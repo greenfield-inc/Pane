@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, Columns2, MoreHorizontal, PanelRight, Play, Square } from 'lucide-react';
 import type { TodoAction, TodoAttachment, TodoDetail } from '../../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
@@ -42,6 +42,16 @@ export interface TodoPageProps {
   onBack: () => void;
   /** Open another to-do's page (a sub-to-do, or the parent from the breadcrumb). */
   onOpenTodo: (number: number) => void;
+  /** Shown inside a Session's To-dos tab (T-23) rather than on the To-dos screen. */
+  embedded?: TodoPageEmbed;
+}
+
+/**
+ * A to-do page inside a Session's To-dos tab: "‹ To-dos / T-14" (the Session is the one around it),
+ * the tab's own controls at the header's end, and ⌘\ left to the Session's split.
+ */
+interface TodoPageEmbed {
+  trailing: ReactNode;
 }
 
 /**
@@ -54,8 +64,12 @@ export function TodoPage(props: TodoPageProps) {
   return <TodoPageView key={props.number} {...props} />;
 }
 
-function TodoPageView({ number, onBack, onOpenTodo }: TodoPageProps) {
+function TodoPageView({ number, onBack, onOpenTodo, embedded }: TodoPageProps) {
   const detail = useAnsweredNow(useTodoDetail(number));
+  // The loaded page owns Esc (an approval first, a sub-to-do's parent, then back). Until it is on screen
+  // (the skeleton holds a moment, even for a to-do already read, as when ↑ ↓ step), Esc still goes back.
+  const [bodyShown, setBodyShown] = useState(false);
+  useEscape(false, noop, onBack, !bodyShown);
   const ref = useRef<HTMLDivElement>(null);
   const [areaPx, setAreaPx] = useState<number | null>(null);
   // Measured before paint, so a narrow window's first frame already has the split hidden.
@@ -73,11 +87,11 @@ function TodoPageView({ number, onBack, onOpenTodo }: TodoPageProps) {
     <div ref={ref} className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg-primary" data-testid="todo-page" data-todo={number}>
       <SkeletonSwap loading={!detail || areaPx === null} skeleton={
         <>
-          <PageHeader number={number} detail={null} onBack={onBack} onOpenTodo={onOpenTodo} onNotice={() => undefined} />
+          <PageHeader number={number} detail={null} onBack={onBack} onOpenTodo={onOpenTodo} onNotice={() => undefined} embedded={embedded} />
           <TodoPageSkeleton number={number} />
         </>
       }>
-        {detail && areaPx !== null && <TodoPageLoaded detail={detail} areaPx={areaPx} onBack={onBack} onOpenTodo={onOpenTodo} />}
+        {detail && areaPx !== null && <TodoPageLoaded detail={detail} areaPx={areaPx} onBack={onBack} onOpenTodo={onOpenTodo} embedded={embedded} onShown={setBodyShown} />}
       </SkeletonSwap>
     </div>
   );
@@ -159,7 +173,11 @@ function restoreScroll(find: () => HTMLElement | null, top: number): () => void 
   return () => cancelAnimationFrame(id);
 }
 
-function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDetail; areaPx: number; onBack: () => void; onOpenTodo: (number: number) => void }) {
+function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown }: { detail: TodoDetail; areaPx: number; onBack: () => void; onOpenTodo: (number: number) => void; embedded?: TodoPageEmbed; onShown: (shown: boolean) => void }) {
+  useLayoutEffect(() => {
+    onShown(true);
+    return () => onShown(false);
+  }, [onShown]);
   const number = detail.todo.number;
   const { hiddenAtOpen, remember } = useSplitMemory(detail, areaPx);
   const overview = useSplitOverviewSession(detail);
@@ -216,7 +234,8 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
   const hasTabs = split.items.length > 0;
   const splitShown = (hasTabs && !split.hidden) || approval !== null;
   const toggleSplit = useCallback(() => dispatch({ type: 'toggle-hidden' }), []);
-  const splitChord = useSplitShortcut(hasTabs, toggleSplit);
+  // In a Session's To-dos tab, ⌘\ stays the Session's Split Right.
+  const splitChord = useSplitShortcut(hasTabs && !embedded, toggleSplit);
 
   const active = split.items[split.active];
   const activeLabel = active ? splitTabLabel(active, split.items) : null;
@@ -290,6 +309,7 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
         snooze={{ anchorRef: snoozeAnchor, onOpen: snooze.open }}
         split={{ shown: splitShown, enabled: hasTabs, chord: splitChord, onToggle: toggleSplit }}
         details={{ open: detailsOpen, onToggle: () => setDetailsOpen((open) => !open) }}
+        embedded={embedded}
       />
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col" data-testid="todo-page-main">
@@ -393,8 +413,13 @@ function useSplitShortcut(enabled: boolean, toggle: () => void): string | null {
  * Esc closes the approval over the split first, then goes back. It leaves alone a key someone else
  * took (a menu, a dialog, a field's own Esc) and typing in a field.
  */
-function useEscape(approvalOpen: boolean, closeApproval: () => void, back: () => void): void {
+function noop(): void {
+  // Nothing to close: no approval shows before the page has loaded.
+}
+
+function useEscape(approvalOpen: boolean, closeApproval: () => void, back: () => void, enabled = true): void {
   useEffect(() => {
+    if (!enabled) return;
     // A menu or dialog closes on this same Esc, before it reaches the window: note whether one was
     // open as the key went down, so its Esc never also leaves the page.
     let overlayOpen = false;
@@ -414,7 +439,7 @@ function useEscape(approvalOpen: boolean, closeApproval: () => void, back: () =>
       document.removeEventListener('keydown', onCapture, true);
       window.removeEventListener('keydown', onKey);
     };
-  }, [approvalOpen, closeApproval, back]);
+  }, [approvalOpen, closeApproval, back, enabled]);
 }
 
 const BUTTON = 'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] border px-2.5 text-[12.5px]';
@@ -440,8 +465,11 @@ export function stateAction(detail: TodoDetail): StateAction | null {
   return { label: 'Stop', action: { kind: 'stop', number }, primary: false };
 }
 
-/** ⋯: Snooze… (round 9) and Drop while open; Archive (with its result line) and Reopen once closed; and its Session. */
-function moreMenu(detail: TodoDetail, run: (action: TodoAction) => Promise<void>, onSnooze?: () => void): DropdownItem[] {
+/**
+ * ⋯: Snooze… (round 9) and Drop while open; Archive (with its result line) and Reopen once closed; and its Session.
+ * `withDone`: Mark done too, where the header has no room for its button (a Session's To-dos tab, T-23).
+ */
+function moreMenu(detail: TodoDetail, run: (action: TodoAction) => Promise<void>, onSnooze?: () => void, withDone = false): DropdownItem[] {
   const number = detail.todo.number;
   const closed = detail.status.status === 'done' || detail.status.status === 'dropped';
   const items: DropdownItem[] = [];
@@ -449,7 +477,7 @@ function moreMenu(detail: TodoDetail, run: (action: TodoAction) => Promise<void>
     items.push({ id: 'snooze', label: detail.todo.snooze ? 'Change snooze…' : 'Snooze…', description: 'Z · until a time, with a wake-up note', onClick: onSnooze });
   }
   // While snoozed the header's button stands in for the state action and Mark done.
-  if (detail.todo.snooze) items.push({ id: 'done', label: 'Mark done', onClick: () => void run({ kind: 'done', number }) });
+  if (detail.todo.snooze || (withDone && !closed)) items.push({ id: 'done', label: 'Mark done', onClick: () => void run({ kind: 'done', number }) });
   if (closed) {
     items.push({ id: 'archive', label: 'Archive', description: 'Archives its Session’s Panes that are safe to archive', onClick: () => void run({ kind: 'archive', number }) });
     items.push({ id: 'reopen', label: 'Reopen', onClick: () => void run({ kind: 'reopen', number }) });
@@ -489,13 +517,14 @@ interface PageHeaderProps {
   snooze?: SnoozeControl;
   split?: SplitToggle;
   details?: DetailsToggle;
+  embedded?: TodoPageEmbed;
 }
 
 /**
  * "‹ To-dos   <Session> › T-12", or on a sub-to-do "‹ T-12   <Session> › T-12 › T-14"; then the
  * actions, and the split and details toggles at the right edge.
  */
-function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, split, details }: PageHeaderProps) {
+function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, split, details, embedded }: PageHeaderProps) {
   const act = useTodosStore((state) => state.act);
   const run = async (action: TodoAction) => {
     const result = await act(action);
@@ -510,7 +539,7 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, spli
     : detail?.sessionName ? { name: detail.sessionName, open: () => openTodoSession(detail) } : null;
   const closed = detail ? detail.status.status === 'done' || detail.status.status === 'dropped' : false;
   const primary = detail ? stateAction(detail) : null;
-  const menu = detail ? moreMenu(detail, run, snooze?.onOpen) : [];
+  const menu = detail ? moreMenu(detail, run, snooze?.onOpen, embedded !== undefined) : [];
   const snoozed = detail?.todo.snooze;
   const splitWords = split?.shown ? 'Hide split' : 'Show split';
   return (
@@ -519,8 +548,9 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, spli
         <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
         {parent ? parent.todo.ref : 'To-dos'}
       </button>
-      <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-text-tertiary" data-testid="todo-breadcrumb">
-        {crumb && (
+      <nav aria-label="Breadcrumb" className={cn('flex items-center gap-1.5 text-[12.5px] text-text-tertiary', embedded ? 'shrink-0' : 'min-w-0')} data-testid="todo-breadcrumb">
+        {embedded && !parent && <span aria-hidden="true">/</span>}
+        {crumb && !embedded && (
           <>
             <button type="button" onClick={crumb.open} className="min-w-0 max-w-[260px] truncate text-text-secondary hover:text-text-primary hover:underline">{crumb.name}</button>
             <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -542,7 +572,7 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, spli
           {primary.label}
         </button>
       )}
-      {detail && !closed && !snoozed && <button type="button" onClick={() => void run({ kind: 'done', number })} className={PLAIN_BUTTON} data-testid="todo-page-done">Mark done</button>}
+      {detail && !closed && !snoozed && !embedded && <button type="button" onClick={() => void run({ kind: 'done', number })} className={PLAIN_BUTTON} data-testid="todo-page-done">Mark done</button>}
       {detail && (
         <Dropdown
           trigger={<button type="button" aria-label="More" className="inline-flex h-7 w-8 items-center justify-center rounded-[7px] text-text-secondary hover:bg-surface-hover" data-testid="todo-page-more"><MoreHorizontal className="h-4 w-4" aria-hidden="true" /></button>}
@@ -552,7 +582,8 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, spli
           menuLabel={`${detail.todo.ref} actions`}
         />
       )}
-      {split && details && (
+      {/* In a Session's To-dos tab the chips show the split and the details; the bar keeps the tab's own controls. */}
+      {split && details && !embedded && (
         <>
           <span className="mx-0.5 h-[18px] w-px shrink-0 bg-border-primary" aria-hidden="true" />
           <button type="button" className={cn(TOGGLE, split.shown && 'bg-surface-hover text-text-primary')} disabled={!split.enabled}
@@ -567,6 +598,12 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, spli
             aria-expanded={details.open}
             onClick={details.onToggle}
             data-testid="todo-details-toggle"><PanelRight className="h-4 w-4" aria-hidden="true" /></button>
+        </>
+      )}
+      {embedded && (
+        <>
+          <span className="mx-0.5 h-[18px] w-px shrink-0 bg-border-primary" aria-hidden="true" />
+          {embedded.trailing}
         </>
       )}
     </div>

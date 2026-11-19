@@ -7,6 +7,7 @@ import { ErrorDialog } from '../../components/ErrorDialog';
 import { PhoneTodos } from '../../components/todos/phone/PhoneTodos';
 import type { PhoneTodoChoices } from '../../components/todos/phone/PhoneTodoForm';
 import type { PhoneTodosRoute } from '../../components/todos/phone/phoneRoute';
+import type { PhoneTodosSession } from '../../components/todos/phone/PhoneSessionTodos';
 import { TodoStatusIcon } from '../../components/todos/TodoStatusIcon';
 import { navSummary } from '../../components/todos/todoList';
 import { useTodoEntries } from '../../components/todos/useTodoEntries';
@@ -43,6 +44,8 @@ export interface RemoteTodosProps {
   hostLabel: string;
   sessionAgents?: RemotePwaSessionAgents;
   status: RemotePaneConnectionStatus;
+  /** Opened from a Session's header (T-23): that Session's to-dos. */
+  session?: PhoneTodosSession;
 }
 
 /**
@@ -50,7 +53,7 @@ export interface RemoteTodosProps {
  * drawer's menu on the list, a line while the host can't be reached, and the errors their actions
  * report. Wider screens (a tablet, landscape) use the same one column (D-423: no split there yet).
  */
-export function RemoteTodos({ route, onNavigate, onReplace, onBack, onOpenSidebar, onOpenSession, hostLabel, sessionAgents, status }: RemoteTodosProps) {
+export function RemoteTodos({ route, onNavigate, onReplace, onBack, onOpenSidebar, onOpenSession, hostLabel, sessionAgents, status, session }: RemoteTodosProps) {
   const projects = useRemoteSessionStore((state) => state.projects);
   const { currentError, clearError } = useErrorStore();
   const choices = useMemo<PhoneTodoChoices>(() => ({
@@ -70,7 +73,7 @@ export function RemoteTodos({ route, onNavigate, onReplace, onBack, onOpenSideba
       {/* 16 px in every text box, so Safari never zooms into one as it takes focus. */}
       <div className="mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col md:border-x md:border-border-primary [&_textarea]:!text-[16px]" data-testid="remote-todos">
         {status !== 'connected' && <ConnectionLine status={status} hostLabel={hostLabel} />}
-        <PhoneTodos route={route} onNavigate={onNavigate} onReplace={onReplace} onBack={onBack} choices={choices} listLead={lead} onOpenSession={onOpenSession} />
+        <PhoneTodos route={route} onNavigate={onNavigate} onReplace={onReplace} onBack={onBack} choices={choices} listLead={lead} onOpenSession={onOpenSession} session={session} />
       </div>
       <ErrorDialog isOpen={currentError !== null} onClose={clearError} title={currentError?.title} error={currentError?.error ?? ''} details={currentError?.details} />
     </ThemeContext.Provider>

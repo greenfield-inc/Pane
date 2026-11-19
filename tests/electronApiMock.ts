@@ -68,6 +68,12 @@ export interface TodosMockHooks {
   getInvokeCalls(channel: 'todos:create'): TodoCreateCall[];
   /** While on, a reply (a comment with `replyTo`) fails as main refuses a bad target; returns the words the page shows. */
   setTodoReplyRefusal(on: boolean): string;
+  /** Stands in for main after a change elsewhere (an answer moves a to-do on): a new list, then todos:changed. */
+  setTodosSnapshot(snapshot: TodosSnapshot): void;
+  /** The approvals' commands sent so far (an answer, a close). */
+  getNotifyCommands(): NotifyCommand[];
+  /** Stands in for main: a new approvals snapshot. */
+  emitNotifySnapshot(snapshot: NotifySnapshot): void;
 }
 
 /** What the mock keeps in sessionStorage, so a reload keeps what attach and detach changed. */
@@ -2442,6 +2448,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getNotifyWindowSizes() {
           return clone(notifyWindowSizes);
+        },
+        setTodosSnapshot(snapshot: TodosSnapshot) {
+          if (!todosState) return;
+          todosState.snapshot = clone(snapshot);
+          saveTodosState(todosState);
+          emit('todos:changed');
         },
         emitNotifySnapshot(snapshot: NotifySnapshot) {
           notifySnapshot = clone(snapshot);

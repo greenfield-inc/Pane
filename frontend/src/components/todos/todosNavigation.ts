@@ -1,6 +1,7 @@
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { useSessionStore } from '../../stores/sessionStore';
+import { TODOS_GROUPINGS, type TodosGrouping } from './todoList';
 
 /**
  * To-dos there and back (D-409), like Approvals: the sidebar entry opens To-dos, and the same
@@ -19,6 +20,31 @@ function openTodos(number: number | null = null): void {
 /** Opens one to-do's page, from search, Approvals or a link. */
 export function openTodo(number: number): void {
   openTodos(number);
+}
+
+const GROUPING_PREFERENCE = 'pane-todos-grouping';
+
+/** The list's grouping, as the person last chose it. */
+export function readGrouping(): TodosGrouping {
+  try {
+    const saved = localStorage.getItem(GROUPING_PREFERENCE);
+    return TODOS_GROUPINGS.find(grouping => grouping === saved) ?? 'status';
+  } catch {
+    return 'status';
+  }
+}
+
+export function saveGrouping(grouping: TodosGrouping): void {
+  try { localStorage.setItem(GROUPING_PREFERENCE, grouping); } catch { /* A remembered grouping is a convenience. */ }
+}
+
+/**
+ * A Session's To-dos tab's "Open in To-dos" (T-23): the list grouped by Requested by, where each
+ * Session's to-dos sit together under its name. The list has no filter, so this is as near as it goes.
+ */
+export function openTodosByRequester(): void {
+  saveGrouping('requester');
+  openTodos(null);
 }
 
 /** Leaves To-dos for where you were. */

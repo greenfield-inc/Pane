@@ -54,7 +54,8 @@ import { remoteDeviceClient } from './components/remoteDeviceClient';
 import { RemoteTodos } from './components/RemoteTodos';
 import { startRemoteTodos } from './runtime/remoteTodosHost';
 import { isOverlayRoute, parseRouteView, routeParent, routeView, stepTodosStack, type PhoneTodosRoute } from '../components/todos/phone/phoneRoute';
-import { useTodosStore } from '../stores/todosStore';
+import { useSessionTodosWaiting, useTodosStore } from '../stores/todosStore';
+import type { PhoneTodosSession } from '../components/todos/phone/PhoneSessionTodos';
 import { LoadingStatus } from '../components/ui/Skeleton';
 
 const EMPTY_AFFORDANCES: RemotePwaAffordances = {
@@ -170,6 +171,9 @@ export function RemotePwaApp() {
   /** The history views under each To-dos screen opened forward, so back can step out through the history. */
   const todosStackRef = useRef<string[]>([]);
   const todosAvailable = useTodosStore(state => state.snapshot !== null);
+  /** To-dos opened from a Session's header (T-23): that Session's list, until To-dos closes. */
+  const [todosSession, setTodosSession] = useState<PhoneTodosSession | null>(null);
+  useEffect(() => { if (!todosRoute) setTodosSession(null); }, [todosRoute]);
 
   useEffect(() => {
     void loadRemoteProfiles()
@@ -496,6 +500,7 @@ export function RemotePwaApp() {
 
   const openTodos = useCallback(() => {
     setSidebarOpen(false);
+    setTodosSession(null);
     if (todosRoute) {
       // The entry again, from a to-do: back to the list in place.
       setTodosRoute({ screen: 'list' });
@@ -1146,6 +1151,20 @@ export function RemotePwaApp() {
   }, [adapter, loadPanels, selectedSessionId]);
 
   const sidebarTodos = todosAvailable ? { open: todosRoute !== null, onOpen: openTodos } : undefined;
+  const openSessionId = openOrchestrationSession?.session.id ?? '';
+  const sessionTodosWaiting = useSessionTodosWaiting(openSessionId);
+  const openName = openOrchestrationSession
+    // The list carries renames (such as a first-message name); the open snapshot does not.
+    ? (orchestrationSessions.find(session => session.id === openOrchestrationSession.session.id)?.name ?? openOrchestrationSession.session.name) || 'Untitled'
+    : selectedSession ? selectedSession.name || 'Untitled' : null;
+  // The open Session's to-dos (T-23): the same list as the desktop's To-dos tab, full screen, with back.
+  const sessionTodos = todosAvailable && openOrchestrationSession && openName ? {
+    waiting: sessionTodosWaiting,
+    onOpen: () => {
+      setTodosSession({ id: openSessionId, name: openName });
+      navigateTodos({ screen: 'list' });
+    },
+  } : undefined;
   /** A to-do's "Open its Session": the Session itself, here. */
   const openTodoSession = (sessionId: string) => {
     closeTodos();
@@ -1263,16 +1282,14 @@ export function RemotePwaApp() {
             hostLabel={activeProfile.label}
             sessionAgents={affordances.sessionAgents}
             status={connectionStatus}
+            session={todosSession ?? undefined}
           />
         )}
         {/* Kept mounted under To-dos, so its terminals and chats don't start over on the way back. */}
         <div className={todosRoute ? 'hidden' : 'contents'}>
           <RemoteStatusBar
             profile={activeProfile}
-            openName={openOrchestrationSession
-              // The list carries renames (such as a first-message name); the open snapshot does not.
-              ? (orchestrationSessions.find(session => session.id === openOrchestrationSession.session.id)?.name ?? openOrchestrationSession.session.name) || 'Untitled'
-              : selectedSession ? selectedSession.name || 'Untitled' : null}
+            openName={openName}
             status={connectionStatus}
             lastError={lastError}
             lastSeenAt={lastSeenAt}
@@ -1280,6 +1297,7 @@ export function RemotePwaApp() {
             onRetry={() => adapter.retryNow()}
             onDisconnect={disconnect}
             onOpenSidebar={openSidebar}
+            todos={sessionTodos}
           />
           {connectionBar}
 

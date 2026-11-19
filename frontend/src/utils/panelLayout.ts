@@ -252,6 +252,28 @@ export function placeLeadingSideTab(root: PanelLayoutNode, panelId: string, besi
   return insert(root);
 }
 
+/** A Session's To-dos tab (T-23): a permanent tab after its Overview, with no panel record either. */
+export function sessionTodosTabId(sessionId: string): string {
+  return `session-todos:${sessionId}`;
+}
+
+/**
+ * Put a tab right after `afterId`, in that tab's group, keeping the tab selected there. A tab already in
+ * the layout stays where the person put it; without `afterId` in the layout, nothing changes.
+ */
+export function placeTabAfter(root: PanelLayoutNode, panelId: string, afterId: string): PanelLayoutNode {
+  if (allPanelIds(root).includes(panelId)) return root;
+  const host = findGroupContainingPanel(root, afterId);
+  if (!host) return root;
+  const insert = (node: PanelLayoutNode): PanelLayoutNode => {
+    if (node.type !== 'group') return { ...node, children: node.children.map(insert) };
+    if (node.id !== host.id) return node;
+    const at = node.panelIds.indexOf(afterId) + 1;
+    return { ...node, panelIds: [...node.panelIds.slice(0, at), panelId, ...node.panelIds.slice(at)] };
+  };
+  return insert(root);
+}
+
 /**
  * Show a panel beside the primary group for an agent's split request. Unlike
  * placePanelInSplit, a tab already in the primary group moves out to the side

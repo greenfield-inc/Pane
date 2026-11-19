@@ -125,7 +125,7 @@ export function PhoneTodoList({ onOpen, onNew, lead }: PhoneTodoListProps) {
             const folded = isFolded(folds, tab, 'status', group, groups.length);
             return (
               <div key={group.key} role="presentation">
-                <GroupHeader group={group} folded={folded} now={now} zone={zone} onToggle={() => setFold(tab, group.key, !folded)} />
+                <PhoneGroupHeader group={group} folded={folded} now={now} zone={zone} onToggle={() => setFold(tab, group.key, !folded)} />
                 {!folded && group.entries.map((entry) => <PhoneTodoRow key={entry.key} entry={entry} now={now} zone={zone} onOpen={onOpen} />)}
               </div>
             );
@@ -145,8 +145,11 @@ function OnShown({ run }: { run: () => void }) {
   return null;
 }
 
-/** A group's header: tap to fold or open it; it keeps its count, and a folded Snoozed shows its next wake. */
-function GroupHeader({ group, folded, now, zone, onToggle }: { group: TodoGroup; folded: boolean; now: number; zone: string; onToggle: () => void }) {
+/**
+ * A group's header: tap to fold or open it; it keeps its count, and a folded Snoozed shows its next wake.
+ * `note` is a line at its end in place of that (a Session's folded Done this week: "older ones in To-dos").
+ */
+export function PhoneGroupHeader({ group, folded, now, zone, onToggle, note }: { group: TodoGroup; folded: boolean; now: number; zone: string; onToggle: () => void; note?: string }) {
   const wake = group.status === 'snoozed' && folded ? nextWake(group) : null;
   return (
     <button
@@ -166,6 +169,7 @@ function GroupHeader({ group, folded, now, zone, onToggle }: { group: TodoGroup;
       <span className="font-medium text-text-tertiary">{group.entries.length}</span>
       <span className="flex-1" />
       {wake !== null && <span className="shrink-0 text-[12.5px] font-normal text-text-tertiary" data-testid="phone-todos-next-wake">next {snoozeWhen(wake, now, zone)}</span>}
+      {note && <span className="shrink-0 text-[12.5px] font-normal text-text-tertiary">{note}</span>}
     </button>
   );
 }
@@ -178,7 +182,7 @@ function metaLine(entry: TodoEntry, now: number, zone: string): string {
   return [todoRef(row.todo.number), reason, row.status.status === 'waiting' ? '' : relativeAge(row.todo.updatedAt, now)].filter(Boolean).join(' · ');
 }
 
-function PhoneTodoRow({ entry, now, zone, onOpen }: { entry: TodoEntry; now: number; zone: string; onOpen: (number: number) => void }) {
+export function PhoneTodoRow({ entry, now, zone, onOpen }: { entry: TodoEntry; now: number; zone: string; onOpen: (number: number) => void }) {
   const { row } = entry;
   const reasonTone = row.status.alert ? 'text-status-error' : 'text-text-tertiary';
   return (

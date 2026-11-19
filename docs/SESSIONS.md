@@ -372,7 +372,10 @@ the right, the **Overview** tab first, before any page, file or browser tab
 opened beside the chat. A Session with no split yet gets one; an existing
 right split gains Overview as its leftmost tab and keeps the tab that was
 selected there. Overview can be dragged like any tab and stays where you put
-it on this computer, but it has no close button. A `pane://open?session=` link
+it on this computer, but it has no close button. **To-dos** comes right after
+it, the same kind of permanent tab: the to-dos this Session asked for, with an
+amber count while one of their approvals waits on you (see
+[In a Session](TODOS.md#in-a-session)). A `pane://open?session=` link
 opens the Session with Overview selected. When the Session
 folder holds a status page at `session/index.html` (an orchestrator renders it
 there from a status JSON with the `orchestrate-sessions` skill's bundled

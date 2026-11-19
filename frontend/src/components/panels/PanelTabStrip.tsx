@@ -377,7 +377,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
             data-panel-type={panel.type}
             aria-disabled={isDisabled || undefined}
             aria-controls={tabPanelId}
-            aria-label={displayTitle}
+            aria-label={presentation?.badge ? `${displayTitle}, ${presentation.badge.label}` : displayTitle}
             tabIndex={panel.id === rovingPanelId ? 0 : -1}
             onFocus={() => setRovingPanelId(panel.id)}
             onClick={() => { if (!isDisabled) onPanelSelect(panel); }}
@@ -471,7 +471,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                 {(panel.type === 'terminal' || panel.type === 'chat') && (
                   <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} paused={isPaused} />
                 )}
-                {getPanelIcon(panel.type, panel, compact ? 'w-3.5 h-3.5 flex-shrink-0' : 'w-4 h-4 flex-shrink-0')}
+                {presentation?.icon ?? getPanelIcon(panel.type, panel, compact ? 'w-3.5 h-3.5 flex-shrink-0' : 'w-4 h-4 flex-shrink-0')}
                 {/* Bold marks the primary group's strip: the group the top
                     bar's tool tabs and the un-split gesture belong to.
                     The title is the only shrinkable element in the tab, so
@@ -483,6 +483,11 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                   isPreviewTab && "italic",
                   isPaused && (isActive ? "text-text-secondary" : "text-text-tertiary"),
                 )}>{displayTitle}</span>
+                {presentation?.badge && (
+                  <span className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-status-warning px-[5px] text-[11px] font-semibold tabular-nums text-text-on-status-warning" title={presentation.badge.label} data-testid="panel-tab-badge">
+                    {presentation.badge.count}
+                  </span>
+                )}
               </span>
             )}
 

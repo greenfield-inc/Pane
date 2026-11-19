@@ -234,6 +234,37 @@ with its **plan beside it** in a split at half the width.
   headed "Back to Plan" (whatever tab was showing). ✕, Back or Esc returns to
   that tab, and so does answering.
 
+## In a Session
+
+Every Session's split has a **To-dos** tab after Overview: the top-level
+to-dos its orchestrator asked for (and, in a to-do's own Session, that to-do),
+with live status. Its label shows an amber count while their approvals wait
+on you, each counted once, the same approvals as the sidebar row's count and
+the chat's cards.
+
+- **The list** has the To-dos screen's status groups in the same order, then
+  **Done this week** (closed in the last 7 days; older ones stay on the To-dos
+  screen). Snoozed (with "next wakes …") and Done this week start folded. Each
+  row has its status, T-n, title and age, then its reason and who works it; a
+  to-do waiting on you shows its question with **Answer**. J/K or ↑/↓ move,
+  ← folds, → opens a group, Enter opens. Under about 440 px the rows drop T-n
+  and the worker.
+- **+ New** opens New to-do (requested by you: the dialog has no requester
+  choice), and **↗** opens the To-dos screen grouped by Requested by, where
+  this Session's to-dos sit under its name; the screen has no filter.
+- **A to-do opens inside the tab**, under "‹ To-dos / T-14", with ↑ ↓ and ↗
+  at the end of its bar. ↑/↓ (or J/K) step through the list; Esc or ‹ To-dos
+  returns with the same row selected. ⌘-click (Ctrl-click) on a row opens it on
+  the To-dos screen instead. Mark done is in ⋯ there, and ⌘\ stays the
+  Session's Split Right.
+- **Answer** opens the approval in the tab, in the same Decide view as the
+  Session's approval column, under "‹ Back to To-dos". Sending it returns to
+  the list; the count, the sidebar badge and the chat's card clear together.
+
+In the web app, an open Session's header has a **To-dos** button with the same
+count. It opens that list full screen; a to-do opens on the phone's to-do
+page, and back returns to the list, then the Session.
+
 ## The chat
 
 The thread under the to-do reads top to bottom, like an issue's activity:

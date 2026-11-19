@@ -3,10 +3,11 @@ import type { NotifyItem } from '../../../shared/types/notify';
 
 /**
  * Which approval the column shows on each surface (P4): a Session (keyed `session:<id>`), a
- * to-do's split (keyed `todo:<number>`, D-407), Autopilot, or the Approvals screen. One column per
- * surface; ✕ closes it and shows what was underneath again.
+ * to-do's split (keyed `todo:<number>`, D-407), a Session's To-dos tab (keyed `session-todos:<id>`,
+ * T-23), Autopilot, or the Approvals screen. One column per surface; ✕ closes it and shows what was
+ * underneath again.
  */
-export type ApprovalSurface = `session:${string}` | `todo:${number}` | 'autopilot' | 'approvals';
+export type ApprovalSurface = `session:${string}` | `todo:${number}` | `session-todos:${string}` | 'autopilot' | 'approvals';
 
 interface OpenApproval {
   itemId: string;

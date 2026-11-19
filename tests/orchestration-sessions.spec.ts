@@ -2352,7 +2352,7 @@ test('the Overview is the first tab of every Session\'s right split, beside the 
     });
     mock.emitPanelActivation({ sessionId, panelId: 'plan-page', placement: 'split' });
   });
-  await expect.poll(() => tabNames(groupStrips.nth(1))).toEqual(['Overview', 'plan.html']);
+  await expect.poll(() => tabNames(groupStrips.nth(1))).toEqual(['Overview', 'To-dos', 'plan.html']);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
   // It can be selected again, and right-click offers nothing to close or rename.
   await overviewTab.click();
@@ -2374,7 +2374,7 @@ test('a saved split without the Overview gains it as the leftmost tab and keeps 
   await page.getByTestId('orchestration-session-plans').click();
   const groupStrips = page.locator('.panel-group-tab-bar');
   await expect(groupStrips).toHaveCount(2);
-  await expect.poll(() => tabNames(groupStrips.nth(1))).toEqual(['Overview', 'plan.html']);
+  await expect.poll(() => tabNames(groupStrips.nth(1))).toEqual(['Overview', 'To-dos', 'plan.html']);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
 });
 
@@ -2397,7 +2397,7 @@ test('a Session link lands on its Overview, from another Session and when alread
   await openLink();
   await expect(page.getByRole('heading', { level: 1, name: 'Plan demo', exact: true })).toBeAttached();
   const sideStrip = page.locator('.panel-group-tab-bar').nth(1);
-  await expect.poll(() => tabNames(sideStrip)).toEqual(['Overview', 'plan.html']);
+  await expect.poll(() => tabNames(sideStrip)).toEqual(['Overview', 'To-dos', 'plan.html']);
   await expect(sideStrip.getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
   // Already open on another tab, the link brings the Overview back.
   await sideStrip.getByRole('tab', { name: 'plan.html' }).click();
@@ -2476,7 +2476,7 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   // and opened pages go after the Overview in the side strip, so all tabs sit
   // on one row under the title bar.
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(1);
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'plan.html']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'To-dos', 'plan.html']);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
   const [agentStrip, pageStrip] = [await layoutBox(groupStrips.nth(0)), await layoutBox(groupStrips.nth(1))];
   expect(pageStrip.y).toBe(agentStrip.y);
@@ -2492,7 +2492,7 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
   await openPage('report-page', 'report.html', true, true);
   await expect(groupStrips).toHaveCount(2);
-  await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(3);
+  await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(4);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'report.html' })).toHaveAttribute('aria-selected', 'true');
   await page.evaluate(() => {
     // SAFETY: the fixture installs these event controls; this test owns the read resolver.
@@ -2513,7 +2513,7 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await groupStrips.nth(1).getByRole('button', { name: 'Close plan.html' }).click();
   // The Overview keeps the split open, showing again.
   await expect(groupStrips).toHaveCount(2);
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'To-dos']);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
   await expect(workspaceTabs.getByRole('tab')).toHaveCount(1);
 });
@@ -2692,7 +2692,7 @@ test('dragging a Session tab to the stage edge opens a split beside the conversa
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(1);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveText(agentTabName);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'Browser' })).toHaveAttribute('aria-selected', 'true');
-  expect(await tabNames(groupStrips.nth(2))).toEqual(['Overview']);
+  expect(await tabNames(groupStrips.nth(2))).toEqual(['Overview', 'To-dos']);
 });
 
 /** As the host does when an agent opens a page: the tab is created, then brought forward. */
@@ -2723,8 +2723,8 @@ async function openSplitSession(page: Page, key: string, pages: string[]): Promi
   for (const title of pages) await openAgentPage(page, key, title.replace('.html', '-page'), title);
   const groupStrips = page.locator('.panel-group-tab-bar');
   await expect(groupStrips).toHaveCount(2);
-  // The right split leads with the Overview.
-  await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(pages.length + 1);
+  // The right split leads with the Overview, then To-dos (T-23).
+  await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(pages.length + 2);
   return { groupStrips, stages: page.locator('.pane-chat-shell [role="tabpanel"]:visible') };
 }
 
@@ -2746,7 +2746,7 @@ test('dragging a Session tab onto the split beside it moves it there and survive
   expect(accepted).toEqual([true]);
 
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'Browser' })).toHaveAttribute('aria-selected', 'true');
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'plan.html', 'Browser']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'To-dos', 'plan.html', 'Browser']);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(1);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
 
@@ -2755,33 +2755,33 @@ test('dragging a Session tab onto the split beside it moves it there and survive
   await expect(page.getByRole('heading', { level: 1, name: 'Elsewhere', exact: true })).toBeAttached();
   await page.getByTestId('orchestration-session-movetab').click();
   await expect(groupStrips).toHaveCount(2);
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'plan.html', 'Browser']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'To-dos', 'plan.html', 'Browser']);
 });
 
 test('a Session tab dropped on a strip lands at the marked slot, and reorders within its own strip', async ({ page }) => {
-  // Wide enough for the right strip's four tabs (the Overview first) to fit without scrolling.
-  await page.setViewportSize({ width: 1600, height: 900 });
+  // Wide enough for the right strip's five tabs (Overview and To-dos first) to fit without scrolling.
+  await page.setViewportSize({ width: 1800, height: 900 });
   await installSessionsFixture(page, [sessionFixture('striptab', 'Strip demo', '', '', new Date(0).toISOString())]);
   await page.goto('/');
   const { groupStrips } = await openSplitSession(page, 'striptab', ['one.html', 'two.html']);
   const right = groupStrips.nth(1);
-  expect(await tabNames(right)).toEqual(['Overview', 'one.html', 'two.html']);
+  expect(await tabNames(right)).toEqual(['Overview', 'To-dos', 'one.html', 'two.html']);
 
   // The left half of a tab inserts before it.
   const two = await layoutBox(right.getByRole('tab', { name: 'two.html' }));
   expect(await dragTab(page, groupStrips.nth(0).getByRole('tab', { name: 'Browser' }), [{ x: two.x + 6, y: two.y + two.height / 2 }])).toEqual([true]);
-  expect(await tabNames(right)).toEqual(['Overview', 'one.html', 'Browser', 'two.html']);
+  expect(await tabNames(right)).toEqual(['Overview', 'To-dos', 'one.html', 'Browser', 'two.html']);
   await expect(right.getByRole('tab', { name: 'Browser' })).toHaveAttribute('aria-selected', 'true');
 
   // The empty space after the last tab appends.
   const last = await layoutBox(right.getByRole('tab', { name: 'two.html' }));
   expect(await dragTab(page, right.getByRole('tab', { name: 'Browser' }), [{ x: last.x + last.width + 8, y: last.y + last.height / 2 }])).toEqual([true]);
-  expect(await tabNames(right)).toEqual(['Overview', 'one.html', 'two.html', 'Browser']);
+  expect(await tabNames(right)).toEqual(['Overview', 'To-dos', 'one.html', 'two.html', 'Browser']);
 
   // Past the second tab's midpoint reorders without splitting.
   const second = await layoutBox(right.getByRole('tab', { name: 'two.html' }));
   expect(await dragTab(page, right.getByRole('tab', { name: 'one.html' }), [{ x: second.x + second.width - 6, y: second.y + second.height / 2 }])).toEqual([true]);
-  expect(await tabNames(right)).toEqual(['Overview', 'two.html', 'one.html', 'Browser']);
+  expect(await tabNames(right)).toEqual(['Overview', 'To-dos', 'two.html', 'one.html', 'Browser']);
   await expect(groupStrips).toHaveCount(2);
 });
 
@@ -2794,6 +2794,10 @@ test('emptying a Session group by drag closes it, and an edge drop opens a new o
 
   await dragTab(page, groupStrips.nth(1).getByRole('tab', { name: 'plan.html' }), [pointIn(await layoutBox(stages.nth(0)))]);
   await expect(groupStrips).toHaveCount(2);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'To-dos']);
+
+  // To-dos (T-23) moves over first, leaving the Overview alone in its group.
+  await dragTab(page, groupStrips.nth(1).getByRole('tab', { name: 'To-dos' }), [pointIn(await layoutBox(stages.nth(0)))]);
   expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview']);
 
   // A group's only tab dropped on its own stage changes nothing.
@@ -2804,7 +2808,7 @@ test('emptying a Session group by drag closes it, and an edge drop opens a new o
   // Moving the Overview too empties the right group, which closes.
   await dragTab(page, groupStrips.nth(1).getByRole('tab', { name: 'Overview' }), [pointIn(await layoutBox(stages.nth(0)))]);
   await expect(groupStrips).toHaveCount(0);
-  await expect(workspaceTabs.getByRole('tab')).toHaveCount(4);
+  await expect(workspaceTabs.getByRole('tab')).toHaveCount(5);
 
   const stage = await layoutBox(stages.first());
   await dragTab(page, workspaceTabs.getByRole('tab', { name: 'plan.html' }), [pointIn(stage, 'left')]);
@@ -2822,7 +2826,7 @@ test('a cancelled Session tab drag leaves the layout and the stage as they were'
   // Hovered, then released without a drop: only dragend arrives.
   expect(await dragTab(page, browserTab, [pointIn(rightStage, 'right')], { drop: false })).toEqual([true]);
   expect(await tabNames(groupStrips.nth(0))).toHaveLength(2);
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'plan.html']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'To-dos', 'plan.html']);
   // No drop target is left mounted: the stage takes clicks again and refuses a stray dragover.
   const stray = await page.evaluate(({ x, y }) => {
     const over = document.elementFromPoint(x, y);
@@ -3118,7 +3122,7 @@ test('a page an agent opens while you are in another Session lands beside the co
   await expect(groupStrips).toHaveCount(2);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveText(agentTabName);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'report.html']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'To-dos', 'report.html']);
   // The conversation keeps the focus this desktop remembered.
   await expect.poll(() => rememberedFocusedGroup(page, '__orchestration_session_awayterminal__')).toEqual(['__orchestration_panel_away_claude']);
 });
@@ -3153,13 +3157,13 @@ test('reopening a page that sits beside the Session conversation moves it into t
   const groupStrips = page.locator('.panel-group-tab-bar');
   await expect(groupStrips).toHaveCount(2);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveText(agentTabName);
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'notes.html']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'To-dos', 'notes.html']);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'notes.html' })).toHaveAttribute('aria-selected', 'true');
 
   // Already beside the conversation: it stays there and stays shown.
   await open('split', true);
   await expect(groupStrips).toHaveCount(2);
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'notes.html']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'To-dos', 'notes.html']);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'notes.html' })).toHaveAttribute('aria-selected', 'true');
 });
 

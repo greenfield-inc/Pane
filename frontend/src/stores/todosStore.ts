@@ -5,11 +5,13 @@ import { isMac } from '../utils/platformUtils';
 import { LOCAL_MACHINE_ID, type MachineCommand, type MachineConnectionsEvent, type MachineEventChannel, type MachineState } from '../../../shared/types/machineConnections';
 import { otherMachines } from '../components/todos/todoList';
 import { todoApprovalScope, type TodoApprovalScope } from '../components/todos/sessionTodos';
+import { sessionTodoEntries } from '../components/todos/sessionTodosList';
+import type { TodoEntry } from '../components/todos/todoList';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { useConfigStore } from './configStore';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { showActionError } from './errorStore';
-import { useNotifyStore } from './notifyStore';
+import { todosWaitingCount, useNotifyStore } from './notifyStore';
 import type { NotifySnapshot } from '../../../shared/types/notify';
 import type { AutopilotDocument } from '../../../shared/types/autopilot';
 
@@ -478,4 +480,17 @@ export function sessionTodoScope(sessionId: string, machineId?: string): TodoApp
 export function useSessionTodoScope(sessionId: string, machineId?: string): TodoApprovalScope {
   const rows = useTodosStore(state => machineRows(state, machineId));
   return useMemo(() => todoApprovalScope(rows ?? [], sessionId), [rows, sessionId]);
+}
+
+/** A Session's to-dos (T-23) as list entries, kept current; null until that machine's to-dos are read. */
+export function useSessionTodoEntries(sessionId: string, machineId?: string): TodoEntry[] | null {
+  const rows = useTodosStore(state => machineRows(state, machineId));
+  return useMemo(() => (rows ? sessionTodoEntries(rows, sessionId, machineId ?? LOCAL_MACHINE_ID) : null), [rows, sessionId, machineId]);
+}
+
+/** A Session's To-dos tab's amber count (T-23): its to-dos' approvals waiting on you, each once. */
+export function useSessionTodosWaiting(sessionId: string, machineId?: string): number {
+  const snapshot = useNotifyStore(state => state.snapshot);
+  const scope = useSessionTodoScope(sessionId, machineId);
+  return useMemo(() => todosWaitingCount(snapshot, scope, machineId), [snapshot, scope, machineId]);
 }

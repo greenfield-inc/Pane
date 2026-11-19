@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
 import { notifyFixture } from '../../../tests/fixtures/notifySnapshot';
-import { archiveApprovals, paneHasWaitingQuestion, selectNotifyItems, sendArchived, sessionWaitingCount, subscribeNotify, undoArchive, useNotifyStore, waitingCount, waitingElsewhere } from './notifyStore';
+import { archiveApprovals, paneHasWaitingQuestion, selectNotifyItems, sendArchived, sessionWaitingCount, subscribeNotify, todosWaitingCount, undoArchive, useNotifyStore, waitingCount, waitingElsewhere } from './notifyStore';
+import { EMPTY_TODO_SCOPE } from '../components/todos/sessionTodos';
 
 const launch = { id: 'session-launch', name: 'Launch', paneId: 'session-launch-pane' };
 
@@ -60,6 +61,26 @@ describe('Approvals counts', () => {
     );
     expect(waitingElsewhere(snapshot, 'local')).toBe(1);
     expect(waitingElsewhere(snapshot, 'studio')).toBe(2);
+  });
+
+  it("counts a Session's to-dos' waiting approvals once each, for its To-dos tab (T-23)", () => {
+    const hidden = { id: 'hidden-15', name: 'T-15', paneId: 'p-15' };
+    const scope = { sessionIds: new Set(['hidden-15']), todoNumbers: new Set([15, 16]) };
+    const snapshot = withItems(
+      // Linked to T-15 and asked in its hidden Session: one approval, counted once.
+      item('q-31', { source: { name: 'planner', agent: 'Claude', session: hidden }, todo: { number: 15, title: 'Cadence' } }),
+      item('perm', { source: { name: 'T-15', agent: 'Claude', session: hidden } }),
+      item('review', { todo: { number: 16, title: 'Copy', kind: 'review' } }),
+      // The Session's own question isn't a to-do's.
+      item('own'),
+      item('answered', { todo: { number: 15, title: 'Cadence' }, state: 'sent' }),
+      item('dismissed', { todo: { number: 16, title: 'Copy' }, dismissedAt: 5 }),
+      item('elsewhere', { todo: { number: 15, title: 'Cadence' }, machineId: 'studio' }),
+    );
+    expect(todosWaitingCount(snapshot, scope)).toBe(4);
+    expect(todosWaitingCount(snapshot, scope, 'local')).toBe(3);
+    expect(todosWaitingCount(snapshot, EMPTY_TODO_SCOPE)).toBe(0);
+    expect(todosWaitingCount(null, scope)).toBe(0);
   });
 });
 

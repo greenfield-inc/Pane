@@ -20,6 +20,7 @@ import { SwitchToChatPaletteEntry } from './panels/SwitchToChat';
 import { PanelContainer } from './panels/PanelContainer';
 import { DropOverlay } from './panels/DropOverlay';
 import { SessionWorkspacePanels } from './SessionWorkspacePanels';
+import { SessionTodosTab } from './todos/SessionTodosTab';
 import { SessionTileLayout, type SessionTileContext } from './SessionTileLayout';
 import { Button } from './ui/Button';
 import { SessionWorkspaceSkeleton } from './SessionWorkspaceSkeleton';
@@ -38,7 +39,7 @@ import {
 import { useSessionWorkspaceLayoutStore } from '../stores/sessionWorkspaceLayoutStore';
 import { usePanelStore } from '../stores/panelStore';
 import { useNavigationStore } from '../stores/navigationStore';
-import { useTodosStore } from '../stores/todosStore';
+import { useSessionTodosWaiting, useTodosStore } from '../stores/todosStore';
 import { TodoStatusIcon } from './todos/TodoStatusIcon';
 import { openTodo } from './todos/todosNavigation';
 import { todoForSession } from './todos/page/todoSessionLink';
@@ -760,6 +761,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
   }, [onOverviewUpdate]);
 
   const approvalOpen = useApprovalColumnStore(state => state.open[`session:${view.session.id}`] !== undefined);
+  const todosWaiting = useSessionTodosWaiting(view.session.id);
   // A new approval opens beside the chat on its own; shown inside another approval's column, it doesn't (D-114).
   useEffect(() => (chrome.inline ? undefined : openNewSessionApprovals(view.session.id, view.panel.id)), [chrome.inline, view.session.id, view.panel.id]);
   const sessionControls = (<>
@@ -810,6 +812,8 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
             }}
             onRetry={onRetry}
           />}
+            todosContent={<SessionTodosTab sessionId={view.session.id} inChat={view.panel.id} />}
+            todosWaiting={todosWaiting}
             changesContent={<SessionChangesPanel overview={overview} error={overviewError} onRetry={onRetry} />} />
         </SessionProvider>
       </div>

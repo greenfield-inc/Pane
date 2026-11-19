@@ -4,6 +4,7 @@ import { PhoneTodoFiles } from './PhoneTodoFiles';
 import { PhoneTodoForm, type PhoneTodoChoices } from './PhoneTodoForm';
 import { PhoneTodoList } from './PhoneTodoList';
 import { PhoneTodoPage } from './PhoneTodoPage';
+import { PhoneSessionTodos, type PhoneTodosSession } from './PhoneSessionTodos';
 import type { PhoneTodosRoute } from './phoneRoute';
 
 export interface PhoneTodosProps {
@@ -19,6 +20,8 @@ export interface PhoneTodosProps {
   /** The list's left slot: the app's menu. */
   listLead?: ReactNode;
   onOpenSession?: (sessionId: string) => void;
+  /** Opened from a Session's header (T-23): the list is that Session's to-dos, and back returns to it. */
+  session?: PhoneTodosSession;
 }
 
 /**
@@ -26,12 +29,12 @@ export interface PhoneTodosProps {
  * an approval full screen, and the New to-do and New sub-to-do forms over them. The app owns the
  * route, so each screen is a history entry.
  */
-export function PhoneTodos({ route, onNavigate, onReplace, onBack, choices, listLead, onOpenSession }: PhoneTodosProps) {
+export function PhoneTodos({ route, onNavigate, onReplace, onBack, choices, listLead, onOpenSession, session }: PhoneTodosProps) {
   // The form opens over the screen it came from, which stays underneath.
   const base: PhoneTodosRoute = route.screen === 'new' ? { screen: 'list' } : route.screen === 'new-sub' ? { screen: 'todo', number: route.number } : route;
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" data-testid="phone-todos" data-screen={route.screen}>
-      <Screen route={base} onNavigate={onNavigate} onReplace={onReplace} onBack={onBack} listLead={listLead} onOpenSession={onOpenSession} />
+      <Screen route={base} onNavigate={onNavigate} onReplace={onReplace} onBack={onBack} listLead={listLead} onOpenSession={onOpenSession} session={session} />
       {route.screen === 'new' && <PhoneTodoForm choices={choices} onCancel={onBack} onCreated={() => onBack()} />}
       {route.screen === 'new-sub' && <PhoneTodoForm parentNumber={route.number} choices={choices} onCancel={onBack} onCreated={() => onBack()} />}
     </div>
@@ -40,7 +43,7 @@ export function PhoneTodos({ route, onNavigate, onReplace, onBack, choices, list
 
 type ScreenProps = Omit<PhoneTodosProps, 'choices'>;
 
-function Screen({ route, onNavigate, onReplace, onBack, listLead, onOpenSession }: ScreenProps) {
+function Screen({ route, onNavigate, onReplace, onBack, listLead, onOpenSession, session }: ScreenProps) {
   switch (route.screen) {
     case 'todo':
       return <TodoScreen number={route.number} onNavigate={onNavigate} onBack={onBack} onOpenSession={onOpenSession} />;
@@ -49,6 +52,7 @@ function Screen({ route, onNavigate, onReplace, onBack, listLead, onOpenSession 
     case 'approval':
       return <PhoneTodoApproval number={route.number} id={route.id} onSelect={(id) => onReplace({ screen: 'approval', number: route.number, id })} onBack={onBack} />;
     default:
+      if (session) return <PhoneSessionTodos session={session} onOpen={(number) => onNavigate({ screen: 'todo', number })} onNew={() => onNavigate({ screen: 'new' })} onBack={onBack} />;
       return <PhoneTodoList lead={listLead} onOpen={(number) => onNavigate({ screen: 'todo', number })} onNew={() => onNavigate({ screen: 'new' })} />;
   }
 }

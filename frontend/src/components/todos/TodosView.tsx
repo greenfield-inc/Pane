@@ -20,7 +20,7 @@ import {
   readFolds, resolveStop, stopAfterLeaving, tabCounts, withFold, writeFolds,
   type TodoEntry, type TodoFolds, type TodoGroup, type TodoRowActionKind, type TodosGrouping, type TodosTab,
 } from './todoList';
-import { isTypingTarget, leaveTodos, overlayOpen } from './todosNavigation';
+import { isTypingTarget, leaveTodos, overlayOpen, readGrouping, saveGrouping } from './todosNavigation';
 import { TODOS_HEADER_BUTTON, TODOS_PILL, TODOS_PILL_OFF, TODOS_PILL_ON, TODOS_REF_COLUMN, TODOS_ROW_LEAD } from './todoStyles';
 import { useTodoEntries } from './useTodoEntries';
 
@@ -39,23 +39,10 @@ const TABS: readonly TabItem[] = [
   { id: 'all', label: 'All' },
 ];
 
-const GROUPING_PREFERENCE = 'pane-todos-grouping';
 /** Under this width the header and footer shorten their words so nothing wraps or clips (T-6). */
 const NARROW_LIST_PX = 720;
 const FLASH_MS = 1800;
 
-function readGrouping(): TodosGrouping {
-  try {
-    const saved = localStorage.getItem(GROUPING_PREFERENCE);
-    return TODOS_GROUPINGS.find(grouping => grouping === saved) ?? 'status';
-  } catch {
-    return 'status';
-  }
-}
-
-function saveGrouping(grouping: TodosGrouping): void {
-  try { localStorage.setItem(GROUPING_PREFERENCE, grouping); } catch { /* A remembered grouping is a convenience. */ }
-}
 
 /** The TodoAction a row's action sends. */
 function actionOf(kind: TodoRowActionKind, number: number): TodoAction {
