@@ -207,7 +207,8 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     // in main/src/ipc/browser.test.ts: Playwright's synthetic clicks don't reach a webview's page reliably.
     let email = (await refs(pane, agent))('textbox "Email"');
     // The chip, with its Take over button, shows while the agent drives: a call that takes a while.
-    const working = browser(pane, agent, 'evaluate', ['--expression', 'new Promise(resolve => setTimeout(resolve, 5000))']);
+    // A busy loop, not a timer: a page Chromium counts as hidden may hold its timers back.
+    const working = browser(pane, agent, 'evaluate', ['--expression', '(() => { const end = Date.now() + 5000; while (Date.now() < end) { /* busy */ } return true; })()']);
     await page.getByTestId('browser-driver-chip').getByRole('button', { name: 'Take over' }).click();
     expect(await working).toMatchObject({ ok: true });
     email = (await refs(pane, agent))('textbox "Email"');

@@ -175,7 +175,7 @@ async function openSettings(page: Page, options: Parameters<typeof installElectr
 // Usage & Limits is a regular Settings category: the full usage dashboard,
 // including the provider limits Codex writes into its transcripts. Autopilot is
 // off here, so its category stays hidden.
-const SETTINGS_CATEGORY_COUNT = 19;
+const SETTINGS_CATEGORY_COUNT = 20;
 
 async function capture(page: Page, testInfo: TestInfo, filename: string): Promise<void> {
   const path = testInfo.outputPath(filename);
