@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import { readFile } from 'fs/promises';
 import { promisify } from 'util';
 import { cLocaleEnv, isProcessAlive, readControllingTerminals } from '../utils/processTree';
 
@@ -7,13 +8,61 @@ const execFileAsync = promisify(execFile);
 export interface ArchiveProcessIdentity {
   pid: number;
   parent: number;
+  /** `ps` lstart text on POSIX, CreationDate ticks on Windows; machine health compares this text. */
   started: string;
+  /**
+   * Linux only: `<boot_id>:<starttime>`, the start in clock ticks since boot from
+   * `/proc/<pid>/stat`. lstart is boot time plus those ticks, and boot time moves
+   * when the clock is stepped (WSL after host sleep, an NTP step), so a live
+   * process's lstart can shift; this cannot. Absent where /proc can't be read.
+   */
+  kernelStart?: string;
 }
 
 export interface ArchiveProcessObservation extends ArchiveProcessIdentity {
   exited: boolean;
   /** POSIX: leads its session, as every PTY shell does (`ps` stat flag `s`). */
   sessionLeader?: boolean;
+}
+
+/**
+ * Parent pid and start time (clock ticks since boot) from a `/proc/<pid>/stat` line.
+ * The command name sits in parentheses and may itself hold spaces and `)`, so the
+ * fields are counted from the last `)`.
+ */
+export function parseProcStat(text: string): { parent: number; startTicks: string } | undefined {
+  const close = text.lastIndexOf(')');
+  if (close < 0) return undefined;
+  // fields[0] is field 3 (state), so field 4 (ppid) is fields[1] and field 22 (starttime) is fields[19].
+  const fields = text.slice(close + 1).trim().split(/\s+/u);
+  const parent = fields[1] ?? '';
+  const startTicks = fields[19] ?? '';
+  if (!/^\d+$/u.test(parent) || !/^\d+$/u.test(startTicks)) return undefined;
+  return { parent: Number(parent), startTicks };
+}
+
+const PROC_READ_BATCH = 64;
+
+/**
+ * Linux: add each row's clock-independent start (`kernelStart`). A row whose /proc
+ * entry can't be read, or names another parent (its pid was reused, or it was
+ * reparented, since `ps` ran), keeps only its lstart text.
+ */
+export async function attachKernelStarts(
+  records: ArchiveProcessObservation[],
+  read: (path: string) => Promise<string> = path => readFile(path, 'utf8'),
+): Promise<void> {
+  let boot: string;
+  try { boot = (await read('/proc/sys/kernel/random/boot_id')).trim(); } catch { return; }
+  if (!boot) return;
+  for (let index = 0; index < records.length; index += PROC_READ_BATCH) {
+    await Promise.all(records.slice(index, index + PROC_READ_BATCH).map(async record => {
+      try {
+        const stat = parseProcStat(await read(`/proc/${record.pid}/stat`));
+        if (stat && stat.parent === record.parent) record.kernelStart = `${boot}:${stat.startTicks}`;
+      } catch { /* exited since ps ran, or /proc is hidden: lstart still identifies it */ }
+    }));
+  }
 }
 
 /** A failed snapshot must never be interpreted as an empty process table. */
@@ -24,7 +73,7 @@ export async function readArchiveProcesses(): Promise<ArchiveProcessObservation[
     ? await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
       '$ErrorActionPreference = "Stop"; Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { [long]$ticks = $_.CreationDate.ToUniversalTime().Ticks; $birth = ($ticks - ($ticks % [long]10)).ToString(); "$($_.ProcessId) $($_.ParentProcessId) $birth" } }'], options)
     : await execFileAsync('ps', ['-Ao', 'pid=,ppid=,lstart=,stat='], { ...options, env: cLocaleEnv() });
-  return stdout.split('\n').filter(line => line.trim()).map(line => {
+  const records = stdout.split('\n').filter(line => line.trim()).map(line => {
     const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/u.exec(line);
     if (!match) throw new Error('Cannot parse the process identity snapshot');
     const record: ArchiveProcessObservation = { pid: Number(match[1]), parent: Number(match[2]), started: match[3], exited: false };
@@ -39,6 +88,8 @@ export async function readArchiveProcesses(): Promise<ArchiveProcessObservation[
     }
     return record;
   });
+  if (process.platform === 'linux') await attachKernelStarts(records);
+  return records;
 }
 
 /** Escalate only freshly matched lifetimes; never taskkill /T or signal a group
