@@ -420,7 +420,7 @@ export class PageDriver {
         await this.send('Page.handleJavaScriptDialog', answer.text === undefined ? { accept: answer.accept } : { accept: answer.accept, promptText: answer.text });
         this.dialog = undefined;
       }
-      return { field: null };
+      return { success: true, field: null };
     }
     await this.attach();
     // A pointer only passing over the page (hover) gives it no focus.
