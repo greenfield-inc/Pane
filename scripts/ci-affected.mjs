@@ -105,16 +105,25 @@ const NOT_READ = [
 const SCANNED = /\.(?:[cm]?[jt]sx?|json|rs|toml|py|sh|ya?ml|html)$/;
 const HASH_COMMENTS = /\.(?:toml|py|sh|ya?ml)$/;
 
+// After these, a `/` starts a regex literal rather than a division.
+const BEFORE_REGEX = new Set(['', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '<', '>', '~', '^']);
+const KEYWORD_BEFORE_REGEX = /^(?:return|typeof|case|in|of|delete|void|throw|new|else|do|yield|await)$/;
+
 /**
- * String literals in source text, outside comments, with their line and the
- * code before each on that line. Template literals keep their static prefix
- * and record whether they contain a ${} expression.
+ * String literals in source text, outside comments and regex literals, with
+ * their line. Template literals keep their text with each ${} as \u0000, and
+ * the code of each ${}. `unterminated` is the line of a template literal that
+ * never closes, after which nothing in the file can be read.
  */
 function stringLiterals(text, { hashComments = false } = {}) {
   const literals = [];
   const comments = [];
+  let unterminated = null;
   let line = 1;
   let i = 0;
+  let previous = '';
+  let word = '';
+  let lastWord = '';
   const n = text.length;
   while (i < n) {
     const ch = text[i];
@@ -132,6 +141,24 @@ function stringLiterals(text, { hashComments = false } = {}) {
       i += 2;
       comments.push([start, i]);
       continue;
+    }
+    if (!hashComments && ch === '/' && (BEFORE_REGEX.has(previous) || (word === '' && KEYWORD_BEFORE_REGEX.test(lastWord) && previous === lastWord.at(-1)))) {
+      let j = i + 1;
+      let inClass = false;
+      while (j < n && text[j] !== '\n') {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === '[') inClass = true;
+        else if (text[j] === ']') inClass = false;
+        else if (text[j] === '/' && !inClass) break;
+        j += 1;
+      }
+      if (j < n && text[j] === '/') {
+        i = j + 1;
+        while (i < n && /[a-z]/.test(text[i])) i += 1;
+        previous = 'x';
+        word = '';
+        continue;
+      }
     }
     if (ch === '"' || ch === "'" || ch === '`') {
       const start = i;
@@ -164,13 +191,20 @@ function stringLiterals(text, { hashComments = false } = {}) {
         value += text[i];
         i += 1;
       }
+      if (ch === '`' && i >= n) unterminated = startLine;
       i += 1;
       literals.push({ value, dynamic, expressions, line: startLine, start, end: i });
+      previous = 'x';
+      word = '';
       continue;
     }
+    if (/[\w$]/.test(ch)) word += ch;
+    else if (!/\s/.test(ch)) { if (word) lastWord = word; word = ''; }
+    else if (word) { lastWord = word; word = ''; }
+    if (!/\s/.test(ch)) previous = ch;
     i += 1;
   }
-  return { literals, comments };
+  return { literals, comments, unterminated };
 }
 
 /** Source text with comments blanked and each string literal replaced by spaces of the same length. */
@@ -178,7 +212,7 @@ function maskLiterals(text, literals, comments) {
   const chars = text.split('');
   for (const [start, end] of comments) for (let i = start; i < end; i += 1) chars[i] = ' ';
   for (const literal of literals) {
-    for (let i = literal.start; i < literal.end; i += 1) if (chars[i] !== '\n') chars[i] = ' ';
+    for (let i = literal.start; i < literal.end && i < chars.length; i += 1) if (chars[i] !== '\n') chars[i] = ' ';
     chars[literal.start] = '\u0001';
   }
   return chars.join('');
@@ -200,19 +234,57 @@ function callArguments(masked, open) {
   return null;
 }
 
-const FILE_BASE = /__dirname|import\.meta|fileURLToPath|__filename/;
 const CWD_BASE = /process\.cwd\(\)/;
+const PURE_CLIMB = /^(?:\.|\.\.(?:\/\.\.)*)$/;
+
+/**
+ * The folder, relative to the file's own folder, that an expression built
+ * from the file's location names: `__dirname` is '.', `dirname(__dirname)`
+ * is '..', `fileURLToPath(new URL('../..', import.meta.url))` is '../..'.
+ * Null when the expression does not start from the file's location.
+ */
+function fileBaseFolder(code) {
+  const compact = code.replace(/\s+/g, '').replace(/\b(?:path|posix|url)\./g, '');
+  const shape = /^((?:dirname\()*)(__dirname|import\.meta\.dirname|__filename|import\.meta\.filename|fileURLToPath\(import\.meta\.url\)|fileURLToPath\(newURL\((['"`])([^'"`$]*)\3,import\.meta\.url\)\))(\)*)$/.exec(compact);
+  if (!shape) return null;
+  const climbs = shape[1].length / 'dirname('.length;
+  if (shape[5].length !== climbs) return null;
+  const start = shape[4] !== undefined ? shape[4] || '.' : '.';
+  // A file's path (import.meta.url, __filename) needs one dirname to be its folder.
+  const fileItself = shape[4] === undefined && !/__dirname|import\.meta\.dirname/.test(shape[2]);
+  return path.posix.join(start, ...(fileItself ? ['_file_'] : []), ...Array(climbs).fill('..'));
+}
+
+/** The operand that ends just before `end` in masked code: a name chain, or a call such as `dirname(x)`. */
+function operandBefore(masked, end) {
+  let i = end;
+  while (i > 0 && /\s/.test(masked[i - 1])) i -= 1;
+  const stop = i;
+  if (masked[i - 1] === ')') {
+    let depth = 0;
+    while (i > 0) {
+      i -= 1;
+      if (masked[i] === ')') depth += 1;
+      else if (masked[i] === '(' && --depth === 0) break;
+    }
+  }
+  while (i > 0 && /[\w$.]/.test(masked[i - 1])) i -= 1;
+  return masked.slice(i, stop);
+}
 
 /**
  * The repository paths a file names. Each reference is
  * `{ line, candidates: [{ from, path }], computed }`: `from` is 'file',
  * 'workspace' or 'repo' (a top-level folder), and `computed` marks a
- * climb followed by a part the guard cannot read.
+ * climb followed by a part the guard cannot read. `unreadable` marks a file
+ * the scanner cannot read past one line.
  */
 function fileReferences(text, file) {
-  const { literals, comments } = stringLiterals(text, { hashComments: HASH_COMMENTS.test(file) });
+  const { literals, comments, unterminated } = stringLiterals(text, { hashComments: HASH_COMMENTS.test(file) });
   const refs = [];
+  if (unterminated !== null) refs.push({ line: unterminated, candidates: [], unreadable: true });
   const relative = (value, bases) => bases.map((from) => ({ from, path: value }));
+  const lineAt = (index) => text.slice(0, index).split('\n').length;
   const fromLiteral = (value, line, computed = false) => {
     if (/^[./]*$/.test(value) && !computed) return;
     if (value.startsWith('./') || value.startsWith('../')) {
@@ -223,7 +295,6 @@ function fileReferences(text, file) {
   };
   const consumed = new Set();
   const masked = maskLiterals(text, literals, comments);
-  const templateCode = literals.flatMap((literal) => literal.expressions).join('\n');
   const byStart = new Map(literals.map((literal) => [literal.start, literal]));
   const calls = [];
   const call = /\b(?:join|resolve|URL)\s*\(/g;
@@ -239,30 +310,84 @@ function fileReferences(text, file) {
       if (whole && !literal.dynamic) return { value: literal.value, start: literal.start };
       return { code: text.slice(start, end).trim() };
     });
-    const declared = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:path\.|posix\.)?$/.exec(masked.slice(Math.max(0, match.index - 80), match.index));
-    calls.push({ index: match.index, spans, args, name: declared?.[1] });
+    calls.push({ index: match.index, spans, args });
   }
 
-  // A name bound to a folder above this file
-  // (`const repoRoot = join(__dirname, '..', '..')`). Joins onto it resolve
-  // from that folder; any other use of the name is reported, because the
-  // guard cannot follow it.
+  // Names bound to the file's folder or a folder above it
+  // (`const root = join(__dirname, '..', '..')`, `dirname(dirname(__dirname))`,
+  // `fileURLToPath(new URL('..', import.meta.url))`). Paths built on them
+  // resolve from that folder; any other use of a name above the file is
+  // reported, because the guard cannot follow it.
   const bindings = new Map();
-  for (const { args, name, index } of calls) {
-    if (!name || args.length < 2 || !FILE_BASE.test(args[0].code ?? '') || args.slice(1).some((arg) => arg.value === undefined)) continue;
-    const folder = path.posix.join(...args.slice(1).map((arg) => arg.value));
-    if (!/^\.\.(?:\/\.\.)*$/.test(folder)) continue;
-    const word = new RegExp(`(?<![\\w$])${name.replace(/[$\\]/g, '\\$&')}(?![\\w$])`, 'g');
-    const uses = [...masked.matchAll(word)];
-    const followed = uses.filter((use) => /\b(?:join|resolve|relative)\s*\(\s*$/.test(masked.slice(Math.max(0, use.index - 40), use.index))).length;
-    const inTemplates = [...templateCode.matchAll(word)].length;
-    bindings.set(name, { folder, unfollowed: uses.length - 1 - followed + inTemplates, line: text.slice(0, index).split('\n').length });
+  const callAt = new Map(calls.map((entry) => [entry.index, entry]));
+  for (const declaration of masked.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*/g)) {
+    const exprStart = declaration.index + declaration[0].length;
+    const rest = masked.slice(exprStart);
+    const end = rest.search(/[;\n]/);
+    const expr = text.slice(exprStart, exprStart + (end === -1 ? rest.length : end));
+    let folder = null;
+    const head = /^(?:path\.|posix\.)?(?:join|resolve)\s*\(/.exec(rest);
+    const joinCall = head && callAt.get(exprStart + head[0].search(/(?:join|resolve)/));
+    if (joinCall) {
+      const base = fileBaseFolder(joinCall.args[0]?.code ?? '');
+      if (base !== null && joinCall.args.slice(1).every((arg) => arg.value !== undefined)) {
+        folder = path.posix.join(base, ...joinCall.args.slice(1).map((arg) => arg.value));
+      }
+    } else folder = fileBaseFolder(expr);
+    if (folder === null || !PURE_CLIMB.test(folder)) continue;
+    bindings.set(declaration[1], {
+      folder, line: lineAt(declaration.index), declared: declaration.index + declaration[0].indexOf(declaration[1], 3), span: [exprStart, exprStart + expr.length],
+    });
   }
-  for (const [, binding] of bindings) {
-    if (binding.unfollowed > 0) refs.push({ line: binding.line, candidates: relative(binding.folder, ['file']), computed: true, binding: true });
+  const baseFolder = (code) => {
+    const name = code.trim();
+    return bindings.has(name) ? bindings.get(name).folder : fileBaseFolder(code);
+  };
+
+  // Templates and concatenations that start at the file's location:
+  // `${__dirname}/../x`, `${root}/x`, `__dirname + '/../x'`.
+  const followedTemplates = new Set();
+  for (const literal of literals) {
+    if (!literal.dynamic || !literal.value.startsWith('\u0000')) continue;
+    const base = baseFolder(literal.expressions[0]);
+    if (base === null) continue;
+    followedTemplates.add(literal);
+    consumed.add(literal.start);
+    const tail = literal.value.slice(1);
+    const cut = tail.indexOf('\u0000');
+    const computed = cut !== -1;
+    const staticTail = computed ? tail.slice(0, tail.slice(0, cut).lastIndexOf('/') + 1) : tail;
+    refs.push({ line: literal.line, candidates: relative(path.posix.join(base, `.${staticTail}`), ['file']), computed });
+  }
+  for (const plus of masked.matchAll(/\+\s*\u0001/g)) {
+    const base = baseFolder(operandBefore(masked, plus.index));
+    const literal = byStart.get(plus.index + plus[0].length - 1);
+    if (base === null || !literal) continue;
+    consumed.add(literal.start);
+    const value = literal.dynamic ? literal.value.slice(0, literal.value.indexOf('\u0000')) : literal.value;
+    refs.push({ line: literal.line, candidates: relative(path.posix.join(base, `.${value}`), ['file']), computed: literal.dynamic });
   }
 
-  for (const { spans, args, name } of calls) {
+  for (const [name, binding] of bindings) {
+    if (binding.folder === '.') continue;
+    const pattern = `(?<![\\w$])${name.replace(/[$\\]/g, '\\$&')}(?![\\w$])`;
+    const inCode = [...masked.matchAll(new RegExp(pattern, 'g'))].filter((use) => use.index !== binding.declared
+      && !/\b(?:join|resolve|relative)\s*\(\s*$/.test(masked.slice(Math.max(0, use.index - 40), use.index))
+      && !/^\s*\+\s*\u0001/.test(masked.slice(use.index + name.length)));
+    const inTemplates = literals.flatMap((literal) => literal.expressions
+      .filter((code, k) => !(k === 0 && followedTemplates.has(literal) && code.trim() === name))
+      .filter((code) => new RegExp(pattern).test(code)));
+    const unfollowed = inCode.length + inTemplates.length;
+    if (unfollowed > 0) refs.push({ line: binding.line, candidates: relative(binding.folder, ['file']), computed: true, binding: true });
+  }
+
+  const inBinding = (index) => [...bindings.values()].some(({ span: [start, end] }) => index >= start && index < end);
+  for (const { index, spans, args } of calls) {
+    // A root name's own definition is followed through its uses instead.
+    if (inBinding(index)) {
+      for (const arg of args) if (arg.start !== undefined) consumed.add(arg.start);
+      continue;
+    }
     for (let i = 0; i < args.length; i += 1) {
       if (args[i].value === undefined) continue;
       let j = i;
@@ -270,12 +395,11 @@ function fileReferences(text, file) {
       const joined = path.posix.join(...args.slice(i, j).map((arg) => arg.value));
       const base = i > 0 ? args[i - 1].code : null;
       const computed = j < args.length;
-      const line = text.slice(0, spans[i][0]).split('\n').length;
+      const line = lineAt(spans[i][0]);
       for (const arg of args.slice(i, j)) consumed.add(arg.start);
-      const bound = base && bindings.get(base);
-      if (bound) refs.push({ line, candidates: relative(path.posix.join(bound.folder, joined), ['file']), computed });
-      else if (base && FILE_BASE.test(base)) {
-        if (!(name && bindings.has(name) && !computed)) refs.push({ line, candidates: relative(joined, ['file']), computed });
+      const folder = base && baseFolder(base);
+      if (folder !== null && folder !== undefined && base) {
+        refs.push({ line, candidates: relative(path.posix.join(folder, joined), ['file']), computed });
       } else if (base && CWD_BASE.test(base)) refs.push({ line, candidates: relative(joined, ['workspace', 'repo']), computed });
       else if (joined.startsWith('..')) {
         if (!base) refs.push({ line, candidates: relative(joined, ['file', 'workspace']), computed });
@@ -425,6 +549,7 @@ export function guardViolations({ lanes, laneFree = LANE_FREE, files, read, notR
     for (const file of files) {
       if (!covers(inputs, file)) continue;
       for (const ref of refsOf(file)) {
+        if (ref.unreadable) violations.push({ lane, file, line: ref.line, target: '(unreadable)', unreadable: true });
         for (const candidate of ref.candidates) {
           const target = resolveCandidate(file, candidate, tree);
           if (!target || covers(inputs, target.path, target.dir) || !selects(target)) continue;
@@ -487,6 +612,10 @@ function runGuard() {
     testLanes: TEST_LANES,
   });
   for (const v of guardViolations({ lanes: LANES, files, read: (file) => readFileSync(path.join(REPO, file), 'utf8') })) {
+    if (v.unreadable) {
+      problems.push(`${v.file}:${v.line} opens a template literal that never closes, so the guard cannot read the rest of the file for the ${v.lane} lane. Fix the file, or the scanner in scripts/ci-affected.mjs if the file is valid.`);
+      continue;
+    }
     problems.push(`${v.file}:${v.line} ${v.computed ? 'builds a path under' : 'reads'} ${v.target}, which is outside the ${v.lane} lane's inputs in scripts/ci-affected.mjs. Add it to that lane (or to NOT_READ with a reason), or a change there skips this lane.`);
   }
   for (const problem of problems) console.error(`::error title=Lane selection::${problem}`);

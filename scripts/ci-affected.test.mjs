@@ -64,7 +64,7 @@ test('the guard follows a name for the repository root', () => {
 
 test('the guard fails a root name it cannot follow, and a computed climb out of the lane', () => {
   assert.deepEqual(scan({ 'main/src/a.ts': "const root = join(__dirname, '../..');\nspawn('node', ['x'], { cwd: root });" }), ['main main/src/a.ts:1 .']);
-  assert.deepEqual(scan({ 'main/src/a.ts': "const root = join(__dirname, '../..');\nconst f = `${root}/frontend/page.ts`;" }), ['main main/src/a.ts:1 .']);
+  assert.deepEqual(scan({ 'main/src/a.ts': "const root = join(__dirname, '../..');\nlistFiles(root);" }), ['main main/src/a.ts:1 .']);
   assert.deepEqual(scan({ 'main/src/a.ts': "const p = join(__dirname, '..', '..', name);" }), ['main main/src/a.ts:1 .']);
   assert.deepEqual(scan({ 'main/src/a.ts': 'const p = `../../${dir}/page.ts`;' }), ['main main/src/a.ts:1 .']);
 });
@@ -111,4 +111,37 @@ test('the map check rejects a test file the inventory runs in a lane job but the
   assert.deepEqual(mapProblems({ lanes: LANES, laneFree: LANE_FREE, files: FILES, workflowText, testLanes }), [
     'lane main: job main-tests runs frontend/page.ts (scripts/ci-test-inventory.mjs), which is outside the lane\'s inputs.',
   ]);
+});
+
+test('a regex literal holding a backtick does not hide the rest of the file', () => {
+  const source = "const SHELL = /[;&|<>`\\n]|\\$\\(/;\nconst m = /read and follow `([^`]+)`/;\nimport page from '../../frontend/page';";
+  assert.deepEqual(scan({ 'main/src/a.ts': source }), ['main main/src/a.ts:3 frontend/page.ts']);
+});
+
+test('a template literal still open at the end of a file fails as unreadable', () => {
+  assert.deepEqual(scan({ 'main/src/a.ts': 'const ratio = a / b; const s = `open\nimport x from "../../frontend/page";' }), ['main main/src/a.ts:1 (unreadable)']);
+});
+
+test('the guard sees root names and climbs written as URLs, templates, concatenation and dirname chains', () => {
+  const forms = {
+    url: "const REPO = fileURLToPath(new URL('../..', import.meta.url));\nconst x = join(REPO, 'frontend');",
+    template: 'const x = readFileSync(`${__dirname}/../../frontend/page.ts`);',
+    templateOnRoot: "const root = join(__dirname, '..', '..');\nconst x = `${root}/frontend/page.ts`;",
+    concatenation: "const x = readFileSync(__dirname + '/../../frontend/page.ts');",
+    dirnameRoot: 'const root = path.dirname(path.dirname(__dirname));\nconst x = path.join(root, "frontend");',
+    dirnameBase: "const x = path.join(path.dirname(path.dirname(__dirname)), 'frontend', 'page.ts');",
+    nestedJoin: "const data = readFileSync(join(__dirname, '../../frontend/page.ts'));",
+    fileUrl: "const here = path.dirname(fileURLToPath(import.meta.url));\nconst x = join(here, '..', '..', 'frontend');",
+  };
+  const found = Object.fromEntries(Object.entries(forms).map(([form, source]) => [form, scan({ 'main/src/a.ts': source })]));
+  assert.deepEqual(found, {
+    url: ['main main/src/a.ts:2 frontend'],
+    template: ['main main/src/a.ts:1 frontend/page.ts'],
+    templateOnRoot: ['main main/src/a.ts:2 frontend/page.ts'],
+    concatenation: ['main main/src/a.ts:1 frontend/page.ts'],
+    dirnameRoot: ['main main/src/a.ts:2 frontend'],
+    dirnameBase: ['main main/src/a.ts:1 frontend/page.ts'],
+    nestedJoin: ['main main/src/a.ts:1 frontend/page.ts'],
+    fileUrl: ['main main/src/a.ts:2 frontend'],
+  });
 });
