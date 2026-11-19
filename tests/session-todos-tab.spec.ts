@@ -26,6 +26,7 @@ const ISO = new Date(NOW - 3 * HOUR).toISOString();
 const BILLING = 'billing';
 const DOCS = 'docs';
 const QUESTION = 'Three dunning reminders or two?';
+const DEVBOX = 'devbox';
 
 function record(number: number, title: string, extra: Partial<TodoRecord> = {}): TodoRecord {
   return {
@@ -148,16 +149,18 @@ async function installSessions(page: Page, selected: string) {
   }, { records: [sessionRecord(BILLING, 'Billing rewrite'), sessionRecord(DOCS, 'Docs refresh')], first: selected });
 }
 
-interface OpenOptions { dark?: boolean; width?: number; session?: string; createdNumber?: number }
+interface OpenOptions { dark?: boolean; width?: number; session?: string; createdNumber?: number; notify?: NotifySnapshot }
 
-async function open(page: Page, { dark = false, width = 1440, session = BILLING, createdNumber }: OpenOptions = {}) {
+async function open(page: Page, { dark = false, width = 1440, session = BILLING, createdNumber, notify = approvals() }: OpenOptions = {}) {
   await page.setViewportSize({ width, height: 900 });
   await installElectronApiMock(page, {
     initialProjects: [{ id: 1, name: 'billing', path: '/tmp/billing', active: true, created_at: '2026-10-01T00:00:00.000Z', updated_at: '2026-10-01T00:00:00.000Z' }],
     initialSessions: [],
     initialConfig: { theme: dark ? 'dark' : 'light-rounded', appearanceMode: 'fixed' },
-    notifySnapshot: approvals(),
+    notifySnapshot: notify,
     todos: { ...todos(), createdNumber },
+    // A saved computer the window can switch to (T-37's All machines case).
+    computers: [{ id: DEVBOX, label: 'devbox', routes: [{ id: 'public:https://devbox.example:8443', kind: 'public', source: 'manual', baseUrl: 'https://devbox.example:8443', token: 'paired' }] }],
   });
   await installSessions(page, session);
   await page.goto('/', { waitUntil: 'domcontentloaded' });
@@ -367,7 +370,7 @@ for (const dark of [false, true]) {
   test(`a Session that requested no to-dos says so quietly in the sidebar (${theme})`, async ({ page }) => {
     await open(page, { dark, session: DOCS });
     await showSidebarTodos(page);
-    await expect(page.getByTestId('sidebar-todos-empty')).toHaveText('No to-dos requested from this Session yet.');
+    await expect(page.getByTestId('sidebar-todos-empty')).toHaveText('No open or recent to-dos from this Session.');
     await sidebarStill(page, `t37-sidebar-empty-${theme}`);
   });
 
@@ -397,6 +400,92 @@ test('a to-do clicked in the sidebar opens in the split\'s To-dos tab', async ({
   await expect(selectedRow(page)).toHaveAttribute('data-todo', '14');
   await sidebarRow(page, 16).click();
   await expect(page.getByTestId('todo-page')).toHaveAttribute('data-todo', '16');
+});
+
+// T-37 review fixes.
+const inspectorTab = (page: Page, name: string) => page.getByRole('tablist', { name: 'Session inspector' }).getByRole('tab', { name: new RegExp(`^${name}`) });
+
+/** devbox's to-dos, requested by its own Billing rewrite Session: another T-14, and a T-30 only it has. */
+function devboxTodos(): Pick<TodosMockOptions, 'snapshot' | 'details'> {
+  const list = [
+    row(record(14, 'Deploy the API to staging', { updatedAt: NOW - 3 * MIN }), { status: 'working', reason: 'deploying' }),
+    row(record(30, 'Rotate the signing keys', { state: 'todo', startedAt: null, sessionId: null, updatedAt: NOW - HOUR }), { status: 'idle', reason: 'not started', idleReason: 'not_started' }),
+  ].map(r => ({ ...r, machine: 'devbox' }));
+  const base = todos().details[14];
+  const details: Record<number, TodoDetail> = {};
+  for (const r of list) details[r.todo.number] = { ...base, ...r, approvalIds: [] };
+  return { snapshot: { rows: list, gate: { state: 'normal', enabled: true, since: 0 }, machine: 'devbox', ownSessionIds: [] }, details };
+}
+
+/** An approval on devbox linked to devbox's own T-14, as desktop Notify lists another machine's card. */
+function devboxApproval(): NotifyItem {
+  return {
+    id: `${DEVBOX}:q77`, ui: 'options', title: 'Q-77: Which staging region?', state: 'waiting', createdAt: NOW - 5 * MIN, machineId: DEVBOX, machine: 'devbox',
+    choices: [{ label: 'us-east', recommended: true }, { label: 'eu-west' }],
+    source: { name: 'deployer', agent: 'Claude', session: { id: 'devbox-hidden-14', name: 'T-14 · Deploy the API to staging' } },
+    todo: { number: 14, title: 'Deploy the API to staging' },
+  };
+}
+
+/** This computer's approvals beside devbox's, each marked with its machine. */
+function bothMachines(q31: Partial<NotifyItem> = {}): NotifySnapshot {
+  const local = approvals();
+  const items = [{ ...local.items[0], machineId: 'local', ...q31 }, devboxApproval()];
+  return { ...local, items, queue: items.filter(item => item.state === 'waiting').map(item => item.id) };
+}
+
+test('switching this window to another computer shows that computer\'s to-dos in the sidebar, with no change event', async ({ page }) => {
+  await open(page);
+  await showSidebarTodos(page);
+  await expect(sidebarRow(page, 14)).toContainText('Ship receipt PDFs');
+  await page.evaluate((remote) => window.__paneTestElectronMock.switchTodosHost('devbox', remote), devboxTodos());
+  if (!(await page.getByTestId('sidebar-todos').isVisible())) await showSidebarTodos(page);
+  await expect.poll(() => sidebarRows(page)).toEqual([[14, 'working'], [30, 'idle']]);
+  await expect(sidebarRow(page, 14)).toContainText('Deploy the API to staging');
+  // This computer's T-15 question is not devbox's.
+  await expect(sidebarTodosTab(page)).toHaveAccessibleName('To-dos');
+  await sidebarRow(page, 14).click();
+  await expect(page.getByTestId('todo-page-title')).toHaveText('Deploy the API to staging');
+});
+
+test('another computer\'s approval on its own T-14 counts neither in the badges nor in the pager here', async ({ page }) => {
+  await open(page, { notify: bothMachines() });
+  await expect(todosTab(page)).toHaveAccessibleName('To-dos, 1 waiting on you');
+  await showSidebarTodos(page);
+  await expect(sidebarTodosTab(page)).toHaveAccessibleName('To-dos, 1 waiting on you');
+  await expect(sidebarRow(page, 15).getByTestId('sidebar-todo-waiting')).toHaveText('1');
+  await expect(sidebarRow(page, 14).getByTestId('sidebar-todo-waiting')).toHaveCount(0);
+  await page.locator('[data-panel-group-id]').getByRole('tab', { name: /^To-dos/ }).click();
+  await rowOf(page, 15).getByTestId('session-todo-answer').click();
+  await expect(page.getByTestId('session-todo-approval').getByTestId('approval-pager')).toHaveText('1 of 1');
+});
+
+for (const [change, patch] of [['dismissed', { dismissedAt: NOW }], ['sent', { state: 'sent' }]] as const) {
+  test(`a question ${change} without an answer clears the row badge with the tab badge`, async ({ page }) => {
+    await open(page);
+    await showSidebarTodos(page);
+    await expect(sidebarRow(page, 15).getByTestId('sidebar-todo-waiting')).toHaveText('1');
+    // Only Notify changes: the to-do list still says T-15 waits on you, as main's would until it rereads.
+    await page.evaluate((notify) => window.__paneTestElectronMock.emitNotifySnapshot(notify), bothMachines(patch));
+    await expect(sidebarTodosTab(page)).toHaveAccessibleName('To-dos');
+    await expect(sidebarRow(page, 15).getByTestId('sidebar-todo-waiting')).toHaveCount(0);
+  });
+}
+
+test('← → move focus with the selection across Files, Changes and To-dos', async ({ page }) => {
+  await open(page);
+  // The conversation's terminal takes focus once it has started; wait for that before the keys.
+  await expect(page.locator('.xterm-helper-textarea').first()).toBeFocused({ timeout: 15_000 });
+  await page.getByRole('button', { name: 'Show details' }).click();
+  await inspectorTab(page, 'Files').click();
+  await expect(inspectorTab(page, 'Files')).toBeFocused();
+  for (const name of ['Changes', 'To-dos', 'Files']) {
+    await page.keyboard.press('ArrowRight');
+    await expect(inspectorTab(page, name)).toBeFocused();
+    await expect(inspectorTab(page, name)).toHaveAttribute('aria-selected', 'true');
+  }
+  await page.keyboard.press('ArrowLeft');
+  await expect(inspectorTab(page, 'To-dos')).toBeFocused();
 });
 
 test('⌘-click on a row opens the to-do on the To-dos screen, and ↗ opens To-dos grouped by Requested by', async ({ page }) => {

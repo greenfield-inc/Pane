@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { todoRef } from '../../../../shared/types/todos';
-import { useSessionTodoEntries } from '../../stores/todosStore';
+import { useSessionTodoApprovals, useSessionTodoEntries } from '../../stores/todosStore';
 import { cn } from '../../utils/cn';
 import { useNow } from '../notify/useNow';
 import { TodoStatusIcon, TODO_STATUS_LABEL } from './TodoStatusIcon';
@@ -23,16 +23,18 @@ interface SessionTodosSidebarProps {
  */
 export function SessionTodosSidebar({ sessionId, machineId, onOpen }: SessionTodosSidebarProps) {
   const entries = useSessionTodoEntries(sessionId, machineId);
+  // The same approvals as the tab's count, so a row's count clears with it (dismissed, sent or answered).
+  const { byTodo } = useSessionTodoApprovals(sessionId, machineId);
   const now = useNow();
   const shown = useMemo(() => flattenGroups(sessionTodoGroups(entries ?? [], now)), [entries, now]);
   if (entries === null) return null;
-  // Like Changes' "No Panes in this Session yet.": the tab stays, and says so quietly.
-  if (shown.length === 0) return <p className="p-3 text-[12px] text-text-muted" data-testid="sidebar-todos-empty">No to-dos requested from this Session yet.</p>;
+  // Like Changes' "No Panes in this Session yet.": the tab stays, and says so quietly. Older closed ones are on the To-dos screen.
+  if (shown.length === 0) return <p className="p-3 text-[12px] text-text-muted" data-testid="sidebar-todos-empty">No open or recent to-dos from this Session.</p>;
   return (
     <ul className="flex flex-col gap-0.5 p-2 text-[12px]" aria-label="To-dos this Session requested" data-testid="sidebar-todos">
       {shown.map(({ key, row }) => {
         const { todo, status, subCounts } = row;
-        const waiting = status.waitingCount ?? (status.status === 'waiting' ? 1 : 0);
+        const waiting = byTodo.get(todo.number) ?? 0;
         return (
           <li key={key}>
             <button type="button" onClick={() => onOpen(todo.number)}

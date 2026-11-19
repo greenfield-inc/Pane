@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from 'react';
 import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ListTodo, Plus } from 'lucide-react';
 import { todoRef } from '../../../../shared/types/todos';
-import type { NotifyItem } from '../../../../shared/types/notify';
-import { useSessionTodoEntries, useSessionTodoScope } from '../../stores/todosStore';
-import { countsAsWaiting, selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
+import { useSessionTodoApprovals, useSessionTodoEntries } from '../../stores/todosStore';
+import { useNotifyStore } from '../../stores/notifyStore';
 import { useApprovalColumnStore, type ApprovalSurface } from '../../stores/approvalColumnStore';
-import { isOpenForSession } from '../../../../shared/approvalOpen';
 import { cn } from '../../utils/cn';
 import { relativeAge } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
@@ -15,7 +13,6 @@ import { NewTodoDialog } from './NewTodoDialog';
 import { TodoPage } from './page/TodoPage';
 import { TodoStatusIcon } from './TodoStatusIcon';
 import { firstLine, snoozeWhen, viewerZone, wakesIn, wakesInShort } from './snoozeTime';
-import { inTodoScope } from './sessionTodos';
 import { SESSION_DONE_GROUP, SESSION_SNOOZED_GROUP, sessionGroupFolded, sessionOpenCount, sessionTodoGroups, stepTodo, withSessionFold } from './sessionTodosList';
 import { FRESH, useTabMemory, type TabMemory } from './sessionTodosTabMemory';
 import { headerKey, listStops, moveSelection, nextWake, resolveStop, type TodoEntry, type TodoGroup } from './todoList';
@@ -44,16 +41,6 @@ function useNarrow(ref: RefObject<HTMLElement | null>): boolean {
   return narrow;
 }
 
-/** The approvals of a Session's to-dos waiting on you, oldest first: what Answer opens and the pager walks. */
-function useTodoApprovals(sessionId: string, machineId?: string): NotifyItem[] {
-  const items = useNotifyStore(selectNotifyItems);
-  const scope = useSessionTodoScope(sessionId, machineId);
-  return useMemo(() => items
-    .filter(item => countsAsWaiting(item) && isOpenForSession(item) && inTodoScope(item, scope)
-      && (machineId === undefined || (item.machineId ?? 'local') === machineId))
-    .sort((a, b) => a.createdAt - b.createdAt), [items, scope, machineId]);
-}
-
 interface SessionTodosTabProps {
   sessionId: string;
   /** The machine the Session runs on; absent for this computer. */
@@ -70,7 +57,8 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
   const groups = useMemo(() => sessionTodoGroups(entries ?? [], now), [entries, now]);
   const folded = useCallback((group: TodoGroup) => sessionGroupFolded(memory.folds, group, groups.length), [memory.folds, groups.length]);
   const stops = useMemo(() => listStops(groups, folded), [groups, folded]);
-  const approvals = useTodoApprovals(sessionId, machineId);
+  // What Answer opens and the pager walks: the same approvals as the tabs' counts (T-37).
+  const approvals = useSessionTodoApprovals(sessionId, machineId).items;
   const [creating, setCreating] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const narrow = useNarrow(rootRef);

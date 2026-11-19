@@ -479,6 +479,7 @@ export function SessionWorkspacePanels({
     if (current) applyLayout(activatePanelInLayout(withSessionTabs(current, overviewId, todosId, agentPanelId), todosId));
   }, [sessionId, overviewId, todosId, agentPanelId, applyLayout]);
 
+  const inspectorTabButtons = useRef<Partial<Record<SessionInspectorTab, HTMLButtonElement | null>>>({});
   const selectSidebarTab = (tab: SessionInspectorTab) => {
     if (tab === 'files') void toggleTool('explorer');
     else setSidebarTab(tab);
@@ -799,7 +800,7 @@ export function SessionWorkspacePanels({
             minimum={filesResize.floor} maximum={filesResize.cap} {...filesResize.separatorHandlers} />}
           <div role="tablist" aria-label="Session inspector" className="flex h-8 flex-shrink-0 items-stretch border-b border-border-primary bg-surface-secondary px-1">
             {SESSION_INSPECTOR_TABS.map(tab => (
-              <button key={tab} type="button" role="tab" aria-selected={sidebarTab === tab}
+              <button key={tab} ref={button => { inspectorTabButtons.current[tab] = button; }} type="button" role="tab" aria-selected={sidebarTab === tab}
                 aria-label={tab === 'todos' && todosWaiting > 0 ? `To-dos, ${todosWaiting} waiting on you` : SESSION_INSPECTOR_LABELS[tab]}
                 onClick={() => selectSidebarTab(tab)}
                 onKeyDown={event => {
@@ -807,7 +808,10 @@ export function SessionWorkspacePanels({
                   event.preventDefault();
                   const index = SESSION_INSPECTOR_TABS.indexOf(tab);
                   const offset = event.key === 'ArrowRight' ? 1 : SESSION_INSPECTOR_TABS.length - 1;
-                  selectSidebarTab(SESSION_INSPECTOR_TABS[(index + offset) % SESSION_INSPECTOR_TABS.length]);
+                  const next = SESSION_INSPECTOR_TABS[(index + offset) % SESSION_INSPECTOR_TABS.length];
+                  selectSidebarTab(next);
+                  // Focus follows the selection, so the next press moves on from there.
+                  inspectorTabButtons.current[next]?.focus();
                 }}
                 className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-t-md border border-transparent px-2 text-[12px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus ${sidebarTab === tab ? 'border-border-primary border-b-surface-primary bg-surface-primary text-text-primary -mb-px' : 'text-text-tertiary hover:text-text-primary hover:bg-surface-hover'}`}>
                 <span className="truncate">{SESSION_INSPECTOR_LABELS[tab]}</span>

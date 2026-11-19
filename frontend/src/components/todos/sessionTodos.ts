@@ -48,3 +48,20 @@ export function todoRefOf(item: NotifyItem, rows: readonly TodoListRow[], sessio
   const owner = rows.find(({ todo }) => todo.sessionId === asking && todo.parentNumber === null);
   return owner ? owner.todo.ref : undefined;
 }
+
+/**
+ * How many of `approvals` each top-level to-do has (T-37): one linked to it or to one of its sub-to-dos, or
+ * asked (or connected) in its own hidden Session. `rows` is the machine's whole list, sub-to-dos included.
+ */
+export function approvalsByTodo(approvals: readonly NotifyItem[], rows: readonly TodoListRow[]): Map<number, number> {
+  const byNumber = new Map(rows.map(({ todo }) => [todo.number, todo]));
+  const counts = new Map<number, number>();
+  for (const item of approvals) {
+    const connected = item.connected?.kind === 'session' ? item.connected.id : undefined;
+    const ownedBy = (sessionId: string | undefined) => (sessionId ? rows.find(({ todo }) => todo.sessionId === sessionId && todo.parentNumber === null)?.todo : undefined);
+    let todo = (item.todo ? byNumber.get(item.todo.number) : undefined) ?? ownedBy(item.source.session?.id) ?? ownedBy(connected);
+    for (let depth = 0; todo && todo.parentNumber !== null && depth < rows.length; depth += 1) todo = byNumber.get(todo.parentNumber);
+    if (todo) counts.set(todo.number, (counts.get(todo.number) ?? 0) + 1);
+  }
+  return counts;
+}
