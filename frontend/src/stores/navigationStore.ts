@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { PaneNavigationView } from '../../../shared/types/hostNavigation';
+import { isTodosEnabled, useConfigStore } from './configStore';
 
 export type SidebarNavigationScope = 'repositories' | 'pinned' | 'orchestration';
 
@@ -297,6 +298,10 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
   // To-dos lists every to-do on every machine, so it clears the project scope.
   navigateToTodos: (options) => {
+    // To-dos off (T-39): no link, search result or remembered view opens it. Before the settings
+    // load it opens, and SessionView leaves it once they say To-dos is off.
+    const config = useConfigStore.getState().config;
+    if (config && !isTodosEnabled(config)) return;
     const state = get();
     const todosReturn = state.activeView === 'todos'
       ? state.todosReturn

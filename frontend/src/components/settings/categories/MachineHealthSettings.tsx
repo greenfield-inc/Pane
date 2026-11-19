@@ -8,6 +8,7 @@ import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { SettingsSettingId } from '../../../types/settings';
 import { showActionError } from '../../../stores/errorStore';
 import { cn } from '../../../utils/cn';
+import { isTodosEnabled } from '../../../stores/configStore';
 
 interface NumberFieldProps {
   label: string;
@@ -81,11 +82,12 @@ export function MachineHealthSettings({ persistence }: { persistence: SettingsPe
           </SettingRow>
         ))}
       </SettingsSection>
-      <SettingsSection title="To-dos">
+      {/* To-dos off (T-39): its load setting waits with it. */}
+      {isTodosEnabled(persistence.config) && <SettingsSection title="To-dos">
         <SettingRow settingId="machine-health-hold-todo-agents" label="Hold to-do agents when this machine is busy" description="While CPU or memory pressure stays high, new to-dos wait as Queued and start when load comes down. Under heavy load that lasts, Pane pauses some in-progress to-dos and resumes them later, in the same conversations." saveState={persistence.saveStates['machine-health-hold-todo-agents']}>
           <ImmediateToggle label="Hold to-do agents when this machine is busy" value={health.holdTodoAgents !== false} onSave={value => save('machine-health-hold-todo-agents', { holdTodoAgents: value })} />
         </SettingRow>
-      </SettingsSection>
+      </SettingsSection>}
       <SettingsSection title="Pane's own leftovers">
         <SettingRow settingId="machine-health-run-now" label="Remove Pane's leftovers now" description="Replaced update copies and old migration backups go by themselves after each storage scan: daily and when disk runs low. Scan and run that pass now." saveState={undefined}>
           <div className="flex items-center gap-3">

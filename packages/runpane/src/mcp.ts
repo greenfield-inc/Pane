@@ -4,7 +4,8 @@ import { setFlagsFromString } from 'node:v8';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
 import { loadDocs } from './docs';
 import { RUNPANE_CONTRACT } from './generated/contract';
-import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
+import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, mcpContractWithoutTodos, type McpTool } from './mcpTools';
+import { isTodoCommand, todosDisabledError, todosOn } from './todosFeature';
 import { ProtocolError, ProtocolErrorCode, Server, serveStdio, StdioServerTransport, type AuthInfo, type JSONRPCMessage, type McpRequestContext } from './mcpSdk';
 import { getWrapperVersion } from './version';
 import type { RunpaneFailure } from './errors';
@@ -54,7 +55,8 @@ const INSTRUCTIONS_BESIDE_CLAUDE_MD = TOOL_GUIDE.join('\n');
 // client named after Claude Code or Codex holds a call open.
 const CLAUDE_CODE = /^(claude-code|claude)$/i;
 
-// The lists only change with a new runpane version, which restarts this server.
+// The lists change with a new runpane version, which restarts this server, and with the To-dos
+// setting (T-39), which a client caching the list sees within this hour or on its next start.
 const LIST_CACHE = { ttlMs: 3_600_000, cacheScope: 'public' } as const;
 
 // A call that waits on the person reports progress this often, which keeps Claude Code's
@@ -95,9 +97,10 @@ interface McpServerOptions {
 }
 
 /** The tools a `--toolsets` / `--read-only` selection serves. `all` and `read` are built in. */
-function selectTools(tools: readonly McpTool[], options: McpServerOptions): McpTool[] {
+function selectTools(tools: readonly McpTool[], options: McpServerOptions, every: readonly McpTool[] = tools): McpTool[] {
   const wanted = new Set(options.toolsets && options.toolsets.length > 0 ? options.toolsets : DEFAULT_TOOLSETS);
-  const known = new Set(['all', 'read', ...tools.flatMap((tool) => tool.toolsets)]);
+  // Toolset names come from every tool, so `--toolsets todos` still starts while To-dos is off (and serves none).
+  const known = new Set(['all', 'read', ...every.flatMap((tool) => tool.toolsets)]);
   const unknown = [...wanted].filter((name) => !known.has(name));
   if (unknown.length > 0) {
     throw new Error(`Unknown toolset(s): ${unknown.join(', ')}. Choose from: ${[...known].sort().join(', ')}.`);
@@ -125,6 +128,12 @@ export interface PaneMcpServerOptions extends McpServerOptions {
    * with `env` (the agent's environment) when given, else this server's own.
    */
   clientFor?: (auth: AuthInfo | undefined) => { name: string; waitsLong: boolean; env?: NodeJS.ProcessEnv } | undefined;
+  /**
+   * Whether To-dos is on (T-39), asked on every tools/list, tools/call and resources request so a
+   * flip in Settings shows on the client's next list. Defaults to `todosEnabled` in the config of
+   * PANE_DIR (else ~/.pane); Pane's own endpoint passes its data directory's setting.
+   */
+  todosEnabled?: () => boolean;
 }
 
 /**
@@ -160,22 +169,19 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
  * agents it starts (mcpHttp.ts). Throws when a toolset name is unknown.
  */
 export function paneMcpServerFactory(options: PaneMcpServerOptions): (context?: McpRequestContext) => Server {
+  const todosEnabled = options.todosEnabled ?? (() => todosOn());
+  // Both views are built up front (a toolset name that is unknown throws here), then each request
+  // serves the one the To-dos setting picks.
   const allTools = buildMcpTools();
-  const tools = selectTools(allTools, options);
-  const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
-  // The docs ship with this build, so one read serves every request (Pane's endpoint serves many agents).
-  let docs: ReturnType<typeof loadDocs> | undefined;
-  const bundledDocs = () => docs ??= loadDocs(undefined);
-  const rewrite = (text: string) => rewriteCliHints(text, allTools, toolsByName);
-  const listResult = {
-    tools: tools.map((tool) => ({
-      name: tool.name,
-      title: tool.title,
-      description: rewrite(tool.description),
-      inputSchema: tool.inputSchema,
-      outputSchema: tool.outputSchema,
-      annotations: tool.annotations,
-    })),
+  const views = new Map([true, false].map((todos) => [todos, toolView(todos ? allTools : buildMcpTools(mcpContractWithoutTodos()), options, allTools)]));
+  const view = () => views.get(todosEnabled()) ?? toolView(allTools, options, allTools);
+  // The docs ship with this build, so one read per To-dos setting serves every request (Pane's endpoint serves many agents).
+  const docs = new Map<boolean, ReturnType<typeof loadDocs>>();
+  const bundledDocs = () => {
+    const todos = todosEnabled();
+    const loaded = docs.get(todos) ?? loadDocs(undefined, todos);
+    docs.set(todos, loaded);
+    return loaded;
   };
 
   return (context) => {
@@ -188,11 +194,16 @@ export function paneMcpServerFactory(options: PaneMcpServerOptions): (context?: 
         cacheHints: { 'tools/list': LIST_CACHE, 'resources/list': LIST_CACHE },
       },
     );
-    server.setRequestHandler('tools/list', () => listResult);
+    server.setRequestHandler('tools/list', () => view().listResult);
     server.setRequestHandler('tools/call', (request, ctx) => {
+      const { toolsByName, rewrite, allTools: servedTools } = view();
       const tool = toolsByName.get(request.params.name);
+      if (!tool && !todosEnabled() && allTools.some((candidate) => candidate.name === request.params.name && isTodoCommand(candidate.command))) {
+        const refusal = todosDisabledError();
+        return errorResult(`${refusal.message}\nNext: ${refusal.next ?? ''}\nCode: ${refusal.code}`);
+      }
       if (!tool) {
-        const other = allTools.find((candidate) => candidate.name === request.params.name);
+        const other = servedTools.find((candidate) => candidate.name === request.params.name);
         const set = other?.toolsets[0] ?? 'all';
         const hint = other
           ? ` It is in the "${set}" toolset: add it with \`runpane mcp --toolsets ${set}\` (or all), or in Pane under Settings > AI & Agents.`
@@ -233,6 +244,24 @@ export function paneMcpServerFactory(options: PaneMcpServerOptions): (context?: 
     });
     return server;
   };
+}
+
+/** The tools one To-dos setting serves, the list result, and the hint rewriter over them. */
+function toolView(allTools: McpTool[], options: McpServerOptions, every: readonly McpTool[]) {
+  const tools = selectTools(allTools, options, every);
+  const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+  const rewrite = (text: string) => rewriteCliHints(text, allTools, toolsByName);
+  const listResult = {
+    tools: tools.map((tool) => ({
+      name: tool.name,
+      title: tool.title,
+      description: rewrite(tool.description),
+      inputSchema: tool.inputSchema,
+      outputSchema: tool.outputSchema,
+      annotations: tool.annotations,
+    })),
+  };
+  return { allTools, toolsByName, rewrite, listResult };
 }
 
 /** What `runpane notify` needs to know about the client: its friendly name, and whether its calls time out. */

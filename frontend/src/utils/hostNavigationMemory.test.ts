@@ -57,7 +57,7 @@ async function loadHostNavigationMemory() {
     import('../stores/configStore'),
   ]);
   setActiveHost(config.useConfigStore, REMOTE_HOST_ID);
-  return { ...memory, ...navigation, ...sessions, setHost: (hostId: string | null) => setActiveHost(config.useConfigStore, hostId) };
+  return { ...memory, ...navigation, ...sessions, useConfigStore: config.useConfigStore, setHost: (hostId: string | null) => setActiveHost(config.useConfigStore, hostId) };
 }
 
 type ConfigStore = typeof import('../stores/configStore')['useConfigStore'];
@@ -103,10 +103,19 @@ describe('restoreHostNavigation', () => {
 
   it('opens the to-do a row on another machine asked for (T-18)', async () => {
     storedMemories.set(REMOTE_HOST_ID, { view: 'todos', projectId: null, paneId: null, todoNumber: 12 });
-    const { restoreHostNavigation, useNavigationStore } = await loadHostNavigationMemory();
+    const { restoreHostNavigation, useNavigationStore, useConfigStore } = await loadHostNavigationMemory();
+    useConfigStore.setState(state => ({ config: state.config && { ...state.config, todosEnabled: true } }));
     await restoreHostNavigation();
     expect(useNavigationStore.getState().activeView).toBe('todos');
     expect(useNavigationStore.getState().selectedTodoNumber).toBe(12);
+  });
+
+  it('keeps To-dos closed while it is turned off (T-39)', async () => {
+    storedMemories.set(REMOTE_HOST_ID, { view: 'todos', projectId: null, paneId: null, todoNumber: 12 });
+    const { restoreHostNavigation, useNavigationStore } = await loadHostNavigationMemory();
+    await restoreHostNavigation();
+    expect(useNavigationStore.getState().activeView).not.toBe('todos');
+    expect(useNavigationStore.getState().selectedTodoNumber).toBeNull();
   });
 
   it('reopens the Pane the host was left on', async () => {

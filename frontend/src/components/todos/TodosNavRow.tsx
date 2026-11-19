@@ -3,6 +3,7 @@ import { cn } from '../../utils/cn';
 import { TodoStatusIcon } from './TodoStatusIcon';
 import { toggleTodos } from './todosNavigation';
 import { useTodosNav } from './useTodoEntries';
+import { useTodosEnabled } from '../../stores/todosStore';
 
 /** The sidebar row classes ProjectSessionList's other entries use (Loops, Approvals). */
 const ROW = 'mx-2 flex w-[calc(100%-1rem)] items-center gap-2 px-2 text-left transition-colors h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary';
@@ -10,10 +11,12 @@ const ROW = 'mx-2 flex w-[calc(100%-1rem)] items-center gap-2 px-2 text-left tra
 /**
  * Opens To-dos, and clicked again returns to the view you left (D-409). The Working spinner shows
  * while any to-do is worked on; the amber count is to-dos waiting on you. The spinner keeps its box
- * while hidden, so the count never shifts.
+ * while hidden, so the count never shifts. Absent while To-dos is off (T-39).
  */
 export function TodosNavRow() {
   const nav = useTodosNav();
+  const enabled = useTodosEnabled();
+  if (!enabled) return null;
   return (
     <button
       type="button"

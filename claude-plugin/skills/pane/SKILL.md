@@ -231,31 +231,6 @@ the project, not Pane.
 - Another machine in the person's workspace: `runpane workspace list`, then
   `runpane workspace <machine> exec -- <command>`.
 
-## To-dos
-
-A to-do (T-n) is one piece of the person's agent work in Pane. When Pane
-assigns you one, it types `[From Pane, To-dos] You are assigned T-n …` into
-your tab, with its done-when checks and attachments; `runpane todos show T-n`
-shows it again, attachments first.
-
-- Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists. Read a to-do's attachments before you start on it.
-  Attach with `runpane todos attach T-n <file|url> --kind plan|mockup|design|pr|findings|decision|doc`.
-- Reply in the to-do's chat with short summaries:
-  `runpane todos comment T-n "<text>"` (at most 2,000 characters; the person
-  reads the full turn in your chat).
-- Ask your orchestrator, never the person directly:
-  `runpane report --state blocked --question "<question>" --todo T-n`.
-  An orchestrator asks the to-do's requester first (`runpane todos ask T-n`),
-  then the person with `--todo T-n` on `runpane notify`.
-- Mark a sub-to-do done when its done-when checks are met:
-  `runpane todos done T-n`. A top-level to-do goes to the person first with
-  `runpane todos review T-n`, and is marked done only after their Accept (or
-  with `--person-said "<their words>"` when they told you to close it).
-- An agent start refused with `machine_busy` means the machine is busy:
-  wait. Pane types "Capacity is back" into your tab when load comes down.
-- `[From Pane, To-dos]` lines come from Pane; `[From the person, via To-dos T-n]`
-  lines carry the person's own words from the to-do's page.
-
 ## Orchestrating workers
 
 To launch, wait on, answer or resume workers (including wrappers launched with

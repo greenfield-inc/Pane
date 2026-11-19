@@ -1,5 +1,6 @@
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
 import { RUNPANE_CONTRACT } from './generated/contract';
+import { isTodoCommand, mentionsTodos, withoutTodoArguments, withoutTodoLines } from './todosFeature';
 
 /**
  * Claude Code cuts a server's instructions, and a tool description it loads up front (tool search
@@ -117,6 +118,27 @@ const STDIN_STAND_IN_FLAGS = new Set(['--content']);
 const CONFIRM_DESCRIPTION = 'Confirm this change (the CLI\'s --yes). Pane refuses mutating calls without it.';
 
 type ContractFlag = McpToolContract['flags'][string][number];
+
+/**
+ * The contract as MCP serves it while To-dos is off (T-39): no todos commands, no `--todo` input
+ * on notify, report and agents start, and no to-do flag descriptions.
+ */
+export function mcpContractWithoutTodos(contract: McpToolContract = RUNPANE_CONTRACT): McpToolContract {
+  return {
+    ...contract,
+    commands: contract.commands
+      .filter((command) => !isTodoCommand(command.name))
+      .map((command) => ({ ...command, usage: withoutTodoLines(command.usage) })),
+    flags: Object.fromEntries(Object.entries(contract.flags)
+      .map(([group, flags]) => [group, flags.filter((flag) => !mentionsTodos(flag.name) && !mentionsTodos(flag.description ?? ''))])),
+    agentContext: {
+      ...contract.agentContext,
+      commands: Object.fromEntries(Object.entries(contract.agentContext.commands)
+        .filter(([name]) => !isTodoCommand(name))
+        .map(([name, command]) => [name, withoutTodoArguments({ examples: [], ...command })])),
+    },
+  };
+}
 
 export function buildMcpTools(contract: McpToolContract = RUNPANE_CONTRACT): McpTool[] {
   const globalFlags = new Map(Object.values(contract.flags).flat().map((flag) => [flag.name, flag]));

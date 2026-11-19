@@ -5,7 +5,7 @@ import { ChevronDown, ChevronUp, ListTodo, PanelRight, Terminal } from 'lucide-r
 import type { PanelLayoutNode, SessionPanelLayout, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { panelApi } from '../services/panelApi';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
-import { useConfigStore } from '../stores/configStore';
+import { isTodosEnabled, useConfigStore } from '../stores/configStore';
 import { readPaneLayout, rememberPaneLayout } from '../utils/paneLayoutMemory';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { usePanelStore } from '../stores/panelStore';
@@ -86,10 +86,11 @@ function sessionTodosTab(sessionId: string): ToolPanel {
 /**
  * A layout with the Overview and To-dos tabs in it: Overview first in the right split, opening one
  * beside the conversation when there is none, and To-dos right after it. Wherever the person moved
- * either, it stays.
+ * either, it stays. With To-dos off (`todosId` null, T-39) there is no To-dos tab.
  */
-function withSessionTabs(layout: SessionPanelLayout, overviewId: string, todosId: string, chatId: string): SessionPanelLayout {
-  const root = placeTabAfter(placeLeadingSideTab(layout.root, overviewId, chatId), todosId, overviewId);
+function withSessionTabs(layout: SessionPanelLayout, overviewId: string, todosId: string | null, chatId: string): SessionPanelLayout {
+  const withOverview = placeLeadingSideTab(layout.root, overviewId, chatId);
+  const root = todosId ? placeTabAfter(withOverview, todosId, overviewId) : withOverview;
   return root === layout.root ? layout : { ...layout, root };
 }
 
@@ -235,10 +236,13 @@ export function SessionWorkspacePanels({
   const overviewTab = useMemo(() => sessionOverviewTab(sessionId), [sessionId]);
   const overviewId = overviewTab.id;
   const todosTab = useMemo(() => sessionTodosTab(sessionId), [sessionId]);
-  const todosId = todosTab.id;
+  // To-dos off (T-39): no To-dos tab; turning it on puts it back after the Overview. Until the
+  // settings load it counts as on, so a saved layout never loses the tab's place to a first frame.
+  const todosOn = useConfigStore(state => state.config === null || isTodosEnabled(state.config));
+  const todosId = todosOn ? todosTab.id : null;
   const tabs = useMemo(
-    () => [currentAgentPanel, overviewTab, todosTab, ...panels.filter(panel => isStagePanel(panel, agentPanelIdSet, inLayout))],
-    [currentAgentPanel, overviewTab, todosTab, panels, agentPanelIdSet, inLayout],
+    () => [currentAgentPanel, overviewTab, ...(todosOn ? [todosTab] : []), ...panels.filter(panel => isStagePanel(panel, agentPanelIdSet, inLayout))],
+    [currentAgentPanel, overviewTab, todosOn, todosTab, panels, agentPanelIdSet, inLayout],
   );
   const tabPresentation = useCallback<PanelTabPresentationResolver>((panel) => {
     if (panel.id !== todosId) return undefined;
@@ -347,7 +351,7 @@ export function SessionWorkspacePanels({
       // its remembered layout keep their place.
       const splitIds = new Set<string>();
       for (const panel of stage) if (panel.metadata?.openPlacement === 'split') splitIds.add(panel.id);
-      applyLayout(reconcile(withOverview, [agentPanelId, overviewId, todosId, ...stage.map(panel => panel.id)], splitIds).layout);
+      applyLayout(reconcile(withOverview, [agentPanelId, overviewId, ...(todosId ? [todosId] : []), ...stage.map(panel => panel.id)], splitIds).layout);
       setLoaded(true);
     }).catch(error => {
       if (!cancelled) setError(error instanceof Error ? error.message : 'Could not load Session tools');
@@ -520,7 +524,7 @@ export function SessionWorkspacePanels({
     if (group) focusGroup(group.id);
   }, [sessionId, focusGroup]);
   const focusOverviewGroup = useCallback(() => focusGroupOf(overviewId), [focusGroupOf, overviewId]);
-  const focusTodosGroup = useCallback(() => focusGroupOf(todosId), [focusGroupOf, todosId]);
+  const focusTodosGroup = useCallback(() => { if (todosId) focusGroupOf(todosId); }, [focusGroupOf, todosId]);
 
   // Maximize (P4): the split takes the Session's stage, and a tiled Session's
   // tile takes the window, so a chat fills the whole main area. Restoring

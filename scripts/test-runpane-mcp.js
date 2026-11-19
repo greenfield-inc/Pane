@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { test } = require('./runpane-test-shard');
+const { after } = require('node:test');
 
 const rootDir = path.resolve(__dirname, '..');
 const runpaneDir = path.join(rootDir, 'packages', 'runpane');
@@ -20,6 +21,13 @@ const Ajv = require(require.resolve('ajv', { paths: [rootDir] }));
 function assertMatchesAdvertisedSchema(tool, payload) {
   const validate = new Ajv({ allErrors: true }).compile(tool.outputSchema);
   assert.equal(validate(payload), true, JSON.stringify(validate.errors));
+}
+
+/** A Pane directory with To-dos on (T-39: it is off unless config.json says otherwise). */
+function todosOnPaneDir() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-todos-on-'));
+  fs.writeFileSync(path.join(paneDir, 'config.json'), JSON.stringify({ todosEnabled: true }));
+  return paneDir;
 }
 
 test('doctor structured content matches its advertised output schema', async () => {
@@ -887,7 +895,9 @@ test('cancelling a call stops its runpane process', async () => {
 });
 
 test('serves the core toolset by default, and named toolsets or read-only on request', async () => {
-  const names = (args) => withMcpClient(async (client) => (await client.listTools()).tools, { args });
+  const paneDir = todosOnPaneDir();
+  after(() => fs.rmSync(paneDir, { recursive: true, force: true }));
+  const names = (args) => withMcpClient(async (client) => (await client.listTools()).tools, { args, env: { PANE_DIR: paneDir } });
 
   const core = await names([]);
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
@@ -934,7 +944,9 @@ test('serves the core toolset by default, and named toolsets or read-only on req
 // The Claude plugin serves `--toolsets plugin`, and a pinned plugin hands calls to whichever Pane
 // release is installed, so these hold on every release (Anthropic directory policy §2 and §5).
 test('the plugin toolset is core without the tools that reach other machines', async () => {
-  const tools = await withMcpClient(async (client) => (await client.listTools()).tools, { args: ['--toolsets', 'plugin'] });
+  const paneDir = todosOnPaneDir();
+  after(() => fs.rmSync(paneDir, { recursive: true, force: true }));
+  const tools = await withMcpClient(async (client) => (await client.listTools()).tools, { args: ['--toolsets', 'plugin'], env: { PANE_DIR: paneDir } });
   assert.deepEqual(tools.map((tool) => tool.name).sort(), [
     'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
@@ -1528,5 +1540,105 @@ test("Pane's HTTP endpoint serves the same instructions, tools and docs as stdio
   } finally {
     await overHttp.close();
     server.close();
+  }
+});
+
+// T-39: To-dos is off unless the person turns it on. While off, agents see no to-do text in help,
+// agent-context or the MCP tool list, `todos` refuses, and `--todo` elsewhere is accepted and dropped.
+const TODO_TEXT = /to-do|todos|--todo/i;
+const TODOS_DISABLED = {
+  code: 'TODOS_DISABLED',
+  message: 'To-dos is turned off in this Pane, so nothing was read or changed. Saved to-dos are kept.',
+  next: 'Turn it on in Settings > Advanced > Experimental > To-dos, then run this again.',
+};
+const pythonSource = path.join(rootDir, 'packages', 'runpane-py', 'src');
+
+function runBoth(args, paneDir) {
+  const env = { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1', PANE_DIR: paneDir, PYTHONPATH: pythonSource };
+  const run = (command, prefix) => require('node:child_process').spawnSync(command, [...prefix, ...args], { encoding: 'utf8', env });
+  return { npm: run(process.execPath, [dist('cli.js')]), python: run(process.env.PYTHON ?? 'python3', ['-m', 'runpane']) };
+}
+
+async function withTodosDirs(action) {
+  const off = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-todos-off-'));
+  const on = todosOnPaneDir();
+  try {
+    return await action({ off, on });
+  } finally {
+    fs.rmSync(off, { recursive: true, force: true });
+    fs.rmSync(on, { recursive: true, force: true });
+  }
+}
+
+test('with To-dos off, help and agent-context carry no to-do text in either CLI; with it on they keep it', () => withTodosDirs(({ off, on }) => {
+  const views = [['--help'], ['agent-context'], ['agent-context', '--json'], ['agent-context', '--command', 'report', '--json'],
+    ['agent-context', '--command', 'notify'], ['agent-context', '--command', 'agents start', '--json'], ['help', 'report'], ['help', 'agents start']];
+  for (const args of views) {
+    for (const [runtime, result] of Object.entries(runBoth(args, off))) {
+      assert.equal(result.status, 0, `${runtime} ${args.join(' ')}: ${result.stderr}`);
+      assert.doesNotMatch(result.stdout, TODO_TEXT, `${runtime} ${args.join(' ')} names to-dos with To-dos off`);
+    }
+  }
+  for (const args of [['--help'], ['agent-context', '--command', 'report', '--json'], ['help', 'agents start']]) {
+    for (const [runtime, result] of Object.entries(runBoth(args, on))) {
+      assert.match(result.stdout, TODO_TEXT, `${runtime} ${args.join(' ')} lost its to-do text with To-dos on`);
+    }
+  }
+  // Off keeps every other usage intact: only `[--todo <T-n>]` leaves the report line.
+  const report = runBoth(['help', 'report'], off).npm.stdout.split('\n')[1];
+  const reportOn = runBoth(['help', 'report'], on).npm.stdout.split('\n')[1];
+  assert.equal(report, reportOn.replace(' [--todo <T-n>]', ''));
+}));
+
+test('with To-dos off, runpane todos refuses before reaching Pane, and its help and agent-context refuse too', () => withTodosDirs(({ off }) => {
+  for (const args of [['todos', 'list', '--json'], ['todos', 'show', 'T-1', '--json'], ['agent-context', '--command', 'todos list', '--json'], ['help', 'todos']]) {
+    for (const [runtime, result] of Object.entries(runBoth(args, off))) {
+      assert.equal(result.status, 1, `${runtime} ${args.join(' ')} should refuse: ${result.stdout}${result.stderr}`);
+      assert.match(result.stderr, /^To-dos is turned off in this Pane, so nothing was read or changed\. Saved to-dos are kept\.\nNext: Turn it on in Settings > Advanced > Experimental > To-dos, then run this again\.\n$/);
+      if (args.includes('--json') && !args.includes('agent-context')) assert.deepEqual(JSON.parse(result.stdout), { ok: false, error: TODOS_DISABLED });
+    }
+  }
+}));
+
+test('with To-dos off, notify --todo still asks the person, without the to-do', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-todos-off-'));
+  try {
+    await withStubDaemon(paneDir, { 'runpane:notify': { answer: 'Yes' } }, async (requests) => {
+      const result = await runCli(['notify', '--ui', 'ask', '--title', 'Which way?', '--todo', 'T-3', '--json', '--pane-dir', paneDir]);
+      assert.equal(result.status, 0, result.stderr);
+      const asked = requests.filter((request) => request.channel === 'runpane:notify');
+      assert.equal(asked.length, 1);
+      assert.equal(asked[0].args[0].title, 'Which way?');
+      assert.equal(asked[0].args[0].todo, undefined);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('with To-dos off, the MCP server lists no to-do tools or text and refuses a todos call; on, it serves them', async () => withTodosDirs(async ({ off, on }) => {
+  const listed = (paneDir, args) => withMcpClient(async (client) => (await client.listTools()).tools, { args, env: { PANE_DIR: paneDir } });
+  for (const args of [[], ['--toolsets', 'all'], ['--toolsets', 'todos']]) {
+    const tools = await listed(off, args);
+    assert.equal(tools.filter((tool) => tool.name.startsWith('todos_')).length, 0, `todos tools listed with ${args.join(' ')}`);
+    assert.doesNotMatch(JSON.stringify(tools), TODO_TEXT);
+  }
+  assert.equal((await listed(on, [])).filter((tool) => tool.name.startsWith('todos_')).length, 17);
+  const refused = await withMcpClient((client) => client.callTool({ name: 'todos_list', arguments: {} }), { args: [], env: { PANE_DIR: off } });
+  assert.equal(refused.isError, true);
+  assert.equal(refused.content[0].text, `${TODOS_DISABLED.message}\nNext: ${TODOS_DISABLED.next}\nCode: ${TODOS_DISABLED.code}`);
+}));
+
+test('the MCP server reads the To-dos setting on each tools/list, so a flip shows without a restart', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-todos-flip-'));
+  try {
+    await withMcpClient(async (client) => {
+      const count = async () => (await client.listTools()).tools.filter((tool) => tool.name.startsWith('todos_')).length;
+      assert.equal(await count(), 0);
+      fs.writeFileSync(path.join(paneDir, 'config.json'), JSON.stringify({ todosEnabled: true }));
+      assert.equal(await count(), 17);
+    }, { args: [], env: { PANE_DIR: paneDir } });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
   }
 });

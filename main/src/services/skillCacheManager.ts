@@ -8,6 +8,8 @@ import type { AppConfig } from '../types/config';
 import type { Project } from '../database/models';
 import { syncPaneHomeSkill } from './paneHomeSkill';
 import { keepSessionTidySection, todosSection } from './sessionTidyRules';
+import { TODOS_TEXT_END, TODOS_TEXT_START, withTodosText } from '../../../shared/todosText';
+import { todosOn } from './todos/todosFeature';
 import { APPROVALS_RULES } from './approvalsRules';
 import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
 
@@ -330,6 +332,8 @@ export class SkillCacheManager {
   readonly paneIdleWatchScriptPath: string;
   private codexSubagentArgs = '';
   private installation: Promise<void> | null = null;
+  /** The To-dos switch the bundle was last installed for (T-39): a flip installs it again. */
+  private installedWithTodos: boolean | null = null;
 
   constructor() {
     this.skillsRoot = path.join(getAppDirectory(), 'skills');
@@ -359,7 +363,7 @@ export class SkillCacheManager {
    * the user's home skill folders. Best effort: a failure never blocks startup.
    */
   async syncHomeSkill(
-    config: Pick<AppConfig, 'agentContext'>,
+    config: Pick<AppConfig, 'agentContext' | 'todosEnabled'>,
     projects: Pick<Project, 'wsl_enabled' | 'wsl_distribution'>[] = [],
   ): Promise<void> {
     try {
@@ -389,7 +393,10 @@ export class SkillCacheManager {
 
   /** Installs the bundle once per run; concurrent callers share the same work. */
   private installOnce(): Promise<void> {
-    this.installation ??= this.install().catch(error => {
+    const todos = todosOn();
+    if (this.installedWithTodos !== todos) this.installation = null;
+    this.installedWithTodos = todos;
+    this.installation ??= this.install(todos).catch(error => {
       this.installation = null;
       throw error;
     });
@@ -403,10 +410,11 @@ export class SkillCacheManager {
    * Skipped when the bundle is unchanged since the last install and its folders
    * are still there: rewriting every file three times held up each launch.
    */
-  private async install(): Promise<void> {
+  private async install(todos: boolean): Promise<void> {
     const manifestPath = path.join(this.paneChatRoot, 'installed.json');
     const previous = await readInstalledManifest(manifestPath);
-    const bundleHash = await hashDirectory(PANE_CHAT_BUNDLE_ROOT);
+    // T-39: the copies drop their To-dos parts while To-dos is off, so the switch is part of what was installed.
+    const bundleHash = `${await hashDirectory(PANE_CHAT_BUNDLE_ROOT)}${todos ? '' : ':todos-off'}`;
     const subagents = await readSubagentDefinitions(path.join(PANE_CHAT_BUNDLE_ROOT, 'agents'));
     this.codexSubagentArgs = this.codexSubagentArgsFor(subagents);
     if (previous.bundleHash === bundleHash && await this.isInstalled(previous)) return;
@@ -432,7 +440,7 @@ export class SkillCacheManager {
     }
     for (const skill of bundledSkills) {
       for (const root of [this.paneChatSkillsRoot, this.claudeProjectSkillsRoot, this.codexProjectSkillsRoot]) {
-        await copyBundledPath(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills', skill), path.join(root, skill));
+        await copyBundledPath(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills', skill), path.join(root, skill), todos);
       }
     }
     const agents = await this.installSubagents(subagents, previous.agents);
@@ -458,8 +466,9 @@ export class SkillCacheManager {
   }
 
   private async writePaneChatGuide(): Promise<void> {
-    const runtimeContext = await this.buildPaneChatRuntimeContext();
-    const orchestratorSkill = this.buildPaneOrchestratorSkill();
+    const todos = todosOn();
+    const runtimeContext = withTodosText(await this.buildPaneChatRuntimeContext(), todos);
+    const orchestratorSkill = withTodosText(this.buildPaneOrchestratorSkill(), todos);
     await fs.mkdir(this.paneChatRoot, { recursive: true });
     await fs.writeFile(this.paneChatRuntimeContextPath, runtimeContext, 'utf8');
     await this.writeTextFile(this.paneChatOrchestratorSkillPath, orchestratorSkill);
@@ -892,11 +901,13 @@ owns completion handling, including blocked reports. The optional CLI
 \`--wait\` result contract is documented in \`agent-context\`; do not add
 it as a second consumer for this route.
 
+${TODOS_TEXT_START}
 To-dos: this watch still keeps the workers on a to-do's sub-to-dos moving.
 Pane's to-do supervisor watches only you, the orchestrator: when nothing has
 moved on an in-progress to-do it types a \`[From Pane, To-dos]\` reminder into
 your tab, restarts you in the same conversation, and then asks the person, as
 "To-dos: your work list" says. It is no reason to re-arm, poll or add a watcher.
+${TODOS_TEXT_END}
 
 Inbox: Pane coalesces reports per panel, clears BLOCKED when the panel moves
 on, and keeps at most 200 items per Session until acknowledged or superseded.
@@ -1427,15 +1438,17 @@ export async function hashDirectory(root: string): Promise<string> {
 }
 
 // Plain reads and writes, which also work inside Electron's asar archive.
-async function copyBundledPath(source: string, target: string): Promise<void> {
+// A Markdown file loses its To-dos parts while To-dos is off (T-39); everything else is copied byte for byte.
+async function copyBundledPath(source: string, target: string, todos: boolean): Promise<void> {
   const stat = await fs.stat(source);
   if (!stat.isDirectory()) {
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, await fs.readFile(source));
+    const content = await fs.readFile(source);
+    await fs.writeFile(target, source.endsWith('.md') ? withTodosText(content.toString('utf8'), todos) : content);
     return;
   }
   for (const entry of await fs.readdir(source)) {
-    await copyBundledPath(path.join(source, entry), path.join(target, entry));
+    await copyBundledPath(path.join(source, entry), path.join(target, entry), todos);
   }
 }
 

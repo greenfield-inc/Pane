@@ -41,7 +41,7 @@ import { RemoteHostSwitcher } from './RemoteHostSwitcher';
 import { AllMachinesSidebar } from './machines/AllMachinesSidebar';
 import { usePaneSort } from '../hooks/usePaneSort';
 import { isAllMachinesOn, startAllMachinesFeed, useAllMachinesStore } from '../stores/allMachinesStore';
-import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
+import { isMissionControlEnabled, isTodosEnabled, useConfigStore } from '../stores/configStore';
 import { usePanelStore } from '../stores/panelStore';
 import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
 import { createProjectById, getPinnedSessions, groupSessionsByProject } from '../utils/sessionOrdering';
@@ -402,6 +402,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   const navigateToSsh = useNavigationStore((state) => state.navigateToSsh);
   const hasSshHosts = useSshHostsStore((state) => state.rows.length > 0);
   const missionControlEnabled = useConfigStore((state) => isMissionControlEnabled(state.config));
+  const todosEnabled = useConfigStore((state) => isTodosEnabled(state.config));
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
   const orchestrationAvailability = useOrchestrationSessionStore((state) => state.availability);
   const loadOrchestrationSessions = useOrchestrationSessionStore((state) => state.load);
@@ -759,9 +760,11 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
               </button>
             </Tooltip>}
 
-            <Tooltip content="To-dos" side="right">
-              <TodosRailButton buttonClass={COMPACT_RAIL_BUTTON} activeClass={COMPACT_RAIL_ACTIVE} idleClass={COMPACT_RAIL_IDLE} />
-            </Tooltip>
+            {todosEnabled && (
+              <Tooltip content="To-dos" side="right">
+                <TodosRailButton buttonClass={COMPACT_RAIL_BUTTON} activeClass={COMPACT_RAIL_ACTIVE} idleClass={COMPACT_RAIL_IDLE} />
+              </Tooltip>
+            )}
 
             {missionControlEnabled && (
               <Tooltip content="Mission Control" side="right">

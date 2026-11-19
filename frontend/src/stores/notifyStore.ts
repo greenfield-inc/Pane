@@ -3,6 +3,7 @@ import { EMPTY_TODO_SCOPE, inTodoScope, type TodoApprovalScope } from '../compon
 import { isOpenForSession } from '../../../shared/approvalOpen';
 import type { NotifyCommand, NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
 import { showActionError } from './errorStore';
+import { isTodosEnabled, useConfigStore } from './configStore';
 
 /**
  * The renderer's copy of main's Notify queue. Main owns every decision (what the
@@ -35,8 +36,24 @@ function publish(snapshot: NotifySnapshot | null): void {
     if (!snapshot?.items.some((item) => item.id === id && item.state === 'waiting')) closing.delete(id);
   }
   const held = new Set([...closing, ...useNotifyStore.getState().archived?.ids ?? []]);
-  useNotifyStore.setState({ snapshot: snapshot && held.size > 0 ? { ...snapshot, items: snapshot.items.filter((item) => !held.has(item.id)) } : snapshot });
+  const shown = withoutTodoLinks(snapshot);
+  useNotifyStore.setState({ snapshot: shown && held.size > 0 ? { ...shown, items: shown.items.filter((item) => !held.has(item.id)) } : shown });
 }
+
+/**
+ * To-dos off on the desktop (T-39): an approval keeps its to-do link in main, but no card, group or
+ * count shows it here. The web app reads the host, which stops linking new cards while it is off.
+ */
+function withoutTodoLinks(snapshot: NotifySnapshot | null): NotifySnapshot | null {
+  if (!snapshot || installedApi || isTodosEnabled(useConfigStore.getState().config)) return snapshot;
+  if (!snapshot.items.some((item) => item.todo)) return snapshot;
+  return { ...snapshot, items: snapshot.items.map((item) => (item.todo ? { ...item, todo: undefined } : item)) };
+}
+
+// Turning To-dos on or off shows or hides the links on the cards already listed.
+useConfigStore.subscribe((state, prior) => {
+  if (isTodosEnabled(state.config) !== isTodosEnabled(prior.config) && received) publish(received);
+});
 
 /** One read from the machine that holds an item: a linked document or its Summary. */
 export type NotifyMachineRead = (machineId: string, channel: string, args: unknown[]) => Promise<{ data: unknown }>;

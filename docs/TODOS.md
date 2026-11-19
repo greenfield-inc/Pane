@@ -6,6 +6,21 @@ start its own [Session](SESSIONS.md) and orchestrator agent, and keeps an
 agent working on it until it is ready for your review. You read its progress,
 answer its questions and accept the result on the to-do's page.
 
+To-dos is experimental and off by default: turn it on in Settings › Advanced
+› Experimental › To-dos. While it is off, Pane shows no To-dos screen, tab,
+approval link or palette entry; its supervisor, load gate and
+`[From Pane, To-dos]` messages don't run; `runpane todos` and the `todos_*`
+MCP tools refuse with `TODOS_DISABLED`; `--todo` on `report`, `notify` and
+`agents start` is accepted and ignored; and the instructions and skills Pane
+writes for agents leave out their To-dos parts. Saved to-dos and their
+Sessions are kept: turning it on brings everything back. Pane rewrites its
+skills and the repository's managed AGENTS.md section when the switch flips;
+a Session folder's AGENTS.md follows the next time the Session opens, without
+a restart. Pane's instructions mark their To-dos parts with
+`<!-- pane:todos -->` … `<!-- /pane:todos -->` (`shared/todosText.ts`), and
+the home `pane` skill's To-dos section is its own `pane-todos` skill, written
+only while To-dos is on.
+
 - **One list.** The To-dos screen lists every to-do on every machine, once
   each, with the status you need: waiting on you, working, queued or idle. A
   saved machine that is this computer (or, in remote mode, the computer the

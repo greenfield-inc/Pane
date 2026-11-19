@@ -33,6 +33,7 @@ import { SkillCacheManager } from '../services/skillCacheManager';
 import { installBundledAgentFarm } from '../services/agentFarm/bundledAgentFarm';
 import { startProfileRunner } from '../services/profiles/profileRunnerHost';
 import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
+import type { AppConfig } from '../types/config';
 import { PaneChatManager } from '../services/paneChatManager';
 import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
 import { TaskQueue } from '../services/taskQueue';
@@ -102,6 +103,7 @@ import { LoopManager } from '../services/loops/loopManager';
 import { TodoService } from '../services/todos/todoService';
 import { TodoStore } from '../services/todos/todoStore';
 import { createTodoHost } from '../services/todos/todoHost';
+import { readTodosSwitchFrom, todosEnabled } from '../services/todos/todosFeature';
 import type { GitStatus } from '../types/session';
 import { AutoPauser } from '../services/autoPause';
 import { pausePanes } from '../services/panePause';
@@ -191,6 +193,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   const configManager = new ConfigManager();
   await configManager.initialize();
+  readTodosSwitchFrom(() => configManager.getConfig());
   // Outside edits to config.json (by hand, a script, an agent) reload at once.
   configManager.startWatching();
   installPaneRuntime(rendererEventSink, configManager, options.getPtyHostRuntime, getWebviewContextMap);
@@ -334,6 +337,20 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     logger.warn('[SkillCache] Failed to install Pane Chat skills', error instanceof Error ? error : undefined);
   });
   await skillCacheManager.syncHomeSkill(configManager.getConfig(), databaseService.getAllProjects());
+  // T-39: turning To-dos on or off rewrites what Pane installed for agents (the bundled and home skills, the
+  // repo's managed AGENTS.md section) with or without their To-dos parts. Session folders follow on their next open.
+  let todosWereOn = todosEnabled(configManager.getConfig());
+  configManager.on('config-updated', (config: AppConfig) => {
+    if (todosEnabled(config) === todosWereOn) return;
+    todosWereOn = todosEnabled(config);
+    void Promise.all([
+      skillCacheManager.ensurePaneChatGuide(),
+      skillCacheManager.syncHomeSkill(config, databaseService.getAllProjects()),
+      config.agentContext?.managedAgentsMd === true
+        ? applyManagedAgentsMdSetting(config, { all: () => databaseService.getAllProjects(), active: () => sessionManager.getActiveProject() })
+        : Promise.resolve(true),
+    ]).catch(error => logger.warn('[Todos] Could not rewrite agent instructions after To-dos was turned on or off', error instanceof Error ? error : undefined));
+  });
   // Bundled profiles: set up greenfield and the other bundled plugins in Pane's own Agent Farm
   // config root, without delaying startup. It never touches the person's own Agent Farm.
   // The Profiles page shows the install's state, so it reads the library again when it ends.
@@ -588,6 +605,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const todoClock = todoTimeScale === 1 ? Date.now : () => todoClockStart + (Date.now() - todoClockStart) * todoTimeScale;
   const todoService = new TodoService(new TodoStore(databaseService.getDb()), createTodoHost(services, commandRegistry), todoClock);
   services.todoService = todoService;
+  // T-39: To-dos is off unless the person turned it on. Off, nothing below acts: no supervisor, load gate,
+  // wakes, launch resume or "[From Pane, To-dos]" message, and the saved to-dos are left as they are.
+  const todosOn = () => todosEnabled(configManager.getConfig());
   // T-7: to-do Sessions made before Sessions carried their to-do's number get it now, so no list shows them.
   void services.orchestrationSessionManager?.markTodoSessions(todoService.sessionLinks()).catch((error: Error) => {
     console.warn('[todos] Could not mark older to-do Sessions; the Sessions list hides them once the to-dos load:', error);
@@ -603,22 +623,22 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   });
   services.notifyService?.queue.on('change', () => {
     const queue = services.notifyService?.queue;
-    if (queue) todoService.onApprovalsChanged(queue.snapshot().items);
+    if (queue && todosOn()) todoService.onApprovalsChanged(queue.snapshot().items);
   });
   const lastCommits = new Map<string, number>();
   gitStatusManager.on('git-status-updated', (paneId: string, status: GitStatus) => {
-    if (status.prNumber && status.prUrl) todoService.onPr(paneId, { url: status.prUrl, number: status.prNumber, title: status.prTitle });
+    if (status.prNumber && status.prUrl && todosOn()) todoService.onPr(paneId, { url: status.prUrl, number: status.prNumber, title: status.prTitle });
     const commits = status.totalCommits ?? 0;
     const before = lastCommits.get(paneId);
     lastCommits.set(paneId, commits);
-    if (before !== undefined && commits > before) todoService.noteProgressForPane(paneId);
+    if (before !== undefined && commits > before && todosOn()) todoService.noteProgressForPane(paneId);
   });
   let todoTimer: ReturnType<typeof setInterval> | undefined;
   let todoLaunchTimer: ReturnType<typeof setTimeout> | undefined;
   if (duties.housekeeping) {
     let ticking = false;
     todoTimer = setInterval(() => {
-      if (ticking) return;
+      if (ticking || !todosOn()) return;
       ticking = true;
       // Round 9: the wake check reads the wall clock each tick (no timer per to-do), so a snooze that came due
       // while Pane was closed or the Mac slept wakes on the first tick after; it waits for launch resume below.
@@ -630,13 +650,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
         .then(stage('supervisor pass', () => todoService.supervisorPass()))
         .finally(() => { ticking = false; });
     }, 2_000);
-    todoService.prune();
+    if (todosOn()) todoService.prune();
     // Launch resume, once the window and tabs have settled.
     todoLaunchTimer = setTimeout(() => {
+      if (!todosOn()) return;
       void todoService.resumeOnLaunch('launch').catch(error => logger.warn('[Todos] launch resume failed', error));
     }, 10_000);
     powerMonitor.on('resume', () => {
-      setTimeout(() => { void todoService.resumeOnLaunch('wake').catch(error => logger.warn('[Todos] wake resume failed', error)); }, 10_000);
+      setTimeout(() => { if (todosOn()) void todoService.resumeOnLaunch('wake').catch(error => logger.warn('[Todos] wake resume failed', error)); }, 10_000);
     });
   }
   const autoPauser = new AutoPauser({

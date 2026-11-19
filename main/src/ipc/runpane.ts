@@ -284,6 +284,7 @@ import {
 import { agentConfig, agentLabel, agentTerminalCommand, configuredAgent, configuredAgentSchema, isAgentSessionId, isConfiguredAgent, typesStartingMessage } from '../../../shared/agents';
 import { paneScratchUsage } from '../services/paneScratch';
 import { archiveRetentionDays } from '../services/archiveExpiry';
+import { activeTodoService } from '../services/todos/todosFeature';
 
 const RUNPANE_CHANNELS = [
   'runpane:doctor',
@@ -1418,7 +1419,7 @@ export function registerRunpaneHandlers(
       // To-dos (D-408): a page an assigned tab opens beside the person attaches to its to-do.
       const opener = paneCommandCaller()?.panelId;
       const openedFile = normalized.url?.startsWith('file://') ? normalized.url : normalized.filePath ? path.resolve(pane.worktreePath, normalized.filePath) : undefined;
-      if (opener && openedFile) services.todoService?.onPanelOpened(opener, openedFile);
+      if (opener && openedFile) activeTodoService(services)?.onPanelOpened(opener, openedFile);
       // Brings the tab forward on clients showing this Pane; never raises or focuses the window.
       const activate = normalized.noFocus !== true;
       const existing = panelManager.getPanelsForSession(pane.id).find(panel => panelShowsOpenTarget(panel, target));
@@ -2009,7 +2010,8 @@ export function registerRunpaneHandlers(
       const normalized = parseReportRequest(request);
       const panel = resolveAgentPanel(normalized.panelId);
       // To-dos (D-408): a --todo that names no open to-do is refused before anything is recorded.
-      if (normalized.todo && services.todoService) services.todoService.todoLinkFor(panel.id, normalized.todo);
+      // T-39: while To-dos is off the link is ignored, so the report itself still lands.
+      if (normalized.todo) activeTodoService(services)?.todoLinkFor(panel.id, normalized.todo);
       if (normalized.paneId && normalized.paneId !== panel.sessionId) {
         throw new Error(`Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${normalized.paneId}.`);
       }
@@ -2580,7 +2582,8 @@ async function panelCloseRefusal(panel: ToolPanel, force: boolean): Promise<Runp
  * gate first (machine_busy while Holding); with --todo the new tab is assigned that to-do.
  */
 function todoAgentStart(services: AppServices, request: PaneCommandValue, callerPanelId: string | undefined, startsAgent: boolean): { assign: (panelId: string) => void } | undefined {
-  const todoService = services.todoService;
+  // T-39: while To-dos is off, --todo is accepted and ignored, so the agent still starts.
+  const todoService = activeTodoService(services);
   if (!todoService || !startsAgent) return undefined;
   const todo = decodeOptionalBoundary(request, boundary.object({ todo: boundary.optional(boundary.string) }))?.todo?.trim();
   return todoService.beforeAgentStart(callerPanelId ?? paneCommandCaller()?.panelId, todo);

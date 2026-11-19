@@ -8,6 +8,7 @@ import {
 } from './generated/contract';
 import { boundary, decodeBoundary, type JsonValue } from './boundaryDecoder';
 import { RunpaneError } from './errors';
+import { isTodoCommand, todosDisabledError, todosOn, withoutTodoLines } from './todosFeature';
 import { BROWSER_BOOLEAN_FLAGS, BROWSER_VALUE_FLAGS, setBrowserFlag, type BrowserRequest } from './browser';
 
 export type { ArtifactFormat, InstallTarget, RunpaneAgent, RunpaneCommand };
@@ -445,7 +446,7 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   const workspaceMachine = takeWorkspaceMachine(args);
   const matched = matchCommand(args);
   if (!matched) {
-    throw new Error(`Unknown command: ${first}\n\n${helpText()}`);
+    throw new Error(`Unknown command: ${first}\n\n${helpText(undefined, todosOn())}`);
   }
 
   args.splice(0, matched.tokens.length);
@@ -1924,12 +1925,15 @@ function readValue(args: string[], index: number, flag: string, literalValues: S
   return value;
 }
 
-export function helpText(topic?: string): string {
+/** The help for a topic, or the overview. With To-dos off (`todos: false`) it carries no to-do text, and a `todos` topic refuses. */
+export function helpText(topic?: string, todos = true): string {
+  if (!todos && topic !== undefined && isTodoCommand(topic)) throw todosDisabledError();
   const helpTopics = RUNPANE_CONTRACT.help.npm;
   const topicLines = topic
     ? Object.entries(helpTopics).find(([key]) => key === topic)?.[1]
     : undefined;
-  return [...(topicLines ?? helpTopics.default), ...helpNotes(topic)].join('\n');
+  const lines = [...(topicLines ?? helpTopics.default), ...helpNotes(topic)];
+  return (todos ? lines : withoutTodoLines(lines)).join('\n');
 }
 
 /** The command's agent notes, for a command whose help carries them (the notify tool description's rules). */
