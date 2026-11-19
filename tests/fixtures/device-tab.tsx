@@ -6,7 +6,7 @@ import { DevicePanel } from '../../frontend/src/components/panels/device/DeviceP
 import { DeviceClientContext, type DeviceTabClient } from '../../frontend/src/components/panels/device/deviceClient';
 import type { ChatTurnActions } from '../../frontend/src/components/chatTab/ChatTurns';
 import type { ChatTabClient, ChatTabView } from '../../shared/types/chatTab';
-import type { DeviceControls, DeviceInput, DeviceLogLine, DevicePanelPhase, DevicePanelState } from '../../shared/types/devices';
+import type { DeviceControls, DeviceInput, DeviceLogLine, DevicePanelPhase, DevicePanelState, DeviceRecordingEnd } from '../../shared/types/devices';
 import type { ToolPanel } from '../../shared/types/panels';
 import '../../frontend/src/index.css';
 
@@ -55,11 +55,13 @@ function landscapeScreen(): string {
   return canvas.toDataURL('image/jpeg', 0.9);
 }
 
-declare global { interface Window { qaInputs: DeviceInput[]; qaPower: string[]; qaRotate: () => void; qaStaged: string[]; qaAttached: string[]; qaFinishBoot: () => void; qaSendFirstFrame: () => void } }
+declare global { interface Window { qaInputs: DeviceInput[]; qaPower: string[]; qaRotate: () => void; qaStaged: string[]; qaAttached: string[]; qaFinishBoot: () => void; qaSendFirstFrame: () => void; qaEndRecording: (by: DeviceRecordingEnd['by']) => void } }
 window.qaStaged = [];
 window.qaAttached = [];
 // ?fold=1 is a foldable, half open; otherwise a phone that turns.
-const controls: DeviceControls = params.get('fold') ? { orientation: 'portrait', fold: { posture: 'half' } } : { orientation: 'portrait' };
+// ?orientation=landscape_left turns it while its frames stay a portrait framebuffer, as a simulator's do.
+const turned = params.get('orientation') === 'landscape_left';
+const controls: DeviceControls = params.get('fold') ? { orientation: 'portrait', fold: { posture: 'half' } } : { orientation: turned ? 'landscape_left' : 'portrait' };
 window.qaInputs = [];
 window.qaPower = [];
 const landscape = landscapeScreen();
@@ -81,8 +83,16 @@ const client: DeviceTabClient = {
   capture: async (_panel, image) => ({ path: '/tmp/pane/devices/screenshots/pane-1.png', dataUrl: image ?? frame }),
   stage: async (_panel, agentPanelId, text) => { window.qaStaged.push(`${agentPanelId}:${text}`); },
   attachToChat: async (chatPanelId, file) => { window.qaAttached.push(`${chatPanelId}:${file.name}`); },
-  record: async (_panel, action) => (action === 'start' ? null : { path: '/tmp/pane/devices/recordings/pane-1.mp4' }),
-  recording: async () => null,
+  // As main does: the tab's state carries the recording while it runs and how it ended.
+  record: async (_panel, action) => {
+    if (action === 'start') {
+      // ?hostClock=<ms> runs the host's clock apart from this one, as another computer's can.
+      updateLive({ recording: { startedAt: Date.now() + Number(params.get('hostClock') ?? 0) }, recordingEnded: undefined });
+      return null;
+    }
+    window.qaEndRecording('person');
+    return RECORDING;
+  },
   // ?logs=many sends 400 lines, as a chatty app does.
   logs: async (_panel, since) => {
     const lines = params.get('logs') === 'many' ? Array.from({ length: 400 }, (_, index) => ({ ...LOG_LINES[index % 3], seq: index + 1 })) : LOG_LINES;
@@ -94,6 +104,18 @@ const client: DeviceTabClient = {
   takeOver: async () => { window.qaPower.push('take-over'); },
   power: async (_panel, action) => { window.qaPower.push(action); },
 };
+
+const RECORDING = { path: '/tmp/pane/devices/recordings/__orchestration_session_6d95f4ea__terminal__-1795029515252.mp4' };
+/** Changes the live tab's state, as main's panel updates do; set once the tab renders. */
+let updateLive: (patch: Partial<DevicePanelState>) => void = () => undefined;
+window.qaEndRecording = (by) => updateLive({ recording: undefined, recordingEnded: { by, recording: RECORDING, at: Date.now() } });
+
+/** The live device tab, its state held here as the host would push it. */
+function LiveDevice({ initial, panels }: { initial: Partial<DevicePanelState>; panels: readonly ToolPanel[] }) {
+  const [state, setState] = useState(initial);
+  updateLive = patch => setState(current => ({ ...current, ...patch }));
+  return <DevicePanel panel={devicePanel('device', state)} panels={panels} isActive />;
+}
 
 const LOG_LINES: DeviceLogLine[] = [
   { seq: 1, at: Date.parse('2026-11-16T19:04:11.208Z'), level: 'info', source: 'Shop', message: 'Checkout: mounted step 1 of 3' },
@@ -116,7 +138,7 @@ const STATES: { label: string; state: Partial<DevicePanelState> }[] = [
   { label: 'Live', state: {} },
   { label: 'Installing', state: { phase: 'installing' } },
   { label: 'Booting', state: { phase: 'booting' } },
-  { label: 'Off after idle', state: { phase: 'off' } },
+  { label: 'Off after idle', state: { phase: 'off', stoppedBy: 'idle' } },
   { label: 'In use by another Pane', state: { phase: 'in-use', heldBy: { paneId: 'other', paneName: 'onboarding-copy' } } },
   { label: 'Runs on a linked Mac', state: { machine: "Studio MacBook Pro", machineId: 'mbp', machineReason: { kind: 'automatic', text: "Runs on Studio MacBook Pro. This PC has no Xcode." } } },
   { label: 'No Mac linked', state: { phase: 'no-mac', name: 'iPhone', machine: 'This PC' } },
@@ -193,8 +215,8 @@ if (params.get('view') === 'boot') {
 } else if (params.get('view') === 'phone') {
   root.render(
     <DeviceClientContext.Provider value={client}>
-      <div className="bg-bg-primary" style={{ width: 390, height: '100vh' }}>
-        <DevicePanel panel={devicePanel('device', driver ? { driver } : {})} panels={[agentPanel]} isActive />
+      <div className="bg-bg-primary" style={{ width: Number(params.get('width') ?? 390), height: '100vh' }}>
+        <LiveDevice initial={driver ? { driver } : {}} panels={[agentPanel]} />
       </div>
     </DeviceClientContext.Provider>,
   );
@@ -203,7 +225,7 @@ if (params.get('view') === 'boot') {
     <DeviceClientContext.Provider value={client}>
       <div className="flex bg-bg-primary" style={{ height: '100vh' }}>
         <div className="border-r border-border-primary" style={{ width: 560, height: '100%' }}><ChatTabPanel panelId="chat" client={chatClient} actions={actions} /></div>
-        <div className="flex-1"><DevicePanel panel={devicePanel('device', paneState)} panels={[agentPanel]} isActive /></div>
+        <div className="flex-1"><LiveDevice initial={paneState} panels={[agentPanel]} /></div>
       </div>
     </DeviceClientContext.Provider>,
   );

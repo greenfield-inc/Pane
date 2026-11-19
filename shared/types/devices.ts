@@ -33,6 +33,12 @@ export interface DevicePanelState {
   macName?: string;
   /** The tab that opened it (the agent). */
   openedBy?: string;
+  /** Why the device stopped, set with `off` and `closed`. */
+  stoppedBy?: DeviceStopCause;
+  /** The tab's screen recording while one runs: when it started (epoch ms). */
+  recording?: { startedAt: number };
+  /** How the tab's last recording ended, so every client can say so. */
+  recordingEnded?: DeviceRecordingEnd;
   /**
    * Who is driving now: an agent while its device tool runs, or the person after Take over. While
    * the person drives, the agent's device_act waits (`agentWaiting` names it) until they hand it back.
@@ -75,6 +81,23 @@ export interface DeviceRecording {
   path: string;
   /** The Mac it was saved on, when the device runs on a linked Mac. */
   machine?: string;
+}
+
+/**
+ * Why a device stopped: the person's Shut down, an agent's device_close, the idle timer, `runpane
+ * devices free`, its Pane archived, Pane quitting, or something outside Pane (Simulator, a crash).
+ */
+export type DeviceStopCause = 'person' | 'agent' | 'idle' | 'freed' | 'archived' | 'quit' | 'outside';
+
+/** How a recording ended: the person's Stop, its 10-minute limit, an agent's record stop, the device stopping, or Pane quitting. */
+export interface DeviceRecordingEnd {
+  by: 'person' | 'limit' | 'agent' | 'device' | 'quit';
+  /** The saved MP4, when it saved. */
+  recording?: DeviceRecording;
+  /** Why it did not save, when it did not. */
+  problem?: string;
+  /** When it ended (epoch ms). */
+  at: number;
 }
 
 export type DevicePanelPhase = 'installing' | 'booting' | 'live' | 'off' | 'in-use' | 'closed' | 'no-mac' | 'mac-offline' | 'error';

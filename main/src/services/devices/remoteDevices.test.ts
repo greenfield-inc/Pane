@@ -31,6 +31,15 @@ function routes(macs: DeviceMac[], answers: Record<string, 'devices' | 'old' | '
 
 const mac = (id: string, name: string, online = true): DeviceMac => ({ id, name, online });
 
+describe('this computer quitting', () => {
+  it('asks each Mac to close its Panes\' devices for a quit, and answers the Panes it closed', async () => {
+    const { remote, calls } = routes([mac('m1', 'Studio Mac')], { m1: 'devices' });
+    await remote.open('pane-a', 'qa', 'ios', undefined);
+    expect(await remote.dispose()).toEqual(['pane-a']);
+    expect(calls.filter(call => call.request.op === 'close').map(call => call.request)).toEqual([expect.objectContaining({ paneId: 'pane-a', shutdownBy: 'quit' })]);
+  });
+});
+
 async function code(work: Promise<unknown>): Promise<string> {
   try {
     await work;
