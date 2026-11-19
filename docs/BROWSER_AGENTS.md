@@ -139,8 +139,8 @@ tab's route), with no new port:
 
 The page fills its tab on the computer that owns it. When you take over a tab from a screen on
 another device (**Take over** in the chip there), the page takes that screen's size, with a phone's
-layout on a phone, and keeps it, through a sleep too, until you click into the tab on the owning
-computer. Watching from another screen, and agent calls, never change the size. `browser_tabs`
+layout on a phone, follows it as that screen changes size, and keeps it, through a sleep too, until
+you click into the tab on the owning computer, which shows the page letterboxed meanwhile. Watching from another screen, and agent calls, never change the size. `browser_tabs`
 reports it as `size`, and `browser_screenshot` captures the page at that size.
 
 ## Background tabs
