@@ -369,9 +369,12 @@ export class PageDriver {
    * settings when they change.
    */
   async startScreencast(settings: ScreencastSettings, onFrame: (frame: ScreencastFrame) => void): Promise<void> {
-    const same = this.cast && JSON.stringify(this.cast.settings) === JSON.stringify(settings);
+    if (this.cast && JSON.stringify(this.cast.settings) === JSON.stringify(settings)) {
+      // Still running: keep the frame waiting for its ack, or Chromium never sends the next.
+      this.cast.onFrame = onFrame;
+      return;
+    }
     this.cast = { settings, onFrame };
-    if (same) return;
     await this.attach();
     await this.send('Page.startScreencast', { format: 'jpeg', ...settings, everyNthFrame: 1 });
   }
