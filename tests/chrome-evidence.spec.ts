@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import type { DiffManifest } from '../shared/types/gitDiff';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const now = new Date(0).toISOString();
 const project = { id: 512, name: 'Pane', path: '/tmp/chrome-evidence', active: true, created_at: now, updated_at: now };
@@ -117,7 +117,7 @@ async function bootChromeFixture(page: Page, opts: BootOptions = {}) {
       });
     }, { hash: execution.after_commit_hash.slice(0, 7), message: execution.commit_message, committerDate: execution.timestamp, author: execution.author });
   }
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Pane$/ }).click();
   await page.getByRole('button', { name: 'Flat chrome', exact: true }).click();
   if (opts.theme) {

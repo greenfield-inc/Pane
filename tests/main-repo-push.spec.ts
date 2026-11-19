@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const project = {
   id: 1,
@@ -52,7 +52,7 @@ test('publishing the main checkout refreshes tracking only after a successful pu
       return { success: true };
     };
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
   if (await page.getByRole('button', { name: 'Show details', exact: true }).isVisible()) {

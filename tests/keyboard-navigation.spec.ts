@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import { notifyFixture } from './fixtures/notifySnapshot';
 
 declare global {
@@ -53,7 +53,7 @@ async function openFixture(page: Page, { approvals = false, initialConfig }: { a
   if (initialConfig) options.initialConfig = initialConfig;
   await installElectronApiMock(page, options);
   await page.addInitScript(() => localStorage.setItem('pane-detail-panel-visible', 'true'));
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Expand project Nav fixture', exact: true }).click();
   await page.getByRole('button', { name: 'auth-refactor', exact: true }).click();
   await expect(page.locator('[data-panel-group-id="g-right"]')).toBeVisible();
@@ -489,7 +489,7 @@ test('the tab keys move focus into the tab they show', async ({ page }) => {
     initialProjects: [project], initialSessions: sessions,
     initialPanels: [...panels, terminal('gamma', 'Gamma', 3)], initialLayout: withGamma, activeProjectId: project.id,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Expand project Nav fixture', exact: true }).click();
   await page.getByRole('button', { name: 'auth-refactor', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);

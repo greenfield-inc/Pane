@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import { AGENT_LAUNCH_PRESETS } from '../shared/constants/agentLaunchPresets';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 type LaunchMock = {
   getPanelCreates: () => JsonObject[];
@@ -57,7 +57,7 @@ async function panelCreates(page: Page): Promise<JsonObject[]> {
 }
 
 async function openSession(page: Page, sessionName: string) {
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Launch shortcut fixture$/ }).click();
   await page.getByRole('button', { name: sessionName, exact: true }).click();
   await expect(page.locator('.xterm-screen').first()).toBeVisible({ timeout: 15_000 });

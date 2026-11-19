@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { TailnetMachineList } from '../shared/types/workspaceAccess';
 
 const tailnetMachines: TailnetMachineList = {
@@ -16,7 +16,7 @@ const tailnetMachines: TailnetMachineList = {
 
 async function openRemoteAccess(page: Page, options: { remoteConnectError?: string } = {}) {
   await installElectronApiMock(page, { tailnetMachines, ...options });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Settings' }).first().click();
   await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
@@ -156,7 +156,7 @@ test.describe('Remote Access', () => {
         refusedOrigins: [{ origin: 'https://even.example', at: '2026-10-29T09:00:00.000Z' }],
       },
     });
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await gotoApp(page);
     await page.getByRole('button', { name: 'Settings' }).first().click();
     await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
     await page.getByRole('tab', { name: /^Phones and glasses/ }).click();
@@ -181,7 +181,7 @@ test.describe('Remote Access', () => {
       },
       glassesRevokeEverywhere: { revoked: ['Mac', 'devbox'], notReached: [{ name: 'laptop', reason: 'offline' }] },
     });
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await gotoApp(page);
     await page.getByRole('button', { name: 'Settings' }).first().click();
     await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
     await page.getByRole('tab', { name: /^Phones and glasses/ }).click();
@@ -206,7 +206,7 @@ test.describe('Remote Access', () => {
       },
       glassesRevokeEverywhereError: failure,
     });
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await gotoApp(page);
     await page.getByRole('button', { name: 'Settings' }).first().click();
     await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
     await page.getByRole('tab', { name: /^Phones and glasses/ }).click();

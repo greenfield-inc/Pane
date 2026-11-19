@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 declare global {
   interface Window {
@@ -19,7 +19,7 @@ for (const channel of ['connection', 'host'] as const) {
         return snapshot;
       };
     });
-    await page.goto('/');
+    await gotoApp(page);
     await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Remote inactive', exact: true })).toBeVisible();
     await page.evaluate(async channel => {

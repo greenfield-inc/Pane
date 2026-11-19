@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 async function openedExternalUrls(page: Page): Promise<string[]> {
   // SAFETY: installElectronApiMock defines this test-only API before navigation.
@@ -23,7 +23,7 @@ test('explains that the tailnet has HTTPS Certificates off, links to the setting
       url: undefined,
     },
   });
-  await page.goto('/');
+  await gotoApp(page);
 
   await expect(page.getByText(notice)).toBeVisible();
   await expect(page.getByText('public Certificate Transparency log')).toBeVisible();
@@ -42,7 +42,7 @@ test('stays hidden while workspaces are on', async ({ page }) => {
   await installElectronApiMock(page, {
     initialPreferences: { hide_discord: 'true', hide_welcome: 'true' },
   });
-  await page.goto('/');
+  await gotoApp(page);
 
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible();
   await expect(page.getByText(notice)).toBeHidden();

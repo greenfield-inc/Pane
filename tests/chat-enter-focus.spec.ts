@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 // Enter goes to the chat (D-328): with a chat tab on screen and focus on no
 // control, Enter moves focus into its message box; opening a Pane with Enter
@@ -35,7 +35,7 @@ const panels = [
 
 async function openFixture(page: Page): Promise<void> {
   await installElectronApiMock(page, { initialProjects: [project], initialSessions: sessions, initialPanels: panels, activeProjectId: project.id });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Expand project Chat fixture', exact: true }).click();
 }
 
@@ -139,7 +139,7 @@ test('Enter stays in its own split: a chat tab opens into its own message box, n
     initialSessions: [{ ...pane('sp', 'split-pane', 0), worktreePath: '/tmp/split-fixture/sp', projectId: splitProject.id }],
     initialPanels: splitPanels, initialLayout: splitLayout, activeProjectId: splitProject.id,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Expand project Split fixture', exact: true }).click();
   await page.getByRole('button', { name: 'split-pane', exact: true }).click();
   const left = page.locator('[data-panel-group-id="g-left"] [data-chat-composer]');

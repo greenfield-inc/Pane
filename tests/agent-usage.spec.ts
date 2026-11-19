@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const project = {
   id: 731,
@@ -160,7 +160,7 @@ const usageReport = {
 
 async function openSettings(page: Page, options: Parameters<typeof installElectronApiMock>[1] = {}): Promise<void> {
   await installElectronApiMock(page, options);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
 
   const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
@@ -307,7 +307,7 @@ test('main-repository branch detection never renders the previous repository bra
     },
     mainRepoSessionDelayByProjectId: { [secondProject.id]: 500 },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
   // The inspector is shown by default; open it only if it was hidden.
@@ -349,7 +349,7 @@ test('latest main-repository lookup wins across A to delayed B to A', async ({ p
     activeProjectId: project.id,
     mainRepoSessionDelayByProjectId: { [secondProject.id]: 500 },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
   // The inspector is shown by default; open it only if it was hidden.
@@ -408,7 +408,7 @@ test('main-repository lookup failure clears the loading skeleton', async ({ page
     mainRepoSessionDelayByProjectId: { [project.id]: 100 },
     mainRepoSessionErrorByProjectId: { [project.id]: 'Main repository session lookup failed' },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
 

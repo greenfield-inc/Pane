@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { PanelActivationRequest, ToolPanel } from '../shared/types/panels';
 
 // Once a pane is split, every tab lives in its group's strip: the top tab
@@ -80,7 +80,7 @@ test('a split pane keeps its tabs in the group strips and collapses the top row'
     initialLayout: layout,
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Split fixture$/ }).click();
   await page.getByRole('button', { name: 'Split pane', exact: true }).click();
 
@@ -162,7 +162,7 @@ for (const layoutReadFails of [false, true]) {
       initialLayout: null,
       activeProjectId: project.id,
     });
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     if (layoutReadFails) {
       await page.evaluate(() => {
         const invoke = window.electronAPI.invoke;
@@ -195,7 +195,7 @@ for (const leaveVia of ['another Pane', 'the repository view'] as const) {
       activeProjectId: project.id,
       rememberPaneLayouts: true,
     });
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     await page.getByRole('button', { name: /^Expand project Split fixture$/ }).click();
     await page.getByRole('button', { name: 'Split pane', exact: true }).click();
     const groups = page.locator('.panel-group-tab-bar');

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const projects = [
   {
@@ -69,7 +69,7 @@ test.describe('compact sidebar', () => {
         ],
         initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true, pinnedSectionExpanded: true },
       });
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await gotoApp(page);
       await expect(page.locator('html')).toHaveClass(new RegExp(theme));
       const pane = page.getByRole('button', { name: title, exact: true });
       const label = page.getByTestId('sidebar').getByText(title, { exact: true });
@@ -133,7 +133,7 @@ test.describe('compact sidebar', () => {
       initialProjects: projects,
       initialConfig: { theme: 'night-owl' },
     });
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     const projectsToggle = page.getByRole('button', { name: 'Projects', exact: true });
     await expect(projectsToggle).toBeVisible();
     await page.screenshot({ path: 'tmp/verify/sidebar-affordances/projects.png' });
@@ -169,7 +169,7 @@ test.describe('compact sidebar', () => {
         initialProjects: projects,
         initialConfig: { theme: 'night-owl' },
       });
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await gotoApp(page);
       await collapseSidebar(page);
       const expand = page.getByRole('button', { name: 'Expand sidebar', exact: true });
       await expect(expand).toHaveCount(1);
@@ -213,7 +213,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
 
     const pinnedToggle = page.getByRole('button', { name: 'Pinned', exact: true });
     // The pinned row also shows its project name, so match the project header.
@@ -252,7 +252,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
 
     await page.getByRole('button', { name: longPaneTitle, exact: true }).hover();
     const tooltip = page.getByRole('tooltip');
@@ -285,7 +285,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
 
     const repositoryButton = page.getByRole('button', { name: /project Alpha/ });
     await repositoryButton.click();
@@ -341,7 +341,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     await collapseSidebar(page);
 
     const regularPane = page.getByTestId('compact-repository-pane-regular');
@@ -391,7 +391,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     await collapseSidebar(page);
 
     await page.getByTestId('compact-repository-pane-regular').click({ button: 'right' });
@@ -443,7 +443,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     await collapseSidebar(page);
 
     await page.getByTestId('compact-repository-pane-regular').hover();
@@ -487,7 +487,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
 
     // The icon renders beside the row's button, so scope to the innermost row container.
     const row = (name: string) => page.locator('div')
@@ -518,7 +518,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     await expect(page.getByRole('button', { name: 'Projects', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: /^(Expand|Collapse) project Alpha$/ })).toHaveCount(0);
     await collapseSidebar(page);
@@ -575,7 +575,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     await collapseSidebar(page);
 
     await expect(page.getByTestId('compact-pinned-toggle')).toHaveAttribute('aria-expanded', 'false');

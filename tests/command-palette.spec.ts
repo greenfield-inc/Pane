@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
+import { installElectronApiMock, type ElectronApiMockOptions, gotoApp } from './electronApiMock';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 
 const SHOTS = process.env.PANE_SEARCH_SHOTS;
@@ -85,7 +85,7 @@ async function boot(page: Page, options: ElectronApiMockOptions & { activePaneId
       },
     });
   }, { sessions: SESSIONS, agentStatuses });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 20_000 });
   if (activePaneId) {
     await page.getByRole('button', { name: 'spotlight-search', exact: true }).first().click();

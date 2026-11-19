@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const project = { id: 382, name: 'File link fixture', path: '/tmp/file-link-fixture', active: true, created_at: new Date(0).toISOString(), updated_at: new Date(0).toISOString() };
 const session = {
@@ -22,7 +22,7 @@ test('terminal links open worktree files in the editor and explain outside paths
     initialTerminalStates: { [panels[1].id]: { scrollbackBuffer: './src/app.ts:42\r\n~/.zshrc\r\n' } },
     activeProjectId: project.id,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.evaluate(() => {
     const invoke = window.electronAPI.invoke;
     window.electronAPI.invoke = (channel: string, ...args: unknown[]) => {

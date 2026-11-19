@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import type { NotifyCommand, NotifySnapshot } from '../shared/types/notify';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import type { MachineState } from '../shared/types/machineConnections';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import { notifyFixture, secretFixture } from './fixtures/notifySnapshot';
 import type { PaneSecretStorage, PaneSecretSummary } from '../shared/types/paneSecrets';
 
@@ -61,7 +61,7 @@ async function boot(
     initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
     notifySnapshot: snapshot,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.getByTestId('sidebar').first()).toBeVisible({ timeout: 30_000 });
 }
 

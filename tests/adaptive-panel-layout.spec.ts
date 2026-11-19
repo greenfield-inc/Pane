@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const now = new Date(0).toISOString();
 const project = {
@@ -74,7 +74,7 @@ async function installFixture(
     initialPanels: fixturePanels,
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
 }
 
 async function openWorktree(page: Page): Promise<void> {

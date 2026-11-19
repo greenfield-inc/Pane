@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 test('a selected tree item cannot intercept shortcuts in a diff tab', async ({ page, context }, testInfo) => {
   const createdAt = '2026-01-01T00:00:00.000Z';
@@ -34,7 +34,7 @@ test('a selected tree item cannot intercept shortcuts in a diff tab', async ({ p
   });
   const dialogs: string[] = [];
   page.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.dismiss(); });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Tree shortcuts', exact: true }).click();
   await page.getByRole('tab', { name: 'Files', exact: true }).click();
   const folder = page.getByRole('treeitem', { name: 'assets', exact: true }).first();

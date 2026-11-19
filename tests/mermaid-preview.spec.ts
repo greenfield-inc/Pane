@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const timestamp = new Date(0).toISOString();
 const project = { id: 823, name: 'Diagram fixture', path: '/tmp/diagram-fixture', active: true, created_at: timestamp, updated_at: timestamp };
@@ -31,7 +31,7 @@ test('a broken Markdown diagram leaves a diagram in another split preview visibl
     },
     initialUiState: { expandedProjects: [project.id] }, activeProjectId: project.id,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.evaluate(() => {
     const invoke = window.electronAPI.invoke;
     window.electronAPI.invoke = async (channel, ...args) => {
@@ -58,7 +58,7 @@ test('a broken diagram cannot remove a neighbor rendered in the same millisecond
     initialProjects: [project], initialSessions: [session], initialPanels: [panel],
     initialUiState: { expandedProjects: [project.id] }, activeProjectId: project.id,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.clock.setFixedTime(new Date('2026-09-25T00:00:00Z'));
   await page.evaluate(() => {
     const invoke = window.electronAPI.invoke;

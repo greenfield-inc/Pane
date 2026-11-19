@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { ProjectDashboardData, ProjectDashboardUpdateEvent } from '../frontend/src/types/projectDashboard';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const dashboard: ProjectDashboardData = {
   projectId: 921, projectName: 'Dashboard fixture', projectPath: '/tmp/dashboard-fixture', mainBranch: 'main',
@@ -56,7 +56,7 @@ async function openDashboard(page: Page): Promise<void> {
       onSessionUpdate: () => () => {},
     };
   }, dashboard);
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Expand project Dashboard fixture', exact: true }).click();
   await page.getByRole('button', { name: 'Dashboard pane', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Project Dashboard' })).toBeVisible();

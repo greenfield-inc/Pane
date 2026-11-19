@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { VersionUpdateInfo } from '../frontend/src/types/session';
 import type { PanelAgentStatusEvent } from '../shared/types/agentStatus';
 
@@ -64,7 +64,7 @@ test('different panels keep separate notifications while newer status replaces t
       },
     });
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Expand project Terminal input fixture', exact: true }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Input Terminal', exact: true })).toBeVisible();

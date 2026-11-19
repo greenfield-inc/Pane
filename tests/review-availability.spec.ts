@@ -1,6 +1,6 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const project = {
   id: 374,
@@ -145,7 +145,7 @@ async function openSession(
     initialConfig: options.initialConfig,
   });
   await beforeLoad?.(page);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Review fixture$/ }).click();
   const paneButton = page.getByRole('button', {
     name: gitStatus.prTitle ?? 'Review changes before PR',
@@ -182,7 +182,7 @@ test('Pinned panes show the pane name with the repository name beside it', async
     initialPanels: panels,
     activeProjectId: pinnedProject.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
 
   // The row is named for the Pane; the repository sits beside it without its owner.
   const pinnedPane = page.getByRole('button', { name: 'do-tm-560', exact: true });

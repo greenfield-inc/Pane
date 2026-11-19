@@ -1,6 +1,6 @@
 import type { CustomCommandResume } from '../shared/types/customCommandResume';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import type { PanelActivationRequest, PanelLayoutNode, SessionPanelLayout, ToolPanel } from '../shared/types/panels';
 import type { TailnetMachine, TailnetMachineList } from '../shared/types/workspaceAccess';
@@ -533,7 +533,7 @@ for (const theme of ['light', 'night-owl']) {
         activeProjectId: 1,
         initialConfig: { theme },
       });
-      await page.goto('/');
+      await gotoApp(page);
       await dismissStartupDialogs(page);
       await expect(page.getByTestId('sessions-section-header')).toBeVisible();
       if (compact) await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
@@ -603,7 +603,7 @@ for (const theme of ['light', 'night-owl']) {
 
 test('empty and folded sidebar sections keep their actions beside the headings', async ({ page }) => {
   await installSessionsFixture(page, []);
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   const sessions = page.getByTestId('sessions-section-header');
   const projects = page.getByRole('button', { name: 'Projects', exact: true });
@@ -622,7 +622,7 @@ test('empty and folded sidebar sections keep their actions beside the headings',
 
 test('Session runtime defaults to Windows and submits the selected installed distribution', async ({ page }) => {
   await installSessionsFixture(page, [], [], { distributions: ['Ubuntu-24.04', 'Debian'] });
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
   const runtime = page.getByLabel('Run agent in');
@@ -638,7 +638,7 @@ test('Session runtime defaults to Windows and submits the selected installed dis
 
 test('Session runtime is hidden when the host offers no WSL distributions', async ({ page }) => {
   await installSessionsFixture(page, []);
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
   await expect(page.getByLabel('Run agent in')).toHaveCount(0);
@@ -649,7 +649,7 @@ test('selecting WSL restores a Cursor default while preserving an explicit agent
     Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'Win32' });
   });
   await installSessionsFixture(page, [], [], { distributions: ['Ubuntu-24.04'], defaultOrchestratorAgent: 'cursor' });
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
   await expect(page.getByRole('radio', { name: 'Cursor', exact: true })).toHaveCount(0);
@@ -670,7 +670,7 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
     sessionFixture('existing-new-chat', 'new chat', '', '', '2026-09-16T12:02:00.000Z'),
     sessionFixture('existing-new-chat-2', ' NEW CHAT 2 ', '', '', '2026-09-16T12:03:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   await expect(page.getByTestId('sessions-section-header')).toBeVisible({ timeout: 10_000 });
@@ -755,7 +755,7 @@ test('Session creation agent picker supports native radio keyboard semantics', a
   await installSessionsFixture(page, [
     sessionFixture('keyboard', 'Keyboard chat', 'Keyboard goal.', 'Keyboard context.', '2026-09-16T12:00:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   await page.getByTestId('new-orchestration-session').click();
@@ -784,7 +784,7 @@ test('Session creation hides unsupported Cursor on Windows', async ({ page }) =>
   await installSessionsFixture(page, [
     sessionFixture('windows', 'Windows chat', 'Windows goal.', 'Windows context.', '2026-09-16T12:00:00.000Z'),
   ], [], { defaultOrchestratorAgent: 'cursor' });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   await page.getByTestId('new-orchestration-session').click();
@@ -804,7 +804,7 @@ test('Session metadata refresh stays quiet and cannot steal a later selection', 
     sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   const firstSessionRow = page.getByTestId('orchestration-session-alpha');
@@ -877,7 +877,7 @@ test('Session view follows an external agent switch without selecting again or r
     sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   const alphaRow = page.getByTestId('orchestration-session-alpha');
@@ -1001,7 +1001,7 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
       }],
     },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   await expect(page.getByTestId('sessions-section-header')).toBeVisible({ timeout: 10_000 });
@@ -1129,7 +1129,7 @@ test('Sessions stay collapsed until you open one, and this computer remembers it
     paneFixture('pane-charlie', 'Charlie worker'),
     paneFixture('pane-charlie-new', 'Charlie new worker'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   const pinnedAlpha = page.locator('#orchestration-session-panes-pinned-alpha');
   const listedAlpha = page.locator('#orchestration-session-panes-sessions-alpha');
@@ -1204,7 +1204,7 @@ test('Session rows show whether their child Panes are working or waiting', async
       { paneId: 'pane-beta', panelIds: [], attachedAt: '2026-09-16T12:00:00.000Z' },
     ]),
   ], [paneFixture('pane-alpha', 'Alpha pane'), paneFixture('pane-beta', 'Beta pane')]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   const row = page.getByTestId('orchestration-session-activity');
   await expect(row).toContainText('2');
@@ -1228,7 +1228,7 @@ test('Session rows show whether their child Panes are working or waiting', async
 test('a banner explains the folder-trust prompt only while the Session agent shows it', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', '', '', '2026-09-16T12:00:00.000Z')]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click();
   await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
@@ -1254,7 +1254,7 @@ test('Sessions can be pinned, persist across reload, and unpin back to the norma
     sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   const alphaRow = page.getByTestId('orchestration-session-alpha');
@@ -1293,7 +1293,7 @@ test('Sessions can be pinned, persist across reload, and unpin back to the norma
 test('Start pinned creates the Session pinned and is remembered for the next Session', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 1000 });
   await installSessionsFixture(page, []);
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   const dialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
   const startPinned = dialog.getByRole('switch', { name: 'Start pinned', exact: true });
@@ -1314,7 +1314,7 @@ test('Start pinned creates the Session pinned and is remembered for the next Ses
 
 test('Start pinned starts on when the saved config says so', async ({ page }) => {
   await installSessionsFixture(page, [], [], { initialConfig: { defaultSessionPinned: true } });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
   await expect(page.getByRole('dialog', { name: 'Create Session', exact: true }).getByRole('switch', { name: 'Start pinned', exact: true })).toBeChecked();
@@ -1326,7 +1326,7 @@ test('switching hosts replaces the Sessions and pinned Sessions in the sidebar',
     sessionFixture('local-pinned', 'Local pinned', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z', [], false, true),
     sessionFixture('local', 'Local', 'Goal.', 'Context.', '2026-09-16T12:01:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await expect(page.getByTestId('orchestration-pinned-session-local-pinned')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('orchestration-session-local')).toBeVisible();
@@ -1364,7 +1364,7 @@ test('an Undo still refreshing when the host changes does not reopen the Session
     sessionFixture('shared-id', 'Local', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z'),
     sessionFixture('local-other', 'Local other', 'Goal.', 'Context.', '2026-09-16T12:01:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   const localRow = page.getByTestId('orchestration-session-shared-id');
   await expect(localRow).toBeVisible({ timeout: 10_000 });
@@ -1427,7 +1427,7 @@ test('Undo restores an archived Session without pulling the person off where the
     sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   const alphaRow = page.getByTestId('orchestration-session-alpha');
@@ -1462,7 +1462,7 @@ test('Session rows archive and restore without losing selection or associated Pa
     ),
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ], [paneFixture('pane-alpha', 'Associated Alpha Pane')]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   const alphaRow = page.getByTestId('orchestration-session-alpha');
@@ -1539,7 +1539,7 @@ test('archiving a Session asks first when one of its Panes has work in progress,
     ]),
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   type ArchiveMock = {
     blockPaneArchive: (paneId: string, code: string) => void;
@@ -1594,7 +1594,7 @@ test('the Session actions menu works by keyboard, and its archive Undo survives 
     sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await expect(page.getByTestId('orchestration-session-alpha')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('orchestration-session-alpha').click();
@@ -1665,7 +1665,7 @@ test('a Pane opened from a Session names it in the title bar as a way back', asy
       [{ paneId: 'pane-checkout', panelIds: [], attachedAt: '2026-09-16T12:00:00.000Z' }],
     ),
   ], [paneFixture('pane-checkout', 'checkout-redesign')]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   await page.getByRole('button', { name: 'Expand Checkout launch Panes' }).click();
@@ -1685,7 +1685,7 @@ test('a Pane row menu adds the Pane to a Session and removes it again', async ({
   await installSessionsFixture(page, [
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ], [paneFixture('pane-loose', 'Loose Pane')]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   const betaRow = page.getByTestId('orchestration-session-beta');
@@ -1734,7 +1734,7 @@ test('the Add to Session picker fits the window when opened near its bottom', as
     names.map((name, index) => sessionFixture(`s${index}`, name, 'Goal.', 'Context.', `2026-09-16T12:${String(index).padStart(2, '0')}:00.000Z`)),
     [paneFixture('pane-loose', 'Loose Pane')],
   );
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await expect(page.getByTestId('orchestration-session-s0')).toBeVisible({ timeout: 10_000 });
 
@@ -1762,7 +1762,7 @@ test('Archiving a Session during a delayed chat load cannot reinstall its view',
     sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   const alphaRow = page.getByTestId('orchestration-session-alpha');
@@ -1830,7 +1830,7 @@ test('Session overview refreshes for associated Pane activity without reacting t
       }],
     },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   const trackedSessionRow = page.getByTestId('orchestration-session-tracked-session');
@@ -1949,7 +1949,7 @@ test('Session launch settings preserve custom arguments, profile, and agent acro
       customCommands: [{ name: 'Agent Farm', command: savedCommand }],
     },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
   const createDialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
@@ -2006,7 +2006,7 @@ test('Session launch settings preserve custom arguments, profile, and agent acro
 test('new Sessions remember the last launch arguments and allow clearing them', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 1000 });
   await installSessionsFixture(page, []);
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   const dialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
   const command = 'agent-farm run coordinator --label "release planning" --quiet';
@@ -2034,7 +2034,7 @@ test('new Sessions remember the last launch arguments and allow clearing them', 
 test('custom Session resume settings persist, seed the next Session, and can be disabled', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 1000 });
   await installSessionsFixture(page, []);
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
   const create = page.getByRole('dialog', { name: 'Create Session', exact: true });
@@ -2069,7 +2069,7 @@ test('Session app defaults save for new Sessions without changing existing launc
   existing.launchCommand = 'codex --model existing';
   existing.profile = 'Keep this Session profile.';
   await installSessionsFixture(page, [existing]);
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
   const appSettings = page.getByTestId('settings-page');
@@ -2127,7 +2127,7 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
       },
     });
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-tools').click();
   // The window title bar names the Session; its tabs are the next row.
   const workspaceTabs = page.locator('.panel-group-tab-bar').first();
@@ -2277,7 +2277,7 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
 
 test('Sessions can be renamed from their right-click menu', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('rename-menu', 'Original', '', '', new Date(0).toISOString())]);
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-rename-menu').click();
   await page.getByTestId('orchestration-session-rename-menu').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Rename Session…' }).click();
@@ -2296,7 +2296,7 @@ test('the Session "+" menu opens terminals and browsers as tabs, apart from the 
     Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'MacIntel' });
   });
   await installSessionsFixture(page, [sessionFixture('addtool', 'Add tool demo', '', '', new Date(0).toISOString())]);
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-addtool').click();
   const workspaceTabs = page.locator('.panel-group-tab-bar').first();
   await expect(workspaceTabs.getByRole('tab')).toHaveCount(1);
@@ -2334,7 +2334,7 @@ test('the Session "+" menu opens terminals and browsers as tabs, apart from the 
 
 test('the Overview is the first tab of every Session\'s right split, beside the conversation', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('roadmap', 'Roadmap', 'Plan the next release.', '', new Date(0).toISOString())], [], { rememberPaneLayouts: true });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-roadmap').click();
   const groupStrips = page.locator('.panel-group-tab-bar');
   // A Session with no split yet opens one: the conversation, then the Overview showing.
@@ -2383,7 +2383,7 @@ test('a saved split without the Overview gains it as the leftmost tab and keeps 
     { type: 'group', id: 'g2', panelIds: ['plan-page'], activePanelId: 'plan-page' },
   ] }, focusedGroupId: 'g1' };
   await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', now)], [], { initialPanels: [planPage], initialLayout: savedLayout });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-plans').click();
   const groupStrips = page.locator('.panel-group-tab-bar');
   await expect(groupStrips).toHaveCount(2);
@@ -2400,7 +2400,7 @@ test('a Session link lands on its Overview, from another Session and when alread
     { type: 'group', id: 'g2', panelIds: ['plan-page'], activePanelId: 'plan-page' },
   ] }, focusedGroupId: 'g1' };
   await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', now), sessionFixture('other', 'Other work', '', '', now)], [], { initialPanels: [planPage], initialLayout: savedLayout });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-other').click();
   await expect(page.getByRole('heading', { level: 1, name: 'Other work', exact: true })).toBeAttached();
   const openLink = () => page.evaluate(() => {
@@ -2429,7 +2429,7 @@ test('keyboard focus arriving in the Overview makes its split the one tab action
     { type: 'group', id: 'overview-group', panelIds: [`session-overview:${sessionId}`], activePanelId: `session-overview:${sessionId}` },
   ] }, focusedGroupId: 'chat-group' };
   await installSessionsFixture(page, [sessionFixture('focusproof', 'Focus proof', 'Review proof', '', now)], [], { initialPanels: [workPage], initialLayout: savedLayout, rememberPaneLayouts: true });
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-focusproof').click();
   await expect(page.locator('.panel-group-tab-bar')).toHaveCount(2);
@@ -2454,7 +2454,7 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
       return invoke(channel, ...args);
     };
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-plans').click();
   const workspaceTabs = page.locator('.panel-group-tab-bar').first();
   await expect(workspaceTabs.getByRole('tab').first()).toBeVisible();
@@ -2582,7 +2582,7 @@ test('a Session dropped on another tiles beside it, survives a reload, and close
     sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   await page.getByTestId('orchestration-session-alpha').click();
@@ -2685,7 +2685,7 @@ function pointIn(box: { x: number; y: number; width: number; height: number }, e
 
 test('dragging a Session tab to the stage edge opens a split beside the conversation', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('tabdrag', 'Tab drag demo', '', '', new Date(0).toISOString())]);
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-tabdrag').click();
   const workspaceTabs = page.locator('.panel-group-tab-bar').first();
   const addTool = page.locator('.pane-chat-shell').getByRole('button', { name: 'Add tool', exact: true }).first();
@@ -2750,7 +2750,7 @@ test('dragging a Session tab onto the split beside it moves it there and survive
     sessionFixture('movetab', 'Move tab demo', '', '', '2026-09-16T12:00:00.000Z'),
     sessionFixture('elsewhere', 'Elsewhere', '', '', '2026-09-16T12:01:00.000Z'),
   ]);
-  await page.goto('/');
+  await gotoApp(page);
   const { groupStrips, stages } = await openSplitSession(page, 'movetab', ['plan.html']);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(2);
 
@@ -2775,7 +2775,7 @@ test('a Session tab dropped on a strip lands at the marked slot, and reorders wi
   // Wide enough for the right strip's four tabs (the Overview first) to fit without scrolling.
   await page.setViewportSize({ width: 1600, height: 900 });
   await installSessionsFixture(page, [sessionFixture('striptab', 'Strip demo', '', '', new Date(0).toISOString())]);
-  await page.goto('/');
+  await gotoApp(page);
   const { groupStrips } = await openSplitSession(page, 'striptab', ['one.html', 'two.html']);
   const right = groupStrips.nth(1);
   expect(await tabNames(right)).toEqual(['Overview', 'one.html', 'two.html']);
@@ -2800,7 +2800,7 @@ test('a Session tab dropped on a strip lands at the marked slot, and reorders wi
 
 test('emptying a Session group by drag closes it, and an edge drop opens a new one', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('emptytab', 'Empty group demo', '', '', new Date(0).toISOString())]);
-  await page.goto('/');
+  await gotoApp(page);
   const { groupStrips, stages } = await openSplitSession(page, 'emptytab', ['plan.html']);
   // With one group left, its tabs move up to the toolbar strip.
   const workspaceTabs = page.getByTestId('session-workspace-tabs');
@@ -2827,7 +2827,7 @@ test('emptying a Session group by drag closes it, and an edge drop opens a new o
 
 test('a cancelled Session tab drag leaves the layout and the stage as they were', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('canceltab', 'Cancel demo', '', '', new Date(0).toISOString())]);
-  await page.goto('/');
+  await gotoApp(page);
   const { groupStrips, stages } = await openSplitSession(page, 'canceltab', ['plan.html']);
   const browserTab = groupStrips.nth(0).getByRole('tab', { name: 'Browser' });
   const rightStage = await layoutBox(stages.nth(1));
@@ -2851,7 +2851,7 @@ test('a tab dragged over a tiled neighbour Session is refused there and moves no
     sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click();
   await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached();
@@ -2882,7 +2882,7 @@ test('a tab dragged over a tiled neighbour Session is refused there and moves no
 
 test('New offers Session and Pane in one dialog and restores keyboard focus', async ({ page }) => {
   await installSessionsFixture(page, []);
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   const newButton = page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true });
   await newButton.click();
@@ -2908,7 +2908,7 @@ test('New offers Session and Pane in one dialog and restores keyboard focus', as
 
 test('New creates a Session with its selected WSL runtime and agent', async ({ page }) => {
   await installSessionsFixture(page, [], [], { distributions: ['Ubuntu-24.04'] });
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
   await page.getByLabel('Run agent in').selectOption('Ubuntu-24.04');
@@ -2932,7 +2932,7 @@ test('New defaults to the active repository and creates a Pane from the changed 
       return { success: true, data: [] };
     };
   });
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
   await page.getByRole('radio', { name: 'Pane', exact: true }).click();
@@ -2953,7 +2953,7 @@ test('New defaults to the active repository and creates a Pane from the changed 
 
 test('New explains the missing repository and remains available from the compact rail', async ({ page }) => {
   await installSessionsFixture(page, [], [], { projects: [] });
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
   const newButton = page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true });
@@ -2969,7 +2969,7 @@ test('New explains the missing repository and remains available from the compact
 
 test('New can show Session settings when an older host has no Session API', async ({ page }) => {
   await installElectronApiMock(page);
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
   await expect(page.getByLabel('Session name (optional)')).toBeVisible();
@@ -2986,7 +2986,7 @@ test('New keeps a pending Session creation in its dialog and enables retry after
       return { success: false, error: 'Creation unavailable; retry.' };
     };
   });
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
   const dialog = page.getByRole('dialog');
@@ -3007,7 +3007,7 @@ test('New preserves multiple-Pane options while switching repositories', async (
     { id: 1, name: 'First repository', path: '/tmp/first' },
     { id: 2, name: 'Second repository', path: '/tmp/second' },
   ] });
-  await page.goto('/');
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
   await page.getByRole('radio', { name: 'Pane', exact: true }).click();
@@ -3048,7 +3048,7 @@ test('first Session load uses persisted readiness when the ready event precedes 
       return invoke(channel, ...args);
     };
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-early-ready').click();
   await expect(page.locator('.xterm-screen')).toHaveCount(1);
   await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
@@ -3073,7 +3073,7 @@ test(`a ${failure} terminal load offers Retry and recovers without switching Ses
       return invoke(channel, ...args);
     };
   }, failure);
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-retry').click();
   if (failure !== 'rejected') {
     await expect(page.getByRole('status', { name: 'Loading terminal' })).toBeVisible();
@@ -3114,7 +3114,7 @@ test('a page an agent opens while you are in another Session lands beside the co
     sessionFixture('away', 'Away demo', '', '', '2026-09-16T12:00:00.000Z'),
     sessionFixture('elsewhere', 'Elsewhere', '', '', '2026-09-16T12:01:00.000Z'),
   ], [], { rememberPaneLayouts: true });
-  await page.goto('/');
+  await gotoApp(page);
   // Visit the Session once, so this desktop remembers its layout.
   await page.getByTestId('orchestration-session-away').click();
   const workspaceTabs = page.locator('.panel-group-tab-bar').first();
@@ -3138,7 +3138,7 @@ test('a page an agent opens while you are in another Session lands beside the co
 
 test('reopening a page that sits beside the Session conversation moves it into the split', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('reopen', 'Reopen demo', '', '', new Date(0).toISOString())]);
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-reopen').click();
   const workspaceTabs = page.locator('.panel-group-tab-bar').first();
   await expect(workspaceTabs.getByRole('tab')).toHaveCount(1);
@@ -3247,7 +3247,7 @@ async function dragSessionOnto(
 test('a Session dragged in the Sessions list stays where it is dropped, across a reload', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, fourSessions());
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await expect(page.getByTestId('orchestration-session-a')).toBeVisible({ timeout: 10_000 });
   expect(await listedSessions(page, 'orchestration-sessions-list')).toEqual(['Alpha', 'Bravo', 'Charlie', 'Delta']);
@@ -3278,7 +3278,7 @@ test('Pinned Sessions reorder among themselves, and a drag across the Pinned lin
   await page.setViewportSize({ width: 1400, height: 900 });
   const [alpha, bravo, charlie, delta] = fourSessions();
   await installSessionsFixture(page, [alpha, { ...delta, isPinned: true }, { ...bravo, isPinned: true }, charlie]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await expect(page.getByTestId('orchestration-pinned-session-b')).toBeVisible({ timeout: 10_000 });
   expect(await listedSessions(page, 'orchestration-pinned-list')).toEqual(['Delta', 'Bravo']);
@@ -3310,7 +3310,7 @@ test('a Session moves with its Panes, which stay under it as they were', async (
     bravo,
     charlie,
   ], [paneFixture('pane-alpha-worker', 'Alpha worker')]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   const worker = page.locator('#orchestration-session-panes-sessions-a').getByText('Alpha worker');
   await page.getByRole('button', { name: 'Expand Alpha Panes' }).click();
@@ -3329,7 +3329,7 @@ test('a Session moves with its Panes, which stay under it as they were', async (
 test('the compact rail reorders Sessions by drag, and the tree shows the same order', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, fourSessions());
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await expect(page.getByTestId('orchestration-session-a')).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
@@ -3349,7 +3349,7 @@ test('Alt+Up and Alt+Down move a focused Session one place and say where it went
   await page.setViewportSize({ width: 1400, height: 900 });
   const [alpha, bravo, charlie, delta] = fourSessions();
   await installSessionsFixture(page, [alpha, { ...bravo, isPinned: true }, charlie, { ...delta, isPinned: true }]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   const bravoRow = page.getByTestId('orchestration-session-b');
   await expect(bravoRow).toBeVisible({ timeout: 10_000 });
@@ -3389,7 +3389,7 @@ test('Alt+Up and Alt+Down move a focused Session one place and say where it went
 test('a reorder the host does not save snaps back and says what to do', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, fourSessions());
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await expect(page.getByTestId('orchestration-session-a')).toBeVisible({ timeout: 10_000 });
 
@@ -3428,7 +3428,7 @@ test('an archived Session restored with Undo returns to its place, and tiling a 
   await page.setViewportSize({ width: 1400, height: 900 });
   const [alpha, bravo, charlie, delta] = fourSessions();
   await installSessionsFixture(page, [alpha, delta, bravo, charlie]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await expect(page.getByTestId('orchestration-session-b')).toBeVisible({ timeout: 10_000 });
 
@@ -3452,7 +3452,7 @@ test('an archived Session restored with Undo returns to its place, and tiling a 
 test('a real mouse drag reorders, in the tree and in the rail', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, fourSessions());
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await expect(page.getByTestId('orchestration-session-a')).toBeVisible({ timeout: 10_000 });
 
@@ -3492,7 +3492,7 @@ async function recordAgentSubmissions(page: Page): Promise<() => Promise<unknown
 test('Move to machine… sits between Rename and Archive in the Session menu, by mouse, keyboard and in the rail', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')]);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   const row = page.getByTestId('orchestration-session-alpha');
   await expect(row).toBeVisible({ timeout: 10_000 });
@@ -3542,7 +3542,7 @@ test('Move to machine… lists only machines that can take the Session, and Hand
     ] },
   });
   const submissions = await recordAgentSubmissions(page);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
@@ -3585,7 +3585,7 @@ test('Move to machine… viewing a Tailscale host offers this computer and leave
         computers: [{ id: 'mini', label: 'tylers-mac-mini', routes: [{ id: 'tailscale:https://tylers-mac-mini.tail1234.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://tylers-mac-mini.tail1234.ts.net:8443', token: '', tailnetMachine: 'tylers-mac-mini', tailnetDomain: 'tail1234.ts.net' }] }] } } },
     tailnetMachines: { ok: true, tailnet: 'example.github', domain: 'tail1234.ts.net', machines: [tailnetMachine('tylers-mac-mini')] },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
@@ -3599,7 +3599,7 @@ test('Move to machine… with nothing reachable says why, names the fix, and sen
     tailnetMachines: { ok: true, tailnet: 'example.github', domain: 'tail1234.ts.net', machines: [tailnetMachine('tylers-mac-mini', { state: 'offline' })] },
   });
   const submissions = await recordAgentSubmissions(page);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
@@ -3616,7 +3616,7 @@ test('Move to machine… is unavailable, with the reason, on a host paired with 
       client: { mode: 'remote', activeProfileId: 'studio', profiles: [{ id: 'studio', label: 'Studio', baseUrl: 'https://studio.example:8443', token: 'paired', transport: 'http+sse' }],
         computers: [{ id: 'studio', label: 'Studio', routes: [{ id: 'public:https://studio.example:8443', kind: 'public', source: 'manual', baseUrl: 'https://studio.example:8443', token: 'paired' }] }] } } },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
   const item = page.getByRole('menuitem', { name: 'Move to machine…' });
@@ -3630,7 +3630,7 @@ test('Move to machine… with Tailscale signed out passes on the reason and the 
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     tailnetMachines: { ok: false, reason: 'Tailscale is signed out', fix: 'Sign in to Tailscale, then try again.' },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
@@ -3670,7 +3670,7 @@ async function installPaneChatOfferFixture(page: Page, firstCreateFails: CreateF
       return { success: false, error: failure === 'after-save' ? 'Session saved but could not be opened' : 'Session storage is busy' };
     };
   }, { failure: firstCreateFails, promptAtLaunch: openingPromptAtLaunch });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'Expand project Pane fixtures', exact: true }).click();
 }
@@ -3757,7 +3757,7 @@ test('Not now hides the Pane Chat offer for the rest of the run', async ({ page 
 // maximize keys work in a Session's splits as they do in a worktree Pane.
 test('in a Session, ⌘⌥+arrows move between splits, the tab keys work, and ⌘K ⌘M maximizes a split and restores', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('keys', 'Keys demo', '', '', '2026-09-16T12:00:00.000Z')]);
-  await page.goto('/');
+  await gotoApp(page);
   const { groupStrips } = await openSplitSession(page, 'keys', ['plan.html']);
   const groups = page.locator('.pane-chat-shell [data-panel-group-id]');
   await expect(groups).toHaveCount(2);
@@ -3794,7 +3794,7 @@ test('in a Session, ⌘⌥+arrows move between splits, the tab keys work, and �
 
 test('a Session inspector opened later still minimizes and maximizes by key (F-3)', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('aside', 'Aside demo', '', '', '2026-09-16T12:00:00.000Z')]);
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-aside').click();
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
   const aside = page.getByRole('complementary', { name: 'Session changes' });
@@ -3836,7 +3836,7 @@ for (const scheme of ['light', 'dark'] as const) {
         },
       } });
     });
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await gotoApp(page);
     await dismissStartupDialogs(page);
 
     await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
@@ -3875,7 +3875,7 @@ test('Switch to chat is always in the Session menu: checking, then why nothing s
       previewSessionSwitch: (sessionId: string) => new Promise(resolve => { release = () => resolve({ sessionId, items }); }),
     } });
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 
   const row = page.getByTestId('orchestration-session-alpha');
@@ -3951,7 +3951,7 @@ function overviewFoldedIntoChat(key: string): JsonObject {
 test('an approval covers the Session\'s right split exactly, and ✕ shows it again unchanged; with no split it opens one and ✕ collapses it', async ({ page }, testInfo) => {
   await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())], [], { notifySnapshot: sessionApprovalsSnapshot(), initialLayout: overviewFoldedIntoChat('plans') });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-plans').click();
   await expect(page.getByTestId('session-workspace-tabs').getByRole('tab').first()).toBeVisible();
 
@@ -4017,7 +4017,7 @@ async function sessionFocusSide(page: Page): Promise<{ side: 'column' | 'group' 
 test('D-335: the split keys move focus between the Session chat and its approval column both ways, and the focused side carries the accent', async ({ page }, testInfo) => {
   await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())], [], { notifySnapshot: sessionApprovalsSnapshot(), initialLayout: overviewFoldedIntoChat('plans') });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-plans').click();
   await expect(page.getByTestId('session-workspace-tabs').getByRole('tab').first()).toBeVisible();
   const chatStrip = page.locator('.panel-tab-strip').first();
@@ -4101,7 +4101,7 @@ for (const keys of JOURNEY_KEYS) {
       initialConfig: keys.config, initialLayout: overviewFoldedIntoChat('plans'),
     });
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/');
+    await gotoApp(page);
     // Where the person was: in the Session, its approval column open beside the chat.
     await page.getByTestId('orchestration-session-plans').click();
     await page.getByTestId('session-approvals-button').click();
@@ -4231,7 +4231,7 @@ test('T-11: Dismissing the dock\'s first card shows the next one, after either p
     notifySnapshot: { ...base, items, queue: items.map(item => item.id) }, initialPanels: [chat],
   });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-plans').click();
   const title = page.getByTestId('session-approval-card-title');
   const pager = page.getByTestId('session-approval-card-pager');
@@ -4257,7 +4257,7 @@ test('D-289: a worker\'s approval shows its asking tab live in the Session colum
   const workerTab = { id: 'panel-worker', sessionId: 'pane-worker', type: 'logs', title: 'doozy-overhaul logs', state: { isActive: true, hasBeenViewed: true }, metadata: { createdAt: now, lastActiveAt: now, position: 0 } };
   await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', now)], [paneFixture('pane-worker', 'doozy-overhaul')], { notifySnapshot: sessionApprovalsSnapshot(), initialPanels: [workerTab] });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-plans').click();
   await page.getByTestId('session-approvals-button').click();
   const column = page.getByTestId('approval-column');
@@ -4288,7 +4288,7 @@ test('F-8: opened cold from the sidebar count, the approval waits for the saved 
     };
   });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByTestId('orchestration-session-plans').hover();
   await page.getByTestId('session-approvals-count-button').click();
   await expect(page.locator('.panel-group-tab-bar')).toHaveCount(2);
@@ -4303,7 +4303,7 @@ test('A Session opens behind one skeleton of its workspace: bones only past 150 
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ]);
   await page.clock.install();
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click();
   await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });

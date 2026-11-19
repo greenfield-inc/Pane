@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { ChangedFileSummary, DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import { expectNoAxeViolations } from './axeTest';
 
 const timestamp = new Date(0).toISOString();
@@ -105,7 +105,7 @@ async function openChanges(page: Page, options: OpenChangesOptions = {}): Promis
     initialUiState: { expandedProjects: [project.id] },
     activeProjectId: project.id,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await page.getByRole('tab', { name: 'Changes', exact: true }).click();
   if (options.waitForList !== false) await expect(page.getByRole('listbox', { name: 'Changed files' })).toBeVisible();
@@ -365,7 +365,7 @@ test('the inspector opens on the Changes tab by default', async ({ page }) => {
     initialUiState: { expandedProjects: [project.id] },
     activeProjectId: project.id,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Changes', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('listbox', { name: 'Changed files' })).toBeVisible();

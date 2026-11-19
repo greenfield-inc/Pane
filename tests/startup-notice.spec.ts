@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 test('a mounted renderer reports the previous unclean shutdown once', async ({ page }) => {
   const notices: Array<{ title: string; body: string }> = [];
@@ -19,7 +19,7 @@ test('a mounted renderer reports the previous unclean shutdown once', async ({ p
     });
   });
   await installElectronApiMock(page, { uncleanShutdown: true });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   await expect(page.getByTestId('sidebar').first()).toBeVisible();
   await expect.poll(() => notices).toEqual([{
     title: "Pane didn't shut down cleanly",
