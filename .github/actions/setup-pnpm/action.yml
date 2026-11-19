@@ -1,23 +1,11 @@
 name: Set up Node.js and pnpm
-description: >-
-  Installs Node.js and activates the pnpm version pinned in package.json
-  through corepack. With install, also installs dependencies with
-  --ignore-scripts, on Linux from the node_modules cache that pushes to main write.
+description: Installs Node.js and activates the pnpm version pinned in package.json through corepack.
 # No pnpm store cache: on GitHub-hosted runners, restoring the store takes as
-# long as downloading the packages it holds. Restoring node_modules itself on
-# Linux took 12-14 s plus a 2-3 s offline install, against 20-24 s for an
-# install. Windows installs every time: its restore took 30-37 s, and pnpm
-# then failed with EPERM on the restored junctions.
+# long as downloading the packages it holds.
 inputs:
   node-version:
     description: Node.js version to install
     default: '22.23.4'
-  install:
-    description: Install dependencies with pnpm install --frozen-lockfile --ignore-scripts.
-    default: 'false'
-  save:
-    description: Save node_modules on a push to main when the cache missed. One job per key saves.
-    default: 'false'
 runs:
   using: composite
   steps:
@@ -28,38 +16,7 @@ runs:
     # The first pnpm call downloads pnpm. Older corepack (Node 20.0) can
     # skip the requested command on that call under pwsh, so make it here.
     - name: Enable pnpm
-      id: pnpm
       shell: bash
       run: |
         corepack enable pnpm
-        echo "version=$(pnpm --version)" >> "$GITHUB_OUTPUT"
-
-    # The key covers everything that decides the installed tree. A hit still
-    # runs the frozen-lockfile install, so a package.json that disagrees with
-    # the lockfile fails exactly as it does without the cache.
-    - name: Restore node_modules
-      id: cache
-      if: inputs.install == 'true' && runner.os == 'Linux'
-      uses: actions/cache/restore@v5
-      with:
-        # The root and each workspace project's node_modules (pnpm-workspace.yaml).
-        path: |
-          node_modules
-          */node_modules
-          packages/*/node_modules
-        key: node-modules-${{ runner.os }}-${{ runner.arch }}-pnpm${{ steps.pnpm.outputs.version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc', 'patches/**') }}
-
-    - name: Install dependencies
-      if: inputs.install == 'true'
-      shell: bash
-      run: pnpm install --frozen-lockfile --ignore-scripts ${{ steps.cache.outputs.cache-hit == 'true' && '--offline' || '' }}
-
-    - name: Save node_modules
-      if: inputs.install == 'true' && inputs.save == 'true' && runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-      uses: actions/cache/save@v5
-      with:
-        path: |
-          node_modules
-          */node_modules
-          packages/*/node_modules
-        key: ${{ steps.cache.outputs.cache-primary-key }}
+        pnpm --version

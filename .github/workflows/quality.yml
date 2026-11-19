@@ -83,14 +83,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v7
 
-    # The install skips install scripts: the frontend tests load no native
-    # module and no Electron.
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
-      with:
-        install: 'true'
-        # This job saves node_modules for every Linux job on main pushes.
-        save: 'true'
+
+    # The frontend tests load no native module and no Electron, so the
+    # Electron-targeted postinstall rebuild is skipped.
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
 
     - name: Verify GitHub release publication behavior
       run: bash scripts/test-publish-github-release.sh
@@ -128,12 +127,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v7
 
-    # The install skips install scripts; the Node rebuild below builds the
-    # only native module these tests load.
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
-      with:
-        install: 'true'
+
+    # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
+    # builds the only native module these tests load.
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
 
     # The unit tests load the real electron package (main/src/utils/shellPath.ts).
     - name: Fetch Electron
@@ -160,13 +160,11 @@ jobs:
 
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
-      with:
-        install: 'true'
 
     # bun's install script puts its binary in place (0.1s; `pnpm rebuild bun`
     # took 6s). It is the one install script this job needs.
-    - name: Install bun's binary
-      run: node node_modules/bun/install.js
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts && node node_modules/bun/install.js
 
     # Oxlint runs alone first: beside the type check it shared the 4 CPUs and
     # took 21-23s.
@@ -259,8 +257,9 @@ jobs:
 
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
-      with:
-        install: 'true'
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
 
     - name: Install Playwright browsers
       uses: ./.github/actions/playwright-browsers
@@ -287,8 +286,9 @@ jobs:
 
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
-      with:
-        install: 'true'
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
 
     - name: Install Playwright browsers
       uses: ./.github/actions/playwright-browsers
@@ -308,8 +308,9 @@ jobs:
 
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
-      with:
-        install: 'true'
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
 
     - name: Restore Playwright browsers
       uses: ./.github/actions/playwright-browsers
@@ -524,12 +525,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v7
 
-    # The install skips install scripts; the Node rebuild below builds the
-    # only native module these tests load.
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
-      with:
-        install: 'true'
+
+    # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
+    # builds the only native module these tests load.
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
 
     # The unit tests load the real electron package (main/src/utils/shellPath.ts);
     # without this, each test worker downloads Electron and they collide on Windows.
@@ -654,8 +656,9 @@ jobs:
 
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
-      with:
-        install: 'true'
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
 
     - name: Fetch Electron
       uses: ./.github/actions/fetch-electron
