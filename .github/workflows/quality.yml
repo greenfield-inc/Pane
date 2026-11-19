@@ -274,9 +274,10 @@ jobs:
   # from Vite with a mocked Electron API; the two renderer selection race shards
   # also run from Vite alone. The two Electron shards launch real Electron and
   # split the specs playwright.chat-tabs.config.ts lists.
-  # The specs #1554 wired in run in Functional Smoke (stabilizing), the WebGL
-  # shards and a stabilizing Electron step: they report on every run, but CI
-  # result does not wait for them (REPORTED_ONLY_JOBS in scripts/ci-gate.mjs).
+  # Specs #1554 wired in that are not yet proven stable run in Functional Smoke
+  # (stabilizing), the WebGL shards and a stabilizing Electron step: they report
+  # on every run, but CI result does not wait for them (REPORTED_ONLY_JOBS in
+  # scripts/ci-gate.mjs).
   # scripts/ci-test-inventory.mjs (in Type Check and Lint) fails when a test file
   # runs in no lane.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot

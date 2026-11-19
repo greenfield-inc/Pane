@@ -8,9 +8,11 @@ import browserConfig from './playwright.ci.minimal.config';
 const STABILIZING_SPECS = [
   'agent-usage.spec.ts',
   'all-machines.spec.ts',
+  'appearance-bootstrap.spec.ts',
   'changes-list.spec.ts',
   'keyboard-navigation.spec.ts',
   'orchestration-sessions.spec.ts',
+  'remote-host-switcher.spec.ts',
   'terminal-file-links.spec.ts',
   'usage-and-limits.spec.ts',
 ];
