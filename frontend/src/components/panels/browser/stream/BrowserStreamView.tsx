@@ -236,7 +236,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       // The keyboard deleted the sentinel: a Backspace, then whatever replaced it.
       send({ kind: 'key', key: 'Backspace', modifiers: 0 });
     }
-    const text = typed.replaceAll(SENTINEL, '');
+    const text = typed.split(SENTINEL).join('');
     if (text) send({ kind: 'text', text });
   };
   const composing = useRef(false);
