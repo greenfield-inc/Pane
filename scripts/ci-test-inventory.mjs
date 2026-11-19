@@ -72,7 +72,9 @@ export const LANES = [
   ] } },
   { workflow: 'quality.yml', job: 'relay-rust', run: 'cargo test --locked', list: { glob: /^(relay|direct)\/tests\/[^/]+\.rs$/ } },
   { workflow: 'quality.yml', job: 'relay-tests', list: { named: ['scripts/test-runpane-relay.js'] } },
-  // Tests of the packaged app run where the package is built, not on pull requests.
+  // Tests of the packaged app run in Linux Package Build, on pull requests that touch
+  // packaging. That workflow is not part of CI result, so a pull request that touches
+  // no packaging path can break them and still merge green.
   { workflow: 'linux-package-build.yml', job: 'build', list: { named: ['scripts/test-packaged-native-architecture.js', 'scripts/test-packaged-headless-remote-setup.sh'] } },
 ];
 
@@ -209,6 +211,9 @@ function main() {
   const perLane = new Map();
   for (const fileLanes of verdict.lanesByFile.values()) for (const lane of new Set(fileLanes)) perLane.set(lane, (perLane.get(lane) ?? 0) + 1);
   const notInCi = Object.keys(NOT_IN_CI).filter((file) => verdict.lanesByFile.has(file)).length;
+  // Code Quality is the workflow CI result gates; lanes elsewhere run outside it.
+  const gated = (lane) => lane.startsWith('quality.yml#');
+  const ungated = [...verdict.lanesByFile].filter(([, fileLanes]) => fileLanes.length > 0 && !fileLanes.some(gated)).map(([file]) => file);
   const summary = [
     `### Test inventory: ${verdict.ok ? 'every test file has a lane' : 'fail'}`,
     '',
@@ -216,7 +221,8 @@ function main() {
     '',
     '| Lane | Files |',
     '| --- | --- |',
-    ...[...perLane].map(([lane, count]) => `| ${lane} | ${count} |`),
+    ...[...perLane].map(([lane, count]) => `| ${lane}${gated(lane) ? '' : ' (not part of CI result)'} | ${count} |`),
+    ...(ungated.length > 0 ? ['', `Run only outside CI result: ${ungated.join(', ')}.`] : []),
     ...(verdict.problems.length > 0 ? ['', ...verdict.problems.map((problem) => `- ${problem}`)] : []),
     '',
   ].join('\n');

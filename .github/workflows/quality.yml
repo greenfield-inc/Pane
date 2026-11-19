@@ -96,8 +96,9 @@ jobs:
 
     # The frontend tests load no native module and no Electron, so the
     # Electron-targeted postinstall rebuild is skipped.
+    # Every workspace: this job also runs the native, glasses and mobile unit tests.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
+      run: pnpm install --ignore-scripts --os=current --cpu=current
 
     - name: Verify GitHub release publication behavior
       run: bash scripts/test-publish-github-release.sh
@@ -316,7 +317,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Install Playwright browser dependencies
       run: pnpm exec playwright install --with-deps chromium
