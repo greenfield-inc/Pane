@@ -9,7 +9,6 @@ import {
   xtermEvaluate,
 } from './terminalXterm';
 
-test.describe.configure({ mode: 'serial' });
 const now = new Date(0).toISOString();
 const project = {
   id: 610,
