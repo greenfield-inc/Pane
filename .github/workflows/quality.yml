@@ -476,6 +476,16 @@ jobs:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
         PANE_ELECTRON_E2E: '1'
 
+    # Reported only: a failure here marks the step and leaves the job green. The
+    # config's comment says why each spec there is not yet required.
+    - name: Run stabilizing Electron specs
+      if: ${{ !cancelled() && matrix.shard == 1 }}
+      continue-on-error: true
+      run: xvfb-run -a pnpm exec playwright test --config=playwright.ci.stabilizing-electron.config.ts
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-stabilizing-electron
+        PANE_ELECTRON_E2E: '1'
+
     # Last, so only a build that Electron loaded and passed the tests with is saved.
     - name: Save the Electron SQLite build
       if: steps.sqlite-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'

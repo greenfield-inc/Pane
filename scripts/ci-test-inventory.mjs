@@ -31,7 +31,7 @@ export const TEST_FILE_PATTERNS = [
 // list its files.
 const NATIVE_GLASSES_MOBILE = 'pnpm --filter native --filter glasses --filter mobile run test';
 
-// A lane with `stabilizing` runs and reports, but CI result does not wait for it.
+// A lane with `stabilizing` runs and reports, but CI result does not wait for it; the value is why.
 const STABILIZING = 'stabilizing: tab-popover.spec.ts:85 failed once in CI (run 44485044464) and passed 200 of 200 on parsa-devbox, cause not yet known; returns to the required lane once it is found';
 
 export const LANES = [
@@ -54,6 +54,7 @@ export const LANES = [
   { workflow: 'quality.yml', job: 'functional-smoke-webgl', run: 'playwright test --config=playwright.ci.webgl.config.ts', list: { playwright: 'playwright.ci.webgl.config.ts' } },
   { workflow: 'quality.yml', job: 'renderer-selection', run: 'playwright test --config=tests/renderer/playwright.config.ts', list: { playwright: 'tests/renderer/playwright.config.ts' } },
   { workflow: 'quality.yml', job: 'functional-smoke-electron', run: 'playwright test --config=playwright.chat-tabs.config.ts', list: { playwright: 'playwright.chat-tabs.config.ts' } },
+  { workflow: 'quality.yml', job: 'functional-smoke-electron', run: 'playwright test --config=playwright.ci.stabilizing-electron.config.ts', list: { playwright: 'playwright.ci.stabilizing-electron.config.ts' }, stabilizing: 'stabilizing: browser-agents.spec.ts:104 (added by #1550) failed once in CI (run 44487357192) after passing 10 of 10 in probe #1588, cause not yet known; returns to the required Electron specs once it is found' },
   { workflow: 'quality.yml', job: 'functional-smoke-electron', list: { named: ['scripts/test-worktree-trash-electron.cjs'] } },
   { workflow: 'quality.yml', job: 'runpane-wrapper-tests', list: { named: [
     'scripts/test-runpane-package-smoke.js',
@@ -227,7 +228,7 @@ function main() {
     '| Lane | Files |',
     '| --- | --- |',
     ...[...perLane].map(([lane, count]) => `| ${lane}${gated(lane) || lane.endsWith(' (stabilizing)') ? '' : ' (not part of CI result)'} | ${count} |`),
-    ...([...perLane.keys()].some((lane) => lane.endsWith(' (stabilizing)')) ? ['', `Lanes marked (stabilizing) report, but CI result does not wait for them. ${STABILIZING}.`] : []),
+    ...(LANES.some((lane) => lane.stabilizing) ? ['', 'Lanes marked (stabilizing) report, but CI result does not wait for them:', ...LANES.filter((lane) => lane.stabilizing).map((lane) => `- ${lane.job}: ${lane.stabilizing}.`)] : []),
     ...(ungated.length > 0 ? ['', `Run only outside CI result: ${ungated.join(', ')}.`] : []),
     ...(verdict.problems.length > 0 ? ['', ...verdict.problems.map((problem) => `- ${problem}`)] : []),
     '',
