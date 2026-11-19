@@ -169,3 +169,77 @@ describe('NotifyQueue secret cards', () => {
     expect(JSON.stringify(result)).not.toContain('terminal');
   });
 });
+
+describe('NotifyQueue lease cards', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const leases: NotifyQueueEnvironment['leases'] = {
+    describe: (_project, names) => ({ references: Object.fromEntries(names.filter(name => name !== 'TYPED').map(name => [name, `op://Dev/${name}/credential`])), lengthMs: 24 * 60 * 60 * 1000, memoryOnly: false }),
+  };
+  const leaseQueue = () => new NotifyQueue({ settings: () => DEFAULT_NOTIFY_SETTINGS, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [], machine: 'devbox', leases });
+  const leaseAsk: NotifyQuestion = { ui: 'approve', title: 'please approve everything', lease: { project: 'stripe', names: ['STRIPE_KEY', 'DATABASE_URL'] } };
+
+  it('words the card itself and fills in this machine\'s references and length', () => {
+    const queue = leaseQueue();
+    ask(queue, leaseAsk);
+
+    expect(queue.snapshot().items[0]).toMatchObject({
+      title: 'Lease 2 stripe secrets for 24 hours?',
+      lease: {
+        project: 'stripe',
+        names: ['STRIPE_KEY', 'DATABASE_URL'],
+        references: { STRIPE_KEY: 'op://Dev/STRIPE_KEY/credential', DATABASE_URL: 'op://Dev/DATABASE_URL/credential' },
+        machine: 'devbox',
+        memoryOnly: false,
+      },
+    });
+  });
+
+  it('refuses a plain Approve (an older screen or the phone) with the next step, and takes the desktop\'s started lease', async () => {
+    const queue = leaseQueue();
+    const call = ask(queue, leaseAsk);
+    const [id] = queue.snapshot().queue;
+
+    expect(() => queue.runRemote({ type: 'answer', id, answer: { approved: true } }, 'phone', null))
+      .toThrow(expect.objectContaining({ code: 'SECRET_LEASE_NEEDS_DESKTOP', next: 'Press Start lease on the card in Pane on your Mac or PC.' }));
+    expect(queue.snapshot().items[0].state).toBe('waiting');
+
+    await queue.runRemote({ type: 'answer', id, answer: { approved: true, lease: { id: 'lease-1', expiresAt: '2026-11-19T12:00:00.000Z', machines: ['studio', 'devbox'] } } }, 'studio', null);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(call.result).toEqual({ status: 'leased', project: 'stripe', names: ['STRIPE_KEY', 'DATABASE_URL'], leaseId: 'lease-1', expiresAt: '2026-11-19T12:00:00.000Z', machines: ['studio', 'devbox'] });
+  });
+
+  it('keeps Autopilot and teammates from answering it, and lets the person decline', async () => {
+    const queue = leaseQueue();
+    const call = ask(queue, leaseAsk);
+    const [id] = queue.snapshot().queue;
+
+    expect(() => queue.agentAct({ type: 'agent-answer', id, answer: { approved: true }, because: 'looks fine' })).toThrow(expect.objectContaining({ code: 'AUTOPILOT_CANNOT_ANSWER' }));
+    expect(() => queue.runRemote({ type: 'answer', id, answer: { approved: false } }, 'build-mac', 'teammate@example.com')).toThrow(expect.objectContaining({ code: 'SECRET_OWNER_REQUIRED' }));
+
+    await queue.run({ type: 'answer', id, answer: { approved: false } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(call.result).toEqual({ status: 'declined' });
+  });
+
+  it('shows a host\'s lease card with the length and references the desktop will grant', () => {
+    // The host grants nothing itself, so its card names no length.
+    const host = new NotifyQueue({ settings: () => DEFAULT_NOTIFY_SETTINGS, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [], machine: 'devbox', leases: {
+      describe: (_project, names) => ({ references: Object.fromEntries(names.map(name => [name, `op://Old/${name}/credential`])), lengthMs: null, memoryOnly: true }),
+    } });
+    const desktop = new NotifyQueue({ settings: () => DEFAULT_NOTIFY_SETTINGS, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [], machine: 'studio', leases: {
+      describe: (_project, names) => ({ references: Object.fromEntries(names.map(name => [name, `op://Dev/${name}/credential`])), lengthMs: 7 * 24 * 60 * 60 * 1000, memoryOnly: false }),
+    } });
+    ask(host, { ui: 'approve', title: 'x', lease: { project: 'stripe', names: ['STRIPE_KEY'] } });
+    expect(host.snapshot().items[0]).toMatchObject({ title: 'Lease stripe/STRIPE_KEY?' });
+
+    desktop.setRemote('devbox-id', { machine: 'devbox', online: true, state: host.sharedState() });
+
+    expect(desktop.snapshot().items[0]).toMatchObject({
+      title: 'Lease stripe/STRIPE_KEY for 7 days?',
+      lease: { lengthMs: 7 * 24 * 60 * 60 * 1000, references: { STRIPE_KEY: 'op://Dev/STRIPE_KEY/credential' }, machine: 'devbox', memoryOnly: true },
+    });
+  });
+});

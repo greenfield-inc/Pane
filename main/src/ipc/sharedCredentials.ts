@@ -10,6 +10,7 @@ import {
   sharedNotifySwitchSchema,
 } from '../services/sharedCredentials';
 import { paneSecretStore, type PaneSecretStore } from '../services/paneSecrets';
+import { refuseLocalCaller } from './paneSecrets';
 import type { AppServices } from './types';
 
 const trustedSchema = boundary.object({ clientId: boundary.nonEmptyString });
@@ -25,16 +26,26 @@ export function registerSharedCredentialHandlers(
   secrets: PaneSecretStore = paneSecretStore(),
 ): void {
   const { configManager } = services;
-  const readAll = async () => ({ ...readSharedCredentials(configManager.getConfig()), paneSecrets: await secrets.exportForSync() });
+  const readAll = async () => ({
+    ...readSharedCredentials(configManager.getConfig()),
+    paneSecrets: await secrets.exportForSync(),
+    paneSecretReferences: secrets.exportReferencesForSync(),
+  });
   commandRegistry.register('credentials:shared:get', async (_input: PaneCommandValue, trusted: PaneCommandValue) => {
+    // The local socket passes a caller's own "trusted" argument, so only paired devices over HTTP may sync.
+    refuseLocalCaller();
     decodeBoundary(trusted, trustedSchema);
     return readAll();
   });
   commandRegistry.register('credentials:shared:apply', async (input: PaneCommandValue, trusted: PaneCommandValue) => {
+    refuseLocalCaller();
     decodeBoundary(trusted, trustedSchema);
     const incoming = decodeBoundary(input, sharedCredentialsSchema);
     const { changed } = await applySharedCredentials(configManager, incoming);
-    const changedSecrets = incoming.paneSecrets ? await secrets.applyFromSync(incoming.paneSecrets) : [];
+    const changedSecrets = [
+      ...(incoming.paneSecrets ? await secrets.applyFromSync(incoming.paneSecrets) : []),
+      ...(incoming.paneSecretReferences ? await secrets.applyReferencesFromSync(incoming.paneSecretReferences) : []),
+    ];
     // Carries no values, so no key ever rides an event.
     if (changed.length + changedSecrets.length > 0) getPaneEventSink().send('remote:settings-changed');
     // The keys only, as before secrets: callers ignore the answer, so secret values never travel back.
