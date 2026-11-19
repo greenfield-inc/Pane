@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const timestamp = new Date(0).toISOString();
@@ -14,6 +14,39 @@ const panel = {
   state: { isActive: true, hasBeenViewed: true, customState: { filePath: 'diagrams.md', isPinned: true } },
   metadata: { createdAt: timestamp, lastActiveAt: timestamp, position: 0 },
 };
+
+// Markdown previews read through file:preview-url and a fetch (b54794b21). Serve each
+// file's content from a same-origin route, as tests/find-in-tab.spec.ts does.
+async function servePreviews(page: Page, contents: Record<string, string>) {
+  await page.route('**/__diagram-preview/**', (route) => {
+    const name = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop() ?? '');
+    const body = contents[name] ?? '';
+    return route.fulfill({
+      status: 206,
+      body,
+      contentType: 'text/markdown',
+      headers: { 'Content-Range': `bytes 0-${Math.max(0, Buffer.byteLength(body) - 1)}/${Buffer.byteLength(body)}` },
+    });
+  });
+  await page.addInitScript(() => {
+    const wrap = () => {
+      const api = window.electronAPI;
+      if (!api) return false;
+      const invoke = api.invoke;
+      api.invoke = (channel: string, ...args: unknown[]) => {
+        if (channel === 'file:preview-url') {
+          // SAFETY: file:preview-url receives the documented { sessionId, filePath } request.
+          const { filePath } = args[0] as { filePath: string };
+          return Promise.resolve(`${location.origin}/__diagram-preview/${encodeURIComponent(filePath)}`);
+        }
+        if (channel === 'file:release-preview') return Promise.resolve();
+        return invoke(channel, ...args);
+      };
+      return true;
+    };
+    if (!wrap()) document.addEventListener('DOMContentLoaded', wrap, { once: true });
+  });
+}
 
 test('a broken Markdown diagram leaves a diagram in another split preview visible', async ({ page }, testInfo) => {
   await installElectronApiMock(page, {
@@ -31,18 +64,11 @@ test('a broken Markdown diagram leaves a diagram in another split preview visibl
     },
     initialUiState: { expandedProjects: [project.id] }, activeProjectId: project.id,
   });
-  await gotoApp(page);
-  await page.evaluate(() => {
-    const invoke = window.electronAPI.invoke;
-    window.electronAPI.invoke = async (channel, ...args) => {
-      if (channel !== 'file:read') return invoke(channel, ...args);
-      // SAFETY: file:read receives the documented filePath request object.
-      const { filePath } = args[0] as { filePath: string };
-      return { success: true, content: filePath === 'broken.md'
-        ? '# Broken diagram\n\n```mermaid\nflowchart TD\n A[Broken syntax\n```'
-        : '# Retained diagram\n\n```mermaid\nflowchart TD\n A[Retained diagram] --> B[Still visible]\n```' };
-    };
+  await servePreviews(page, {
+    'broken.md': '# Broken diagram\n\n```mermaid\nflowchart TD\n A[Broken syntax\n```',
+    'diagrams.md': '# Retained diagram\n\n```mermaid\nflowchart TD\n A[Retained diagram] --> B[Still visible]\n```',
   });
+  await gotoApp(page);
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await page.getByRole('button', { name: 'Preview', exact: true }).first().click();
   await expect(page.locator('.markdown-preview svg').getByText('Retained diagram', { exact: true })).toBeVisible();
@@ -58,14 +84,11 @@ test('a broken diagram cannot remove a neighbor rendered in the same millisecond
     initialProjects: [project], initialSessions: [session], initialPanels: [panel],
     initialUiState: { expandedProjects: [project.id] }, activeProjectId: project.id,
   });
+  await servePreviews(page, {
+    'diagrams.md': '```mermaid\nflowchart TD\n A[First diagram] --> B[First result]\n```\n\n```mermaid\nflowchart TD\n A[Broken syntax\n```',
+  });
   await gotoApp(page);
   await page.clock.setFixedTime(new Date('2026-09-25T00:00:00Z'));
-  await page.evaluate(() => {
-    const invoke = window.electronAPI.invoke;
-    window.electronAPI.invoke = async (channel, ...args) => channel === 'file:read'
-      ? { success: true, content: '```mermaid\nflowchart TD\n A[First diagram] --> B[First result]\n```\n\n```mermaid\nflowchart TD\n A[Broken syntax\n```' }
-      : invoke(channel, ...args);
-  });
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await page.getByRole('button', { name: 'Preview', exact: true }).click();
   await expect(page.getByText('⚠ Diagram error:', { exact: true })).toBeVisible();
