@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -16,7 +17,7 @@ const dirs: string[] = [];
 
 afterEach(async () => {
   vi.useRealTimers();
-  await Promise.all(dirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
+  await Promise.all(dirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true, maxRetries: 3 })));
 });
 
 const plain: SecretEncryption = { available: () => true, encrypt: async text => Buffer.from(text), decrypt: async data => data.toString() };
@@ -216,7 +217,7 @@ describe('SecretLeaseService', () => {
   it('posts the Extend card an hour before the end, a quarter of the way from the end for a short lease, and closes it when the lease runs out', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const clock = { now: Date.parse('2026-11-18T12:00:00Z') };
-    const { service, secrets, reminders, closed, config } = await desktop(clock, [], ITEMS);
+    const { service, secrets, reminders, closed, config, dir } = await desktop(clock, [], ITEMS);
     await secrets.setReference('stripe', 'STRIPE_KEY', 'op://Dev/Stripe/credential');
     await config.updateConfigWith(() => ({ secretLeaseLengths: { stripe: HOUR } }));
     const { leaseId } = await service.start({ project: 'stripe', names: ['STRIPE_KEY'], machines: [], requestedBy: 'Settings' });
@@ -236,6 +237,8 @@ describe('SecretLeaseService', () => {
     clock.now += 15 * 60_000;
     await vi.advanceTimersByTimeAsync(15 * 60_000);
     await settle(() => expect(closed).toContain(leaseId));
+    // The store logs the expiry after telling listeners; wait for it so cleanup finds no write in flight.
+    await settle(() => expect(readFileSync(path.join(dir, 'secret-leases.log'), 'utf8')).toContain('"expired"'));
     service.dispose();
   });
 });

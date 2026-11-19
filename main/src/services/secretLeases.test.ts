@@ -12,7 +12,7 @@ const dirs: string[] = [];
 
 afterEach(async () => {
   vi.useRealTimers();
-  await Promise.all(dirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
+  await Promise.all(dirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true, maxRetries: 3 })));
 });
 
 /** Reversible stand-in for safeStorage: a byte rotation, so ciphertext never contains the plain text. */
