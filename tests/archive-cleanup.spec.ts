@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { ArchiveProgressSnapshot, ArchiveProgressTask } from '../shared/types/archiveProgress';
 
 declare global {
@@ -27,7 +27,7 @@ test('retains cleanup failure across reload and exposes an explicit interrupted-
     },
     archiveRetryError: 'Cleanup is not ready to retry',
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Archive Tasks' }).click();
   await expect(page.getByText('Archived; cleanup needs attention')).toBeVisible();
   await expect(page.getByText('/repo/worktrees/feature', { exact: true })).toBeVisible();
@@ -55,7 +55,7 @@ const snapshot = (...tasks: ArchiveProgressTask[]): ArchiveProgressSnapshot => (
 
 test('archive progress leaves the panel as the user set it and opens it only for a new failure', async ({ page }) => {
   await installElectronApiMock(page);
-  await page.goto('/');
+  await gotoApp(page);
   const emit = (progress: ArchiveProgressSnapshot) => page.evaluate(
     value => window.__paneTestElectronMock.emitArchiveProgress(value), progress,
   );
@@ -82,7 +82,7 @@ test('archive progress leaves the panel as the user set it and opens it only for
 
 test('a failure seen first after a reconnect opens the panel, one from another host does not', async ({ page }) => {
   await installElectronApiMock(page, { initialArchiveProgress: snapshot(task('a', 'removing-worktree')) });
-  await page.goto('/');
+  await gotoApp(page);
   const header = page.getByRole('button', { name: /Archive Tasks/ });
   await expect(header).toHaveAttribute('aria-expanded', 'false');
   const resync = (progress: ArchiveProgressSnapshot, hostChanged: boolean) => page.evaluate(([value, changed]) => {
