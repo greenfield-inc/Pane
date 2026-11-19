@@ -1,12 +1,101 @@
 import { defineConfig, devices } from '@playwright/test';
+import { CHAT_PROJECTS } from './playwright.agent-chat.config';
 import { getPlaywrightBaseURL, getPlaywrightPort, getPlaywrightServerEnv } from './playwright.shared';
 
 const devServerPort = getPlaywrightPort();
 
+// Every spec that runs against the renderer from Vite with a mocked Electron API.
+// scripts/ci-test-inventory.mjs fails CI when a spec in tests/ runs in no lane, so a
+// new spec must be added here, to another CI config, or to its NOT_IN_CI list.
+// terminal-blur-recovery.spec.ts runs in its own lane (playwright.ci.webgl.config.ts).
+const BROWSER_SPECS = [
+  'accessibility.spec.ts',
+  'adaptive-panel-layout.spec.ts',
+  'agent-status.spec.ts',
+  'agent-usage.spec.ts',
+  'all-machines.spec.ts',
+  'analytics-consent.spec.ts',
+  'appearance-bootstrap.spec.ts',
+  'approvals-system.spec.ts',
+  'archive-cleanup.spec.ts',
+  'autopilot-settings.spec.ts',
+  'browser-ports.spec.ts',
+  'changes-list-perf.spec.ts',
+  'changes-list.spec.ts',
+  'chat-enter-focus.spec.ts',
+  'chrome-evidence.spec.ts',
+  'codeless-remote.spec.ts',
+  'command-palette.spec.ts',
+  'commit-dialog.spec.ts',
+  'desktop-notifications.spec.ts',
+  'device-tab.spec.ts',
+  'discord-presence.spec.ts',
+  'dropdown-keyboard-nav.spec.ts',
+  'feedback.spec.ts',
+  'file-editor-lifecycle.spec.ts',
+  'file-preview-lifecycle.spec.ts',
+  'file-tree-selection.spec.ts',
+  'file-tree-shortcuts.spec.ts',
+  'find-in-tab.spec.ts',
+  'home-usage-card.spec.ts',
+  'html-editable-source.spec.ts',
+  'html-explorer-open.spec.ts',
+  'keyboard-navigation.spec.ts',
+  'launch-outline.spec.ts',
+  'launch-shortcuts.spec.ts',
+  'leaderboard.spec.ts',
+  'loops.spec.ts',
+  'machine-health-cards.spec.ts',
+  'machine-health-resources.spec.ts',
+  'main-repo-push.spec.ts',
+  'mermaid-preview.spec.ts',
+  'mission-control.spec.ts',
+  'motion-remote.spec.ts',
+  'motion.spec.ts',
+  'native-mobile.spec.ts',
+  'notify-cards.spec.ts',
+  'notify.spec.ts',
+  'onboarding-open-project.spec.ts',
+  'orchestration-sessions.spec.ts',
+  'pair-phone.spec.ts',
+  'pane-order.spec.ts',
+  'pause.spec.ts',
+  'project-dashboard-refresh.spec.ts',
+  'remote-host-switcher.spec.ts',
+  'remote-network-rejection.spec.ts',
+  'remote-pwa-browser.spec.ts',
+  'remote-pwa-explorer.spec.ts',
+  'remote-pwa-sidebar.spec.ts',
+  'remote-pwa-view-state.spec.ts',
+  'remote-runtime-state.spec.ts',
+  'resume-selection.spec.ts',
+  'review-availability.spec.ts',
+  'session-logs.spec.ts',
+  'session-move-dialog.spec.ts',
+  'settings.spec.ts',
+  'shortcut-sheet.spec.ts',
+  'shortcuts-settings.spec.ts',
+  'sidebar-compact.spec.ts',
+  'sidebar-session-status.spec.ts',
+  'smoke.spec.ts',
+  'split-groups.spec.ts',
+  'ssh-hosts.spec.ts',
+  'startup-notice.spec.ts',
+  'summary-policy.spec.ts',
+  'tab-popover.spec.ts',
+  'tailnet-https-banner.spec.ts',
+  'terminal-dock.spec.ts',
+  'terminal-file-links.spec.ts',
+  'terminal-keyboard-input.spec.ts',
+  'terminal-selection-popover.spec.ts',
+  'terminal-upload-button.spec.ts',
+  'theme-screenshots.spec.ts',
+  'usage-and-limits.spec.ts',
+  'window-title-bar.spec.ts',
+];
+
 export default defineConfig({
   testDir: './tests',
-  // Keep the fast startup checks and the maintained accessibility journeys in CI.
-  testMatch: ['smoke.spec.ts', 'accessibility.spec.ts', 'settings.spec.ts', 'remote-pwa-sidebar.spec.ts', 'remote-pwa-view-state.spec.ts', 'remote-pwa-explorer.spec.ts', 'file-editor-lifecycle.spec.ts', 'file-preview-lifecycle.spec.ts', 'find-in-tab.spec.ts', 'shortcut-sheet.spec.ts', 'summary-policy.spec.ts', 'html-editable-source.spec.ts', 'html-explorer-open.spec.ts', 'file-tree-selection.spec.ts', 'browser-ports.spec.ts', 'analytics-consent.spec.ts', 'ssh-hosts.spec.ts', 'onboarding-open-project.spec.ts', 'terminal-selection-popover.spec.ts', 'home-usage-card.spec.ts', 'notify-cards.spec.ts', 'approvals-system.spec.ts', 'launch-outline.spec.ts', 'window-title-bar.spec.ts', 'device-tab.spec.ts', 'machine-health-cards.spec.ts', 'machine-health-resources.spec.ts', 'loops.spec.ts', 'session-move-dialog.spec.ts'],
   // Allow enough time for cold CI startup while keeping failures bounded.
   timeout: 30 * 1000,
   expect: {
@@ -45,10 +134,12 @@ export default defineConfig({
     },
   },
 
-  // Configure projects for major browsers
+  // Configure projects for major browsers. The chat composer specs run at the
+  // desktop and phone sizes playwright.agent-chat.config.ts gives them.
   projects: [
     {
       name: 'chromium',
+      testMatch: BROWSER_SPECS,
       use: { 
         ...devices['Desktop Chrome'],
         // Disable GPU for CI
@@ -57,6 +148,10 @@ export default defineConfig({
         },
       },
     },
+    ...CHAT_PROJECTS.map((project) => ({
+      ...project,
+      use: { ...devices['Desktop Chrome'], ...project.use, launchOptions: { args: ['--disable-gpu', '--disable-dev-shm-usage', '--disable-setuid-sandbox', '--no-sandbox'] } },
+    })),
   ],
 
   // The tests mock the Electron API (tests/electronApiMock.ts), so they need

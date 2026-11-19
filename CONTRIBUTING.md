@@ -169,14 +169,18 @@ To test approvals' timers without waiting, start a dev build with
   your real data. They do still see your shell environment: with
   `OPENROUTER_API_KEY` set, one main test fails (#721). Unset it for the run.
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
-  `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
-  CI runs: smoke, accessibility, settings, remote sidebar and file-preview lifecycle regressions.
+  `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the
+  browser suite CI runs: every spec `playwright.ci.minimal.config.ts` lists,
+  with the chat composer specs at a desktop and a phone size.
 - `pnpm test:chat-tabs` runs the chat tab journeys and the loop Session journey
   (`tests/loop-sessions.spec.ts`): it launches Electron from
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each
   test in its own temporary `PANE_DIR`, and serves the renderer from plain Vite.
-  CI runs the specs `playwright.chat-tabs.config.ts` lists, in one job. A new
-  spec runs only once it is listed there.
+  CI runs the specs `playwright.chat-tabs.config.ts` lists, in two shards, with
+  `PANE_ELECTRON_E2E=1` so the remote browser and browser auth specs run too.
+- A new spec runs only once a CI config lists it: CI fails until it is in
+  `playwright.ci.minimal.config.ts`, `playwright.chat-tabs.config.ts`, or the
+  `NOT_IN_CI` list in `scripts/ci-test-inventory.mjs` with its reason.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
   (`tests/electronApiMock.ts`). `pnpm test:ci:minimal` starts Vite alone. To
   start Vite, `pnpm test` and `pnpm test:ci` run `pnpm electron-dev` on port

@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const project = {
   id: 400,
@@ -46,7 +46,7 @@ test('leaderboard tab shows join banner and table before opt-in', async ({ page 
     initialLeaderboard: leaderboardEntries,
   });
   await page.setViewportSize({ width: 1200, height: 800 });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
 
   await openUsageAndLimits(page);
 
@@ -95,7 +95,7 @@ test('leaderboard tab shows joined banner when opted in', async ({ page }, testI
     initialLeaderboard: leaderboardEntries,
   });
   await page.setViewportSize({ width: 1200, height: 800 });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
 
   await openUsageAndLimits(page);
   await page.getByRole('tab', { name: 'Leaderboard' }).click();
@@ -124,7 +124,7 @@ test('tab navigation switches between My usage and Leaderboard', async ({ page }
     initialLeaderboard: leaderboardEntries,
   });
   await page.setViewportSize({ width: 1200, height: 800 });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
 
   await openUsageAndLimits(page);
 
@@ -158,7 +158,7 @@ test('DO_NOT_TRACK disables join button', async ({ page }, testInfo) => {
     initialLeaderboard: leaderboardEntries,
   });
   await page.setViewportSize({ width: 1200, height: 800 });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
 
   await openUsageAndLimits(page);
   await page.getByRole('tab', { name: 'Leaderboard' }).click();

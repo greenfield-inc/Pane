@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import {
   loseWebglContext,
   readSnapshot,
@@ -9,7 +9,6 @@ import {
   xtermEvaluate,
 } from './terminalXterm';
 
-test.describe.configure({ mode: 'serial' });
 const now = new Date(0).toISOString();
 const project = {
   id: 610,
@@ -165,7 +164,7 @@ async function bootFixture(
     },
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Terminal blur fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   const panel = page.getByRole('tabpanel', { name: primaryPanel.title });
