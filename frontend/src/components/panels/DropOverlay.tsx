@@ -62,6 +62,8 @@ export const DropOverlay: React.FC<DropOverlayProps> = React.memo(({
 
   return (
     <div
+      data-testid="drop-overlay"
+      data-active-zone={activeZone ?? undefined}
       className="absolute inset-0 z-20"
       onDragOver={handleDragOver}
       onDrop={handleDrop}

@@ -74,6 +74,7 @@ const BROWSER_SPECS = [
   'review-availability.spec.ts',
   'session-logs.spec.ts',
   'session-move-dialog.spec.ts',
+  'session-split-cap.spec.ts',
   'session-todo-dock.spec.ts',
   'session-todos-tab.spec.ts',
   'settings.spec.ts',

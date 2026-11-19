@@ -2047,7 +2047,7 @@ function pointIn(box: { x: number; y: number; width: number; height: number }, e
   return { x: box.x + box.width / 2, y };
 }
 
-test('dragging a Session tab to the stage edge opens a split beside the conversation', async ({ page }) => {
+test('at two splits, dragging a Session tab to the stage edge keeps it a tab instead of opening a third (D-448)', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('tabdrag', 'Tab drag demo', '', '', new Date(0).toISOString())]);
   await gotoApp(page);
   await page.getByTestId('orchestration-session-tabdrag').click();
@@ -2063,13 +2063,14 @@ test('dragging a Session tab to the stage edge opens a split beside the conversa
   const accepted = await dragTab(page, workspaceTabs.getByRole('tab', { name: 'Browser' }), [pointIn(stage, 'right')]);
   expect(accepted).toEqual([true]);
 
-  // A new split opens right beside the conversation, before the Overview's.
+  // The Session already shows two splits (chat | Overview), so the edge offers no third: the
+  // Browser stays a tab beside the conversation.
   const groupStrips = page.locator('.panel-group-tab-bar');
-  await expect(groupStrips).toHaveCount(3);
-  await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(1);
-  await expect(groupStrips.nth(0).getByRole('tab')).toHaveText(agentTabName);
-  await expect(groupStrips.nth(1).getByRole('tab', { name: 'Browser' })).toHaveAttribute('aria-selected', 'true');
-  expect(await tabNames(groupStrips.nth(2))).toEqual(['Overview', 'To-dos']);
+  await expect(groupStrips).toHaveCount(2);
+  await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(2);
+  await expect(groupStrips.nth(0).getByRole('tab').first()).toHaveText(agentTabName);
+  await expect(groupStrips.nth(0).getByRole('tab', { name: 'Browser' })).toHaveAttribute('aria-selected', 'true');
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'To-dos']);
 });
 
 /** As the host does when an agent opens a page: the tab is created, then brought forward. */

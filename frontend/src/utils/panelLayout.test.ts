@@ -253,7 +253,7 @@ describe('agent and runpane split requests at two splits (D-448)', () => {
   const twoDown = split('s1', 'column', [group('g1', ['agent', 'notes'], 'agent'), group('g2', ['plan'])]);
 
   it('a tab created with openPlacement split joins the second split as a tab', () => {
-    const root = placeCreatedPanel(twoDown, 'g1', { id: 'page', metadata: { openPlacement: 'split' } });
+    const root = placeCreatedPanel(twoDown, 'g1', { id: 'page', metadata: { createdAt: '', lastActiveAt: '', position: 0, openPlacement: 'split' } });
     expect(allGroups(root).map(g => g.panelIds)).toEqual([['agent', 'notes'], ['plan', 'page']]);
   });
 

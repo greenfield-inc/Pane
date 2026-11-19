@@ -619,3 +619,19 @@ test('QA F1: a to-do made with New in the tab opens there, though it is yours, n
   await expect(page.getByTestId('todo-page')).toHaveAttribute('data-todo', '18');
   await expect(page.getByTestId('todo-breadcrumb')).toHaveText(/\/\s*T-18/);
 });
+
+test('a Session opens with its two splits (chat | Overview), so Split Right says it is at the limit (T-40, D-448)', async ({ page }) => {
+  await open(page);
+  const session = page.locator(`[data-session-content-id="${BILLING}"]`);
+  await expect(session.locator('[data-panel-group-id]')).toHaveCount(2);
+  await todosTab(page).click();
+  await page.keyboard.press('ControlOrMeta+Shift+P');
+  const input = page.getByRole('combobox', { name: 'Search', exact: true });
+  await expect(input).toBeFocused();
+  await input.fill('>split right');
+  await expect(page.getByRole('option', { name: /^Split Right/ })).toHaveAttribute('aria-disabled', 'true');
+  await page.getByRole('option', { name: /^Split Right/ }).hover();
+  await expect(page.getByRole('tooltip').filter({ hasText: 'At most 2 splits' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(session.locator('[data-panel-group-id]')).toHaveCount(2);
+});
