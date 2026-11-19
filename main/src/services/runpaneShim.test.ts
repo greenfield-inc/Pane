@@ -3,7 +3,7 @@ import { spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { getWSLShellSpawn, WSLPATH } from '../utils/wslUtils';
 import {
   addRunpaneToUserPath,
@@ -400,6 +400,22 @@ describe.skipIf(process.platform === 'win32')('pane-browser', () => {
   });
 });
 
+describe('pane-browser on Windows', () => {
+  it('writes a PowerShell script that passes each URL to the CLI as one argument, and falls back to the system browser', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-browser-win-'));
+    onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const state: RunpaneShimState = { binDir: "C:\\Users\\O'Neil\\.pane\\bin", shimPath: '', cli: { executable: 'C:\\Pane\\Pane.exe', script: "C:\\Users\\O'Neil\\.pane\\bin\\runpane.cjs" }, browserPath: path.join(dir, 'pane-browser.ps1'), zshDotDir: '', bashRcFile: '' };
+    writeBrowserShim('pane', state, 'win32');
+    const script = fs.readFileSync(state.browserPath, 'utf8');
+    // Single-quoted PowerShell strings double a quote; the URL goes as $url, never through cmd.exe.
+    expect(script).toContain("& 'C:\\Pane\\Pane.exe' 'C:\\Users\\O''Neil\\.pane\\bin\\runpane.cjs' panels open --url $url --split --source user --yes");
+    expect(script).toContain('catch { $opened = $false }');
+    expect(script).toContain('Start-Process $url');
+    writeBrowserShim('system', state, 'win32');
+    expect(fs.readFileSync(state.browserPath, 'utf8')).not.toContain('panels open');
+  });
+});
+
 describe('withRunpaneOnPath', () => {
   const state: RunpaneShimState = { binDir: '/pane/bin', shimPath: '/pane/bin/runpane', cli: { executable: '/pane/electron', script: '/pane/bin/runpane.cjs' }, browserPath: '/pane/bin/pane-browser', zshDotDir: '/pane/shell/zsh', bashRcFile: '/pane/shell/bash/rcfile' };
   const env = { PATH: '/usr/bin:/pane/bin:/bin', HOME: '/home/me' };
@@ -431,12 +447,15 @@ describe('withRunpaneOnPath', () => {
     expect(fish[2]).toContain("'/pane/bin'");
   });
 
-  it('only prepends PATH on Windows and for non-interactive commands', () => {
-    const win = withRunpaneOnPath({ name: 'bash', args: ['-i'] }, { PATH: 'C:\\Windows' }, { ...state, binDir: 'C:\\pane\\bin' }, 'win32');
-    expect(win).toEqual({ args: ['-i'], env: { PATH: 'C:\\pane\\bin;C:\\Windows', PANE_RUNPANE_BIN: '/pane/bin/runpane', AGENT_FARM_SESSION_HOOK: '/pane/bin/runpane' } });
+  it('only prepends PATH on Windows and for non-interactive commands, with BROWSER everywhere', () => {
+    const winState = { ...state, binDir: 'C:\\Users\\Ada Lovelace\\.pane\\bin', browserPath: 'C:\\Users\\Ada Lovelace\\.pane\\bin\\pane-browser.ps1' };
+    // Windows tools hand BROWSER the URL unquoted, which a batch file would split at `&`: PowerShell runs
+    // the script with -File, its path in forward slashes because gh and Python split BROWSER POSIX-style.
+    const browser = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:/Users/Ada Lovelace/.pane/bin/pane-browser.ps1"';
+    const win = withRunpaneOnPath({ name: 'bash', args: ['-i'] }, { PATH: 'C:\\Windows' }, winState, 'win32');
+    expect(win).toEqual({ args: ['-i'], env: { PATH: 'C:\\Users\\Ada Lovelace\\.pane\\bin;C:\\Windows', PANE_RUNPANE_BIN: '/pane/bin/runpane', AGENT_FARM_SESSION_HOOK: '/pane/bin/runpane', BROWSER: browser } });
     expect(withRunpaneBinOnPath({ PATH: '/usr/bin' }, state, 'linux')).toEqual({ PATH: '/pane/bin:/usr/bin', PANE_RUNPANE_BIN: '/pane/bin/runpane', BROWSER: '/pane/bin/pane-browser' });
-    // Windows tools hand BROWSER the URL unquoted, which a batch file would split at `&`.
-    expect(withRunpaneBinOnPath({ PATH: 'C:\\Windows' }, state, 'win32')).toEqual({ PATH: '/pane/bin;C:\\Windows', PANE_RUNPANE_BIN: '/pane/bin/runpane' });
+    expect(withRunpaneBinOnPath({ PATH: 'C:\\Windows' }, winState, 'win32')).toEqual({ PATH: 'C:\\Users\\Ada Lovelace\\.pane\\bin;C:\\Windows', PANE_RUNPANE_BIN: '/pane/bin/runpane', BROWSER: browser });
   });
 });
 

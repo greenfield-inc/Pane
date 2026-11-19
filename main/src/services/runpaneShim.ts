@@ -19,11 +19,12 @@
  * Beside it, a `pane-node` shim runs any script with the same binary as Node,
  * so bundled skill scripts work on a machine without Node.
  *
- * On macOS and Linux, a `pane-browser` command is BROWSER in Pane's terminals: it opens a link a
- * command-line tool opens (gh pr view --web, Python's webbrowser) in a Pane browser tab beside the
- * terminal, or in the system browser when Settings > Links says so or Pane can't open the tab.
- * Pane rewrites it when that setting changes. Windows gets none: tools hand BROWSER the URL
- * unquoted, and a batch file would split it at `&` and could run what follows.
+ * A `pane-browser` command is BROWSER in Pane's terminals: it opens a link a command-line tool
+ * opens (gh pr view --web, Python's webbrowser) in a Pane browser tab beside the terminal, or in
+ * the system browser when Settings > Links says so or Pane can't open the tab. Pane rewrites it
+ * when that setting changes. On Windows it is a PowerShell script run with -File, never a batch
+ * file: tools hand BROWSER the URL as one unquoted argument, which cmd.exe would split at `&`.
+ * The script runs the CLI with the Electron binary directly for the same reason.
  *
  * The installed app also appends `<PANE_DIR>/bin` to the end of the user's own
  * PATH (shell startup files, or the Windows user PATH), so `runpane` works in
@@ -58,7 +59,7 @@ export interface RunpaneShimState {
   shimPath: string;
   /** What the shim runs: the CLI script and the runtime that runs it as Node. */
   cli: { executable: string; script: string };
-  /** BROWSER for Pane's terminals on macOS and Linux: opens a link in a Pane browser tab beside the terminal. */
+  /** The pane-browser script: opens a link in a Pane browser tab beside the terminal (a .ps1 on Windows). */
   browserPath: string;
   /** Wrapper startup files that re-apply PATH after the user's own files. */
   zshDotDir: string;
@@ -255,10 +256,49 @@ function posixBrowserShim(shimPath: string, openIn: LinksOpenIn, platform: NodeJ
   ].join('\n');
 }
 
+/** A PowerShell single-quoted string: a quote doubles, nothing else is special. */
+function psQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+/** `pane-browser.ps1 <url>...`: BROWSER in Pane's terminals on Windows. */
+function windowsBrowserShim(state: RunpaneShimState, openIn: LinksOpenIn): string {
+  return [
+    `# ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup and when Settings > Links changes; edits are lost.`,
+    openIn === 'pane'
+      ? '# Opens each link in a Pane browser tab beside this terminal, or the system browser when Pane can\'t.'
+      : '# Settings > Links opens links in the system browser.',
+    'param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Urls)',
+    ...(openIn === 'pane' ? [`if (-not $env:PANE_DIR) { $env:PANE_DIR = ${psQuote(path.dirname(state.binDir))} }`] : []),
+    'foreach ($url in $Urls) {',
+    ...(openIn === 'pane' ? [
+      // The Electron binary runs the CLI as Node; no batch file ever sees the URL.
+      '  $env:ELECTRON_RUN_AS_NODE = \'1\'',
+      // A runtime that won't start (a moved or half-updated app) falls back to the system browser.
+      `  try { & ${psQuote(state.cli.executable)} ${psQuote(state.cli.script)} panels open --url $url --split --source user --yes *> $null; $opened = $LASTEXITCODE -eq 0 } catch { $opened = $false }`,
+      '  Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue',
+      '  if ($opened) { continue }',
+    ] : []),
+    '  Start-Process $url',
+    '}',
+    '',
+  ].join('\r\n');
+}
+
+/**
+ * BROWSER for Pane's terminals: the pane-browser script, and on Windows the PowerShell command that
+ * runs it. Forward slashes, because gh and Python split BROWSER POSIX-style, eating backslashes.
+ */
+function browserCommand(state: RunpaneShimState, platform: NodeJS.Platform): string {
+  if (platform !== 'win32') return state.browserPath;
+  return `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${state.browserPath.replace(/\\/g, '/')}"`;
+}
+
 /** Writes pane-browser for Settings > Links' choice; Pane calls it at startup and when the setting changes. */
 export function writeBrowserShim(openIn: LinksOpenIn, state: RunpaneShimState | null = currentState, platform: NodeJS.Platform = process.platform): void {
-  if (!state || platform === 'win32') return;
-  writeManagedFile(state.browserPath, posixBrowserShim(path.join(state.binDir, 'runpane'), openIn, platform), PANE_MANAGED_SHIM_MARKER, 0o755);
+  if (!state) return;
+  if (platform === 'win32') writeManagedFile(state.browserPath, windowsBrowserShim(state, openIn), PANE_MANAGED_SHIM_MARKER, 0o644);
+  else writeManagedFile(state.browserPath, posixBrowserShim(path.join(state.binDir, 'runpane'), openIn, platform), PANE_MANAGED_SHIM_MARKER, 0o755);
 }
 
 function posixShim(appDirectory: string, execPath: string, cliPath: string, platform: NodeJS.Platform): string {
@@ -473,7 +513,7 @@ export function installRunpaneShim(options: InstallRunpaneShimOptions): RunpaneS
   }
   const bashRc = path.join(bashDir, 'rcfile');
   writeManagedFile(bashRc, bashRcFile(binDir), MANAGED_SHELL_MARKER, 0o644);
-  const browserPath = path.join(binDir, 'pane-browser');
+  const browserPath = path.join(binDir, platform === 'win32' ? 'pane-browser.ps1' : 'pane-browser');
   currentState = { binDir, shimPath, cli: { executable: execPath, script: cliPath }, browserPath, zshDotDir, bashRcFile: bashRc };
   writeBrowserShim(options.openLinksIn ?? 'pane', currentState, platform);
   if (platform === 'win32') {
@@ -530,8 +570,8 @@ export function withRunpaneOnPath(
     // Agent Farm's Claude SessionStart hook runs `"$AGENT_FARM_SESSION_HOOK" session-start` (D-403).
     [AGENT_FARM_HOST_ENV.sessionHook]: state.shimPath,
   };
+  nextEnv.BROWSER = browserCommand(state, platform);
   if (platform === 'win32') return { args: shell.args, env: nextEnv };
-  nextEnv.BROWSER = state.browserPath;
 
   switch (shell.name) {
     case 'zsh': {
@@ -553,11 +593,10 @@ export function withRunpaneOnPath(
   }
 }
 
-/** Non-interactive commands (run scripts, workspace exec, chat tab agents) only need the PATH prepend, and BROWSER off Windows. */
+/** Non-interactive commands (run scripts, workspace exec, chat tab agents) only need the PATH prepend and BROWSER. */
 export function withRunpaneBinOnPath<Env extends SpawnEnv | NodeJS.ProcessEnv>(env: Env, state: RunpaneShimState | null = currentState, platform: NodeJS.Platform = process.platform): Env {
   if (!state) return env;
-  if (platform === 'win32') return { ...env, PATH: prependPath(env.PATH, state.binDir, ';'), PANE_RUNPANE_BIN: state.shimPath };
-  return { ...env, PATH: prependPath(env.PATH, state.binDir, ':'), PANE_RUNPANE_BIN: state.shimPath, BROWSER: state.browserPath };
+  return { ...env, PATH: prependPath(env.PATH, state.binDir, platform === 'win32' ? ';' : ':'), PANE_RUNPANE_BIN: state.shimPath, BROWSER: browserCommand(state, platform) };
 }
 
 /** Marks the PATH lines Pane appends to a user's shell startup file. */
