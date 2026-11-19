@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BrowserInput } from '../../../../../../shared/types/browserStream';
-import { browserInputQueue, pagePoint } from '../../../../../../shared/utils/browserStreamInput';
+import { browserInputQueue, clickCounter, pagePoint } from '../../../../../../shared/utils/browserStreamInput';
 
 describe('pagePoint', () => {
   it('maps a point in a letterboxed frame to the page, and the bars to nothing', () => {
@@ -46,5 +46,15 @@ describe('browserInputQueue', () => {
     queue(null);
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(sent).toEqual([[]]);
+  });
+});
+
+describe('clickCounter', () => {
+  it('counts quick presses in one place as double and triple clicks, and starts again elsewhere or later', () => {
+    const count = clickCounter();
+    expect([count(10, 10, 0), count(11, 10, 200), count(11, 11, 400)]).toEqual([1, 2, 3]);
+    expect(count(11, 11, 600)).toBe(1);
+    expect(count(11, 11, 1_300)).toBe(1);
+    expect(count(40, 11, 1_400)).toBe(1);
   });
 });
