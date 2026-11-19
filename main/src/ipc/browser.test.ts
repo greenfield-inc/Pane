@@ -421,7 +421,7 @@ describe('browser tools: tabs an agent holds (P4)', () => {
 
 describe('browser tabs: the screens that watch them', () => {
   const holds: BrowserHoldSettings = { limit: 4, idleMs: 60_000, sweepMs: 40, watch: { limit: 2, graceMs: 300, silentMs: 150 } };
-  const phone = { kind: 'phone', onScreen: true, width: 390, height: 844 };
+  const phone = { kind: 'phone', onScreen: true, width: 390, height: 844, scale: 3 };
   /** A screen on another device (the phone, another desktop) reports over the host channel. */
   const fromAfar = (fixture: Fixture, tab: string, viewer: string, report: JsonObject | null) => fixture.registry.invokeRemote('browser:watch', [tab, viewer, report], { caller: undefined });
   /** This computer's own window reports over local IPC. */
@@ -470,7 +470,8 @@ describe('browser tabs: the screens that watch them', () => {
     // Watching alone never resizes the page.
     expect(page?.sent).not.toContain('Emulation.setDeviceMetricsOverride');
     expect(await fixture.registry.invokeRemote('browser:driver', ['mine', 'person', 'phone-1'], { caller: undefined })).toEqual({ success: true });
-    await vi.waitFor(() => expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 390, height: 844, mobile: true }));
+    // A phone's own pixel ratio, so the page is sharp on its screen.
+    await vi.waitFor(() => expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 390, height: 844, mobile: true, deviceScaleFactor: 3 }));
     const [shown] = await listed(fixture);
     expect(shown).toMatchObject({ size: { width: 390, height: 844, mobile: true }, watching: ['host', 'phone'] });
     // Results carry only what the published output schema allows (MCP clients reject the rest).
@@ -574,6 +575,15 @@ describe('browser tabs: streaming a page to another screen', () => {
       seq = read.frame?.seq ?? seq;
     }
     expect(acks()).toBe(2);
+  });
+
+  it('sends a fresh still after the page loads, when the screencast stays quiet', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    const seq = (await frame(fixture, 'persons', 0)).frame?.seq ?? 0;
+    const waiting = frame(fixture, 'persons', seq);
+    fixture.pages.get('persons')?.emit('did-stop-loading');
+    expect((await waiting).frame?.seq).toBeGreaterThan(seq);
   });
 
   it('pauses the screencast while an agent takes a screenshot, never capturing twice at once', async () => {
