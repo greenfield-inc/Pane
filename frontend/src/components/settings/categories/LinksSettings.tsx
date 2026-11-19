@@ -74,7 +74,7 @@ export function LinksSettings({ persistence, onDirtyChange }: LinksSettingsProps
         <SettingRow
           settingId="links-open-in"
           label="Open links in"
-          description="Links in terminal output, chat messages and cards, and links opened by command-line tools on macOS and Linux (gh pr view --web), open in a Pane browser tab beside where you clicked, with your Pane sign-ins. Pane's own links, such as release notes and downloads, always open in your system browser."
+          description="Links in terminal output, chat messages and cards, and links opened by command-line tools (gh pr view --web), open in a Pane browser tab beside where you clicked, with your Pane sign-ins. Pane's own links, such as release notes and downloads, always open in your system browser."
           saveState={persistence.saveStates['links-open-in']}
         >
           <SegmentedControl<LinksOpenIn>

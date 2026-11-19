@@ -268,9 +268,11 @@ The Remote Pane PWA is a browser runtime. It does not have `window.electronAPI`,
 
 ## Forwarded ports
 
-A desktop connected to a remote host reaches every port listening on the host as if it were local. Pane lists the host's ports on a new, empty browser tab and under the address bar's **Ports** button, and the desktop opens a matching listener on its own `127.0.0.1` and `::1` for each one. Only the desktop app sets up these listeners; the browser app and phones don't yet.
+A desktop connected to a remote host reaches every port listening on the host as if it were local: terminal links, live reload, and an older host's browser tabs use it. The desktop opens a matching listener on its own `127.0.0.1` and `::1` for each port the host lists. Only the desktop app sets up these listeners; the browser app and phones don't yet.
 
-- A browser tab streams the host's own page (see [Where a tab's page runs](BROWSER_AGENTS.md#where-a-tabs-page-runs)), so `localhost:5173` in a tab is the host's dev server without forwarding. The address bar reads `localhost:5173` with **on &lt;host name&gt;**. A host on an older Pane gets the desktop's own copy, which loads through these forwarded ports.
+A browser tab from a host on a current Pane streams the host's own page instead (see [Where a tab's page runs](BROWSER_AGENTS.md#where-a-tabs-page-runs)): `localhost:5173` there is the host's dev server with no forwarding. Its address bar has back, forward, reload and **Copy URL** (the host's address), and none of the Ports list, Find, DevTools or **Open in your browser**. The rest of this section describes an older host's tabs.
+
+- An older host's tab is the desktop's own copy, loading through these forwarded ports. Its address bar reads `localhost:5173` with **on &lt;host name&gt;**.
 - When something on the desktop already answers on 5173, the desktop uses the next free port, or any free port when the next 19 are taken too. The tab still reads `localhost:5173`, and the Ports list shows the local number as **here :5174**.
 - A tab never loads the desktop's own service in the host's place. While the host's Ports list is loading it waits, and when a port stops listening on the host it says the port isn't reachable, then loads once the port is back.
 - **Copy URL** copies the address that works on the desktop, for its system browser.

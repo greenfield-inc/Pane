@@ -287,7 +287,7 @@ function windowsBrowserShim(state: RunpaneShimState, openIn: LinksOpenIn): strin
 
 /**
  * BROWSER for Pane's terminals: the pane-browser script, and on Windows the PowerShell command that
- * runs it. Forward slashes, because gh and Python split BROWSER POSIX-style, eating backslashes.
+ * runs it. Forward slashes, because gh splits BROWSER POSIX-style, eating backslashes.
  */
 function browserCommand(state: RunpaneShimState, platform: NodeJS.Platform): string {
   if (platform !== 'win32') return state.browserPath;

@@ -22,6 +22,10 @@ test('a browser tab streams from the host: frames arrive, a click and typing lan
   await expect(page.getByTestId('browser-sign-in-notice')).toContainText('This page runs on MacBook Pro, signed in as MacBook Pro.');
   await page.getByRole('button', { name: 'Got it' }).click();
   await expect(page.getByTestId('browser-sign-in-notice')).toHaveCount(0);
+  // Once per host on this screen: a reload doesn't bring it back.
+  await page.reload();
+  await expect(page.getByTestId('browser-stream')).toBeVisible();
+  await expect(page.getByTestId('browser-sign-in-notice')).toHaveCount(0);
 
   await expect(page.getByTestId('browser-driver-chip')).toContainText('Claude Code is driving');
   await page.getByTestId('browser-driver-chip').getByRole('button', { name: 'Take over' }).click();
@@ -35,7 +39,8 @@ test('a browser tab streams from the host: frames arrive, a click and typing lan
   await page.keyboard.press('Enter');
   const sent = () => JSON.stringify(host.browserStream?.calls.filter(call => call.channel === 'browser:input').map(call => call.args[2]));
   await expect.poll(sent).toContain('"kind":"mouse","action":"down"');
-  await expect.poll(sent).toContain('"kind":"text","text":"h');
+  // On a desktop-width screen each printable key goes as a key press, so the page sees keydown.
+  await expect.poll(sent).toContain('"kind":"key","key":"h"');
   await expect.poll(sent).toContain('"kind":"key","key":"Enter"');
   // The click landed at the middle of the page: 400 of its 800 CSS pixels across.
   expect(sent()).toMatch(/"action":"down","x":400(\.\d+)?,"y":300/);

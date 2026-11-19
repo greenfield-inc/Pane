@@ -103,7 +103,7 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
   }));
   // Input made while the host can't be reached is dropped, never replayed late onto a page that may have changed.
   const stopRef = useRef(stop);
-  stopRef.current = stop;
+  useEffect(() => { stopRef.current = stop; }, [stop]);
   const send = useCallback((input: BrowserInput | null) => {
     if (stopRef.current && stopRef.current !== 'older') return;
     // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.

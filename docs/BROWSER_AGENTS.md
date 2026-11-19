@@ -195,17 +195,18 @@ small pages and 100 MB for the GitHub page, 320 MB in all, with no CPU use and a
   command, so `gh pr view --web` and `gh auth login` open a tab beside that terminal, on the
   computer that runs it; any screen you watch from shows it. On macOS and Linux
   `python3 -m webbrowser <url>` does too. On Windows `pane-browser` is a PowerShell script
-  (`powershell.exe -File …\pane-browser.ps1`), so a URL with `&` arrives whole; Python's
-  `webbrowser` there can't run a `BROWSER` with arguments and opens your system browser. A tool
+  (`powershell.exe -File …/pane-browser.ps1`), so a URL with `&` arrives whole; Python's
+  `webbrowser` there treats `BROWSER` as one program name and opens your system browser. A tool
   that runs macOS `open` or Windows `start` itself, or ignores `BROWSER`, still uses your system
   browser. WSL terminals leave `BROWSER` alone.
 - **Settings › Links › Open links in** chooses **Pane's browser** (the default) or **System
   browser**. With System browser, links from terminals, chats, cards, the command palette, the
   docs dialog and command-line tools all open in your system browser, at once, in terminals
   already open too.
-- **Leave any page.** Each tab's **Open in your browser** button sends its page to your
-  system browser, and right-clicking a link, in a tab or in a chat, offers **Open in System
-  Browser**.
+- **Leave any page.** On the computer that runs the tab, its **Open in your browser** button
+  sends the page to your system browser, and right-clicking a link, in a tab or in a chat,
+  offers **Open in System Browser**. A tab streamed to another screen has neither: its address
+  bar has **Copy URL** (the host's address).
 
 ## Apps, sign-ins and downloads
 

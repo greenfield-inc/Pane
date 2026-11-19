@@ -3,16 +3,25 @@ import * as SecureStore from 'expo-secure-store';
 /** SecureStore keys allow letters, digits, ".", "-" and "_". */
 const keyFor = (host: string) => `browser.signInNotice.${host.replace(/[^A-Za-z0-9._-]/g, '_')}`;
 
+/** Each host's answer, read once: the stream renders per frame, and a Keychain read per frame is costly. */
+const seen = new Map<string, boolean>();
+
 /** Whether this phone already showed the one-time note about whose sign-ins a host's tabs use. */
 export function signInNoticeSeen(host: string): boolean {
+  const known = seen.get(host);
+  if (known !== undefined) return known;
+  let answer = false;
   try {
-    return SecureStore.getItem(keyFor(host)) === 'seen';
+    answer = SecureStore.getItem(keyFor(host)) === 'seen';
   } catch {
-    return false;
+    answer = false;
   }
+  seen.set(host, answer);
+  return answer;
 }
 
 export function markSignInNoticeSeen(host: string): void {
+  seen.set(host, true);
   void SecureStore.setItemAsync(keyFor(host), 'seen').catch(() => undefined);
 }
 
