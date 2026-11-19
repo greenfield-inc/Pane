@@ -42,7 +42,7 @@ jobs:
       env:
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
       run: |
-        t() { local s=$(date +%s%N); "$@" > /dev/null 2>&1; local rc=$?; echo "$(( ($(date +%s%N) - s) / 1000000 )) ms rc=$rc: $*"; }
+        t() { local s=$(date +%s%N); local rc=0; "$@" > /dev/null 2>&1 || rc=$?; echo "$(( ($(date +%s%N) - s) / 1000000 )) ms rc=$rc: $*"; }
         echo "is-shallow: $(git rev-parse --is-shallow-repository)"
         echo "promisor: $(git config remote.origin.promisor || echo unset)"
         echo "partialclonefilter: $(git config remote.origin.partialclonefilter || echo unset)"
