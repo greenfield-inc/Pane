@@ -45,7 +45,7 @@ function linkedComputers(configManager: Pick<ConfigManager, 'getConfig'>): Linke
   };
 }
 
-export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, commandRegistry: PaneCommandRegistry, configManager: Pick<ConfigManager, 'getConfig'>): BrowserHost {
+export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, commandRegistry: PaneCommandRegistry, configManager: Pick<ConfigManager, 'getConfig'>, sessions: Pick<NodeJS.EventEmitter, 'on'>): BrowserHost {
   return {
     tabs: (paneId) => panelManager.getPanelsBySessionAndType(paneId, 'browser'),
     tab: (panelId) => panelManager.getPanel(panelId),
@@ -77,6 +77,10 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
     showCursor: (panelId, x, y) => getMainWindow()?.webContents.send(BROWSER_AGENT_CURSOR_EVENT, { panelId, x, y }),
     linked: () => linkedComputers(configManager),
     setBusy: (panelId, busy) => getMainWindow()?.webContents.send(BROWSER_BUSY_EVENT, { panelId, busy }),
+    onGone: (listener) => {
+      panelManager.onPanelDeleted(() => listener());
+      sessions.on('session-deleted', () => listener());
+    },
     setHeld: (tabIds) => {
       const window = getMainWindow();
       if (window) window.webContents.send(BROWSER_HELD_EVENT, { tabs: tabIds.map(panelId => ({ panelId, sessionId: panelManager.getPanel(panelId)?.sessionId })) });

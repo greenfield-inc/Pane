@@ -68,6 +68,8 @@ interface Fixture {
   download(tabId: string, filename: string, content: string): Promise<string>;
   /** The tabs that said "Downloaded …", with the file. */
   shownDownloads: Array<[string, string]>;
+  /** Archives a Pane, as Pane does: it is marked archived, then the host hears it went. */
+  archive(paneId: string): void;
 }
 
 function browserTab(id: string, paneId: string, openedByPanel?: string, url = 'http://localhost:4173/'): ToolPanel {
@@ -83,6 +85,8 @@ function agentTab(id: string, paneId: string, agent: string): ToolPanel {
 
 /** `pagesHere: false` leaves this computer without pages, as when only a linked computer shows the tabs. */
 function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; pagesHere?: boolean; cursors?: string[]; held?: string[]; holds?: BrowserHoldSettings } = {}): Fixture {
+  const archived = new Set<string>();
+  const goneListeners: Array<() => void> = [];
   const worktree = mkdtempSync(path.join(os.tmpdir(), 'pane-browser-tools-'));
   let tools = true;
   const tabs = [agentTab('claude-a', 'pane-a', 'claude'), agentTab('codex-a', 'pane-a', 'codex'), ...initial];
@@ -114,6 +118,7 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
     shotsDirectory: async () => path.join(worktree, '.shots'),
     showCursor: (panelId) => { options.cursors?.push(panelId); },
     setHeld: (tabIds) => { options.held?.splice(0, Infinity, ...tabIds); },
+    onGone: (listener) => { goneListeners.push(listener); },
     setBusy: () => undefined,
     linked: () => options.linked,
     onDownload: (listener) => { downloadListener = listener; },
@@ -133,12 +138,13 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
     return saveAt;
   };
   const services: BrowserServices = {
-    sessionManager: { getSession: (id: string) => (id === 'pane-a' || id === 'pane-b' ? { name: id, worktreePath: worktree } : undefined) },
+    sessionManager: { getSession: (id: string) => (id === 'pane-a' || id === 'pane-b' ? { name: id, worktreePath: worktree, archived: archived.has(id) } : undefined) },
     configManager: { getConfig: () => ({ browser: { agentTools: tools } }) },
   };
   const registry = new PaneCommandRegistry();
   registerBrowserHandlers(services, registry, host, options.holds);
-  return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree, download, shownDownloads };
+  const archive = (paneId: string) => { archived.add(paneId); for (const listener of goneListeners) listener(); };
+  return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree, download, shownDownloads, archive };
 }
 
 const signal = new AbortController().signal;
@@ -429,6 +435,16 @@ describe('browser tools: tabs an agent holds (P4)', () => {
     expect(held.sort()).toEqual(opened.slice(1).sort());
     const listed = JSON.parse(JSON.stringify(await call(fixture, 'tabs', {}))).tabs;
     expect(listed.find((tab: { id: string }) => tab.id === opened[0])).toMatchObject({ held: false, asleep: true });
+  });
+
+  it('puts the held tabs to sleep at once when the agent\'s Pane is archived', async () => {
+    const held: string[] = [];
+    const agentTerminal: ToolPanel = { id: 'claude-a', sessionId: 'pane-a', type: 'terminal', title: 'Claude Code', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a'), agentTerminal], { held });
+    await call(fixture, 'snapshot', { tab: 'mine' });
+    expect(held).toEqual(['mine']);
+    fixture.archive('pane-a');
+    expect(held).toEqual([]);
   });
 
   it('puts a tab to sleep after the idle time with no agent action, and says so when the agent wakes it', async () => {

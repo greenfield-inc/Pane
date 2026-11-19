@@ -21,6 +21,10 @@ interface Slot { panel: ToolPanel; element: HTMLElement; active: boolean }
 
 const slots = new Map<string, Slot>();
 const lastRects = new Map<string, { left: number; top: number; width: number; height: number }>();
+/** The last panel seen for each page, so a held page stays mounted while its Pane's tabs reload. */
+const lastPanels = new Map<string, ToolPanel>();
+/** Held tabs whose Pane's tabs this window asked main for, so it asks once. */
+const requested = new Set<string>();
 let held: ReadonlyArray<{ panelId: string; sessionId?: string }> = [];
 const busy = new Map<string, number>();
 let version = 0;
@@ -86,25 +90,29 @@ export function BrowserLayer() {
     };
   }, []);
 
-  // A held tab in a Pane this window has not loaded yet: load that Pane's tabs.
+  // A held tab this window doesn't have yet (its Pane's tabs never loaded, or the agent just opened
+  // it in a Pane out of view): load that Pane's tabs once.
   useEffect(() => {
-    for (const { sessionId } of held) {
-      if (sessionId && !panelsBySession[sessionId]) {
-        void panelApi.loadPanelsForSession(sessionId).then(panels => usePanelStore.getState().setPanels(sessionId, panels)).catch(() => undefined);
-      }
+    for (const { panelId, sessionId } of held) {
+      if (!sessionId || requested.has(panelId)) continue;
+      if (panelsBySession[sessionId]?.some(panel => panel.id === panelId)) continue;
+      requested.add(panelId);
+      void panelApi.loadPanelsForSession(sessionId).then(panels => usePanelStore.getState().setPanels(sessionId, panels)).catch(() => requested.delete(panelId));
     }
   }, [panelsBySession, version]);
 
   const byId = new Map<string, ToolPanel>();
   for (const panels of Object.values(panelsBySession)) for (const panel of panels) if (panel.type === 'browser') byId.set(panel.id, panel);
   const ids = new Set([...slots.keys(), ...held.map(tab => tab.panelId)]);
+  for (const id of lastPanels.keys()) if (!ids.has(id)) lastPanels.delete(id);
 
   return (
     <>
       {[...ids].map(id => {
         const slot = slots.get(id);
-        const panel = slot?.panel ?? byId.get(id);
+        const panel = slot?.panel ?? byId.get(id) ?? lastPanels.get(id);
         if (!panel) return null;
+        lastPanels.set(id, panel);
         const visible = slot !== undefined && slot.active && slot.element.isConnected;
         const measured = visible ? slot.element.getBoundingClientRect() : undefined;
         const rect = measured && measured.width > 0 ? { left: measured.left, top: measured.top, width: measured.width, height: measured.height } : lastRects.get(id) ?? { left: 0, top: 0, width: 1280, height: 800 };

@@ -43,6 +43,8 @@ export interface BrowserHost {
   showCursor(panelId: string, x: number, y: number): void;
   /** The tabs agents hold: their pages stay alive while hidden (P4). */
   setHeld(tabIds: readonly string[]): void;
+  /** Hears a tab closing for good or a Pane archived: agents whose tab is gone stop holding pages. */
+  onGone(listener: () => void): void;
   /** A call runs on the tab: a hidden page paints while it does, so screenshots are current. */
   setBusy(panelId: string, busy: boolean): void;
   /** Your other computers this one is linked to, when it keeps connections to them (P2). */
@@ -88,7 +90,7 @@ interface ToolResult { ok: true; tab: string; url?: string; title?: string; dial
 
 /** What the browser tools read from the app: the caller's Pane and Settings > Browser. */
 export interface BrowserServices {
-  sessionManager: { getSession(paneId: string): { name: string; worktreePath?: string } | undefined };
+  sessionManager: { getSession(paneId: string): { name: string; worktreePath?: string; archived?: boolean } | undefined };
   configManager: { getConfig(): { browser?: Partial<BrowserSettings> } };
 }
 
@@ -205,12 +207,16 @@ const DEFAULT_HOLDS: BrowserHoldSettings = { limit: 4, idleMs: 15 * 60_000, swee
 export function registerBrowserHandlers(services: BrowserServices, commandRegistry: PaneCommandRegistry, host: BrowserHost, holdSettings: BrowserHoldSettings = DEFAULT_HOLDS): void {
   const pages = new Map<number, PageDriver>();
   const holds = new BrowserHolds({ limit: holdSettings.limit, idleMs: holdSettings.idleMs, onChange: held => host.setHeld(held) });
-  const sweeper = setInterval(() => holds.sweep(
-    agent => host.tab(agent) !== undefined,
+  const sweep = () => holds.sweep(
+    // An agent is gone once its tab closed or its Pane was archived.
+    agent => { const tab = host.tab(agent); return tab !== undefined && services.sessionManager.getSession(tab.sessionId)?.archived !== true; },
     // A dialog waiting for an answer counts as action.
     tabId => { const page = host.page(tabId); return page !== undefined && pages.get(page.id)?.pendingDialog !== undefined; },
-  ), holdSettings.sweepMs);
+  );
+  const sweeper = setInterval(sweep, holdSettings.sweepMs);
   sweeper.unref?.();
+  // Closing the agent's tab or archiving its Pane puts its held tabs to sleep at once.
+  host.onGone(sweep);
   /** Linked computers found showing each tab, or found not showing it (machine undefined) until `until`. */
   const viewers = new Map<string, { machine: { id: string; name: string } | undefined; until: number }>();
   /** Tabs the person holds by touching the page; they go back to the agent TOUCH_HOLD_MS after the last touch. */
@@ -371,7 +377,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       if (!host.hasWindow()) {
         throw new PaneError('ERR_BROWSER_NOT_LINKED', `Tab ${tab.id} is not showing anywhere this computer can reach: Pane runs here without a window, and no linked computer shows ${paneName}. Nothing ran.`, `Open ${paneName} in Pane's desktop app on a computer linked in Settings › Your computers (a computer that only views this one over Tailscale or SSH cannot run browser tools), then try again.`);
       }
-      throw new PaneError('ERR_BROWSER_NOT_SHOWING', `Tab ${tab.id} did not load its page within ${PAGE_WAIT_MS / 1000} seconds. A browser tab's page loads only while its Pane is open in a Pane window, and ${paneName} is not open here or on a linked computer. Nothing ran.`, `Ask the person to open ${paneName} in Pane, then try again. To use a tab you watch from another computer, link that computer in Settings › Your computers.`);
+      throw new PaneError('ERR_BROWSER_NOT_SHOWING', `Tab ${tab.id} in ${paneName} did not load its page in Pane's window within ${PAGE_WAIT_MS / 1000} seconds. Nothing ran.`, `Try again. If it fails again, ask the person to open ${paneName} in Pane. To use a tab you watch from another computer, link that computer in Settings › Your computers.`);
     }
     return page;
   }
