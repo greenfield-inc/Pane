@@ -4,6 +4,8 @@ import { Button, IconButton } from '../../ui/Button';
 import { Input } from '../../ui/Input';
 import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
+import { SegmentedControl } from '../SettingsControls';
+import { DEFAULT_BROWSER_SETTINGS, type LinksOpenIn } from '../../../../../shared/types/browser';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { CustomLink } from '../../../../../shared/types/customLinks';
 import {
@@ -23,6 +25,7 @@ interface LinksSettingsProps {
 
 export function LinksSettings({ persistence, onDirtyChange }: LinksSettingsProps) {
   const config = persistence.config!;
+  const browser = { ...DEFAULT_BROWSER_SETTINGS, ...config.browser };
   const persistedLinks = config.customLinks ?? [];
   const persistedKey = JSON.stringify(persistedLinks);
   const [links, setLinks] = useState<CustomLink[]>(persistedLinks);
@@ -66,7 +69,22 @@ export function LinksSettings({ persistence, onDirtyChange }: LinksSettingsProps
   };
 
   return (
-    <SettingsPage title="Links" description="Turn text in terminal output into links that open in your browser.">
+    <SettingsPage title="Links" description="Where links from your work open, and your own links in terminal output.">
+      <SettingsSection title="Opening links">
+        <SettingRow
+          settingId="links-open-in"
+          label="Open links in"
+          description="Links in terminal output, chat messages and cards, and links opened by command-line tools (gh pr view --web), open in a Pane browser tab beside where you clicked, with your Pane sign-ins. Pane's own links, such as release notes and downloads, always open in your system browser."
+          saveState={persistence.saveStates['links-open-in']}
+        >
+          <SegmentedControl<LinksOpenIn>
+            label="Open links in"
+            value={browser.openLinksIn}
+            options={[{ id: 'pane', label: "Pane's browser" }, { id: 'system', label: 'System browser' }]}
+            onChange={(openLinksIn) => void persistence.saveConfig('links-open-in', { browser: { ...browser, openLinksIn } })}
+          />
+        </SettingRow>
+      </SettingsSection>
       <SettingsSection title="Terminal links">
         <SettingRow
           settingId="custom-links"

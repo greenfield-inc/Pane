@@ -770,6 +770,9 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
     }
     // Browser commands own their flags, whose values may start with "-" (`--dy -300`).
     if (parsed.command.startsWith('browser ') && (BROWSER_VALUE_FLAGS.has(arg) || BROWSER_BOOLEAN_FLAGS.has(arg))) {
+      // Each browser command takes only the flags its usage line names.
+      const usage = RUNPANE_CONTRACT.commands.find((command) => command.name === parsed.command)?.usage.join(' ') ?? '';
+      if (!usage.split(/[^a-z-]+/).includes(arg)) throw new Error(`runpane ${parsed.command} does not take ${arg}. Run runpane help ${parsed.command} for its options.`);
       const request = (parsed.browserRequest ??= {});
       const field = BROWSER_BOOLEAN_FLAGS.get(arg);
       if (field) {

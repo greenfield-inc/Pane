@@ -24,9 +24,9 @@ opened one tab, or when the Pane has one; with several, the call fails with
 | Tool | Command | What it does |
 | --- | --- | --- |
 | `browser_open` | `runpane browser open --url <url>` | Opens a tab beside the agent, in a split, owned by it; reuses the agent's tab on the same origin |
-| `browser_tabs` | `runpane browser tabs` | The Pane's browser tabs: id, URL, title, who opened it, who is driving, any open dialog |
+| `browser_tabs` | `runpane browser tabs` | The Pane's browser tabs: id, URL, title, who opened it, who is driving, any open dialog, files the agent downloaded |
 | `browser_close` | `runpane browser close` | Closes a tab the agent opened |
-| `browser_snapshot` | `runpane browser snapshot` | The page as an accessibility tree with refs (`e12`), plus URL and title |
+| `browser_snapshot` | `runpane browser snapshot` | The page as an accessibility tree with refs (`e12`), plus URL and title. On a long page, text is left out before controls |
 | `browser_screenshot` | `runpane browser screenshot [--full-page]` | A PNG in the Pane's scratch folder; MCP clients get the image itself |
 | `browser_click` | `runpane browser click --ref e12` | Clicks an element (or `--x --y`) as real mouse input, once it is visible and enabled |
 | `browser_type` | `runpane browser type --ref e7 --text "hi" [--clear] [--submit]` | Types into a field |
@@ -53,6 +53,12 @@ Snapshots show password fields as dots. A dialog the page opens stays open until
 with `ERR_BROWSER_DIALOG_PENDING`. A file picker a click opens never shows on your screen
 during an agent's call; the result tells the agent to fill it with `browser_upload`.
 
+A file a page downloads while an agent drives the tab (during its call, or in the 2 seconds
+after, while the tab's chip still names the agent; see
+[Watching and taking over](#watching-and-taking-over)) saves into the Pane's scratch folder,
+`$PANE_SCRATCH_DIR`, under `browser-downloads/`, and `browser_tabs` lists its path under the
+tab's `downloads`.
+
 ## Who may act on a tab
 
 - An agent acts on the tabs it opened and on the tabs you opened.
@@ -67,12 +73,13 @@ during an agent's call; the result tells the agent to fill it with `browser_uplo
 Every browser tab in every Pane shares one sign-in store, so a tab an agent opens is signed in
 wherever you are. An agent that a page steers with hidden instructions (prompt injection) can
 act as you on any site you are signed in to, by opening that site in its Pane. It cannot reach
-other Panes' tabs, Pane's own window, cookie values, `file:` or `chrome:` pages, or files
+other Panes' tabs, Pane's own window, the cookie store (a page's script can still read its own
+non-HttpOnly cookies through `browser_evaluate`), `file:` or `chrome:` pages, or files
 outside its worktree. The Settings switch is the off button.
 
 ## Watching and taking over
 
-While an agent's call runs, the tab is outlined, its address bar reads "Claude Code is driving ·
+While an agent's call runs, the tab is outlined, a chip over the top of the page reads "Claude is driving ·
 Take over" (with the agent's name), and a pointer marks each click. The chip stays 2 seconds
 after the agent's last call, so a run of calls reads as one. While you drive, it reads "You're
 driving · Hand to" and the agent's name.
@@ -96,7 +103,10 @@ Pane window. A call goes to the copy you watch:
   **Settings › Your computers**, the call runs on that computer's copy: snapshots, clicks and
   screenshots come from the page in front of you, the chip shows there, and touching the page or
   pressing **Take over** there makes the agent wait. That copy uses that computer's sign-ins. An
-  upload sends the file from the agent's worktree; the screenshot is saved on the agent's computer.
+  upload sends the file from the agent's worktree (up to 10 MB per call) and stays on that
+  computer until the tab closes; the screenshot is saved on the agent's computer. A `localhost`
+  URL loads through that computer's tunnel for the port, and fails with `ERR_BROWSER_URL_REFUSED`
+  when the port has none.
 - **On the agent's computer.** Otherwise the call uses the tab here, bringing it forward in its
   Pane and waiting up to 5 seconds for its page.
 
@@ -105,6 +115,40 @@ shows another Pane, and with `ERR_BROWSER_NOT_LINKED` when Pane runs here withou
 computer that views this one over Tailscale, SSH or a manual URL without being linked can't run
 browser tools; link it. A call from an agent on another computer through `runpane workspace`
 fails with `ERR_BROWSER_LOCAL_ONLY`.
+
+## Links
+
+- **Links from your work open in a Pane browser tab beside where you clicked.** A link in
+  terminal output, a chat message, a Notify card, the chat's pull request chip, the command
+  palette's **Open pull request**, or a page in the docs dialog opens in a browser tab of that
+  Pane, in the split beside the conversation. A tab already showing that page comes forward instead. Pane's own links
+  (release notes, downloads, Discord, feedback, Tailscale) open in your system browser.
+- **Command-line tools too.** Pane's terminals and chat tabs set `BROWSER` to its
+  `pane-browser` command, so `gh pr view --web`, `gh auth login` and
+  `python3 -m webbrowser <url>` open a tab beside that terminal. A tool that runs macOS `open`
+  itself, or ignores `BROWSER`, still uses your system browser. Pane doesn't set `BROWSER` in
+  WSL terminals.
+- **Settings › Links › Open links in** chooses **Pane's browser** (the default) or **System
+  browser**. With System browser, links from terminals, chats, cards, the command palette, the
+  docs dialog and command-line tools all open in your system browser, at once, in terminals
+  already open too.
+- **Leave any page.** Each tab's **Open in your browser** button sends its page to your
+  system browser, and right-clicking a link, in a tab or in a chat, offers **Open in System
+  Browser**.
+
+## Apps, sign-ins and downloads
+
+These apply to every browser tab, whoever drives it.
+
+- **Apps.** When a page opens an app link, such as a Zoom meeting (`zoommtg:`), the tab asks
+  first: "This page wants to open zoom.us. Open · Cancel". Only **Open** hands it to the app.
+  Links that reach local files or programs (`file:`, `search-ms:`, `ms-msdt:`) never open.
+- **Sign-ins that refuse embedded browsers.** Google sign-in (`accounts.google.com`) refuses
+  to run inside an app's browser, so Pane opens it in your system browser and the tab says so.
+  When a site's passkey prompt doesn't appear in a tab, use **Open in your browser**.
+- **Downloads.** A file you download in a tab saves to your Downloads folder with no save
+  dialog, and the tab shows "Downloaded report.pdf · Show in folder". A download an agent's call
+  caused goes to the Pane's scratch folder instead (see above), and the notice names the agent.
 
 ## How it works
 

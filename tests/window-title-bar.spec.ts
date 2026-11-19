@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 
 const project = {
   id: 1,
@@ -63,7 +63,7 @@ async function openDesktop(
     initialUiState: { expandedProjects: [project.id] },
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 15_000 });
 }
 

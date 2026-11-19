@@ -49,6 +49,8 @@ export interface ChatStatusBarProps {
   tasks?: readonly ChatTabTask[];
   queued: number;
   pr?: ChatStatusPullRequest;
+  /** Opens the pull request's link (Settings > Links); without it the link opens in the system browser. */
+  onOpenLink?: (url: string) => void;
   /** The Session's agents actively working, one per tab (D-276): in a Session orchestrator's or Autopilot's chat. */
   agents?: readonly WorkingAgent[];
   /** Opens an agent's tab, or its Pane when the tab is unknown. */
@@ -69,7 +71,7 @@ export interface ChatStatusBarProps {
  * composer row.
  * "…" picks which items show, remembered on this device. Items with nothing to say stay out.
  */
-export function ChatStatusBar({ context, tasks = [], queued, pr, agents = [], onOpenAgent, working, sendNowSteers, phone, onClear, onStopTask, onShowQueue }: ChatStatusBarProps) {
+export function ChatStatusBar({ context, tasks = [], queued, pr, onOpenLink, agents = [], onOpenAgent, working, sendNowSteers, phone, onClear, onStopTask, onShowQueue }: ChatStatusBarProps) {
   const shown = useStatusItems();
   const now = useNow(tasks.length > 0);
   const left = contextLeft(context);
@@ -99,7 +101,7 @@ export function ChatStatusBar({ context, tasks = [], queued, pr, agents = [], on
         const state = prStateName(pr.state, pr.draft);
         const label = <>#{pr.number}{state && !phone && <> · {state}</>}</>;
         return pr.url
-          ? <a className="chat-status-item" href={pr.url} target="_blank" rel="noreferrer" title={`Open pull request #${pr.number}${state ? ` (${state})` : ''}`}>{label}</a>
+          ? <a className="chat-status-item" href={pr.url} target="_blank" rel="noreferrer" onClick={onOpenLink && (event => { event.preventDefault(); onOpenLink(event.currentTarget.href); })} title={`Open pull request #${pr.number}${state ? ` (${state})` : ''}`}>{label}</a>
           : <span className="chat-status-item">{label}</span>;
       }
       case 'agents':

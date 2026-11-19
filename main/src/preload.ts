@@ -9,6 +9,7 @@ import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult }
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
+import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
   type WindowControlsOverlayColors,
@@ -335,6 +336,22 @@ try {
       console.error('Failed to dispatch browser-panel:file-refused to window:', e);
     }
   });
+  // A line under a browser tab's address bar: an app link to confirm, a sign-in sent out, a download.
+  ipcRenderer.on(BROWSER_TAB_NOTICE_CHANNEL, (_event: Electron.IpcRendererEvent, data: { panelId: string; notice: BrowserTabNotice }) => {
+    try {
+      window.dispatchEvent(new CustomEvent(BROWSER_TAB_NOTICE_CHANNEL, { detail: data }));
+    } catch (e) {
+      console.error(`Failed to dispatch ${BROWSER_TAB_NOTICE_CHANNEL} to window:`, e);
+    }
+  });
+  // A docs page's link that opens a new window.
+  ipcRenderer.on('docs:open-link', (_event: Electron.IpcRendererEvent, url: string) => {
+    try {
+      window.dispatchEvent(new CustomEvent('docs:open-link', { detail: url }));
+    } catch (e) {
+      console.error('Failed to dispatch docs:open-link to window:', e);
+    }
+  });
 } catch {
   // Ignore if IPC is not available for some reason
 }
@@ -413,13 +430,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** The device tab (docs/DEVICES.md): the local screen, frames, and the person's own controls. */
   devices: {
     input: (panelId: string, input: DeviceInput): Promise<IPCResponse> => invokeIpc('devices:input', panelId, input),
-    frame: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame', panelId),
+    frame: (panelId: string, maxPx?: number): Promise<IPCResponse> => invokeIpc('devices:frame', panelId, maxPx),
     frameRate: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame-rate', panelId),
     controls: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:controls', panelId),
     capture: (panelId: string, image?: string): Promise<IPCResponse> => invokeIpc('devices:capture', panelId, image),
     stage: (panelId: string, agentPanelId: string, text: string): Promise<IPCResponse> => invokeIpc('devices:stage', panelId, agentPanelId, text),
     record: (panelId: string, action: 'start' | 'stop'): Promise<IPCResponse> => invokeIpc('devices:record', panelId, action),
-    recording: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:recording', panelId),
     logs: (panelId: string, since: number): Promise<IPCResponse> => invokeIpc('devices:logs', panelId, since),
     driver: (panelId: string, who: 'person' | 'agent'): Promise<IPCResponse> => invokeIpc('devices:driver', panelId, who),
     visible: (panelId: string, clientId: string, visible: boolean): Promise<IPCResponse> => invokeIpc('devices:visible', panelId, clientId, visible),

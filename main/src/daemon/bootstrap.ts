@@ -1,6 +1,7 @@
 import { prepareNotifyForQuit } from '../ipc/notify';
 import { getChatTabManager } from '../services/chatTabs';
-import { getRunpaneShimState, installRunpaneShimBestEffort } from '../services/runpaneShim';
+import { getRunpaneShimState, installRunpaneShimBestEffort, writeBrowserShim } from '../services/runpaneShim';
+import { DEFAULT_BROWSER_SETTINGS } from '../../../shared/types/browser';
 import { BUNDLED_MCP_HTTP_MODULE, PaneMcpEndpoint, setPaneMcpEndpoint, type PaneMcpHttpModule } from '../services/paneMcpEndpoint';
 import { tabListener } from '../services/tabListener';
 import os from 'os';
@@ -297,7 +298,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const runCommandManager = new RunCommandManager(databaseService);
   const versionChecker = new VersionChecker(configManager, logger);
   // Terminals launched below find this build's runpane first on PATH.
-  installRunpaneShimBestEffort(getAppDirectory());
+  // Their BROWSER follows Settings > Links (pane-browser).
+  const openLinksIn = () => ({ ...DEFAULT_BROWSER_SETTINGS, ...configManager.getConfig().browser }).openLinksIn;
+  installRunpaneShimBestEffort(getAppDirectory(), openLinksIn());
+  configManager.on('config-updated', () => writeBrowserShim(openLinksIn()));
   // The loopback listener for the tabs Pane starts (Claude's prompt hooks, Pane's MCP tools). Not awaited: the
   // first window doesn't wait for it, and a tab spawned before it listens just keeps stdio.
   void tabListener.start().catch(error => {

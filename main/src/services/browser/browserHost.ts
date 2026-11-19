@@ -1,7 +1,8 @@
-import { BrowserWindow, webContents } from 'electron';
+import { app, BrowserWindow, session, webContents } from 'electron';
+import { SHARED_BROWSER_PARTITION } from '../../../../shared/constants/browserPartitions';
+import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../../../shared/types/browser';
 import path from 'path';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
-import { SHARED_BROWSER_PARTITION } from '../../../../shared/constants/browserPartitions';
 import { hardenWebviewPreferences } from '../webviewPreferences';
 import type { BrowserPanelState } from '../../../../shared/types/panels';
 import { getPaneWebviewContextMap } from '../../core/runtime';
@@ -81,6 +82,24 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
       if (window) window.webContents.send(BROWSER_HELD_EVENT, { tabs: tabIds.map(panelId => ({ panelId, sessionId: panelManager.getPanel(panelId)?.sessionId })) });
       else holdHeadless(tabIds);
     },
+    onDownload: (listener) => {
+      void app.whenReady().then(() => {
+        session.fromPartition(SHARED_BROWSER_PARTITION).on('will-download', (_event, item, contents) => listener({
+          pageId: contents.id,
+          tabId: getPaneWebviewContextMap().get(contents.id)?.panelId,
+          filename: item.getFilename(),
+          saveAs: (file) => item.setSavePath(file),
+          finished: new Promise(resolve => item.once('done', (_done, state) => resolve(state === 'completed'))),
+        }));
+      });
+    },
+    personDownloads: () => app.getPath('downloads'),
+    agentDownloads: async (paneId) => path.join(await paneScratchDirectory(paneId) ?? os.tmpdir(), 'browser-downloads'),
+    showDownload: (panelId, file, agent) => {
+      const notice: BrowserTabNotice = { kind: 'downloaded', name: path.basename(file), file };
+      if (agent) notice.agent = agent;
+      getMainWindow()?.webContents.send(BROWSER_TAB_NOTICE_CHANNEL, { panelId, notice });
+    },
   };
 }
 
@@ -96,7 +115,8 @@ function newestPage(panelId: string): Electron.WebContents | undefined {
   for (const [id, context] of getPaneWebviewContextMap()) {
     if (context.panelId !== panelId) continue;
     const contents = webContents.fromId(id);
-    if (!contents || contents.isDestroyed()) continue;
+    // Only a browser tab's own page: never another kind of WebContents that reused a mapped id.
+    if (!contents || contents.isDestroyed() || contents.getType() !== 'webview') continue;
     if (!newest || contents.id > newest.id) newest = contents;
   }
   return newest;

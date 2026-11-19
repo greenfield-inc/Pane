@@ -914,7 +914,7 @@
     {
       "name": "devices close",
       "mcpName": "device_close",
-      "summary": "Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. The device stays warm for 10 minutes.",
+      "summary": "Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. A device Pane booted stays warm for 10 minutes, then shuts down.",
       "usage": [
         "runpane devices close [--platform <ios|android>] [--json] [--pane-dir <path>]"
       ],
@@ -977,7 +977,6 @@
         "runpane browser open --url <url> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
-      "additive": true,
       "toolsets": [
         "core",
         "browser"
@@ -6273,7 +6272,7 @@
         "Usage:",
         "  runpane devices close [--json] [--pane-dir <path>]",
         "",
-        "Ends the lease so another Pane can use the device. It shuts down 10 minutes later unless a Pane opens it again.",
+        "Ends the lease so another Pane can use the device. If Pane booted it, it shuts down 10 minutes later unless a Pane opens it again; a device the person booted keeps running.",
         "",
         "Options:",
         "  --json                         Print machine-readable output",
@@ -6378,7 +6377,7 @@
         "Usage:",
         "  runpane browser snapshot [--tab <tab-id>] [--json] [--pane-dir <path>]",
         "",
-        "Pane's browser, shared with the person, signed in as them. Read the page as an accessibility tree with element refs (e12), plus its URL and title. Act on elements by their refs. Password values are masked. Long pages are cut off with a note. A new snapshot, a navigation, or the person taking over makes older refs stale.",
+        "Pane's browser, shared with the person, signed in as them. Read the page as an accessibility tree with element refs (e12), plus its URL and title. Act on elements by their refs. Password values are masked. On a long page, text past the limit is left out first so controls keep their refs; the note says when controls were cut too. A new snapshot, a navigation, or the person taking over makes older refs stale.",
         "",
         "Options:",
         "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
@@ -20931,6 +20930,13 @@
         },
         "dialog": {
           "$ref": "#/jsonSchemas/browserDialog"
+        },
+        "downloads": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files your calls on this tab downloaded, saved in the Pane's scratch folder."
         }
       },
       "additionalProperties": false
@@ -28816,8 +28822,8 @@
       },
       "devices close": {
         "name": "devices close",
-        "summary": "Release this Pane's device and stop the commands device_run started. The device stays warm for 10 minutes.",
-        "details": "Ends the lease so another Pane can use the device. It shuts down 10 minutes later unless a Pane opens it again.",
+        "summary": "Release this Pane's device and stop the commands device_run started. A device Pane booted stays warm for 10 minutes, then shuts down.",
+        "details": "Ends the lease so another Pane can use the device. If Pane booted it, it shuts down 10 minutes later unless a Pane opens it again; a device the person booted keeps running.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -29021,7 +29027,7 @@
       "browser snapshot": {
         "name": "browser snapshot",
         "summary": "Pane's browser, shared with the person, signed in as them. Read the page as an accessibility tree with element refs (e12), plus its URL and title.",
-        "details": "Act on elements by their refs. Password values are masked. Long pages are cut off with a note. A new snapshot, a navigation, or the person taking over makes older refs stale.",
+        "details": "Act on elements by their refs. Password values are masked. On a long page, text past the limit is left out first so controls keep their refs; the note says when controls were cut too. A new snapshot, a navigation, or the person taking over makes older refs stale.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
