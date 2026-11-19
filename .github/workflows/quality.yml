@@ -287,6 +287,33 @@ jobs:
     - name: Run maintained functional smoke tests
       run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
+  # The WebGL renderer recovery spec, split off the browser shards: its 25 tests
+  # take about 16 s each, and Playwright shards by test count in file order, so
+  # in the browser lane they all landed in one shard and set the run's time.
+  functional-smoke-webgl:
+    name: Functional Smoke (WebGL ${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    - name: Install Playwright browser dependencies
+      run: pnpm exec playwright install --with-deps chromium
+
+    - name: Run WebGL renderer recovery tests
+      run: pnpm exec playwright test --config=playwright.ci.webgl.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
   # One worker per shard: the tests are CPU-bound, so four workers on one
   # 4-vCPU runner took as long as one. fullyParallel lets --shard split files.
   renderer-selection:
@@ -674,7 +701,7 @@ jobs:
   # A missing, cancelled, failed or unexpectedly skipped job fails it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, main-tests, typecheck-lint, markdown-links, functional-smoke-browser, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-rust, relay-tests]
+    needs: [changes, quality-checks, main-tests, typecheck-lint, markdown-links, functional-smoke-browser, functional-smoke-webgl, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-rust, relay-tests]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

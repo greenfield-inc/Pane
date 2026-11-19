@@ -7,6 +7,7 @@ const devServerPort = getPlaywrightPort();
 // Every spec that runs against the renderer from Vite with a mocked Electron API.
 // scripts/ci-test-inventory.mjs fails CI when a spec in tests/ runs in no lane, so a
 // new spec must be added here, to another CI config, or to its NOT_IN_CI list.
+// terminal-blur-recovery.spec.ts runs in its own lane (playwright.ci.webgl.config.ts).
 const BROWSER_SPECS = [
   'accessibility.spec.ts',
   'adaptive-panel-layout.spec.ts',
@@ -76,7 +77,6 @@ const BROWSER_SPECS = [
   'summary-policy.spec.ts',
   'tab-popover.spec.ts',
   'tailnet-https-banner.spec.ts',
-  'terminal-blur-recovery.spec.ts',
   'terminal-dock.spec.ts',
   'terminal-file-links.spec.ts',
   'terminal-keyboard-input.spec.ts',
