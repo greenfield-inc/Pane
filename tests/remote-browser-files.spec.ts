@@ -71,8 +71,9 @@ test('remote browser loads host HTML, assets and linked pages through the remote
     await page.waitForTimeout(2200);
     await page.getByTitle('Back', { exact: true }).click();
     await expect.poll(() => guest('document.body.innerText')).toContain('Rendered from the host');
+    // The address bar follows the tab's did-navigate handler, which can run after the guest shows the page.
+    await expect(page.locator('input')).toHaveValue(/\/index\.html$/);
     const entryUrl = await page.locator('input').inputValue();
-    expect(entryUrl).toMatch(/\/index\.html$/);
     await guest('document.querySelector("a").click()');
     await expect.poll(() => guest('document.body.innerText')).toContain('Sibling navigation works');
     await page.locator('input').fill(entryUrl);
