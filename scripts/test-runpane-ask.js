@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { test } = require('node:test');
+const { test } = require('./runpane-test-shard');
 
 const { extractAnswer, parseModelList, describeSignIn } = require(path.join(__dirname, '..', 'packages', 'runpane', 'dist', 'ask.js'));
 const fixture = (...parts) => fs.readFileSync(path.join(__dirname, 'fixtures', ...parts), 'utf8');
