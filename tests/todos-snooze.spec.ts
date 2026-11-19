@@ -115,7 +115,8 @@ test('snooze, held comment, wake on time, and a wake after a restart (S1, S2, S6
     await new Promise(resolve => setTimeout(resolve, 12_000));
     ({ app, page } = await launchIsolated(pane, baseURL, { PANE_CHAT_TEST_AGENT: AGENT, ...extra }));
     await dismissDialogs(page);
-    expect(await statusOf(page, todo.number)).toBe('snoozed');
+    // Its time passed while Pane was closed, so it may already have woken by the first read (a slow relaunch):
+    // what matters is the log below, one wake after launch resume and no plain restart.
     await expect.poll(() => statusOf(page, todo.number), { timeout: 60_000, intervals: [1_000] }).not.toBe('snoozed');
     const after = await detail(page, todo.number);
     expect(after.todo.state).toBe('in_progress');
