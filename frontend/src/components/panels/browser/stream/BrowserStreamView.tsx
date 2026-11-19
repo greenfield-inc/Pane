@@ -9,6 +9,8 @@ import type { BrowserStreamClient } from './streamClient';
 
 /** How long the agent's cursor stays at a click before it fades (as on the host's own tab). */
 const CURSOR_SHOWN_MS = 1_200;
+/** How long "The page reloaded on <host>" stays. */
+const RELOADED_SHOWN_MS = 8_000;
 /** A touch held this long without moving is a right click. */
 const LONG_PRESS_MS = 550;
 /** A touch that moves this far is a scroll, not a tap. */
@@ -258,6 +260,11 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   };
 
   const [, rerender] = useState(0);
+  useEffect(() => {
+    if (stream.reloadedAt === undefined) return;
+    const timer = window.setTimeout(() => rerender(count => count + 1), RELOADED_SHOWN_MS);
+    return () => window.clearTimeout(timer);
+  }, [stream.reloadedAt]);
   const cursor = view?.agentCursor;
   useEffect(() => {
     if (!cursor) return;
@@ -332,6 +339,11 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       )}
       {!frame && !stop && (
         <div role="status" className="absolute inset-0 flex items-center justify-center text-xs text-text-tertiary">Loading the page on {host}…</div>
+      )}
+      {stream.reloadedAt !== undefined && Date.now() - stream.reloadedAt < RELOADED_SHOWN_MS && !stop && (
+        <div role="status" className="absolute inset-x-0 bottom-0 flex justify-center p-3">
+          <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">The page reloaded on {host}.</p>
+        </div>
       )}
       {download && Date.now() - download.at < 60_000 && (
         <div role="status" className="absolute bottom-3 right-3 rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">
