@@ -562,4 +562,42 @@ test.describe('compact sidebar', () => {
     });
   });
 
+  test('pins the Projects header only when the rail has room for a row beside it', async ({ page }) => {
+    const pinned = Array.from({ length: 12 }, (_, index) =>
+      session(`pinned-${index}`, `Pinned ${index}`, 1, {
+        isFavorite: true,
+        favoritePinnedAt: `2026-01-${String(index + 10).padStart(2, '0')}T00:00:00.000Z`,
+      }));
+    await installElectronApiMock(page, {
+      initialConfig: { theme: 'night-owl' },
+      initialProjects: projects,
+      initialSessions: pinned,
+      initialUiState: { pinnedSectionExpanded: true, repositoriesSectionExpanded: true },
+    });
+
+    await gotoApp(page);
+    await collapseSidebar(page);
+
+    const rail = page.getByRole('navigation', { name: 'Compact sidebar' });
+    const header = rail.locator('.pane-sidebar-projects-header');
+    const headerPosition = () => header.evaluate(element => getComputedStyle(element).position);
+
+    // Normal window: the pinned rows overflow, so the header rests on the rail's bottom edge.
+    expect(await headerPosition()).toBe('sticky');
+    const railBox = await rail.boundingBox();
+    const headerBox = await header.boundingBox();
+    expect(railBox && headerBox && Math.round(headerBox.y + headerBox.height)).toBe(railBox && Math.round(railBox.y + railBox.height));
+    await page.getByTestId('compact-repositories-toggle').click();
+    await expect(page.getByTestId('compact-repositories-toggle')).toHaveAttribute('aria-expanded', 'false');
+
+    // Short window: the header scrolls with the rows, so the last pinned row comes fully into view.
+    await page.setViewportSize({ width: 640, height: 360 });
+    await expect.poll(headerPosition).toBe('static');
+    const lastPinned = page.getByRole('group', { name: 'Pinned panes' }).getByRole('button').last();
+    await lastPinned.scrollIntoViewIfNeeded();
+    const lastBox = await lastPinned.boundingBox();
+    const shortRailBox = await rail.boundingBox();
+    expect(lastBox && shortRailBox && lastBox.y + lastBox.height <= shortRailBox.y + shortRailBox.height).toBe(true);
+    await lastPinned.click();
+  });
 });
