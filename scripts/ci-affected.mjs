@@ -48,7 +48,7 @@ const MAIN = [
   'main/', 'shared/',
   // Imported or read by main's tests.
   'packages/runpane/src/', 'packages/runpane-py/src/runpane/telemetry.py', 'frontend/src/',
-  'packages/runpane/package.json', 'contracts/runpane/', 'claude-plugin/',
+  'packages/runpane/package.json', 'contracts/runpane/',
   'frontend/index.html', 'frontend/remote.html', 'tests/fixtures/notifySnapshot.ts',
   'scripts/pane-run-script.js', 'scripts/pane-remote-setup.js', 'scripts/import-agent-farm-profiles.js',
 ];
@@ -80,7 +80,7 @@ export const LANES = {
 // Paths no lane reads. A change only here skips every lane; the always-run
 // jobs (Quality Checks, Type Check and Lint, Markdown Links) still check it.
 export const LANE_FREE = [
-  'mobile/', 'native/', 'glasses/', 'tools/',
+  'mobile/', 'native/', 'glasses/', 'tools/', 'claude-plugin/',
   'screenshots/', 'images/', 'briefs/', 'README.md', 'CONTRIBUTING.md', 'RUNBOOK.md', 'SECURITY.md',
 ];
 
@@ -89,6 +89,7 @@ const FILTERS = { main: 'main/', frontend: 'frontend/', runpane: 'packages/runpa
 
 // Paths the guard finds that a lane's tests do not read, each with why.
 const NOT_READ = [
+  { file: 'main/src/services/claudePlugin.test.ts', target: 'claude-plugin', why: 'PROBE: a wrong exception that hides a real read' },
   ...['shared/types/generatedRunpaneContract.ts', 'contracts/runpane/contract.json', 'packages/runpane/src/generated/contract.ts'].map((file) => ({
     file, target: 'docs/PANE_MCP.md', why: 'the contract names this page as a link for readers; no code opens it',
   })),
