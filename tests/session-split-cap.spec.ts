@@ -107,7 +107,8 @@ for (const dark of [false, true]) {
     await openPane(page, twoSplits, dark);
     await expect(groups(page)).toHaveCount(2);
     await page.getByRole('tab', { name: 'Alpha', exact: true }).click();
-    await page.keyboard.press('ControlOrMeta+Shift+P');
+    // The fixture is a Mac (MacIntel, darwin): ⌘ is Meta on every runner.
+    await page.keyboard.press('Meta+Shift+P');
     const input = page.getByRole('combobox', { name: 'Search', exact: true });
     await expect(input).toBeFocused();
     await input.fill('>split');
@@ -121,7 +122,7 @@ for (const dark of [false, true]) {
     // The shortcut does nothing either: still two splits.
     await page.keyboard.press('Escape');
     await page.getByRole('tab', { name: 'Alpha', exact: true }).click();
-    await page.keyboard.press('ControlOrMeta+\\');
+    await page.keyboard.press('Meta+Backslash');
     await expect(groups(page)).toHaveCount(2);
   });
 
