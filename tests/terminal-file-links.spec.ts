@@ -65,6 +65,7 @@ test('terminal links open worktree files in the editor and explain outside paths
   await expect(page.getByRole('button', { name: 'Open in Editor', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Open in Editor', exact: true }).click();
   await expect(page.getByRole('tab', { name: /app.ts/ })).toBeVisible();
-  await expect(page.locator('.monaco-editor').first()).toBeVisible();
+  // The editor loads Monaco from jsDelivr (frontend/vite.config.ts), a fetch as large as the app, so it gets gotoApp's start-up bound.
+  await expect(page.locator('.monaco-editor').first()).toBeVisible({ timeout: 30_000 });
   await page.screenshot({ path: testInfo.outputPath('opened-editor.png') });
 });

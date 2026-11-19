@@ -1,5 +1,4 @@
 import type { Page } from '@playwright/test';
-import path from 'node:path';
 import type { ArchiveProgressSnapshot } from '../shared/types/archiveProgress';
 import type { PaneChatAgent } from '../shared/types/paneChat';
 import type { PanePermissionRequest, PanePermissionResponse } from '../shared/types/permissions';
@@ -184,14 +183,7 @@ export async function gotoApp(page: Page, path = '/'): Promise<void> {
   }, undefined, { timeout: 30_000 });
 }
 
-// The editor loads Monaco from jsDelivr (frontend/vite.config.ts). Tests serve the installed
-// copy, so opening a file never waits on the network.
-const MONACO_MIN = path.resolve('frontend/node_modules/monaco-editor/min');
-
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
-  await page.route(/^https:\/\/cdn\.jsdelivr\.net\/npm\/monaco-editor@[^/]+\/min\//, (route) => (
-    route.fulfill({ path: path.join(MONACO_MIN, new URL(route.request().url()).pathname.replace(/^\/npm\/monaco-editor@[^/]+\/min\//, '')) })
-  ));
   type SerializedOptions = ElectronApiMockOptions & {
     appearance: { defaults: AppearanceConfig; seeded: AppearanceConfig };
   };

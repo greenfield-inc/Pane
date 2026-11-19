@@ -1642,7 +1642,8 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   await expect(fileTab).toHaveAttribute('aria-selected', 'true');
   await expect.poll(readPanels).toHaveLength(3);
   const editorLines = page.locator('.monaco-editor .view-lines').filter({ visible: true });
-  await expect(editorLines).toContainText('Session notes');
+  // The editor loads Monaco from jsDelivr (frontend/vite.config.ts), a fetch as large as the app, so it gets gotoApp's start-up bound.
+  await expect(editorLines).toContainText('Session notes', { timeout: 30_000 });
   await page.evaluate(async () => {
     const originalInvoke = window.electronAPI.invoke;
     Object.assign(window.electronAPI, {
