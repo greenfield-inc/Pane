@@ -119,6 +119,8 @@ const NAVIGATION_WAIT_MS = 30_000;
 const PAGE_CALL_MS = 10_000;
 const EVALUATE_TIMEOUT_MS = 30_000;
 const EVALUATE_RESULT_LIMIT = 64 * 1024;
+/** How long a screenshot or still may take before the capture queue gives up on it. */
+const CAPTURE_MS = 10_000;
 export const WAIT_DEFAULT_MS = 10_000;
 export const WAIT_MAX_MS = 120_000;
 
@@ -339,9 +341,11 @@ export class PageDriver {
   still(quality: number): Promise<ScreencastFrame> {
     return this.capture(async () => {
       await this.attach();
-      const viewport = decodeBoundary(await this.send('Page.getLayoutMetrics'), layoutSchema).cssLayoutViewport;
+      // The size screencast frames report (the view, scrollbars included, or a viewer's size), so
+      // input on this still maps the same way as on frames.
+      const size = this.size ?? decodeBoundary(await this.send('Runtime.evaluate', { expression: '({ width: innerWidth, height: innerHeight })', returnByValue: true }), boundary.object({ result: boundary.object({ value: sizeSchema }) })).result.value;
       const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'jpeg', quality }), screenshotSchema);
-      return { data: shot.data, width: viewport.clientWidth, height: viewport.clientHeight };
+      return { data: shot.data, width: size.width, height: size.height };
     });
   }
 
@@ -353,9 +357,15 @@ export class PageDriver {
     const run = this.screenshots.then(async () => {
       const cast = this.cast;
       if (cast) await this.send('Page.stopScreencast').catch(() => undefined);
+      let timer: NodeJS.Timeout | undefined;
+      // A page that never paints never answers a capture: give up, so the queue never jams.
+      const late = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new PaneError('ERR_BROWSER_PAGE_FAILED', `The page did not give a picture within ${CAPTURE_MS / 1000} seconds; it may not be painting.`, 'Show the tab, then try again.')), CAPTURE_MS);
+      });
       try {
-        return await work();
+        return await Promise.race([work(), late]);
       } finally {
+        clearTimeout(timer);
         if (cast && this.cast === cast && !this.contents.isDestroyed()) await this.send('Page.startScreencast', { format: 'jpeg', ...cast.settings, everyNthFrame: 1 }).catch(() => undefined);
       }
     });
@@ -376,7 +386,10 @@ export class PageDriver {
     }
     this.cast = { settings, onFrame };
     await this.attach();
-    await this.send('Page.startScreencast', { format: 'jpeg', ...settings, everyNthFrame: 1 });
+    // In the capture queue, so it never starts while a screenshot or still is being taken.
+    const start = this.screenshots.then(() => (this.cast?.settings === settings ? this.send('Page.startScreencast', { format: 'jpeg', ...settings, everyNthFrame: 1 }) : undefined));
+    this.screenshots = start.then(() => undefined, () => undefined);
+    await start;
   }
 
   async stopScreencast(): Promise<void> {
@@ -400,7 +413,9 @@ export class PageDriver {
    */
   async personInput(batch: readonly BrowserInput[]): Promise<BrowserInputResult> {
     await this.attach();
-    await this.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    // A pointer only passing over the page (hover) gives it no focus.
+    const hoverOnly = batch.every(input => input.kind === 'mouse' && input.action === 'move');
+    if (!hoverOnly) await this.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     // A click, tap or Enter may open a file picker: it comes to Pane, so the screen offers its own
     // (the host's dialog would open where nobody sits).
     const mayOpenPicker = batch.some(input => (input.kind === 'mouse' && input.action === 'up') || (input.kind === 'touch' && input.action === 'end') || (input.kind === 'key' && (input.key === 'Enter' || input.key === ' ')));
@@ -410,7 +425,8 @@ export class PageDriver {
     // An alert the input opens blocks the page, and the input's own reply waits for its answer:
     // the batch ends there, and the screen shows the dialog.
     let dialogOpened = false;
-    const opened = new Promise<'dialog'>(resolve => { const done = () => { dialogOpened = true; resolve('dialog'); }; this.dialogWaiters.add(done); });
+    let waiter: (() => void) | undefined;
+    const opened = new Promise<'dialog'>(resolve => { waiter = () => { dialogOpened = true; resolve('dialog'); }; this.dialogWaiters.add(waiter); });
     try {
       for (const input of batch) {
         if (dialogOpened || (this.dialog && input.kind !== 'dialog')) break;
@@ -421,11 +437,12 @@ export class PageDriver {
       }
       if (mayOpenPicker && !dialogOpened) await Promise.race([sleep(SETTLE_MS), opened]);
     } finally {
-      this.dialogWaiters.clear();
+      // Only this batch's waiter: an agent's input or another screen's may be waiting too.
+      if (waiter) this.dialogWaiters.delete(waiter);
       this.forwarding -= 1;
       this.lastForwardEnd = Date.now();
       if (mayOpenPicker) void this.send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => undefined);
-      this.unfocusLater();
+      if (!hoverOnly) this.unfocusLater();
     }
     const field = this.dialog ? null : decodeOptionalBoundary(await this.page('focusedField').catch(() => null), fieldSchema) ?? null;
     const result: BrowserInputResult = { field };
@@ -503,8 +520,9 @@ export class PageDriver {
   private async screenshotNow(fullPage: boolean): Promise<PageScreenshot> {
     const size = this.size;
     if (!fullPage && size) {
-      // The view is the tab's size, and the page a viewer's: capture the page at its own size.
-      const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 } }), screenshotSchema);
+      // The view is the tab's size, and the page a viewer's: the debugger captures the emulated
+      // viewport at its own size, where it is scrolled to (a clip would be in document coordinates).
+      const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'png' }), screenshotSchema);
       // The PNG is in device pixels (2x on a Retina host), as capturePage's is: report its own size.
       const png = Buffer.from(shot.data, 'base64');
       return { png, width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
@@ -759,14 +777,15 @@ export class PageDriver {
     this.chooser = undefined;
     if (interceptChooser) await this.send('Page.setInterceptFileChooserDialog', { enabled: true }).catch(() => undefined);
     this.dispatching += 1;
-    const dialogOpened = new Promise<'dialog'>(resolve => { const done = () => resolve('dialog'); this.dialogWaiters.add(done); });
+    let waiter: (() => void) | undefined;
+    const dialogOpened = new Promise<'dialog'>(resolve => { waiter = () => resolve('dialog'); this.dialogWaiters.add(waiter); });
     try {
       const sent = work().then(() => 'sent' as const);
       // An alert blocks the page, so the input's own reply waits for the answer; don't.
       sent.catch(() => undefined);
       if (await Promise.race([sent, dialogOpened]) === 'sent') await Promise.race([sleep(SETTLE_MS), dialogOpened]);
     } finally {
-      this.dialogWaiters.clear();
+      if (waiter) this.dialogWaiters.delete(waiter);
       this.dispatching -= 1;
       this.lastDispatchEnd = Date.now();
       // While a dialog blocks the page this reply waits for the answer, so it is never awaited.

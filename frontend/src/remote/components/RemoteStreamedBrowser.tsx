@@ -1,18 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Keyboard, Loader2, RotateCw } from 'lucide-react';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { normalizeUrl } from '../../components/panels/browser/browserUrl';
-import { VIEWER_ID } from '../../components/panels/browser/browserWatch';
 import { BrowserStreamView, stopLine } from '../../components/panels/browser/stream/BrowserStreamView';
 import { streamClient } from '../../components/panels/browser/stream/streamClient';
 import { useBrowserStream } from '../../components/panels/browser/stream/useBrowserStream';
+import { useStreamWatch } from '../../components/panels/browser/stream/useStreamWatch';
 import { cn } from '../../utils/cn';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 import { isNativeMobile } from '../runtime/nativeMobile';
 
-/** How often the screen repeats that it shows the tab; the host forgets one silent for 15 s. */
-const WATCH_EVERY_MS = 5_000;
 /** Narrower than this, the tab uses the phone layout: address on top, controls at the bottom. */
 const PHONE_WIDTH_PX = 640;
 
@@ -37,27 +35,16 @@ export function RemoteStreamedBrowser({ adapter, panel, hostName, ownCopy }: { a
   const phone = width < PHONE_WIDTH_PX;
   const touchScreen = isNativeMobile() || window.matchMedia('(pointer: coarse)').matches;
 
-  // Tells the host this screen shows the tab, with the room it gives the page.
+  // Tells the host this screen shows the tab, with the room its stream gives the page.
+  const invokeHost = useCallback((channel: string, ...args: Parameters<Parameters<typeof useStreamWatch>[0]>[1][]) => adapter.invoke<JsonValue>(channel, args), [adapter]);
+  useStreamWatch(invokeHost, panel.id, touchScreen ? 'phone' : 'web', rootRef, stream.stop !== 'older');
   useEffect(() => {
-    const report = () => {
-      const box = rootRef.current?.querySelector('[data-testid="browser-stream"]')?.getBoundingClientRect();
-      if (!box) return;
-      const onScreen = document.visibilityState === 'visible';
-      void adapter.invoke('browser:watch', [panel.id, VIEWER_ID, { kind: touchScreen ? 'phone' : 'web', onScreen, width: Math.round(box.width), height: Math.round(box.height), scale: window.devicePixelRatio || 1 }]).catch(() => undefined);
-    };
-    report();
-    const timer = window.setInterval(report, WATCH_EVERY_MS);
-    document.addEventListener('visibilitychange', report);
     const element = rootRef.current;
-    const observer = new ResizeObserver(() => { setWidth(element?.clientWidth ?? window.innerWidth); report(); });
-    if (element) observer.observe(element);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', report);
-      observer.disconnect();
-      void adapter.invoke('browser:watch', [panel.id, VIEWER_ID, null]).catch(() => undefined);
-    };
-  }, [adapter, panel.id, touchScreen]);
+    if (!element) return;
+    const observer = new ResizeObserver(() => setWidth(element.clientWidth));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   if (stream.stop === 'older') {
     return (

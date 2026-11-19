@@ -131,7 +131,8 @@ export const BrowserLayer = memo(function BrowserLayer() {
         const visible = measured !== undefined && measured.width > 0 && measured.height > 0;
         const rect = visible ? { left: measured.left, top: measured.top, width: measured.width, height: measured.height } : lastRects.get(id) ?? { left: 0, top: 0, width: 1280, height: 800 };
         lastRects.set(id, rect);
-        if (visible) shown.set(id, { width: rect.width, height: rect.height });
+        // A desktop showing another computer's Pane reports from the stream itself (StreamedBrowserPanel).
+        if (visible && !remote) shown.set(id, { width: rect.width, height: rect.height });
         // A hidden page is not drawn, and Chromium throttles it. While a call runs on it, or another
         // device streams it, it is drawn fully transparent under the tab in view, so its frames are current.
         const painting = visible || busy.has(id) || streamed.has(id);

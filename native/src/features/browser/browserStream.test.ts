@@ -5,6 +5,15 @@ import { KEYBOARD_EMPTY, keyboardEdit, PhoneControl } from './browserStream';
 const backspace = { kind: 'key', key: 'Backspace', modifiers: 0 };
 
 describe('keyboardEdit', () => {
+  it('in a password field, types each character and reads iOS emptying the field on return as nothing deleted', () => {
+    const first = keyboardEdit(KEYBOARD_EMPTY, `${KEYBOARD_EMPTY}h`, true);
+    expect(first).toEqual({ input: [{ kind: 'text', text: 'h' }], next: KEYBOARD_EMPTY });
+    // Back from another app, iOS replaces the secure field's text with the next character typed.
+    expect(keyboardEdit(first.next, 'e', true).input).toEqual([{ kind: 'text', text: 'e' }]);
+    // A real Backspace still deletes one character on the page.
+    expect(keyboardEdit(KEYBOARD_EMPTY, '', true).input).toEqual([{ kind: 'key', key: 'Backspace', modifiers: 0 }]);
+  });
+
   it('sends a typed letter as text', () => {
     expect(keyboardEdit('​', '​h')).toEqual({ input: [{ kind: 'text', text: 'h' }], next: '​h' });
   });

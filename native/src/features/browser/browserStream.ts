@@ -74,12 +74,13 @@ export const KEYBOARD_EMPTY = '​';
 /**
  * The page input for one edit of the keyboard field, from its text `before` to `after`: removed
  * characters as Backspaces and added ones as text, so autocorrect and dictation replacements land
- * too. `next` is what the field holds afterwards.
+ * too. `next` is what the field holds afterwards. A `secure` (password) field keeps nothing
+ * between edits: iOS empties a secure field when typing resumes, which must not read as deletions.
  */
-export function keyboardEdit(before: string, after: string): { input: BrowserInput[]; next: string } {
+export function keyboardEdit(before: string, after: string, secure = false): { input: BrowserInput[]; next: string } {
   const was = [...before.replaceAll(KEYBOARD_EMPTY, '')];
   const now = [...after.replaceAll(KEYBOARD_EMPTY, '')];
-  const next = KEYBOARD_EMPTY + now.join('');
+  const next = secure ? KEYBOARD_EMPTY : KEYBOARD_EMPTY + now.join('');
   // The marker itself went: Backspace in an empty field.
   if (was.length === 0 && now.length === 0) {
     return { input: after.includes(KEYBOARD_EMPTY) ? [] : [{ kind: 'key', key: 'Backspace', modifiers: 0 }], next };

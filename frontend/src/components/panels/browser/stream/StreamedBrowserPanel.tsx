@@ -1,11 +1,16 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Loader2, RotateCw } from 'lucide-react';
 import type { ToolPanel } from '../../../../../../shared/types/panels';
+import type { JsonValue } from '../../../../../../shared/validation/boundaryDecoder';
 import { cn } from '../../../../utils/cn';
 import { normalizeUrl } from '../browserUrl';
 import { BrowserStreamView, stopLine } from './BrowserStreamView';
 import { streamClient } from './streamClient';
 import { useBrowserStream } from './useBrowserStream';
+import { useStreamWatch } from './useStreamWatch';
+
+const invokeHost = (channel: string, ...args: Parameters<Parameters<typeof useStreamWatch>[0]>[1][]): Promise<JsonValue> => window.electronAPI.invoke(channel, ...args);
+
 
 /**
  * A browser tab on a desktop showing another computer's Pane: the page runs on that computer, with
@@ -15,6 +20,9 @@ import { useBrowserStream } from './useBrowserStream';
 export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: ToolPanel; isActive: boolean; ownCopy: () => ReactNode }) {
   const client = useMemo(() => streamClient((channel, ...args) => window.electronAPI.invoke(channel, ...args)), []);
   const stream = useBrowserStream(client, panel.id, isActive);
+  // This desktop reports the stream's own box (below the address bar), so a Take over sizes the page to it.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useStreamWatch(invokeHost, panel.id, 'desktop', rootRef, isActive && stream.stop !== 'older');
   const view = stream.view;
   const [typed, setTyped] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -47,7 +55,7 @@ export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: Tool
   const button = 'p-1 rounded enabled:hover:bg-surface-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed';
 
   return (
-    <div className="flex h-full flex-col bg-bg-primary" data-browser-streamed={panel.id}>
+    <div ref={rootRef} className="flex h-full flex-col bg-bg-primary" data-browser-streamed={panel.id}>
       <div className="flex flex-shrink-0 items-center gap-1.5 border-b border-border-primary bg-bg-chrome px-2 py-1.5">
         <button type="button" className={button} disabled={!view?.canGoBack} onClick={() => history('back')} title="Back"><ArrowLeft className="h-3.5 w-3.5" /></button>
         <button type="button" className={button} disabled={!view?.canGoForward} onClick={() => history('forward')} title="Forward"><ArrowRight className="h-3.5 w-3.5" /></button>

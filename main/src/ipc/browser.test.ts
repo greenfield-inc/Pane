@@ -64,11 +64,12 @@ function fakePage(id: number, url: string): BrowserPageContents & EventEmitter &
       attach: () => { attached = true; },
       isAttached: () => attached,
       detach: () => { attached = false; },
-      sendCommand: async (method: string, given?: { files?: string[] }) => {
+      sendCommand: async (method: string, given?: { files?: string[]; expression?: string }) => {
         sent.push(method);
         params.set(method, given);
         if (method === 'DOM.setFileInputFiles') files.push(...(given?.files ?? []));
         if (method === 'Page.captureScreenshot') return { data: pngOf(780, 1688).toString('base64') };
+        if (method === 'Runtime.evaluate' && JSON.stringify(given).includes('innerWidth')) return { result: { value: { width: 800, height: 600 } } };
         if (method === 'Page.getLayoutMetrics') return { cssContentSize: { width: 800, height: 600 }, cssLayoutViewport: { clientWidth: 800, clientHeight: 600 } };
         if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
         if (method === 'DOM.querySelector') return { nodeId: 7 };
@@ -499,6 +500,17 @@ describe('browser tabs: the screens that watch them', () => {
     await vi.waitFor(() => expect(page).toMatchObject({ throttled: true, muted: false }));
   });
 
+  it('keeps a page painting for a phone that joins a tab this computer\'s window already shows', async () => {
+    const painting: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { painting, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000 } } });
+    await fromHere(fixture, 'persons', { kind: 'desktop', onScreen: true, width: 1200, height: 700 });
+    expect(painting).toEqual([]);
+    await fromAfar(fixture, 'persons', 'phone-1', phone);
+    expect(painting).toEqual(['persons']);
+    await fromAfar(fixture, 'persons', 'phone-1', null);
+    expect(painting).toEqual([]);
+  });
+
   it('takes reports only from Pane\'s own screens, never from an agent', async () => {
     const fixture = setup([browserTab('persons', 'pane-a')]);
     expect(await fixture.registry.invokeConnected('browser:watch', ['persons', 'v', phone], signal, claudeInA)).toMatchObject({ success: false });
@@ -587,6 +599,17 @@ describe('browser tabs: streaming a page to another screen', () => {
     const started = Date.now();
     expect(await code(call(fixture, 'click', { ref: 'e2' }))).toBe('ERR_BROWSER_STALE_REF');
     expect(Date.now() - started).toBeGreaterThanOrEqual(TOUCH_HOLD_MS - 300);
+  });
+
+  it('lets a pointer pass over the stream without taking the page from the agent', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['mine', 'phone-1', phone], { caller: undefined });
+    await call(fixture, 'snapshot', {});
+    await call(fixture, 'click', { ref: 'e2' });
+    await input(fixture, 'mine', [{ kind: 'mouse', action: 'move', x: 5, y: 5, button: 'none', clicks: 0, modifiers: 0 }]);
+    expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).not.toContain('"by":"person"');
+    expect(fixture.pages.get('mine')?.sent).not.toContain('Emulation.setDeviceMetricsOverride');
+    expect(await call(fixture, 'click', { ref: 'e2' })).toMatchObject({ ok: true });
   });
 
   it('gives the screen the tab\'s state, and wakes a waiting read when it changes', async () => {
