@@ -97,7 +97,15 @@ from .machine import run_machine_cleanup, run_machine_health
 from .notify import RunpaneError, run_notify
 from .pairing_link import run_link
 from .profiles import run_profiles_launch, run_profiles_list, run_profiles_runs, run_profiles_show
-from .secrets import run_secrets_delete, run_secrets_exec, run_secrets_list, run_secrets_request, run_secrets_set
+from .secrets import (
+    run_secrets_delete,
+    run_secrets_exec,
+    run_secrets_lease,
+    run_secrets_lease_end,
+    run_secrets_list,
+    run_secrets_request,
+    run_secrets_set,
+)
 from .platforms import detect_platform
 from .releases import resolve_release
 from .telemetry import (
@@ -188,7 +196,8 @@ FLAG_OWNERS = {
     "--approve": ("autopilot answer",),
     "--deny": ("autopilot answer",),
     "--because": ("autopilot answer",),
-    "--reason": ("secrets request", "autopilot close"),
+    "--reason": ("secrets request", "secrets lease", "autopilot close"),
+    "--id": ("secrets lease end",),
     "--kind": ("machine cleanup",),
     "--conversation": ("panels conversation",),
     "--hook": ("panels conversation",),
@@ -263,6 +272,9 @@ class ParsedArgs:
     project: Optional[str] = None
     only: Optional[List[str]] = None
     secret_files: Optional[List[str]] = None
+    # secrets lease: the secret names, given as words; secrets lease end --id: the lease to end.
+    secret_names: Optional[List[str]] = None
+    lease_id: Optional[str] = None
     reason: Optional[str] = None
     kind: Optional[str] = None
     exec_command: Optional[List[str]] = None
@@ -656,6 +668,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     parsed = ParsedArgs(command=command)
     if parsed.command == "secrets exec":
         parsed.exec_command = take_exec_command(args)
+    if parsed.command == "secrets lease":
+        parsed.secret_names = take_secret_names(args)
     if parsed.command == "relay":
         # Every word after `relay` is pane-relay's; this package points to npx instead.
         del args[:]
@@ -721,6 +735,18 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     if parsed.command == "autopilot stack push":
         validate_stack_push_args(parsed)
     return parsed
+
+
+def take_secret_names(args: List[str]) -> Optional[List[str]]:
+    """secrets lease takes the names as words before, between or after its options."""
+    names: List[str] = []
+    index = 0
+    while index < len(args):
+        if args[index].startswith("-"):
+            index += 2 if args[index] in LOCAL_VALUE_FLAGS else 1
+        else:
+            names.append(args.pop(index))
+    return names or None
 
 
 def take_exec_command(args: List[str]) -> Optional[List[str]]:
@@ -1305,6 +1331,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--reason":
         parsed.reason = value
         return
+    if flag == "--id":
+        parsed.lease_id = value
+        return
     if flag == "--timeout-ms":
         if parsed.command == "watch":
             parsed.timeout_ms = parse_watch_duration(flag, value)
@@ -1850,6 +1879,8 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "secrets delete": lambda parsed, context: run_secrets_delete(parsed),
     "secrets exec": lambda parsed, context: run_secrets_exec(parsed),
     "secrets request": lambda parsed, context: run_secrets_request(parsed),
+    "secrets lease": lambda parsed, context: run_secrets_lease(parsed),
+    "secrets lease end": lambda parsed, context: run_secrets_lease_end(parsed),
     "sessions list": lambda parsed, context: run_sessions_list(parsed),
     "sessions create": lambda parsed, context: run_sessions_create(parsed),
     "sessions get": lambda parsed, context: run_sessions_get(parsed),

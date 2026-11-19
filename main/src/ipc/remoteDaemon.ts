@@ -1,3 +1,5 @@
+import { secretLeaseStore } from '../services/paneSecrets';
+import { secretLeaseService } from '../services/secretLeaseRuntime';
 import { allRouteProfiles, primaryProfile, saveProfileRoute } from '../../../shared/types/remoteComputers';
 import { runRemoteSetupCommand } from '../daemon/remote-setup-command';
 import {
@@ -542,6 +544,8 @@ export function registerRemoteDaemonHandlers(
 
       await configManager.updateConfig({ remoteDaemon: next });
       dependencies.disconnectActiveRemoteHostClients([...new Set([decodedClientId, ...revoked])]);
+      // Leases a removed desktop pushed here end with it: nothing could end them for it any more.
+      await secretLeaseStore().endPushedBy([decodedClientId, ...revoked]).catch((error: Error) => console.warn(`[SecretLeases] Could not end leases of a removed client: ${error.message}`));
       return { success: true, data: next.host.clients };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Failed to delete remote daemon client record') };
@@ -577,6 +581,8 @@ export function registerRemoteDaemonHandlers(
   ipcMain.handle('remote-daemon:delete-connection-profile', async (_event, profileId: PaneCommandValue) => {
     try {
       const decodedProfileId = decodeBoundary(profileId, boundary.nonEmptyString);
+      // End the leases pushed to it while it can still be told; an offline one keeps them until they expire there.
+      await secretLeaseService()?.releaseMachine(decodedProfileId);
 
       const next = await applyRemoteClientTransition(async (current) => {
         const isActiveRemoteProfile = current.client.mode === 'remote' && current.client.activeProfileId === decodedProfileId;

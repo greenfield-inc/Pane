@@ -4,7 +4,7 @@ import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder
 import type { MachineState } from '../shared/types/machineConnections';
 import { installElectronApiMock, gotoApp } from './electronApiMock';
 import { notifyFixture, secretFixture } from './fixtures/notifySnapshot';
-import type { PaneSecretStorage, PaneSecretSummary } from '../shared/types/paneSecrets';
+import type { PaneSecretsOverview, PaneSecretSummary } from '../shared/types/paneSecrets';
 
 const project = {
   id: 1,
@@ -44,7 +44,7 @@ async function boot(
   page: Page,
   snapshot: NotifySnapshot = notifyFixture(),
   initialConfig: JsonObject = {},
-  paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage },
+  paneSecrets?: Partial<PaneSecretsOverview>,
   initialPanels: JsonObject[] = [],
   initialLayout: JsonObject | null = null,
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> },
@@ -443,6 +443,63 @@ test.describe('Settings → Secrets', () => {
       { action: 'set', project: 'qa', name: 'UIVERIFY' },
       { action: 'delete', project: 'stripe', name: 'STRIPE_SECRET_KEY' },
       { action: 'set', project: 'openai', name: 'OPENAI_API_KEY' },
+    ]);
+  });
+
+  test('adds a 1Password reference over a typed secret, leases it to the machines picked, and ends the lease', async ({ page }) => {
+    const now = new Date().toISOString();
+    await boot(page, notifyFixture(), {}, {
+      secrets: [{ project: 'stripe', name: 'STRIPE_SECRET_KEY', updatedAt: now, machine: 'mac-studio' }],
+      references: [{ project: 'stripe', name: 'DATABASE_URL', reference: 'op://Dev/Neon/url', updatedAt: now, machine: 'mac-studio' }],
+      machines: [
+        { id: 'local', name: 'This computer', online: true, refusal: null, memoryOnly: false },
+        { id: 'devbox', name: 'parsa-devbox', online: true, refusal: null, memoryOnly: true },
+        { id: 'old-mac', name: 'old-mac', online: true, refusal: 'old-mac runs a Pane too old for leases. Update Pane there.', memoryOnly: false },
+      ],
+    });
+    await openSecrets(page);
+    const reference = (address: string) => page.locator(`[data-testid="pane-secret-reference-row"][data-secret="${address}"]`);
+    await expect(reference('stripe/DATABASE_URL')).toContainText('from 1Password');
+    await expect(reference('stripe/DATABASE_URL')).toContainText('no lease');
+    await expect(page.locator('[data-secret="stripe/STRIPE_SECRET_KEY"]').getByRole('button', { name: 'Move to 1Password' })).toBeDisabled();
+
+    await page.getByRole('button', { name: 'Add from 1Password' }).click();
+    await page.getByLabel('Reference project').fill('stripe');
+    await page.getByLabel('Reference name').fill('STRIPE_SECRET_KEY');
+    await page.getByLabel('1Password reference').fill('Dev/Stripe/credential');
+    await expect(page.getByText('A 1Password reference looks like op://vault/item/field.', { exact: false })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Add reference' })).toBeDisabled();
+    await page.getByLabel('1Password reference').fill('op://Dev/Stripe/credential');
+    await page.getByRole('button', { name: 'Add reference' }).click();
+    // The name is a typed secret: adding the reference deletes it everywhere, so it asks first.
+    const replace = page.getByRole('group', { name: 'Replace stripe/STRIPE_SECRET_KEY' });
+    await expect(replace).toContainText('stripe/STRIPE_SECRET_KEY is a typed secret. Adding this reference deletes the typed value on every machine.');
+    await replace.getByRole('button', { name: 'Replace' }).click();
+    await expect(reference('stripe/STRIPE_SECRET_KEY')).toContainText('op://Dev/Stripe/credential');
+
+    await page.getByRole('button', { name: 'Start lease' }).click();
+    const form = page.getByRole('form', { name: 'Start lease for stripe' });
+    await expect(form.getByLabel('This computer')).toBeChecked();
+    await expect(form.getByLabel('old-mac')).toBeDisabled();
+    await expect(form).toContainText('old-mac runs a Pane too old for leases. Update Pane there.');
+    await expect(form).toContainText('Held in memory: ends if Pane restarts there.');
+    await expect(form).toContainText('Lasts 24 hours');
+    await form.getByLabel('DATABASE_URL').uncheck();
+    await form.getByLabel('parsa-devbox').check();
+    await form.getByRole('button', { name: 'Start lease' }).click();
+    await expect(page.getByTestId('pane-secrets-lease-result')).toContainText('on This computer, parsa-devbox.');
+    await expect(reference('stripe/STRIPE_SECRET_KEY')).toContainText('leased until');
+    await expect(reference('stripe/DATABASE_URL')).toContainText('no lease');
+
+    const lease = page.getByTestId('pane-secret-lease');
+    await expect(lease).toContainText('On This computer, parsa-devbox (in memory)');
+    await expect(page.getByText('A command already running keeps the values it started with.')).toBeVisible();
+    await lease.getByRole('button', { name: 'End now' }).click();
+    await expect(lease).toHaveCount(0);
+    expect(await secretCalls(page)).toEqual([
+      { action: 'setReference', project: 'stripe', name: 'STRIPE_SECRET_KEY', reference: 'op://Dev/Stripe/credential' },
+      { action: 'startLease', request: { project: 'stripe', names: ['STRIPE_SECRET_KEY'], machines: ['local', 'devbox'] } },
+      { action: 'endLease', leaseId: 'lease-1' },
     ]);
   });
 

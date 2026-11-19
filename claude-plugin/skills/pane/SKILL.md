@@ -173,6 +173,10 @@ For an API key, token or password, call the `secrets_request` tool (or
 never `ask`. Pane saves the value as a Pane secret and returns only saved or
 declined; run commands with it through `runpane secrets exec`. If it returns
 `unavailable`, ask the person to save it in Pane under Settings > Secrets.
+For a secret from 1Password, call `secrets_lease` (or
+`runpane secrets lease --project <project> <NAME>...`) and wait for the person
+to approve it. When `secrets exec` fails with `SECRET_LEASE_ENDED`, run the
+next step it names.
 
 ## Phone simulators
 

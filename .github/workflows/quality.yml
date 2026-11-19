@@ -695,13 +695,33 @@ jobs:
     - name: Run runpane relay against the relay
       run: pnpm run test:runpane-relay
 
+  # The Remote PWA preview deploy's install and build, exactly as
+  # deploy-remote-pwa-preview.yml runs them on main. Its frontend-only install
+  # catches a build that needs another package's dependencies.
+  pwa-build:
+    name: Remote PWA Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile --filter 'frontend...' --ignore-scripts
+
+    - name: Build remote PWA assets
+      run: pnpm run build:frontend
+
   # The one check branch protection requires. It runs even when the run is
   # cancelled, and fails unless every job in scripts/ci-gate.mjs EXPECTED_JOBS
   # succeeded or skipped with a reason from Detect changed areas' manifest.
   # A missing, cancelled, failed or unexpectedly skipped job fails it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, main-tests, typecheck-lint, markdown-links, functional-smoke-browser, functional-smoke-webgl, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-rust, relay-tests]
+    needs: [changes, quality-checks, main-tests, typecheck-lint, markdown-links, functional-smoke-browser, functional-smoke-webgl, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-rust, relay-tests, pwa-build]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

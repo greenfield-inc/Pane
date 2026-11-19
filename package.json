@@ -78,7 +78,7 @@
     "anim:evidence": "playwright test -c playwright.anim.config.ts",
     "anim:evidence:remote": "playwright test -c playwright.anim.remote.config.ts",
     "anim:evidence:render": "node scripts/render-anim-evidence.mjs",
-    "typecheck": "bun check --no-script -b --all",
+    "typecheck": "bun check --no-script -b -p tsconfig.check.json --all",
     "typecheck:tsc": "pnpm run -r typecheck && pnpm --filter frontend exec tsc --noEmit -p ../tests/renderer/tsconfig.json",
     "check:fast": "node scripts/check-fast.mjs",
     "sync:claude-plugin": "pnpm --filter main exec vitest run src/services/claudePlugin.test.ts --update",

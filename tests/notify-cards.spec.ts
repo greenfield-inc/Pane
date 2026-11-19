@@ -13,6 +13,18 @@ async function open(page: Page, query: string) {
 const commands = (page: Page) => page.evaluate(() => window.qaCommands);
 
 test.describe("Notify's round", () => {
+  test('a lease card sends a bare approval, even with a note typed', async ({ page }) => {
+    await open(page, 'surface=round&ui=approve&lease=1');
+    const round = page.getByTestId('notify-round');
+    await expect(round.getByTestId('notify-round-lease')).toContainText(/STRIPE_KEY\s*op:\/\/Dev\/Stripe\/credential/);
+    // A note typed first never turns the lease answer into a reply.
+    await page.keyboard.press('Tab');
+    await round.getByRole('textbox', { name: 'Note' }).fill('only for the webhook tests');
+    await round.getByRole('option', { name: /Start lease/ }).click();
+    await round.getByRole('button', { name: /Send to Claude/ }).click();
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q1', answer: { approved: true } }]);
+  });
+
   test('opens with nothing picked; Enter sends nothing until a pick or a typed reply', async ({ page }) => {
     await open(page, 'surface=round');
     const round = page.getByTestId('notify-round');
@@ -68,6 +80,22 @@ test.describe('Notify card', () => {
     await page.getByPlaceholder(/Add a note for Claude/).fill('only for now');
     await page.getByRole('button', { name: 'Send', exact: true }).click();
     await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q1', answer: { picks: ['Keep Redis'], text: 'only for now' } }]);
+  });
+
+  test('a lease card sends a bare approval on Start lease, stays busy while 1Password asks, and Decline declines', async ({ page }) => {
+    await open(page, 'surface=card&ui=approve&lease=1');
+    const card = page.getByTestId('notify-card');
+    await expect(card.getByTestId('notify-lease-row')).toHaveText(/STRIPE_KEY\s*op:\/\/Dev\/Stripe\/credential/);
+    await expect(card.getByTestId('notify-lease-summary')).toHaveText(/^On: this computer · Ends .+ · 1Password will ask once$/);
+    const start = card.getByRole('button', { name: /Start lease/ });
+    const box = await start.boundingBox();
+    await start.click();
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q1', answer: { approved: true } }]);
+    await expect(start).toHaveAttribute('aria-busy', 'true');
+    // The spinner sits in a box the idle button already held.
+    expect(await start.boundingBox()).toEqual(box);
+    await card.getByRole('button', { name: /Decline/ }).click();
+    await expect.poll(async () => (await commands(page)).at(-1)).toEqual({ type: 'answer', id: 'q1', answer: { approved: false } });
   });
 });
 
