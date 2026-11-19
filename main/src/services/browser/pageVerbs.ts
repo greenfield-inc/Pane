@@ -71,7 +71,9 @@ export async function runVerb(page: PageDriver, contents: BrowserPageContents, r
       const outcome: VerbOutcome = { url: reading.url, title: reading.title, snapshot: reading.snapshot };
       if (reading.truncated) {
         outcome.truncated = true;
-        outcome.note = 'The page is long, so text past the limit was left out; every control on the page still has a ref. Use browser_evaluate to read a part of the text.';
+        outcome.note = reading.controlsCut
+          ? 'The page is very long, so its later text and its controls past about 60,000 characters were left out. Use browser_evaluate to find them, or browser_click with x and y.'
+          : 'The page is long, so text past the limit was left out; every control on the page still has a ref. Use browser_evaluate to read the rest of the text.';
       }
       return outcome;
     }

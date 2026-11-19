@@ -434,7 +434,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (write && devToolsOpen(contents)) {
       throw new PaneError('ERR_BROWSER_DEVTOOLS_OPEN', `DevTools is open on tab ${tab.id}, and agents don't act on a page while the person inspects it. Nothing ran.`, 'Ask the person to close DevTools on that tab, then try again.');
     }
-    refuseNonWebPage(contents, 'shows');
+    if (!loadsUrl(request)) refuseNonWebPage(contents, 'shows');
     const outcome = await runVerb(driverFor(tab.id, contents), contents, request);
     refuseNonWebPage(contents, 'is now on');
     if (outcome.cursor) host.showCursor(tab.id, outcome.cursor.x, outcome.cursor.y);
@@ -665,7 +665,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (write && devToolsOpen(contents)) {
       throw new PaneError('ERR_BROWSER_DEVTOOLS_OPEN', 'DevTools is open on that tab, and agents don\'t act on a page while the person inspects it. Nothing ran.', 'Ask the person to close DevTools on that tab, then try again.');
     }
-    refuseNonWebPage(contents, 'shows');
+    if (!loadsUrl(message.request)) refuseNonWebPage(contents, 'shows');
     const driver = driverFor(message.panelId, contents);
     if (write && driver.personDriving(TOUCH_HOLD_MS)) return { personDriving: true };
     return answerWithin(key, (async () => {
@@ -732,6 +732,11 @@ function refuseNonWebPage(contents: BrowserPageContents, verb: 'shows' | 'is now
   try { protocol = new URL(contents.getURL()).protocol; } catch { protocol = ''; }
   if (protocol === 'http:' || protocol === 'https:' || contents.getURL() === 'about:blank' || contents.getURL() === '') return;
   throw new PaneError('ERR_BROWSER_URL_REFUSED', `The tab ${verb} a ${protocol || 'non-web'} page, and agents read and act only on http and https pages.${verb === 'is now on' ? ' The call ran; nothing more will on that page.' : ' Nothing ran.'}`, 'Load an http or https page with browser_navigate, or use another tab.');
+}
+
+/** Loading a web page is how an agent leaves a file: page, so only the page it lands on is checked. */
+function loadsUrl(request: VerbRequest): boolean {
+  return request.verb === 'navigate' && request.url !== undefined;
 }
 
 function devToolsOpen(contents: BrowserPageContents): boolean {

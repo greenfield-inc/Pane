@@ -60,12 +60,12 @@ export interface ActionOutcome { dialog?: PendingDialog; fileChooser?: FileChoos
 
 export interface PagePoint { x: number; y: number }
 export type ClickTarget = { ref: string } | PagePoint;
-export interface PageReading { url: string; title: string; snapshot: string; truncated: boolean }
+export interface PageReading { url: string; title: string; snapshot: string; truncated: boolean; controlsCut?: boolean }
 export interface PageScreenshot { png: Buffer; width: number; height: number }
 export interface Evaluated { value: JsonValue; truncated: boolean }
 interface Chord { key: string; modifiers: number }
 
-const readingSchema = boundary.object({ snapshot: boundary.string, truncated: boundary.boolean, url: boundary.string, title: boundary.string });
+const readingSchema = boundary.object({ snapshot: boundary.string, truncated: boundary.boolean, controlsCut: boundary.optional(boundary.boolean), url: boundary.string, title: boundary.string });
 /** A ref call the page refused: the ref is stale, or the element is not ready yet. */
 const refusalSchema = boundary.object({ stale: boundary.optional(boundary.string), wait: boundary.optional(boundary.string) });
 const pointSchema = boundary.object({ x: boundary.number, y: boundary.number });
@@ -87,6 +87,8 @@ const frameEventSchema = boundary.object({ frame: boundary.object({ parentId: bo
 const ACTIONABLE_WAIT_MS = 5_000;
 /** How long after its input an action looks for a dialog or file picker it opened. */
 const SETTLE_MS = 150;
+/** How long after the agent's last call the page keeps its emulated focus (the driver chip's linger). */
+const FOCUS_LINGER_MS = 2_000;
 const NAVIGATION_WAIT_MS = 30_000;
 /** How long one call into the page script may take (a blocked page never answers). */
 const PAGE_CALL_MS = 10_000;
@@ -144,6 +146,7 @@ export class PageDriver {
   private dispatching = 0;
   private lastDispatchEnd = 0;
   private lastPersonInput = 0;
+  private unfocusTimer: NodeJS.Timeout | undefined;
   private screenshots: Promise<void> = Promise.resolve();
   private actions: Promise<void> = Promise.resolve();
   private readonly dialogWaiters = new Set<() => void>();
@@ -179,7 +182,20 @@ export class PageDriver {
   /** Refs from before now stop working until the next snapshot (the person took over). */
   revokeRefs(): void {
     this.refsRevoked = true;
+    this.unfocusNow();
     void this.page('revoke').catch(() => undefined);
+  }
+
+  /** Turns focus emulation off FOCUS_LINGER_MS after the agent's last call, like the driver chip. */
+  private unfocusLater(): void {
+    clearTimeout(this.unfocusTimer);
+    this.unfocusTimer = setTimeout(() => this.unfocusNow(), FOCUS_LINGER_MS);
+  }
+
+  private unfocusNow(): void {
+    clearTimeout(this.unfocusTimer);
+    this.unfocusTimer = undefined;
+    if (this.contents.debugger.isAttached()) void this.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => undefined);
   }
 
   // Actions on one page run one at a time: two agents' typing never interleaves in one field.
@@ -220,12 +236,15 @@ export class PageDriver {
   }
 
   private exclusive<Result>(work: () => Promise<Result>): Promise<Result> {
+    // While the agent keeps calling, the page keeps its emulated focus.
+    if (this.unfocusTimer) this.unfocusLater();
     const run = this.actions.then(work, work);
     this.actions = run.then(() => undefined, () => undefined);
     return run;
   }
 
   async snapshot(): Promise<PageReading> {
+    if (this.unfocusTimer) this.unfocusLater();
     // Listening for dialogs from the first call means a dialog never leaves a read hanging.
     await this.attach();
     this.refuseWhileDialog();
@@ -495,8 +514,9 @@ export class PageDriver {
       this.lastDispatchEnd = Date.now();
       // While a dialog blocks the page this reply waits for the answer, so it is never awaited.
       if (interceptChooser) void this.send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => undefined);
-      // The page goes back to its real focus, so a chat app marks nothing read and blur still saves.
-      void this.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => undefined);
+      // Once the agent stops, the page goes back to its real focus, so a chat app marks nothing read.
+      // Not after each input: blur would close a typeahead menu before the agent clicks a suggestion.
+      this.unfocusLater();
     }
     return this.outcome();
   }

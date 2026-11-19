@@ -84,7 +84,13 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
   const tabs = [agentTab('claude-a', 'pane-a', 'claude'), agentTab('codex-a', 'pane-a', 'codex'), ...initial];
   const pages = new Map<string, ReturnType<typeof fakePage>>();
   let nextPage = 1;
-  if (options.pagesHere !== false) for (const tab of initial) pages.set(tab.id, fakePage(nextPage++, 'http://localhost:4173/'));
+  if (options.pagesHere !== false) {
+    for (const tab of initial) {
+      // SAFETY: browserTab builds every initial tab's customState as a BrowserPanelState.
+      const state = tab.state.customState as BrowserPanelState | undefined;
+      pages.set(tab.id, fakePage(nextPage++, state?.currentUrl ?? 'http://localhost:4173/'));
+    }
+  }
   const host: BrowserHost = {
     tabs: (paneId) => tabs.filter(tab => tab.sessionId === paneId && tab.type === 'browser'),
     tab: (id) => tabs.find(tab => tab.id === id),
@@ -206,6 +212,12 @@ describe('browser tools: what an agent may load and upload', () => {
       expect(await code(call(fixture, 'navigate', { url }))).toBe('ERR_BROWSER_URL_REFUSED');
       expect(await code(call(fixture, 'open', { url }))).toBe('ERR_BROWSER_URL_REFUSED');
     }
+  });
+
+  it('reads nothing on a file: page in a tab, but lets the agent load a web page there', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a', 'file:///Users/me/report.html')]);
+    expect(await code(call(fixture, 'snapshot', {}))).toBe('ERR_BROWSER_URL_REFUSED');
+    expect(await call(fixture, 'navigate', { url: 'http://localhost:4173/' })).toMatchObject({ ok: true, url: 'http://localhost:4173/' });
   });
 
   it('uploads worktree files only, and never a credential', async () => {

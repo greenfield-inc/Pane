@@ -11,8 +11,9 @@ function recordingPage() {
     attach() { this.attached = true; },
     isAttached() { return this.attached; },
     detach() { this.attached = false; },
-    sendCommand: async (method: string, params?: { type?: string }) => {
+    sendCommand: async (method: string, params?: { type?: string; enabled?: boolean }) => {
       sent.push(method);
+      if (method === 'Emulation.setFocusEmulationEnabled') log.push(`emulation focus ${params?.enabled}`);
       if (method === 'Input.dispatchMouseEvent' && params?.type === 'mouseReleased') {
         debug.emit('message', {}, 'Page.javascriptDialogOpening', { type: 'confirm', message: 'Delete it?' });
         return new Promise(() => undefined);
@@ -119,5 +120,18 @@ describe('page driver', () => {
     expect(log.filter(line => line.startsWith('key keyDown'))).toEqual(['key keyDown W agent=true', 'key keyDown Escape agent=true']);
     await new Promise(resolve => setTimeout(resolve, 400));
     expect(agentInputInFlight(1)).toBe(false);
+  });
+
+  it('keeps the page focused while the agent works, and gives focus back once it stops', async () => {
+    const { page, log } = recordingPage();
+    const driver = new PageDriver(page);
+    await driver.snapshot();
+    await driver.type('e1', 'ada', false, false);
+    await new Promise(resolve => setTimeout(resolve, 1_000));
+    await driver.click({ ref: 'e2' }, 'left', false);
+    // A typeahead menu stays open between typing and clicking a suggestion: no blur yet.
+    expect(log).not.toContain('emulation focus false');
+    await new Promise(resolve => setTimeout(resolve, 2_300));
+    expect(log.filter(line => line.startsWith('emulation focus')).at(-1)).toBe('emulation focus false');
   });
 });
