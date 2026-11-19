@@ -271,6 +271,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   host.onGone(sweep);
   /** Tabs the person holds by touching the page; they go back to the agent TOUCH_HOLD_MS after the last touch. */
   const touchTimers = new Map<string, NodeJS.Timeout>();
+  /** The screen each tab's page takes its size from, while one on another device controls it. */
+  const controllers = new Map<string, string>();
   /** Tabs the person took over with the chip: they hold them until Hand to agent. */
   const chipHeld = new Set<string>();
   /** How each live page was last set up for its watchers, so a report that changes nothing touches nothing. */
@@ -484,6 +486,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
 
   /** Sets (or clears) the size a viewer in control gave the tab's page, and keeps it in the tab. */
   async function setPageSize(tabId: string, size: BrowserPageSize | undefined): Promise<void> {
+    if (!size) controllers.delete(tabId);
     const tab = host.tab(tabId);
     if (!tab) return;
     const state = tabState(tab);
@@ -505,6 +508,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const viewer = holds.viewers(tabId).find(candidate => candidate.id === viewerId);
     if (!viewer) return;
     if (viewer.kind === 'host') return setPageSize(tabId, undefined);
+    controllers.set(tabId, viewerId);
     const width = Math.round(Math.min(Math.max(viewer.width, PAGE_MIN), PAGE_MAX.width));
     const height = Math.round(Math.min(Math.max(viewer.height, PAGE_MIN), PAGE_MAX.height));
     return setPageSize(tabId, { width, height, mobile: viewer.kind === 'phone' });
@@ -795,6 +799,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       // This computer's own window is the host's screen, whatever it calls itself.
       const kind: ViewerKind = isRemotePaneCommand() ? decoded.kind : 'host';
       holds.watch(id, viewerId, { ...decoded, kind });
+      // The page follows the size of the screen in control as it changes (a window resized, a sidebar closed).
+      if (controllers.get(id) === viewerId && tabOf(id)?.pageSize) await takeControl(id, viewerId);
     }
     applyWatch(id);
     return { success: true };
