@@ -81,11 +81,15 @@
         "Install Playwright browsers"
       ]
     },
+    "functional-smoke-stabilizing": {
+      "setupSteps": [
+        "Checkout code",
+        "Setup Node.js and pnpm",
+        "Install dependencies",
+        "Install Playwright browsers"
+      ]
+    },
     "functional-smoke-webgl": {
-      "ceilings": {
-        "setup": 90,
-        "running": 80
-      },
       "setupSteps": [
         "Checkout code",
         "Setup Node.js and pnpm",

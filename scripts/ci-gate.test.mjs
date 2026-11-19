@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { EXPECTED_JOBS, SKIP_WHEN_UNCHANGED, evaluate, skipManifest, workflowJobIds } from './ci-gate.mjs';
+import { EXPECTED_JOBS, REPORTED_ONLY_JOBS, SKIP_WHEN_UNCHANGED, evaluate, skipManifest, workflowJobIds } from './ci-gate.mjs';
 
 const WORKFLOW = readFileSync(new URL('../.github/workflows/quality.yml', import.meta.url), 'utf8');
-const ALL_JOBS = [...EXPECTED_JOBS, 'ci-result'];
+const ALL_JOBS = [...EXPECTED_JOBS, ...Object.keys(REPORTED_ONLY_JOBS), 'ci-result'];
 const PR_SKIP = skipManifest({ event: 'pull_request', changed: { runpane: 'false', main: 'true', relay: 'false' } });
 
 function needsWith(overrides = {}, skip = PR_SKIP) {
@@ -101,7 +101,7 @@ test('Code Quality runs on merge groups', () => {
   assert.match(on, /^ {2}merge_group:\n {4}types: \[ checks_requested \]$/m);
 });
 
-test('quality.yml has exactly the expected jobs plus CI result', () => {
+test('quality.yml has exactly the expected and reported-only jobs plus CI result', () => {
   assert.deepEqual(workflowJobIds(WORKFLOW).sort(), [...ALL_JOBS].sort());
 });
 
