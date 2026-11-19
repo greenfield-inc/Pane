@@ -1,4 +1,5 @@
 import { HealthCardDialog } from './components/machineHealth/HealthCardDialog';
+import { BrowserLayer } from './components/panels/browser/BrowserLayer';
 import { askAgentAbout, isHealthCard } from './components/machineHealth/healthCardActions';
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
 import { AddDeviceHost } from './components/addDevice/AddDeviceDialog';
@@ -40,6 +41,7 @@ import { DISCORD_INVITE_URL } from './components/DiscordIcon';
 import { ResumeSessionsDialog } from './components/ResumeSessionsDialog';
 import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
+import { openLink } from './utils/openLink';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeSessionActivity } from './services/sessionActivitySync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
@@ -239,6 +241,11 @@ function App() {
     }
     if (target === 'inbox') {
       openApprovals();
+      return;
+    }
+    if ('link' in target) {
+      // A link from a floating card: show the Pane it came from, then open the link beside it.
+      void useSessionStore.getState().setActiveSession(target.paneId).then(() => openLink(target.link, target.paneId));
       return;
     }
     if ('askAgent' in target) {
@@ -1100,6 +1107,7 @@ function App() {
           isOpen={isSupportPaneOpen}
           onClose={() => setIsSupportPaneOpen(false)}
         />
+        <BrowserLayer />
         <Welcome isOpen={isWelcomeOpen} onClose={() => setIsWelcomeOpen(false)} />
         <AboutDialog isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} onUpdate={handleUpdateRequest} />
         <FeedbackDialog isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />

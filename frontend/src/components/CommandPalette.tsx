@@ -21,6 +21,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useConfigStore } from '../stores/configStore';
+import { linkDestination, openLink } from '../utils/openLink';
 import { showActionError } from '../stores/errorStore';
 import { usePanelStore } from '../stores/panelStore';
 import type { PanelStore } from '../types/panelStore';
@@ -184,7 +185,10 @@ function actionsFor(item: SearchItem, context: ActionContext): LauncherAction[] 
         },
         ...(prUrl ? [{
           id: 'pr', label: 'Open pull request', icon: ExternalLink,
-          run: () => void reportFailure('Could not open the pull request', window.electronAPI.openExternal(prUrl)),
+          // A Pane tab opens in that Pane, so the Pane comes forward with it (Settings > Links).
+          run: () => linkDestination(prUrl, { paneId: pane.id, openIn: useConfigStore.getState().config?.browser?.openLinksIn }) === 'pane'
+            ? afterLeavingSettings(() => void openPane(pane.id).then(() => openLink(prUrl, pane.id)))
+            : void reportFailure('Could not open the pull request', window.electronAPI.openExternal(prUrl)),
         }] : []),
         {
           id: 'pin', label: pane.isFavorite ? 'Unpin' : 'Pin', icon: pane.isFavorite ? PinOff : Pin,

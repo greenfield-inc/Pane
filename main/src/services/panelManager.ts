@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { ToolPanel, CreatePanelRequest, PanelEventType, PanelActivationRequest, PanelOpenPlacement, ToolPanelState, ToolPanelMetadata, ToolPanelType, LogsPanelState, TerminalPanelState, TerminalPausedMark } from '../../../shared/types/panels';
+import { ToolPanel, CreatePanelRequest, PanelEventType, PanelActivationRequest, PanelOpenPlacement, ToolPanelState, ToolPanelMetadata, ToolPanelType, LogsPanelState, TerminalPanelState, TerminalPausedMark, BrowserPanelState } from '../../../shared/types/panels';
 import { getPaneEventSink, getPaneWebviewContextMap } from '../core/runtime';
 import { databaseService } from './database';
 import { splitPanelBufferState } from '../database/panelBuffers';
@@ -352,6 +352,11 @@ class PanelManager {
         // SAFETY: This database row belongs to the terminal panel above.
         const current = databaseService.getPanel(panelId)?.state.customState as TerminalPanelState | undefined;
         updates = { ...updates, state: { ...updates.state, customState: { ...updates.state.customState, paused: current?.paused } } };
+      } else if (panel.type === 'browser' && updates.state?.customState && !('driver' in updates.state.customState)) {
+        // Only the browser tools write who drives a tab (ipc/browser.ts); the tab's own URL saves keep it.
+        // SAFETY: This database row belongs to the browser panel above.
+        const current = databaseService.getPanel(panelId)?.state.customState as BrowserPanelState | undefined;
+        if (current?.driver) updates = { ...updates, state: { ...updates.state, customState: { ...updates.state.customState, driver: current.driver } } };
       } else if (panel.type === 'chat' && updates.state?.customState) {
         // A chat tab's state belongs to the host's chat runtime (commitChatTab);
         // a viewer's panel update must never replace it.

@@ -3,10 +3,59 @@ import { getPlaywrightBaseURL, getPlaywrightPort, getPlaywrightServerEnv } from 
 
 const devServerPort = getPlaywrightPort();
 
+// The required browser specs: they run against the renderer from Vite with a mocked
+// Electron API, and CI result waits for them. The specs #1554 wired in run beside
+// them, not gating, in playwright.ci.stabilizing.config.ts until each is proven
+// stable. scripts/ci-test-inventory.mjs fails CI when a spec in tests/ runs in no
+// lane, so a new spec must be added here, to another CI config, or to its
+// NOT_IN_CI list.
+const BROWSER_SPECS = [
+  'accessibility.spec.ts',
+  'analytics-consent.spec.ts',
+  'approvals-system.spec.ts',
+  'browser-ports.spec.ts',
+  'device-tab.spec.ts',
+  'file-editor-lifecycle.spec.ts',
+  'file-preview-lifecycle.spec.ts',
+  'file-tree-selection.spec.ts',
+  'find-in-tab.spec.ts',
+  'home-usage-card.spec.ts',
+  'html-editable-source.spec.ts',
+  'html-explorer-open.spec.ts',
+  'launch-outline.spec.ts',
+  'loops.spec.ts',
+  'machine-health-cards.spec.ts',
+  'machine-health-resources.spec.ts',
+  'notify-cards.spec.ts',
+  'onboarding-open-project.spec.ts',
+  'remote-pwa-explorer.spec.ts',
+  'remote-pwa-sidebar.spec.ts',
+  'remote-pwa-todos-snooze.spec.ts',
+  'remote-pwa-todos.spec.ts',
+  'remote-pwa-view-state.spec.ts',
+  'session-move-dialog.spec.ts',
+  'session-todo-dock.spec.ts',
+  'session-todos-tab.spec.ts',
+  'settings.spec.ts',
+  'shortcut-sheet.spec.ts',
+  'smoke.spec.ts',
+  'ssh-hosts.spec.ts',
+  'summary-policy.spec.ts',
+  'terminal-selection-popover.spec.ts',
+  'todo-session-approvals.spec.ts',
+  'todo-session-sidebar.spec.ts',
+  'todos-images.spec.ts',
+  'todos-machines.spec.ts',
+  'todos-page-frame.spec.ts',
+  'todos-session-link.spec.ts',
+  'todos-snooze-ui.spec.ts',
+  'todos-split-files.spec.ts',
+  'todos-thread.spec.ts',
+  'window-title-bar.spec.ts',
+];
+
 export default defineConfig({
   testDir: './tests',
-  // Keep the fast startup checks and the maintained accessibility journeys in CI.
-  testMatch: ['smoke.spec.ts', 'accessibility.spec.ts', 'settings.spec.ts', 'remote-pwa-sidebar.spec.ts', 'remote-pwa-todos.spec.ts', 'todos-page-frame.spec.ts', 'todos-thread.spec.ts', 'todos-machines.spec.ts', 'todo-session-sidebar.spec.ts', 'todo-session-approvals.spec.ts', 'session-todos-tab.spec.ts', 'session-todo-dock.spec.ts', 'todos-split-files.spec.ts', 'todos-session-link.spec.ts', 'todos-images.spec.ts', 'todos-snooze-ui.spec.ts', 'remote-pwa-todos-snooze.spec.ts', 'remote-pwa-view-state.spec.ts', 'remote-pwa-explorer.spec.ts', 'file-editor-lifecycle.spec.ts', 'file-preview-lifecycle.spec.ts', 'find-in-tab.spec.ts', 'shortcut-sheet.spec.ts', 'summary-policy.spec.ts', 'html-editable-source.spec.ts', 'html-explorer-open.spec.ts', 'file-tree-selection.spec.ts', 'browser-ports.spec.ts', 'analytics-consent.spec.ts', 'ssh-hosts.spec.ts', 'onboarding-open-project.spec.ts', 'terminal-selection-popover.spec.ts', 'home-usage-card.spec.ts', 'notify-cards.spec.ts', 'approvals-system.spec.ts', 'launch-outline.spec.ts', 'window-title-bar.spec.ts', 'device-tab.spec.ts', 'machine-health-cards.spec.ts', 'machine-health-resources.spec.ts', 'loops.spec.ts', 'session-move-dialog.spec.ts'],
   // Allow enough time for cold CI startup while keeping failures bounded.
   timeout: 30 * 1000,
   expect: {
@@ -49,6 +98,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testMatch: BROWSER_SPECS,
       use: { 
         ...devices['Desktop Chrome'],
         // Disable GPU for CI

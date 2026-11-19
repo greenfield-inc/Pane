@@ -41,6 +41,8 @@ export interface PortsTest {
   finishLocalOpen: (() => void) | null;
   /** Makes the next `openLocalPage` calls wait for `finishLocalOpen`. */
   holdLocalOpens(): void;
+  /** Whether the panel listens for this event on this `<webview>` now. */
+  listensTo(webview: Element, type: string): boolean;
 }
 
 declare global {
@@ -48,6 +50,24 @@ declare global {
     portsTest: PortsTest;
   }
 }
+
+// The panel listens to its <webview> from an effect that runs a task after the element mounts.
+const webviewListeners = new WeakMap<EventTarget, Map<string, number>>();
+const { addEventListener, removeEventListener } = EventTarget.prototype;
+const countListener = (target: EventTarget, type: string, change: number) => {
+  if (!(target instanceof Element) || target.localName !== 'webview') return;
+  const counts = webviewListeners.get(target) ?? new Map<string, number>();
+  counts.set(type, (counts.get(type) ?? 0) + change);
+  webviewListeners.set(target, counts);
+};
+EventTarget.prototype.addEventListener = function (this: EventTarget, ...args: Parameters<EventTarget['addEventListener']>) {
+  countListener(this, args[0], 1);
+  addEventListener.apply(this, args);
+};
+EventTarget.prototype.removeEventListener = function (this: EventTarget, ...args: Parameters<EventTarget['removeEventListener']>) {
+  countListener(this, args[0], -1);
+  removeEventListener.apply(this, args);
+};
 
 const portLists = answeredByTest<ListeningPortsSnapshot>();
 const connectionStates = answeredByTest<RemotePaneConnectionState>();
@@ -70,6 +90,7 @@ const portsTest: PortsTest = {
   openExternalError: null,
   finishLocalOpen: null,
   holdLocalOpens: () => { localOpenHeld = true; },
+  listensTo: (webview, type) => (webviewListeners.get(webview)?.get(type) ?? 0) > 0,
 };
 
 Object.assign(window, {

@@ -5,13 +5,24 @@ on:
     branches: [ main ]
   # Stacked and integration PRs need the same gates before they reach main.
   pull_request:
+  # The merge queue's runs. Each merge group runs every job on its exact merge
+  # commit. The queue is a repository setting (RUNBOOK.md, "Merge queue").
+  merge_group:
+    types: [ checks_requested ]
   workflow_dispatch:
 
 # A new push to a PR cancels that PR's in-flight run. Every other event gets
-# its own group, so no main commit ever loses its run.
+# its own group, so no main commit or merge group ever loses its run.
 concurrency:
   group: code-quality-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
+
+# Installs here pass --os=current --cpu=current: these jobs test on the
+# runner's own platform, so they skip the other platforms' binaries that
+# pnpm-workspace.yaml's supportedArchitectures adds for package builds (about
+# 1.2 GB of the 3.2 GB store on Linux). Jobs that test only the desktop app
+# also leave out the mobile, native and glasses workspaces (about 500 of the
+# 2,165 locked packages); Type Check and Lint installs every workspace.
 
 jobs:
   changes:
@@ -28,8 +39,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v7
 
+    # A merge group selects nothing, so it never diffs paths (the manifest
+    # below skips jobs only on pull requests).
     - name: Filter changed paths
       id: filter
+      if: github.event_name != 'merge_group'
       uses: dorny/paths-filter@v3
       with:
         filters: |
@@ -49,6 +63,7 @@ jobs:
             - 'scripts/test-runpane-handoff.js'
             - 'scripts/test-runpane-ask.js'
             - 'scripts/test-runpane-managed-cli.js'
+            - 'scripts/test-runpane-submit.js'
             - 'scripts/runpane-test-shard.js'
             - 'scripts/fixtures/**'
             - '.github/workflows/quality.yml'
@@ -88,8 +103,9 @@ jobs:
 
     # The frontend tests load no native module and no Electron, so the
     # Electron-targeted postinstall rebuild is skipped.
+    # Every workspace: this job also runs the native, glasses and mobile unit tests.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current
 
     - name: Verify GitHub release publication behavior
       run: bash scripts/test-publish-github-release.sh
@@ -99,6 +115,17 @@ jobs:
 
     - name: Run frontend unit tests
       run: CI=1 pnpm --filter frontend exec vitest run
+
+    # The Expo app, the glasses app and the Capacitor shell, each its own Vitest run.
+    - name: Run native, glasses and mobile unit tests
+      if: ${{ !cancelled() }}
+      run: CI=1 pnpm --filter native --filter glasses --filter mobile run test
+
+    - name: Run release and network script tests
+      if: ${{ !cancelled() }}
+      run: |
+        node scripts/test-license-generation.js
+        node --test scripts/flapping-link-proxy.test.mjs scripts/patch-electron-builder-macos-keychain.test.js
 
     # Catches hand edits to the generated contract files (docs, TS, Python,
     # fixture). It needs no dependencies, and runs even if the tests above
@@ -133,7 +160,7 @@ jobs:
     # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
     # builds the only native module these tests load.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     # The unit tests load the real electron package (main/src/utils/shellPath.ts).
     - name: Fetch Electron
@@ -164,7 +191,7 @@ jobs:
     # bun's install script puts its binary in place (0.1s; `pnpm rebuild bun`
     # took 6s). It is the one install script this job needs.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts && node node_modules/bun/install.js
+      run: pnpm install --ignore-scripts --os=current --cpu=current && node node_modules/bun/install.js
 
     # Oxlint runs alone first: beside the type check it shared the 4 CPUs and
     # took 21-23s.
@@ -192,12 +219,18 @@ jobs:
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait lint-checks
 
-    # CI result's gate and its contract with this file (expected jobs, needs,
-    # skip manifest). Here rather than in CI result, which runs it every time
-    # at the end of the critical path.
+    # CI result's gate and budgets and their contract with this file (expected
+    # jobs, needs, skip manifest, a budget per job). Here rather than in CI
+    # result, which runs it every time at the end of the critical path.
     - name: Test the CI result gate and the pre-push hook
       if: ${{ !cancelled() }}
-      run: node --test scripts/ci-gate.test.mjs scripts/pre-push.test.mjs
+      run: node --test scripts/ci-gate.test.mjs scripts/ci-timings.test.mjs scripts/pre-push.test.mjs scripts/ci-test-inventory.test.mjs
+
+    # Every tracked test file runs in a lane of this workflow (or another
+    # workflow), or is listed with its reason in scripts/ci-test-inventory.mjs.
+    - name: Check every test file has a lane
+      if: ${{ !cancelled() }}
+      run: node scripts/ci-test-inventory.mjs check
 
   # Offline check of relative links and #anchors in every tracked markdown file.
   # External URLs are not fetched, so the check never flakes on the network.
@@ -236,11 +269,16 @@ jobs:
         --exclude-path node_modules --exclude-path dist-electron
         './**/*.md'
 
-  # The smoke suites run beside quality-checks in ten jobs. The seven browser
-  # shards split the minimal suite, which loads the renderer from Vite with a
-  # mocked Electron API; the two renderer selection race shards also run from
-  # Vite alone. The Electron job launches main/dist in real Electron and runs the
-  # specs playwright.chat-tabs.config.ts lists.
+  # The smoke suites run beside quality-checks. The browser shards split the
+  # browser suite (playwright.ci.minimal.config.ts), which loads the renderer
+  # from Vite with a mocked Electron API; the two renderer selection race shards
+  # also run from Vite alone. The two Electron shards launch real Electron and
+  # split the specs playwright.chat-tabs.config.ts lists.
+  # The specs #1554 wired in run in Functional Smoke (stabilizing), the WebGL
+  # shards and a stabilizing Electron step: they report on every run, but CI
+  # result does not wait for them (REPORTED_ONLY_JOBS in scripts/ci-gate.mjs).
+  # scripts/ci-test-inventory.mjs (in Type Check and Lint) fails when a test file
+  # runs in no lane.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke-browser:
@@ -259,7 +297,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Install Playwright browsers
       uses: ./.github/actions/playwright-browsers
@@ -269,6 +307,61 @@ jobs:
 
     - name: Run maintained functional smoke tests
       run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # Stabilizing: wired in by #1554 on 2026-11-18, flaky under CI load; returns to
+  # the required lanes as each is proven stable. Reported only: CI result does
+  # not wait for this job.
+  functional-smoke-stabilizing:
+    name: Functional Smoke (stabilizing ${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
+
+    - name: Install Playwright browsers
+      uses: ./.github/actions/playwright-browsers
+
+    - name: Run stabilizing browser tests
+      run: pnpm exec playwright test --config=playwright.ci.stabilizing.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # The WebGL renderer recovery spec, split off the browser shards: its 25 tests
+  # take about 16 s each, and Playwright shards by test count in file order, so
+  # in the browser lane they all landed in one shard and set the run's time.
+  # Stabilizing, like functional-smoke-stabilizing: reported only.
+  functional-smoke-webgl:
+    name: Functional Smoke (stabilizing WebGL ${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
+
+    - name: Install Playwright browser dependencies
+      run: pnpm exec playwright install --with-deps chromium
+
+    - name: Run WebGL renderer recovery tests
+      run: pnpm exec playwright test --config=playwright.ci.webgl.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # One worker per shard: the tests are CPU-bound, so four workers on one
   # 4-vCPU runner took as long as one. fullyParallel lets --shard split files.
@@ -288,7 +381,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Install Playwright browsers
       uses: ./.github/actions/playwright-browsers
@@ -299,8 +392,12 @@ jobs:
         PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
 
   functional-smoke-electron:
-    name: Functional Smoke (Electron)
+    name: Functional Smoke (Electron ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
     - name: Checkout code
@@ -310,7 +407,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Restore Playwright browsers
       uses: ./.github/actions/playwright-browsers
@@ -371,14 +468,30 @@ jobs:
       run: scripts/ci-background.sh wait electron-rebuild
 
     - name: Verify sandboxed Electron preload
+      if: ${{ matrix.shard == 1 }}
       run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
+
+    - name: Verify worktree trash sweep under Electron's ASAR
+      if: ${{ !cancelled() && matrix.shard == 1 }}
+      run: xvfb-run -a node scripts/test-worktree-trash-electron.cjs
 
     # Launches Electron from the build above with a scripted ACP agent; never a real account.
     - name: Run chat tab journeys
       if: ${{ !cancelled() }}
-      run: xvfb-run -a pnpm test:chat-tabs
+      run: xvfb-run -a pnpm test:chat-tabs --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
+
+    # Stabilizing: wired in by #1554 on 2026-11-18, flaky under CI load. Reported
+    # only: a failure here marks the step and leaves the job green.
+    # PANE_ELECTRON_E2E turns on the remote browser and browser auth specs.
+    - name: Run stabilizing Electron specs
+      if: ${{ !cancelled() }}
+      continue-on-error: true
+      run: xvfb-run -a pnpm exec playwright test --config=playwright.ci.stabilizing-electron.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-stabilizing-electron
+        PANE_ELECTRON_E2E: '1'
 
     # Last, so only a build that Electron loaded and passed the tests with is saved.
     - name: Save the Electron SQLite build
@@ -454,7 +567,7 @@ jobs:
         "$python" -c "import os, sys; print(os.path.dirname(sys.executable))" >> "$GITHUB_PATH"
 
     - name: Install wrapper dependencies
-      run: pnpm install --filter runpane --ignore-scripts
+      run: pnpm install --filter runpane --ignore-scripts --os=current --cpu=current
 
     - name: Check wrapper package versions
       if: matrix.lane == 'package'
@@ -487,6 +600,7 @@ jobs:
         scripts/test-runpane-workspace.js
         scripts/test-runpane-managed-cli.js
         scripts/test-runpane-telemetry.js
+        scripts/test-runpane-submit.js
 
     - name: Finish wrapper contract tests
       if: ${{ !cancelled() && matrix.lane != 'package' }}
@@ -533,7 +647,7 @@ jobs:
     # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
     # builds the only native module these tests load.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     # The unit tests load the real electron package (main/src/utils/shellPath.ts);
     # without this, each test worker downloads Electron and they collide on Windows.
@@ -660,7 +774,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Fetch Electron
       uses: ./.github/actions/fetch-electron
@@ -689,7 +803,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --frozen-lockfile --filter 'frontend...' --ignore-scripts
+      run: pnpm install --frozen-lockfile --filter 'frontend...' --ignore-scripts --os=current --cpu=current
 
     - name: Build remote PWA assets
       run: pnpm run build:frontend
@@ -708,14 +822,14 @@ jobs:
       contents: read
       actions: read
     steps:
-    # Three files at the run's exact commit, read in parallel: about 2 s
+    # Four files at the run's exact commit, read in parallel: about 2 s
     # faster than actions/checkout and its post step. Any failed read fails.
     - name: Fetch the gate
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
         pids=()
-        for file in .github/workflows/quality.yml scripts/ci-gate.mjs scripts/ci-timings.mjs; do
+        for file in .github/workflows/quality.yml scripts/ci-gate.mjs scripts/ci-timings.mjs scripts/ci-budgets.json; do
           mkdir -p "$(dirname "$file")"
           gh api -H 'Accept: application/vnd.github.raw' "repos/$GITHUB_REPOSITORY/contents/$file?ref=$GITHUB_SHA" > "$file" &
           pids+=("$!")
@@ -729,10 +843,14 @@ jobs:
 
     # Each job's head SHA, runner and waiting/setup/running seconds, in the
     # job summary and the log, for measuring CI speed (scripts/ci-timings.mjs).
-    - name: Record job timings
+    # A job over a ceiling in scripts/ci-budgets.json fails this step; a
+    # missed target or a value that could not be measured is only reported.
+    - name: Record job timings and check budgets
       if: ${{ always() }}
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        node scripts/ci-timings.mjs --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --out "$RUNNER_TEMP/ci-run-timings.json" --summary "$GITHUB_STEP_SUMMARY"
-        cat "$RUNNER_TEMP/ci-run-timings.json"
+        status=0
+        node scripts/ci-timings.mjs --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --out "$RUNNER_TEMP/ci-run-timings.json" --summary "$GITHUB_STEP_SUMMARY" --budgets scripts/ci-budgets.json || status=$?
+        if [ -f "$RUNNER_TEMP/ci-run-timings.json" ]; then cat "$RUNNER_TEMP/ci-run-timings.json"; fi
+        exit "$status"

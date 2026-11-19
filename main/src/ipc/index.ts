@@ -62,6 +62,8 @@ import { registerPaneLinkHandler } from '../services/paneLinks';
 import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { registerWorkspaceAccessHandlers } from './workspaceAccess';
+import { registerBrowserHandlers } from './browser';
+import { electronBrowserHost } from '../services/browser/browserHost';
 import { registerDeviceHandlers } from './devices';
 import { readTailscaleStatus, resolveTailnetMachineUrl } from '../services/tailnetMachines';
 import { startedOnFreshBoot } from '../services/freshBoot';
@@ -117,6 +119,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerSharedCredentialHandlers(services, commandRegistry);
   registerPaneSecretHandlers(ipcMain, commandRegistry);
   registerDeviceHandlers(ipcMain, services, commandRegistry);
+  registerBrowserHandlers(services, commandRegistry, electronBrowserHost(services.getMainWindow, commandRegistry, services.configManager, services.sessionManager));
   registerCustomThemeHandlers(ipcMain, commandRegistry, services.configManager, services.getMainWindow);
   registerDialogHandlers(ipcMain, services);
   registerExportHandlers(ipcMain, services);

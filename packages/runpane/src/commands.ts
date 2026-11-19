@@ -8,6 +8,7 @@ import {
 } from './generated/contract';
 import { boundary, decodeBoundary, type JsonValue } from './boundaryDecoder';
 import { RunpaneError } from './errors';
+import { BROWSER_BOOLEAN_FLAGS, BROWSER_VALUE_FLAGS, setBrowserFlag, type BrowserRequest } from './browser';
 
 export type { ArtifactFormat, InstallTarget, RunpaneAgent, RunpaneCommand };
 
@@ -77,6 +78,8 @@ export interface ParsedArgs {
   envRemove?: string[];
   /** `runpane secrets`: the secret project, exec's --only and --file names, and request's reason. */
   project?: string;
+  /** `runpane browser`: the request the command sends to Pane, built from its flags. */
+  browserRequest?: BrowserRequest;
   /** `runpane devices`: open's platform and device, run's --background and --wait-ms, free's --idle. */
   devicePlatform?: string;
   deviceName?: string;
@@ -317,7 +320,7 @@ const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactForm
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'machine', 'loops', 'todos', 'profiles', 'secrets', 'autopilot', 'devices']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'machine', 'loops', 'todos', 'profiles', 'secrets', 'autopilot', 'devices', 'browser']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -381,6 +384,7 @@ const INLINE_VALUE_FLAGS = new Set<string>([
   ...LOCAL_VALUE_FLAGS,
   ...RUNPANE_CONTRACT.flags.wrapper.filter((flag) => 'value' in flag).map((flag) => flag.name),
   '--command',
+  ...BROWSER_VALUE_FLAGS.keys(),
 ]);
 
 const DEFAULTS: Omit<ParsedArgs, 'command'> = {
@@ -843,6 +847,22 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
     // Offline commands accept --pane-dir and ignore it, so one --pane-dir works for every command.
     if ((isAgentContextCommand || parsed.command === 'version') && arg === '--pane-dir') {
       parsed.paneDir = readValue(args, ++index, arg, literalValues);
+      continue;
+    }
+    // Browser commands own their flags, whose values may start with "-" (`--dy -300`).
+    if (parsed.command.startsWith('browser ') && (BROWSER_VALUE_FLAGS.has(arg) || BROWSER_BOOLEAN_FLAGS.has(arg))) {
+      // Each browser command takes only the flags its usage line names.
+      const usage = RUNPANE_CONTRACT.commands.find((command) => command.name === parsed.command)?.usage.join(' ') ?? '';
+      if (!usage.split(/[^a-z-]+/).includes(arg)) throw new Error(`runpane ${parsed.command} does not take ${arg}. Run runpane help ${parsed.command} for its options.`);
+      const request = (parsed.browserRequest ??= {});
+      const field = BROWSER_BOOLEAN_FLAGS.get(arg);
+      if (field) {
+        request[field] = true;
+        continue;
+      }
+      index += 1;
+      if (index >= args.length || (!literalValues.has(index) && /^--[a-z]/.test(args[index]))) throw new Error(`${arg} requires a value.`);
+      setBrowserFlag(request, arg, args[index]);
       continue;
     }
     // `--tab` places a new panel elsewhere; on `autopilot stack push` it takes a file or URL.

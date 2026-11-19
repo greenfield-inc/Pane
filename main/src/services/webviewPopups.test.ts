@@ -4,16 +4,20 @@ import { routeWebviewPopups } from './webviewPopups';
 
 type OpenHandler = (details: Pick<HandlerDetails, 'url' | 'disposition'>) => WindowOpenHandlerResponse;
 
-type NavigateHandler = (event: { preventDefault: () => void }, url: string) => void;
+type NavigateHandler = (event: { preventDefault: () => void }, url: string, isInPlace?: boolean, isMainFrame?: boolean) => void;
 
 function setup(registered: boolean, pageUrl = 'https://example.com/') {
   let handler: OpenHandler | undefined;
   let navigate: NavigateHandler | undefined;
+  let redirect: NavigateHandler | undefined;
   const wvContents = {
     id: 7,
     getURL: () => pageUrl,
     setWindowOpenHandler: (next: OpenHandler) => { handler = next; },
-    on: vi.fn((event: string, listener: NavigateHandler) => { if (event === 'will-navigate') navigate = listener; }),
+    on: vi.fn((event: string, listener: NavigateHandler) => {
+      if (event === 'will-navigate') navigate = listener;
+      if (event === 'will-redirect') redirect = listener;
+    }),
     once: vi.fn(),
   };
   const routing = {
@@ -21,17 +25,26 @@ function setup(registered: boolean, pageUrl = 'https://example.com/') {
     openBrowserTab: vi.fn(),
     openExternal: vi.fn(),
     openPaneLink: vi.fn(),
+    offerApp: vi.fn(),
+    sendOut: vi.fn(),
   };
   routeWebviewPopups(wvContents, routing);
-  if (!handler || !navigate) throw new Error('routeWebviewPopups did not install its handlers');
+  if (!handler || !navigate || !redirect) throw new Error('routeWebviewPopups did not install its handlers');
   const click = navigate;
+  const redirected = redirect;
   /** A link click in the page; returns whether the page itself navigated. */
   const follow = (url: string): boolean => {
     let prevented = false;
     click({ preventDefault: () => { prevented = true; } }, url);
     return !prevented;
   };
-  return { open: handler, follow, routing };
+  /** A server redirect, in the page itself or in a frame inside it; returns whether it went ahead. */
+  const redirectTo = (url: string, isMainFrame: boolean): boolean => {
+    let prevented = false;
+    redirected({ preventDefault: () => { prevented = true; } }, url, false, isMainFrame);
+    return !prevented;
+  };
+  return { open: handler, follow, redirectTo, routing };
 }
 
 describe('routeWebviewPopups', () => {
@@ -74,6 +87,29 @@ describe('routeWebviewPopups', () => {
     expect(follow('pane://open?session=x')).toBe(false);
     expect(open({ url: 'pane://open?session=x', disposition: 'foreground-tab' })).toEqual({ action: 'deny' });
     expect(routing.openPaneLink).not.toHaveBeenCalled();
+  });
+
+  it('asks the person before a page opens an app, and never opens it itself', () => {
+    const { open, routing } = setup(true);
+    expect(open({ url: 'zoommtg://zoom.us/join?confno=123', disposition: 'foreground-tab' })).toEqual({ action: 'deny' });
+    expect(routing.offerApp).toHaveBeenCalledWith({ url: 'zoommtg://zoom.us/join?confno=123', panelId: 'panel-1' });
+    expect(routing.openExternal).not.toHaveBeenCalled();
+  });
+
+  it('sends Google sign-in to the system browser, from a link, a redirect or a popup', () => {
+    const { follow, redirectTo, open, routing } = setup(true);
+    const signIn = 'https://accounts.google.com/v3/signin/identifier?continue=https://mail.google.com';
+    expect(follow(signIn)).toBe(false);
+    expect(redirectTo(signIn, true)).toBe(false);
+    expect(open({ url: signIn, disposition: 'new-window' })).toEqual({ action: 'deny' });
+    expect(routing.sendOut).toHaveBeenCalledTimes(3);
+    expect(routing.sendOut).toHaveBeenCalledWith({ url: signIn, site: 'Google sign-in', panelId: 'panel-1' });
+  });
+
+  it('leaves a Google sign-in button inside another site\'s page alone', () => {
+    const { redirectTo, routing } = setup(true);
+    expect(redirectTo('https://accounts.google.com/gsi/button?client_id=1', false)).toBe(true);
+    expect(routing.sendOut).not.toHaveBeenCalled();
   });
 
   it('lets ordinary links navigate the page', () => {

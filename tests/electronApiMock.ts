@@ -1040,12 +1040,63 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const machineLatencyCalls: string[] = [];
     const machineReads: Array<{ machineId: string; channel: string }> = [];
     const machineListeners = new Set<(event: MachineConnectionsEvent) => void>();
+    /** The usage report this computer answers, on `usage.getReport` and as a `machines:read`. */
+    const usageReport = () => clone(mockOptions.initialUsageReport ?? {
+      totals: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        totalTokens: 0,
+        messageCount: 0,
+        estimatedCostUsd: 0,
+        costIncomplete: false,
+        cacheSavingsUsd: 0,
+      },
+      series: [],
+      byModel: [],
+      byProject: [],
+      byPane: {
+        panes: [],
+        unattributed: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          totalTokens: 0,
+          messageCount: 0,
+          estimatedCostUsd: 0,
+          costIncomplete: false,
+          cacheSavingsUsd: 0,
+          uncachedCostUsd: 0,
+          uncachedInputTokens: 0,
+          cacheHitRate: 0,
+          byModel: [],
+        },
+      },
+      rateLimits: [],
+      index: {
+        lastScanStartedMs: null,
+        lastScanFinishedMs: null,
+        filesTracked: 0,
+        eventsIndexed: 0,
+        missingRoots: [],
+        scanning: false,
+        filesScanned: 0,
+        filesTotal: 0,
+        lastError: null,
+      },
+      pricingAsOf: '2026-08-10',
+    });
     const machinesApi = {
       list: () => Promise.resolve(clone(machineConnections.machines)),
-      read: (machineId: string, channel: string) => {
+      read: async (machineId: string, channel: string, args: unknown[] = []) => {
         machineReads.push({ machineId, channel });
         const answers = machineConnections.reads[machineId] ?? {};
-        return Promise.resolve({ machineId, data: clone(channel in answers ? answers[channel] : { success: true, data: [] }) });
+        if (channel in answers) return { machineId, data: clone(answers[channel]) };
+        // This computer answers with the same command `usage.getReport` runs, so a test that wraps it reaches both.
+        if (machineId === 'local' && channel === 'usage:get-report') return { machineId, data: await window.electronAPI.usage.getReport(...args) };
+        return { machineId, data: { success: true, data: [] } };
       },
       run: (machineId: string, command: MachineCommand) => {
         machineRuns.push({ machineId, command: clone(command) });
@@ -1467,53 +1518,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
       }),
       usage: namespace({
-        getReport: (...args: unknown[]) => { trackCall('usage:get-report', args); return success(clone(mockOptions.initialUsageReport ?? {
-          totals: {
-            inputTokens: 0,
-            outputTokens: 0,
-            cacheReadTokens: 0,
-            cacheCreationTokens: 0,
-            totalTokens: 0,
-            messageCount: 0,
-            estimatedCostUsd: 0,
-            costIncomplete: false,
-            cacheSavingsUsd: 0,
-          },
-          series: [],
-          byModel: [],
-          byProject: [],
-          byPane: {
-            panes: [],
-            unattributed: {
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheReadTokens: 0,
-              cacheCreationTokens: 0,
-              totalTokens: 0,
-              messageCount: 0,
-              estimatedCostUsd: 0,
-              costIncomplete: false,
-              cacheSavingsUsd: 0,
-              uncachedCostUsd: 0,
-              uncachedInputTokens: 0,
-              cacheHitRate: 0,
-              byModel: [],
-            },
-          },
-          rateLimits: [],
-          index: {
-            lastScanStartedMs: null,
-            lastScanFinishedMs: null,
-            filesTracked: 0,
-            eventsIndexed: 0,
-            missingRoots: [],
-            scanning: false,
-            filesScanned: 0,
-            filesTotal: 0,
-            lastError: null,
-          },
-          pricingAsOf: '2026-08-10',
-        })); },
+        getReport: (...args: unknown[]) => { trackCall('usage:get-report', args); return success(usageReport()); },
         getStatus: () => { trackCall('usage:get-status', []); return success(clone(mockOptions.initialUsageReport?.index ?? {
           lastScanStartedMs: null,
           lastScanFinishedMs: null,

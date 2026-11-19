@@ -5,13 +5,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { LinkProviderConfig } from '../linkProviders/types';
 import { registerAllLinkProviders } from '../linkProviders';
-import { panelApi } from '../../../services/panelApi';
-import { requestBrowserNavigation } from '../../panels/browser/browserNavigation';
+import { openInPaneTab, openLink } from '../../../utils/openLink';
 import { openFileInEditor } from '../../../services/openFileInEditor';
-import { usePanelStore } from '../../../stores/panelStore';
 import { isCopyOnSelectEnabled, useConfigStore } from '../../../stores/configStore';
 import { isMac } from '../../../utils/platformUtils';
-import type { BrowserPanelState, ToolPanel } from '../../../../../shared/types/panels';
 import { copyTerminalText } from '../../../utils/terminalClipboard';
 import { useCommittedRef } from '../../../hooks/useCommittedRef';
 
@@ -43,14 +40,6 @@ interface SelectionPopoverState {
   x: number;
   y: number;
   text: string;
-}
-
-function getBrowserPanelTitle(url: string): string {
-  try {
-    return new URL(url).host || 'Browser';
-  } catch {
-    return 'Browser';
-  }
 }
 
 export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalLinksConfig) {
@@ -138,7 +127,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
         setFilePopover({ visible: true, x: event.clientX, y: event.clientY, ...path, line: line ?? 0 });
       },
       onOpenUrl: (url) => {
-        window.electronAPI.openExternal(url);
+        void openLink(url, config.sessionId);
       },
     };
 
@@ -147,7 +136,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     return () => {
       disposables.forEach((d) => d.dispose());
     };
-  }, [terminal, config.workingDirectory, customLinks, githubRemoteUrl, pathContext]);
+  }, [terminal, config.workingDirectory, config.sessionId, customLinks, githubRemoteUrl, pathContext]);
 
   // Listen for selection changes
   useEffect(() => {
@@ -198,11 +187,6 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     };
   }, [terminal, copyOnSelect, onCopyError, suppressSelectionPopoverRef]);
 
-  // Get panel store methods
-  const addPanel = usePanelStore((state) => state.addPanel);
-  const setActivePanelInStore = usePanelStore((state) => state.setActivePanel);
-  const updatePanelState = usePanelStore((state) => state.updatePanelState);
-
   // File popover action handlers
   const handleOpenInEditor = useCallback(async () => {
     const { relativePath, line } = filePopover;
@@ -252,45 +236,8 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     setFilePopover((prev) => ({ ...prev, visible: false }));
   }, [filePopover, isRemoteMode, config.sessionId]);
 
-  const handleOpenInBrowser = useCallback(async (url: string) => {
-    const panels = usePanelStore.getState().getSessionPanels(config.sessionId);
-    const existingPanel = panels.find((candidate) => candidate.type === 'browser');
-
-    let browserPanel: ToolPanel;
-    if (existingPanel) {
-      // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
-      const existingCustomState = (existingPanel.state.customState ?? {}) as BrowserPanelState;
-      browserPanel = {
-        ...existingPanel,
-        state: {
-          ...existingPanel.state,
-          customState: {
-            ...existingCustomState,
-            currentUrl: url,
-          },
-        },
-      };
-      await panelApi.updatePanel(browserPanel.id, { state: browserPanel.state });
-      updatePanelState(browserPanel);
-    } else {
-      browserPanel = await panelApi.createPanel({
-        sessionId: config.sessionId,
-        type: 'browser',
-        title: getBrowserPanelTitle(url),
-        initialState: {
-          customState: {
-            currentUrl: url,
-          },
-        },
-      });
-      addPanel(browserPanel);
-    }
-
-    setActivePanelInStore(config.sessionId, browserPanel.id);
-    await panelApi.setActivePanel(config.sessionId, browserPanel.id);
-
-    requestBrowserNavigation({ url, sessionId: config.sessionId, panelId: browserPanel.id });
-  }, [config.sessionId, addPanel, setActivePanelInStore, updatePanelState]);
+  // Open in Pane's browser, from the selection popover and the right-click menu.
+  const handleOpenInBrowser = useCallback((url: string) => openInPaneTab(config.sessionId, url), [config.sessionId]);
 
   const closeTooltip = useCallback(() => {
     setTooltip((prev) => ({ ...prev, visible: false }));

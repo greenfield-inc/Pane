@@ -3,7 +3,9 @@ import './versionQuery';
 // Load ReadableStream polyfill before any other imports
 import './polyfills/readablestream';
 import { getChatTabManager } from './services/chatTabs';
+import { agentInputInFlight } from './services/browser/pageDriver';
 import { disposeDevices, setDeviceMachines } from './ipc/devices';
+import { setBrowserMachines } from './services/browser/browserHost';
 import { acknowledgeUpdateQuiescence } from './services/updateShutdown';
 
 import { registerStartupNotice } from './ipc/startup-notice';
@@ -157,6 +159,10 @@ import { PowerSaveManager } from './services/powerSaveManager';
 import { warmShellPath } from './utils/shellPath';
 import { routeWebviewPopups } from './services/webviewPopups';
 import { openExternalUrl } from './utils/openExternalUrl';
+import { offerAppLink, openOfferedAppLink } from './services/browser/appLinks';
+import { PaneError, paneErrorText } from '../../shared/paneError';
+import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
+import { DOCS_BROWSER_PARTITION } from '../../shared/constants/browserPartitions';
 import { hardenWebviewPreferences } from './services/webviewPreferences';
 import { APP_MENU_ACTION_CHANNEL, attachEditContextMenu, installApplicationMenu, type AppMenuAction } from './services/nativeMenus';
 import { fitBoundsToWorkAreas, parseSavedWindowState, trackWindowState, WINDOW_STATE_KEY } from './utils/windowState';
@@ -166,6 +172,11 @@ export let mainWindow: BrowserWindow | null = null;
 // Map webContentsId → {panelId, sessionId} for webview popup interception.
 // Populated by browser-panel:register-webview IPC, consumed by did-attach-webview handler.
 export const webviewContextMap = new Map<number, { panelId: string; sessionId: string }>();
+
+/** Shows a line under a browser tab's address bar: an app link to confirm, a sign-in sent out, a download. */
+function sendTabNotice(panelId: string, notice: BrowserTabNotice): void {
+  mainWindow?.webContents.send(BROWSER_TAB_NOTICE_CHANNEL, { panelId, notice });
+}
 
 // Browser-tab webviews whose Pane find bar is open, so Escape in the page closes it.
 const findActiveWebviews = new Set<number>();
@@ -652,13 +663,20 @@ async function createWindow() {
   // The context map (panelId/sessionId) is populated later by the browser-panel:register-webview IPC.
   mainWindow.webContents.on('did-attach-webview', (_event, wvContents: WebContents) => {
     attachEditContextMenu(wvContents);
+    const openOutside = (url: string) => void openExternalUrl(url).catch((error) => {
+      console.error('[BrowserPanel] Did not open popup URL externally:', error);
+    });
     routeWebviewPopups(wvContents, {
       contextOf: id => webviewContextMap.get(id),
       openBrowserTab: request => mainWindow?.webContents.send('browser-panel:popup-requested', request),
-      openExternal: url => void openExternalUrl(url).catch((error) => {
-        console.error('[BrowserPanel] Did not open popup URL externally:', error);
-      }),
+      // The docs dialog opens its new-window links like any link from your work (Settings > Links).
+      openExternal: url => wvContents.session === session.fromPartition(DOCS_BROWSER_PARTITION) ? mainWindow?.webContents.send('docs:open-link', url) : openOutside(url),
       openPaneLink,
+      offerApp: ({ url, panelId }) => offerAppLink(url, panelId, sendTabNotice),
+      sendOut: ({ url, site, panelId }) => {
+        openOutside(url);
+        if (panelId) sendTabNotice(panelId, { kind: 'sent-out', site });
+      },
     });
 
     wvContents.setBackgroundThrottling(true);
@@ -683,6 +701,8 @@ async function createWindow() {
     const keySequence = createWebviewSequenceState();
     wvContents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
+      // An agent's keys belong to the page: Meta+W from browser_press never closes a Pane tab.
+      if (agentInputInFlight(wvContents.id)) return;
       const isBrowserTab = webviewContextMap.has(wvContents.id);
       const forwarded = webviewKeysToForward(input, {
         config: configManager.getConfig(),
@@ -718,6 +738,14 @@ async function createWindow() {
     const partitionKey = wvSession.storagePath ?? 'default';
     if (wvSession !== session.defaultSession && !registeredPartitions.has(partitionKey)) {
       registeredPartitions.add(partitionKey);
+      // A page asking the OS to open an app link (zoommtg:, slack:) waits for the person's OK in its
+      // tab (appLinks.ts). Every other permission keeps Electron's default, which grants it.
+      wvSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+        if (permission !== 'openExternal') return callback(true);
+        callback(false);
+        const context = contents ? webviewContextMap.get(contents.id) : undefined;
+        if (context && 'externalURL' in details && details.externalURL) offerAppLink(details.externalURL, context.panelId, sendTabNotice);
+      });
       wvSession.webRequest.onHeadersReceived(
         { urls: [
           'http://localhost:*/*', 'http://127.0.0.1:*/*',
@@ -748,6 +776,14 @@ async function createWindow() {
   // Guard: only register once (createWindow can be called again on macOS activate).
   if (!devToolsHandlersRegistered) {
   devToolsHandlersRegistered = true;
+  ipcMain.handle('browser-panel:open-app-link', async (_, id: string) => {
+    try {
+      await openOfferedAppLink(id);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : error instanceof Error ? error.message : 'Pane could not open the app' };
+    }
+  });
   ipcMain.handle('browser-panel:set-find-active', (_, wcId: number, active: boolean) => {
     // The guest's 'destroyed' handler (did-attach-webview) removes it when it goes.
     const guest = webContents.fromId(wcId);
@@ -1249,6 +1285,7 @@ async function initializeServices() {
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
   setDeviceMachines(machineConnections);
+  setBrowserMachines(machineConnections);
   const machines = machineConnections;
   powerMonitor.on('suspend', () => machines.suspend());
   powerMonitor.on('resume', () => machines.resume());

@@ -5,6 +5,7 @@ import { boundary, decodeOptionalBoundary } from '../validation/boundaryDecoder'
 import type { BoundaryCursor, BoundarySchema } from '../validation/boundaryDecoder';
 import type { ConfiguredAgentId } from '../agents';
 import type { NotifyChoice, NotifySubQuestion } from './notify';
+import type { DeviceDriver } from './devices';
 
 /**
  * Panel and session types for Pane.
@@ -335,6 +336,11 @@ export interface BrowserPanelState {
   /** Set when an agent reopens this page (runpane panels open); the tab reloads to show the latest file. */
   reopenedAt?: string;
   reopenedWithFocus?: boolean;
+  /**
+   * Who drives the tab now: an agent while its browser_* call runs, or the person after they touch
+   * the page or press Take over. Only main writes it (main/src/ipc/browser.ts).
+   */
+  driver?: DeviceDriver;
 }
 
 export interface ToolPanelMetadata {

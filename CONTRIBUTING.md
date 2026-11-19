@@ -169,14 +169,21 @@ To test approvals' timers without waiting, start a dev build with
   your real data. They do still see your shell environment: with
   `OPENROUTER_API_KEY` set, one main test fails (#721). Unset it for the run.
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
-  `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
-  CI runs: smoke, accessibility, settings, remote sidebar and file-preview lifecycle regressions.
+  `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the
+  required browser suite: every spec `playwright.ci.minimal.config.ts` lists.
+- The specs #1554 added to CI are stabilizing: CI runs them and reports, but
+  `CI result` does not wait for them. `playwright.ci.stabilizing.config.ts`
+  (with the chat composer specs at a desktop and a phone size),
+  `playwright.ci.webgl.config.ts` and `playwright.ci.stabilizing-electron.config.ts`
+  list them. A spec moves back to a required config once it is proven stable.
 - `pnpm test:chat-tabs` runs the chat tab journeys and the loop Session journey
   (`tests/loop-sessions.spec.ts`): it launches Electron from
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each
   test in its own temporary `PANE_DIR`, and serves the renderer from plain Vite.
-  CI runs the specs `playwright.chat-tabs.config.ts` lists, in one job. A new
-  spec runs only once it is listed there.
+  CI runs the specs `playwright.chat-tabs.config.ts` lists, in two shards.
+- A new spec runs only once a CI config lists it: CI fails until it is in
+  `playwright.ci.minimal.config.ts`, `playwright.chat-tabs.config.ts`, or the
+  `NOT_IN_CI` list in `scripts/ci-test-inventory.mjs` with its reason.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
   (`tests/electronApiMock.ts`). `pnpm test:ci:minimal` starts Vite alone. To
   start Vite, `pnpm test` and `pnpm test:ci` run `pnpm electron-dev` on port
@@ -373,6 +380,12 @@ A stack (each pull request based on the one below) is merged bottom-up with
    only its own commits, and the green `CI result` on its head still counts.
    Do not rebase or push it.
 4. Merge it with a merge commit, and repeat up the stack.
+
+When the merge queue is on ([RUNBOOK.md](RUNBOOK.md#merge-queue)), every
+merge above, a stack's included, adds the pull request to the queue instead
+(`gh pr merge <number>` does this too). It reaches `main` only after `CI result`
+passes on the merge group, which runs every `Code Quality` job, and the queue
+uses its own merge method in place of the one named above.
 
 Agents merge only when the person asks for that pull request.
 

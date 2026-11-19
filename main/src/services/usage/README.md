@@ -43,6 +43,16 @@ every event. Pane attribution resolves each rollup row once; a row whose
 events straddle a pane's creation or archive time rereads those events.
 `usageAggregator.rollup.test.ts` holds every report to the per-event queries.
 
+## Accounts and All machines
+
+Each report names the Claude Code and Codex accounts the machine is signed in
+to (`usageAccounts.ts`): an id, an email and a plan read from `~/.claude.json`
+and `~/.codex/auth.json`, never a token. Usage & Limits reads every linked
+machine's report through `machines:read` and opens on All machines: usage
+adds up across machines, and each account shows once with the machines that
+use it and the newest reading of each limit. A machine that is offline or does
+not answer keeps the last report read while Pane is open, marked with its time.
+
 ## Dashboard ranges and per-pane summaries
 
 Usage & limits supports rolling 24h/7d/30d/90d presets and custom inclusive

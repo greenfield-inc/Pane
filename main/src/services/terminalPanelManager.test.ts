@@ -2272,6 +2272,8 @@ type AgentStatusAccess = {
 
 describe('TerminalPanelManager latest output', () => {
   it('counts a terminal closing as output, so port reads notice its server is gone', async () => {
+    // The fake shell pid may be a real process here: destroy must not read the process table or track it.
+    const capture = vi.spyOn(ArchiveProcessTracker.prototype, 'capture').mockResolvedValue();
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       const manager = testAccess<AgentStatusAccess>(new TerminalPanelManager());
@@ -2286,6 +2288,7 @@ describe('TerminalPanelManager latest output', () => {
       expect(manager.latestOutputAt()).toBe(Date.parse('2026-11-13T10:05:00.000Z'));
     } finally {
       vi.useRealTimers();
+      capture.mockRestore();
     }
   });
 });

@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import type { DiffManifest } from '../shared/types/gitDiff';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const now = new Date(0).toISOString();
 const project = { id: 512, name: 'Pane', path: '/tmp/chrome-evidence', active: true, created_at: now, updated_at: now };
@@ -46,18 +47,12 @@ const execution = {
   comparison_branch: 'origin/main',
   history_source: 'branch',
 };
-const combinedDiff = {
-  diff: [
-    `diff --git a/${changedPath} b/${changedPath}`,
-    'index 1111111..2222222 100644',
-    `--- a/${changedPath}`,
-    `+++ b/${changedPath}`,
-    '@@ -1 +1 @@',
-    '-old chrome',
-    '+flat chrome',
-  ].join('\n'),
+const sessionManifest: DiffManifest = {
+  scope: { kind: 'session' },
+  files: [{ path: changedPath, kind: 'modified', additions: 8, deletions: 3, isBinary: false }],
+  resolvedBase: { kind: 'comparison-base', ref: 'main', hash: '1111111111111111111111111111111111111111' },
+  resolvedTarget: { kind: 'working-tree' },
   stats: { additions: 8, deletions: 3, filesChanged: 1 },
-  changedFiles: [changedPath],
 };
 
 interface BootOptions {
@@ -110,11 +105,19 @@ async function bootChromeFixture(page: Page, opts: BootOptions = {}) {
     initialTerminalStates: opts.mountTerminal
       ? { 'chrome-live-terminal': { scrollbackBuffer: 'ready\r\n' } }
       : undefined,
-    initialCombinedDiff: opts.diff ? combinedDiff : undefined,
+    diffManifests: opts.diff ? { session: sessionManifest } : undefined,
     initialExecutions: opts.diff ? [execution] : undefined,
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  if (opts.diff) {
+    await page.addInitScript((commit) => {
+      window.electronAPI.sessions.getGitGraph = async () => ({
+        success: true,
+        data: { entries: [{ ...commit, parents: [], branch: 'flat-chrome' }], currentBranch: 'flat-chrome' },
+      });
+    }, { hash: execution.after_commit_hash.slice(0, 7), message: execution.commit_message, committerDate: execution.timestamp, author: execution.author });
+  }
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Pane$/ }).click();
   await page.getByRole('button', { name: 'Flat chrome', exact: true }).click();
   if (opts.theme) {
@@ -258,8 +261,10 @@ test('macOS UI uses the sans stack; content surfaces stay monospace', async ({ p
   );
 
   await page.getByRole('tab', { name: 'Changes', exact: true }).click();
-  await expect(page.getByRole('button', { name: /^Open diff for .+$/ })).toBeVisible();
+  await expect(page.getByRole('option', { name: /^Open diff for .+$/ })).toBeVisible();
   const mono = await computedClassFont(page, 'font-mono');
   await expect(page.getByText(changedPath, { exact: true })).toHaveCSS('font-family', mono);
-  await expect(page.getByText('1234567', { exact: true })).toHaveCSS('font-family', mono);
+
+  await page.getByRole('tab', { name: 'Details', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Commit history' }).getByText(/^1234567/)).toHaveCSS('font-family', mono);
 });

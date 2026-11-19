@@ -36,9 +36,17 @@ export const EXPECTED_JOBS = [
   'pwa-build',
 ];
 
+// Code Quality jobs that run and report but that CI result does not wait for,
+// each with its reason. They stay out of CI result's needs.
+const STABILIZING = 'stabilizing: wired in by #1554 on 2026-11-18, flaky under CI load; returns to the required lanes as each is proven stable';
+export const REPORTED_ONLY_JOBS = {
+  'functional-smoke-stabilizing': STABILIZING,
+  'functional-smoke-webgl': STABILIZING,
+};
+
 // Jobs a pull request may skip when none of their files changed, keyed by job
 // id, with the Detect changed areas output that says whether they did. Pushes
-// to main and manual runs skip nothing.
+// to main, merge groups and manual runs skip nothing.
 export const SKIP_WHEN_UNCHANGED = {
   'runpane-wrapper-tests': 'runpane',
   'cross-os-main-tests': 'main',
@@ -56,17 +64,33 @@ export function skipManifest({ event, changed }) {
   return skip;
 }
 
-/** Top-level job ids in a workflow file, read without a YAML parser. */
-export function workflowJobIds(workflowText) {
-  const ids = [];
+/**
+ * Top-level jobs in a workflow file, read without a YAML parser: each job's
+ * id, its `name:` (the id when it has none) and its step names, in order.
+ */
+export function workflowJobs(workflowText) {
+  const jobs = [];
   let inJobs = false;
   for (const line of workflowText.split(/\r?\n/)) {
     if (/^jobs:\s*(#.*)?$/.test(line)) { inJobs = true; continue; }
-    if (inJobs && /^\S/.test(line) && !line.startsWith('#')) break;
-    const match = inJobs && /^ {2}([A-Za-z0-9_-]+):\s*(#.*)?$/.exec(line);
-    if (match) ids.push(match[1]);
+    if (!inJobs) continue;
+    if (/^\S/.test(line) && !line.startsWith('#')) break;
+    const id = /^ {2}([A-Za-z0-9_-]+):\s*(#.*)?$/.exec(line);
+    if (id) { jobs.push({ id: id[1], name: id[1], steps: [] }); continue; }
+    const job = jobs.at(-1);
+    const name = /^ {4}name:\s*(.+?)\s*$/.exec(line);
+    if (job && name) job.name = unquote(name[1]);
+    const step = /^ {4}- name:\s*(.+?)\s*$/.exec(line);
+    if (job && step) job.steps.push(unquote(step[1]));
   }
-  return ids;
+  return jobs;
+}
+
+const unquote = (value) => value.replace(/^(['"])(.*)\1$/, '$2');
+
+/** Top-level job ids in a workflow file. */
+export function workflowJobIds(workflowText) {
+  return workflowJobs(workflowText).map((job) => job.id);
 }
 
 /**
@@ -91,8 +115,8 @@ export function evaluate({ needs, workflowJobs }) {
   }
 
   for (const job of workflowJobs) {
-    if (job !== GATE_JOB && !EXPECTED_JOBS.includes(job)) {
-      problems.push(`${job}: is in quality.yml but not in scripts/ci-gate.mjs EXPECTED_JOBS, so CI result would not check it. Add it there and to CI result's needs.`);
+    if (job !== GATE_JOB && !EXPECTED_JOBS.includes(job) && !REPORTED_ONLY_JOBS[job]) {
+      problems.push(`${job}: is in quality.yml but not in scripts/ci-gate.mjs EXPECTED_JOBS or REPORTED_ONLY_JOBS, so CI result would not check it. Add it to EXPECTED_JOBS and to CI result's needs.`);
     }
   }
   for (const job of Object.keys(needs)) {

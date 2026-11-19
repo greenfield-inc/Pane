@@ -20,7 +20,7 @@ each computer its `runpane.net` address for QR pairing.
 | Android build check | `Native Android Build` (`native-android.yml`) | pull requests and pushes to `main` whose Expo Android fingerprint changed, or that change the workflow; weekly; manual | Builds the Android dev client APK with the Firebase config. Pull requests build `arm64-v8a` only; pushes to `main`, the weekly run and manual runs build all four ABIs, one job per ABI |
 | Relays | `Deploy Pane relays` (`relay-deploy.yml`) | manual only | Builds `relay/`, pushes the image to Google Artifact Registry, and creates or updates the three relay VMs; see [relay/deploy/RUNBOOK.md](relay/deploy/RUNBOOK.md) |
 | Website notification | `Notify website on release` (`notify-website.yml`) | manual only | Re-sends the release event to the website repo; tag releases already do this from `Build & Release` |
-| PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux and Windows, the runpane wrapper matrix, and the Playwright smoke suite |
+| PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux and Windows (plus the native, glasses and mobile apps), the runpane wrapper matrix, the Playwright browser and Electron suites, and a check that every test file runs in one of them |
 | React review | `React Doctor` (`react-doctor.yml`) | pull requests that touch `frontend/` | Comments on new React findings; advisory, never blocks |
 | Traffic snapshot | `GitHub traffic → PostHog` (`traffic-snapshot.yml`) | daily 06:00 UTC | Copies GitHub traffic and release download counts into PostHog |
 
@@ -220,6 +220,8 @@ interactive `mcp-publisher login github` cannot publish to an organization
 namespace. Check the listing with
 `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=runpane"`.
 
+## CI
+
 `CI result` is the check branch protection requires. It runs even when the
 run is cancelled, and passes only when every `Code Quality` job named in
 `scripts/ci-gate.mjs` `EXPECTED_JOBS` succeeded, or skipped with a reason from
@@ -228,11 +230,20 @@ wrapper, main or relay files skips those jobs). A job that fails, is
 cancelled, is skipped without a reason, or is missing from the workflow or
 from `CI result`'s needs fails it, and so does a `Code Quality` job the list
 does not name. Add a new job to `EXPECTED_JOBS` and to `CI result`'s needs in
-the same change; `scripts/ci-gate.test.mjs` (run by Type Check and Lint, and
+the same change, or to `REPORTED_ONLY_JOBS` with its reason for a job that
+reports without gating (the stabilizing lanes); `scripts/ci-gate.test.mjs` (run by Type Check and Lint, and
 by `node --test scripts/ci-gate.test.mjs` locally) checks they match the
 workflow. It is the only check a merge waits for; how
 to merge a pull request or a stack is in
 [CONTRIBUTING.md](CONTRIBUTING.md#merging).
+
+Every test file runs in a CI lane or is listed with its reason.
+`node scripts/ci-test-inventory.mjs check` (run by Type Check and Lint) reads
+each lane's files from the runner itself (`vitest list`,
+`playwright test --list`) or from the job's steps, and fails when a tracked
+test file runs in no lane and is not in its `NOT_IN_CI` list, or when a lane
+in its `LANES` list no longer matches the workflow. `node
+scripts/ci-test-inventory.mjs list` prints every test file with its lanes.
 
 `node scripts/ci-timings.mjs --since <date> --until <time>` writes
 `ci-timings.json`: the wall time (first job start to last job end, attempt 1)
@@ -243,6 +254,22 @@ listing calls. `--run <id> --attempt <n>` records a single run attempt
 instead: each job's head SHA, runner, and waiting, setup, running and teardown
 seconds. `CI result` writes that record to its job summary and log on every
 `Code Quality` run.
+
+`CI result` also checks each successful job against
+`scripts/ci-budgets.json`. Each phase (waiting, setup, running) and each
+budgeted step (Lint, Type check) has a target, the speed the CI plan aims for,
+and most have a ceiling. Only a measured value over its ceiling fails
+`CI result`. A value over its target is a warning in the job summary, and so
+is a value that could not be measured: the jobs API did not answer, a step or
+phase reported no time, or a job has no budget. Waiting has no ceiling: it
+depends on GitHub's runner capacity, not the change. Times come from the jobs
+API in whole seconds. Ceilings are 1.3 times the largest value seen in recent
+successful runs, rounded up to 10 s, so no normal run fails one. If a run was
+only slow, re-run all jobs: re-running `CI result` alone reads the same
+timings. A new job, or a renamed or new setup step, needs its entry in the
+same change; `scripts/ci-timings.test.mjs` (run by Type Check and Lint) checks
+the file against `quality.yml`. Lower a ceiling only after real runs show the
+job stays under it.
 
 In `Code Quality`, pushes to `main` write two Actions caches that pull
 requests only read: Playwright's Chromium (`playwright-*`, keyed on the
@@ -257,6 +284,41 @@ to `main` writes the new key. Dependencies install fresh in every job: a
 `node_modules` cache saved about 2 s per job on Linux, and its restore breaks
 pnpm's junctions on Windows. To drop a bad entry, delete it with
 `gh cache delete <key>`; the next push to `main` writes it again.
+
+### Merge queue
+
+`Code Quality` also runs on the merge queue's `merge_group` events, so the
+queue can hold every merge to `main` until every `Code Quality` job passes on
+the exact merge commit. In a merge group, Detect changed areas diffs no paths
+and its manifest skips nothing, so every job runs. That covers every lane in
+`scripts/ci-test-inventory.mjs` except the Linux package build's packaged-app
+tests, which run in `linux-package-build.yml` on pull requests that touch
+packaging, and the files its `NOT_IN_CI` list names. No release or
+deploy workflow runs: their push triggers name `main`, `nightly`, `release` or
+tags, never the queue's `gh-readonly-queue/main/*` branches. `CI result` is a
+`Code Quality` job and the only required check, so no other workflow needs the
+trigger.
+
+The queue is off until a repository admin turns it on for `main` (Settings ›
+Rules › Rulesets, or the branch protection rule):
+
+1. Turn on **Require merge queue**.
+2. Choose its merge method. The queue merges every pull request the same way.
+   A stack ([CONTRIBUTING.md](CONTRIBUTING.md#merging)) needs **Merge commit**,
+   so with that choice single pull requests stop being squash-merged. Choosing
+   **Squash** keeps single pull requests as they are but breaks the stack
+   steps.
+3. Keep `CI result` as the only required check. Set the status check timeout
+   above a full run (`main` runs take about 11 minutes at p95), for example 30
+   minutes.
+4. Keep **Only merge non-failing pull requests** on, and remove the bypasses
+   that let anyone merge around the queue.
+
+Once it is on, merging a pull request adds it to the queue
+(`gh pr merge <number>` does this too). GitHub builds a merge group of `main`
+plus the queued pull requests, and `Code Quality` runs on it. A group whose
+`CI result` fails is not merged, and its pull requests leave the queue. Pushes
+to `main` still run `Code Quality` as before.
 
 ## Recovery and rollback
 

@@ -19,6 +19,12 @@
  * Beside it, a `pane-node` shim runs any script with the same binary as Node,
  * so bundled skill scripts work on a machine without Node.
  *
+ * On macOS and Linux, a `pane-browser` command is BROWSER in Pane's terminals: it opens a link a
+ * command-line tool opens (gh pr view --web, Python's webbrowser) in a Pane browser tab beside the
+ * terminal, or in the system browser when Settings > Links says so or Pane can't open the tab.
+ * Pane rewrites it when that setting changes. Windows gets none: tools hand BROWSER the URL
+ * unquoted, and a batch file would split it at `&` and could run what follows.
+ *
  * The installed app also appends `<PANE_DIR>/bin` to the end of the user's own
  * PATH (shell startup files, or the Windows user PATH), so `runpane` works in
  * terminals Pane did not open, such as when recovering from a failed update.
@@ -33,6 +39,7 @@ import type { PtyHostSpawnOpts } from '../ptyHost/types';
 import { isPackagedOnDefaultDirectory } from '../utils/appDirectory';
 import { RUNPANE_PATH_FLAGS, RUNPANE_WSL_PATH_FUNCTIONS, WSLPATH } from '../utils/wslUtils';
 import { AGENT_FARM_HOST_ENV } from '../../../shared/types/customCommandResume';
+import type { LinksOpenIn } from '../../../shared/types/browser';
 
 /** Environment handed to a terminal spawn. */
 type SpawnEnv = PtyHostSpawnOpts['env'];
@@ -51,6 +58,8 @@ export interface RunpaneShimState {
   shimPath: string;
   /** What the shim runs: the CLI script and the runtime that runs it as Node. */
   cli: { executable: string; script: string };
+  /** BROWSER for Pane's terminals on macOS and Linux: opens a link in a Pane browser tab beside the terminal. */
+  browserPath: string;
   /** Wrapper startup files that re-apply PATH after the user's own files. */
   zshDotDir: string;
   bashRcFile: string;
@@ -64,6 +73,8 @@ export interface InstallRunpaneShimOptions {
   bundledCliPath: string;
   execPath: string;
   platform?: NodeJS.Platform;
+  /** Settings > Links: where pane-browser opens links. */
+  openLinksIn?: LinksOpenIn;
 }
 
 let currentState: RunpaneShimState | null = null;
@@ -219,6 +230,35 @@ function windowsNodeShim(execPath: string): string {
     'exit /b 1',
     '',
   ].join('\r\n');
+}
+
+/** The OS command that opens a URL in the system browser. */
+function systemOpener(platform: NodeJS.Platform): string {
+  return platform === 'darwin' ? 'open' : 'xdg-open';
+}
+
+/** `pane-browser <url>...`: BROWSER in Pane's terminals on macOS and Linux. */
+function posixBrowserShim(shimPath: string, openIn: LinksOpenIn, platform: NodeJS.Platform): string {
+  const opener = systemOpener(platform);
+  return [
+    '#!/bin/sh',
+    `# ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup and when Settings > Links changes; edits are lost.`,
+    openIn === 'pane'
+      ? '# Opens each link in a Pane browser tab beside this terminal, or the system browser when Pane can\'t.'
+      : '# Settings > Links opens links in the system browser.',
+    'for url in "$@"; do',
+    openIn === 'pane'
+      ? `  ${shellQuote(shimPath)} panels open --url "$url" --split --source user --yes >/dev/null 2>&1 || ${opener} "$url"`
+      : `  ${opener} "$url"`,
+    'done',
+    '',
+  ].join('\n');
+}
+
+/** Writes pane-browser for Settings > Links' choice; Pane calls it at startup and when the setting changes. */
+export function writeBrowserShim(openIn: LinksOpenIn, state: RunpaneShimState | null = currentState, platform: NodeJS.Platform = process.platform): void {
+  if (!state || platform === 'win32') return;
+  writeManagedFile(state.browserPath, posixBrowserShim(path.join(state.binDir, 'runpane'), openIn, platform), PANE_MANAGED_SHIM_MARKER, 0o755);
 }
 
 function posixShim(appDirectory: string, execPath: string, cliPath: string, platform: NodeJS.Platform): string {
@@ -433,7 +473,9 @@ export function installRunpaneShim(options: InstallRunpaneShimOptions): RunpaneS
   }
   const bashRc = path.join(bashDir, 'rcfile');
   writeManagedFile(bashRc, bashRcFile(binDir), MANAGED_SHELL_MARKER, 0o644);
-  currentState = { binDir, shimPath, cli: { executable: execPath, script: cliPath }, zshDotDir, bashRcFile: bashRc };
+  const browserPath = path.join(binDir, 'pane-browser');
+  currentState = { binDir, shimPath, cli: { executable: execPath, script: cliPath }, browserPath, zshDotDir, bashRcFile: bashRc };
+  writeBrowserShim(options.openLinksIn ?? 'pane', currentState, platform);
   if (platform === 'win32') {
     const wslRc = path.join(bashDir, 'wsl-rcfile');
     if (writeManagedFile(wslRc, wslBashRcFile(binDir), MANAGED_SHELL_MARKER, 0o644)) currentState.wslBashRcFile = wslRc;
@@ -446,10 +488,10 @@ export function getRunpaneShimState(): RunpaneShimState | null {
   return currentState;
 }
 
-export function installRunpaneShimBestEffort(appDirectory: string): RunpaneShimState | null {
+export function installRunpaneShimBestEffort(appDirectory: string, openLinksIn: LinksOpenIn): RunpaneShimState | null {
   try {
     // An AppImage's execPath is a per-launch mount; APPIMAGE is the stable file.
-    const state = installRunpaneShim({ appDirectory, bundledCliPath: defaultBundledRunpaneCliPath(), execPath: process.env.APPIMAGE || process.execPath });
+    const state = installRunpaneShim({ appDirectory, bundledCliPath: defaultBundledRunpaneCliPath(), execPath: process.env.APPIMAGE || process.execPath, openLinksIn });
     if (!state) console.warn('[runpane] Bundled CLI unavailable; terminals will use runpane from PATH if installed');
     return state;
   } catch (error) {
@@ -489,6 +531,7 @@ export function withRunpaneOnPath(
     [AGENT_FARM_HOST_ENV.sessionHook]: state.shimPath,
   };
   if (platform === 'win32') return { args: shell.args, env: nextEnv };
+  nextEnv.BROWSER = state.browserPath;
 
   switch (shell.name) {
     case 'zsh': {
@@ -510,10 +553,11 @@ export function withRunpaneOnPath(
   }
 }
 
-/** Non-interactive commands (run scripts, workspace exec) only need the PATH prepend. */
+/** Non-interactive commands (run scripts, workspace exec, chat tab agents) only need the PATH prepend, and BROWSER off Windows. */
 export function withRunpaneBinOnPath<Env extends SpawnEnv | NodeJS.ProcessEnv>(env: Env, state: RunpaneShimState | null = currentState, platform: NodeJS.Platform = process.platform): Env {
   if (!state) return env;
-  return { ...env, PATH: prependPath(env.PATH, state.binDir, platform === 'win32' ? ';' : ':'), PANE_RUNPANE_BIN: state.shimPath };
+  if (platform === 'win32') return { ...env, PATH: prependPath(env.PATH, state.binDir, ';'), PANE_RUNPANE_BIN: state.shimPath };
+  return { ...env, PATH: prependPath(env.PATH, state.binDir, ':'), PANE_RUNPANE_BIN: state.shimPath, BROWSER: state.browserPath };
 }
 
 /** Marks the PATH lines Pane appends to a user's shell startup file. */

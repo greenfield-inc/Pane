@@ -1,4 +1,5 @@
 import type { DeviceSettings } from '../../../shared/types/devices';
+import type { BrowserSettings } from '../../../shared/types/browser';
 import type { MachineHealthSettings } from '../../../shared/types/machineHealth';
 import type { PaneSecretMeta, PaneSecretReferenceMeta } from '../services/paneSecrets';
 import type { NotifySettings } from '../../../shared/types/notify';
@@ -65,6 +66,8 @@ export interface AppConfig {
   chatTabsEnabled?: boolean;
   /** Settings > Devices (docs/DEVICES.md). */
   devices?: Partial<DeviceSettings>;
+  /** Settings > Browser. */
+  browser?: Partial<BrowserSettings>;
   /** Experimental: Autopilot, one always-running agent above every Session (needs chat tabs). */
   autopilotEnabled?: boolean;
   verbose?: boolean;
@@ -264,6 +267,7 @@ export interface AppConfig {
 }
 
 export interface UpdateConfigRequest {
+  browser?: Partial<BrowserSettings>;
   verbose?: boolean;
   anthropicApiKey?: string;
   openaiApiKey?: string;

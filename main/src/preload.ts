@@ -11,6 +11,7 @@ import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult }
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
+import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
   type WindowControlsOverlayColors,
@@ -290,6 +291,30 @@ try {
       console.error('Failed to dispatch browser-panel:popup-requested to window:', e);
     }
   });
+  // A call runs on a browser tab: its hidden page paints while it does (P4).
+  ipcRenderer.on('browser-panel:busy', (_event: Electron.IpcRendererEvent, data: { panelId: string; busy: boolean }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:busy', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:busy to window:', e);
+    }
+  });
+  // The browser tabs agents hold: their pages stay alive while hidden (P4).
+  ipcRenderer.on('browser-panel:held', (_event: Electron.IpcRendererEvent, data: { tabs: Array<{ panelId: string; sessionId?: string }> }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:held', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:held to window:', e);
+    }
+  });
+  // An agent clicked in a browser tab's page: draw its cursor there.
+  ipcRenderer.on('browser-panel:agent-cursor', (_event: Electron.IpcRendererEvent, data: { panelId: string; x: number; y: number }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:agent-cursor', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:agent-cursor to window:', e);
+    }
+  });
   // A browser tab's page took keyboard focus (a click inside it never reaches this DOM).
   ipcRenderer.on('browser-panel:page-focused', (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
     try {
@@ -311,6 +336,22 @@ try {
       window.dispatchEvent(new CustomEvent('browser-panel:file-refused', { detail: data }));
     } catch (e) {
       console.error('Failed to dispatch browser-panel:file-refused to window:', e);
+    }
+  });
+  // A line under a browser tab's address bar: an app link to confirm, a sign-in sent out, a download.
+  ipcRenderer.on(BROWSER_TAB_NOTICE_CHANNEL, (_event: Electron.IpcRendererEvent, data: { panelId: string; notice: BrowserTabNotice }) => {
+    try {
+      window.dispatchEvent(new CustomEvent(BROWSER_TAB_NOTICE_CHANNEL, { detail: data }));
+    } catch (e) {
+      console.error(`Failed to dispatch ${BROWSER_TAB_NOTICE_CHANNEL} to window:`, e);
+    }
+  });
+  // A docs page's link that opens a new window.
+  ipcRenderer.on('docs:open-link', (_event: Electron.IpcRendererEvent, url: string) => {
+    try {
+      window.dispatchEvent(new CustomEvent('docs:open-link', { detail: url }));
+    } catch (e) {
+      console.error('Failed to dispatch docs:open-link to window:', e);
     }
   });
 } catch {
