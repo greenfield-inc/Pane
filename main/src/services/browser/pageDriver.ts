@@ -105,6 +105,8 @@ const NAVIGATION_WAIT_MS = 30_000;
 const PAGE_CALL_MS = 10_000;
 const EVALUATE_TIMEOUT_MS = 30_000;
 const EVALUATE_RESULT_LIMIT = 64 * 1024;
+/** How long a screenshot may wait for the page to paint. */
+const CAPTURE_MS = 15_000;
 export const WAIT_DEFAULT_MS = 10_000;
 export const WAIT_MAX_MS = 120_000;
 
@@ -164,7 +166,8 @@ export class PageDriver {
   /** The size a viewer in control gave the page; undefined while it fills its own view. */
   private size: BrowserPageSize | undefined;
 
-  constructor(private readonly contents: BrowserPageContents) {
+  /** `captureMs`: how long a screenshot may wait for the page to paint before the queue gives up on it. */
+  constructor(private readonly contents: BrowserPageContents, private readonly captureMs = CAPTURE_MS) {
     drivers.set(contents.id, this);
     contents.once('destroyed', () => {
       clearTimeout(this.unfocusTimer);
@@ -293,30 +296,45 @@ export class PageDriver {
 
   /** A PNG of what the tab shows, or of the whole page. One capture per tab at a time. */
   screenshot(fullPage: boolean): Promise<PageScreenshot> {
-    const run = this.screenshots.then(async (): Promise<PageScreenshot> => {
-      const size = this.size;
-      if (!fullPage && size) {
-        // The view is the tab's size, and the page a viewer's: the debugger captures the emulated
-        // viewport at its own size, where it is scrolled to (a clip would be in document coordinates).
-        const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'png' }), screenshotSchema);
-        // The PNG is in device pixels (2x on a Retina host), as capturePage's is: report its own size.
-        const png = Buffer.from(shot.data, 'base64');
-        return { png, width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
-      }
-      if (!fullPage) {
-        const image = await this.contents.capturePage();
-        const size = image.getSize();
-        return { png: image.toPNG(), width: size.width, height: size.height };
-      }
-      await this.attach();
-      const content = decodeBoundary(await this.send('Page.getLayoutMetrics'), layoutSchema).cssContentSize;
-      const width = Math.ceil(content.width);
-      const height = Math.min(Math.ceil(content.height), 16_384);
-      const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width, height, scale: 1 } }), screenshotSchema);
-      return { png: Buffer.from(shot.data, 'base64'), width, height };
-    });
+    const run = this.screenshots.then(() => this.withinCapture(this.screenshotNow(fullPage)));
     this.screenshots = run.then(() => undefined, () => undefined);
     return run;
+  }
+
+  /**
+   * A page that doesn't paint (Pane's window minimized or covered, on some systems) never answers
+   * a capture: give up, so the agent hears why and the next screenshot isn't stuck behind it.
+   */
+  private withinCapture<Result>(work: Promise<Result>): Promise<Result> {
+    work.catch(() => undefined);
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new PaneError('ERR_BROWSER_SCREENSHOT_TIMEOUT', `The page gave no picture within ${this.captureMs / 1000} seconds. Pane's window on this computer may be minimized or covered, and the page doesn't paint then. Nothing was saved.`, 'Read the page with browser_snapshot instead, or ask the person to bring Pane\'s window forward and try again.')), this.captureMs);
+    });
+    return Promise.race([work, late]).finally(() => clearTimeout(timer));
+  }
+
+  private async screenshotNow(fullPage: boolean): Promise<PageScreenshot> {
+    const size = this.size;
+    if (!fullPage && size) {
+      // The view is the tab's size, and the page a viewer's: the debugger captures the emulated
+      // viewport at its own size, where it is scrolled to (a clip would be in document coordinates).
+      const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'png' }), screenshotSchema);
+      // The PNG is in device pixels (2x on a Retina host), as capturePage's is: report its own size.
+      const png = Buffer.from(shot.data, 'base64');
+      return { png, width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
+    }
+    if (!fullPage) {
+      const image = await this.contents.capturePage();
+      const size = image.getSize();
+      return { png: image.toPNG(), width: size.width, height: size.height };
+    }
+    await this.attach();
+    const content = decodeBoundary(await this.send('Page.getLayoutMetrics'), layoutSchema).cssContentSize;
+    const width = Math.ceil(content.width);
+    const height = Math.min(Math.ceil(content.height), 16_384);
+    const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width, height, scale: 1 } }), screenshotSchema);
+    return { png: Buffer.from(shot.data, 'base64'), width, height };
   }
 
   private async clickNow(target: ClickTarget, button: 'left' | 'right' | 'middle', double: boolean): Promise<ActionOutcome & { x: number; y: number }> {
@@ -453,7 +471,7 @@ export class PageDriver {
     });
     if (result === 'dialog') {
       const dialog = this.dialog;
-      throw new PaneError('ERR_BROWSER_DIALOG_PENDING', `The script opened a ${dialog?.type ?? 'dialog'} ("${(dialog?.message ?? '').slice(0, 120)}"), and the page is blocked until it is answered. The script is still running.`, 'Answer it with browser_dialog; the script then finishes, but its value is not returned.');
+      throw new PaneError('ERR_BROWSER_DIALOG_PENDING', `The script opened ${article(dialog?.type ?? 'dialog')} ${dialog?.type ?? 'dialog'} ("${(dialog?.message ?? '').slice(0, 120)}"), and the page is blocked until it is answered. The script is still running.`, 'Answer it with browser_dialog; the script then finishes, but its value is not returned.');
     }
     if (result === 'overdue') {
       await this.send('Runtime.terminateExecution').catch(() => undefined);
@@ -496,7 +514,7 @@ export class PageDriver {
   private refuseWhileDialog(): void {
     const dialog = this.dialog;
     if (dialog) {
-      throw new PaneError('ERR_BROWSER_DIALOG_PENDING', `The page has a ${dialog.type} dialog open ("${dialog.message.slice(0, 120)}"), and it blocks the page until it is answered. Nothing ran.`, 'Answer it with browser_dialog (accept or dismiss), or ask the person to.');
+      throw new PaneError('ERR_BROWSER_DIALOG_PENDING', `The page has ${article(dialog.type)} ${dialog.type} dialog open ("${dialog.message.slice(0, 120)}"), and it blocks the page until it is answered. Nothing ran.`, 'Answer it with browser_dialog (accept or dismiss), or ask the person to.');
     }
   }
 
@@ -651,6 +669,11 @@ export class PageDriver {
     }
     return this.contents.debugger.sendCommand(method, params);
   }
+}
+
+/** "an alert", "a confirm". */
+function article(word: string): string {
+  return /^[aeiou]/i.test(word) ? 'an' : 'a';
 }
 
 function evaluateTimeout(): PaneError {
