@@ -1,4 +1,6 @@
-import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, Menu, shell, type MenuItemConstructorOptions, type WebContents } from 'electron';
+import { externalUrlOrNull } from '../utils/externalUrl';
+import { openExternalUrl } from '../utils/openExternalUrl';
 import type { ContextMenuEntry } from '../../../shared/types/contextMenu';
 
 export const APP_MENU_ACTION_CHANNEL = 'app:menu-action';
@@ -132,7 +134,8 @@ function lookUpLabel(selection: string): string {
 const CONTEXT_MENU_DISMISS_GRACE_MS = 100;
 
 /**
- * Right-click on editable fields and selected text opens the native edit menu.
+ * Right-click on editable fields, selected text and links opens the native edit menu;
+ * a link gets Open in System Browser and Copy Link.
  * Pane's own menus (sidebar rows, file tree, terminals through
  * showContextMenu) call preventDefault on the DOM event, so Chromium never
  * raises this event for them.
@@ -141,9 +144,18 @@ export function attachEditContextMenu(contents: WebContents): void {
   contents.on('context-menu', (_event, params) => {
     const { editFlags, isEditable, misspelledWord, dictionarySuggestions } = params;
     const selection = params.selectionText.trim();
-    if (!isEditable && !selection) return;
+    const link = externalUrlOrNull(params.linkURL);
+    if (!isEditable && !selection && !link) return;
 
     const items: MenuItemConstructorOptions[] = [];
+    // A link in a browser tab, a chat message or a card can always go to the system browser.
+    if (link) {
+      items.push(
+        { label: 'Open in System Browser', click: () => void openExternalUrl(link).catch(error => console.error('[menu] Did not open the link in the system browser:', error)) },
+        { label: 'Copy Link', click: () => clipboard.writeText(link) },
+      );
+      if (isEditable || selection) items.push({ type: 'separator' });
+    }
     if (isEditable && misspelledWord) {
       items.push(...(dictionarySuggestions.length > 0
         ? dictionarySuggestions.map((word): MenuItemConstructorOptions => ({
@@ -170,7 +182,7 @@ export function attachEditContextMenu(contents: WebContents): void {
         { type: 'separator' },
         { label: 'Select All', accelerator: 'CmdOrCtrl+A', registerAccelerator: false, enabled: editFlags.canSelectAll, click: () => contents.selectAll() },
       );
-    } else {
+    } else if (selection) {
       items.push({ label: 'Copy', accelerator: 'CmdOrCtrl+C', registerAccelerator: false, enabled: editFlags.canCopy, click: () => contents.copy() });
     }
     // A webview's menu opens over the window that hosts it.

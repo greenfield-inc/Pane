@@ -236,7 +236,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
         <PopoverButton onClick={handleOpenInBrowser}>
           <span className="flex items-center gap-2">
             <Globe className="w-4 h-4" />
-            Open in Browser
+            Open in Pane's browser
           </span>
         </PopoverButton>
       )}
@@ -244,7 +244,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
         <PopoverButton onClick={handleOpenUrl}>
           <span className="flex items-center gap-2">
             <ExternalLink className="w-4 h-4" />
-            Open URL
+            Open in system browser
           </span>
         </PopoverButton>
       )}

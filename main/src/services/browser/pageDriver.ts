@@ -149,6 +149,7 @@ export class PageDriver {
   private refsRevoked = false;
   private dispatching = 0;
   private lastDispatchEnd = 0;
+  private lastPersonInput = 0;
   private unfocusTimer: NodeJS.Timeout | undefined;
   private screenshots: Promise<void> = Promise.resolve();
   private actions: Promise<void> = Promise.resolve();
@@ -170,6 +171,20 @@ export class PageDriver {
   /** Whether input the page sees now came from the agent (so it never reads as the person's). */
   isAgentInput(now = Date.now()): boolean {
     return this.dispatching > 0 || now - this.lastDispatchEnd < SETTLE_MS * 2;
+  }
+
+  /**
+   * The person used the page: refs from before stop working, since the page may have changed.
+   * On a linked computer this is also how the agent's computer learns the person is driving.
+   */
+  notePersonInput(now = Date.now()): void {
+    this.lastPersonInput = now;
+    this.revokeRefs();
+  }
+
+  /** Whether the person used the page in the last `holdMs` (they drive until they stop). */
+  personDriving(holdMs: number, now = Date.now()): boolean {
+    return now - this.lastPersonInput < holdMs;
   }
 
   /** Refs from before now stop working until the next snapshot (the person took over). */
@@ -319,11 +334,19 @@ export class PageDriver {
   private async navigateNow(target: { url: string } | { history: 'back' | 'forward' | 'reload' }): Promise<void> {
     this.refuseWhileDialog();
     if ('url' in target) {
-      await this.contents.loadURL(target.url).catch((cause: unknown) => {
-        // A load that a newer navigation replaced (ERR_ABORTED) still leaves the tab on a page.
-        if (cause instanceof Error && /ERR_ABORTED/.test(cause.message)) return;
+      const before = this.contents.getURL();
+      const load = () => this.contents.loadURL(target.url).then(() => true, (cause: unknown) => {
+        // Another navigation replaced this one (ERR_ABORTED, -3): a waking tab loading its saved page, or the page's own redirect.
+        if (cause instanceof Error && /ERR_ABORTED|\(-3\)/.test(cause.message)) return false;
         throw new PaneError('ERR_BROWSER_NAVIGATION_FAILED', `The page at ${target.url} did not load: ${cause instanceof Error ? cause.message : String(cause)}.`, 'Check the URL, or call browser_snapshot to see what the tab shows.');
       });
+      if (await load()) return;
+      // A waking tab's own reload of its old page replaced this one: once it settles, load the agent's
+      // URL again. A redirect or a page's own navigation is left as it is, so nothing loads twice.
+      if (this.contents.isLoading()) await this.nextLoad();
+      const landed = this.contents.getURL();
+      const freshPage = before === '' || before === 'about:blank';
+      if (landed !== target.url && (freshPage || landed === before)) await load();
       return;
     }
     const history = this.contents.navigationHistory;
@@ -350,7 +373,7 @@ export class PageDriver {
       if (this.dialog) return;
       if (Date.now() >= deadline) {
         const wanted = [conditions.text && `text "${conditions.text}"`, conditions.url && `a URL containing "${conditions.url}"`, conditions.ref && `${conditions.ref} visible`].filter(Boolean).join(' and ');
-        throw new PaneError('ERR_BROWSER_WAIT_TIMEOUT', `The page did not show ${wanted} within ${Number((timeoutMs / 1000).toFixed(1))} seconds.`, 'Call browser_snapshot to see what the page shows, or wait longer with --timeout-ms.');
+        throw new PaneError('ERR_BROWSER_WAIT_TIMEOUT', `The page did not ${wanted ? `show ${wanted}` : 'finish loading'} within ${Number((timeoutMs / 1000).toFixed(1))} seconds.`, 'Call browser_snapshot to see what the page shows, or wait longer with --timeout-ms.');
       }
       await sleep(200);
     }

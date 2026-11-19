@@ -63,10 +63,10 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'links',
     label: 'Links',
-    description: 'Your own clickable links in terminal output, such as issue keys.',
+    description: 'Where links open, and your own clickable links in terminal output.',
     icon: Link,
-    settingIds: ['custom-links'],
-    aliases: ['link', 'url', 'regex', 'pattern', 'issue', 'ticket', 'jira', 'linear', 'tracker', 'clickable'],
+    settingIds: ['links-open-in', 'custom-links'],
+    aliases: ['link', 'url', 'regex', 'pattern', 'issue', 'ticket', 'jira', 'linear', 'tracker', 'clickable', 'browser', 'system browser', 'open in', 'BROWSER'],
   },
   {
     id: 'ai-agents',

@@ -355,8 +355,8 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `devices close`: Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. A device Pane booted stays warm for 10 minutes, then shuts down.
 - `devices usage`: Report every simulator and emulator on this machine, and the memory and disk they, Pane's device tools and build checkouts use.
 - `devices free`: Shut down unused devices (--idle), or also delete every unused device Pane made and the build checkouts no Pane holds (--all).
-- `browser open`: Pane's browser, shared with the person, signed in as them. Open a URL in a browser tab beside you, in a split, owned by you.
-- `browser tabs`: Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, and any pending dialog.
+- `browser open`: Pane's browser, shared with the person, signed in as them. Open a URL in a browser tab beside you, in a split, owned by you. Its page stays alive while the person looks elsewhere; you can drive up to 4 tabs this way, and one idle 15 minutes goes to sleep.
+- `browser tabs`: Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, any pending dialog, whether an agent holds it or it is asleep, and files you downloaded.
 - `browser close`: Pane's browser, shared with the person, signed in as them. Close a browser tab you opened.
 - `browser snapshot`: Pane's browser, shared with the person, signed in as them. Read the page as an accessibility tree with element refs (e12), plus its URL and title.
 - `browser screenshot`: Pane's browser, shared with the person, signed in as them. Capture the tab as a PNG image.

@@ -2,9 +2,15 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Modal } from './ui/Modal';
 import { DOCS_BROWSER_PARTITION } from '../../../shared/constants/browserPartitions';
 import { cn } from '../utils/cn';
+import { linkDestination, openLink } from '../utils/openLink';
+import { useConfigStore } from '../stores/configStore';
+import { useNavigationStore } from '../stores/navigationStore';
+import { useSessionStore } from '../stores/sessionStore';
 
 const DOCS_URL = 'https://runpane.com/docs';
 const DOCS_HOSTNAME = 'runpane.com';
+/** A docs page's link that opens a new window, sent by main (see webviewPopups). */
+const DOCS_LINK_EVENT = 'docs:open-link';
 
 interface DocsDialogProps {
   isOpen: boolean;
@@ -30,6 +36,14 @@ export function DocsDialog({ isOpen, onClose }: DocsDialogProps) {
     webviewRef.current?.reload();
   }, []);
 
+  // A link off the docs site opens like any link from your work: in a tab of the Pane you are
+  // looking at (closing the docs, so you see it), or the system browser (Settings > Links).
+  const openOffDocsLink = useCallback((url: string) => {
+    const paneId = useNavigationStore.getState().activeView === 'sessions' ? useSessionStore.getState().activeSessionId ?? undefined : undefined;
+    if (linkDestination(url, { paneId, openIn: useConfigStore.getState().config?.browser?.openLinksIn }) === 'pane') onClose();
+    void openLink(url, paneId);
+  }, [onClose]);
+
   // Wire webview events when mounted
   useEffect(() => {
     if (!isOpen) return;
@@ -52,19 +66,23 @@ export function DocsDialog({ isOpen, onClose }: DocsDialogProps) {
       setCurrentTitle(e.title || 'Docs');
     };
 
-    // Intercept navigation to external sites — open in system browser instead
     const onWillNavigate = (e: Electron.WillNavigateEvent) => {
       try {
         const targetUrl = new URL(e.url);
-        if (targetUrl.hostname !== DOCS_HOSTNAME && targetUrl.hostname !== `www.${DOCS_HOSTNAME}`) {
-          // External link — block in-webview navigation and open in system browser
-          e.preventDefault();
-          window.electronAPI?.openExternal(e.url);
-        }
+        if (targetUrl.hostname === DOCS_HOSTNAME || targetUrl.hostname === `www.${DOCS_HOSTNAME}`) return;
       } catch {
-        // Malformed URL — ignore
+        // Malformed URL: the webview refuses it.
+        return;
       }
+      e.preventDefault();
+      openOffDocsLink(e.url);
     };
+    // A link that opens a new window (target="_blank"): main hands it here.
+    const onPopup = (event: Event) => {
+      // SAFETY: The preload bridge is the only sender of this event.
+      openOffDocsLink((event as CustomEvent<string>).detail);
+    };
+    window.addEventListener(DOCS_LINK_EVENT, onPopup);
 
     webview.addEventListener('did-start-loading', onDidStartLoading);
     webview.addEventListener('did-stop-loading', onDidStopLoading);
@@ -80,8 +98,9 @@ export function DocsDialog({ isOpen, onClose }: DocsDialogProps) {
       webview.removeEventListener('did-navigate-in-page', onDidNavigate);
       webview.removeEventListener('page-title-updated', onPageTitleUpdated);
       webview.removeEventListener('will-navigate', onWillNavigate);
+      window.removeEventListener(DOCS_LINK_EVENT, onPopup);
     };
-  }, [isOpen]);
+  }, [isOpen, openOffDocsLink]);
 
   if (!isOpen) return null;
 

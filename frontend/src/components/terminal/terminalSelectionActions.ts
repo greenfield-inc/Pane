@@ -47,7 +47,7 @@ export const terminalContextMenuChoiceSchema: BoundarySchema<TerminalContextMenu
 export interface TerminalContextMenuContext {
   selection: string;
   targets: SelectionTargets;
-  /** Open in Browser and Add to notes need the Pane the terminal belongs to. */
+  /** Open in Pane's browser and Add to notes need the Pane the terminal belongs to. */
   hasSession: boolean;
   notesEnabled: boolean;
   isRemoteMode: boolean;
@@ -69,8 +69,8 @@ export function terminalContextMenuEntries(context: TerminalContextMenuContext):
 
   const extras: ContextMenuEntry[] = [];
   if (hasSelection && notesEnabled && hasSession) extras.push(item('add-to-notes', 'Add to notes'));
-  if (targets.url && hasSession) extras.push(item('open-in-browser', 'Open in Browser'));
-  if (targets.url) extras.push(item('open-url', 'Open URL'));
+  if (targets.url && hasSession) extras.push(item('open-in-browser', "Open in Pane's browser"));
+  if (targets.url) extras.push(item('open-url', 'Open in system browser'));
   if (targets.file) {
     extras.push(isRemoteMode
       ? item('show-in-explorer', 'Show in Explorer (local only)', false)

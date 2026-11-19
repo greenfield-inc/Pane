@@ -118,7 +118,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerSharedCredentialHandlers(services, commandRegistry);
   registerPaneSecretHandlers(ipcMain, commandRegistry);
   registerDeviceHandlers(ipcMain, services, commandRegistry);
-  registerBrowserHandlers(ipcMain, services, commandRegistry, electronBrowserHost(services.getMainWindow, commandRegistry));
+  registerBrowserHandlers(services, commandRegistry, electronBrowserHost(services.getMainWindow, commandRegistry, services.configManager, services.sessionManager));
   registerCustomThemeHandlers(ipcMain, commandRegistry, services.configManager, services.getMainWindow);
   registerDialogHandlers(ipcMain, services);
   registerExportHandlers(ipcMain, services);

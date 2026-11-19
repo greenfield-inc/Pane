@@ -11,7 +11,7 @@ const CURSOR_SHOWN_MS = 1_200;
 
 /** Who drives a browser tab, floating over the top of its page, with Take over and Hand to agent (D-100's chip). */
 function BrowserDriverChip({ panelId, driver, agentName }: { panelId: string; driver: DeviceDriver; agentName: string | undefined }) {
-  const set = (who: 'person' | 'agent') => { void window.electronAPI?.invoke('browser-panel:driver', panelId, who); };
+  const set = (who: 'person' | 'agent') => { void window.electronAPI?.invoke('browser:driver', panelId, who); };
   return (
     <div className="pointer-events-auto absolute left-1/2 top-2 max-w-[calc(100%-16px)] -translate-x-1/2 whitespace-nowrap rounded-full bg-surface-primary text-xs shadow-md" data-testid="browser-driver-chip">
       <DriverChip driver={driver} agentName={agentName} onTakeOver={() => set('person')} onHandBack={() => set('agent')} />

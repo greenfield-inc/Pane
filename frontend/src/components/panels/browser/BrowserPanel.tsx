@@ -17,6 +17,8 @@ import { Dropdown } from '../../ui/Dropdown';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../../ui/Skeleton';
 import { PortsList } from './PortsList';
 import { RefusedFilesNotice, type FileRefusal } from './RefusedFilesNotice';
+import { TabNotices, type ShownTabNotice } from './TabNotices';
+import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../../../../shared/types/browser';
 import { FindBar } from '../../find/FindBar';
 import { usePanelFind } from '../../find/usePanelFind';
 import { closeFind, getFindBar, reportFindResult, setFindQuery, useFindBar } from '../../find/findController';
@@ -24,6 +26,8 @@ import { createBrowserFindAdapter } from './browserFind';
 import { AgentOverlay } from './AgentDriving';
 
 const COPIED_FEEDBACK_MS = 1500;
+/** The most notices a tab shows at once; older ones drop off. */
+const MAX_NOTICES = 3;
 
 interface BrowserPanelProps {
   panel: ToolPanel;
@@ -39,6 +43,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [openingExternally, setOpeningExternally] = useState(false);
   const [urlError, setUrlError] = useState('');
   const [refusals, setRefusals] = useState<FileRefusal[]>([]);
+  const [notices, setNotices] = useState<ShownTabNotice[]>([]);
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
@@ -71,6 +76,13 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   }, [remoteMode, ports]);
   const toHostUrl = useCallback((localUrl: string) => remapLoopbackPort(localUrl, localToHost), [localToHost]);
   const toHostUrlRef = useRef(toHostUrl);
+  const localToHostRef = useRef(localToHost);
+  useEffect(() => { localToHostRef.current = localToHost; }, [localToHost]);
+  // Main maps an agent's localhost URLs through this desktop's tunnels (docs/BROWSER_AGENTS.md).
+  useEffect(() => {
+    const wcId = pageWcIdRef.current;
+    if (wcId) void window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId, [...localToHost]);
+  }, [localToHost, panel.id, panel.sessionId]);
   // Navigation reads the current mapping without depending on it: a ports or
   // remote-mode update recomputes where a URL loads but never navigates the tab.
   const targetOfRef = useRef(targetOf);
@@ -455,7 +467,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     const register = () => {
       const wcId = webview.getWebContentsId();
       pageWcIdRef.current = wcId;
-      window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId);
+      window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId, [...localToHostRef.current]);
     };
     const onDomReady = () => {
       register();
@@ -570,7 +582,40 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     return () => window.removeEventListener('browser-panel:file-refused', handler);
   }, [panel.id]);
 
-  // Navigate requests (terminal links, "Open in Browser") name the tab they target;
+  // Main's lines for this tab: an app link to confirm, a sign-in sent out, a finished download.
+  // The newest few stay until the person acts on them.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      // SAFETY: The preload bridge is the only sender of this event.
+      const { panelId, notice } = (e as CustomEvent<{ panelId: string; notice: BrowserTabNotice }>).detail;
+      if (panelId !== panel.id) return;
+      setNotices(current => {
+        const next = [...current, { key: crypto.randomUUID(), notice }];
+        // Over the limit, the oldest notice goes, but never an app bar still waiting for Open or Cancel.
+        while (next.length > MAX_NOTICES) {
+          const oldest = next.findIndex(shown => shown.notice.kind !== 'app');
+          next.splice(oldest < 0 ? 0 : oldest, 1);
+        }
+        return next;
+      });
+    };
+    window.addEventListener(BROWSER_TAB_NOTICE_CHANNEL, handler);
+    return () => window.removeEventListener(BROWSER_TAB_NOTICE_CHANNEL, handler);
+  }, [panel.id]);
+  const dismissNotice = useCallback((key: string) => setNotices(current => current.filter(shown => shown.key !== key)), []);
+  const openApp = useCallback((key: string, id: string) => {
+    dismissNotice(key);
+    void window.electronAPI.invoke('browser-panel:open-app-link', id).then((result: { success: boolean; error?: string }) => {
+      if (!result.success) setUrlError(result.error || 'Pane could not open the app.');
+    });
+  }, [dismissNotice]);
+  const showInFolder = useCallback((file: string) => {
+    void window.electronAPI.invoke('app:showItemInFolder', file).then((result: { success: boolean; error?: string }) => {
+      if (!result.success) setUrlError(result.error || 'Pane could not show the file.');
+    });
+  }, []);
+
+  // Navigate requests (an editor's HTML preview, a project's run URL) name the tab they target;
   // only that tab acts, and it takes focus so the person sees the page.
   useEffect(() => {
     const handler = (e: Event) => {
@@ -778,6 +823,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
         </div>
       )}
       {refusals.length > 0 && <RefusedFilesNotice refusals={refusals} onDismiss={() => setRefusals([])} />}
+      <TabNotices notices={notices} onOpenApp={openApp} onShowInFolder={showInFolder} onDismiss={dismissNotice} />
 
       {/* Content area */}
       {!url ? (

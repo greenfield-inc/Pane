@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { BrowserWindow } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from '../configManager';
 import type { AppConfig } from '../../types/config';
@@ -78,5 +79,55 @@ describe('NotifyService in-use poll', () => {
     reads = 0;
     await vi.advanceTimersByTimeAsync(10_000);
     expect(reads).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('NotifyService links in a card', () => {
+  let service: NotifyService | undefined;
+  afterEach(() => {
+    service?.dispose();
+    vi.unstubAllEnvs();
+  });
+
+  function withSetting(openLinksIn: 'pane' | 'system') {
+    vi.stubEnv('PANE_DISABLE_OS_INTEGRATION', '1');
+    const navigated = vi.fn();
+    const opened = vi.fn(async () => undefined);
+    // The main window, with only what navigating uses.
+    const window: BrowserWindow = Object.assign(Object.create(BrowserWindow.prototype), { isDestroyed: () => false, isMinimized: () => false, restore: () => {}, show: () => {}, focus: () => {}, webContents: { send: navigated } });
+    class FakeConfigManager extends EventEmitter {
+      getConfig(): AppConfig { return { machineId: 'mini' }; }
+    }
+    service = new NotifyService({
+      // SAFETY: NotifyService reads only getConfig() and 'config-updated' from its ConfigManager.
+      configManager: new FakeConfigManager() as ConfigManager,
+      getMainWindow: () => window,
+      findPane: () => undefined,
+      rendererArguments: () => [],
+      headless: true,
+      machine: 'mini',
+      publish: () => {},
+      sendToMachine: async () => {},
+      refreshMachine: async () => {},
+      linksOpenIn: () => openLinksIn,
+      openExternal: opened,
+    });
+    void service.queue.ask({ question: { ui: 'info', title: 'Preview is up' }, source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 't1' } });
+    const id = service.queue.snapshot().items[0]?.id ?? '';
+    return { service, id, navigated, opened };
+  }
+
+  it('opens a card\'s link beside its Pane in the main window, raised', async () => {
+    const { service, id, navigated, opened } = withSetting('pane');
+    await service.run({ type: 'open-url', id, url: 'https://example.com/preview' });
+    expect(navigated).toHaveBeenCalledWith('notify:navigate', { link: 'https://example.com/preview', paneId: 'p1' });
+    expect(opened).not.toHaveBeenCalled();
+  });
+
+  it('opens a card\'s link in the system browser when Settings > Links says so', async () => {
+    const { service, id, navigated, opened } = withSetting('system');
+    await service.run({ type: 'open-url', id, url: 'https://example.com/preview' });
+    expect(opened).toHaveBeenCalledWith('https://example.com/preview');
+    expect(navigated).not.toHaveBeenCalled();
   });
 });
