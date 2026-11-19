@@ -190,6 +190,12 @@ export interface NotifyQueueEnvironment {
   store?: Pick<ApprovalStore, 'saveItem' | 'claim' | 'readItem' | 'openItems' | 'recentItems' | 'prune'>;
   /** Why this item's asker is gone (the owning machine decides, D-145), or undefined while someone can take the answer. */
   askerGone?: (item: NotifyItem) => string | undefined;
+  /**
+   * T-39: while To-dos is off, its own cards (review, stuck, question, reminder) are left out of every list
+   * and can't be acted on, so nothing answers a to-do while it can't act; and a worker's card loses its
+   * to-do link. They come back as they were when it is turned on. Absent: To-dos is on.
+   */
+  todosOff?: () => boolean;
   /** The person used this computer in the last 2 minutes, with its screen unlocked (D-144). Absent: yes. */
   inUse?: () => boolean;
   /** Where "Show cards on" leaves this machine. Absent: whichever computer is in use. */
@@ -454,6 +460,7 @@ export class NotifyQueue extends EventEmitter {
     | { type: 'pause'; minutes: number }
     | { type: 'resume' }
     | { type: 'fix-reply'; id: string; as: 'answer' | 'question' }): void | Promise<void> {
+    if ('id' in command) this.refuseWhileTodosOff(command.id);
     switch (command.type) {
       case 'answer': return this.answer(command.id, command.answer);
       case 'fix-reply': this.fixReply(command.id, command.as); break;
@@ -485,6 +492,7 @@ export class NotifyQueue extends EventEmitter {
    * Refuses a command for a question no longer in the state it needs.
    */
   runRemote(command: Exclude<NotifyRemoteCommand, { type: 'open-link' }>, device: string, teammate: string | null): void | Promise<void> {
+    this.refuseWhileTodosOff(command.id);
     const entry = this.entries.get(command.id);
     if (!entry) {
       throw new PaneError('ERR_NOTIFY_GONE', `That question is no longer on ${this.machine()}: it finished earlier. Nothing was sent.`, 'Nothing to do: the agent is no longer waiting on it.');
@@ -615,6 +623,7 @@ export class NotifyQueue extends EventEmitter {
    * once. Permission prompts stay the person's: they grant an agent power.
    */
   agentAct(action: NotifyAgentAction): NotifyAgentActed {
+    this.refuseWhileTodosOff(action.id);
     const entry = this.entries.get(action.id);
     if (!entry) throw new PaneError('ERR_NOTIFY_GONE', `That item is no longer on ${this.machine()}. Nothing was changed.`, 'List what waits again with runpane autopilot waiting --json.');
     if (entry.item.agentPrompt) {
@@ -750,6 +759,7 @@ export class NotifyQueue extends EventEmitter {
   private ring(entry: Entry): void {
     clearTimeout(entry.ringTimer);
     if (!entry.item.quiet || entry.item.state !== 'waiting') return;
+    if (this.env.todosOff?.() && isTodosOwnCard(entry.item)) return;
     entry.item.quiet = undefined;
     this.save(entry);
     if (entry.item.staleSince === undefined) this.chime();
@@ -1348,6 +1358,11 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /** The person came back to or left this computer, or "Show cards on" moved: the strip and Settings follow (D-144). */
+  /** T-39: To-dos was turned on or off, which changes what every list shows; send every screen and phone a fresh copy. */
+  todosSwitched(): void {
+    this.changed();
+  }
+
   pollInUse(): void {
     const now = JSON.stringify([this.inUse(), this.cardsOn()]);
     if (now === this.lastAlertState) return;
@@ -1405,7 +1420,16 @@ export class NotifyQueue extends EventEmitter {
 
   private localItems(): NotifyItem[] {
     const enabled = this.env.settings().enabled;
-    return [...this.entries.values()].map(entry => entry.item).filter(item => enabled || !isOpen(item));
+    const items = [...this.entries.values()].map(entry => entry.item).filter(item => enabled || !isOpen(item));
+    if (!this.env.todosOff?.()) return items;
+    return items.filter(item => !isTodosOwnCard(item)).map(item => item.todo ? { ...item, todo: undefined } : item);
+  }
+
+  /** T-39: To-dos' own card can't be acted on while To-dos is off; the to-do keeps it for when it is back. */
+  private refuseWhileTodosOff(id: string): void {
+    const entry = this.entries.get(id);
+    if (!entry || !this.env.todosOff?.() || !isTodosOwnCard(entry.item)) return;
+    throw new PaneError('TODOS_DISABLED', `"${entry.item.title}" belongs to a to-do, and To-dos is turned off in this Pane, so nothing was changed.`, 'Turn it on in Settings > Advanced > Experimental > To-dos, then answer it.');
   }
 
   /** What every connected screen and phone shares: the questions, their order and who answered. */
@@ -2364,4 +2388,9 @@ function leaseLengthText(lengthMs: number): string {
   const hours = lengthMs / 3_600_000;
   if (hours >= 48 && Number.isInteger(hours / 24)) return `${hours / 24} days`;
   return hours >= 1 ? `${Math.round(hours * 10) / 10} hours` : `${Math.round(lengthMs / 60_000)} minutes`;
+}
+
+/** A card To-dos raised itself (a review, a stuck card, a requester question, a reminder), not a worker's linked question. */
+function isTodosOwnCard(item: NotifyItem): boolean {
+  return item.todo?.kind !== undefined;
 }

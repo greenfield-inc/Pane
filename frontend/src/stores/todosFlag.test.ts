@@ -121,7 +121,14 @@ describe('the web app on a host with To-dos off', () => {
     answer = { success: false, error: 'To-dos is turned off in this Pane, so nothing was read or changed. Saved to-dos are kept. Turn it on in Settings > Advanced > Experimental > To-dos, then run this again.' };
     await useTodosStore.getState().refresh();
     expect(useTodosStore.getState().snapshot).toBeNull();
+    expect(useTodosStore.getState().hostTodosOff).toBe(true);
     expect(todosEnabledNow()).toBe(false);
+
+    // Turned back on, the next read shows them again.
+    answer = { success: true, data: SNAPSHOT };
+    await useTodosStore.getState().refresh();
+    expect(useTodosStore.getState().hostTodosOff).toBe(false);
+    expect(useTodosStore.getState().snapshot).not.toBeNull();
   });
 
   it('keeps the to-dos it showed through any other failed read', async () => {

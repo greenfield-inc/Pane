@@ -2007,11 +2007,13 @@ export function registerRunpaneHandlers(
 
   commandRegistry.register('runpane:report', async (request: PaneCommandValue): Promise<RunpaneReportResult> => {
     return withRunpaneAction(services, 'report', {}, async () => {
-      const normalized = parseReportRequest(request);
+      const parsed = parseReportRequest(request);
+      // T-39: while To-dos is off a --todo is dropped here, so the report lands and is stored without it.
+      const todoService = activeTodoService(services);
+      const normalized = todoService ? parsed : { ...parsed, todo: undefined };
       const panel = resolveAgentPanel(normalized.panelId);
       // To-dos (D-408): a --todo that names no open to-do is refused before anything is recorded.
-      // T-39: while To-dos is off the link is ignored, so the report itself still lands.
-      if (normalized.todo) activeTodoService(services)?.todoLinkFor(panel.id, normalized.todo);
+      if (normalized.todo) todoService?.todoLinkFor(panel.id, normalized.todo);
       if (normalized.paneId && normalized.paneId !== panel.sessionId) {
         throw new Error(`Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${normalized.paneId}.`);
       }

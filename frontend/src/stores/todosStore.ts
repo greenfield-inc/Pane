@@ -154,6 +154,8 @@ export interface RemoteTodos {
  */
 interface TodosState {
   snapshot: TodosSnapshot | null;
+  /** The host answered that To-dos is turned off (T-39), as opposed to not read yet: open To-dos screens close. */
+  hostTodosOff: boolean;
   /** Pages read so far, by to-do number; reread on every change. */
   details: ReadonlyMap<number, TodoDetail>;
   /** To-do pages on screen, so a change rereads only those. */
@@ -187,6 +189,7 @@ const detailGenerations = new Map<number, number>();
 
 export const useTodosStore = create<TodosState>((set, get) => ({
   snapshot: null,
+  hostTodosOff: false,
   details: new Map(),
   watched: new Map(),
   snoozeRequest: null,
@@ -199,9 +202,9 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     const response = await api.snapshot().catch(() => null);
     if (generation !== refreshGeneration) return;
     // The host turned To-dos off: forget what it showed, so every entry hides (T-39).
-    if (response && !response.success && refusedAsOff(response.error)) { set({ snapshot: null, details: new Map() }); return; }
+    if (response && !response.success && refusedAsOff(response.error)) { set({ snapshot: null, details: new Map(), hostTodosOff: true }); return; }
     if (!response?.success || !response.data) return;
-    set({ snapshot: api.hostIsHere ? asThisMachine(response.data) : response.data });
+    set({ snapshot: api.hostIsHere ? asThisMachine(response.data) : response.data, hostTodosOff: false });
     await Promise.all([...get().watched.keys()].map(number => get().loadDetail(number)));
   },
 
@@ -450,7 +453,7 @@ export async function switchTodosHost(): Promise<void> {
 /** Forgets every to-do read so far: the web app does this when it leaves a host. */
 export function resetTodos(): void {
   refreshGeneration += 1;
-  useTodosStore.setState({ snapshot: null, details: new Map(), watched: new Map() });
+  useTodosStore.setState({ snapshot: null, details: new Map(), watched: new Map(), hostTodosOff: false });
 }
 
 /**

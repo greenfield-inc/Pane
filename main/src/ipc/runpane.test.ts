@@ -7736,6 +7736,19 @@ describe('runpane IPC handlers', () => {
       });
     });
 
+    it('lands a report with --todo while To-dos is off, and stores it without the to-do (T-39)', async () => {
+      // SAFETY: Only recordAgentReport is reached by the report handler, and it is stubbed below.
+      const orchestrationSessionManager = Object.create(OrchestrationSessionManager.prototype) as OrchestrationSessionManager;
+      vi.spyOn(orchestrationSessionManager, 'recordAgentReport').mockResolvedValue([]);
+      const registry = createRegistry(createServices({ orchestrationSessionManager }));
+
+      const result = await registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked', question: 'Which PDF library?', todo: 'T-404' }]);
+
+      expect(result.report).toMatchObject({ state: 'blocked', question: 'Which PDF library?' });
+      expect(result.report).not.toHaveProperty('todo');
+      expect(stored.state.customState).not.toHaveProperty('agentReport.todo');
+    });
+
     it('stores the latest report in the panel custom state and journals an opt-in agent.report', async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-09-27T18:00:00.000Z'));

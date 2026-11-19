@@ -42,6 +42,7 @@ import type { JsonStoreImportOutcome } from '../../database/jsonStoreImport';
 import type { SessionInboxEnded } from '../sessionInbox';
 import { workerCard } from './workerContext';
 import { agentConfig } from '../../../../shared/agents';
+import { todosEnabled } from '../todos/todosFeature';
 
 const agentName = (agentType: string | undefined): string => (agentType ? agentConfig(agentType)?.label : undefined) ?? 'Agent';
 
@@ -183,6 +184,7 @@ export class NotifyService {
       projectOf: deps.projectOf,
       store: deps.store,
       askerGone: (item) => this.askerGone(item),
+      todosOff: () => !todosEnabled(deps.configManager.getConfig()),
       inUse: deps.idleSeconds ? () => (deps.idleSeconds?.() ?? 0) < IN_USE_SECONDS : undefined,
       cardsOn: deps.cardsOn,
       typeIntoTab: deps.typeIntoTab,
@@ -220,7 +222,12 @@ export class NotifyService {
       this.syncInUsePoll();
     });
     this.queue.on('chime', () => this.sendToMainWindow('notify:chime'));
+    let todosOn = todosEnabled(deps.configManager.getConfig());
     deps.configManager.on('config-updated', (config: AppConfig) => {
+      if (todosEnabled(config) !== todosOn) {
+        todosOn = todosEnabled(config);
+        this.queue.todosSwitched();
+      }
       const homeSkill = isPaneHomeSkillEnabled(config);
       const homeSkillChanged = homeSkill !== this.homeSkill;
       this.homeSkill = homeSkill;

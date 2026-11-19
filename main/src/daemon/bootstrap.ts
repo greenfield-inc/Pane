@@ -610,6 +610,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   configManager.on('config-updated', (config: AppConfig) => {
     if (todosEnabled(config) === sessionFoldersHadTodos) return;
     sessionFoldersHadTodos = todosEnabled(config);
+    // Connected phones and other screens read the to-dos again, and a host that turned them off refuses.
+    getPaneEventSink().send('todos:changed');
     void services.orchestrationSessionManager?.refreshSessionInstructions()
       .catch(error => logger.warn('[Todos] Could not rewrite Session folders after To-dos was turned on or off', error instanceof Error ? error : undefined));
   });
@@ -648,7 +650,13 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     let supervisorWasOn = todosOn();
     configManager.on('config-updated', () => {
       const on = todosOn();
-      if (on && !supervisorWasOn) todoService.restartClocksAfterTurnedOn();
+      if (on && !supervisorWasOn) {
+        todoService.restartClocksAfterTurnedOn();
+        // Launch resume waited while To-dos was off: run it now (first time) or as a wake, so stopped agents
+        // restart and snoozes that came due while it was off wake.
+        void todoService.resumeOnLaunch(todoService.launchHasResumed ? 'wake' : 'launch')
+          .catch(error => logger.warn('[Todos] resume after turning To-dos on failed', error instanceof Error ? error : undefined));
+      }
       supervisorWasOn = on;
     });
     let ticking = false;
