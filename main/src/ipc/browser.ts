@@ -569,7 +569,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     try {
       const outcome = await (write ? gate.run(tab.id, agent, paneCommandSignal(), run) : run());
       const notes = [
-        wasAsleep ? 'The tab was asleep after 15 minutes without your actions, so its page reloaded from its URL.' : undefined,
+        wasAsleep ? 'The tab was asleep (15 minutes with no action, another tab took its place, or its agent went), so its page reloaded from its URL; anything typed there before is gone.' : undefined,
         evicted ? `You hold at most ${holdSettings.limit} tabs, so tab ${evicted} went to sleep; its page reloads when you next use it.` : undefined,
         outcome.note,
       ].filter(note => note !== undefined);
