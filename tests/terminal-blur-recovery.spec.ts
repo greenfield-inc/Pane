@@ -397,6 +397,10 @@ async function waitForActivation(page: Page, panelId: string, depth: 'full' | 'h
 // Opens a terminal per browser WebGL context, visiting each tab once in strip
 // order so every one is eligible to keep its renderer while hidden.
 async function bootWithEveryTabVisited(page: Page): Promise<BootFixtureResult> {
+  // Sixteen full WebGL refreshes on software GL take 28-30 s on a 4-vCPU CI
+  // runner (main run 44457570565: 28.4 s, 29.7 s and a 30.2 s timeout), so these
+  // tests get twice the suite's 30 s.
+  test.setTimeout(60_000);
   const result = await bootFixture(page, 'performance', false, false, 'darwin', extraPanels);
   if (!result.webglLoaded) return result;
   for (const next of visitOrder.slice(1)) {
