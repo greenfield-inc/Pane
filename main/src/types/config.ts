@@ -1,7 +1,7 @@
 import type { DeviceSettings } from '../../../shared/types/devices';
 import type { BrowserSettings } from '../../../shared/types/browser';
 import type { MachineHealthSettings } from '../../../shared/types/machineHealth';
-import type { PaneSecretMeta } from '../services/paneSecrets';
+import type { PaneSecretMeta, PaneSecretReferenceMeta } from '../services/paneSecrets';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { CustomLink } from '../../../shared/types/customLinks';
@@ -81,6 +81,12 @@ export interface AppConfig {
   sharedCredentials?: Partial<Record<SharedCredentialId, SharedCredentialMeta>>;
   /** Pane secrets index by `<project>/<NAME>`: when and where each was set or deleted. Values live in the OS store, never here. */
   paneSecrets?: Record<string, PaneSecretMeta>;
+  /** 1Password references by `<project>/<NAME>`. Addresses only: their values exist only in leases. */
+  paneSecretReferences?: Record<string, PaneSecretReferenceMeta>;
+  /** Lease length per secret project, in ms (default 24 h). */
+  secretLeaseLengths?: Record<string, number>;
+  /** The 1Password vault "Move to 1Password" writes into. */
+  onePasswordMoveVault?: string;
   voiceTranscriptionMode?: VoiceTranscriptionMode;
   // Legacy fields for backward compatibility
   gitRepoPath?: string;

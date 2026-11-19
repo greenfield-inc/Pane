@@ -97,6 +97,24 @@ function pageScript(limit: number) {
     return clean(el instanceof HTMLElement ? el.innerText : el.textContent);
   }
 
+  /** The nodes a slot shows: what the page slotted into it, or its own fallback content. */
+  function slotted(slot: HTMLSlotElement): Node[] {
+    const assigned = slot.assignedNodes({ flatten: true });
+    return assigned.length > 0 ? assigned : Array.from(slot.childNodes);
+  }
+
+  /** Text as rendered through slots, for a control inside a shadow root (<md-button>Save</md-button>). */
+  function flatText(el: Element): string {
+    let text = '';
+    const walk = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) text += `${node.textContent ?? ''} `;
+      else if (node instanceof HTMLSlotElement) slotted(node).forEach(walk);
+      else if (node instanceof Element && !['SCRIPT', 'STYLE'].includes(node.tagName)) (node.shadowRoot ?? node).childNodes.forEach(walk);
+    };
+    walk(el);
+    return clean(text);
+  }
+
   function labelText(el: Element): string {
     const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {
@@ -128,7 +146,7 @@ function pageScript(limit: number) {
     if (tag === 'img' || tag === 'area' || (el instanceof HTMLInputElement && el.type === 'image')) return clean(el.getAttribute('alt'));
     if (el instanceof HTMLInputElement && ['submit', 'button', 'reset'].includes(el.type)) return clean(el.value) || (el.type === 'submit' ? 'Submit' : '');
     if (['button', 'link', 'heading', 'option', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'treeitem', 'cell', 'columnheader', 'switch', 'checkbox', 'radio'].includes(role) && !['input', 'select', 'textarea'].includes(tag)) {
-      return textOf(el).slice(0, 200);
+      return (textOf(el) || flatText(el)).slice(0, 200);
     }
     return clean(el.getAttribute('title')) || clean(el.getAttribute('placeholder'));
   }
@@ -273,13 +291,14 @@ function pageScript(limit: number) {
         if (role === 'combobox' && tag === 'select') return;
       }
       // A run of text with nothing to act on or name inside (a paragraph, a code block) reads as one line.
-      if (!role && !node.shadowRoot && !shadowAncestors.has(node) && !node.querySelector(STRUCTURE)) {
+      // Nor does anything holding a slot: what the page slotted in may be controls.
+      if (!role && !node.shadowRoot && !shadowAncestors.has(node) && !(node instanceof HTMLSlotElement) && !node.querySelector('slot') && !node.querySelector(STRUCTURE)) {
         const text = textOf(node);
         if (text) pushText(depth, text);
         return;
       }
-      const root = node.shadowRoot;
-      for (const child of Array.from((root ?? node).childNodes)) walk(child, childDepth, inFrame);
+      const children = node instanceof HTMLSlotElement ? slotted(node) : Array.from((node.shadowRoot ?? node).childNodes);
+      for (const child of children) walk(child, childDepth, inFrame);
       if (node instanceof HTMLIFrameElement) {
         try {
           const doc = node.contentDocument;

@@ -4801,7 +4801,16 @@ print(json.dumps({"calls": calls, "stdout": stdout.getvalue(), "errors": errors}
 async function checkSecretsParity() {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-secrets-'));
   const secret = { project: 'stripe', name: 'STRIPE_SECRET_KEY', updatedAt: '2026-11-04T10:00:00.000Z', machine: 'studio' };
-  const listResult = { ok: true, secrets: [secret], storage: { kind: 'file', encrypted: false } };
+  const references = [
+    { project: 'stripe', name: 'STRIPE_LIVE_KEY', reference: 'op://Dev/Stripe/live key', updatedAt: '2026-11-04T11:00:00.000Z', machine: 'studio' },
+    { project: 'stripe', name: 'STRIPE_RESTRICTED_KEY', reference: 'op://Dev/Stripe/restricted', updatedAt: '2026-11-04T11:00:00.000Z', machine: 'studio' },
+  ];
+  const lease = (id, expiresAt) => ({
+    id, project: 'stripe', names: ['STRIPE_LIVE_KEY'], grantedAt: '2026-11-04T12:00:00.000Z', expiresAt, requestedBy: 'panel-1', grantedOn: 'studio', memoryOnly: false,
+  });
+  const listResult = {
+    ok: true, secrets: [secret], references, leases: [lease('lease-b', '2026-11-05T15:00:00.000Z'), lease('lease-a', '2026-11-05T12:00:00.000Z')], storage: { kind: 'file', encrypted: false },
+  };
   const values = { STRIPE_SECRET_KEY: 'sk_test_canary', WEBHOOK_SECRET: 'whsec_canary' };
   const respond = (frame) => {
     const [request] = frame.args;
@@ -4812,8 +4821,17 @@ async function checkSecretsParity() {
       const names = request.names ?? Object.keys(values);
       return { ok: true, values: Object.fromEntries(names.filter((name) => name in values).map((name) => [name, values[name]])) };
     }
+    if (frame.channel === 'runpane:secrets:lease:end') return { ok: true, ended: request.leaseId === 'lease-a' };
+    if (request.lease) {
+      if (request.lease.names.includes('DECLINED')) return { approved: false };
+      return { status: 'leased', project: request.lease.project, names: request.lease.names, leaseId: 'lease-a', expiresAt: '2026-11-05T12:00:00.000Z', machines: ['studio', 'devbox'] };
+    }
     return request.secret.name === 'DECLINED' ? { status: 'declined' } : { status: 'saved', project: request.secret.project, name: request.secret.name };
   };
+  // A Pane from before leases has no lease:end channel.
+  const reply = (frame) => (frame.channel === 'runpane:secrets:lease:end' && frame.args[0].leaseId === 'old-pane'
+    ? { error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'Unknown channel runpane:secrets:lease:end' } }
+    : { result: respond(frame) });
   // The child reports what it got: the injected variables, each --file's contents and mode, and its own path.
   const probe = [
     'const fs = require("fs");',
@@ -4833,6 +4851,12 @@ async function checkSecretsParity() {
     { args: ['secrets', 'exec', '--project', 'stripe', '--', process.execPath, '-e', 'process.stdout.write(`${process.env.STRIPE_SECRET_KEY} ${process.env.WEBHOOK_SECRET}`)'] },
     { args: ['secrets', 'request', '--project', 'stripe', '--name', 'STRIPE_SECRET_KEY', '--title', 'Stripe test secret key', '--reason', 'Run the webhook tests.'] },
     { args: ['secrets', 'request', '--project', 'stripe', '--name', 'DECLINED', '--title', 'Stripe test secret key', '--reason', 'Run the webhook tests.', '--json'] },
+    // Names go before, between or after the options; a repeated name is asked for once.
+    { args: ['secrets', 'lease', 'STRIPE_LIVE_KEY', '--project', 'stripe', '--reason', '- the webhook tests', 'STRIPE_RESTRICTED_KEY', 'STRIPE_LIVE_KEY'] },
+    { args: ['secrets', 'lease', '--project', 'stripe', 'DECLINED'] },
+    { args: ['secrets', 'lease', 'end', '--id', 'lease-a', '--yes'] },
+    { args: ['secrets', 'lease', 'end', '--id', 'lease-gone', '--yes', '--json'] },
+    { args: ['secrets', 'lease', 'end', '--id', 'old-pane', '--yes', '--json'] },
   ];
   const outputs = { npm: [], pip: [] };
   const frames = { npm: [], pip: [] };
@@ -4841,7 +4865,7 @@ async function checkSecretsParity() {
       for (const { args, input } of runs) {
         const run = await withFakeDaemon(paneDir, (frame) => {
           frames[runtime].push({ channel: frame.channel, args: frame.args });
-          return { result: respond(frame) };
+          return reply(frame);
         }, () => runCliOnce(runtime, args, paneDir, 20_000, { PANE_SESSION_ID: 'session-1', PANE_PANEL_ID: 'panel-1' }, input));
         outputs[runtime].push({ code: run.code, stdout: lf(run.stdout) });
       }
@@ -4858,8 +4882,14 @@ async function checkSecretsParity() {
   }
   assert.deepStrictEqual(outputs.pip, outputs.npm, 'Python and Node secrets commands printed different output');
   assert.deepStrictEqual(frames.pip, frames.npm, 'Python and Node secrets commands sent different requests');
-  const [list, listJson, set, setJson, deleted, exec, execAll, saved, declined] = outputs.npm;
-  assert.strictEqual(list.stdout, 'stripe/STRIPE_SECRET_KEY  set 2026-11-04T10:00:00.000Z on studio\nThis machine has no OS keyring, so its secret values are stored unencrypted in a file only you can read.\n');
+  const [list, listJson, set, setJson, deleted, exec, execAll, saved, declined, leased, leaseDeclined, ended, notEnded, oldPane] = outputs.npm;
+  assert.strictEqual(list.stdout, [
+    'stripe/STRIPE_SECRET_KEY  set 2026-11-04T10:00:00.000Z on studio',
+    'stripe/STRIPE_LIVE_KEY  from 1Password (op://Dev/Stripe/live key)  leased until 2026-11-05T15:00:00.000Z',
+    'stripe/STRIPE_RESTRICTED_KEY  from 1Password (op://Dev/Stripe/restricted)  no lease',
+    'This machine has no OS keyring, so its secret values are stored unencrypted in a file only you can read.',
+    '',
+  ].join('\n'));
   assert.deepStrictEqual(JSON.parse(listJson.stdout), listResult);
   assert.strictEqual(set.stdout, 'Replaced stripe/STRIPE_SECRET_KEY\n');
   assert.deepStrictEqual(JSON.parse(setJson.stdout), { ok: true, replaced: true, secret });
@@ -4871,6 +4901,15 @@ async function checkSecretsParity() {
   assert.deepStrictEqual(execAll, { code: 0, stdout: 'sk_test_canary whsec_canary' });
   assert.deepStrictEqual(saved, { code: 0, stdout: 'Saved as stripe/STRIPE_SECRET_KEY\n' });
   assert.deepStrictEqual(JSON.parse(declined.stdout), { status: 'declined' });
+  assert.deepStrictEqual(leased, {
+    code: 0,
+    stdout: 'Leased stripe/STRIPE_LIVE_KEY, STRIPE_RESTRICTED_KEY until 2026-11-05T12:00:00.000Z on studio, devbox. Lease lease-a. Use them with `runpane secrets exec --project stripe -- <command>`.\n',
+  });
+  assert.deepStrictEqual(leaseDeclined, { code: 0, stdout: 'The person declined the lease.\n' });
+  assert.deepStrictEqual(ended, { code: 0, stdout: 'Ended lease lease-a.\n' });
+  assert.deepStrictEqual(JSON.parse(notEnded.stdout), { ok: true, ended: false });
+  assert.strictEqual(oldPane.code, 1);
+  assert.deepStrictEqual(JSON.parse(oldPane.stdout).error, { code: 'SECRET_LEASE_UNSUPPORTED', message: 'This Pane doesn\'t support leases yet. Nothing was ended.', next: 'Update Pane.' });
   assert.deepStrictEqual(frames.npm.map(({ channel, args }) => ({ channel, args })), [
     { channel: 'runpane:secrets:list', args: [{}] },
     { channel: 'runpane:secrets:list', args: [{ project: 'stripe' }] },
@@ -4893,6 +4932,20 @@ async function checkSecretsParity() {
         caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir },
       }],
     },
+    {
+      channel: 'runpane:notify',
+      args: [{
+        ui: 'approve', title: 'Lease 2 secrets', context: '- the webhook tests', lease: { project: 'stripe', names: ['STRIPE_LIVE_KEY', 'STRIPE_RESTRICTED_KEY'] },
+        caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir },
+      }],
+    },
+    {
+      channel: 'runpane:notify',
+      args: [{ ui: 'approve', title: 'Lease 1 secret', lease: { project: 'stripe', names: ['DECLINED'] }, caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir } }],
+    },
+    { channel: 'runpane:secrets:lease:end', args: [{ leaseId: 'lease-a' }] },
+    { channel: 'runpane:secrets:lease:end', args: [{ leaseId: 'lease-gone' }] },
+    { channel: 'runpane:secrets:lease:end', args: [{ leaseId: 'old-pane' }] },
   ]);
   for (const { stdout } of [...outputs.npm.slice(0, 5), ...outputs.npm.slice(7)]) {
     assert.ok(!stdout.includes('canary'), `runpane printed a secret value: ${stdout}`);
@@ -4931,6 +4984,8 @@ async function checkSecretsParity() {
     [['secrets', 'set', '--project', 'stripe', '--name', 'K'], 'ERR_RUNPANE_CONFIRMATION_REQUIRED', 'value', /needs confirmation/],
     [['secrets', 'request', '--project', 'stripe', '--name', 'K', '--title', 'Key'], 'SECRET_INVALID', undefined, /requires --reason\. Nothing was shown to the person\./],
     [['secrets', 'set', '--project', 'stripe', '--name', 'K', '--value', 'x', '--yes'], 'ERR_RUNPANE_FAILED', '', /Unknown option for secrets set: --value/],
+    [['secrets', 'lease', '--project', 'stripe'], 'SECRET_INVALID', undefined, /^runpane secrets lease needs the names of the secrets to lease\. Nothing was shown to the person\./],
+    [['secrets', 'lease', '--project', 'stripe', 'GOOD', '9BAD'], 'SECRET_INVALID', undefined, /^"9BAD" is not a valid secret name/],
   ];
   const refusalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-secrets-refusals-'));
   try {
@@ -4953,13 +5008,14 @@ async function checkSecretsParity() {
     [['secrets', 'delete', '--project', 'stripe', '--name', 'K', '--yes'], 'delete one'],
     [['secrets', 'exec', '--project', 'stripe', '--', 'true'], 'run secrets exec'],
     [['secrets', 'request', '--project', 'stripe', '--name', 'K', '--title', 'Key', '--reason', 'Tests.'], 'ask for one'],
+    [['secrets', 'lease', '--project', 'stripe', 'K'], 'ask for a lease'],
   ];
   const teammateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-secrets-teammate-'));
   try {
     for (const [args, action, input] of teammateRefusals) {
       for (const runtime of ['npm', 'pip']) {
         const asked = [];
-        const run = await withFakeDaemon(teammateDir, (frame) => { asked.push(frame.channel); return { result: respond(frame) }; },
+        const run = await withFakeDaemon(teammateDir, (frame) => { asked.push(frame.channel); return reply(frame); },
           () => runCliOnce(runtime, [...args.slice(0, 2), '--json', ...args.slice(2)], teammateDir, 20_000, { PANE_TEAMMATE_LOGIN: 'ana@github' }, input));
         assert.strictEqual(run.code, 1, `${runtime} ${args.join(' ')} should refuse a teammate`);
         assert.deepStrictEqual(JSON.parse(run.stdout).error, {
@@ -7228,7 +7284,7 @@ print(json.dumps(errors))
     '--about-session is only valid with runpane notify.',
     '--decision is only valid with runpane inbox ack.',
     '--because is only valid with runpane autopilot answer.',
-    '--reason is only valid with runpane secrets request or runpane autopilot close.',
+    '--reason is only valid with runpane secrets request or runpane secrets lease or runpane autopilot close.',
     '--approve is only valid with runpane autopilot answer.',
     '--took is only valid with runpane notify.',
     '--update is only valid with runpane notify.',

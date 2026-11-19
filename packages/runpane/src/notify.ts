@@ -63,6 +63,8 @@ export interface NotifyRequest extends Partial<Omit<NotifyQuestion, 'ui'>> {
   ui?: NotifyRequestUi;
   /** `runpane secrets request` only: the Pane secret the answer is saved as. */
   secret?: { project: string; name: string };
+  /** `runpane secrets lease` only (ui approve): the 1Password-backed secrets to lease. */
+  lease?: { project: string; names: string[] };
   resume?: string;
   /** `--took`: the approval whose reply the reader took, and how. */
   took?: string;
@@ -92,6 +94,8 @@ type NotifyResultBody =
   | { delivered: 'screen' | 'inbox' }
   | { status: 'saved'; project: string; name: string }
   | { status: 'declined' }
+  /** `runpane secrets lease`: the person started the lease. Never a value. */
+  | { status: 'leased'; project: string; names: string[]; leaseId: string; expiresAt: string; machines: string[] }
   | { waiting: true; id: string; next: string }
   | { unavailable: string; next: string };
 
@@ -140,6 +144,14 @@ const notifyResultBodySchema: BoundarySchema<NotifyResultBody> = boundary.union(
   boundary.object({ delivered: boundary.enumeration('screen', 'inbox') }),
   boundary.object({ status: boundary.literal('saved'), project: boundary.string, name: boundary.string }),
   boundary.object({ status: boundary.literal('declined') }),
+  boundary.object({
+    status: boundary.literal('leased'),
+    project: boundary.string,
+    names: boundary.array(boundary.string),
+    leaseId: boundary.string,
+    expiresAt: boundary.string,
+    machines: boundary.array(boundary.string),
+  }),
 );
 const warningsSchema = boundary.object({ warnings: boundary.optional(boundary.array(boundary.string)) });
 export const notifyResultSchema: BoundarySchema<NotifyResult> = {
@@ -448,7 +460,11 @@ function describeNotifyOutcome(result: NotifyResult): string {
   if ('unavailable' in result) return `Unavailable: ${result.unavailable} ${result.next}`;
   if ('approved' in result) return withNote(result.approved ? 'Approved' : 'Denied', result.note);
   if ('answer' in result) return withNote(`Answer: ${result.answer}`, result.note);
-  if ('status' in result) return result.status === 'saved' ? `Saved as ${result.project}/${result.name}` : 'Declined';
+  if ('status' in result) {
+    if (result.status === 'saved') return `Saved as ${result.project}/${result.name}`;
+    if (result.status === 'leased') return `Leased ${result.project}/${result.names.join(', ')} until ${result.expiresAt}`;
+    return 'Declined';
+  }
   return result.delivered === 'screen' ? 'Shown on screen.' : 'Added to the Notify inbox.';
 }
 

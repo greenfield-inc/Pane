@@ -1,4 +1,5 @@
 import type { DeviceInput } from '../../shared/types/devices';
+import type { SecretLeaseStartRequest } from '../../shared/types/paneSecrets';
 import type { LoopInput } from '../../shared/types/loop';
 import type { ProfileLaunchInput } from '../../shared/types/profiles';
 import type { TestNotificationResult } from '../../shared/types/notifications';
@@ -426,6 +427,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:list'),
     set: (project: string, name: string, value: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value),
     delete: (project: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:delete', project, name),
+    setReference: (project: string, name: string, reference: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-reference', project, name, reference),
+    startLease: (request: SecretLeaseStartRequest): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:start-lease', request),
+    endLease: (leaseId: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:end-lease', leaseId),
+    endAllLeases: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:end-all-leases'),
+    setLeaseLength: (project: string, lengthMs: number): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-lease-length', project, lengthMs),
+    setMoveVault: (vault: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-move-vault', vault),
+    listVaults: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:list-vaults'),
+    moveToOnePassword: (project: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:move-to-1password', project, name),
+    /** Fires when leases start, renew or end here or on a machine this desktop follows. Carries no values. */
+    onChanged: (callback: () => void): (() => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('pane-secrets:changed', listener);
+      return () => ipcRenderer.removeListener('pane-secrets:changed', listener);
+    },
   },
   /** The device tab (docs/DEVICES.md): the local screen, frames, and the person's own controls. */
   devices: {

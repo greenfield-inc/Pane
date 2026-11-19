@@ -748,7 +748,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "secrets list",
-      "summary": "List the Pane secrets on this machine: project, name, and when and where each was set. Never shows a value.",
+      "summary": "List the Pane secrets on this machine: typed secrets, 1Password references and live leases, with when and where each was set. Never shows a value.",
       "usage": [
         "runpane secrets list [--project <project>] [--json] [--pane-dir <path>]"
       ],
@@ -810,6 +810,41 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "notifyRequest",
         "notifyResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "secrets lease",
+      "summary": "Ask the person to lease 1Password-backed Pane secrets to this machine for a while. Returns the lease's id, end time and machines, never a value.",
+      "usage": [
+        "runpane secrets lease <name>... --project <project> [--reason <text>] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "toolsets": [
+        "core",
+        "secrets"
+      ],
+      "jsonSchemas": [
+        "notifyRequest",
+        "notifyResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "secrets lease end",
+      "summary": "End a Pane secret lease now: this machine deletes the leased values.",
+      "usage": [
+        "runpane secrets lease end --id <lease-id> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "secrets"
+      ],
+      "jsonSchemas": [
+        "secretLeaseEndRequest",
+        "secretLeaseEndResult"
       ],
       "localControl": true
     },
@@ -3615,7 +3650,12 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--reason",
         "value": "<text>",
-        "description": "secrets request: why you need the secret, shown on the card. autopilot close: why it closes, recorded on the item."
+        "description": "secrets request and secrets lease: why you need the secret, shown on the card. autopilot close: why it closes, recorded on the item."
+      },
+      {
+        "name": "--id",
+        "value": "<lease-id>",
+        "description": "secrets lease end only: the lease to end, from `runpane secrets list --json`."
       },
       {
         "name": "--epoch",
@@ -3996,6 +4036,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane secrets delete --project <project> --name <name> --yes",
         "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
         "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
+        "  runpane secrets lease --project <project> <NAME>... [--reason <text>] [--json]",
+        "  runpane secrets lease end --id <lease-id> --yes [--json]",
         "  runpane devices list [--json] [--pane-dir <path>]",
         "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
         "  runpane devices screenshot [--json] [--pane-dir <path>]",
@@ -4291,11 +4333,13 @@ export const RUNPANE_CONTRACT = {
       ],
       "secrets": [
         "Usage:",
-        "  runpane secrets <list|set|delete|exec|request> [options]",
+        "  runpane secrets <list|set|delete|exec|request|lease> [options]",
         "",
         "Pane secrets are named values, addressed as <project>/<NAME>, that every machine you saved in Pane keeps a copy of.",
         "Agents use them only through `runpane secrets exec`, which puts them in a command's environment. No command prints a value.",
         "Ask the person for a new one with `runpane secrets request`; they type it on a masked card.",
+        "A secret can also come from 1Password: the person adds the reference in Settings > Secrets, and it has a value only during a lease they approve.",
+        "Ask for one with `runpane secrets lease`. When `secrets exec` fails with SECRET_LEASE_ENDED, run the command its next step names.",
         "",
         "Commands:",
         "  runpane secrets list [--project <project>] [--json]",
@@ -4303,6 +4347,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane secrets delete --project <project> --name <name> --yes",
         "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
         "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
+        "  runpane secrets lease --project <project> <NAME>... [--reason <text>] [--json]",
+        "  runpane secrets lease end --id <lease-id> --yes [--json]",
         "",
         "A project is up to 64 letters, digits, \".\", \"_\" or \"-\". A name follows environment variable rules: letters, digits and underscores, not starting with a digit. PATH, WORKTREE_PATH and PANE_* are reserved."
       ],
@@ -4310,7 +4356,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane secrets list [--project <project>] [--json] [--pane-dir <path>]",
         "",
-        "Lists the Pane secrets on this machine: project, name, when each was last set, and on which machine. It never shows a value.",
+        "Lists the Pane secrets on this machine: project, name, when each was last set, and on which machine. A secret from 1Password shows its reference and when its lease ends. It never shows a value.",
         "",
         "Options:",
         "  --project <project>            Only this project's secrets",
@@ -4373,6 +4419,36 @@ export const RUNPANE_CONTRACT = {
         "  --name <name>                  Secret name, such as STRIPE_SECRET_KEY",
         "  --title <text>                 What the secret is, such as \"Stripe test secret key\"",
         "  --reason <text>                What you need it for",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "secrets lease": [
+        "Usage:",
+        "  runpane secrets lease --project <project> <NAME>... [--reason <text>] [--json] [--pane-dir <path>]",
+        "",
+        "Asks the person to lease secrets that come from 1Password. The card shows the names, references, machines, length and end time; the person presses Start lease on their computer.",
+        "You get back the lease's id, end time and machines, or \"declined\", never a value. Then use them with `runpane secrets exec`.",
+        "A waiting result means the card is still open: run `runpane notify --resume <id>` to keep waiting.",
+        "",
+        "Options:",
+        "  --project <project>            Secret project",
+        "  <NAME>...                      The secrets to lease",
+        "  --reason <text>                What you need them for, shown on the card",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "",
+        "Example:",
+        "  runpane secrets lease --project stripe STRIPE_SECRET_KEY --reason \"Run the webhook tests.\""
+      ],
+      "secrets lease end": [
+        "Usage:",
+        "  runpane secrets lease end --id <lease-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Ends a lease now: this machine deletes its leased values. A command already running keeps the environment it started with.",
+        "",
+        "Options:",
+        "  --id <lease-id>                The lease, from `runpane secrets list --json`",
+        "  --yes                          Confirm the change",
         "  --json                         Print machine-readable output",
         "  --pane-dir <path>              Connect to a specific Pane data directory"
       ],
@@ -6607,6 +6683,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane secrets delete --project <project> --name <name> --yes",
         "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
         "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
+        "  runpane secrets lease --project <project> <NAME>... [--reason <text>] [--json]",
+        "  runpane secrets lease end --id <lease-id> --yes [--json]",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -6862,11 +6940,13 @@ export const RUNPANE_CONTRACT = {
       ],
       "secrets": [
         "Usage:",
-        "  python -m runpane secrets <list|set|delete|exec|request> [options]",
+        "  python -m runpane secrets <list|set|delete|exec|request|lease> [options]",
         "",
         "Pane secrets are named values, addressed as <project>/<NAME>, that every machine you saved in Pane keeps a copy of.",
         "Agents use them only through `runpane secrets exec`, which puts them in a command's environment. No command prints a value.",
         "Ask the person for a new one with `runpane secrets request`; they type it on a masked card.",
+        "A secret can also come from 1Password: the person adds the reference in Settings > Secrets, and it has a value only during a lease they approve.",
+        "Ask for one with `runpane secrets lease`. When `secrets exec` fails with SECRET_LEASE_ENDED, run the command its next step names.",
         "",
         "Commands:",
         "  python -m runpane secrets list [--project <project>] [--json]",
@@ -6874,6 +6954,8 @@ export const RUNPANE_CONTRACT = {
         "  python -m runpane secrets delete --project <project> --name <name> --yes",
         "  python -m runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
         "  python -m runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
+        "  python -m runpane secrets lease --project <project> <NAME>... [--reason <text>] [--json]",
+        "  python -m runpane secrets lease end --id <lease-id> --yes [--json]",
         "",
         "A project is up to 64 letters, digits, \".\", \"_\" or \"-\". A name follows environment variable rules: letters, digits and underscores, not starting with a digit. PATH, WORKTREE_PATH and PANE_* are reserved."
       ],
@@ -6881,7 +6963,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  python -m runpane secrets list [--project <project>] [--json] [--pane-dir <path>]",
         "",
-        "Lists the Pane secrets on this machine: project, name, when each was last set, and on which machine. It never shows a value.",
+        "Lists the Pane secrets on this machine: project, name, when each was last set, and on which machine. A secret from 1Password shows its reference and when its lease ends. It never shows a value.",
         "",
         "Options:",
         "  --project <project>            Only this project's secrets",
@@ -6944,6 +7026,36 @@ export const RUNPANE_CONTRACT = {
         "  --name <name>                  Secret name, such as STRIPE_SECRET_KEY",
         "  --title <text>                 What the secret is, such as \"Stripe test secret key\"",
         "  --reason <text>                What you need it for",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "secrets lease": [
+        "Usage:",
+        "  python -m runpane secrets lease --project <project> <NAME>... [--reason <text>] [--json] [--pane-dir <path>]",
+        "",
+        "Asks the person to lease secrets that come from 1Password. The card shows the names, references, machines, length and end time; the person presses Start lease on their computer.",
+        "You get back the lease's id, end time and machines, or \"declined\", never a value. Then use them with `runpane secrets exec`.",
+        "A waiting result means the card is still open: run `runpane notify --resume <id>` to keep waiting.",
+        "",
+        "Options:",
+        "  --project <project>            Secret project",
+        "  <NAME>...                      The secrets to lease",
+        "  --reason <text>                What you need them for, shown on the card",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "",
+        "Example:",
+        "  python -m runpane secrets lease --project stripe STRIPE_SECRET_KEY --reason \"Run the webhook tests.\""
+      ],
+      "secrets lease end": [
+        "Usage:",
+        "  python -m runpane secrets lease end --id <lease-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Ends a lease now: this machine deletes its leased values. A command already running keeps the environment it started with.",
+        "",
+        "Options:",
+        "  --id <lease-id>                The lease, from `runpane secrets list --json`",
+        "  --yes                          Confirm the change",
         "  --json                         Print machine-readable output",
         "  --pane-dir <path>              Connect to a specific Pane data directory"
       ],
@@ -8963,6 +9075,8 @@ export const RUNPANE_CONTRACT = {
       "runpane secrets delete --project stripe --name STRIPE_SECRET_KEY --yes --json",
       "runpane secrets exec --project stripe --only STRIPE_SECRET_KEY -- pnpm test:webhooks",
       "runpane secrets request --project stripe --name STRIPE_SECRET_KEY --title \"Stripe test secret key\" --reason \"Run the webhook tests against Stripe test mode.\" --json",
+      "runpane secrets lease --project stripe STRIPE_SECRET_KEY --reason \"Run the webhook tests against Stripe test mode.\" --json",
+      "runpane secrets lease end --id 3f9a2c1b7d4e8f06 --yes --json",
       "runpane panes list --repo active --json",
       "runpane panes cost --pane <pane-id> --json",
       "runpane panes create --repo active --name issue-252 --agent <agent> --prompt \"Kick off the discussion skill for issue 252\" --source agent --no-focus --wait-ready --yes --json",
@@ -9036,7 +9150,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane repos get` prints a saved repository's Project Settings. Each script shows its saved value, the fallback from the repository's config file, and the one Pane will run.",
       "`runpane repos update` changes a saved repository's Project Settings through the same save as the Project Settings dialog. It requires `--yes`, supports `--dry-run`, clears settings with `--clear`, and adds, replaces or removes project environment variables with `--env` and `--env-remove`.",
       "`runpane repos rename` trims and sets a saved repository's display name, the same rename as the repository settings in the app, and returns the updated repository record.",
-      "`runpane secrets` manages Pane secrets: named values, addressed as `<project>/<NAME>`, that every machine saved in Pane keeps a copy of. `list` shows names, times and machines only. `set` reads the value from stdin. `delete` removes one everywhere. `exec` runs a command with secrets in its environment and returns its exit code. `request` asks the person on a masked Notify card and returns only `saved` or `declined`. No command prints a value, and the MCP server has no tool that sets or reads one. These commands run on the machine itself, so `runpane workspace <machine> secrets ...` is refused; use `runpane workspace <machine> exec -- runpane secrets ...`.",
+      "`runpane secrets` manages Pane secrets: named values, addressed as `<project>/<NAME>`, that every machine saved in Pane keeps a copy of. `list` shows names, times and machines, 1Password references and live leases, never a value. `set` reads the value from stdin. `delete` removes one everywhere. `exec` runs a command with secrets in its environment and returns its exit code. `request` asks the person on a masked Notify card and returns only `saved` or `declined`. A secret can instead be a 1Password reference, which the person sets in Settings; it has a value only during a lease. `lease` asks the person to start one and returns the lease's id, end time and machines; `lease end` ends one now. `exec` fails with `SECRET_LEASE_ENDED` when a reference has no live lease. No command prints a value, and the MCP server has no tool that sets or reads one. These commands run on the machine itself, so `runpane workspace <machine> secrets ...` is refused; use `runpane workspace <machine> exec -- runpane secrets ...`.",
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. New Panes join the caller's Session automatically: the orchestrator's Session (`PANE_ORCHESTRATION_SESSION_ID`), or the open Session the calling tab's Pane belongs to; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
@@ -10471,6 +10585,26 @@ export const RUNPANE_CONTRACT = {
         "Stripe test key",
         "--reason",
         "- for the webhook tests",
+        "--json"
+      ],
+      [
+        "secrets",
+        "lease",
+        "--project",
+        "stripe",
+        "STRIPE_SECRET_KEY",
+        "--reason",
+        "- for the webhook tests",
+        "WEBHOOK_SECRET",
+        "--json"
+      ],
+      [
+        "secrets",
+        "lease",
+        "end",
+        "--id",
+        "3f9a2c1b7d4e8f06",
+        "--yes",
         "--json"
       ],
       [
@@ -11956,6 +12090,86 @@ export const RUNPANE_CONTRACT = {
       },
       "additionalProperties": false
     },
+    "secretReferenceSummary": {
+      "type": "object",
+      "description": "A secret whose value lives in 1Password. reference is an address, not a value.",
+      "required": [
+        "project",
+        "name",
+        "reference",
+        "updatedAt",
+        "machine"
+      ],
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "reference": {
+          "type": "string",
+          "description": "op://<vault>/<item>/<field>"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO time it was last set."
+        },
+        "machine": {
+          "type": "string",
+          "description": "The machine where it was last set."
+        }
+      },
+      "additionalProperties": false
+    },
+    "secretLeaseSummary": {
+      "type": "object",
+      "description": "A live lease on this machine: names and times, never values.",
+      "required": [
+        "id",
+        "project",
+        "names",
+        "grantedAt",
+        "expiresAt",
+        "requestedBy",
+        "grantedOn",
+        "memoryOnly"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "grantedAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string",
+          "description": "ISO time the lease ends."
+        },
+        "requestedBy": {
+          "type": "string",
+          "description": "Who asked: an agent's tab, or Settings."
+        },
+        "grantedOn": {
+          "type": "string",
+          "description": "The machine that read 1Password and granted it."
+        },
+        "memoryOnly": {
+          "type": "boolean",
+          "description": "Held in memory only, because this machine cannot encrypt at rest: it ends if Pane restarts here."
+        }
+      },
+      "additionalProperties": false
+    },
     "secretListRequest": {
       "type": "object",
       "properties": {
@@ -11980,6 +12194,20 @@ export const RUNPANE_CONTRACT = {
           "type": "array",
           "items": {
             "$ref": "#/jsonSchemas/secretSummary"
+          }
+        },
+        "references": {
+          "type": "array",
+          "description": "Secrets that come from 1Password. Absent on a Pane from before references.",
+          "items": {
+            "$ref": "#/jsonSchemas/secretReferenceSummary"
+          }
+        },
+        "leases": {
+          "type": "array",
+          "description": "Live leases on this machine, ending soonest first. Absent on a Pane from before leases.",
+          "items": {
+            "$ref": "#/jsonSchemas/secretLeaseSummary"
           }
         },
         "storage": {
@@ -12092,6 +12320,37 @@ export const RUNPANE_CONTRACT = {
             }
           },
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "secretLeaseEndRequest": {
+      "description": "What `runpane secrets lease end` sends on runpane:secrets:lease:end.",
+      "type": "object",
+      "required": [
+        "leaseId"
+      ],
+      "properties": {
+        "leaseId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "secretLeaseEndResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "ended"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "ended": {
+          "type": "boolean",
+          "description": "False when this machine had no such lease, such as one that already ended."
         }
       },
       "additionalProperties": false
@@ -18446,7 +18705,7 @@ export const RUNPANE_CONTRACT = {
       "additionalProperties": false
     },
     "notifyRequest": {
-      "description": "What `runpane notify` and `runpane secrets request` send on the runpane:notify daemon channel: the question fields, with relays or aboutSession when they apply; resume alone; took with tookAs (and status); or update with whatChanged, asked when it answers the person's typed question, and the changed fields. Only `secrets request` sends ui secret.",
+      "description": "What `runpane notify` and `runpane secrets request` send on the runpane:notify daemon channel: the question fields, with relays or aboutSession when they apply; resume alone; took with tookAs (and status); or update with whatChanged, asked when it answers the person's typed question, and the changed fields. Only `secrets request` sends ui secret; only `secrets lease` sends lease, with ui approve.",
       "type": "object",
       "required": [
         "caller"
@@ -18517,6 +18776,29 @@ export const RUNPANE_CONTRACT = {
             "name": {
               "type": "string",
               "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "lease": {
+          "type": "object",
+          "description": "ui approve, `secrets lease` only: the 1Password-backed secrets to lease. The host fills in the references, length and machines on the card.",
+          "required": [
+            "project",
+            "names"
+          ],
+          "properties": {
+            "project": {
+              "type": "string",
+              "minLength": 1
+            },
+            "names": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           },
           "additionalProperties": false
@@ -18741,13 +19023,54 @@ export const RUNPANE_CONTRACT = {
         },
         {
           "type": "object",
-          "description": "secret: the person declined; nothing was saved.",
+          "description": "secret: the person declined; nothing was saved. lease: the person declined; nothing was leased.",
           "required": [
             "status"
           ],
           "properties": {
             "status": {
               "const": "declined"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "lease: the person approved and Pane leased the secrets. Values are never returned; use them with `runpane secrets exec`.",
+          "required": [
+            "status",
+            "project",
+            "names",
+            "leaseId",
+            "expiresAt",
+            "machines"
+          ],
+          "properties": {
+            "status": {
+              "const": "leased"
+            },
+            "project": {
+              "type": "string"
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "leaseId": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": "string",
+              "description": "ISO time the lease ends."
+            },
+            "machines": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Names of the machines that hold the lease."
             }
           },
           "additionalProperties": false
@@ -21769,7 +22092,7 @@ export const RUNPANE_CONTRACT = {
         "For `agent-context --command`, use canonical spaced names like `panes create`; copied forms like `panes.create` or `runpane panes create` are accepted too.",
         "Use `runpane repos list --json` to find the saved repository when unsure after doctor shows the daemon is reachable.",
         "Read and change a repo's Project Settings (build, run, and archive scripts, worktree folder, environment variables) with `runpane repos get` and `runpane repos update`; never edit Pane's database by hand.",
-        "When a command needs a secret (an API key, a token), run it with `runpane secrets exec --project <project> -- <command>`. If the secret is missing, ask the person with `runpane secrets request`; never ask them to paste a secret into the chat, and never print one.",
+        "When a command needs a secret (an API key, a token), run it with `runpane secrets exec --project <project> -- <command>`. If the secret is missing, ask the person with `runpane secrets request`; never ask them to paste a secret into the chat, and never print one. For a secret from 1Password, ask with `runpane secrets lease` and wait; when `secrets exec` fails with SECRET_LEASE_ENDED, run the next step it names.",
         "If WSL cannot reach Pane, the user may be running Windows Pane; try `/mnt/c/Users/<you>/.pane/bin/runpane doctor --json`, or with an older Pane build `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane doctor --json'`.",
         "If the repository exists on disk but is not saved in Pane, use `runpane repos add --path <repo> --yes --json` before creating panes.",
         "Use `runpane agents doctor --agent <codex|claude|cursor|opencode|pi> --repo <selector> --json` when agent availability differs across host, Windows, WSL, or repo environments.",
@@ -21870,7 +22193,7 @@ export const RUNPANE_CONTRACT = {
         },
         {
           "name": "secrets list",
-          "summary": "List Pane secrets: project, name, time and machine. Never a value.",
+          "summary": "List Pane secrets: project, name, time and machine, plus 1Password references and live leases. Never a value.",
           "arguments": [
             "--project <project>",
             "--json"
@@ -21894,6 +22217,16 @@ export const RUNPANE_CONTRACT = {
             "--project <project>",
             "--name <name>",
             "--title <text>",
+            "--reason <text>",
+            "--json"
+          ]
+        },
+        {
+          "name": "secrets lease",
+          "summary": "Ask the person to lease 1Password-backed secrets; returns the lease id and end time, never a value.",
+          "arguments": [
+            "<NAME>...",
+            "--project <project>",
             "--reason <text>",
             "--json"
           ]
@@ -22844,8 +23177,8 @@ export const RUNPANE_CONTRACT = {
       },
       "secrets list": {
         "name": "secrets list",
-        "summary": "List the Pane secrets on this machine: project, name, and when and where each was set. Never shows a value.",
-        "details": "Use this to find the project and name to pass to `runpane secrets exec`. Each entry has project, name, updatedAt and machine. storage says how this machine keeps values; encrypted false means a plain 0600 file on a machine without an OS keyring.",
+        "summary": "List the Pane secrets on this machine: typed secrets, 1Password references and live leases, with when and where each was set. Never shows a value.",
+        "details": "Use this to find the project and name to pass to `runpane secrets exec`. secrets lists typed secrets with project, name, updatedAt and machine. references lists secrets that come from 1Password, with their op:// reference; leases lists the live leases on this machine with id, names and expiresAt. storage says how this machine keeps values; encrypted false means a plain 0600 file on a machine without an OS keyring.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -22924,6 +23257,7 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Never set a value someone pasted into the chat; ask with `runpane secrets request` instead, so the value stays out of the transcript.",
+          "A name that comes from 1Password fails with SECRET_IS_REFERENCE: only the person changes those, in Settings > Secrets.",
           "There is no MCP tool for this command: MCP arguments land in the transcript.",
           "Runs on this machine only: `runpane workspace <machine> secrets ...` is refused. Use `runpane workspace <machine> exec -- runpane secrets ...` for another machine."
         ]
@@ -23027,6 +23361,7 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "Target names PATH, WORKTREE_PATH and PANE_*, in any case, are refused with SECRET_RESERVED_NAME, and nothing runs.",
           "A missing secret fails with SECRET_NOT_FOUND before anything runs; ask for it with `runpane secrets request`.",
+          "A secret from 1Password with no live lease on this machine fails with SECRET_LEASE_ENDED, and nothing runs. Its next step is the `runpane secrets lease` command to run.",
           "Do not echo a secret from inside the command: its output lands wherever the command's output goes, such as your transcript.",
           "There is no MCP tool for this command; run it in a shell.",
           "Runs on this machine only: `runpane workspace <machine> secrets ...` is refused. Use `runpane workspace <machine> exec -- runpane secrets ...` for another machine.",
@@ -23087,6 +23422,98 @@ export const RUNPANE_CONTRACT = {
           "A result of {waiting: true, id} means the card is still open and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting.",
           "A result of {unavailable, next} means nobody can answer through Pane right now. Do not ask for the secret in the chat; follow next.",
           "Saving replaces a secret that already exists under that name; the card says so."
+        ]
+      },
+      "secrets lease": {
+        "name": "secrets lease",
+        "summary": "Ask the person to lease 1Password-backed Pane secrets to this machine for a while. Returns the lease's id, end time and machines, never a value.",
+        "details": "For secrets that come from 1Password. Shows a lease card with the names, their 1Password references, the machines (by default the person's desktop and this machine), the length and the end time. The person presses Start lease on their computer, Pane reads 1Password once, and each machine keeps the values until the lease ends. You get back {status: \"leased\", project, names, leaseId, expiresAt, machines} or {status: \"declined\"}, never a value. Then use them with `runpane secrets exec`.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<name>...",
+            "required": true,
+            "description": "The secrets to lease, such as STRIPE_SECRET_KEY."
+          },
+          {
+            "name": "--project",
+            "value": "<project>",
+            "required": true,
+            "description": "Secret project."
+          },
+          {
+            "name": "--reason",
+            "value": "<text>",
+            "required": false,
+            "description": "What you need them for, in one sentence, shown on the card."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane secrets lease --project stripe STRIPE_SECRET_KEY --reason \"Run the webhook tests against Stripe's test mode.\" --json"
+        ],
+        "jsonSchemas": [
+          "notifyRequest",
+          "notifyResult"
+        ],
+        "notes": [
+          "Only the person approves a lease, on their computer. You can ask for and end leases, never grant or extend one.",
+          "A result of {waiting: true, id} means the card is still open and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting.",
+          "A result of {unavailable, next} means nobody can answer through Pane right now; follow next.",
+          "About an hour before a lease ends (a quarter of its length for leases shorter than 4 hours), Pane shows the person an Extend card. If the lease ends, `secrets exec` fails with SECRET_LEASE_ENDED and names this command as the next step."
+        ]
+      },
+      "secrets lease end": {
+        "name": "secrets lease end",
+        "summary": "End a Pane secret lease now: this machine deletes the leased values.",
+        "details": "Ends the lease now. This machine deletes its leased values; a command already running keeps the environment it started with. With --json it prints {ok, ended}; ended is false when this machine had no such lease.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--id",
+            "value": "<lease-id>",
+            "required": true,
+            "description": "The lease, from `runpane secrets lease` or `runpane secrets list --json`."
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm the change."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane secrets lease end --id 3f9a2c1b7d4e8f06 --yes --json"
+        ],
+        "jsonSchemas": [
+          "secretLeaseEndRequest",
+          "secretLeaseEndResult"
+        ],
+        "notes": [
+          "Ending a lease only removes access, so an agent may end one it no longer needs.",
+          "A Pane from before leases fails with SECRET_LEASE_UNSUPPORTED."
         ]
       },
       "panes list": {
@@ -29780,7 +30207,7 @@ export const RUNPANE_CONTRACT = {
       "",
       "{{paneAndTabRules}} With the MCP tools, open a tab with `panels_create`, or `agents_start` with `pane`.",
       "",
-      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question \"<question>\"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.",
+      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question \"<question>\"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets. For a secret from 1Password, call `secrets_lease` (or `runpane secrets lease`) and wait; on `SECRET_LEASE_ENDED`, run the next step it names.",
       "",
       "To free disk or memory, run `runpane machine health` and delete only with `runpane machine cleanup` (a dry run until `--yes`), never `rm`. Put QA roots and test instances in the Pane's scratch folder (`$PANE_SCRATCH_DIR`).",
       "",
@@ -29799,7 +30226,8 @@ export const RUNPANE_CONTRACT = {
       "rules": [
         "Claude's own card (AskUserQuestion) only for a quick question about the person's latest message, in the chat they are typing in, that steers only this turn. Anything else (it waits, blocks other work, is recorded as a decision or approves an ask-first action) is an approval card (`notify`). Unsure? Use an approval card. Codex and other agents always do.",
         "In a Session, only its orchestrator asks the person. A worker (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't, or your brief names an orchestrator or a parent status file) doesn't call `notify`: it reports blocked with `runpane report --state blocked --question \"<question>\"` (its buttons in `--choices` or `--questions`, as notify takes them). `answer:`, `closed:` and `correction:` lines ending `(by you)` in its tab are the person's word.",
-        "For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`."
+        "For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`.",
+        "For a secret from 1Password, call `secrets_lease` (or `runpane secrets lease`) and wait for the person to approve it. On `SECRET_LEASE_ENDED`, run the next step it names."
       ]
     }
   }

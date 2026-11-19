@@ -381,7 +381,8 @@ describe('what an opened item is connected to (J32)', () => {
 });
 
 describe('a link to another approval', () => {
-  const now = 10 * 24 * 60 * 60 * 1000;
+  // Local noon, so an item answered 30 s earlier is today in every time zone.
+  const now = new Date(1970, 0, 11, 12).getTime();
   const answered = item('answered-q', now - 60_000, { state: 'answered', resolvedAt: now - 30_000 });
   const old = item('old-q', 1_000, { state: 'answered', resolvedAt: 2_000 });
   const links = at(loose, answered, old);

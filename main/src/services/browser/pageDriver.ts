@@ -87,8 +87,12 @@ const frameEventSchema = boundary.object({ frame: boundary.object({ parentId: bo
 const ACTIONABLE_WAIT_MS = 5_000;
 /** How long after its input an action looks for a dialog or file picker it opened. */
 const SETTLE_MS = 150;
-/** How long after the agent's last call the page keeps its emulated focus (the driver chip's linger). */
-const FOCUS_LINGER_MS = 2_000;
+/**
+ * How long the page keeps its emulated focus after the agent's last call: longer than an agent's
+ * turn between calls, so a typeahead menu stays open from typing to clicking a suggestion. The
+ * person taking over or the tab closing ends it sooner.
+ */
+const FOCUS_LINGER_MS = 60_000;
 const NAVIGATION_WAIT_MS = 30_000;
 /** How long one call into the page script may take (a blocked page never answers). */
 const PAGE_CALL_MS = 10_000;
@@ -153,7 +157,11 @@ export class PageDriver {
 
   constructor(private readonly contents: BrowserPageContents) {
     drivers.set(contents.id, this);
-    contents.once('destroyed', () => { if (drivers.get(contents.id) === this) drivers.delete(contents.id); });
+    contents.once('destroyed', () => {
+      clearTimeout(this.unfocusTimer);
+      this.unfocusTimer = undefined;
+      if (drivers.get(contents.id) === this) drivers.delete(contents.id);
+    });
   }
 
   get pendingDialog(): PendingDialog | undefined {
@@ -186,15 +194,18 @@ export class PageDriver {
     void this.page('revoke').catch(() => undefined);
   }
 
-  /** Turns focus emulation off FOCUS_LINGER_MS after the agent's last call, like the driver chip. */
+  /** Turns focus emulation off FOCUS_LINGER_MS after the agent's last call. */
   private unfocusLater(): void {
     clearTimeout(this.unfocusTimer);
     this.unfocusTimer = setTimeout(() => this.unfocusNow(), FOCUS_LINGER_MS);
+    this.unfocusTimer.unref?.();
   }
 
   private unfocusNow(): void {
     clearTimeout(this.unfocusTimer);
     this.unfocusTimer = undefined;
+    // A closed page has nothing to give focus back to; touching its debugger would throw.
+    if (this.contents.isDestroyed()) return;
     if (this.contents.debugger.isAttached()) void this.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => undefined);
   }
 
