@@ -475,7 +475,7 @@ function runGuard() {
   for (const v of guardViolations({ lanes: LANES, files, read: (file) => readFileSync(path.join(REPO, file), 'utf8') })) {
     problems.push(`${v.file}:${v.line} ${v.computed ? 'builds a path under' : 'reads'} ${v.target}, which is outside the ${v.lane} lane's inputs in scripts/ci-affected.mjs. Add it to that lane (or to NOT_READ with a reason), or a change there skips this lane.`);
   }
-  for (const problem of problems) console.log(`::error title=Lane selection::${problem}`);
+  for (const problem of problems) console.error(`::error title=Lane selection::${problem}`);
   return problems.length === 0;
 }
 
