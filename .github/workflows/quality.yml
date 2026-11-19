@@ -155,7 +155,7 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: CI=1 pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }} --includeTaskLocation --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/vitest-linux-${{ matrix.shard }}.json
+      run: CI=1 pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/vitest-linux-${{ matrix.shard }}.json
 
     # TEMPORARY (P07 skip-site evidence): reverted before the PR is ready.
     - name: Upload per-case results
@@ -556,7 +556,7 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }} --includeTaskLocation --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/vitest-windows-${{ matrix.shard }}.json
+      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/vitest-windows-${{ matrix.shard }}.json
 
     # TEMPORARY (P07 skip-site evidence): reverted before the PR is ready.
     - name: Upload per-case results

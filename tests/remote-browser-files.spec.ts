@@ -41,9 +41,9 @@ test('remote browser loads host HTML, assets and linked pages through the remote
     // A webview the host just replaced is in the DOM before its dom-ready event, and
     // executeJavaScript throws until then. Report that as a value so polls keep waiting.
     const guest = async <T>(script: string): Promise<T | 'webview not ready'> => page.locator('webview').evaluate(
-      // SAFETY: This locator selects Electron's webview tag in the Electron client fixture.
       async (element, code) => {
         try {
+          // SAFETY: This locator selects Electron's webview tag in the Electron client fixture.
           return await (element as Electron.WebviewTag).executeJavaScript(code, true);
         } catch (error) {
           if (String(error).includes('dom-ready event emitted')) return 'webview not ready';
