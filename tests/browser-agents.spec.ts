@@ -122,9 +122,14 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
   try {
     await dismissDialogs(page);
     // A loaded test machine can raise Pane's own machine health cards (memory, disk) over the window at any time.
-    await page.addLocatorHandler(page.getByRole('button', { name: /Review in Resources/ }).first(), async () => {
-      await page.getByRole('button', { name: 'Not now', exact: true }).locator('visible=true').first().click();
-    });
+    // Cards can follow one another (memory, then disk), so dismiss until none is left.
+    const healthCard = page.getByRole('button', { name: /Review in Resources/ }).first();
+    await page.addLocatorHandler(healthCard, async () => {
+      for (let card = 0; card < 5 && await healthCard.isVisible(); card += 1) {
+        await page.getByRole('button', { name: 'Not now', exact: true }).locator('visible=true').first().click();
+        await page.waitForTimeout(300);
+      }
+    }, { noWaitAfter: true });
     // And the first-run cards ("Which agent do you use?", "Open your project") that can come late.
     const skip = page.getByRole('button', { name: 'Skip', exact: true }).locator('visible=true').first();
     await page.addLocatorHandler(skip, async () => { await skip.click(); });
