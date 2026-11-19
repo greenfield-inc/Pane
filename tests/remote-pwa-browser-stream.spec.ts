@@ -16,8 +16,12 @@ test('a browser tab streams from the host: frames arrive, a click and typing lan
   // The first frame is drawn and the host's address shows.
   await expect(stream.getByText(/Loading the page/)).toHaveCount(0);
   await expect(page.getByRole('textbox', { name: 'Address' })).toHaveValue('http://localhost:5173/signup');
-  await expect(page.getByText('on MacBook Pro')).toBeVisible();
+  await expect(page.getByText('on MacBook Pro', { exact: true })).toBeVisible();
   await expect.poll(() => host.browserStream?.calls.some(call => call.channel === 'browser:watch')).toBe(true);
+  // The first streamed tab from a host says whose sign-ins it uses, once.
+  await expect(page.getByTestId('browser-sign-in-notice')).toContainText('This page runs on MacBook Pro, signed in as MacBook Pro.');
+  await page.getByRole('button', { name: 'Got it' }).click();
+  await expect(page.getByTestId('browser-sign-in-notice')).toHaveCount(0);
 
   await expect(page.getByTestId('browser-driver-chip')).toContainText('Claude Code is driving');
   await page.getByTestId('browser-driver-chip').getByRole('button', { name: 'Take over' }).click();

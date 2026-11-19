@@ -20,6 +20,7 @@ import { pickFiles, type AttachSource } from '../upload/pickFiles';
 import { splitAddress } from './browserPage';
 import { driverChip, KEYBOARD_EMPTY, keyboardEdit, PhoneControl, stopLine } from './browserStream';
 import { OwnCopyBrowserTab } from './OwnCopyBrowserTab';
+import { markSignInNoticeSeen, signInNotice, signInNoticeSeen } from './signInNotice';
 import { browserChannels, useBrowserStream } from './useBrowserStream';
 
 /** How long the agent's cursor stays at a click before it fades (as on the host's own tab). */
@@ -57,6 +58,9 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
   const stream = useBrowserStream(panel.id, focused && active, box && { ...box, scale: PixelRatio.get() });
   const { frame, view, stop } = stream;
   const host = view?.host || profile.label;
+  // The first streamed tab from each host says whose sign-ins it uses, once per phone.
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const noticeSeen = dismissed === host || signInNoticeSeen(host);
 
   // Input goes to the host in order through one queue for the tab's life.
   const clientRef = useRef(client);
@@ -287,6 +291,11 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
           ) : null}
         </View>
       </View>
+      {view && !noticeSeen ? (
+        <Pressable testID="browser-sign-in-notice" accessibilityRole="button" accessibilityHint="Dismiss" onPress={() => { markSignInNoticeSeen(host); setDismissed(host); }} style={[styles.notice, { backgroundColor: colors.surface, borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+          <Text variant="footnote" tone="secondary">{signInNotice(host)} <Text variant="footnote" style={{ color: colors.accentText }}>Got it</Text></Text>
+        </Pressable>
+      ) : null}
       {addressError ? (
         <Pressable testID="browser-input-error" onPress={() => setAddressError(null)} accessibilityHint="Dismiss" style={styles.notice}>
           <Text variant="footnote" tone="danger">{addressError}</Text>

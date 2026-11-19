@@ -96,8 +96,14 @@ and fails with `ERR_BROWSER_PERSON_DRIVING` after 4 minutes. With DevTools open 
 
 ## Where a tab's page runs
 
-A tab's page lives on the computer that owns its Pane, signed in with that computer's sign-ins,
-and every agent call runs on that page. When the tab is not in view, its page loads in the
+A tab's page lives on the computer that owns its Pane (the host), signed in with the host's
+sign-ins, and every agent call runs on that page. Every other screen (another desktop, the web app,
+the phone app) shows a live stream of that one page, so the tab is signed in as the host wherever
+you look, a half-filled form follows you between devices, and `localhost` means the host's. Sign in
+to a site once in any screen's stream and every device sees it. The first streamed tab from each
+host says so once: "This page runs on studio-mac, signed in as studio-mac. Sign in here once and
+every device sees it." Each computer's own Panes keep that computer's sign-ins; nothing is copied
+between computers. When the tab is not in view, its page loads in the
 background and the tab never comes forward. With no Pane window (a headless host), Pane loads the
 page in a hidden window, where it can't open popups or hand links to other apps, since nobody is
 there to approve them. When the window closes or comes back, each live page moves between it and
