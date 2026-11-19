@@ -135,6 +135,7 @@ function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: 
     hasWindow: () => true,
     shotsDirectory: async () => path.join(worktree, '.shots'),
     showCursor: (panelId) => { options.cursors?.push(panelId); },
+    sizeHidden: () => undefined,
     // As the window does: a tab whose hold ends loses its page; a newly held tab gets one.
     setHeld: (tabIds, painting) => {
       for (const id of options.held ?? []) if (!tabIds.includes(id)) pages.delete(id);
