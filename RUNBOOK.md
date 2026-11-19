@@ -271,6 +271,22 @@ instead: each job's head SHA, runner, and waiting, setup, running and teardown
 seconds. `CI result` writes that record to its job summary and log on every
 `Code Quality` run.
 
+`CI result` also checks each successful job against
+`scripts/ci-budgets.json`. Each phase (waiting, setup, running) and each
+budgeted step (Lint, Type check) has a target, the speed the CI plan aims for,
+and most have a ceiling. Only a measured value over its ceiling fails
+`CI result`. A value over its target is a warning in the job summary, and so
+is a value that could not be measured: the jobs API did not answer, a step or
+phase reported no time, or a job has no budget. Waiting has no ceiling: it
+depends on GitHub's runner capacity, not the change. Times come from the jobs
+API in whole seconds. Ceilings are 1.3 times the largest value seen in recent
+successful runs, rounded up to 10 s, so no normal run fails one. If a run was
+only slow, re-run all jobs: re-running `CI result` alone reads the same
+timings. A new job, or a renamed or new setup step, needs its entry in the
+same change; `scripts/ci-timings.test.mjs` (run by Type Check and Lint) checks
+the file against `quality.yml`. Lower a ceiling only after real runs show the
+job stays under it.
+
 In `Code Quality`, pushes to `main` write two Actions caches that pull
 requests only read: Playwright's Chromium (`playwright-*`, keyed on the
 image's OS family, arch and `playwright-core` version; saved by browser shard

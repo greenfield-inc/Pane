@@ -213,7 +213,7 @@ function maskLiterals(text, literals, comments) {
   for (const [start, end] of comments) for (let i = start; i < end; i += 1) chars[i] = ' ';
   for (const literal of literals) {
     for (let i = literal.start; i < literal.end && i < chars.length; i += 1) if (chars[i] !== '\n') chars[i] = ' ';
-    chars[literal.start] = '\u0001';
+    chars[literal.start] = '\uE000';
   }
   return chars.join('');
 }
@@ -245,13 +245,13 @@ const PURE_CLIMB = /^(?:\.|\.\.(?:\/\.\.)*)$/;
  */
 function fileBaseFolder(code) {
   const compact = code.replace(/\s+/g, '').replace(/\b(?:path|posix|url)\./g, '');
-  const shape = /^((?:dirname\()*)(__dirname|import\.meta\.dirname|__filename|import\.meta\.filename|fileURLToPath\(import\.meta\.url\)|fileURLToPath\(newURL\((['"`])([^'"`$]*)\3,import\.meta\.url\)\))(\)*)$/.exec(compact);
-  if (!shape) return null;
-  const climbs = shape[1].length / 'dirname('.length;
-  if (shape[5].length !== climbs) return null;
-  const start = shape[4] !== undefined ? shape[4] || '.' : '.';
+  const location = /^((?:dirname\()*)(__dirname|import\.meta\.dirname|__filename|import\.meta\.filename|fileURLToPath\(import\.meta\.url\)|fileURLToPath\(newURL\((['"`])([^'"`$]*)\3,import\.meta\.url\)\))(\)*)$/.exec(compact);
+  if (!location) return null;
+  const climbs = location[1].length / 'dirname('.length;
+  if (location[5].length !== climbs) return null;
+  const start = location[4] !== undefined ? location[4] || '.' : '.';
   // A file's path (import.meta.url, __filename) needs one dirname to be its folder.
-  const fileItself = shape[4] === undefined && !/__dirname|import\.meta\.dirname/.test(shape[2]);
+  const fileItself = location[4] === undefined && !/__dirname|import\.meta\.dirname/.test(location[2]);
   return path.posix.join(start, ...(fileItself ? ['_file_'] : []), ...Array(climbs).fill('..'));
 }
 
@@ -359,7 +359,7 @@ function fileReferences(text, file) {
     const staticTail = computed ? tail.slice(0, tail.slice(0, cut).lastIndexOf('/') + 1) : tail;
     refs.push({ line: literal.line, candidates: relative(path.posix.join(base, `.${staticTail}`), ['file']), computed });
   }
-  for (const plus of masked.matchAll(/\+\s*\u0001/g)) {
+  for (const plus of masked.matchAll(/\+\s*\uE000/g)) {
     const base = baseFolder(operandBefore(masked, plus.index));
     const literal = byStart.get(plus.index + plus[0].length - 1);
     if (base === null || !literal) continue;
@@ -373,7 +373,7 @@ function fileReferences(text, file) {
     const pattern = `(?<![\\w$])${name.replace(/[$\\]/g, '\\$&')}(?![\\w$])`;
     const inCode = [...masked.matchAll(new RegExp(pattern, 'g'))].filter((use) => use.index !== binding.declared
       && !/\b(?:join|resolve|relative)\s*\(\s*$/.test(masked.slice(Math.max(0, use.index - 40), use.index))
-      && !/^\s*\+\s*\u0001/.test(masked.slice(use.index + name.length)));
+      && !/^\s*\+\s*\uE000/.test(masked.slice(use.index + name.length)));
     const inTemplates = literals.flatMap((literal) => literal.expressions
       .filter((code, k) => !(k === 0 && followedTemplates.has(literal) && code.trim() === name))
       .filter((code) => new RegExp(pattern).test(code)));
