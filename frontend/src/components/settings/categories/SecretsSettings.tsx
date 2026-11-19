@@ -403,18 +403,21 @@ function ActiveLeases({ leases, now, run }: { leases: SecretLeaseOnMachine[]; no
           );
         })}
       </div>
-      {confirmingAll ? (
-        <ConfirmBar
-          label="End all leases"
-          text="End every lease on all your machines? Agents stop getting these secrets until a new lease starts."
-          action="End all"
-          onConfirm={() => void run(() => window.electronAPI.paneSecrets.endAllLeases(), 'Pane could not end your leases.').then(() => setConfirmingAll(false))}
-          onCancel={() => setConfirmingAll(false)}
-        />
-      ) : (
-        <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmingAll(true)}>End all</Button>
-      )}
-      <p className="text-xs text-text-tertiary">A command already running keeps the values it started with.</p>
+      {/* One child of the section, so its row dividers don't draw a short line over the button. */}
+      <div className="space-y-2">
+        {confirmingAll ? (
+          <ConfirmBar
+            label="End all leases"
+            text="End every lease on all your machines? Agents stop getting these secrets until a new lease starts."
+            action="End all"
+            onConfirm={() => void run(() => window.electronAPI.paneSecrets.endAllLeases(), 'Pane could not end your leases.').then(() => setConfirmingAll(false))}
+            onCancel={() => setConfirmingAll(false)}
+          />
+        ) : (
+          <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmingAll(true)}>End all</Button>
+        )}
+        <p className="text-xs text-text-tertiary">A command already running keeps the values it started with.</p>
+      </div>
     </SettingsSection>
   );
 }

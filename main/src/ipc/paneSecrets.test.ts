@@ -70,11 +70,13 @@ describe('runpane secrets channels', () => {
     const { registry, secrets, leases } = setup();
     await secrets.set('stripe', 'TYPED', 'typed-value');
     await secrets.setReference('stripe', 'STRIPE_KEY', 'op://Dev/Stripe/credential');
+    await secrets.setReference('stripe', 'SENTRY_TOKEN', 'op://Dev/Sentry/token');
 
     await expect(registry.invoke('runpane:secrets:resolve', [{ project: 'stripe' }])).rejects.toMatchObject({
       code: 'SECRET_LEASE_ENDED',
-      next: 'Run `runpane secrets lease --project stripe STRIPE_KEY`, and the person approves it on the card.',
+      next: 'Run `runpane secrets lease --project stripe SENTRY_TOKEN STRIPE_KEY`, and the person approves it on the card.',
     });
+    await secrets.delete('stripe', 'SENTRY_TOKEN');
 
     await leases.grant({ project: 'stripe', secrets: [{ name: 'STRIPE_KEY', reference: 'op://Dev/Stripe/credential', value: CANARY }], expiresInMs: 60_000, requestedBy: 'test', grantedOn: 'this-mac' });
     await expect(registry.invoke('runpane:secrets:resolve', [{ project: 'stripe' }])).resolves.toEqual({ ok: true, values: { TYPED: 'typed-value', STRIPE_KEY: CANARY } });

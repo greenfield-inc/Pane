@@ -3,6 +3,7 @@ import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
   paneSecretProjectProblem,
+  secretLeaseRenewCommand,
   teammateSecretRefusal,
   type PaneSecretReferenceSummary,
   type PaneSecretsOverview,
@@ -139,6 +140,15 @@ export function registerPaneSecretHandlers(
     for (const name of wanted) {
       validatePaneSecretAddress(project, name);
       if (!store.has(project, name)) throw secretNotFound(project, name);
+    }
+    // Every unleased one in one error, so one lease command covers them all.
+    const unleased = wanted.filter(name => store.referenceOf(project, name) && !leases().has(project, name));
+    if (unleased.length > 1) {
+      throw new PaneError(
+        'SECRET_LEASE_ENDED',
+        `${unleased.map(name => `${project}/${name}`).join(', ')} come from 1Password and have no active lease on this machine. Nothing was run.`,
+        `Run \`${secretLeaseRenewCommand(project, unleased)}\`, and the person approves it on the card.`,
+      );
     }
     const values: Record<string, string> = {};
     for (const name of wanted) values[name] = await store.read(project, name);
