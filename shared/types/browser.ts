@@ -17,7 +17,7 @@ export type BrowserTabNotice =
   | { kind: 'app'; id: string; app: string | null; scheme: string }
   /** A sign-in that fails in an embedded browser went to the system browser instead. */
   | { kind: 'sent-out'; site: string }
-  /** "Downloaded <name> · Show in folder". */
-  | { kind: 'downloaded'; name: string; file: string };
+  /** "Downloaded <name> · Show in folder", or "<agent> downloaded <name>" for a file in the Pane's scratch folder. */
+  | { kind: 'downloaded'; name: string; file: string; agent?: string };
 
 export const BROWSER_TAB_NOTICE_CHANNEL = 'browser-panel:notice';

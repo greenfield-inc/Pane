@@ -85,8 +85,9 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
     },
     personDownloads: () => app.getPath('downloads'),
     agentDownloads: async (paneId) => path.join(await paneScratchDirectory(paneId) ?? os.tmpdir(), 'browser-downloads'),
-    showDownload: (panelId, file) => {
+    showDownload: (panelId, file, agent) => {
       const notice: BrowserTabNotice = { kind: 'downloaded', name: path.basename(file), file };
+      if (agent) notice.agent = agent;
       getMainWindow()?.webContents.send(BROWSER_TAB_NOTICE_CHANNEL, { panelId, notice });
     },
   };

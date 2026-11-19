@@ -51,7 +51,8 @@ export interface BrowserHost {
   /** Where downloads an agent's call caused go: the Pane's scratch folder, deleted with the Pane. */
   agentDownloads(paneId: string): Promise<string>;
   /** Tells the tab a file finished downloading: "Downloaded <name> · Show in folder". */
-  showDownload(panelId: string, file: string): void;
+  /** Shows the download's notice in the tab; `agent` names the agent whose call caused it. */
+  showDownload(panelId: string, file: string, agent?: string): void;
 }
 
 /** A download a page started (Electron's will-download on the browser tabs' store). */
@@ -247,7 +248,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
         const file = unusedPath(directory, name);
         await moveFile(path.join(staging, name), file);
         downloads.set(tab.id, [...(downloads.get(tab.id) ?? []), file]);
-        host.showDownload(tab.id, file);
+        const driver = tabState(tab).driver;
+        host.showDownload(tab.id, file, driver?.by === 'agent' ? driver.agent : 'The agent');
       } finally {
         await rm(staging, { recursive: true, force: true });
       }

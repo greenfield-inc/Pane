@@ -148,7 +148,7 @@ These apply to every browser tab, whoever drives it.
   When a site's passkey prompt doesn't appear in a tab, use **Open in your browser**.
 - **Downloads.** A file you download in a tab saves to your Downloads folder with no save
   dialog, and the tab shows "Downloaded report.pdf · Show in folder". A download an agent's call
-  caused goes to the Pane's scratch folder instead (see above).
+  caused goes to the Pane's scratch folder instead (see above), and the notice names the agent.
 
 ## How it works
 

@@ -29,11 +29,11 @@ export const TabNotices: React.FC<TabNoticesProps> = ({ notices, onOpenApp, onSh
         </>}
         {notice.kind === 'sent-out' && <>
           <ExternalLink className="h-3.5 w-3.5 flex-shrink-0 text-text-tertiary" />
-          <span className="min-w-0 flex-1 truncate">{notice.site} doesn&apos;t work in Pane&apos;s browser, so it opened in your system browser.</span>
+          <span className="min-w-0 flex-1 truncate" title={`${notice.site} doesn't work in Pane's browser, so it opened in your system browser.`}>{notice.site} doesn&apos;t work in Pane&apos;s browser, so it opened in your system browser.</span>
         </>}
         {notice.kind === 'downloaded' && <>
           <Download className="h-3.5 w-3.5 flex-shrink-0 text-status-success" />
-          <span className="min-w-0 truncate" title={notice.file}>Downloaded {notice.name}</span>
+          <span className="min-w-0 truncate" title={notice.file}>{notice.agent ? `${notice.agent} downloaded ${notice.name}` : `Downloaded ${notice.name}`}</span>
           <span aria-hidden className="text-text-tertiary">·</span>
           <button type="button" className={ACTION} onClick={() => onShowInFolder(notice.file)}>Show in folder</button>
           <span className="flex-1" />

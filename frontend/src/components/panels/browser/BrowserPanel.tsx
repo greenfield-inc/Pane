@@ -592,7 +592,15 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       // SAFETY: The preload bridge is the only sender of this event.
       const { panelId, notice } = (e as CustomEvent<{ panelId: string; notice: BrowserTabNotice }>).detail;
       if (panelId !== panel.id) return;
-      setNotices(current => [...current, { key: crypto.randomUUID(), notice }].slice(-MAX_NOTICES));
+      setNotices(current => {
+        const next = [...current, { key: crypto.randomUUID(), notice }];
+        // Over the limit, the oldest notice goes, but never an app bar still waiting for Open or Cancel.
+        while (next.length > MAX_NOTICES) {
+          const oldest = next.findIndex(shown => shown.notice.kind !== 'app');
+          next.splice(oldest < 0 ? 0 : oldest, 1);
+        }
+        return next;
+      });
     };
     window.addEventListener(BROWSER_TAB_NOTICE_CHANNEL, handler);
     return () => window.removeEventListener(BROWSER_TAB_NOTICE_CHANNEL, handler);
