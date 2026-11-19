@@ -47,7 +47,7 @@ const MAIN = [
   'main/', 'shared/',
   // Imported or read by main's tests.
   'packages/runpane/src/', 'packages/runpane-py/src/runpane/telemetry.py', 'frontend/src/',
-  'packages/runpane/package.json', 'contracts/runpane/', 'claude-plugin/',
+  'packages/runpane/package.json', 'contracts/runpane/',
   'frontend/index.html', 'frontend/remote.html', 'tests/fixtures/notifySnapshot.ts',
   'scripts/pane-run-script.js', 'scripts/pane-remote-setup.js', 'scripts/import-agent-farm-profiles.js',
 ];
@@ -79,7 +79,7 @@ export const LANES = {
 // Paths no lane reads. A change only here skips every lane; the always-run
 // jobs (Quality Checks, Type Check and Lint, Markdown Links) still check it.
 export const LANE_FREE = [
-  'mobile/', 'native/', 'glasses/', 'tools/',
+  'mobile/', 'native/', 'glasses/', 'tools/', 'claude-plugin/',
   'screenshots/', 'images/', 'briefs/', 'README.md', 'CONTRIBUTING.md', 'RUNBOOK.md', 'SECURITY.md',
 ];
 
