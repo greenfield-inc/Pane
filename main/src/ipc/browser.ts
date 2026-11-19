@@ -57,7 +57,7 @@ const PAGE_WAIT_MS = 5_000;
 /** The person drives until this long after their last touch on a page an agent was driving. */
 export const TOUCH_HOLD_MS = 750;
 /** Password-like and key files browser_upload never sends. */
-const CREDENTIAL_FILE = /(^\.env(\..*)?$)|(\.(pem|key|p12|pfx)$)|(^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$)/i;
+const CREDENTIAL_FILE = /(^\.env(\..*)?$)|(\.(pem|key|p12|pfx|kdbx)$)|(^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$)|(^\.(npmrc|netrc|pypirc|git-credentials|pgpass)$)|(^credentials(\.json)?$)/i;
 
 const tabField = boundary.optional(boundary.string);
 const refField = boundary.optional(boundary.string);
@@ -308,15 +308,32 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
     await gate.set(tabId, driver);
   }
 
+  /** The tab's live page, refused when agents may not use it: DevTools open (writes), or not a web page. */
+  async function usablePage(tab: ToolPanel, write: boolean): Promise<BrowserPageContents> {
+    const contents = await livePage(tab);
+    if (write && (contents.isDevToolsOpened() || (contents.devToolsWebContents !== null && !contents.devToolsWebContents.isDestroyed()))) {
+      throw new PaneError('ERR_BROWSER_DEVTOOLS_OPEN', `DevTools is open on tab ${tab.id}, and agents don't act on a page while the person inspects it. Nothing ran.`, 'Ask the person to close DevTools on that tab, then try again.');
+    }
+    refuseNonWebPage(tab, contents, 'shows');
+    return contents;
+  }
+
+  /** Agents read and act only on http(s) pages (and a blank one): never a file: or chrome: page in a tab. */
+  function refuseNonWebPage(tab: ToolPanel, contents: BrowserPageContents, verb: 'shows' | 'is now on'): void {
+    let protocol = '';
+    try { protocol = new URL(contents.getURL()).protocol; } catch { protocol = ''; }
+    if (protocol === 'http:' || protocol === 'https:' || contents.getURL() === 'about:blank' || contents.getURL() === '') return;
+    throw new PaneError('ERR_BROWSER_URL_REFUSED', `Tab ${tab.id} ${verb} a ${protocol || 'non-web'} page, and agents read and act only on http and https pages.${verb === 'is now on' ? ' The call ran; nothing more will on that page.' : ' Nothing ran.'}`, 'Load an http or https page with browser_navigate, or use another tab.');
+  }
+
   /** Runs a call on a tab: reads go straight through; writes wait their turn behind the person. */
   async function onTab<Result>(caller: BrowserCaller, tabId: string | undefined, write: boolean, work: (page: PageDriver, tab: ToolPanel, contents: BrowserPageContents) => Promise<Result>): Promise<Result> {
     const tab = pickTab(caller, tabId, write);
     const run = async () => {
-      const contents = await livePage(tab);
-      if (write && (contents.isDevToolsOpened() || (contents.devToolsWebContents !== null && !contents.devToolsWebContents.isDestroyed()))) {
-        throw new PaneError('ERR_BROWSER_DEVTOOLS_OPEN', `DevTools is open on tab ${tab.id}, and agents don't act on a page while the person inspects it. Nothing ran.`, 'Ask the person to close DevTools on that tab, then try again.');
-      }
-      return work(driverFor(tab, contents), tab, contents);
+      const contents = await usablePage(tab, write);
+      const result = await work(driverFor(tab, contents), tab, contents);
+      refuseNonWebPage(tab, contents, 'is now on');
+      return result;
     };
     return write ? gate.run(tab.id, agentName(caller.panelId), paneCommandSignal(), run) : run();
   }
@@ -342,7 +359,7 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
     const own = host.tabs(caller.paneId).find(tab => openerOf(tab, caller) === 'you' && (() => { try { return new URL(host.page(tab.id)?.getURL() || tabState(tab).currentUrl || '').origin === origin; } catch { return false; } })());
     if (own) {
       return gate.run(own.id, agentName(caller.panelId), paneCommandSignal(), async () => {
-        const contents = await livePage(own);
+        const contents = await usablePage(own, true);
         await driverFor(own, contents).navigate({ url });
         return { ...after(own, contents), reused: true, next: 'Read it with browser_snapshot, then act on refs.' };
       });
@@ -375,7 +392,7 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
     return onTab(caller, tabId, false, async (page, tab) => {
       const shot = await page.snapshot();
       const result: SnapshotResult = { ok: true, tab: tab.id, ...shot };
-      if (shot.truncated) result.note = 'The page is long, so the snapshot was cut off. Scroll, or use browser_evaluate to read a part of it.';
+      if (shot.truncated) result.note = 'The page is long, so text past the limit was left out; every control on the page still has a ref. Use browser_evaluate to read a part of the text.';
       else delete result.truncated;
       return result;
     });

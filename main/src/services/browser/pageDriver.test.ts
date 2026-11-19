@@ -1,9 +1,10 @@
 import { EventEmitter } from 'events';
 import { describe, expect, it } from 'vitest';
-import { ALLOWED_CDP_METHODS, PageDriver, type BrowserPageContents } from './pageDriver';
+import { agentInputInFlight, ALLOWED_CDP_METHODS, PageDriver, type BrowserPageContents } from './pageDriver';
 
 /** A page whose debugger records every method sent to it and opens a confirm() on a click. */
 function recordingPage() {
+  const log: string[] = [];
   const sent: string[] = [];
   const debug = Object.assign(new EventEmitter(), {
     attached: false,
@@ -34,14 +35,15 @@ function recordingPage() {
     isLoading: () => false,
     isDevToolsOpened: () => false,
     devToolsWebContents: null,
-    insertText: async () => undefined,
-    sendInputEvent: () => undefined,
+    insertText: async (text: string) => { await new Promise(resolve => setTimeout(resolve, 20)); log.push(`insert ${text}`); },
+    sendInputEvent: (event: { type: string; keyCode: string }) => { log.push(`key ${event.type} ${event.keyCode} agent=${agentInputInFlight(1)}`); },
     capturePage: async () => ({ toPNG: () => Buffer.from('png'), getSize: () => ({ width: 800, height: 600 }) }),
     loadURL: async () => undefined,
     reload: () => { reloads += 1; page.emit('did-stop-loading'); },
     navigationHistory: { canGoBack: () => true, goBack: () => page.emit('did-stop-loading'), canGoForward: () => false, goForward: () => undefined },
     executeJavaScriptInIsolatedWorld: async (_world: number, [{ code }]: { code: string }[]) => {
       const method = /\)\.(\w+)\([^()]*\)$/.exec(code)?.[1];
+      if (method === 'focus') log.push(`focus ${/focus\("(\w+)"/.exec(code)?.[1]}`);
       if (method === 'snapshot') return { snapshot: '- button "Delete" [ref=e1]', truncated: false, url: 'http://localhost/', title: 'Sign up' };
       if (method === 'point') return { x: 10, y: 20 };
       if (method === 'select') return ['ca'];
@@ -50,7 +52,7 @@ function recordingPage() {
     },
     debugger: debug,
   });
-  return { page, sent, reloads: () => reloads };
+  return { page, sent, log, reloads: () => reloads };
 }
 
 describe('page driver', () => {
@@ -97,5 +99,25 @@ describe('page driver', () => {
     await expect(driver.type('e1', 'x', false, false)).rejects.toMatchObject({ code: 'ERR_BROWSER_STALE_REF' });
     await driver.snapshot();
     await expect(driver.type('e1', 'x', false, false)).resolves.toEqual({});
+  });
+
+  it('runs actions on one page one at a time, so two agents\' typing never interleaves', async () => {
+    const { page, log } = recordingPage();
+    const driver = new PageDriver(page);
+    await driver.snapshot();
+    await Promise.all([driver.type('e1', 'first', false, false), driver.type('e2', 'second', false, false)]);
+    expect(log.filter(line => line.startsWith('focus') || line.startsWith('insert'))).toEqual(['focus e1', 'insert first', 'focus e2', 'insert second']);
+  });
+
+  it('marks an agent\'s keys as the agent\'s while they reach the page, so Pane never runs them as shortcuts', async () => {
+    const { page, log } = recordingPage();
+    const driver = new PageDriver(page);
+    await driver.snapshot();
+    expect(agentInputInFlight(1)).toBe(false);
+    await driver.press('Meta+W', undefined);
+    await driver.press('Escape', undefined);
+    expect(log.filter(line => line.startsWith('key keyDown'))).toEqual(['key keyDown W agent=true', 'key keyDown Escape agent=true']);
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(agentInputInFlight(1)).toBe(false);
   });
 });

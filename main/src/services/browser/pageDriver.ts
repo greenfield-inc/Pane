@@ -88,6 +88,8 @@ const ACTIONABLE_WAIT_MS = 5_000;
 /** How long after its input an action looks for a dialog or file picker it opened. */
 const SETTLE_MS = 150;
 const NAVIGATION_WAIT_MS = 30_000;
+/** How long one call into the page script may take (a blocked page never answers). */
+const PAGE_CALL_MS = 10_000;
 const EVALUATE_TIMEOUT_MS = 30_000;
 const EVALUATE_RESULT_LIMIT = 64 * 1024;
 export const WAIT_DEFAULT_MS = 10_000;
@@ -117,6 +119,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/** The driver of each page, so Pane's own key handling can tell an agent's keys from the person's. */
+const drivers = new Map<number, PageDriver>();
+
+/**
+ * Whether input arriving at this page now is an agent's. Pane's webview hotkey forwarder skips it,
+ * so an agent's Meta+W reaches the page instead of closing a Pane tab.
+ */
+export function agentInputInFlight(webContentsId: number): boolean {
+  return drivers.get(webContentsId)?.isAgentInput() ?? false;
+}
+
 /**
  * Drives one browser tab's page for agents. It is the only module that sends debugger commands,
  * and it sends only ALLOWED_CDP_METHODS, attached through attachDebugger. Reading the page and
@@ -131,9 +144,13 @@ export class PageDriver {
   private dispatching = 0;
   private lastDispatchEnd = 0;
   private screenshots: Promise<void> = Promise.resolve();
+  private actions: Promise<void> = Promise.resolve();
   private readonly dialogWaiters = new Set<() => void>();
 
-  constructor(private readonly contents: BrowserPageContents) {}
+  constructor(private readonly contents: BrowserPageContents) {
+    drivers.set(contents.id, this);
+    contents.once('destroyed', () => { if (drivers.get(contents.id) === this) drivers.delete(contents.id); });
+  }
 
   get pendingDialog(): PendingDialog | undefined {
     return this.dialog;
@@ -147,9 +164,55 @@ export class PageDriver {
   /** Refs from before now stop working until the next snapshot (the person took over). */
   revokeRefs(): void {
     this.refsRevoked = true;
+    void this.page('revoke').catch(() => undefined);
+  }
+
+  // Actions on one page run one at a time: two agents' typing never interleaves in one field.
+  click(target: ClickTarget, button: 'left' | 'right' | 'middle', double: boolean): Promise<ActionOutcome & { x: number; y: number }> {
+    return this.exclusive(() => this.clickNow(target, button, double));
+  }
+
+  type(ref: string, text: string, clear: boolean, submit: boolean): Promise<ActionOutcome> {
+    return this.exclusive(() => this.typeNow(ref, text, clear, submit));
+  }
+
+  press(chord: string, ref: string | undefined): Promise<ActionOutcome> {
+    return this.exclusive(() => this.pressNow(chord, ref));
+  }
+
+  select(ref: string, values: string[]): Promise<string[]> {
+    return this.exclusive(() => this.selectNow(ref, values));
+  }
+
+  scroll(ref: string | undefined, dx: number, dy: number): Promise<void> {
+    return this.exclusive(() => this.scrollNow(ref, dx, dy));
+  }
+
+  navigate(target: { url: string } | { history: 'back' | 'forward' | 'reload' }): Promise<void> {
+    return this.exclusive(() => this.navigateNow(target));
+  }
+
+  answerDialog(accept: boolean, text: string | undefined): Promise<PendingDialog> {
+    return this.exclusive(() => this.answerDialogNow(accept, text));
+  }
+
+  evaluate(expression: string, ref: string | undefined): Promise<Evaluated> {
+    return this.exclusive(() => this.evaluateNow(expression, ref));
+  }
+
+  upload(ref: string | undefined, paths: string[]): Promise<void> {
+    return this.exclusive(() => this.uploadNow(ref, paths));
+  }
+
+  private exclusive<Result>(work: () => Promise<Result>): Promise<Result> {
+    const run = this.actions.then(work, work);
+    this.actions = run.then(() => undefined, () => undefined);
+    return run;
   }
 
   async snapshot(): Promise<PageReading> {
+    // Listening for dialogs from the first call means a dialog never leaves a read hanging.
+    await this.attach();
     this.refuseWhileDialog();
     const reading = decodeOptionalBoundary(await this.page('snapshot'), readingSchema);
     if (!reading) throw new PaneError('ERR_BROWSER_PAGE_FAILED', 'The page did not return a snapshot.', 'Try again; if the page is still loading, call browser_wait first.');
@@ -176,7 +239,7 @@ export class PageDriver {
     return run;
   }
 
-  async click(target: ClickTarget, button: 'left' | 'right' | 'middle', double: boolean): Promise<ActionOutcome & { x: number; y: number }> {
+  private async clickNow(target: ClickTarget, button: 'left' | 'right' | 'middle', double: boolean): Promise<ActionOutcome & { x: number; y: number }> {
     this.refuseWhileDialog();
     const { x, y } = 'ref' in target ? await this.actionablePoint(target.ref) : target;
     const outcome = await this.input(async () => {
@@ -189,7 +252,7 @@ export class PageDriver {
     return { ...outcome, x, y };
   }
 
-  async type(ref: string, text: string, clear: boolean, submit: boolean): Promise<ActionOutcome> {
+  private async typeNow(ref: string, text: string, clear: boolean, submit: boolean): Promise<ActionOutcome> {
     this.refuseWhileDialog();
     await this.focus(ref, clear);
     return this.input(async () => {
@@ -200,19 +263,19 @@ export class PageDriver {
     }, false);
   }
 
-  async press(chord: string, ref: string | undefined): Promise<ActionOutcome> {
+  private async pressNow(chord: string, ref: string | undefined): Promise<ActionOutcome> {
     this.refuseWhileDialog();
     const { key, modifiers } = parseChord(chord);
     if (ref) await this.focus(ref, false);
     return this.input(() => this.key(key, modifiers), true);
   }
 
-  async select(ref: string, values: string[]): Promise<string[]> {
+  private async selectNow(ref: string, values: string[]): Promise<string[]> {
     this.refuseWhileDialog();
     return decodeBoundary(await this.withRef(ref, () => this.page('select', ref, values)), boundary.array(boundary.string));
   }
 
-  async scroll(ref: string | undefined, dx: number, dy: number): Promise<void> {
+  private async scrollNow(ref: string | undefined, dx: number, dy: number): Promise<void> {
     this.refuseWhileDialog();
     if (ref === undefined && (dx !== 0 || dy !== 0)) {
       const center = await this.viewportCenter();
@@ -223,7 +286,7 @@ export class PageDriver {
   }
 
   /** Loads a URL (already checked to be http or https), or goes back, forward or reloads; returns once loaded. */
-  async navigate(target: { url: string } | { history: 'back' | 'forward' | 'reload' }): Promise<void> {
+  private async navigateNow(target: { url: string } | { history: 'back' | 'forward' | 'reload' }): Promise<void> {
     this.refuseWhileDialog();
     if ('url' in target) {
       await this.contents.loadURL(target.url).catch((cause: unknown) => {
@@ -246,6 +309,7 @@ export class PageDriver {
 
   /** Returns once every condition holds, or fails at the timeout. */
   async wait(conditions: { text?: string; url?: string; ref?: string }, timeoutMs: number): Promise<void> {
+    await this.attach();
     this.refuseWhileDialog();
     if (conditions.ref && this.refsRevoked) throw stale('The person took over this tab, so refs from before are revoked.');
     const deadline = Date.now() + timeoutMs;
@@ -262,7 +326,7 @@ export class PageDriver {
     }
   }
 
-  async answerDialog(accept: boolean, text: string | undefined): Promise<PendingDialog> {
+  private async answerDialogNow(accept: boolean, text: string | undefined): Promise<PendingDialog> {
     const dialog = this.dialog;
     if (!dialog) throw new PaneError('ERR_BROWSER_NO_DIALOG', 'This tab has no dialog open. Nothing ran.', 'Call browser_tabs to see which tab has one.');
     await this.attach();
@@ -272,7 +336,7 @@ export class PageDriver {
   }
 
   /** Runs an expression in the page (or a function of a ref's element); the value as JSON, capped. */
-  async evaluate(expression: string, ref: string | undefined): Promise<Evaluated> {
+  private async evaluateNow(expression: string, ref: string | undefined): Promise<Evaluated> {
     this.refuseWhileDialog();
     let source = expression;
     if (ref) {
@@ -291,7 +355,18 @@ export class PageDriver {
       });
     let timer: NodeJS.Timeout | undefined;
     const overdue = new Promise<'overdue'>(resolve => { timer = setTimeout(() => resolve('overdue'), EVALUATE_TIMEOUT_MS + 2_000); });
-    const result = await Promise.race([evaluated, overdue]).finally(() => clearTimeout(timer));
+    // A script that opens alert() or confirm() blocks until it is answered: say so at once.
+    let dialogWaiter: (() => void) | undefined;
+    const dialogOpened = new Promise<'dialog'>(resolve => { dialogWaiter = () => resolve('dialog'); this.dialogWaiters.add(dialogWaiter); });
+    evaluated.catch(() => undefined);
+    const result = await Promise.race([evaluated, overdue, dialogOpened]).finally(() => {
+      clearTimeout(timer);
+      if (dialogWaiter) this.dialogWaiters.delete(dialogWaiter);
+    });
+    if (result === 'dialog') {
+      const dialog = this.dialog;
+      throw new PaneError('ERR_BROWSER_DIALOG_PENDING', `The script opened a ${dialog?.type ?? 'dialog'} ("${(dialog?.message ?? '').slice(0, 120)}"), and the page is blocked until it is answered. The script is still running.`, 'Answer it with browser_dialog; the script then finishes, but its value is not returned.');
+    }
     if (result === 'overdue') {
       await this.send('Runtime.terminateExecution').catch(() => undefined);
       throw evaluateTimeout();
@@ -310,7 +385,7 @@ export class PageDriver {
   }
 
   /** Puts files into a file input by ref, or into the file picker the page opened. Paths are already checked. */
-  async upload(ref: string | undefined, paths: string[]): Promise<void> {
+  private async uploadNow(ref: string | undefined, paths: string[]): Promise<void> {
     this.refuseWhileDialog();
     if (!ref) {
       const chooser = this.chooser;
@@ -339,7 +414,12 @@ export class PageDriver {
 
   /** Runs a call on the page script in Pane's isolated world. */
   private page(method: Parameters<typeof pageCall>[0], ...args: Parameters<typeof pageCall>[1][]): Promise<JsonValue> {
-    return this.contents.executeJavaScriptInIsolatedWorld(PANE_WORLD_ID, [{ code: pageCall(method, ...args) }], false);
+    const call = this.contents.executeJavaScriptInIsolatedWorld(PANE_WORLD_ID, [{ code: pageCall(method, ...args) }], false);
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new PaneError('ERR_BROWSER_PAGE_FAILED', `The page did not answer within ${PAGE_CALL_MS / 1000} seconds; it may be busy or showing a dialog Pane did not see. Nothing more ran.`, 'Call browser_tabs to check for a dialog, or ask the person to look at the tab.')), PAGE_CALL_MS);
+    });
+    return Promise.race([call, late]).finally(() => clearTimeout(timer));
   }
 
   /** Runs a ref call, turning the page's stale and not-yet-actionable answers into errors. */
@@ -400,6 +480,8 @@ export class PageDriver {
       this.lastDispatchEnd = Date.now();
       // While a dialog blocks the page this reply waits for the answer, so it is never awaited.
       if (interceptChooser) void this.send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => undefined);
+      // The page goes back to its real focus, so a chat app marks nothing read and blur still saves.
+      void this.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => undefined);
     }
     return this.outcome();
   }

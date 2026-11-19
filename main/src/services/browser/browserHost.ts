@@ -52,7 +52,8 @@ function newestPage(panelId: string): Electron.WebContents | undefined {
   for (const [id, context] of getPaneWebviewContextMap()) {
     if (context.panelId !== panelId) continue;
     const contents = webContents.fromId(id);
-    if (!contents || contents.isDestroyed()) continue;
+    // Only a browser tab's own page: never another kind of WebContents that reused a mapped id.
+    if (!contents || contents.isDestroyed() || contents.getType() !== 'webview') continue;
     if (!newest || contents.id > newest.id) newest = contents;
   }
   return newest;

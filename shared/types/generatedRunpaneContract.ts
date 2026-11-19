@@ -979,7 +979,6 @@ export const RUNPANE_CONTRACT = {
         "runpane browser open --url <url> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
-      "additive": true,
       "toolsets": [
         "core",
         "browser"
@@ -6380,7 +6379,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane browser snapshot [--tab <tab-id>] [--json] [--pane-dir <path>]",
         "",
-        "Pane's browser, shared with the person, signed in as them. Read the page as an accessibility tree with element refs (e12), plus its URL and title. Act on elements by their refs. Password values are masked. Long pages are cut off with a note. A new snapshot, a navigation, or the person taking over makes older refs stale.",
+        "Pane's browser, shared with the person, signed in as them. Read the page as an accessibility tree with element refs (e12), plus its URL and title. Act on elements by their refs. Password values are masked. On a long page, text past the limit is left out and every control keeps its ref. A new snapshot, a navigation, or the person taking over makes older refs stale.",
         "",
         "Options:",
         "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
@@ -29015,7 +29014,7 @@ export const RUNPANE_CONTRACT = {
       "browser snapshot": {
         "name": "browser snapshot",
         "summary": "Pane's browser, shared with the person, signed in as them. Read the page as an accessibility tree with element refs (e12), plus its URL and title.",
-        "details": "Act on elements by their refs. Password values are masked. Long pages are cut off with a note. A new snapshot, a navigation, or the person taking over makes older refs stale.",
+        "details": "Act on elements by their refs. Password values are masked. On a long page, text past the limit is left out and every control keeps its ref. A new snapshot, a navigation, or the person taking over makes older refs stale.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [

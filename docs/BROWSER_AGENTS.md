@@ -67,12 +67,13 @@ during an agent's call; the result tells the agent to fill it with `browser_uplo
 Every browser tab in every Pane shares one sign-in store, so a tab an agent opens is signed in
 wherever you are. An agent that a page steers with hidden instructions (prompt injection) can
 act as you on any site you are signed in to, by opening that site in its Pane. It cannot reach
-other Panes' tabs, Pane's own window, cookie values, `file:` or `chrome:` pages, or files
+other Panes' tabs, Pane's own window, the cookie store (a page's script can still read its own
+non-HttpOnly cookies through `browser_evaluate`), `file:` or `chrome:` pages, or files
 outside its worktree. The Settings switch is the off button.
 
 ## Watching and taking over
 
-While an agent's call runs, the tab is outlined, its address bar reads "Claude Code is driving ·
+While an agent's call runs, the tab is outlined, a chip over the top of the page reads "Claude is driving ·
 Take over" (with the agent's name), and a pointer marks each click. The chip stays 2 seconds
 after the agent's last call, so a run of calls reads as one. While you drive, it reads "You're
 driving · Hand to" and the agent's name.

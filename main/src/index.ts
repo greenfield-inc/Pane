@@ -3,6 +3,7 @@ import './versionQuery';
 // Load ReadableStream polyfill before any other imports
 import './polyfills/readablestream';
 import { getChatTabManager } from './services/chatTabs';
+import { agentInputInFlight } from './services/browser/pageDriver';
 import { disposeDevices, setDeviceMachines } from './ipc/devices';
 import { acknowledgeUpdateQuiescence } from './services/updateShutdown';
 
@@ -682,6 +683,8 @@ async function createWindow() {
     const keySequence = createWebviewSequenceState();
     wvContents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
+      // An agent's keys belong to the page: Meta+W from browser_press never closes a Pane tab.
+      if (agentInputInFlight(wvContents.id)) return;
       const isBrowserTab = webviewContextMap.has(wvContents.id);
       const forwarded = webviewKeysToForward(input, {
         config: configManager.getConfig(),
