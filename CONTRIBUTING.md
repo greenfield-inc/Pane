@@ -176,6 +176,8 @@ To test approvals' timers without waiting, start a dev build with
   `playwright.ci.stabilizing-electron.config.ts` (Electron) list specs that CI
   runs and reports but `CI result` does not wait for, each with the reason in
   its comment. A spec moves back to its required config once that is fixed.
+  A failed Electron run uploads its traces and screenshots as the
+  `electron-test-results-<shard>` artifact.
 - `pnpm test:chat-tabs` runs the chat tab journeys and the loop Session journey
   (`tests/loop-sessions.spec.ts`): it launches Electron from
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each

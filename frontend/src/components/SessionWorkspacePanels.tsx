@@ -56,7 +56,8 @@ import {
 } from '../utils/panelLayout';
 
 const EMPTY_PANELS: ToolPanel[] = [];
-const SESSION_INSPECTOR_TABS = ['files', 'changes'] as const;
+const SESSION_INSPECTOR_TABS = ['files', 'changes', 'todos'] as const;
+const SESSION_INSPECTOR_LABELS = { files: 'Files', changes: 'Changes', todos: 'To-dos' } as const satisfies Record<SessionInspectorTab, string>;
 type SessionInspectorTab = typeof SESSION_INSPECTOR_TABS[number];
 
 /** The Overview tab as the tab strip sees it: a permanent tab named Overview. */
@@ -156,6 +157,7 @@ export function SessionWorkspacePanels({
   todosContent,
   todosWaiting = 0,
   changesContent,
+  sidebarTodosContent,
   toolbarActions,
   stageNotice,
   chromeInline = false,
@@ -167,6 +169,11 @@ export function SessionWorkspacePanels({
 }: {
   agentPanel: ToolPanel; agentPanelIds: string[];
   overviewContent: ReactNode; changesContent: ReactNode; toolbarActions?: ReactNode;
+  /**
+   * The sidebar's To-dos (T-37): the to-dos the Session requested. Given the opener that shows the
+   * split's To-dos tab, which the Session calls after pointing that tab at the to-do.
+   */
+  sidebarTodosContent?: (showTodosTab: () => void) => ReactNode;
   /** The To-dos tab's list (T-23), drawn by the Session like the Overview. */
   todosContent: ReactNode;
   /** The Session's to-dos' approvals waiting on you: the To-dos tab's amber count. */
@@ -466,6 +473,13 @@ export function SessionWorkspacePanels({
     <SessionAddToolMenu disabled={!loaded} onAdd={tool => { void addTool(tool, groupId); }} />
   ), [loaded, addTool]);
 
+  // The sidebar's To-dos open in the split's To-dos tab, put back beside the conversation if it was moved away.
+  const showTodosTab = useCallback(() => {
+    const current = usePanelStore.getState().layouts[sessionId];
+    if (current) applyLayout(activatePanelInLayout(withSessionTabs(current, overviewId, todosId, agentPanelId), todosId));
+  }, [sessionId, overviewId, todosId, agentPanelId, applyLayout]);
+
+  const inspectorTabButtons = useRef<Partial<Record<SessionInspectorTab, HTMLButtonElement | null>>>({});
   const selectSidebarTab = (tab: SessionInspectorTab) => {
     if (tab === 'files') void toggleTool('explorer');
     else setSidebarTab(tab);
@@ -776,7 +790,7 @@ export function SessionWorkspacePanels({
             {approval.render('Close split', approval.onClose, approvalFocused)}
           </div>
         )}
-        {showSidebar && <aside ref={asideRef} data-focus-region="right-panel" aria-label={sidebarTab === 'files' ? 'Session files' : 'Session changes'}
+        {showSidebar && <aside ref={asideRef} data-focus-region="right-panel" aria-label={`Session ${SESSION_INSPECTOR_LABELS[sidebarTab].toLowerCase()}`}
           // Maximized, it covers the stage and terminal, which keep their size underneath (P4).
           className={asideMaximized
             ? 'absolute inset-0 z-20 flex min-w-0 flex-col bg-bg-primary'
@@ -786,17 +800,24 @@ export function SessionWorkspacePanels({
             minimum={filesResize.floor} maximum={filesResize.cap} {...filesResize.separatorHandlers} />}
           <div role="tablist" aria-label="Session inspector" className="flex h-8 flex-shrink-0 items-stretch border-b border-border-primary bg-surface-secondary px-1">
             {SESSION_INSPECTOR_TABS.map(tab => (
-              <button key={tab} type="button" role="tab" aria-selected={sidebarTab === tab}
+              <button key={tab} ref={button => { inspectorTabButtons.current[tab] = button; }} type="button" role="tab" aria-selected={sidebarTab === tab}
+                aria-label={tab === 'todos' && todosWaiting > 0 ? `To-dos, ${todosWaiting} waiting on you` : SESSION_INSPECTOR_LABELS[tab]}
                 onClick={() => selectSidebarTab(tab)}
                 onKeyDown={event => {
                   if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
                   event.preventDefault();
                   const index = SESSION_INSPECTOR_TABS.indexOf(tab);
                   const offset = event.key === 'ArrowRight' ? 1 : SESSION_INSPECTOR_TABS.length - 1;
-                  selectSidebarTab(SESSION_INSPECTOR_TABS[(index + offset) % SESSION_INSPECTOR_TABS.length]);
+                  const next = SESSION_INSPECTOR_TABS[(index + offset) % SESSION_INSPECTOR_TABS.length];
+                  selectSidebarTab(next);
+                  // Focus follows the selection, so the next press moves on from there.
+                  inspectorTabButtons.current[next]?.focus();
                 }}
-                className={`flex flex-1 items-center justify-center rounded-t-md border border-transparent px-2 text-[12px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus ${sidebarTab === tab ? 'border-border-primary border-b-surface-primary bg-surface-primary text-text-primary -mb-px' : 'text-text-tertiary hover:text-text-primary hover:bg-surface-hover'}`}>
-                {tab === 'files' ? 'Files' : 'Changes'}
+                className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-t-md border border-transparent px-2 text-[12px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus ${sidebarTab === tab ? 'border-border-primary border-b-surface-primary bg-surface-primary text-text-primary -mb-px' : 'text-text-tertiary hover:text-text-primary hover:bg-surface-hover'}`}>
+                <span className="truncate">{SESSION_INSPECTOR_LABELS[tab]}</span>
+                {tab === 'todos' && todosWaiting > 0 && (
+                  <span aria-hidden="true" className="inline-flex h-4 min-w-4 flex-shrink-0 items-center justify-center rounded-full bg-status-warning px-1 text-[10px] font-semibold tabular-nums text-text-on-status-warning">{todosWaiting}</span>
+                )}
               </button>
             ))}
             {asideMaximized && <RestoreRegionButton className="my-0.5 ml-1 h-7" onRestore={() => setAsideMaximized(false)} />}
@@ -804,6 +825,7 @@ export function SessionWorkspacePanels({
           <div className="relative min-h-0 flex-1 overflow-y-auto">
             {sidebarTab === 'files' && explorer && <PanelContainer panel={explorer} isActive />}
             {sidebarTab === 'changes' && changesContent}
+            {sidebarTab === 'todos' && sidebarTodosContent?.(showTodosTab)}
           </div>
         </aside>}
       </div>

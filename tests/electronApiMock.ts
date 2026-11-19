@@ -72,6 +72,11 @@ export interface TodosMockHooks {
   setTodoReplyRefusal(on: boolean): string;
   /** Stands in for main after a change elsewhere (an answer moves a to-do on): a new list, then todos:changed. */
   setTodosSnapshot(snapshot: TodosSnapshot): void;
+  /**
+   * Stands in for main switching this window to saved computer `computerId` (All machines, T-37): config names
+   * it, its to-dos replace these without a todos:changed, then the host-change resync.
+   */
+  switchTodosHost(computerId: string, todos: Pick<TodosMockOptions, 'snapshot' | 'details'>): void;
   /** The approvals' commands sent so far (an answer, a close). */
   getNotifyCommands(): NotifyCommand[];
   /** Stands in for main: a new approvals snapshot. */
@@ -2581,6 +2586,17 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getNotifyWindowSizes() {
           return clone(notifyWindowSizes);
+        },
+        switchTodosHost(computerId: string, todos: Pick<TodosMockOptions, 'snapshot' | 'details'>) {
+          remoteDaemonConfig.client.mode = 'remote';
+          remoteDaemonConfig.client.activeProfileId = computerId;
+          configState.remoteDaemon = clone(remoteDaemonConfig);
+          if (todosState) {
+            todosState.snapshot = clone(todos.snapshot);
+            todosState.details = clone(todos.details);
+            saveTodosState(todosState);
+          }
+          emit('remote-daemon:resync-required', { hostChanged: true });
         },
         setTodosSnapshot(snapshot: TodosSnapshot) {
           if (!todosState) return;

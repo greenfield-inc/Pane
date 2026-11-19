@@ -298,7 +298,7 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   while Pane is in front. ⌘F finds text in Decide, the Summary (the frame
   shares Pane's origin so it can be searched, with scripts still off) and
   each reference. ⌘/ lists every key. The right
-  sidebar (Files, Changes) is never covered. The Session's title
+  sidebar (Files, Changes, To-dos) is never covered. The Session's title
   bar shows **Approvals n · n ready**, and a Session row's count in the
   sidebar opens the newest ready-again approval, or the first waiting one. A
   Session's orchestrator chat docks one compact card above its composer:

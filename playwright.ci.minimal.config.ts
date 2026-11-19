@@ -96,6 +96,7 @@ const BROWSER_SPECS = [
   'theme-screenshots.spec.ts',
   'todo-session-approvals.spec.ts',
   'todo-session-sidebar.spec.ts',
+  'todo-split-rule.spec.ts',
   'todos-images.spec.ts',
   'todos-machines.spec.ts',
   'todos-page-frame.spec.ts',
