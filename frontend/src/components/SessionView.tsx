@@ -407,15 +407,20 @@ export const SessionView = memo(() => {
         // Agent pages this desktop has never placed (opened while it showed
         // something else) go beside the primary group, inactive. Tabs already
         // in its remembered layout keep their place.
-        const { layout: reconciledLayout } = reconcileLayout(base, liveIdsNow, splitIdsNow);
-        const layout = fallbackActiveId
+        const { layout: reconciledLayout, focusFolded } = reconcileLayout(base, liveIdsNow, splitIdsNow);
+        // Folding a saved 3+ split layout (D-448) carried its focus and shown tab into the second
+        // split: that is the saved choice, so the host's last tab does not override it.
+        const keepSaved = remembered || focusFolded;
+        const layout = fallbackActiveId && !focusFolded
           ? activatePanelInLayout(reconciledLayout, fallbackActiveId)
           : reconciledLayout;
         const focusedGroupId = layout.focusedGroupId && findGroup(layout.root, layout.focusedGroupId)
           ? layout.focusedGroupId
           : primaryGroup(layout.root).id;
-        const shownPanelId = remembered ? findGroup(layout.root, focusedGroupId)?.activePanelId : fallbackActiveId;
+        const shownPanelId = keepSaved ? findGroup(layout.root, focusedGroupId)?.activePanelId : fallbackActiveId;
         if (shownPanelId) setActivePanelInStore(sid, shownPanelId);
+        // The host's active tab mirrors what this desktop now shows.
+        if (focusFolded && shownPanelId && shownPanelId !== fallbackActiveId && !remembered) panelApi.setActivePanel(sid, shownPanelId).catch(() => {});
         // What this desktop showed first is its own from now on, even if it
         // never changes it, so another client's later split does not leak in.
         if (!remembered) rememberPaneLayout(hostId, sid, layout);

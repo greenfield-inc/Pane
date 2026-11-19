@@ -1835,7 +1835,7 @@ test('a saved split without the Overview gains it as the leftmost tab and keeps 
   const sessionId = '__orchestration_session_plansterminal__';
   const now = new Date(0).toISOString();
   const planPage = { id: 'plan-page', sessionId, type: 'browser', title: 'plan.html', state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5 } };
-  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [50, 50], children: [
+  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [0.5, 0.5], children: [
     { type: 'group', id: 'g1', panelIds: ['__orchestration_panel_plans_claude'], activePanelId: '__orchestration_panel_plans_claude' },
     { type: 'group', id: 'g2', panelIds: ['plan-page'], activePanelId: 'plan-page' },
   ] }, focusedGroupId: 'g1' };
@@ -1852,7 +1852,7 @@ test('a Session link lands on its Overview, from another Session and when alread
   const sessionId = '__orchestration_session_plansterminal__';
   const now = new Date(0).toISOString();
   const planPage = { id: 'plan-page', sessionId, type: 'browser', title: 'plan.html', state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5 } };
-  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [50, 50], children: [
+  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [0.5, 0.5], children: [
     { type: 'group', id: 'g1', panelIds: ['__orchestration_panel_plans_claude'], activePanelId: '__orchestration_panel_plans_claude' },
     { type: 'group', id: 'g2', panelIds: ['plan-page'], activePanelId: 'plan-page' },
   ] }, focusedGroupId: 'g1' };
@@ -1881,7 +1881,7 @@ test('keyboard focus arriving in the Overview makes its split the one tab action
   const chatId = '__orchestration_panel_focusproof_claude';
   const now = new Date(0).toISOString();
   const workPage = { id: 'work-page', sessionId, type: 'browser', title: 'work.html', state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5 } };
-  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [50, 50], children: [
+  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [0.5, 0.5], children: [
     { type: 'group', id: 'chat-group', panelIds: [chatId, 'work-page'], activePanelId: 'work-page' },
     { type: 'group', id: 'overview-group', panelIds: [`session-overview:${sessionId}`], activePanelId: `session-overview:${sessionId}` },
   ] }, focusedGroupId: 'chat-group' };
@@ -3641,12 +3641,60 @@ test('D-289: a worker\'s approval shows its asking tab live in the Session colum
   await expect(origin.getByTestId('approval-origin-tab')).toBeVisible();
 });
 
+for (const stacked of [true, false]) {
+  test(`an open approval uses one of the two Session groups (${stacked ? 'already stacked' : 'split while open'})`, async ({ page }) => {
+    const key = 'plans';
+    const sessionId = '__orchestration_session_plansterminal__';
+    const now = new Date(0).toISOString();
+    const tool: ToolPanel = {
+      id: 'plan-page', sessionId, type: 'browser', title: 'plan.html',
+      state: { isActive: false, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } },
+      metadata: { createdAt: now, lastActiveAt: now, position: 5, openPlacement: 'split' },
+    };
+    const single = overviewFoldedIntoChat(key);
+    const initialLayout = stacked ? {
+      ...single,
+      root: { type: 'split', id: 'stack', direction: 'column', sizes: [0.5, 0.5], children: [
+        single.root,
+        { type: 'group', id: 'plan', panelIds: [tool.id], activePanelId: tool.id },
+      ] },
+    } : single;
+    await installSessionsFixture(page, [sessionFixture(key, 'Plan demo', '', '', now)], [], {
+      notifySnapshot: sessionApprovalsSnapshot(), initialLayout, initialPanels: stacked ? [tool] : [],
+    });
+    await gotoApp(page);
+    await page.getByTestId('orchestration-session-plans').click();
+    await page.getByTestId('session-approvals-button').click();
+    const standalone = page.getByTestId('session-approval-split');
+    if (!stacked) {
+      await expect(standalone).toBeVisible();
+      await page.evaluate(panel => {
+        // SAFETY: installElectronApiMock installs this fixture control.
+        const mock = (window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void } }).__paneTestElectronMock;
+        mock.emitPanelCreated(panel);
+      }, tool);
+    }
+    const groups = page.locator('[data-panel-group-id]');
+    await expect(groups).toHaveCount(2);
+    const overlay = page.getByTestId('session-approval-overlay');
+    await expect(overlay).toBeVisible();
+    await expect(standalone).toHaveCount(0);
+    // It covers the second group exactly (the lower one when stacked, the right one when split
+    // beside the chat): no third column, and the conversation beside or above it stays uncovered.
+    const [covered, under] = [await layoutBox(overlay), await layoutBox(groups.nth(1))];
+    expect(covered).toEqual(under);
+    await overlay.getByTestId('approval-column-close').click();
+    await expect(overlay).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'plan.html' })).toBeVisible();
+  });
+}
+
 test('F-8: opened cold from the sidebar count, the approval waits for the saved split and lays over it', async ({ page }) => {
   const sessionId = '__orchestration_session_plansterminal__';
   const now = new Date(0).toISOString();
   // A saved layout from before the restart: the conversation, and plan.html split to its right.
   const planPage = { id: 'plan-page', sessionId, type: 'browser', title: 'plan.html', state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5 } };
-  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [50, 50], children: [
+  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [0.5, 0.5], children: [
     { type: 'group', id: 'g1', panelIds: ['__orchestration_panel_plans_claude'], activePanelId: '__orchestration_panel_plans_claude' },
     { type: 'group', id: 'g2', panelIds: ['plan-page'], activePanelId: 'plan-page' },
   ] }, focusedGroupId: 'g1' };

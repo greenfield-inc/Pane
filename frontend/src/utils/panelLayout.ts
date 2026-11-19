@@ -39,6 +39,11 @@ export type { DropZone } from './layoutTree';
 interface ReconciledPanelLayout {
   layout: SessionPanelLayout;
   changed: boolean;
+  /**
+   * Folding a saved layout to two splits moved focus and its shown tab out of a folded split
+   * (D-448). That repaired focus is the saved one: a caller keeps it over any other fallback.
+   */
+  focusFolded: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,14 +148,20 @@ function withinSplitLimit(root: PanelLayoutNode, next: PanelLayoutNode, refused:
   return allGroups(next).length > before && !canSplitLayout(root) ? refused() : next;
 }
 
+/** A layout folded to two splits, and whether its focus moved out of a folded split. */
+interface CappedLayout {
+  layout: SessionPanelLayout;
+  focusFolded: boolean;
+}
+
 /**
  * Fold a layout saved with more than two splits (before D-448) into two: the first split keeps its
  * tabs, and every later split's tabs join the second, in reading order. No tab is lost. When the
  * focused split is folded, focus and its shown tab move to the second split.
  */
-function capSplits(layout: SessionPanelLayout): SessionPanelLayout {
+function capSplits(layout: SessionPanelLayout): CappedLayout {
   const groups = allGroups(layout.root);
-  if (groups.length <= MAX_MAIN_SPLITS) return layout;
+  if (groups.length <= MAX_MAIN_SPLITS) return { layout, focusFolded: false };
   const keep = groups[MAX_MAIN_SPLITS - 1];
   const folded = groups.slice(MAX_MAIN_SPLITS);
   const foldedIds = new Set(folded.map(group => group.id));
@@ -166,10 +177,13 @@ function capSplits(layout: SessionPanelLayout): SessionPanelLayout {
     };
   };
   return {
-    ...layout,
-    root: normalize(fold(layout.root)),
-    focusedGroupId: focusedFolded ? keep.id : layout.focusedGroupId,
-    zoomedGroupId: layout.zoomedGroupId && foldedIds.has(layout.zoomedGroupId) ? null : layout.zoomedGroupId,
+    layout: {
+      ...layout,
+      root: normalize(fold(layout.root)),
+      focusedGroupId: focusedFolded ? keep.id : layout.focusedGroupId,
+      zoomedGroupId: layout.zoomedGroupId && foldedIds.has(layout.zoomedGroupId) ? null : layout.zoomedGroupId,
+    },
+    focusFolded: focusedFolded !== undefined,
   };
 }
 
@@ -590,7 +604,7 @@ export function reconcile(
 
   const cleaned = normalize(cleanNode(saved.root));
   // A layout saved with more than two splits opens as two (D-448).
-  const layout = capSplits({ ...saved, root: cleaned });
+  const { layout, focusFolded } = capSplits({ ...saved, root: cleaned });
   if (layout.root !== cleaned) changed = true;
   let root = layout.root;
 
@@ -655,6 +669,7 @@ export function reconcile(
   return {
     layout: { ...layout, root, focusedGroupId, zoomedGroupId },
     changed,
+    focusFolded,
   };
 }
 

@@ -636,6 +636,9 @@ describe('reconcile', () => {
     ]);
     expect(result.focusedGroupId).toBe('g2');
     expect(result.zoomedGroupId).toBeNull();
+    expect(reconcile(saved, live).focusFolded).toBe(true);
+    // Folding a split that did not hold focus leaves focus where it was, and says so.
+    expect(reconcile({ ...saved, focusedGroupId: 'g1' }, live)).toMatchObject({ focusFolded: false, layout: { focusedGroupId: 'g1' } });
     expect(allPanelIds(result.root).sort()).toEqual([...live].sort());
   });
 

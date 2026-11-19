@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, ListTodo, PanelRight, Terminal } from 'lucide-react';
-import type { PanelLayoutNode, SessionPanelLayout, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
+import type { SessionPanelLayout, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { panelApi } from '../services/panelApi';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useConfigStore } from '../stores/configStore';
@@ -56,6 +56,7 @@ import {
   type DropZone,
 } from '../utils/panelLayout';
 import { SPLIT_LIMIT_REASON } from '../utils/mainSplits';
+import { approvalPlacement, approvalTargetGroups, type StageApprovalPlacement } from '../utils/stageApprovalPlacement';
 
 const EMPTY_PANELS: ToolPanel[] = [];
 const SESSION_INSPECTOR_TABS = ['files', 'changes', 'todos'] as const;
@@ -105,16 +106,6 @@ function launchesCommand(panel: ToolPanel): boolean {
   // SAFETY: The terminal discriminator determines the custom-state shape.
   const state = panel.state.customState as TerminalPanelState | undefined;
   return !!state?.initialCommand?.trim() || !!state?.isCliPanel || !!state?.agentType;
-}
-
-/** Every group in a layout subtree, in order. */
-function groupsIn(node: PanelLayoutNode): Array<Extract<PanelLayoutNode, { type: 'group' }>> {
-  return node.type === 'group' ? [node] : node.children.flatMap(groupsIn);
-}
-
-/** The Session's right split view: the last child of a side-by-side root, if there is one (D-261). */
-function rightSplit(layout: SessionPanelLayout | null | undefined): PanelLayoutNode | undefined {
-  return layout?.root.type === 'split' && layout.root.direction === 'row' ? layout.root.children.at(-1) : undefined;
 }
 
 /**
@@ -702,34 +693,36 @@ export function SessionWorkspacePanels({
   );
 
   const approvalOpen = approval?.open ?? false;
-  const right = rightSplit(layout);
+  // What it lays over: the right split, or at two stacked splits the lower one (D-448).
+  const targets = useMemo(() => approvalTargetGroups(layout), [layout]);
+  const hasTargets = targets.length > 0;
   // Decided when it opens: over the split there was, or in a split of its own that ✕ collapses.
-  const [approvalMode, setApprovalMode] = useState<'over' | 'split' | null>(null);
+  const [approvalMode, setApprovalMode] = useState<StageApprovalPlacement | null>(null);
   // Only once this visit's saved layout has loaded: opened from the sidebar count, the approval can
   // arrive before the Session's split does, and deciding then would open a third column (F-8).
   useLayoutEffect(() => {
-    setApprovalMode(mode => (!approvalOpen ? null : !loaded ? mode : mode ?? (right ? 'over' : 'split')));
-  }, [approvalOpen, right, loaded]);
-  // The person closed the split under it: the column keeps its own.
-  const placement = approvalMode === 'over' && !right ? 'split' : approvalMode;
+    setApprovalMode(mode => (!approvalOpen ? null : !loaded ? mode : mode ?? (hasTargets ? 'over' : 'split')));
+  }, [approvalOpen, hasTargets, loaded]);
+  // Recomputed as the layout changes: the person closed the split under it (a column of its own),
+  // or the tree grew to two splits under a column of its own (it moves over them, never a third).
+  const placement = approvalPlacement(approvalMode, layout);
   // The column is a focus stop of its own (data-focus-region="approvals"); while it has focus, its
   // active tab carries the accent and the chat's dims, as a split's would (D-249, D-335).
   const approvalFocused = useFocusRegionStore(state => state.region === 'approvals') && focusWithin;
   // The column going away (✕, Esc on ✕, an answer) with focus in it would leave focus on nothing: it goes to the chat.
   useLeaveOnClose(approvalOpen, focusWithin, leaveApprovalColumn);
   // It covers the right split's groups, found by id on the stage, and follows them as they resize.
-  const rightGroupKey = useMemo(() => (right ? groupsIn(right).map(group => group.id).join('|') : ''), [right]);
+  const rightGroupKey = useMemo(() => targets.map(group => group.id).join('|'), [targets]);
   const rightGroups = useCallback((stage: HTMLElement) => (rightGroupKey ? rightGroupKey.split('|') : []).flatMap(id => {
     const element = stage.querySelector(`[data-panel-group-id="${CSS.escape(id)}"]`);
     return element ? [element] : [];
   }), [rightGroupKey]);
   // ✕ names what the split shows underneath.
   const underneath = useMemo(() => {
-    if (!right) return undefined;
-    const groups = groupsIn(right);
-    const group = groups.find(candidate => candidate.id === layout?.focusedGroupId) ?? groups[0];
+    if (!hasTargets) return undefined;
+    const group = targets.find(candidate => candidate.id === layout?.focusedGroupId) ?? targets[0];
     return tabs.find(panel => panel.id === group?.activePanelId)?.title;
-  }, [right, layout?.focusedGroupId, tabs]);
+  }, [targets, hasTargets, layout?.focusedGroupId, tabs]);
 
   if (!loaded) {
     return <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">

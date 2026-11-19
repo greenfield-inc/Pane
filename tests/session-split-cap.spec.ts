@@ -41,13 +41,12 @@ const terminal = (id: string, title: string, position: number, isActive = false)
   metadata: { createdAt: now, lastActiveAt: now, position },
 });
 
-// The first terminal is the pinned dock terminal and never enters the layout.
-const panels = [
+// The first terminal is the pinned dock terminal and never enters the layout. `hostActive` is the
+// tab the host last marked active (what a desktop with no remembered layout falls back to).
+const panelsWith = (hostActive: string) => [
   terminal('dock', 'Terminal', 0),
-  terminal('alpha', 'Alpha', 1, true),
-  terminal('gamma', 'Gamma', 2),
-  terminal('beta', 'Beta', 3),
-  terminal('delta', 'Delta', 4),
+  ...[['alpha', 'Alpha'], ['gamma', 'Gamma'], ['beta', 'Beta'], ['delta', 'Delta']]
+    .map(([id, title], index) => terminal(id, title, index + 1, id === hostActive)),
 ];
 
 const group = (id: string, panelIds: string[], activePanelId = panelIds[0]) => ({ type: 'group' as const, id, panelIds, activePanelId });
@@ -68,14 +67,14 @@ const threeSplits: SessionPanelLayout = {
   },
 };
 
-async function openPane(page: Page, layout: SessionPanelLayout, dark: boolean) {
+async function openPane(page: Page, layout: SessionPanelLayout, dark: boolean, hostActive = 'alpha') {
   await page.setViewportSize({ width: 1400, height: 860 });
   await page.addInitScript(() => Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'MacIntel' }));
   await installElectronApiMock(page, {
     platform: 'darwin',
     initialProjects: [project],
     initialSessions: [session],
-    initialPanels: panels,
+    initialPanels: panelsWith(hostActive),
     initialLayout: layout,
     activeProjectId: project.id,
     initialConfig: { theme: dark ? 'dark' : 'light-rounded', appearanceMode: 'fixed' },
@@ -153,8 +152,23 @@ for (const dark of [false, true]) {
     await expect(groups(page)).toHaveCount(2);
     await expect.poll(() => stripIds(page, 0)).toEqual(['alpha']);
     await expect.poll(() => stripIds(page, 1)).toEqual(['gamma', 'beta', 'delta']);
-    // The folded split was focused: its shown tab stays shown.
+    // Alpha is separately marked active on the host. The saved focus follows Delta.
+    await expect(groups(page).nth(1)).toHaveAttribute('data-group-focused', 'true');
+    await expect(groups(page).nth(0)).toHaveAttribute('data-group-focused', 'false');
     await expect(shownTab(page, 1)).toHaveAttribute('data-panel-id', 'delta');
     await still(page, `3-saved-three-splits-open-as-two-${theme}`);
+  });
+}
+
+// The host's last active tab, matching or stale (another split, or the same one), never undoes the
+// focus and shown tab that folding carried over from the focused third split.
+for (const [hostActive, why] of [['delta', 'matching'], ['alpha', 'stale, in the other split'], ['beta', 'stale, in the same split']] as const) {
+  test(`a folded three-split layout keeps its saved focus with a ${why} host active tab`, async ({ page }) => {
+    await openPane(page, threeSplits, false, hostActive);
+    await expect(groups(page)).toHaveCount(2);
+    await expect(groups(page).nth(1)).toHaveAttribute('data-group-focused', 'true');
+    await expect(groups(page).nth(0)).toHaveAttribute('data-group-focused', 'false');
+    await expect(shownTab(page, 1)).toHaveAttribute('data-panel-id', 'delta');
+    await expect(shownTab(page, 0)).toHaveAttribute('data-panel-id', 'alpha');
   });
 }
