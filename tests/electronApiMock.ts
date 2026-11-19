@@ -1937,6 +1937,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             remoteDaemonConfig.client.profiles.push(profile);
           }
           syncRemoteDaemonConfig();
+          // As main does: saving a connection updates the config, which it announces.
+          emit('config:updated', clone(configState));
           return success(clone(remoteDaemonConfig.client.profiles));
         },
         deleteConnectionProfile: (profileId: string) => {
@@ -1956,6 +1958,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             });
           }
           syncRemoteDaemonConfig();
+          emit('config:updated', clone(configState));
           return success(clone(remoteDaemonConfig.client));
         },
         updateClientState: (updates: { activeProfileId?: string | null; mode?: 'local' | 'remote' }) => {
