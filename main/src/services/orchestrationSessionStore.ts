@@ -21,7 +21,7 @@ import {
   type OrchestrationSessionRecord,
   type OrchestrationSessionStoreData,
 } from '../../../shared/types/orchestrationSession';
-import { getPaneChatPanelId } from '../../../shared/types/paneChat';
+import { getPaneChatPanelId, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { CONFIGURED_AGENT_IDS, agentLabel, configuredAgentSchema, type ConfiguredAgentId } from '../../../shared/agents';
 
 const paneChatAgentSchema = configuredAgentSchema;
@@ -160,6 +160,9 @@ export interface OrchestrationSessionMembership {
   name: string;
   internalSessionId: string;
   archived: boolean;
+  agent: PaneChatAgent;
+  /** The tab of the Session's own agent (its orchestrator), if it has one. */
+  agentPanelId: string | null;
   panelIds: string[];
   associations: Array<{ paneId: string; panelIds: string[]; machine?: OrchestrationAssociation['machine'] }>;
 }
@@ -184,18 +187,14 @@ export class OrchestrationSessionStore {
    */
   memberships(): OrchestrationSessionMembership[] {
     this.ensureLoaded();
-    return this.data.sessions.map(session => ({
-      id: session.id,
-      name: session.name,
-      internalSessionId: session.internalSessionId,
-      archived: session.archived === true,
-      panelIds: Object.values(session.panelIds),
-      associations: session.associations.map(association => {
-        const member: OrchestrationSessionMembership['associations'][number] = { paneId: association.paneId, panelIds: [...association.panelIds] };
-        if (association.machine) member.machine = { ...association.machine };
-        return member;
-      }),
-    }));
+    return this.data.sessions.map(membershipOf);
+  }
+
+  /** One Session's `memberships` entry, copying nothing of the others: to-dos ask on every status tick. */
+  membership(sessionId: string): OrchestrationSessionMembership | undefined {
+    this.ensureLoaded();
+    const session = this.data.sessions.find(candidate => candidate.id === sessionId);
+    return session && membershipOf(session);
   }
 
   /**
@@ -471,6 +470,23 @@ function decodes(value: JsonValue, schema: BoundarySchema<unknown>, label: strin
 
 function emptyStore(): OrchestrationSessionStoreData {
   return { version: ORCHESTRATION_SESSION_STORE_VERSION, sessions: [] };
+}
+
+function membershipOf(session: OrchestrationSessionRecord): OrchestrationSessionMembership {
+  return {
+    id: session.id,
+    name: session.name,
+    internalSessionId: session.internalSessionId,
+    archived: session.archived === true,
+    agent: session.agent,
+    agentPanelId: session.panelIds[session.agent] ?? null,
+    panelIds: Object.values(session.panelIds),
+    associations: session.associations.map(association => {
+      const member: OrchestrationSessionMembership['associations'][number] = { paneId: association.paneId, panelIds: [...association.panelIds] };
+      if (association.machine) member.machine = { ...association.machine };
+      return member;
+    }),
+  };
 }
 
 function cloneStore(value: OrchestrationSessionStoreData): OrchestrationSessionStoreData {

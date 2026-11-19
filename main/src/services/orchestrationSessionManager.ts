@@ -844,21 +844,22 @@ export class OrchestrationSessionManager extends EventEmitter {
    * from the in-memory store without the lock (the to-do service reads it on every status).
    */
   todoSessionInfo(sessionId: string): TodoSessionRecord | undefined {
-    const record = this.store.read().sessions.find(session => session.id === sessionId);
+    // Membership only: cloning the whole store (every Session's history) per lookup stalls the 2 s to-dos tick.
+    const record = this.store.membership(sessionId);
     if (!record) return undefined;
     const paneIds = record.associations.map(association => association.paneId)
       .filter(paneId => this.sessionManager.getSession(paneId)?.archived === false);
     return {
-      id: record.id, name: record.name, agent: record.agent, orchestratorPanelId: record.panelIds[record.agent] ?? null,
-      ownPaneId: record.internalSessionId, archived: record.archived === true, paneIds,
+      id: record.id, name: record.name, agent: record.agent, orchestratorPanelId: record.agentPanelId,
+      ownPaneId: record.internalSessionId, archived: record.archived, paneIds,
     };
   }
 
   /** To-dos: the Session a tab works in, and whether it is that Session's orchestrator. Reads without the lock. */
   todoSessionOfPanel(panelId: string, paneId: string | undefined): TodoPanelSession | undefined {
-    const sessions = this.store.read().sessions;
-    const own = sessions.find(session => Object.values(session.panelIds).includes(panelId) || (paneId !== undefined && session.internalSessionId === paneId));
-    if (own) return { sessionId: own.id, sessionName: own.name, orchestrator: Object.values(own.panelIds).includes(panelId), ownPane: true, agent: own.agent };
+    const sessions = this.store.memberships();
+    const own = sessions.find(session => session.panelIds.includes(panelId) || (paneId !== undefined && session.internalSessionId === paneId));
+    if (own) return { sessionId: own.id, sessionName: own.name, orchestrator: own.panelIds.includes(panelId), ownPane: true, agent: own.agent };
     const member = paneId === undefined ? undefined : sessions.find(session => session.associations.some(association => association.paneId === paneId));
     return member ? { sessionId: member.id, sessionName: member.name, orchestrator: false, ownPane: false, agent: member.agent } : undefined;
   }
