@@ -116,11 +116,14 @@ export const REMOTE_STREAMLESS_CHANNELS = new Set([
   'relay:client:preview-address',
 ]);
 
-/** Idempotent viewer bookkeeping required to restore a connected workspace. `panels:initialize` starts a terminal only once. */
+/**
+ * Idempotent viewer bookkeeping required to restore a connected workspace. `panels:initialize` starts a terminal only once.
+ * `ports:phone-address` gives a web port a phone address once; a browser tab shown while the workspace comes back asks for it on mount.
+ */
 export const REMOTE_RESTORE_CHANNELS = new Set([
   'panels:initialize', 'terminal:resize', 'panels:resize-terminal', 'terminal:setVisibility',
   'terminal:ack', 'terminal:resetFlowControl', 'sessions:mark-viewed',
-  'panels:set-active', 'terminal:reply',
+  'panels:set-active', 'terminal:reply', 'ports:phone-address',
 ]);
 
 /** A host that runs each request id once refuses a write with this code, before running it, while its memory of answers is full; resending is safe. */
