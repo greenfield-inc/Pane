@@ -12,7 +12,15 @@ const record = (command: NotifyCommand) => {
 };
 Object.defineProperty(window, 'electronAPI', { configurable: true, value: {
   paneSecrets: {
-    list: async () => ({ success: true, data: { secrets: [], storage: { kind: 'keychain', encrypted: true } } }),
+    list: async () => ({
+      success: true,
+      data: {
+        secrets: [], references: [], storage: { kind: 'keychain', encrypted: true }, leases: [],
+        machines: [{ id: 'local', name: 'This computer', online: true, refusal: null, memoryOnly: false }],
+        leaseLengths: {}, moveVault: null,
+      },
+    }),
+    onChanged: () => () => undefined,
     set: async (_project: string, _name: string, value: string) => { saved.push(value); return { success: true, data: false }; },
   },
 } });
