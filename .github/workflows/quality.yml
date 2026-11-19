@@ -219,12 +219,12 @@ jobs:
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait lint-checks
 
-    # CI result's gate and its contract with this file (expected jobs, needs,
-    # skip manifest). Here rather than in CI result, which runs it every time
-    # at the end of the critical path.
+    # CI result's gate and budgets and their contract with this file (expected
+    # jobs, needs, skip manifest, a budget per job). Here rather than in CI
+    # result, which runs it every time at the end of the critical path.
     - name: Test the CI result gate and the pre-push hook
       if: ${{ !cancelled() }}
-      run: node --test scripts/ci-gate.test.mjs scripts/pre-push.test.mjs scripts/ci-test-inventory.test.mjs
+      run: node --test scripts/ci-gate.test.mjs scripts/ci-timings.test.mjs scripts/pre-push.test.mjs scripts/ci-test-inventory.test.mjs
 
     # Every tracked test file runs in a lane of this workflow (or another
     # workflow), or is listed with its reason in scripts/ci-test-inventory.mjs.
@@ -782,14 +782,14 @@ jobs:
       contents: read
       actions: read
     steps:
-    # Three files at the run's exact commit, read in parallel: about 2 s
+    # Four files at the run's exact commit, read in parallel: about 2 s
     # faster than actions/checkout and its post step. Any failed read fails.
     - name: Fetch the gate
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
         pids=()
-        for file in .github/workflows/quality.yml scripts/ci-gate.mjs scripts/ci-timings.mjs; do
+        for file in .github/workflows/quality.yml scripts/ci-gate.mjs scripts/ci-timings.mjs scripts/ci-budgets.json; do
           mkdir -p "$(dirname "$file")"
           gh api -H 'Accept: application/vnd.github.raw' "repos/$GITHUB_REPOSITORY/contents/$file?ref=$GITHUB_SHA" > "$file" &
           pids+=("$!")
@@ -803,10 +803,14 @@ jobs:
 
     # Each job's head SHA, runner and waiting/setup/running seconds, in the
     # job summary and the log, for measuring CI speed (scripts/ci-timings.mjs).
-    - name: Record job timings
+    # A job over a ceiling in scripts/ci-budgets.json fails this step; a
+    # missed target or a value that could not be measured is only reported.
+    - name: Record job timings and check budgets
       if: ${{ always() }}
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        node scripts/ci-timings.mjs --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --out "$RUNNER_TEMP/ci-run-timings.json" --summary "$GITHUB_STEP_SUMMARY"
-        cat "$RUNNER_TEMP/ci-run-timings.json"
+        status=0
+        node scripts/ci-timings.mjs --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --out "$RUNNER_TEMP/ci-run-timings.json" --summary "$GITHUB_STEP_SUMMARY" --budgets scripts/ci-budgets.json || status=$?
+        if [ -f "$RUNNER_TEMP/ci-run-timings.json" ]; then cat "$RUNNER_TEMP/ci-run-timings.json"; fi
+        exit "$status"

@@ -57,17 +57,33 @@ export function skipManifest({ event, changed }) {
   return skip;
 }
 
-/** Top-level job ids in a workflow file, read without a YAML parser. */
-export function workflowJobIds(workflowText) {
-  const ids = [];
+/**
+ * Top-level jobs in a workflow file, read without a YAML parser: each job's
+ * id, its `name:` (the id when it has none) and its step names, in order.
+ */
+export function workflowJobs(workflowText) {
+  const jobs = [];
   let inJobs = false;
   for (const line of workflowText.split(/\r?\n/)) {
     if (/^jobs:\s*(#.*)?$/.test(line)) { inJobs = true; continue; }
-    if (inJobs && /^\S/.test(line) && !line.startsWith('#')) break;
-    const match = inJobs && /^ {2}([A-Za-z0-9_-]+):\s*(#.*)?$/.exec(line);
-    if (match) ids.push(match[1]);
+    if (!inJobs) continue;
+    if (/^\S/.test(line) && !line.startsWith('#')) break;
+    const id = /^ {2}([A-Za-z0-9_-]+):\s*(#.*)?$/.exec(line);
+    if (id) { jobs.push({ id: id[1], name: id[1], steps: [] }); continue; }
+    const job = jobs.at(-1);
+    const name = /^ {4}name:\s*(.+?)\s*$/.exec(line);
+    if (job && name) job.name = unquote(name[1]);
+    const step = /^ {4}- name:\s*(.+?)\s*$/.exec(line);
+    if (job && step) job.steps.push(unquote(step[1]));
   }
-  return ids;
+  return jobs;
+}
+
+const unquote = (value) => value.replace(/^(['"])(.*)\1$/, '$2');
+
+/** Top-level job ids in a workflow file. */
+export function workflowJobIds(workflowText) {
+  return workflowJobs(workflowText).map((job) => job.id);
 }
 
 /**
