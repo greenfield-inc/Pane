@@ -300,7 +300,7 @@ try {
     }
   });
   // The browser tabs agents hold: their pages stay alive while hidden (P4).
-  ipcRenderer.on('browser-panel:held', (_event: Electron.IpcRendererEvent, data: { tabs: Array<{ panelId: string; sessionId?: string }> }) => {
+  ipcRenderer.on('browser-panel:held', (_event: Electron.IpcRendererEvent, data: { tabs: Array<{ panelId: string; sessionId?: string; painting?: boolean }> }) => {
     try {
       window.dispatchEvent(new CustomEvent('browser-panel:held', { detail: data }));
     } catch (e) {

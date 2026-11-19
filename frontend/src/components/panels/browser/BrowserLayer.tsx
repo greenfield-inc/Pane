@@ -3,10 +3,11 @@ import type { ToolPanel } from '../../../../../shared/types/panels';
 import { usePanelStore } from '../../../stores/panelStore';
 import { panelApi } from '../../../services/panelApi';
 import { PanelErrorBoundary } from '../PanelErrorBoundary';
+import { reportShownTabs, type WatchedTab } from './browserWatch';
 
 const BrowserPanel = lazy(() => import('./BrowserPanel'));
 
-/** Main's event with the tabs agents hold (main/src/services/browser/browserHost.ts). */
+/** Main's event with the tabs whose pages stay alive (main/src/services/browser/browserHost.ts). */
 const HELD_EVENT = 'browser-panel:held';
 /** Main's event while a call runs on a tab: its hidden page paints, transparent, so captures are current. */
 const BUSY_EVENT = 'browser-panel:busy';
@@ -16,7 +17,8 @@ const BUSY_EVENT = 'browser-panel:busy';
  * DOM or unmounts, so every browser tab's page renders here, in one layer that stays mounted across
  * tab and Pane switches. A tab's slot in its Pane only says where it is; the layer draws the page
  * over the slot when the tab is in view and hides it with CSS otherwise. A page mounts only while
- * its tab is in view or an agent holds it, so tabs nobody drives cost nothing when hidden.
+ * its tab is in view or main holds it (an agent acted on it, or a screen showed it in the last 15
+ * minutes), so tabs nobody uses cost nothing when hidden.
  */
 interface Slot { panel: ToolPanel; element: HTMLElement; active: boolean }
 
@@ -26,7 +28,7 @@ const lastRects = new Map<string, { left: number; top: number; width: number; he
 const lastPanels = new Map<string, ToolPanel>();
 /** Held tabs whose Pane's tabs this window asked main for, so it asks once. */
 const requested = new Set<string>();
-let held: ReadonlyArray<{ panelId: string; sessionId?: string }> = [];
+let held: ReadonlyArray<{ panelId: string; sessionId?: string; painting?: boolean }> = [];
 const busy = new Map<string, number>();
 let version = 0;
 const listeners = new Set<() => void>();
@@ -69,7 +71,7 @@ export const BrowserLayer = memo(function BrowserLayer() {
   useEffect(() => {
     const onHeld = (event: Event) => {
       // SAFETY: preload dispatches this event with main's { tabs } payload.
-      held = (event as CustomEvent<{ tabs: Array<{ panelId: string; sessionId?: string }> }>).detail.tabs;
+      held = (event as CustomEvent<{ tabs: Array<{ panelId: string; sessionId?: string; painting?: boolean }> }>).detail.tabs;
       changed();
     };
     window.addEventListener(HELD_EVENT, onHeld);
@@ -106,6 +108,11 @@ export const BrowserLayer = memo(function BrowserLayer() {
   for (const panels of Object.values(panelsBySession)) for (const panel of panels) if (panel.type === 'browser') byId.set(panel.id, panel);
   const ids = new Set([...slots.keys(), ...held.map(tab => tab.panelId)]);
   for (const id of lastPanels.keys()) if (!ids.has(id)) lastPanels.delete(id);
+  // Another device streams these, so their pages keep drawing while hidden here.
+  const streamed = new Set(held.filter(tab => tab.painting).map(tab => tab.panelId));
+  const shown = new Map<string, WatchedTab>();
+  // Main hears which tabs this window shows, so their pages outlive a switch away.
+  useEffect(() => reportShownTabs(shown));
 
   return (
     <>
@@ -120,9 +127,10 @@ export const BrowserLayer = memo(function BrowserLayer() {
         const visible = measured !== undefined && measured.width > 0 && measured.height > 0;
         const rect = visible ? { left: measured.left, top: measured.top, width: measured.width, height: measured.height } : lastRects.get(id) ?? { left: 0, top: 0, width: 1280, height: 800 };
         lastRects.set(id, rect);
-        // A hidden page is not drawn, and Chromium throttles it. While a call runs on it, it is drawn
-        // fully transparent under the tab in view, so its screenshots are current.
-        const painting = visible || busy.has(id);
+        if (visible) shown.set(id, { width: rect.width, height: rect.height });
+        // A hidden page is not drawn, and Chromium throttles it. While a call runs on it, or another
+        // device streams it, it is drawn fully transparent under the tab in view, so its frames are current.
+        const painting = visible || busy.has(id) || streamed.has(id);
         const style: CSSProperties = {
           position: 'fixed',
           ...rect,

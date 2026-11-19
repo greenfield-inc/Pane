@@ -24,7 +24,7 @@ opened one tab, or when the Pane has one; with several, the call fails with
 | Tool | Command | What it does |
 | --- | --- | --- |
 | `browser_open` | `runpane browser open --url <url>` | Opens a tab beside the agent, in a split, owned by it; reuses the agent's tab on the same origin |
-| `browser_tabs` | `runpane browser tabs` | The Pane's browser tabs: id, URL, title, who opened it, who is driving, any open dialog, files the agent downloaded, and whether an agent holds it or it is asleep |
+| `browser_tabs` | `runpane browser tabs` | The Pane's browser tabs: id, URL, title, who opened it, who is driving, any open dialog, files the agent downloaded, whether an agent holds it or it is asleep, which of your screens show it (`watching`) and its page size while a screen on another device controls it (`size`) |
 | `browser_close` | `runpane browser close` | Closes a tab the agent opened |
 | `browser_snapshot` | `runpane browser snapshot` | The page as an accessibility tree with refs (`e12`), plus URL and title. On a long page, text is left out before controls |
 | `browser_screenshot` | `runpane browser screenshot [--full-page]` | A PNG in the Pane's scratch folder; MCP clients get the image itself |
@@ -96,32 +96,33 @@ and fails with `ERR_BROWSER_PERSON_DRIVING` after 4 minutes. With DevTools open 
 
 ## Where a tab's page runs
 
-Each desktop draws its own copy of a tab. A call goes to the copy you watch:
+A tab's page lives on the computer that owns its Pane, signed in with that computer's sign-ins,
+and every agent call runs on that page. When the tab is not in view, its page loads in the
+background and the tab never comes forward. With no Pane window (a headless host), Pane loads the
+page in a hidden window, where it can't open popups or hand links to other apps, since nobody is
+there to approve them. When the window closes or comes back, each live page moves between it and
+a hidden window and reloads once from its URL.
 
-- **On a linked computer.** When you watch this Pane from another of your computers, linked in
-  **Settings › Your computers**, the call runs on that computer's copy: snapshots, clicks and
-  screenshots come from the page in front of you, the chip shows there, and touching the page or
-  pressing **Take over** there makes the agent wait. That copy uses that computer's sign-ins. An
-  upload sends the file from the agent's worktree (up to 10 MB per call) and stays on that
-  computer until the tab closes; the screenshot is saved on the agent's computer. A `localhost`
-  URL loads through that computer's tunnel for the port, and fails with `ERR_BROWSER_URL_REFUSED`
-  when the port has none.
-- **On the agent's computer.** Otherwise the call uses the tab here. When the tab is not in view,
-  its page loads in the background and the tab never comes forward. With no Pane window (a
-  headless host), Pane loads the page in a hidden window, where it can't open popups or hand
-  links to other apps, since nobody is there to approve them.
+When the page doesn't load within 5 seconds, the call fails with `ERR_BROWSER_NOT_SHOWING`. A call
+from an agent on another computer through `runpane workspace` fails with `ERR_BROWSER_LOCAL_ONLY`.
 
-When the page doesn't load within 5 seconds, the call fails with `ERR_BROWSER_NOT_SHOWING`, or
-`ERR_BROWSER_NOT_LINKED` on a host with no window. A
-computer that views this one over Tailscale, SSH or a manual URL without being linked can't run
-browser tools; link it. A call from an agent on another computer through `runpane workspace`
-fails with `ERR_BROWSER_LOCAL_ONLY`.
+Another computer showing this Pane still draws its own copy of the tab, with its own sign-ins.
+Agent calls never run on that copy, so it doesn't show what an agent does.
+
+### Page size
+
+The page fills its tab on the computer that owns it. When you take over a tab from a screen on
+another device (**Take over** in the chip there), the page takes that screen's size, with a phone's
+layout on a phone, and keeps it, through a sleep too, until you click into the tab on the owning
+computer. Watching from another screen, and agent calls, never change the size. `browser_tabs`
+reports it as `size`, and `browser_screenshot` captures the page at that size.
 
 ## Background tabs
 
-An agent holds each tab it calls, so the tab's page stays alive while you look at another tab or
-Pane: a half-filled form, the scroll position and the page's own state stay as they were. One
-agent can drive its held tabs at the same time.
+An agent holds each tab it calls, and each of your screens holds each tab it shows, so the tab's
+page stays alive while you look at another tab, Pane or device: a half-filled form, the scroll
+position and the page's own state stay as they were. One agent can drive its held tabs at the
+same time.
 
 - **Up to 4 per agent.** Holding a fifth puts the one idle longest to sleep, and the result's note
   names it.
@@ -130,7 +131,15 @@ agent can drive its held tabs at the same time.
   and its note says so; selecting the tab yourself reloads it too.
 - **When the agent goes.** Closing the agent's tab, or archiving its Pane, puts its held tabs to
   sleep at once.
+- **Tabs you watched stay 15 minutes.** A tab any of your screens showed (this computer's window,
+  another desktop) stays alive while it shows it and for 15 minutes after the last one moves away,
+  then sleeps the same way. At most 8 tabs stay alive this way, not counting agent holds; a ninth
+  puts to sleep the one off screen longest. A screen that stops reporting for 15 seconds (a
+  computer that slept or lost its connection) counts as gone.
 - **Tabs nobody holds** unload when hidden, as before.
+
+While another device watches a tab, its page keeps running at full speed when hidden on the
+owning computer, and makes no sound there unless that computer's window shows it.
 
 A held page costs memory but next to no energy while it waits. Measured on a Mac with four held,
 hidden pages (three small test pages and a GitHub pull request page): about 70 MB each for the

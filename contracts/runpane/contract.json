@@ -1027,7 +1027,7 @@
     {
       "name": "browser tabs",
       "mcpName": "browser_tabs",
-      "summary": "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, any pending dialog, whether an agent holds it or it is asleep, and files you downloaded.",
+      "summary": "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, any pending dialog, whether an agent holds it or it is asleep, which of the person's screens show it, its page size while a person's screen controls it, and files you downloaded.",
       "usage": [
         "runpane browser tabs [--json] [--pane-dir <path>]"
       ],
@@ -22163,6 +22163,41 @@
         "asleep": {
           "type": "boolean",
           "description": "Its hold ended, so its page reloads from its URL on the next call."
+        },
+        "watching": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "host",
+              "desktop",
+              "phone",
+              "web"
+            ]
+          },
+          "description": "The person's screens showing it now: \"host\" (this computer's window), \"desktop\" (another computer's Pane), \"phone\" (the phone app or the web app on a phone) or \"web\" (the web app in a desktop browser). The page lives on this computer either way, and you drive it for all of them."
+        },
+        "size": {
+          "type": "object",
+          "required": [
+            "width",
+            "height",
+            "mobile"
+          ],
+          "properties": {
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            },
+            "mobile": {
+              "type": "boolean",
+              "description": "The page has a phone's layout and touch."
+            }
+          },
+          "additionalProperties": false,
+          "description": "The page's size in CSS pixels while a person's screen on another device controls it (the screen they took over from). Absent while the page fills its tab here. Your calls never change it."
         },
         "dialog": {
           "$ref": "#/jsonSchemas/browserDialog"

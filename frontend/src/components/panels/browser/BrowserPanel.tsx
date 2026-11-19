@@ -76,13 +76,6 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   }, [remoteMode, ports]);
   const toHostUrl = useCallback((localUrl: string) => remapLoopbackPort(localUrl, localToHost), [localToHost]);
   const toHostUrlRef = useRef(toHostUrl);
-  const localToHostRef = useRef(localToHost);
-  useEffect(() => { localToHostRef.current = localToHost; }, [localToHost]);
-  // Main maps an agent's localhost URLs through this desktop's tunnels (docs/BROWSER_AGENTS.md).
-  useEffect(() => {
-    const wcId = pageWcIdRef.current;
-    if (wcId) void window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId, [...localToHost]);
-  }, [localToHost, panel.id, panel.sessionId]);
   // Navigation reads the current mapping without depending on it: a ports or
   // remote-mode update recomputes where a URL loads but never navigates the tab.
   const targetOfRef = useRef(targetOf);
@@ -467,7 +460,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     const register = () => {
       const wcId = webview.getWebContentsId();
       pageWcIdRef.current = wcId;
-      window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId, [...localToHostRef.current]);
+      window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId);
     };
     const onDomReady = () => {
       register();

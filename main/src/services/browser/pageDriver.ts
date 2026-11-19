@@ -2,6 +2,7 @@ import { PaneError } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { attachDebugger, type DebuggableContents } from '../debuggerLifetime';
 import { PANE_WORLD_ID, pageCall } from './pageScript';
+import type { BrowserPageSize } from '../../../../shared/types/panels';
 
 /**
  * The debugger methods the page driver may send, and nothing else: no Target, Browser, Storage or
@@ -21,6 +22,9 @@ export const ALLOWED_CDP_METHODS: ReadonlySet<string> = new Set([
   'DOM.querySelector',
   'DOM.setFileInputFiles',
   'Emulation.setFocusEmulationEnabled',
+  'Emulation.setDeviceMetricsOverride',
+  'Emulation.clearDeviceMetricsOverride',
+  'Emulation.setTouchEmulationEnabled',
 ]);
 
 /** The parts of a browser tab's WebContents the driver uses (Electron's WebContents fits). */
@@ -36,6 +40,9 @@ export interface BrowserPageContents extends DebuggableContents {
   isDevToolsOpened(): boolean;
   /** Set while Pane's docked DevTools (setDevToolsWebContents) inspects the page, which isDevToolsOpened misses. */
   readonly devToolsWebContents: { isDestroyed(): boolean } | null;
+  /** Chromium slows a hidden page's timers and painting while this is on. */
+  setBackgroundThrottling(allowed: boolean): void;
+  setAudioMuted(muted: boolean): void;
   /** Inserts text at the page's focus, whether or not the page has the window's focus. */
   insertText(text: string): Promise<void>;
   /** Sends a key to the page, whether or not it has the window's focus. */
@@ -154,6 +161,8 @@ export class PageDriver {
   private screenshots: Promise<void> = Promise.resolve();
   private actions: Promise<void> = Promise.resolve();
   private readonly dialogWaiters = new Set<() => void>();
+  /** The size a viewer in control gave the page; undefined while it fills its own view. */
+  private size: BrowserPageSize | undefined;
 
   constructor(private readonly contents: BrowserPageContents) {
     drivers.set(contents.id, this);
@@ -265,9 +274,32 @@ export class PageDriver {
     return reading;
   }
 
+  /**
+   * Gives the page a viewer's size (a phone's with its mobile layout and touch), or lets it fill its
+   * own view again. Agents' calls never change it.
+   */
+  async setPageSize(size: BrowserPageSize | undefined): Promise<void> {
+    if (JSON.stringify(size ?? null) === JSON.stringify(this.size ?? null)) return;
+    await this.attach();
+    if (size) {
+      await this.send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, deviceScaleFactor: 0, mobile: size.mobile });
+      await this.send('Emulation.setTouchEmulationEnabled', size.mobile ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
+    } else {
+      await this.send('Emulation.clearDeviceMetricsOverride');
+      await this.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    }
+    this.size = size;
+  }
+
   /** A PNG of what the tab shows, or of the whole page. One capture per tab at a time. */
   screenshot(fullPage: boolean): Promise<PageScreenshot> {
     const run = this.screenshots.then(async (): Promise<PageScreenshot> => {
+      const size = this.size;
+      if (!fullPage && size) {
+        // The view is the tab's size, and the page a viewer's: capture the page at its own size.
+        const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 } }), screenshotSchema);
+        return { png: Buffer.from(shot.data, 'base64'), width: size.width, height: size.height };
+      }
       if (!fullPage) {
         const image = await this.contents.capturePage();
         const size = image.getSize();
@@ -586,7 +618,8 @@ export class PageDriver {
     attachDebugger(this.contents);
     if (this.listening) return;
     this.listening = true;
-    this.contents.debugger.on('detach', () => { this.listening = false; this.dialog = undefined; this.chooser = undefined; });
+    // Chromium drops emulation with the session, so the size is set again on the next attach.
+    this.contents.debugger.on('detach', () => { this.listening = false; this.dialog = undefined; this.chooser = undefined; this.size = undefined; });
     this.contents.debugger.on('message', (_event, method, params) => {
       if (method === 'Page.javascriptDialogOpening') {
         const opened = decodeOptionalBoundary(params, dialogEventSchema);

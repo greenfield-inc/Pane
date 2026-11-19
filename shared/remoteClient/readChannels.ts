@@ -32,6 +32,8 @@ export const REMOTE_READ_CHANNELS = new Set([
   'devices:controls',
   'devices:logs',
   'devices:frame-rate',
+  // A screen saying it shows a browser tab, every 5 s: repeating a report changes nothing more.
+  'browser:watch',
   'config:get',
   'config:get-session-preferences',
   'ui-state:get-expanded',
