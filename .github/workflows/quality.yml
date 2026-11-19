@@ -329,17 +329,18 @@ jobs:
       uses: ./.github/actions/fetch-electron
 
     # SQLite built for Electron depends only on the runner image, arch,
-    # Electron version and the module's installed folder, so it is cached on
-    # those (the same key as Notes Native QA) and rebuilt only on a miss: no
-    # Electron 43 prebuilt exists to download. Pushes to main save it.
+    # Electron version, the module's installed folder and the rebuild tool, so
+    # it is cached on those and rebuilt only on a miss: no Electron 43 prebuilt
+    # exists to download. Pushes to main save it once the tests below pass.
     - name: Key the Electron SQLite build
       id: sqlite
       run: |
         electron="$(node -p "require('./node_modules/electron/package.json').version")"
         # The .pnpm folder name carries the version, patch hash and peer suffix.
         module="$(cd node_modules/.pnpm && printf '%s\n' better-sqlite3-multiple-ciphers@* | sort | paste -sd+ -)"
+        rebuild="$(cd node_modules/.pnpm && printf '%s\n' @electron+rebuild@* | sort | paste -sd+ -)"
         # The runner image fixes the compiler and system headers the build used.
-        echo "key=electron-sqlite-${ImageOS}-${ImageVersion}-${{ runner.arch }}-electron${electron}-${module}" >> "$GITHUB_OUTPUT"
+        echo "key=electron-sqlite-${ImageOS}-${ImageVersion}-${{ runner.arch }}-electron${electron}-${module}-${rebuild}" >> "$GITHUB_OUTPUT"
 
     - name: Restore the Electron SQLite build
       id: sqlite-cache
@@ -369,13 +370,6 @@ jobs:
       if: steps.sqlite-cache.outputs.cache-hit != 'true'
       run: scripts/ci-background.sh wait electron-rebuild
 
-    - name: Save the Electron SQLite build
-      if: steps.sqlite-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-      uses: actions/cache/save@v5
-      with:
-        path: node_modules/.pnpm/better-sqlite3-multiple-ciphers@*/node_modules/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node
-        key: ${{ steps.sqlite.outputs.key }}
-
     - name: Verify sandboxed Electron preload
       run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
 
@@ -385,6 +379,14 @@ jobs:
       run: xvfb-run -a pnpm test:chat-tabs
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
+
+    # Last, so only a build that Electron loaded and passed the tests with is saved.
+    - name: Save the Electron SQLite build
+      if: steps.sqlite-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v5
+      with:
+        path: node_modules/.pnpm/better-sqlite3-multiple-ciphers@*/node_modules/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node
+        key: ${{ steps.sqlite.outputs.key }}
 
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
   # change on a PR; always runs on pushes to main. Linux is tested at the
