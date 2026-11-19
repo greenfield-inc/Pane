@@ -577,6 +577,18 @@ describe('TodoService', () => {
     });
   });
 
+  describe('turned back on (T-39)', () => {
+    it('starts every moving to-do\'s quiet time again, so the time To-dos was off never reads as stuck', async () => {
+      const todo = await service.create({ title: 'Quiet' }, person);
+      now += 80 * 60_000; // off for 80 minutes: no supervisor passes ran
+      service.restartClocksAfterTurnedOn();
+      await service.supervisorPass();
+      expect(host.restarted).toEqual([]);
+      expect(service.detail(todo.number).activity.at(-1)?.body).toBe('To-dos was turned back on: its quiet time starts again now');
+      expect(service.get(todo.number)?.lastProgressAt).toBe(now);
+    });
+  });
+
   describe('launch resume', () => {
     it('at the 30-minute rung stops and starts a live quiet orchestrator again, not a Resume that does nothing (F-7)', async () => {
       const todo = await service.create({ title: 'Quiet' }, person);

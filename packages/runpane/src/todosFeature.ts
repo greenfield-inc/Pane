@@ -15,7 +15,7 @@ import { RunpaneError } from './errors';
 const todosConfigSchema = boundary.object({ todosEnabled: boundary.optional(boundary.boolean) });
 
 /** Whether To-dos is on in this Pane directory; a missing or unreadable config counts as off. */
-export function todosEnabled(paneDir: string): boolean {
+function todosEnabled(paneDir: string): boolean {
   try {
     return decodeBoundary(JSON.parse(fs.readFileSync(path.join(paneDir, 'config.json'), 'utf8')), todosConfigSchema).todosEnabled === true;
   } catch {
@@ -28,7 +28,7 @@ export function todosOn(paneDir?: string): boolean {
   return todosEnabled(resolvePaneDirectory(paneDir));
 }
 
-export const TODOS_DISABLED_CODE = 'TODOS_DISABLED';
+const TODOS_DISABLED_CODE = 'TODOS_DISABLED';
 
 export function todosDisabledError(): RunpaneError {
   return new RunpaneError(

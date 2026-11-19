@@ -164,7 +164,8 @@ export async function installSessionsFixture(
   fixtureOptions: SessionFixtureOptions = {},
 ): Promise<void> {
   await installElectronApiMock(page, {
-    initialConfig: { defaultOrchestratorAgent: fixtureOptions.defaultOrchestratorAgent ?? 'claude', ...fixtureOptions.initialConfig },
+    // Session layouts as they are with To-dos on (T-39); a spec that checks To-dos off passes todosEnabled: false.
+    initialConfig: { defaultOrchestratorAgent: fixtureOptions.defaultOrchestratorAgent ?? 'claude', todosEnabled: true, ...fixtureOptions.initialConfig },
     initialProjects: fixtureOptions.projects ?? [{ id: 1, name: 'Pane fixtures', path: '/tmp/pane-fixtures', active: true }],
     activeProjectId: fixtureOptions.activeProjectId,
     initialSessions: paneSessions,

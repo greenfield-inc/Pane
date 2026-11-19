@@ -605,6 +605,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const todoClock = todoTimeScale === 1 ? Date.now : () => todoClockStart + (Date.now() - todoClockStart) * todoTimeScale;
   const todoService = new TodoService(new TodoStore(databaseService.getDb()), createTodoHost(services, commandRegistry), todoClock);
   services.todoService = todoService;
+  // T-39: open Session folders' AGENTS.md follow the switch too, with or without their To-dos parts.
+  let sessionFoldersHadTodos = todosEnabled(configManager.getConfig());
+  configManager.on('config-updated', (config: AppConfig) => {
+    if (todosEnabled(config) === sessionFoldersHadTodos) return;
+    sessionFoldersHadTodos = todosEnabled(config);
+    void services.orchestrationSessionManager?.refreshSessionInstructions()
+      .catch(error => logger.warn('[Todos] Could not rewrite Session folders after To-dos was turned on or off', error instanceof Error ? error : undefined));
+  });
   // T-39: To-dos is off unless the person turned it on. Off, nothing below acts: no supervisor, load gate,
   // wakes, launch resume or "[From Pane, To-dos]" message, and the saved to-dos are left as they are.
   const todosOn = () => todosEnabled(configManager.getConfig());
@@ -636,6 +644,13 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   let todoTimer: ReturnType<typeof setInterval> | undefined;
   let todoLaunchTimer: ReturnType<typeof setTimeout> | undefined;
   if (duties.housekeeping) {
+    // T-39: turned back on, the to-dos' quiet clocks start again, so the off time never reads as stuck.
+    let supervisorWasOn = todosOn();
+    configManager.on('config-updated', () => {
+      const on = todosOn();
+      if (on && !supervisorWasOn) todoService.restartClocksAfterTurnedOn();
+      supervisorWasOn = on;
+    });
     let ticking = false;
     todoTimer = setInterval(() => {
       if (ticking || !todosOn()) return;

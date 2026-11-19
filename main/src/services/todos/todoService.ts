@@ -1888,6 +1888,20 @@ export class TodoService extends EventEmitter {
   }
 
   /** Retention: closed to-dos go 30 days after closing. */
+  /**
+   * T-39: To-dos was off and is on again. The time it was off isn't time a to-do sat quiet, so every
+   * moving to-do's quiet clock starts now and the supervisor's ladder begins again from its first rung.
+   */
+  restartClocksAfterTurnedOn(): void {
+    const now = this.now();
+    for (const todo of this.store.listOpen()) {
+      if (!MOVING_TODO_STATES.includes(todo.state)) continue;
+      this.store.update(todo.number, { lastProgressAt: now }, todo.updatedAt);
+      if (todo.parentNumber === null) this.event(todo, 'To-dos was turned back on: its quiet time starts again now');
+    }
+    this.changed();
+  }
+
   prune(): void {
     this.store.pruneClosed(this.now());
   }

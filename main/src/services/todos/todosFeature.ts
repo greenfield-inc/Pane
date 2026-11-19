@@ -24,10 +24,10 @@ export function todosOn(): boolean {
   return todosEnabled(readConfig());
 }
 
-export const TODOS_DISABLED_CODE = 'TODOS_DISABLED';
+const TODOS_DISABLED_CODE = 'TODOS_DISABLED';
 
 /** The refusal `runpane todos …`, the todos_* MCP tools and the app's To-dos channels give while it is off. */
-export function todosDisabledError(): PaneError {
+function todosDisabledError(): PaneError {
   return new PaneError(
     TODOS_DISABLED_CODE,
     'To-dos is turned off in this Pane, so nothing was read or changed. Saved to-dos are kept.',

@@ -248,6 +248,24 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /**
+   * T-39: rewrites Pane's section of every open Session folder's AGENTS.md, so turning To-dos on or off
+   * reaches Sessions already open. Only the marked section changes; the person's own lines stay.
+   */
+  async refreshSessionInstructions(): Promise<void> {
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      for (const record of this.store.read().sessions) {
+        if (record.archived === true) continue;
+        try {
+          prepareSessionWorkspace(record.id, record.profile, record);
+        } catch (error) {
+          console.warn(`[Sessions] Could not rewrite the instructions in Session ${record.id}'s folder:`, error);
+        }
+      }
+    });
+  }
+
+  /**
    * To-dos (T-7): a to-do's Session made before Sessions carried `todoNumber` gets it here, at startup,
    * so every Session list hides it from its first read instead of waiting for the to-dos snapshot.
    */
