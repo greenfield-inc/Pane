@@ -5,7 +5,8 @@
  */
 
 /** This window, as one of the screens watching browser tabs. */
-export const VIEWER_ID = crypto.randomUUID();
+// randomUUID exists only in secure contexts; a web app opened over plain http still loads.
+export const VIEWER_ID = globalThis.crypto?.randomUUID?.() ?? `viewer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 /** How often a screen repeats that it still shows a tab; the host forgets one silent for 15 s. */
 const WATCH_EVERY_MS = 5_000;
 

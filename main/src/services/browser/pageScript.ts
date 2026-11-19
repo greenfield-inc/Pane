@@ -450,11 +450,21 @@ function pageScript(limit: number) {
     return fieldKind(deepestAt(x, y));
   }
 
-  /** The field that has the page's focus now, through shadow roots. */
+  /**
+   * The field that has the page's focus now, through shadow roots and same-origin frames. A field
+   * in a frame Pane can't read (a payment or sign-in form) counts as a password field, so the
+   * screen's keyboard learns and echoes nothing.
+   */
   function focusedField(): 'password' | 'text' | null {
     let active = document.activeElement;
-    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
-    return fieldKind(active);
+    for (;;) {
+      while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+      if (!(active instanceof HTMLIFrameElement)) return fieldKind(active);
+      let inner: Document | null = null;
+      try { inner = active.contentDocument; } catch { inner = null; }
+      if (!inner) return 'password';
+      active = inner.activeElement;
+    }
   }
 
   /** The text the person selected, to put on their own clipboard; never a password field's. */
