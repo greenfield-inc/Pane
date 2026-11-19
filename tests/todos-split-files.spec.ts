@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installElectronApiMock, type TodosMockOptions } from './electronApiMock';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
@@ -147,6 +147,8 @@ async function openTodo(page: Page, number: number) {
 
 const tabs = (page: Page) => page.getByTestId('todo-split-tab');
 const tab = (page: Page, name: string) => tabs(page).filter({ hasText: name });
+/** A tab's ✕ sits beside the tab, not inside it (its own button, T-38). */
+const closeOf = (tabLocator: Locator) => tabLocator.locator('xpath=..').getByTestId('todo-split-tab-close');
 const selected = (page: Page) => page.locator('[data-testid="todo-split-tab"][aria-selected="true"]');
 const closeKey = 'ControlOrMeta+KeyW';
 
@@ -166,16 +168,16 @@ for (const dark of [false, true]) {
     await openTodo(page, 12);
     await expect(tabs(page)).toHaveText(['Plan', 'Overview', 'Receipt mock-up', 'PR #7', 'QA findings', 'Decisions']);
     // ✕ shows on the shown tab, and on another tab under the pointer.
-    await expect(selected(page).getByTestId('todo-split-tab-close')).toBeVisible();
-    await expect(tab(page, 'PR #7').getByTestId('todo-split-tab-close')).toHaveCSS('opacity', '0');
+    await expect(closeOf(selected(page))).toBeVisible();
+    await expect(closeOf(tab(page, 'PR #7'))).toHaveCSS('opacity', '0');
     await tab(page, 'PR #7').hover();
-    await expect(tab(page, 'PR #7').getByTestId('todo-split-tab-close')).toHaveCSS('opacity', '1');
+    await expect(closeOf(tab(page, 'PR #7'))).toHaveCSS('opacity', '1');
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/close-hover-${theme}.png` });
     // An attachment by ✕.
-    await tab(page, 'PR #7').getByTestId('todo-split-tab-close').click();
+    await closeOf(tab(page, 'PR #7')).click();
     await expect(tab(page, 'PR #7')).toHaveCount(0);
     // The Overview by ✕.
-    await tab(page, 'Overview').getByTestId('todo-split-tab-close').click();
+    await closeOf(tab(page, 'Overview')).click();
     await expect(tab(page, 'Overview')).toHaveCount(0);
     // An attachment by the key: the shown one.
     await tab(page, 'Decisions').click();
@@ -199,7 +201,7 @@ for (const dark of [false, true]) {
   test(`T-25: closing the last tab hides the split; showing it reopens the plan; remembered after a reload (${theme})`, async ({ page }) => {
     await open(page, dark);
     await openTodo(page, 12);
-    await tab(page, 'QA findings').getByTestId('todo-split-tab-close').click();
+    await closeOf(tab(page, 'QA findings')).click();
     await page.reload();
     await openTodo(page, 12);
     await expect(tab(page, 'QA findings')).toHaveCount(0);
@@ -233,9 +235,9 @@ for (const dark of [false, true]) {
 test('T-25: a closed tab reopens from the files list, a chip and a thread card, and forgets it was closed', async ({ page }) => {
   await open(page);
   await openTodo(page, 12);
-  await tab(page, 'QA findings').getByTestId('todo-split-tab-close').click();
-  await tab(page, 'PR #7').getByTestId('todo-split-tab-close').click();
-  await tab(page, 'Decisions').getByTestId('todo-split-tab-close').click();
+  await closeOf(tab(page, 'QA findings')).click();
+  await closeOf(tab(page, 'PR #7')).click();
+  await closeOf(tab(page, 'Decisions')).click();
   // A thread card.
   await page.getByTestId('todo-thread-attachment-link').filter({ hasText: 'QA findings' }).click();
   await expect(selected(page)).toHaveText('QA findings');
@@ -247,7 +249,9 @@ test('T-25: a closed tab reopens from the files list, a chip and a thread card, 
   await openFiles(page);
   await expect(fileRow(page, 'Decisions')).toHaveAttribute('data-closed', 'true');
   await fileRow(page, 'Decisions').click();
+  // The file shows in the split, which the details give back (two splits at most, D-448).
   await expect(selected(page)).toHaveText('Decisions');
+  await openFiles(page);
   await expect(fileRow(page, 'Decisions')).not.toHaveAttribute('data-closed', 'true');
   await page.reload();
   await openTodo(page, 12);
@@ -293,17 +297,22 @@ test('T-26: a file opens in the split, a sub-to-do’s too; ⋯ offers Open outs
   await expect(page.getByTestId('todo-page-split')).toHaveCount(0);
   await openFiles(page);
   await fileRow(page, 'QA findings').click();
+  // The file shows in the split, which the details give back (two splits at most, D-448).
   await expect(page.getByTestId('todo-page-split')).toBeVisible();
+  await expect(page.getByTestId('todo-page-details')).toHaveCount(0);
   await expect(selected(page)).toHaveText('QA findings');
+  await openFiles(page);
   await expect(fileRow(page, 'QA findings')).toHaveAttribute('aria-current', 'true');
   // By Enter.
   await fileRow(page, 'Cover sheet r1').focus();
   await page.keyboard.press('Enter');
   await expect(selected(page)).toHaveText('Plan');
   // A sub-to-do's file opens as its own tab, marked where it is from.
+  await openFiles(page);
   await fileRow(page, 'PR #8').click();
   await expect(selected(page)).toContainText('PR #8');
   await expect(selected(page)).toContainText('from T-14');
+  await openFiles(page);
   await page.getByTestId('todo-file-row').filter({ hasText: 'PR #8' }).hover();
   await page.getByTestId('todo-file-row').filter({ hasText: 'PR #8' }).getByTestId('todo-file-more').click();
   await expect(page.getByRole('menuitem', { name: /Open outside/ })).toBeVisible();
@@ -313,6 +322,8 @@ test('T-26: a file opens in the split, a sub-to-do’s too; ⋯ offers Open outs
   await page.getByTestId('todo-file-row').filter({ hasText: 'Decisions' }).getByTestId('todo-file-more').click();
   await page.getByRole('menuitem', { name: /Detach/ }).click();
   await expect(fileRow(page, 'Decisions')).toHaveCount(0);
+  await page.getByTestId('todo-details-toggle').click();
+  await expect(tabs(page)).not.toHaveCount(0);
   await expect(tab(page, 'Decisions')).toHaveCount(0);
 });
 

@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { installElectronApiMock, type TodosMockOptions } from './electronApiMock';
 import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
@@ -9,6 +9,13 @@ import type { TodoAttachment, TodoDetail, TodoListRow, TodoRecord, TodoStatus } 
 // in a Session's split (the chat is the other) never splits further: its page, files and approvals are tabs in
 // that one column. On the full To-dos page the page and one file are the two splits, and opening another file
 // lands as a tab. Stills go to T38_SHOTS_DIR when set.
+declare global {
+  interface Window {
+    /** Whether each ⌘W the window saw was already taken (defaultPrevented) before the Session's handler. */
+    __closeKeys?: boolean[];
+  }
+}
+
 const SHOTS = process.env.T38_SHOTS_DIR;
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 
@@ -148,9 +155,29 @@ async function openOnTodosPage(page: Page) {
 }
 
 const strip = (page: Page) => page.getByTestId('todo-tabs').getByRole('tab');
+/** A tab's ✕ sits beside the tab, not inside it (its own button, T-38). */
+const closeOf = (tabLocator: Locator) => tabLocator.locator('xpath=..').getByTestId('todo-split-tab-close');
 const stripTab = (page: Page, name: RegExp) => page.getByTestId('todo-tabs').getByRole('tab', { name });
 const stripSelected = (page: Page) => page.getByTestId('todo-tabs').locator('[role="tab"][aria-selected="true"]');
 const splitSelected = (page: Page) => page.locator('[data-testid="todo-split-tab"][aria-selected="true"]');
+
+/** Side-by-side columns in the to-do's body: visible children that don't overlap (an overlay doesn't count). */
+async function columns(page: Page): Promise<number> {
+  return page.getByTestId('todo-page-body').evaluate((body) => {
+    const boxes = [...body.children].map((child) => child.getBoundingClientRect()).filter((box) => box.width > 1 && box.height > 1).sort((a, b) => a.left - b.left);
+    let count = 0;
+    let right = -Infinity;
+    for (const box of boxes) {
+      if (box.left >= right - 1) {
+        count += 1;
+        right = box.right;
+      } else right = Math.max(right, box.right);
+    }
+    return count;
+  });
+}
+
+const focusedTestId = (page: Page) => page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? '');
 
 async function still(page: Page, name: string) {
   if (!SHOTS) return;
@@ -169,7 +196,7 @@ for (const dark of [false, true]) {
     await expect(strip(page)).toHaveText([/^To-do$/, /^Plan/, /^cover-sheet\.html/, /^p5-p8\.html/]);
     await expect(stripSelected(page)).toHaveText('To-do');
     // To-do is first and never closes; the way back to the list stays.
-    await expect(stripTab(page, /^To-do$/).getByTestId('todo-split-tab-close')).toHaveCount(0);
+    await expect(closeOf(stripTab(page, /^To-do$/))).toHaveCount(0);
     await expect(page.getByTestId('todo-page-back')).toContainText('To-dos');
     await still(page, `1-session-todo-${theme}`);
     // A file's tab takes the page's place, in the same column.
@@ -189,13 +216,13 @@ for (const dark of [false, true]) {
     await expect(page.getByTestId('todo-tab-approval')).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('todo-approval-over-split')).toBeVisible();
     await still(page, `1-session-approval-${theme}`);
-    await page.getByTestId('todo-tab-approval').getByTestId('todo-split-tab-close').click();
+    await closeOf(page.getByTestId('todo-tab-approval')).click();
     await expect(page.getByTestId('todo-tab-approval')).toHaveCount(0);
     await expect(stripSelected(page)).toHaveText('To-do');
     // The files chip opens the plan's tab; closing every file tab comes back to To-do.
     await page.getByTestId('todo-chip-plan').click();
     await expect(stripSelected(page)).toHaveText(/^Plan/);
-    for (let left = 3; left > 0; left -= 1) await stripTab(page, /^(Plan|cover-sheet|p5-p8)/).first().getByTestId('todo-split-tab-close').click();
+    for (let left = 3; left > 0; left -= 1) await closeOf(stripTab(page, /^(Plan|cover-sheet|p5-p8)/).first()).click();
     await expect(strip(page)).toHaveText([/^To-do$/]);
     await expect(stripSelected(page)).toHaveText('To-do');
   });
@@ -213,7 +240,7 @@ for (const dark of [false, true]) {
     await page.locator('[data-testid="todo-split-tab"]').filter({ hasText: 'p5-p8.html' }).click();
     await expect(splitSelected(page)).toContainText('p5-p8.html');
     await expect(page.getByTestId('todo-page-split')).toHaveCount(1);
-    await expect(page.getByTestId('todo-page-body').locator(':scope > div:not([hidden])').filter({ visible: true })).toHaveCount(2);
+    expect(await columns(page)).toBe(2);
     await page.getByTestId('todo-details-toggle').click();
     await page.getByTestId('todo-details-tab-files').click();
     await page.getByTestId('todo-file').filter({ hasText: 'cover-sheet.html' }).click();
@@ -227,10 +254,140 @@ for (const dark of [false, true]) {
 test('going between the Session and the To-dos page keeps the open tabs and the one shown', async ({ page }) => {
   await boot(page, false);
   await openInSession(page);
-  await stripTab(page, /^p5-p8/).getByTestId('todo-split-tab-close').click();
+  await closeOf(stripTab(page, /^p5-p8/)).click();
   await stripTab(page, /cover-sheet/).click();
   await page.getByTestId('todos-nav').first().click();
   await openOnTodosPage(page);
   await expect(page.locator('[data-testid="todo-split-tab"]')).toHaveText([/^Plan/, /^cover-sheet\.html/]);
   await expect(splitSelected(page)).toContainText('cover-sheet.html');
+});
+
+test('Details count in the two splits: on the To-dos page they take the split’s column, with or without an approval', async ({ page }) => {
+  await boot(page, false);
+  await openOnTodosPage(page);
+  expect(await columns(page)).toBe(2);
+  await page.getByTestId('todo-details-toggle').click();
+  await expect(page.getByTestId('todo-page-details')).toBeVisible();
+  await expect(page.getByTestId('todo-page-split')).toHaveCount(0);
+  expect(await columns(page)).toBe(2);
+  // An approval takes the column back from the details…
+  await page.getByTestId('todo-chip-status').click();
+  await expect(page.getByTestId('todo-approval-over-split')).toBeVisible();
+  await expect(page.getByTestId('todo-page-details')).toHaveCount(0);
+  expect(await columns(page)).toBe(2);
+  // …and the details take it from the approval.
+  await page.getByTestId('todo-details-toggle').click();
+  await expect(page.getByTestId('todo-page-details')).toBeVisible();
+  await expect(page.getByTestId('todo-approval-over-split')).toHaveCount(0);
+  expect(await columns(page)).toBe(2);
+  // A file opened from the details' Files closes them, so it shows in the split.
+  await page.getByTestId('todo-details-tab-files').click();
+  await page.getByTestId('todo-file').filter({ hasText: 'p5-p8.html' }).click();
+  await expect(page.getByTestId('todo-page-details')).toHaveCount(0);
+  await expect(splitSelected(page)).toContainText('p5-p8.html');
+  expect(await columns(page)).toBe(2);
+});
+
+test('Details in a Session’s split lie over the one column, with or without an approval', async ({ page }) => {
+  await boot(page, false);
+  await openInSession(page);
+  // A Session's To-dos tab has no details button: the Machine chip opens them.
+  await page.getByTestId('todo-chip-machine').click();
+  await expect(page.getByTestId('todo-page-details')).toHaveAttribute('data-overlay', 'true');
+  expect(await columns(page)).toBe(1);
+  await page.getByTestId('todo-page-details').getByRole('button', { name: 'Hide details' }).click();
+  await page.getByTestId('todo-chip-status').click();
+  await expect(page.getByTestId('todo-approval-over-split')).toBeVisible();
+  await stripTab(page, /^To-do$/).click();
+  await page.getByTestId('todo-chip-machine').click();
+  await expect(page.getByTestId('todo-page-details')).toBeVisible();
+  expect(await columns(page)).toBe(1);
+  // A file opened from Files closes the details so it shows.
+  await page.getByTestId('todo-details-tab-files').click();
+  await page.getByTestId('todo-file').filter({ hasText: 'cover-sheet.html' }).click();
+  await expect(page.getByTestId('todo-page-details')).toHaveCount(0);
+  await expect(stripSelected(page)).toHaveText(/^cover-sheet\.html/);
+});
+
+test('⌘W in a Session’s To-dos tab closes the to-do’s selected tab while focus is in it; elsewhere it stays the Session’s', async ({ page }) => {
+  await boot(page, false);
+  await openInSession(page);
+  // Record whether the key reached the Session's own handler untouched.
+  await page.evaluate(() => {
+    const seen: boolean[] = [];
+    window.addEventListener('keydown', (event) => { if (event.key.toLowerCase() === 'w' && (event.metaKey || event.ctrlKey)) seen.push(event.defaultPrevented); });
+    window.__closeKeys = seen;
+  });
+  const lastKeyPrevented = () => page.evaluate(() => window.__closeKeys?.at(-1));
+  // A file tab, focused: ⌘W closes it.
+  await stripTab(page, /cover-sheet/).click();
+  await page.keyboard.press('ControlOrMeta+KeyW');
+  await expect(stripTab(page, /cover-sheet/)).toHaveCount(0);
+  // The approval: ⌘W closes it.
+  await stripTab(page, /^To-do$/).click();
+  await page.getByTestId('todo-chip-status').click();
+  await expect(page.getByTestId('todo-tab-approval')).toBeVisible();
+  await page.getByTestId('todo-tab-approval').focus();
+  await page.keyboard.press('ControlOrMeta+KeyW');
+  await expect(page.getByTestId('todo-tab-approval')).toHaveCount(0);
+  // The To-do tab never closes: the key goes on to the Session.
+  await stripTab(page, /^To-do$/).focus();
+  await page.keyboard.press('ControlOrMeta+KeyW');
+  expect(await lastKeyPrevented()).toBe(false);
+  await expect(strip(page)).toHaveText([/^To-do$/, /^Plan/, /^p5-p8\.html/]);
+  // A file selected but focus in the Session's chat: the key is the Session's and the tab stays.
+  await stripTab(page, /^p5-p8/).click();
+  await page.getByRole('tab', { name: 'Overview', exact: true }).first().focus();
+  await page.keyboard.press('ControlOrMeta+KeyW');
+  expect(await lastKeyPrevented()).toBe(false);
+  await expect(stripTab(page, /^p5-p8/)).toHaveCount(1);
+});
+
+test('keys on the one-column strip reach an open approval and keep it open until its own close', async ({ page }) => {
+  await boot(page, false);
+  await openInSession(page);
+  await page.getByTestId('todo-chip-status').click();
+  await expect(page.getByTestId('todo-tab-approval')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('todo-tab-approval').focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(stripSelected(page)).toHaveText(/^p5-p8\.html/);
+  await expect(page.getByTestId('todo-tab-approval')).toHaveAttribute('aria-selected', 'false');
+  await expect(page.getByTestId('todo-approval-over-split')).toHaveCount(0);
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByTestId('todo-tab-approval')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('todo-approval-over-split')).toBeVisible();
+  await page.keyboard.press('ArrowRight');
+  await expect(stripSelected(page)).toHaveText('To-do');
+  await page.keyboard.press('End');
+  await expect(page.getByTestId('todo-tab-approval')).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Home');
+  await expect(stripSelected(page)).toHaveText('To-do');
+  await expect(page.getByTestId('todo-tab-approval')).toHaveCount(1);
+  // Each tab names its panel, and the shown panel names its tab.
+  const controls = await page.getByTestId('todo-tab-page').getAttribute('aria-controls');
+  await expect(page.getByTestId('todo-page-main')).toHaveAttribute('id', controls ?? 'missing');
+  await expect(page.getByTestId('todo-page-main')).toHaveAttribute('aria-labelledby', (await page.getByTestId('todo-tab-page').getAttribute('id')) ?? 'missing');
+  await expect(page.getByTestId('todo-tab-page').getByRole('button')).toHaveCount(0);
+});
+
+test('closing the focused last file tab leaves focus on the To-do tab', async ({ page }) => {
+  await boot(page, false);
+  await openInSession(page);
+  await closeOf(stripTab(page, /^Plan/)).click();
+  await closeOf(stripTab(page, /^p5-p8/)).click();
+  await stripTab(page, /cover-sheet/).click();
+  await expect.poll(() => focusedTestId(page)).toBe('todo-split-tab');
+  await page.keyboard.press('ControlOrMeta+KeyW');
+  await expect(strip(page)).toHaveText([/^To-do$/]);
+  await expect.poll(() => focusedTestId(page)).toBe('todo-tab-page');
+});
+
+test('an arrow on the To-dos page selects a file as a click does, and the Session shows it', async ({ page }) => {
+  await boot(page, false);
+  await openOnTodosPage(page);
+  await splitSelected(page).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(splitSelected(page)).toContainText('cover-sheet.html');
+  await openInSession(page);
+  await expect(stripSelected(page)).toHaveText(/^cover-sheet\.html/);
 });

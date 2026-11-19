@@ -43,8 +43,8 @@ export type TodoSplitAction =
   /** Shows an item's tab (reopening a closed one, adding an image's), and shows the split. */
   | { type: 'open'; item: TodoSplitItem }
   | { type: 'activate'; index: number }
-  /** ← and → on the tab strip, wrapping round; `withTodo` counts the one-column layout's To-do tab first. */
-  | { type: 'step'; delta: 1 | -1; withTodo?: boolean }
+  /** ← and → on the split's tab strip, wrapping round: selects as a click does. */
+  | { type: 'step'; delta: 1 | -1 }
   /** The one-column layout's To-do tab. */
   | { type: 'show-todo' }
   /** ✕ or the close-tab key (T-25): any tab closes; closing the last one hides the split. */
@@ -153,7 +153,7 @@ export function todoSplitReducer(state: TodoSplitState, action: TodoSplitAction)
       // Picked under the one-column tabs, the file is the split's shown tab too where a split is allowed.
       return action.index === state.active && !state.todoShown && !state.hidden ? state : { ...state, active: action.index, todoShown: false, hidden: false };
     case 'step':
-      return action.withTodo ? stepWithTodo(state, action.delta) : stepTabs(state, action.delta);
+      return stepTabs(state, action.delta);
     case 'show-todo':
       return state.todoShown ? state : { ...state, todoShown: true };
     case 'close':
@@ -177,15 +177,20 @@ export function todoSplitReducer(state: TodoSplitState, action: TodoSplitAction)
 function stepTabs(state: TodoSplitState, delta: 1 | -1): TodoSplitState {
   const count = state.items.length;
   if (count < 2) return state;
-  return { ...state, active: (state.active + delta + count) % count };
+  // As a click: the one-column layout then shows this tab rather than the to-do.
+  return { ...state, active: (state.active + delta + count) % count, todoShown: false, hidden: false };
 }
 
-/** The one-column strip: To-do at position 0, then each tab. */
-function stepWithTodo(state: TodoSplitState, delta: 1 | -1): TodoSplitState {
-  const count = state.items.length + 1;
-  if (count < 2) return state;
-  const next = ((state.todoShown ? 0 : state.active + 1) + delta + count) % count;
-  return next === 0 ? { ...state, todoShown: true } : { ...state, active: next - 1, todoShown: false, hidden: false };
+/**
+ * Where a key moves the one-column strip's selection (T-38): positions To-do 0, each file, then an
+ * open approval last. ← → wrap round, Home is To-do, End the last tab; any other key, null.
+ */
+export function stripMove(position: number, count: number, key: string): number | null {
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  if (key === 'ArrowRight') return (position + 1) % count;
+  if (key === 'ArrowLeft') return (position - 1 + count) % count;
+  return null;
 }
 
 /** The tabs shown: the offered ones not closed, then the extras. */
