@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BrowserInput } from '../../../../../../shared/types/browserStream';
-import { browserInputQueue, pagePoint } from './streamInput';
+import { browserInputQueue, pagePoint } from '../../../../../../shared/utils/browserStreamInput';
 
 describe('pagePoint', () => {
   it('maps a point in a letterboxed frame to the page, and the bars to nothing', () => {

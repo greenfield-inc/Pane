@@ -1,4 +1,4 @@
-import type { BrowserInput, BrowserInputResult } from '../../../../../../shared/types/browserStream';
+import type { BrowserInput, BrowserInputResult } from '../types/browserStream';
 
 /** Where the frame is drawn inside its box: scaled to fit whole, centred (letterboxed). */
 export interface FrameBox { left: number; top: number; width: number; height: number }

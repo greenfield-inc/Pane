@@ -3,7 +3,7 @@ import { MousePointer2 } from 'lucide-react';
 import type { BrowserInputResult } from '../../../../../../shared/types/browserStream';
 import { cn } from '../../../../utils/cn';
 import { DriverChip } from '../../device/DeviceToolViews';
-import { browserInputQueue, fitFrame, modifiersOf, pagePoint } from './streamInput';
+import { browserInputQueue, fitFrame, modifiersOf, pagePoint } from '../../../../../../shared/utils/browserStreamInput';
 import type { BrowserStream, StreamStop } from './useBrowserStream';
 import type { BrowserStreamClient } from './streamClient';
 
