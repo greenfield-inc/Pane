@@ -116,9 +116,13 @@ export class ProjectEnvService {
         try {
           env[variable.key] = await this.secrets().read(variable.project, variable.name);
         } catch (error) {
+          // A 1Password secret without a live lease: the next step is the lease command, not a new value.
+          const leaseNext = error instanceof PaneError && error.code === 'SECRET_LEASE_ENDED' ? error.next : undefined;
           warnings.push(
             `Pane did not set ${variable.key}: it could not read Pane secret ${variable.project}/${variable.name} (${reasonOf(error)}). `
-            + 'Everything else started normally. Set it in Settings → Secrets or with `runpane secrets set`, or change the variable in Project Settings → Environment Variables.',
+            + (leaseNext
+              ? `Everything else started normally. ${leaseNext}`
+              : 'Everything else started normally. Set it in Settings → Secrets or with `runpane secrets set`, or change the variable in Project Settings → Environment Variables.'),
           );
         }
         return;

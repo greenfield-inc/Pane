@@ -1817,7 +1817,8 @@ export class PaneRemoteHttpApiServer {
       );
     }
     if (invokeRequest.channel.startsWith('notify:switch:')) return this.notifySwitchArgs(args, auth, request);
-    const sharesKeys = invokeRequest.channel.startsWith('credentials:shared:');
+    // Secret leases take the same owner-only, paired-device gate as key sharing.
+    const sharesKeys = invokeRequest.channel.startsWith('credentials:shared:') || invokeRequest.channel.startsWith('secrets:lease:');
     if (sharesKeys && this.workspace) {
       // Keys belong to the owner: a teammate this workspace lets in may neither read nor replace them.
       const owner = this.workspaceOwnerLogin(request);

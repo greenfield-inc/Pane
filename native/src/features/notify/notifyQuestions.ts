@@ -144,3 +144,10 @@ export function initialPicks(item: NotifyItem): string[] {
 export function isReply(answer: NotifyAnswer): boolean {
   return 'picks' in answer && Boolean(answer.text?.trim());
 }
+
+/** A lease's length in words: "30 minutes", "24 hours", "7 days" (whole days past one). */
+export function leaseLengthText(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  const [count, unit] = minutes > 1440 && minutes % 1440 === 0 ? [minutes / 1440, 'day'] : minutes % 60 === 0 ? [minutes / 60, 'hour'] : [minutes, 'minute'];
+  return `${count} ${unit}${count === 1 ? '' : 's'}`;
+}

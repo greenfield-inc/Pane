@@ -16,8 +16,8 @@ afterEach(async () => {
 function fakeEncryption(available: boolean): SecretEncryption {
   return {
     available: () => available,
-    encrypt: text => Buffer.from(Buffer.from(text, 'utf8').map(byte => (byte + 1) % 256)),
-    decrypt: data => Buffer.from(data.map(byte => (byte + 255) % 256)).toString('utf8'),
+    encrypt: async text => Buffer.from(Buffer.from(text, 'utf8').map(byte => (byte + 1) % 256)),
+    decrypt: async data => Buffer.from(data.map(byte => (byte + 255) % 256)).toString('utf8'),
   };
 }
 
@@ -192,5 +192,38 @@ describe('Pane secrets in the macOS keychain', () => {
     expect(failure).toBeInstanceOf(Error);
     expect(String(failure)).not.toContain(Buffer.from('sk-canary-value').toString('hex'));
     expect(String(failure)).not.toContain('sk-canary-value');
+  });
+});
+
+describe('PaneSecretStore 1Password references', () => {
+  async function storeWithReference() {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-secrets-'));
+    tempDirs.push(dir);
+    const store = new PaneSecretStore(memoryConfig(), fileSecretBackend(path.join(dir, 'secrets.json'), fakeEncryption(true)), () => 'studio', () => new Date('2026-11-18T12:00:00.000Z'));
+    return { store, file: path.join(dir, 'secrets.json') };
+  }
+
+  it('replaces a typed secret of the same name, so its value is deleted here and the deletion syncs', async () => {
+    const { store, file } = await storeWithReference();
+    await store.set('stripe', 'STRIPE_KEY', 'typed-canary');
+
+    expect(await store.setReference('stripe', 'STRIPE_KEY', 'op://Dev/Stripe/credential')).toEqual({ replacedTyped: true });
+
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).values).toEqual({});
+    expect((await store.exportForSync())['stripe/STRIPE_KEY']).toMatchObject({ value: null });
+    expect(store.exportReferencesForSync()['stripe/STRIPE_KEY']).toMatchObject({ value: 'op://Dev/Stripe/credential' });
+    expect(store.listReferences()).toEqual([{ project: 'stripe', name: 'STRIPE_KEY', reference: 'op://Dev/Stripe/credential', updatedAt: '2026-11-18T12:00:00.000Z', machine: 'studio' }]);
+  });
+
+  it('has no value without a lease, refuses a typed value, and rejects text that is not a reference', async () => {
+    const { store } = await storeWithReference();
+    await store.setReference('stripe', 'STRIPE_KEY', 'op://Dev/Stripe/credential');
+
+    await expect(store.read('stripe', 'STRIPE_KEY')).rejects.toMatchObject({ code: 'SECRET_NOT_FOUND' });
+    await expect(store.set('stripe', 'STRIPE_KEY', 'typed')).rejects.toMatchObject({
+      code: 'SECRET_IS_REFERENCE',
+      next: 'Run `runpane secrets lease --project stripe STRIPE_KEY` to use it, or remove the reference in Settings → Secrets first.',
+    });
+    await expect(store.setReference('stripe', 'OTHER', 'sk_live_not_a_reference')).rejects.toMatchObject({ code: 'SECRET_INVALID' });
   });
 });
