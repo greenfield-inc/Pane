@@ -102,7 +102,7 @@ function agentTab(id: string, paneId: string, agent: string): ToolPanel {
   return { id, sessionId: paneId, type: 'terminal', title: agent, state: { isActive: false, customState: { agent } }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
 }
 
-function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: string[]; painting?: string[]; holds?: BrowserHoldSettings; loading?: boolean } = {}): Fixture {
+function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: string[]; painting?: string[]; holds?: Partial<BrowserHoldSettings>; loading?: boolean; window?: { open: boolean } } = {}): Fixture {
   const archived = new Set<string>();
   const goneListeners: Array<() => void> = [];
   const worktree = mkdtempSync(path.join(os.tmpdir(), 'pane-browser-tools-'));
@@ -132,7 +132,7 @@ function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: 
     close: async (tab) => { tabs.splice(tabs.indexOf(tab), 1); },
     update: async (tab, state) => { tab.state = { ...tab.state, customState: state }; },
     page: (id) => pages.get(id),
-    hasWindow: () => true,
+    hasWindow: () => options.window?.open ?? true,
     shotsDirectory: async () => path.join(worktree, '.shots'),
     showCursor: (panelId) => { options.cursors?.push(panelId); },
     sizeHidden: () => undefined,
@@ -449,6 +449,7 @@ describe('browser tabs: the screens that watch them', () => {
     const held: string[] = [];
     const fixture = setup(['t1', 't2', 't3'].map(id => browserTab(id, 'pane-a')).concat(browserTab('mine', 'pane-a', 'claude-a')), { held, holds });
     await call(fixture, 'snapshot', { tab: 'mine' });
+    await fromAfar(fixture, 't1', 'phone-1', phone);
     await fromAfar(fixture, 't1', 'phone-1', { ...phone, onScreen: false });
     await fromAfar(fixture, 't2', 'phone-1', phone);
     await fromAfar(fixture, 'mine', 'phone-1', phone);
@@ -519,6 +520,31 @@ describe('browser tabs: the screens that watch them', () => {
     expect(painting).toEqual(['persons']);
     await fromAfar(fixture, 'persons', 'phone-1', null);
     expect(painting).toEqual([]);
+  });
+
+  it('lets a screen that has the tab off screen neither keep the page running here nor hold it past the grace time', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { held, holds });
+    const page = fixture.pages.get('persons');
+    await fromAfar(fixture, 'persons', 'phone-1', phone);
+    expect(page).toMatchObject({ throttled: false });
+    // The phone's app goes to the background but keeps reporting, off screen.
+    const keepReporting = setInterval(() => void fromAfar(fixture, 'persons', 'phone-1', { ...phone, onScreen: false }), 50);
+    onTestFinished(() => clearInterval(keepReporting));
+    await vi.waitFor(() => expect(page).toMatchObject({ throttled: true }));
+    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
+  });
+
+  it('lets the tabs only this window showed go when it closes, and keeps those another device watches', async () => {
+    const held: string[] = [];
+    const window = { open: true };
+    const fixture = setup([browserTab('mine', 'pane-a'), browserTab('streamed', 'pane-a')], { held, window, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000, graceMs: 60_000 } } });
+    await fromHere(fixture, 'mine', { kind: 'desktop', onScreen: true, width: 1200, height: 700 });
+    await fromHere(fixture, 'streamed', { kind: 'desktop', onScreen: false, width: 1200, height: 700 });
+    await fromAfar(fixture, 'streamed', 'phone-1', phone);
+    expect([...held].sort()).toEqual(['mine', 'streamed']);
+    window.open = false;
+    await vi.waitFor(() => expect(held).toEqual(['streamed']));
   });
 
   it('takes reports only from Pane\'s own screens, never from an agent', async () => {
