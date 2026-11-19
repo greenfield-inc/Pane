@@ -376,7 +376,7 @@ jobs:
       run: scripts/ci-background.sh wait electron-rebuild
 
     - name: Save the Electron SQLite build
-      if: steps.sqlite-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      if: steps.sqlite-cache.outputs.cache-hit != 'true' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request')
       uses: actions/cache/save@v5
       with:
         path: node_modules/.pnpm/better-sqlite3-multiple-ciphers@*/node_modules/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node

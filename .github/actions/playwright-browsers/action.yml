@@ -34,7 +34,7 @@ runs:
       run: pnpm exec playwright install --with-deps chromium
 
     - name: Save the Playwright browsers
-      if: inputs.install == 'true' && inputs.save == 'true' && steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      if: inputs.install == 'true' && inputs.save == 'true' && steps.cache.outputs.cache-hit != 'true' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request')
       uses: actions/cache/save@v5
       with:
         path: ~/.cache/ms-playwright
