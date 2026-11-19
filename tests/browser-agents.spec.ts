@@ -52,8 +52,12 @@ function browser(pane: IsolatedPane, from: Caller | undefined, verb: string, arg
     env.PANE_SESSION_ID = from.paneId;
     env.PANE_PANEL_ID = from.panelId;
   }
-  return new Promise(resolve => {
-    execFile(path.join(pane.paneDir, 'bin', 'runpane'), ['browser', verb, ...args, '--json'], { env, timeout: 120_000 }, (_error, stdout) => {
+  return new Promise((resolve, reject) => {
+    execFile(path.join(pane.paneDir, 'bin', 'runpane'), ['browser', verb, ...args, '--json'], { env, timeout: 120_000 }, (error, stdout, stderr) => {
+      if (!stdout.trim()) {
+        reject(new Error(`runpane browser ${verb} printed nothing (${error?.message ?? 'no error'}): ${stderr}`));
+        return;
+      }
       // SAFETY: `runpane … --json` prints one JSON object, a result or { ok: false, error }.
       const parsed = JSON.parse(stdout) as Reply & { error?: { code: string } };
       resolve({ ...parsed, code: parsed.error?.code });
@@ -121,10 +125,9 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     await page.addLocatorHandler(page.getByRole('button', { name: /Review in Resources/ }).first(), async () => {
       await page.getByRole('button', { name: 'Not now', exact: true }).locator('visible=true').first().click();
     });
-    // And the first-run "Which agent do you use?" card, once the app finishes starting.
-    await page.addLocatorHandler(page.getByText('Which agent do you use?', { exact: true }).first(), async () => {
-      await page.getByRole('button', { name: 'Skip', exact: true }).first().click();
-    });
+    // And the first-run cards ("Which agent do you use?", "Open your project") that can come late.
+    const skip = page.getByRole('button', { name: 'Skip', exact: true }).locator('visible=true').first();
+    await page.addLocatorHandler(skip, async () => { await skip.click(); });
     await expect.poll(() => runpane(pane, ['sessions', 'list', '--json']).then(() => true, () => false), { timeout: 30_000 }).toBe(true);
     await runpane(pane, ['repos', 'add', '--path', repo, '--yes', '--json']);
     const other = await newPane(pane, 'repo', 'other');
