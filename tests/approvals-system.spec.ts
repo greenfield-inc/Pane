@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
 
 // The approvals system's chat surfaces (P5, P6, P7): one compact card with a pager above a
@@ -63,7 +63,7 @@ const emitSnapshot = (page: Page, next: NotifySnapshot) => page.evaluate((value)
 async function openChat(page: Page, items: NotifyItem[]): Promise<void> {
   await installElectronApiMock(page, { initialProjects: [project], initialSessions: [pane], initialPanels: panels, activeProjectId: project.id, notifySnapshot: snapshot(items) });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Expand project Approvals fixture', exact: true }).click();
   await page.getByRole('button', { name: 'orgs-orchestrator', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Message Claude' })).toBeVisible();

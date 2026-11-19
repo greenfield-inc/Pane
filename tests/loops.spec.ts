@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { Loop } from '../shared/types/loop';
-import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
+import { gotoApp, installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
 import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
 
 const projects = [
@@ -29,7 +29,7 @@ async function open(page: Page, options: ElectronApiMockOptions = {}, addElectro
     ...options,
   });
   if (addElectronApi) await page.addInitScript(addElectronApi);
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
 }
 
 test('creates, runs, pauses, edits and deletes a loop', async ({ page }) => {
