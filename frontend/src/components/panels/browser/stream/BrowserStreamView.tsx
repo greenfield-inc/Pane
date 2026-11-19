@@ -84,7 +84,8 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       while (pending.current) {
         const data = pending.current;
         pending.current = undefined;
-        const bitmap = await fetch(data).then(response => response.blob()).then(blob => createImageBitmap(blob)).catch(() => undefined);
+        // Decoded from the data URL's bytes: Pane's content policy lets no fetch() read data: URLs.
+        const bitmap = await createImageBitmap(jpegBlob(data)).catch((cause: unknown) => { console.warn('[browser stream] Could not decode a frame:', cause); return undefined; });
         const canvas = canvasRef.current;
         if (!bitmap || !canvas) continue;
         if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
@@ -324,6 +325,15 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       )}
     </div>
   );
+}
+
+/** The image in a base64 data URL, as a Blob. */
+function jpegBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(',');
+  const binary = atob(dataUrl.slice(comma + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: dataUrl.slice(5, dataUrl.indexOf(';')) || 'image/jpeg' });
 }
 
 function toBase64(file: File): Promise<string> {
