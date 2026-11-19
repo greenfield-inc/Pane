@@ -498,6 +498,17 @@ describe('browser tabs: the screens that watch them', () => {
     await vi.waitFor(() => expect(page).toMatchObject({ throttled: true, muted: false }));
   });
 
+  it('keeps a page painting for a phone that joins a tab this computer\'s window already shows', async () => {
+    const painting: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { painting, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000 } } });
+    await fromHere(fixture, 'persons', { kind: 'desktop', onScreen: true, width: 1200, height: 700 });
+    expect(painting).toEqual([]);
+    await fromAfar(fixture, 'persons', 'phone-1', phone);
+    expect(painting).toEqual(['persons']);
+    await fromAfar(fixture, 'persons', 'phone-1', null);
+    expect(painting).toEqual([]);
+  });
+
   it('takes reports only from Pane\'s own screens, never from an agent', async () => {
     const fixture = setup([browserTab('persons', 'pane-a')]);
     expect(await fixture.registry.invokeConnected('browser:watch', ['persons', 'v', phone], signal, claudeInA)).toMatchObject({ success: false });
