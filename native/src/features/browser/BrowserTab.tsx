@@ -145,7 +145,7 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
 
   // Typing: a hidden field carries the phone's keyboard into the page's focused field.
   const onType = (after: string) => {
-    const edit = keyboardEdit(keyboardText, after);
+    const edit = keyboardEdit(keyboardText, after, fieldRef.current === 'password');
     for (const input of edit.input) send(input);
     setKeyboardText(edit.next);
   };
