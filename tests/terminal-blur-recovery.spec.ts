@@ -169,7 +169,8 @@ async function bootFixture(
   await page.getByRole('button', { name: session.name, exact: true }).click();
   const panel = page.getByRole('tabpanel', { name: primaryPanel.title });
   await expect(panel.locator('.xterm-screen')).toBeVisible({ timeout: 15_000 });
-  await expect(panel.getByTestId('terminal-activation-mask')).toHaveCount(0);
+  // The mask lifts when the boot's full refresh settles, so it shares the boot's bound.
+  await expect(panel.getByTestId('terminal-activation-mask')).toHaveCount(0, { timeout: 15_000 });
   await expect.poll(() => lifecycleLogs(page).then((logs) => (
     logs.filter((line) => line.includes(`Activation depth for panel ${primaryPanel.id}: full`)).length
   ))).toBe(1);

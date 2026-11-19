@@ -321,7 +321,7 @@ test('switching hosts returns to the Pane that was open on each of them', async 
     initialSessions: [localPane],
     initialUiState: { expandedProjects: [1] },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   const memory = navigationMemoryMock(page);
   await saveHost(page, false);
 
@@ -356,7 +356,7 @@ test('a remembered Pane that is gone from the host falls back to the home view',
     initialSessions: [localPane],
     initialUiState: { expandedProjects: [1] },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   const memory = navigationMemoryMock(page);
   await saveHost(page, false);
 
