@@ -54,7 +54,6 @@ export const LANES = [
   { workflow: 'quality.yml', job: 'functional-smoke-webgl', run: 'playwright test --config=playwright.ci.webgl.config.ts', list: { playwright: 'playwright.ci.webgl.config.ts' } },
   { workflow: 'quality.yml', job: 'renderer-selection', run: 'playwright test --config=tests/renderer/playwright.config.ts', list: { playwright: 'tests/renderer/playwright.config.ts' } },
   { workflow: 'quality.yml', job: 'functional-smoke-electron', run: 'playwright test --config=playwright.chat-tabs.config.ts', list: { playwright: 'playwright.chat-tabs.config.ts' } },
-  { workflow: 'quality.yml', job: 'functional-smoke-electron', run: 'playwright test --config=playwright.ci.stabilizing-electron.config.ts', list: { playwright: 'playwright.ci.stabilizing-electron.config.ts' }, stabilizing: 'stabilizing: browser-agents.spec.ts:104 (added by #1550) failed once in CI (run 44487357192) after passing 10 of 10 in probe #1588, cause not yet known; returns to the required Electron specs once it is found' },
   { workflow: 'quality.yml', job: 'functional-smoke-electron', list: { named: ['scripts/test-worktree-trash-electron.cjs'] } },
   { workflow: 'quality.yml', job: 'runpane-wrapper-tests', list: { named: [
     'scripts/test-runpane-package-smoke.js',
