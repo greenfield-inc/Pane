@@ -13,6 +13,17 @@ import { readFileSync } from 'fs';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
 
+/** The start of a PNG of `width` by `height` pixels: its signature and IHDR chunk, which hold its size. */
+function pngOf(width: number, height: number): Buffer {
+  const header = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header, 0);
+  header.writeUInt32BE(13, 8);
+  header.write('IHDR', 12, 'ascii');
+  header.writeUInt32BE(width, 16);
+  header.writeUInt32BE(height, 20);
+  return header;
+}
+
 /** A page that answers the page script and the debugger the way a simple form page would. */
 function fakePage(id: number, url: string): BrowserPageContents & EventEmitter & { sent: string[]; files: string[]; params: Map<string, unknown>; throttled: boolean; muted: boolean } {
   const events = new EventEmitter();
@@ -56,7 +67,7 @@ function fakePage(id: number, url: string): BrowserPageContents & EventEmitter &
         sent.push(method);
         params.set(method, given);
         if (method === 'DOM.setFileInputFiles') files.push(...(given?.files ?? []));
-        if (method === 'Page.captureScreenshot') return { data: Buffer.from('page png').toString('base64') };
+        if (method === 'Page.captureScreenshot') return { data: pngOf(780, 1688).toString('base64') };
         if (method === 'Page.getLayoutMetrics') return { cssContentSize: { width: 800, height: 600 }, cssLayoutViewport: { clientWidth: 800, clientHeight: 600 } };
         if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
         if (method === 'DOM.querySelector') return { nodeId: 7 };
@@ -464,7 +475,8 @@ describe('browser tabs: the screens that watch them', () => {
     await fixture.registry.invokeRemote('browser:driver', ['mine', 'agent', 'phone-1'], { caller: undefined });
     await call(fixture, 'snapshot', {});
     await call(fixture, 'click', { ref: 'e2' });
-    expect(await call(fixture, 'screenshot', {})).toMatchObject({ width: 390, height: 844 });
+    // A 390x844 page captured at the host's 2x scale: the result names the PNG's own size.
+    expect(await call(fixture, 'screenshot', {})).toMatchObject({ width: 780, height: 1688 });
     expect(page?.sent).not.toContain('Emulation.clearDeviceMetricsOverride');
     // The person at this computer clicks into the tab.
     await new Promise(resolve => setTimeout(resolve, 400));
@@ -506,7 +518,7 @@ describe('browser tabs: streaming a page to another screen', () => {
     const fixture = setup([browserTab('persons', 'pane-a')], { holds });
     await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
     const first = await frame(fixture, 'persons', 0);
-    expect(first.frame).toMatchObject({ data: `data:image/jpeg;base64,${Buffer.from('page png').toString('base64')}`, width: 800 });
+    expect(first.frame).toMatchObject({ data: `data:image/jpeg;base64,${pngOf(780, 1688).toString('base64')}`, width: 800 });
     const page = fixture.pages.get('persons');
     expect(page?.params.get('Page.startScreencast')).toMatchObject({ format: 'jpeg', maxWidth: 1170, maxHeight: 2532 });
     const seq = first.frame?.seq ?? 0;
