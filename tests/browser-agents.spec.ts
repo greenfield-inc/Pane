@@ -5,7 +5,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { JsonValue } from '../shared/validation/boundaryDecoder';
 import path from 'node:path';
-import { dismissDialogs, isolatedPane, launchIsolated, runpane, type IsolatedPane } from './isolatedPane';
+import { isolatedPane, launchIsolated, runpane, type IsolatedPane } from './isolatedPane';
 
 // Agents drive Pane's browser tabs (docs/BROWSER_AGENTS.md), end to end in a real, isolated Pane:
 // an agent's browser_* calls, made as `runpane browser …` from a tab, act on local fixture pages.
@@ -135,7 +135,14 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
   app.context().pages().forEach(leaveDialogs);
   app.context().on('page', leaveDialogs);
   try {
-    await dismissDialogs(page);
+    // A Pane with no projects opens its first-run dialog once it has read its settings, which a cold start
+    // can hold back many seconds. Opened later, over the agent's Pane, it hides the chip's Take over, and its
+    // last Skip moves the window to Pane Chat. So finish it before the repo goes in: it always opens until then.
+    const firstRun = (title: string) => page.getByRole('dialog', { name: title });
+    await firstRun('Which agent do you use?').getByRole('button', { name: 'Skip', exact: true }).click();
+    await firstRun('Open your project').getByRole('button', { name: 'Skip', exact: true }).click();
+    await firstRun('Take your agents with you').getByRole('button', { name: 'Skip for now', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
     // A loaded test machine can raise Pane's own machine health cards (memory, disk) over the window at any time.
     // Cards can follow one another (memory, then disk), so dismiss until none is left.
     const healthCard = page.getByRole('button', { name: /Review in Resources/ }).first();
@@ -145,9 +152,6 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
         await page.waitForTimeout(300);
       }
     }, { noWaitAfter: true });
-    // And the first-run cards ("Which agent do you use?", "Open your project") that can come late.
-    const skip = page.getByRole('button', { name: 'Skip', exact: true }).locator('visible=true').first();
-    await page.addLocatorHandler(skip, async () => { await skip.click(); });
     await expect.poll(() => runpane(pane, ['sessions', 'list', '--json']).then(() => true, () => false), { timeout: 30_000 }).toBe(true);
     await runpane(pane, ['repos', 'add', '--path', repo, '--yes', '--json']);
     const other = await newPane(pane, 'repo', 'other');
