@@ -25,11 +25,18 @@ const PAGE = 100;
 const PENDING_LIMIT = 2000;
 /** The most messages the host returns from one history read. */
 const HISTORY_PAGE = 500;
+/** Closed chats that keep their newest messages, so reopening one paints them at once. */
+const KEPT_CLOSED = 5;
+const KEPT_MESSAGES = 200;
+/** Viewers with no screen open that still hold messages, the most recently closed last. */
+const closedWithMessages: ChatTabViewer[] = [];
 
 /**
  * A disposable subscription to one chat tab's host state. Detaching has no
  * effect on the agent; the draft and an unconfirmed send survive tab switches
- * and, through rebind(), a replaced connection to the same host.
+ * and, through rebind(), a replaced connection to the same host. The five chats
+ * closed most recently also keep their newest 200 messages, which a reopen paints
+ * while it reads the window again.
  */
 export class ChatTabViewer {
   private state: ChatTabViewerState = { draft: '', loadingEarlier: false, hasNewer: false, loadingNewer: false };
@@ -97,7 +104,10 @@ export class ChatTabViewer {
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
-    if (!this.detach) this.attach();
+    if (!this.detach) {
+      removeClosed(this);
+      this.attach();
+    }
     return () => {
       this.listeners.delete(listener);
       if (this.listeners.size === 0) {
@@ -105,9 +115,12 @@ export class ChatTabViewer {
         this.frame = undefined;
         this.detach?.();
         this.detach = undefined;
-        // Keep the draft and an unconfirmed send; release the heavy transcript.
-        this.state = { ...this.state, transcript: undefined, hasNewer: false };
+        // Keep the draft, an unconfirmed send and, for a reopen, the newest messages; a window
+        // scrolled back from the newest would paint the wrong end, so it goes.
+        const transcript = this.state.transcript;
+        this.state = { ...this.state, transcript: transcript && !this.state.hasNewer ? newest(transcript) : undefined, hasNewer: false };
         this.pending = [];
+        if (this.state.transcript) keepClosed(this);
       }
     };
   };
@@ -162,7 +175,11 @@ export class ChatTabViewer {
       }
       this.pending = [];
       if (gap) this.resyncNeeded = true;
+      // Closed before this read landed: it keeps what a close keeps, and counts toward the five.
+      const closed = this.listeners.size === 0;
+      if (closed && transcript) transcript = newest(transcript);
       this.publish({ view: { ...view, transcript: undefined }, transcript, hasNewer: false, error: gap ? this.state.error : this.state.pendingDelivery ? this.state.error : undefined });
+      if (closed && transcript) keepClosed(this);
     }).catch(error => {
       if (transport !== this.transport) return;
       this.resyncNeeded = false;
@@ -260,6 +277,27 @@ export class ChatTabViewer {
     if (extra <= PAGE) return transcript;
     return { ...transcript, start: transcript.start + extra, messages: transcript.messages.slice(extra) };
   }
+
+  /** Drops the messages kept for a reopen, once it is no longer among the chats closed most recently. */
+  forgetMessages(): void {
+    if (this.listeners.size === 0) this.state = { ...this.state, transcript: undefined };
+  }
+}
+
+function newest(transcript: ChatTabTranscript): ChatTabTranscript {
+  const extra = transcript.messages.length - KEPT_MESSAGES;
+  return extra > 0 ? { ...transcript, start: transcript.start + extra, messages: transcript.messages.slice(extra) } : transcript;
+}
+
+function removeClosed(viewer: ChatTabViewer): void {
+  const at = closedWithMessages.indexOf(viewer);
+  if (at >= 0) closedWithMessages.splice(at, 1);
+}
+
+function keepClosed(viewer: ChatTabViewer): void {
+  removeClosed(viewer);
+  closedWithMessages.push(viewer);
+  while (closedWithMessages.length > KEPT_CLOSED) closedWithMessages.shift()?.forgetMessages();
 }
 
 const viewers = new WeakMap<ChatTabClient, Map<string, ChatTabViewer>>();
