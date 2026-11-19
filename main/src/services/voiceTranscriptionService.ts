@@ -92,7 +92,7 @@ interface ValidatedAudioInput {
   dataUrl: string;
   mimeType: string;
   byteLength: number;
-  audioBuffer: Buffer;
+  audioBuffer: Buffer<ArrayBuffer>;
 }
 
 interface ValidatedStreamingFinalizeInput {

@@ -2,7 +2,7 @@
 // JPEG data URL, in this sandboxed renderer rather than Pane's main process.
 import { ipcRenderer } from 'electron';
 
-interface ScaleJob { id: number; bytes: Uint8Array; maxPx: number; quality: number }
+interface ScaleJob { id: number; bytes: Uint8Array<ArrayBuffer>; maxPx: number; quality: number }
 
 let canvas: HTMLCanvasElement | undefined;
 

@@ -21,8 +21,8 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   lints the pushed files and type checks the workspaces they reach in seconds;
   `git push --no-verify` skips it.
 - Before a push: `pnpm check:fast` (type check, lint, offline links when
-  lychee is installed, renderer test types, and the unit tests your changes
-  reach), plus any other tests your change touches.
+  lychee is installed, and the unit tests your changes reach), plus any other
+  tests your change touches.
   Agent facts (ids, executables, modes, versions, env var names) live in
   `contracts/runpane/contract.json` `agents`; read them through
   `shared/agents.ts`, never as literals. `pnpm lint` (and CI) fails on one;
