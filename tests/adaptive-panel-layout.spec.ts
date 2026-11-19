@@ -818,8 +818,14 @@ test('an observed active terminal resize debounces through the existing xterm re
   const initialHeight = (await terminalDock.boundingBox())!.height;
   const terminalSeparator = page.getByRole('separator', { name: 'Resize terminal' });
   await terminalSeparator.focus();
-  await page.keyboard.press('ArrowUp');
-  await page.keyboard.press('ArrowUp');
+  // Two steps two frames apart, well inside the 150 ms resize debounce. Sent from the
+  // page, so a slow runner's key round trips can't stretch the gap past the debounce.
+  await terminalSeparator.evaluate(async (separator) => {
+    const press = () => separator.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+    press();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    press();
+  });
   await expect.poll(async () => (await terminalDock.boundingBox())!.height).toBe(initialHeight + 20);
 
   await expect.poll(() => page.evaluate(() => {
