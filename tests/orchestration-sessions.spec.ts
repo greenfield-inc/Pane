@@ -46,7 +46,6 @@ for (const theme of ['light', 'night-owl']) {
           if (scrollers.length !== 1) throw new Error(`Expected one scrolling list, got ${scrollers.length}`);
           scrollers[0].scrollTop = (scrollers[0].scrollHeight - scrollers[0].clientHeight) * progress;
         }, fraction);
-        await page.screenshot({ path: `tmp/verify/sidebar-sticky/${theme}-${compact ? 'rail' : 'expanded'}-${fraction}.png` });
         await reachable(page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }));
         await reachable(creation);
         await reachable(stickyAction);

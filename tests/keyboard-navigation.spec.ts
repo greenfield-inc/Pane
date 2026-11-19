@@ -401,6 +401,8 @@ async function configUpdates(page: Page): Promise<ConfigUpdate[]> {
 }
 
 test('a key changed in Keyboard Shortcuts works at once and after a relaunch; a taken key blocks Apply', async ({ page, browser }) => {
+  // Two app starts and the Settings page: 20.6 s on a CI runner (run 44466821062).
+  test.setTimeout(60_000);
   await openFixture(page);
   // ⌘K ⌘S with ⌘ held, since a terminal has focus (⌘K alone would clear it).
   await page.keyboard.down(MOD);

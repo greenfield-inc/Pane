@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 import type { TailnetMachineList } from '../shared/types/workspaceAccess';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
@@ -99,7 +99,7 @@ async function openAllMachines(page: Page, colorScheme: 'light' | 'dark' = 'ligh
     initialConfig: { appearanceMode: 'system' },
     ...extra,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.evaluate(async (saved) => {
     for (const machine of saved) {
       await window.electronAPI.remoteDaemon.upsertConnectionProfile({
@@ -196,6 +196,8 @@ test('All machines shows each machine\'s own Session activity, and an offline ma
 });
 
 test('switching to All machines opens no project, and what you open is remembered across a relaunch', async ({ page, browser }) => {
+  // Two app starts (the relaunch included): 12.5 s on a CI runner (run 44466821062).
+  test.setTimeout(60_000);
   await openAllMachines(page, 'light', { open: false });
   for (const name of PROJECTS) await expect(page.getByRole('button', { name: `Expand project ${name}` })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByTestId('all-machines-pane-row')).toHaveCount(0);
@@ -221,6 +223,8 @@ test('switching to All machines opens no project, and what you open is remembere
 });
 
 test('two computers keep their own arrangement: a drag saves on this computer only and survives a relaunch', async ({ page, browser }) => {
+  // Three app starts (another computer and a relaunch): 17.2 s on a CI runner (run 44466821062).
+  test.setTimeout(60_000);
   await openAllMachines(page);
   // Drag build-box's Session above this computer's; move a Pane down with Alt+Down.
   await sessionRows(page).filter({ hasText: 'Backup rotation' }).dragTo(sessionRows(page).filter({ hasText: 'Spring sale launch' }), { targetPosition: { x: 20, y: 2 } });

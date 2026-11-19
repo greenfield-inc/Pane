@@ -372,6 +372,8 @@ test('the inspector opens on the Changes tab by default', async ({ page }) => {
 });
 
 test('inspector width matrix keeps basename and status visible without horizontal overflow', async ({ page }) => {
+  // Five app starts (one per width): 21.6 s on a CI runner (run 44466821062).
+  test.setTimeout(60_000);
   // AC8 is about the inspector rail's width, not the window's: the window stays
   // regular and the persisted rail width varies from its minimum to wide.
   await openChanges(page);
