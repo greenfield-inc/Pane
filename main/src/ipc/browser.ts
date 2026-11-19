@@ -129,7 +129,7 @@ const driverSchema = boundary.optional(boundary.union(
   boundary.object({ by: boundary.literal('agent'), agent: boundary.string }),
   boundary.object({ by: boundary.literal('person'), agentWaiting: boundary.optional(boundary.string) }),
 ));
-const pageSizeSchema = boundary.object({ width: boundary.number, height: boundary.number, mobile: boundary.boolean });
+const pageSizeSchema = boundary.object({ width: boundary.number, height: boundary.number, mobile: boundary.boolean, scale: boundary.optional(boundary.number) });
 const tabStateSchema = boundary.object({ currentUrl: boundary.optional(boundary.string), isPopup: boundary.optional(boundary.boolean), driver: driverSchema, pageSize: boundary.optional(pageSizeSchema) });
 /** What a screen showing a tab reports (`browser:watch`); null when it stops showing it. */
 const watchReportSchema = boundary.optional(boundary.object({
@@ -137,6 +137,7 @@ const watchReportSchema = boundary.optional(boundary.object({
   onScreen: boundary.boolean,
   width: boundary.number,
   height: boundary.number,
+  scale: boundary.optional(boundary.number),
 }));
 /** The smallest and largest page a viewer may ask for, in CSS pixels. */
 const PAGE_MIN = 100;
@@ -343,7 +344,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       watching: [...new Set(holds.viewers(tab.id).filter(viewer => viewer.onScreen).map(viewer => viewer.kind))],
     };
     if (state.driver) item.driving = state.driver.by === 'person' ? 'person' : state.driver.agent;
-    if (state.pageSize) item.size = state.pageSize;
+    if (state.pageSize) item.size = { width: state.pageSize.width, height: state.pageSize.height, mobile: state.pageSize.mobile };
     const dialog = page ? pages.get(page.id)?.pendingDialog : undefined;
     if (dialog) item.dialog = dialog;
     const saved = downloads.get(tab.id);
@@ -469,7 +470,9 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     controllers.set(tabId, viewerId);
     const width = Math.round(Math.min(Math.max(viewer.width, PAGE_MIN), PAGE_MAX.width));
     const height = Math.round(Math.min(Math.max(viewer.height, PAGE_MIN), PAGE_MAX.height));
-    return setPageSize(tabId, { width, height, mobile: viewer.kind === 'phone' });
+    const size: BrowserPageSize = { width, height, mobile: viewer.kind === 'phone' };
+    if (viewer.scale) size.scale = Math.min(Math.max(viewer.scale, 1), 3);
+    return setPageSize(tabId, size);
   }
 
   async function personTouched(tabId: string, pageId: number): Promise<void> {

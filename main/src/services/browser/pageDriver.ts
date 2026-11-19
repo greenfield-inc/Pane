@@ -285,7 +285,7 @@ export class PageDriver {
     if (JSON.stringify(size ?? null) === JSON.stringify(this.size ?? null)) return;
     await this.attach();
     if (size) {
-      await this.send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, deviceScaleFactor: 0, mobile: size.mobile });
+      await this.send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, deviceScaleFactor: size.scale ?? 0, mobile: size.mobile });
       await this.send('Emulation.setTouchEmulationEnabled', size.mobile ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
     } else {
       await this.send('Emulation.clearDeviceMetricsOverride');
