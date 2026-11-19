@@ -180,14 +180,19 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     const updatePosition = () => {
       if (!dropdownRef.current) return;
       const rect = externalAnchorRef.current ?? dropdownRef.current.getBoundingClientRect();
-      const { left, width } = placeAddToolMenu({ anchorLeft: rect.left, viewportWidth: window.innerWidth });
+      const { left, minWidth, maxWidth } = placeAddToolMenu({
+        anchorLeft: rect.left,
+        viewportWidth: window.innerWidth,
+        menuWidth: dropdownMenuRef.current?.offsetWidth ?? 0,
+      });
       setDropdownStyle({
         position: 'fixed',
         top: rect.bottom + 4,
         left,
         zIndex: 10000,
-        width,
-        maxWidth: `calc(100vw - ${ADD_TOOL_MENU_VIEWPORT_MARGIN * 2}px)`,
+        // The menu is as wide as its widest row (w-max) within these bounds.
+        minWidth,
+        maxWidth,
         maxHeight: Math.max(0, window.innerHeight - rect.bottom - 4 - ADD_TOOL_MENU_VIEWPORT_MARGIN),
         overflowY: 'auto',
         // Pinned under the button's left edge, so that corner is where the menu
@@ -199,9 +204,14 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     updatePosition();
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
+    // The menu's width follows its rows (the custom command form, a renamed
+    // command), so it is placed again whenever that width changes.
+    const resizeObserver = new ResizeObserver(updatePosition);
+    if (dropdownMenuRef.current) resizeObserver.observe(dropdownMenuRef.current);
     return () => {
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
+      resizeObserver.disconnect();
     };
   }, [showDropdown]);
 
@@ -586,7 +596,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
             return createPortal(
             <div
               ref={dropdownMenuRef}
-              className="min-w-[228px] p-1 bg-surface-primary border border-border-primary rounded-lg shadow-dropdown z-50"
+              className="w-max p-1 bg-surface-primary border border-border-primary rounded-lg shadow-dropdown z-50"
               style={dropdownStyle}
               role="menu"
               onKeyDown={handleDropdownKeyDown}

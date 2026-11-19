@@ -1,4 +1,4 @@
-/** The Add tool menu's width when the viewport has room for it. */
+/** The Add tool menu's narrowest width when the viewport has room for it. */
 export const ADD_TOOL_MENU_WIDTH = 280;
 /** The gap the Add tool menu keeps from each side of the viewport. */
 export const ADD_TOOL_MENU_VIEWPORT_MARGIN = 8;
@@ -12,24 +12,31 @@ export function truncateCustomCommandLabel(label: string): string {
 
 export interface AddToolMenuPlacement {
   left: number;
-  width: number;
+  minWidth: number;
+  maxWidth: number;
 }
 
 /**
- * Where the Add tool menu sits: under its "+" button, moved left as far as it
- * takes to keep the whole menu inside the viewport's margins.
+ * Where the Add tool menu sits and how wide it may grow. The menu takes the
+ * width of its widest row: at least ADD_TOOL_MENU_WIDTH, at most the viewport
+ * minus its margins. Shortcut hints are wider off macOS ("Ctrl+Alt+7" against
+ * "⌘⌥7"), so a fixed width would leave a custom command's already shortened
+ * label too little room and cut it a second time (#1562).
+ *
+ * `menuWidth` is the menu's rendered width; the menu opens under its "+"
+ * button and moves left as far as it takes to stay inside the margins.
  */
-export function placeAddToolMenu({ anchorLeft, viewportWidth }: {
+export function placeAddToolMenu({ anchorLeft, viewportWidth, menuWidth }: {
   anchorLeft: number;
   viewportWidth: number;
+  menuWidth: number;
 }): AddToolMenuPlacement {
-  const width = Math.min(
-    ADD_TOOL_MENU_WIDTH,
-    viewportWidth - (ADD_TOOL_MENU_VIEWPORT_MARGIN * 2),
-  );
+  const maxWidth = Math.max(0, viewportWidth - (ADD_TOOL_MENU_VIEWPORT_MARGIN * 2));
+  const minWidth = Math.min(ADD_TOOL_MENU_WIDTH, maxWidth);
+  const width = Math.min(Math.max(menuWidth, minWidth), maxWidth);
   const left = Math.max(
     ADD_TOOL_MENU_VIEWPORT_MARGIN,
     Math.min(anchorLeft, viewportWidth - width - ADD_TOOL_MENU_VIEWPORT_MARGIN),
   );
-  return { left, width };
+  return { left, minWidth, maxWidth };
 }
