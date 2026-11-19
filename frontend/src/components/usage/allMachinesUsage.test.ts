@@ -44,10 +44,10 @@ describe('accountUsage', () => {
     ]);
   });
 
-  it('keeps a Pane that does not report accounts separate, named for its machine', () => {
-    const old = machine('devbox', [model('codex', 'gpt-5', 60)]);
+  it('keeps usage and limits it cannot tie to an account, as their own row for the machine', () => {
+    const old = machine('devbox', [model('codex', 'gpt-5', 60)], { rateLimits: [limit(35, 2_000)] });
     expect(accountUsage([old])).toEqual([
-      { provider: 'codex', key: 'unreported:devbox:codex', label: 'Account not reported by devbox', plan: null, machines: ['devbox'], tokens: 60, limits: [] },
+      { provider: 'codex', key: 'unidentified:devbox:codex', label: 'Account not identified on devbox', plan: 'pro', machines: ['devbox'], tokens: 60, limits: [limit(35, 2_000)] },
     ]);
   });
 });

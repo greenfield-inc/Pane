@@ -76,13 +76,21 @@ function mergeSlices(slices: UsagePaneCostSlice[]): UsagePaneCostSlice {
   };
 }
 
-/** A machine's accounts; a Pane too old to report them gets one unnamed account per provider it used. */
+/**
+ * A machine's accounts. A provider it has usage or limits for but no account it can name (not
+ * signed in through the CLI, or a Pane from before accounts) gets one row of its own, so its
+ * usage and limits still show.
+ */
 function accountsOf(usage: MachineUsage): UsageAccount[] {
-  if (usage.report.accounts) return usage.report.accounts;
-  const providers = new Set(usage.report.byModel.map(entry => entry.provider));
-  return [...providers].map(provider => ({
-    provider, key: `unreported:${usage.machineId}:${provider}`, label: `Account not reported by ${usage.name}`, plan: null,
+  const named = usage.report.accounts ?? [];
+  const used = new Set([...usage.report.byModel, ...usage.report.rateLimits].map(entry => entry.provider));
+  const unnamed = [...used].filter(provider => !named.some(account => account.provider === provider)).map(provider => ({
+    provider,
+    key: `unidentified:${usage.machineId}:${provider}`,
+    label: `Account not identified on ${usage.name}`,
+    plan: usage.report.rateLimits.find(limit => limit.provider === provider && limit.planType)?.planType ?? null,
   }));
+  return [...named, ...unnamed];
 }
 
 /**

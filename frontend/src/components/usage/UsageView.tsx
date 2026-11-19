@@ -152,7 +152,7 @@ function UsageSkeleton() {
             <div className="mt-2 flex gap-2"><Bone className="h-[19px] w-24" /><Bone className="h-[19px] w-24" /></div>
           </section>
           <section className="rounded border border-border-primary bg-surface-secondary p-3">
-            <h2 className={heading}><TextBone text="Provider limits" /></h2>
+            <h2 className={heading}><TextBone text="Accounts and limits" /></h2>
             <div className="mt-2 space-y-2">
               {[0, 1, 2].map((index) => (
                 <div key={index}>
