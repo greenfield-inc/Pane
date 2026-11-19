@@ -474,8 +474,10 @@ agent in the same conversation.
   about 700 messages: **Earlier messages** pages older ones in
   (`chat-tab:history`) and drops the newest, **Newer messages** pages back
   down, and the jump-to-latest arrow returns to the live end.
-- Only the chat tab on screen renders. A hidden tab is unmounted and holds no
-  transcript; showing it reads the newest window from the host once.
+- Only the chat tab on screen renders. A hidden tab is unmounted; the five
+  hidden most recently keep their newest 200 messages, and the rest hold no
+  transcript. Showing a tab paints the messages it kept, then reads the newest
+  window from the host once.
 - A streaming reply redraws at most once per stream frame (`STREAM_FRAME_MS` in
   `shared/constants/streamCadence.ts`, also the terminals' output interval when
   no one is typing), and its markdown is parsed block by block, so an update

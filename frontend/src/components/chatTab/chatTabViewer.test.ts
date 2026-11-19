@@ -219,3 +219,47 @@ describe('chat tab viewer whole conversation', () => {
     await expect(viewer.allMessages()).rejects.toThrow('host went away');
   });
 });
+
+describe('chat tab viewer reopen', () => {
+  it('paints a reopened chat’s last messages at once, then refreshes them from the host', async () => {
+    const fake = host(3);
+    const viewer = new ChatTabViewer(fake.client, 'p');
+    const close = viewer.subscribe(() => undefined);
+    await settle();
+    close();
+    fake.append();
+    const release = fake.deferGet();
+    viewer.subscribe(() => undefined);
+    expect(ids(viewer)).toEqual(['m0', 'm1', 'm2']);
+    release();
+    await settle();
+    expect(ids(viewer)).toEqual(['m0', 'm1', 'm2', 'm3']);
+  });
+
+  it('keeps the messages of the five chats closed most recently', async () => {
+    const fake = host(3);
+    const viewers = ['a', 'b', 'c', 'd', 'e', 'f'].map(panel => new ChatTabViewer(fake.client, panel));
+    const closers = viewers.map(viewer => viewer.subscribe(() => undefined));
+    await settle();
+    closers.forEach(close => close());
+    expect(viewers.map(viewer => ids(viewer).length)).toEqual([0, 3, 3, 3, 3, 3]);
+  });
+
+  it('keeps the newest 200 messages of a long chat, and nothing of a chat closed while scrolled back', async () => {
+    const fake = host(1000);
+    const following = new ChatTabViewer(fake.client, 'p');
+    const close = following.subscribe(() => undefined);
+    await settle();
+    close();
+    expect(ids(following)).toHaveLength(200);
+    expect(ids(following).at(-1)).toBe('m999');
+
+    const scrolled = new ChatTabViewer(fake.client, 'p');
+    const closeScrolled = scrolled.subscribe(() => undefined);
+    await settle();
+    for (let page = 0; page < 6; page++) await scrolled.loadEarlier();
+    expect(scrolled.snapshot().hasNewer).toBe(true);
+    closeScrolled();
+    expect(ids(scrolled)).toEqual([]);
+  });
+});
