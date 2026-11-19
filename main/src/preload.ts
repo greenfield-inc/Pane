@@ -319,6 +319,14 @@ try {
       console.error('Failed to dispatch browser-panel:file-refused to window:', e);
     }
   });
+  // A docs page's link that opens a new window.
+  ipcRenderer.on('docs:open-link', (_event: Electron.IpcRendererEvent, url: string) => {
+    try {
+      window.dispatchEvent(new CustomEvent('docs:open-link', { detail: url }));
+    } catch (e) {
+      console.error('Failed to dispatch docs:open-link to window:', e);
+    }
+  });
 } catch {
   // Ignore if IPC is not available for some reason
 }

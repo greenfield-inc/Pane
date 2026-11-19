@@ -567,7 +567,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     return () => window.removeEventListener('browser-panel:file-refused', handler);
   }, [panel.id]);
 
-  // Navigate requests (terminal links, "Open in Browser") name the tab they target;
+  // Navigate requests (an editor's HTML preview, a project's run URL) name the tab they target;
   // only that tab acts, and it takes focus so the person sees the page.
   useEffect(() => {
     const handler = (e: Event) => {

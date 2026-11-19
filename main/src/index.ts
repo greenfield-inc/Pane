@@ -157,6 +157,7 @@ import { PowerSaveManager } from './services/powerSaveManager';
 import { warmShellPath } from './utils/shellPath';
 import { routeWebviewPopups } from './services/webviewPopups';
 import { openExternalUrl } from './utils/openExternalUrl';
+import { DOCS_BROWSER_PARTITION } from '../../shared/constants/browserPartitions';
 import { hardenWebviewPreferences } from './services/webviewPreferences';
 import { APP_MENU_ACTION_CHANNEL, attachEditContextMenu, installApplicationMenu, type AppMenuAction } from './services/nativeMenus';
 import { fitBoundsToWorkAreas, parseSavedWindowState, trackWindowState, WINDOW_STATE_KEY } from './utils/windowState';
@@ -655,9 +656,12 @@ async function createWindow() {
     routeWebviewPopups(wvContents, {
       contextOf: id => webviewContextMap.get(id),
       openBrowserTab: request => mainWindow?.webContents.send('browser-panel:popup-requested', request),
-      openExternal: url => void openExternalUrl(url).catch((error) => {
-        console.error('[BrowserPanel] Did not open popup URL externally:', error);
-      }),
+      // The docs dialog opens its new-window links like any link from your work (Settings > Links).
+      openExternal: url => wvContents.session === session.fromPartition(DOCS_BROWSER_PARTITION)
+        ? mainWindow?.webContents.send('docs:open-link', url)
+        : void openExternalUrl(url).catch((error) => {
+          console.error('[BrowserPanel] Did not open popup URL externally:', error);
+        }),
       openPaneLink,
     });
 

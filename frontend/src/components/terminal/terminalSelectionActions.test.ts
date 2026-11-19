@@ -66,8 +66,8 @@ describe('terminalContextMenuEntries', () => {
   });
 
   it('adds the browser actions for a URL', () => {
-    expect(labels(menuFor('see https://example.com'))).toEqual(['Copy', 'Paste', '---', 'Select All', '---', 'Open in Browser', 'Open URL']);
-    expect(labels(menuFor('https://example.com', { hasSession: false }))).toEqual(['Copy', 'Paste', '---', 'Select All', '---', 'Open URL']);
+    expect(labels(menuFor('see https://example.com'))).toEqual(['Copy', 'Paste', '---', 'Select All', '---', "Open in Pane's browser", 'Open in system browser']);
+    expect(labels(menuFor('https://example.com', { hasSession: false }))).toEqual(['Copy', 'Paste', '---', 'Select All', '---', 'Open in system browser']);
   });
 
   it('adds Show in Explorer for a path, disabled where it cannot work', () => {

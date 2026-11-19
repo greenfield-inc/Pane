@@ -106,6 +106,26 @@ computer that views this one over Tailscale, SSH or a manual URL without being l
 browser tools; link it. A call from an agent on another computer through `runpane workspace`
 fails with `ERR_BROWSER_LOCAL_ONLY`.
 
+## Links
+
+- **Links from your work open in a Pane browser tab beside where you clicked.** A link in
+  terminal output, a chat message, a Notify card, the chat's pull request chip, the command
+  palette's **Open pull request**, or a page in the docs dialog opens in a browser tab of that
+  Pane, in the split beside the conversation. A tab already showing that page comes forward instead. Pane's own links
+  (release notes, downloads, Discord, feedback, Tailscale) open in your system browser.
+- **Command-line tools too.** Pane's terminals and chat tabs set `BROWSER` to its
+  `pane-browser` command, so `gh pr view --web`, `gh auth login` and
+  `python3 -m webbrowser <url>` open a tab beside that terminal. A tool that runs macOS `open`
+  itself, or ignores `BROWSER`, still uses your system browser. Pane doesn't set `BROWSER` in
+  WSL terminals.
+- **Settings › Links › Open links in** chooses **Pane's browser** (the default) or **System
+  browser**. With System browser, links from terminals, chats, cards, the command palette, the
+  docs dialog and command-line tools all open in your system browser, at once, in terminals
+  already open too.
+- **Leave any page.** Each tab's **Open in your browser** button sends its page to your
+  system browser, and right-clicking a link, in a tab or in a chat, offers **Open in System
+  Browser**.
+
 ## How it works
 
 Pane's main process drives the page through Electron's per-page debugger, attached only through
