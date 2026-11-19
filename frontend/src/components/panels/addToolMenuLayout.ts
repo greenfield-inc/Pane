@@ -33,7 +33,9 @@ export function placeAddToolMenu({ anchorLeft, viewportWidth, menuWidth }: {
 }): AddToolMenuPlacement {
   const maxWidth = Math.max(0, viewportWidth - (ADD_TOOL_MENU_VIEWPORT_MARGIN * 2));
   const minWidth = Math.min(ADD_TOOL_MENU_WIDTH, maxWidth);
-  const width = Math.min(Math.max(menuWidth, minWidth), maxWidth);
+  // A rendered width can be fractional; place by the whole pixels it covers so its right edge
+  // never lands a fraction past the margin.
+  const width = Math.min(Math.max(Math.ceil(menuWidth), minWidth), maxWidth);
   const left = Math.max(
     ADD_TOOL_MENU_VIEWPORT_MARGIN,
     Math.min(anchorLeft, viewportWidth - width - ADD_TOOL_MENU_VIEWPORT_MARGIN),

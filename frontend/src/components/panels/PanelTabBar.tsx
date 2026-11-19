@@ -183,7 +183,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
       const { left, minWidth, maxWidth } = placeAddToolMenu({
         anchorLeft: rect.left,
         viewportWidth: window.innerWidth,
-        menuWidth: dropdownMenuRef.current?.offsetWidth ?? 0,
+        menuWidth: dropdownMenuRef.current?.getBoundingClientRect().width ?? 0,
       });
       setDropdownStyle({
         position: 'fixed',

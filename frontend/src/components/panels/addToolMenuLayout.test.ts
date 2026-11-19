@@ -35,6 +35,11 @@ describe('placeAddToolMenu', () => {
       .toEqual({ left: 8, minWidth: 184, maxWidth: 184 });
   });
 
+  it('keeps a menu with a fractional width inside the right margin', () => {
+    const { left } = placeAddToolMenu({ anchorLeft: 300, viewportWidth: 420, menuWidth: 290.40625 });
+    expect(left + 290.40625).toBeLessThanOrEqual(420 - 8);
+  });
+
   it('places a menu not yet measured at its narrowest width', () => {
     expect(placeAddToolMenu({ anchorLeft: 1200, viewportWidth: 1280, menuWidth: 0 }).left)
       .toBe(1280 - ADD_TOOL_MENU_WIDTH - 8);
