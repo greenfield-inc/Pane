@@ -359,7 +359,7 @@ jobs:
       run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Install Playwright browser dependencies
-      run: pnpm exec playwright install --with-deps chromium
+      run: scripts/playwright-chromium.sh
 
     - name: Run WebGL renderer recovery tests
       run: pnpm exec playwright test --config=playwright.ci.webgl.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
@@ -415,10 +415,10 @@ jobs:
       with:
         install: 'false'
 
-    # The apt packages overlap the build steps below. apt upgrades libraries
-    # Electron loads, so the wait step comes before Electron first starts.
+    # The browser install overlaps the build steps below; the wait step comes
+    # before the tests first start Chromium.
     - name: Start Playwright browser dependencies install
-      run: scripts/ci-background.sh start playwright pnpm exec playwright install --with-deps chromium
+      run: scripts/ci-background.sh start playwright scripts/playwright-chromium.sh
 
     # The install skipped Electron's binary download, and Electron 42+ logs a
     # first-use fetch to stdout, so fetch it first to keep require('electron')
