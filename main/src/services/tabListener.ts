@@ -123,7 +123,7 @@ export function sendError(response: http.ServerResponse, status: number, body: T
 }
 
 /** Reads a request body, refusing more than `maxBytes`. */
-export function readBody(request: http.IncomingMessage, maxBytes: number): Promise<Buffer> {
+export function readBody(request: http.IncomingMessage, maxBytes: number): Promise<Buffer<ArrayBuffer>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;

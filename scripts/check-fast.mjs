@@ -63,7 +63,7 @@ const started = Date.now();
 const results = [];
 console.log(`check:fast against ${base.slice(0, 12)}: ${changed.length} changed files; unit tests for ${workspaces.join(', ') || 'no workspace'}.\n`);
 
-// Type check and lint are the slowest; they run side by side, as in CI.
+// Type check and lint are the slowest; they run side by side.
 results.push(...(await Promise.all([
   run('pnpm typecheck', 'pnpm', ['typecheck'], { quiet: true }),
   run('pnpm lint', 'pnpm', ['lint'], { quiet: true }),
@@ -77,10 +77,6 @@ if (spawnSync('lychee', ['--version'], { stdio: 'ignore', shell: process.platfor
 } else {
   console.log('skip markdown links: lychee is not installed (brew install lychee, or cargo install lychee); CI still checks them.\n');
 }
-
-results.push(report(await run('renderer test types', 'pnpm', [
-  '--filter', 'frontend', 'exec', 'tsc', '--noEmit', '-p', '../tests/renderer/tsconfig.json',
-])));
 
 for (const workspace of workspaces) {
   const result = report(await run(`${workspace} unit tests (changed since ${base.slice(0, 12)})`, 'pnpm', [

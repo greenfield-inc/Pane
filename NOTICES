@@ -482,6 +482,38 @@ Version: 3.0.3
 Author: Kris Zyp
 Repository: http://github.com/kriszyp/msgpackr-extract
 
+Package: @oven/bun-darwin-aarch64
+Version: 1.4.4
+Homepage: https://bun.com
+
+Package: @oven/bun-darwin-x64
+Version: 1.4.4
+Homepage: https://bun.com
+
+Package: @oven/bun-linux-aarch64
+Version: 1.4.4
+Homepage: https://bun.com
+
+Package: @oven/bun-linux-aarch64-musl
+Version: 1.4.4
+Homepage: https://bun.com
+
+Package: @oven/bun-linux-x64
+Version: 1.4.4
+Homepage: https://bun.com
+
+Package: @oven/bun-linux-x64-musl
+Version: 1.4.4
+Homepage: https://bun.com
+
+Package: @oven/bun-windows-aarch64
+Version: 1.4.4
+Homepage: https://bun.com
+
+Package: @oven/bun-windows-x64
+Version: 1.4.4
+Homepage: https://bun.com
+
 Package: @oxc-resolver/binding-darwin-arm64
 Version: 11.24.2
 Homepage: https://oxc.rs
@@ -908,6 +940,10 @@ Package: buffer-equal
 Version: 0.0.1
 Author: James Halliday
 Repository: git://github.com/substack/node-buffer-equal.git
+
+Package: bun
+Version: 1.4.4
+Homepage: https://bun.com
 
 Package: chromium-pickle-js
 Version: 0.2.0
