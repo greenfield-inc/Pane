@@ -546,11 +546,24 @@ export class TodoStore {
 
   // ── Retention ───────────────────────────────────────────────────────────
 
-  /** Deletes to-dos closed more than 30 days ago, with their rows. Files they point at are never touched. */
+  /**
+   * Deletes to-dos closed more than 30 days ago, with their rows. Files they point at are never touched.
+   * A parent stays while any sub-to-do of it stays, so a kept sub-to-do never loses its parent or the
+   * context it inherits; the family goes together once every member is past retention.
+   */
   pruneClosed(now: number): number {
     return this.transaction(() => {
       const cutoff = now - TODO_RETENTION_MS;
-      const doomed = decodeBoundary(this.db.prepare('SELECT number FROM todos WHERE closed_at IS NOT NULL AND closed_at < ? AND state IN (\'done\', \'dropped\')').all(cutoff), boundary.array(boundary.object({ number: boundary.number }))).map(row => row.number);
+      const eligible = new Set(decodeBoundary(this.db.prepare('SELECT number FROM todos WHERE closed_at IS NOT NULL AND closed_at < ? AND state IN (\'done\', \'dropped\')').all(cutoff), boundary.array(boundary.object({ number: boundary.number }))).map(row => row.number));
+      const links = decodeBoundary(this.db.prepare('SELECT number, parent_id FROM todos WHERE parent_id IS NOT NULL').all(), boundary.array(boundary.object({ number: boundary.number, parent_id: boundary.number })));
+      // Drop from the set every row with a child that stays, until nothing changes (sub-to-dos may nest).
+      for (let changed = true; changed;) {
+        changed = false;
+        for (const link of links) {
+          if (!eligible.has(link.number) && eligible.delete(link.parent_id)) changed = true;
+        }
+      }
+      const doomed = [...eligible];
       for (const number of doomed) {
         this.db.prepare('DELETE FROM todo_attachments WHERE todo_id = ?').run(number);
         this.db.prepare('DELETE FROM todo_activity WHERE todo_id = ?').run(number);

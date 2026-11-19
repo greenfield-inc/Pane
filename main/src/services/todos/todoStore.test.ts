@@ -26,6 +26,24 @@ describe('TodoStore', () => {
     expect(store.create({ title: 'Three', requester: person, createdBy: 'you', now: 4 }).ref).toBe('T-3');
   });
 
+  it('keeps a closed parent past retention while a sub-to-do of it stays, then prunes the family together (F-2)', () => {
+    const parent = store.create({ title: 'Parent', sessionId: 's1', requester: person, createdBy: 'you', now: 1 });
+    const child = store.create({ title: 'Child', sessionId: 's1', parentNumber: parent.number, requester: person, createdBy: 'orchestrator', now: 2 });
+    const grandchild = store.create({ title: 'Grandchild', sessionId: 's1', parentNumber: child.number, requester: person, createdBy: 'orchestrator', now: 2 });
+    store.attach({ todoNumber: parent.number, kind: 'plan', target: '/tmp/plan.html', machine: 'mini', label: 'Plan', addedBy: 'planner', source: 'attached', now: 2 });
+    store.update(parent.number, { state: 'done', closedAt: 3 }, 3);
+    store.update(child.number, { state: 'done', closedAt: 3 }, 3);
+    // The grandchild is still open: nothing above it goes.
+    expect(store.pruneClosed(3 + TODO_RETENTION_MS + 1)).toBe(0);
+    expect(store.get(parent.number)?.title).toBe('Parent');
+    expect(store.attachments(parent.number)).toHaveLength(1);
+    // Closed later, the grandchild keeps the family until its own 30 days pass.
+    store.update(grandchild.number, { state: 'dropped', closedAt: 3 + TODO_RETENTION_MS }, 3 + TODO_RETENTION_MS);
+    expect(store.pruneClosed(3 + TODO_RETENTION_MS + 2)).toBe(0);
+    expect(store.pruneClosed(3 + 2 * TODO_RETENTION_MS + 1)).toBe(3);
+    expect(store.get(parent.number)).toBeUndefined();
+  });
+
   it('keeps a to-do, its done-when list, requester and assignee as written', () => {
     const created = store.create({
       title: 'Invoice PDFs', summary: '**Bold**', doneWhen: [{ text: 'PDF renders', met: false }], sessionId: 's1',
