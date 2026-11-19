@@ -334,7 +334,7 @@ jobs:
       uses: ./.github/actions/playwright-browsers
 
     - name: Run stabilizing browser tests
-      run: pnpm exec playwright test --config=playwright.ci.stabilizing.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      run: pnpm exec playwright test --config=playwright.ci.stabilizing.config.ts --repeat-each=10 --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # The WebGL renderer recovery spec, split off the browser shards: its 25 tests
   # take about 16 s each, and Playwright shards by test count in file order, so
@@ -362,7 +362,7 @@ jobs:
       run: pnpm exec playwright install --with-deps chromium
 
     - name: Run WebGL renderer recovery tests
-      run: pnpm exec playwright test --config=playwright.ci.webgl.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      run: pnpm exec playwright test --config=playwright.ci.webgl.config.ts --repeat-each=10 --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # One worker per shard: the tests are CPU-bound, so four workers on one
   # 4-vCPU runner took as long as one. fullyParallel lets --shard split files.
