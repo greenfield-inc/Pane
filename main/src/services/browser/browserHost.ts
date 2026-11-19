@@ -65,11 +65,18 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
       await panelManager.updatePanel(tab.id, { state: { ...current.state, customState: state } });
     },
     page: (panelId) => newestPage(panelId),
+    tunnels: (panelId) => new Map(newestContext(panelId)?.ports ?? []),
     hasWindow: () => getMainWindow() !== null,
     shotsDirectory: async (paneId) => path.join(await paneScratchDirectory(paneId) ?? os.tmpdir(), 'browser-screenshots'),
     showCursor: (panelId, x, y) => getMainWindow()?.webContents.send(BROWSER_AGENT_CURSOR_EVENT, { panelId, x, y }),
     linked: () => linkedComputers(configManager),
   };
+}
+
+/** The newest live page's registration for a tab. */
+function newestContext(panelId: string) {
+  const page = newestPage(panelId);
+  return page ? getPaneWebviewContextMap().get(page.id) : undefined;
 }
 
 /** A remounted tab registers a new page id and the old ones stay mapped, so the newest live one wins. */

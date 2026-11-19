@@ -21,7 +21,7 @@ import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { getAppSubdirectory } from '../utils/appDirectory';
 import { sanitizeTerminalOutput } from '../utils/terminalOutputSanitizer';
 import { getWSLHome, linuxToUNCPath, posixJoin, windowsPathToWSLMount } from '../utils/wslUtils';
-import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { readBrowserPanelFile } from '../services/browserPanelFiles';
 import { prepareRemoteBrowserFiles } from '../daemon/client/remoteBrowserFiles';
@@ -1055,8 +1055,10 @@ export function registerPanelHandlers(
 
   // Register a webview's panel/session context so the did-attach-webview popup handler
   // (in index.ts) can route popups to the correct browser panel.
-  ipcMain.handle('browser-panel:register-webview', async (_, wcId: number, panelId: string, sessionId: string) => {
-    getPaneWebviewContextMap().set(wcId, { panelId, sessionId });
+  ipcMain.handle('browser-panel:register-webview', async (_, wcId: number, panelId: string, sessionId: string, ports?: JsonValue) => {
+    // A remote desktop sends its port tunnels, so agents' calls map the host's localhost URLs.
+    const tunnels = decodeOptionalBoundary(ports, boundary.array(boundary.array(boundary.number)))?.flatMap(pair => (pair.length === 2 ? [[pair[0], pair[1]] as const] : []));
+    getPaneWebviewContextMap().set(wcId, tunnels?.length ? { panelId, sessionId, ports: tunnels } : { panelId, sessionId });
     return { success: true };
   });
 

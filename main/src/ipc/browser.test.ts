@@ -94,6 +94,7 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
     close: async (tab) => { tabs.splice(tabs.indexOf(tab), 1); },
     update: async (tab, state) => { tab.state = { ...tab.state, customState: state }; },
     page: (id) => pages.get(id),
+    tunnels: () => new Map(),
     hasWindow: () => true,
     shotsDirectory: async () => path.join(worktree, '.shots'),
     showCursor: (panelId) => { options.cursors?.push(panelId); },
@@ -262,6 +263,18 @@ describe('browser tools: a tab a linked computer shows (P2)', () => {
     expect(shot).toMatchObject({ ok: true, mimeType: 'image/png' });
     expect(readFileSync(JSON.parse(JSON.stringify(shot)).path, 'utf8')).toBe('png');
     expect(viewer.pages.get('shown-there')?.sent).toContain('Input.dispatchMouseEvent');
+  });
+
+  it('makes the agent wait after Take over on the linked computer, and stales its refs there', async () => {
+    const { agentSide } = linkedPair();
+    await call(agentSide, 'snapshot', {});
+    // The viewing desktop's chip reaches the agent's computer as a host channel.
+    expect(await agentSide.registry.invokeRemote('browser:driver', ['shown-there', 'person'], { caller: undefined })).toEqual({ success: true });
+    const waiting = code(call(agentSide, 'click', { ref: 'e2' }));
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(JSON.stringify(agentSide.tabs.find(tab => tab.id === 'shown-there')?.state.customState)).toContain('"agentWaiting":"Claude"');
+    await agentSide.registry.invokeRemote('browser:driver', ['shown-there', 'agent'], { caller: undefined });
+    expect(await waiting).toBe('ERR_BROWSER_STALE_REF');
   });
 
   it('waits while the person uses the page on the linked computer', async () => {

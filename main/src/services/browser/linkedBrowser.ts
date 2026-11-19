@@ -18,12 +18,14 @@ const file = boundary.object({ name: boundary.string, data: boundary.string });
 
 export type LinkedBrowserRequest =
   | { op: 'probe'; from: { id: string; name: string }; panelId: string }
+  | { op: 'revoke'; from: { id: string; name: string }; panelId: string }
   | { op: 'run'; from: { id: string; name: string }; panelId: string; request: VerbRequest; files?: Array<{ name: string; data: string }> }
   | { op: 'await'; from: { id: string; name: string }; task: string }
   | { op: 'chunk'; from: { id: string; name: string }; image: string; offset: number };
 
 export const linkedBrowserRequestSchema: BoundarySchema<LinkedBrowserRequest> = boundary.union(
   boundary.object({ op: boundary.literal('probe'), from, panelId: boundary.string }),
+  boundary.object({ op: boundary.literal('revoke'), from, panelId: boundary.string }),
   boundary.object({ op: boundary.literal('run'), from, panelId: boundary.string, request: verbRequestSchema, files: boundary.optional(boundary.array(file)) }),
   boundary.object({ op: boundary.literal('await'), from, task: boundary.string }),
   boundary.object({ op: boundary.literal('chunk'), from, image: boundary.string, offset: boundary.number }),

@@ -15,6 +15,7 @@ import { PageDriver, WAIT_DEFAULT_MS, WAIT_MAX_MS, type BrowserPageContents, typ
 import { READ_VERBS, runVerb, type VerbOutcome, type VerbRequest } from '../services/browser/pageVerbs';
 import { BROWSER_MACHINE_CHANNEL, IMAGE_CHUNK_BYTES, linkedBrowserRequestSchema, linkedChunkAnswerSchema, linkedProbeAnswerSchema, linkedRunAnswerSchema } from '../services/browser/linkedBrowser';
 import { answerWithin, awaitTask } from './macDevices';
+import { remapLoopbackPort } from '../../../shared/utils/browserUrl';
 
 /**
  * Where the browser tools find tabs and pages. Main's default reads the panel store and the page
@@ -33,6 +34,8 @@ export interface BrowserHost {
   update(tab: ToolPanel, state: BrowserPanelState): Promise<void>;
   /** The tab's live page on this machine, the newest one the renderer registered. */
   page(panelId: string): BrowserPageContents | undefined;
+  /** On a desktop showing another computer's Pane: the tab's local tunnel ports and the host ports they reach. */
+  tunnels(panelId: string): ReadonlyMap<number, number>;
   /** Whether this Pane has a window that can show a tab (headless hosts have none). */
   hasWindow(): boolean;
   /** Where a Pane's screenshots go: its scratch folder, deleted with the Pane. */
@@ -167,6 +170,8 @@ function checkedUploadPath(worktree: string | undefined, raw: string): string {
  */
 export function registerBrowserHandlers(services: BrowserServices, commandRegistry: PaneCommandRegistry, host: BrowserHost): void {
   const pages = new Map<number, PageDriver>();
+  /** Linked computers found showing each tab, or found not showing it (machine undefined) until `until`. */
+  const viewers = new Map<string, { machine: { id: string; name: string } | undefined; until: number }>();
   /** Tabs the person holds by touching the page; they go back to the agent TOUCH_HOLD_MS after the last touch. */
   const touchTimers = new Map<string, NodeJS.Timeout>();
 
@@ -229,7 +234,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       title: page?.getTitle() || tab.title,
       openedBy: openerOf(tab, caller),
       yours: mayAct(tab, caller),
-      showing: page !== undefined,
+      showing: page !== undefined || viewers.get(tab.id)?.machine !== undefined,
     };
     if (state.driver) item.driving = state.driver.by === 'person' ? 'person' : state.driver.agent;
     const dialog = page ? pages.get(page.id)?.pendingDialog : undefined;
@@ -323,14 +328,16 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     touchTimers.delete(tabId);
     const page = host.page(tabId);
     if (who === 'person' && page) pages.get(page.id)?.revokeRefs();
+    // Taking over a tab a linked computer shows revokes the refs its copy handed out too.
+    const linked = host.linked();
+    const viewer = viewers.get(tabId)?.machine;
+    if (who === 'person' && linked && viewer) void linked.invoke(viewer.id, { op: 'revoke', from: linked.self, panelId: tabId }, PROBE_TIMEOUT_MS).catch(() => undefined);
     const tab = host.tab(tabId);
     const waiting = tab ? tabState(tab).driver : undefined;
     const driver: DeviceDriver | undefined = who === 'person' ? (waiting?.by === 'person' ? waiting : { by: 'person' }) : undefined;
     await gate.set(tabId, driver);
   }
 
-  /** Linked computers found showing each tab, or found not showing it (machine undefined) until `until`. */
-  const viewers = new Map<string, { machine: { id: string; name: string } | undefined; until: number }>();
 
   /** The linked computer showing the tab, if any: that copy is the one the person watches, so it wins. */
   async function viewerOf(tab: ToolPanel): Promise<{ id: string; name: string } | undefined> {
@@ -589,6 +596,11 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const message = decodeBoundary(raw, linkedBrowserRequestSchema);
     const key = `${message.from.id}:browser`;
     if (message.op === 'probe') return { showing: host.page(message.panelId) !== undefined };
+    if (message.op === 'revoke') {
+      const page = host.page(message.panelId);
+      if (page) pages.get(page.id)?.revokeRefs();
+      return { ok: true };
+    }
     if (message.op === 'await') return awaitTask(key, message.task, () => new PaneError('ERR_BROWSER_TASK_GONE', `This computer no longer has that browser call from ${message.from.name}.`, 'Call the browser tool again.'));
     if (message.op === 'chunk') {
       const image = images.get(message.image);
@@ -607,7 +619,12 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const driver = driverFor(message.panelId, contents);
     if (write && driver.personDriving(TOUCH_HOLD_MS)) return { personDriving: true };
     return answerWithin(key, (async () => {
-      let request = message.request;
+      // This desktop reaches the host's localhost ports through tunnels on other local ports.
+      const tunnels = host.tunnels(message.panelId);
+      const hostToLocal = new Map([...tunnels].map(([local, hostPort]) => [hostPort, local]));
+      let request = message.request.verb === 'navigate' && message.request.url !== undefined
+        ? { ...message.request, url: remapLoopbackPort(message.request.url, hostToLocal) }
+        : message.request;
       let uploads: string | undefined;
       if (request.verb === 'upload' && message.files) {
         uploads = await mkdtemp(path.join(os.tmpdir(), 'pane-browser-upload-'));
@@ -622,7 +639,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       try {
         const { image, cursor, ...rest } = await runVerb(driver, contents, request);
         if (cursor) host.showCursor(message.panelId, cursor.x, cursor.y);
-        const outcome: PaneCommandValue = { ...rest };
+        const outcome: PaneCommandValue = { ...rest, url: remapLoopbackPort(rest.url, tunnels) };
         if (image) {
           const id = randomUUID();
           for (const [old, held] of images) if (held.expires < Date.now()) images.delete(old);
