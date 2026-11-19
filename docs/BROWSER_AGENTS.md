@@ -123,11 +123,12 @@ fails with `ERR_BROWSER_LOCAL_ONLY`.
   palette's **Open pull request**, or a page in the docs dialog opens in a browser tab of that
   Pane, in the split beside the conversation. A tab already showing that page comes forward instead. Pane's own links
   (release notes, downloads, Discord, feedback, Tailscale) open in your system browser.
-- **Command-line tools too.** Pane's terminals and chat tabs set `BROWSER` to its
-  `pane-browser` command, so `gh pr view --web`, `gh auth login` and
+- **Command-line tools too, on macOS and Linux.** Pane's terminals and chat tabs set `BROWSER`
+  to its `pane-browser` command, so `gh pr view --web`, `gh auth login` and
   `python3 -m webbrowser <url>` open a tab beside that terminal. A tool that runs macOS `open`
-  itself, or ignores `BROWSER`, still uses your system browser. Pane doesn't set `BROWSER` in
-  WSL terminals.
+  itself, or ignores `BROWSER`, still uses your system browser. On Windows, and in WSL
+  terminals, Pane leaves `BROWSER` alone, so these tools open your system browser: Windows tools
+  pass the URL to `BROWSER` unquoted, and a `.cmd` file would cut it at `&`.
 - **Settings › Links › Open links in** chooses **Pane's browser** (the default) or **System
   browser**. With System browser, links from terminals, chats, cards, the command palette, the
   docs dialog and command-line tools all open in your system browser, at once, in terminals

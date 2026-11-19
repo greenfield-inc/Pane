@@ -433,8 +433,10 @@ describe('withRunpaneOnPath', () => {
 
   it('only prepends PATH on Windows and for non-interactive commands', () => {
     const win = withRunpaneOnPath({ name: 'bash', args: ['-i'] }, { PATH: 'C:\\Windows' }, { ...state, binDir: 'C:\\pane\\bin' }, 'win32');
-    expect(win).toEqual({ args: ['-i'], env: { PATH: 'C:\\pane\\bin;C:\\Windows', PANE_RUNPANE_BIN: '/pane/bin/runpane', BROWSER: '/pane/bin/pane-browser', AGENT_FARM_SESSION_HOOK: '/pane/bin/runpane' } });
+    expect(win).toEqual({ args: ['-i'], env: { PATH: 'C:\\pane\\bin;C:\\Windows', PANE_RUNPANE_BIN: '/pane/bin/runpane', AGENT_FARM_SESSION_HOOK: '/pane/bin/runpane' } });
     expect(withRunpaneBinOnPath({ PATH: '/usr/bin' }, state, 'linux')).toEqual({ PATH: '/pane/bin:/usr/bin', PANE_RUNPANE_BIN: '/pane/bin/runpane', BROWSER: '/pane/bin/pane-browser' });
+    // Windows tools hand BROWSER the URL unquoted, which a batch file would split at `&`.
+    expect(withRunpaneBinOnPath({ PATH: 'C:\\Windows' }, state, 'win32')).toEqual({ PATH: '/pane/bin;C:\\Windows', PANE_RUNPANE_BIN: '/pane/bin/runpane' });
   });
 });
 
