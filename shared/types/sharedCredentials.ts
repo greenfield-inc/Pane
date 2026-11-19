@@ -16,7 +16,15 @@ export interface SharedCredential {
 export type SharedCredentials = Partial<Record<SharedCredentialId, SharedCredential>> & {
   /** Pane secrets by `<project>/<NAME>`, with the same newest-wins and tombstone rules. Hosts and phones from before secrets drop this field. */
   paneSecrets?: Record<string, SharedCredential>;
+  /**
+   * 1Password references by `<project>/<NAME>`: `value` is the `op://` address (never a secret value), null once removed.
+   * A field of its own, so hosts, desktops and phones from before references drop it whole and never read one as a tombstone.
+   */
+  paneSecretReferences?: Record<string, SharedCredential>;
 };
+
+/** The per-key maps that merge by newest copy. */
+const SECRET_MAPS = ['paneSecrets', 'paneSecretReferences'] as const;
 
 /** When and where a host's copy of a key was set; stored next to the key in host config. */
 export interface SharedCredentialMeta extends Pick<SharedCredential, 'updatedAt' | 'source'> {
@@ -45,7 +53,7 @@ function isNewerCredential(candidate: SharedCredential, current: SharedCredentia
 export interface SharedCredentialMerge {
   credentials: SharedCredentials;
   changed: SharedCredentialId[];
-  /** Pane secret keys (`<project>/<NAME>`) that changed. */
+  /** Pane secret and reference keys (`<project>/<NAME>`) that changed. */
   changedSecrets: string[];
 }
 
@@ -61,15 +69,19 @@ export function mergeSharedCredentials(current: SharedCredentials, incoming: Sha
     }
   }
   const changedSecrets: string[] = [];
-  if (incoming.paneSecrets) {
-    const secrets = { ...current.paneSecrets };
-    for (const [key, candidate] of Object.entries(incoming.paneSecrets)) {
-      if (isNewerCredential(candidate, secrets[key])) {
-        secrets[key] = candidate;
+  for (const field of SECRET_MAPS) {
+    const records = incoming[field];
+    if (!records) continue;
+    const merged = { ...current[field] };
+    let changedHere = false;
+    for (const [key, candidate] of Object.entries(records)) {
+      if (isNewerCredential(candidate, merged[key])) {
+        merged[key] = candidate;
         changedSecrets.push(key);
+        changedHere = true;
       }
     }
-    if (changedSecrets.length > 0 || current.paneSecrets) credentials.paneSecrets = secrets;
+    if (changedHere || current[field]) credentials[field] = merged;
   }
   return { credentials, changed, changedSecrets };
 }

@@ -14,7 +14,7 @@ side of it, and keeps its name in the CLI, the MCP server and the code.
 | `ui` | Card | Result |
 | --- | --- | --- |
 | `options` | The question and 1 to 9 `choices` (`{label, detail?, recommended?}`), or 2 to 4 `questions` (`{title, choices}`, one pick each) instead. The strip shows four, then **More**. | `{answer, note?}` (`answers[]` too for several questions), or `{reply, picks?, id, next}` when the person typed something ([Replies](#replies-and-new-versions)) |
-| `approve` | Deny and Approve, plus a disclosure with the preformatted `detail`. `detailLabel` names the disclosure (up to 40 characters; default **Show details**). | `{approved, note?}` |
+| `approve` | Deny and Approve, plus a disclosure with the preformatted `detail`. `detailLabel` names the disclosure (up to 40 characters; default **Show details**). | `{approved, note?}`. A lease card (an approve card with a lease section, posted by `runpane secrets lease`) returns `{status: "leased", project, names, leaseId, expiresAt, machines}` or `{status: "declined"}` instead. |
 | `ask` | A text field, with optional `suggestions` as chips above it. | `{answer}` |
 | `secret` | A masked field with **Save securely** and **Decline**. Created only by `runpane secrets request` (MCP `secrets_request`), never with `notify --ui`. The host saves the value as a [Pane secret](PANE_SECRETS.md) and drops it; it never reaches the agent, history or other screens. No Undo. | `{status: "saved", project, name}` or `{status: "declined"}` |
 | `info` | One line, with at most one `action` button (`{label, url}`). It returns at once and hides after a few seconds. | `{delivered: "screen" \| "inbox"}` |
