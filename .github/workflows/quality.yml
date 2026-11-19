@@ -303,7 +303,7 @@ jobs:
         save: ${{ matrix.shard == 1 }}
 
     - name: Run maintained functional smoke tests
-      run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      run: pnpm test:ci:minimal --repeat-each=10 --shard=${{ matrix.shard }}/${{ strategy.job-total }} tests/agent-usage.spec.ts tests/all-machines.spec.ts tests/appearance-bootstrap.spec.ts tests/changes-list.spec.ts tests/keyboard-navigation.spec.ts tests/orchestration-sessions.spec.ts tests/remote-host-switcher.spec.ts tests/terminal-file-links.spec.ts tests/usage-and-limits.spec.ts
 
   # The WebGL renderer recovery spec, split off the browser shards: its 25 tests
   # take about 16 s each, and Playwright shards by test count in file order, so
@@ -330,7 +330,7 @@ jobs:
       run: pnpm exec playwright install --with-deps chromium
 
     - name: Run WebGL renderer recovery tests
-      run: pnpm exec playwright test --config=playwright.ci.webgl.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      run: pnpm exec playwright test --config=playwright.ci.webgl.config.ts --repeat-each=10 --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # One worker per shard: the tests are CPU-bound, so four workers on one
   # 4-vCPU runner took as long as one. fullyParallel lets --shard split files.
