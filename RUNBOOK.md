@@ -244,6 +244,20 @@ instead: each job's head SHA, runner, and waiting, setup, running and teardown
 seconds. `CI result` writes that record to its job summary and log on every
 `Code Quality` run.
 
+In `Code Quality`, pushes to `main` write two Actions caches that pull
+requests only read: Playwright's Chromium (`playwright-*`, keyed on the
+image's OS family, arch and `playwright-core` version; saved by browser shard
+1) and SQLite built for Electron (`electron-sqlite-*`, keyed on the runner
+image, arch, Electron version, module folder and `@electron/rebuild` version;
+saved by Functional Smoke (Electron) after its tests pass). On a hit, pull
+requests skip `electron:rebuild`, so a change to that script runs on the next
+miss. A pull request that changes one
+of those inputs misses once and downloads or builds as before; the next push
+to `main` writes the new key. Dependencies install fresh in every job: a
+`node_modules` cache saved about 2 s per job on Linux, and its restore breaks
+pnpm's junctions on Windows. To drop a bad entry, delete it with
+`gh cache delete <key>`; the next push to `main` writes it again.
+
 ## Recovery and rollback
 
 - **Never retag a version.** To undo a bad release, fix `main` and cut a new
