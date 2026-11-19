@@ -1,0 +1,124 @@
+For people:
+Open a Session for each workstream and tell its agent what you want, in plain words. It plans the work, starts a Pane for each feature, and runs the builders, reviewers and QA as tabs inside them, so you don't have to. Anything that needs you, like a decision, an approval or a merge, waits for you in Approvals while everything else keeps moving. When a feature is done, archiving its Pane cleans up its worktree and files for you.
+
+For agents:
+In Pane, work flows from a Session to Panes to tabs. A Session is a workstream: the person or an orchestrator opens it, and every Pane created or adopted from inside it joins it. When you are in one ($PANE_SESSION_DIR is set: you orchestrate it or your Pane belongs to it), start new Panes from there (each result's `association` names the Session they joined); when you are in none, work with several parts starts a new Session. Each feature gets one Pane, a git worktree on its own branch, and everything for that feature (the agent that builds it, its reviews, QA and fixes) runs as tabs inside it. Scratch files go in $PANE_SCRATCH_DIR inside the Pane. When the feature is done, archive the Pane and Pane cleans up its worktree, tabs and scratch files. When you need the person, ask through Approvals (a Session worker reports blocked to its orchestrator instead).
+
+Usage:
+  runpane
+  runpane setup
+  runpane install [client|daemon] [options]
+  runpane update [options]
+  runpane version
+  runpane doctor
+  runpane doctor --report --body-file <path|->
+  runpane daemon repair [--pane-dir <path>] [--yes] [--json]
+  runpane agent-context [--json]
+  runpane mcp [--toolsets <name,...>] [--read-only]
+  runpane relay [pane-relay flags...]
+  runpane link <link> [--yes] [--json]
+  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]
+  runpane repos list [--json]
+  runpane repos add --path <path> [--name <name>]
+  runpane repos get [--repo <selector>] [--json]
+  runpane repos update --repo <selector> [setting flags] --yes [--dry-run] [--json]
+  runpane repos rename --repo <selector> --name <name>
+  runpane secrets list [--project <project>] [--json]
+  runpane secrets set --project <project> --name <name> --yes   (value on stdin)
+  runpane secrets delete --project <project> --name <name> --yes
+  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...
+  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]
+  runpane secrets lease --project <project> <NAME>... [--reason <text>] [--json]
+  runpane secrets lease end --id <lease-id> --yes [--json]
+  runpane panes list [--repo <selector>] [--json]
+  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]
+  runpane workspace state [--repo <selector>] [--json]
+  runpane watch --follow
+  runpane watch --until-event
+  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]
+  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes
+  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes
+  runpane panes pause|resume --pane <pane-id> --yes [--json]
+  python -m runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [--source user|agent] [--focus|--no-focus] --yes
+  runpane panels list --pane <pane-id> [--json]
+  runpane panels output --panel <panel-id> [--limit <count>] [--json]
+  runpane panels screen --panel <panel-id> [--limit <count>] [--json]
+  runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) --yes [--json]
+  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]
+  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]
+  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]
+  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]
+  runpane panels pause --panel <panel-id> --yes [--json]
+  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]
+  runpane panels conversation (--conversation <id> [--source startup|resume|clear|compact]|--hook) [--json]
+  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]
+  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]
+  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]
+  runpane panes push --pane <pane-id> --yes [--json] [--pane-dir <path>]
+  runpane panes pull --pane <pane-id> --yes [--json] [--pane-dir <path>]
+  runpane panes rebase-main --pane <pane-id> --yes [--json] [--pane-dir <path>]
+  runpane panes restore --pane <pane-id> --yes [--json] [--pane-dir <path>]
+  runpane links create --pane <pane-id> [--panel <panel-id>] [--json]
+  runpane links open --url <pane-url> --yes [--json] [--pane-dir <path>]
+  runpane docs search --query <text> [--limit <count>] [--json]
+  runpane docs read --doc <path> [--json]
+  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]
+  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]
+  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]
+  runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]
+  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--json]
+  runpane inbox [--session <id|name>] [--json]
+  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]
+  runpane autopilot status|waiting|stack [--json]
+  runpane autopilot stack push (--item <id>|--file <path>|--url <url>|--session <id|name>) [--next] [--json]
+  runpane autopilot answer <id> (--choice <label>|--approve|--deny|--text <text>) --because <why> [--json]
+  runpane autopilot close <id> --reason <why> [--json]
+  runpane autopilot rewrite <id> --ui <options|approve|ask> --title <text> [--choices <json>] [--json]
+  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]
+  runpane panes stash --pane <pane-id> --yes [--json] [--pane-dir <path>]
+  runpane panes stash-pop --pane <pane-id> --yes [--json] [--pane-dir <path>]
+  runpane panes soft-reset --pane <pane-id> --yes [--json] [--pane-dir <path>]
+  runpane panes fetch --pane <pane-id> --yes [--json] [--pane-dir <path>]
+  runpane panes run-script --pane <pane-id> --yes [--json] [--pane-dir <path>]
+  runpane panes stop-script --pane <pane-id> --yes [--json] [--pane-dir <path>]
+  runpane panes move --pane <pane-id> --folder <folder-id> --yes [--json] [--pane-dir <path>]
+  runpane folders list --repo <repo-id> [--json] [--pane-dir <path>]
+  runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir <path>]
+  runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
+  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
+  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]
+  python -m runpane machine health [--json]
+  python -m runpane machine cleanup --kind <kind> [--yes] [--json]
+  python -m runpane loops list [--json]
+  python -m runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes
+  python -m runpane loops update|run|pause|resume|delete --loop <id> --yes
+  python -m runpane profiles list|runs [--json]
+  python -m runpane profiles show <name> [--yaml] [--json]
+  python -m runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] --yes [--json]
+  runpane help [command]
+
+Quick start:
+  pipx run runpane
+  python -m pip install runpane && python -m runpane setup
+
+Advanced examples:
+  pipx run runpane install client
+  pipx run runpane install daemon --label "My Server"
+  uvx runpane@latest
+
+Common commands:
+  runpane help
+  runpane setup
+  runpane install
+  runpane doctor
+
+Agent discovery:
+  runpane doctor --json
+  runpane agent-context --json
+  runpane agent-context --command "<command>" --json
+
+Run "runpane help panes create" for pane orchestration options.
+
+Workspaces: off on <machine> (Pane is not running). Fix: Open Pane.
+Other machines: <machine> (macOS, online), doozy-bc1e555bbf5e (Linux, offline)
+Reach them: runpane workspace <machine> read|write|exec|<command>

@@ -1,0 +1,115 @@
+{
+  "ok": true,
+  "mode": "command",
+  "source": "runpane-contract",
+  "command": {
+    "name": "report",
+    "summary": "Hand back a worker's structured report: state, PR, head commit, summary, and the question when blocked.",
+    "details": "Run this as a delegated worker when you finish, fail, or get blocked, as the last step of your task. The orchestrator receives it as an agent.report watch event and treats it as the completion signal. It prints whether anyone was waiting for it.",
+    "requiresPaneDaemon": true,
+    "mutates": true,
+    "arguments": [
+      {
+        "name": "--state",
+        "value": "<ready|blocked|failed|done>",
+        "required": true,
+        "description": "ready: work is ready for review; done: finished with nothing to review; blocked: needs an answer; failed: could not finish. Optional with --outcome, which implies done."
+      },
+      {
+        "name": "--pr",
+        "value": "<number>",
+        "required": false,
+        "description": "Pull request number."
+      },
+      {
+        "name": "--head",
+        "value": "<sha>",
+        "required": false,
+        "description": "Head commit the report is about, 7-40 hex characters."
+      },
+      {
+        "name": "--summary",
+        "value": "<text>",
+        "required": false,
+        "description": "Summary text; up to 16,000 characters are kept."
+      },
+      {
+        "name": "--summary-file",
+        "value": "<path|->",
+        "required": false,
+        "description": "Read the summary from a file or stdin; the absolute path is kept as summaryPath."
+      },
+      {
+        "name": "--question",
+        "value": "<text>",
+        "required": false,
+        "description": "What you need answered; required with --state blocked. It is the card's title: put options in --choices or --questions, not in brackets at its end."
+      },
+      {
+        "name": "--choices",
+        "value": "<json>",
+        "required": false,
+        "description": "With --state blocked: the question's buttons, exactly as `runpane notify --choices` takes them (1 to 9 of {label, detail?, recommended?}) and checked the same way."
+      },
+      {
+        "name": "--questions",
+        "value": "<json>",
+        "required": false,
+        "description": "With --state blocked, instead of --choices: 2 to 4 questions as `runpane notify --questions` takes them ({title, choices, why?}), each with its own buttons."
+      },
+      {
+        "name": "--pane",
+        "value": "<pane-id>",
+        "required": false,
+        "description": "Pane id when not running inside a Pane terminal (PANE_SESSION_ID)."
+      },
+      {
+        "name": "--panel",
+        "value": "<panel-id>",
+        "required": false,
+        "description": "Panel id when not running inside a Pane terminal (PANE_PANEL_ID)."
+      },
+      {
+        "name": "--todo",
+        "value": "<T-n>",
+        "required": false,
+        "description": "The to-do this report is about (T-12). Pane records it on the to-do's activity."
+      },
+      {
+        "name": "--json",
+        "required": false,
+        "description": "Print machine-readable output."
+      },
+      {
+        "name": "--pane-dir",
+        "value": "<path>",
+        "required": false,
+        "description": "Connect to a specific Pane data directory."
+      },
+      {
+        "name": "--outcome",
+        "value": "<name>",
+        "required": false,
+        "description": "Ends a profile step with one of its declared outcomes (implies --state done). Refused with --question, or with --state other than done (ERR_REPORT_OUTCOME_STATE)."
+      }
+    ],
+    "examples": [
+      "runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json",
+      "runpane report --outcome \"plan ready\" --summary-file status.json",
+      "runpane report --state blocked --question \"Should the migration drop the old column?\"",
+      "runpane report --state blocked --question 'Q-3: Use the invoice id in the PDF filename?' --choices '[{\"label\":\"Invoice id\",\"detail\":\"Ids are stable\",\"recommended\":true},{\"label\":\"Invoice number\"}]' --summary 'Invoice PDFs'"
+    ],
+    "jsonSchemas": [
+      "reportResult"
+    ],
+    "notes": [
+      "Inside a Pane terminal the report is for the current panel (PANE_SESSION_ID and PANE_PANEL_ID). Explicit --panel (with an optional --pane) wins; with neither, the command fails with a clear error.",
+      "Each report replaces the panel's previous one and survives a Pane restart.",
+      "agent.report is in the default kinds of `runpane watch --follow` and `--until-event`, and arrives from any panel, a shell tab included. REPORT lines skip the --min-interval batch.",
+      "The output says who received it: \"Delivered to N waiting watcher(s).\" counts watches waiting at that moment (liveWatchers in JSON). With no Session and nobody waiting it adds that the report is stored on the panel (runpane agents status --panel <id>) and that a named-cursor watch (runpane watch --as <name> --kinds agent.report) still receives it when it next waits. Zero is not a failure; the exit code is 0 either way.",
+      "With --state blocked and --question, the person sees an answerable card at once; it rings once the orchestrator relays it or after 10 minutes. The answer reaches this tab as `answer: Q-n \u2192 <answer> (by you)`. `closed: Q-n (by you)` and `correction: Q-n \u2192 <answer> (by you)` lines are the person's word too.",
+      "A blocked report's buttons come from --choices or --questions first, then from the `needs_you` block of the status file passed as --summary-file. Invalid --choices or --questions JSON fails with ERR_NOTIFY_INVALID, as notify does. A --question that ends with an option list in brackets (\"(A / B)\" or \"(A (recommended) / B)\") and has no options from either source is refused with ERR_REPORT_PACKED_OPTIONS and nothing is shown; a question with no option list is accepted as an open question. A bracketed unit with a spaced slash (\"(requests / second)\") reads as an option list too; when the question asks for a value, word the unit as prose (\"in requests per second\") or drop the spaces (\"(requests/second)\").",
+      "`--outcome <name>` ends one step of a Pane profile workflow by naming which of the step's declared outcomes happened, such as `runpane report --outcome \"plan ready\" --summary-file status.json`. It sends `state: done` with `outcome`; --state is optional and may only be done (else ERR_REPORT_OUTCOME_STATE), and --question is refused (ERR_REPORT_OUTCOME_QUESTION). Pane checks the outcome against the step the panel runs and refuses one the step does not declare, listing the allowed outcomes."
+    ]
+  }
+}

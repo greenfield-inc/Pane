@@ -1,0 +1,20 @@
+{
+  "sessionFolders": [],
+  "paneSkills": [
+    "pane-chat/skills/refactor/SKILL.md:32: **simple** checks the changed lines for: long functions (over ~100 lines) or nesting over 3 levels, magic values, missing or swallowed error handling on new pat",
+    "pane-chat/skills/rewrite-simply/SKILL.md:213: from chat, notes, todos, or transcripts into the document's voice. Keep",
+    "pane-chat/skills/rewrite-simply/SKILL.md:268: - Hyperlink todos, conversations, captures, and skills when you mention them,"
+  ],
+  "claudeProjectSkills": [
+    "skills/refactor/SKILL.md:32: **simple** checks the changed lines for: long functions (over ~100 lines) or nesting over 3 levels, magic values, missing or swallowed error handling on new pat",
+    "skills/rewrite-simply/SKILL.md:213: from chat, notes, todos, or transcripts into the document's voice. Keep",
+    "skills/rewrite-simply/SKILL.md:268: - Hyperlink todos, conversations, captures, and skills when you mention them,"
+  ],
+  "codexProjectSkills": [
+    "skills/refactor/SKILL.md:32: **simple** checks the changed lines for: long functions (over ~100 lines) or nesting over 3 levels, magic values, missing or swallowed error handling on new pat",
+    "skills/rewrite-simply/SKILL.md:213: from chat, notes, todos, or transcripts into the document's voice. Keep",
+    "skills/rewrite-simply/SKILL.md:268: - Hyperlink todos, conversations, captures, and skills when you mention them,"
+  ],
+  "help": [],
+  "agentContext": []
+}

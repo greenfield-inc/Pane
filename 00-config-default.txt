@@ -1,0 +1,210 @@
+{
+  "machineId": "ec8ec439-11df-4c03-b992-7aab02ceb865",
+  "gitRepoPath": "",
+  "usePtyHost": false,
+  "verbose": false,
+  "voiceTranscriptionMode": "streaming",
+  "appearanceMode": "system",
+  "theme": "folio",
+  "systemLightTheme": "folio",
+  "systemDarkTheme": "dusk-oled",
+  "highContrast": false,
+  "terminalFontFamily": "Geist Mono",
+  "terminalFontSize": 16,
+  "terminalPowerMode": "performance",
+  "defaultPermissionMode": "ignore",
+  "defaultModel": "sonnet",
+  "defaultOrchestratorAgent": "claude",
+  "chatTabsEnabled": true,
+  "autopilotEnabled": false,
+  "notesEnabled": false,
+  "profilesEnabled": false,
+  "todosEnabled": true,
+  "autoStartOnBoot": true,
+  "keepAwakeWhileSessionsActive": true,
+  "keepAwakeWhilePluggedIn": false,
+  "keepAwakeOnBattery": false,
+  "backgroundActivity": "balanced",
+  "resumePausedOnOpen": false,
+  "autoPauseEnabled": true,
+  "autoPauseAfterHours": 48,
+  "chatIdleReleaseMinutes": 30,
+  "notifications": {
+    "playSound": false,
+    "enabled": true
+  },
+  "sessionCreationPreferences": {
+    "sessionCount": 1,
+    "toolType": "none",
+    "selectedTools": {
+      "claude": false
+    },
+    "claudeConfig": {
+      "model": "auto",
+      "permissionMode": "ignore",
+      "ultrathink": false
+    },
+    "showAdvanced": false
+  },
+  "analytics": {
+    "enabled": true,
+    "posthogApiKey": "phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1",
+    "posthogHost": "https://runpane.com/api/c",
+    "installId": "install_6e80ff69-da21-4133-9e6e-50ac7bb7d0a3",
+    "distinctId": "install:install_6e80ff69-da21-4133-9e6e-50ac7bb7d0a3",
+    "identitySource": "anonymous"
+  },
+  "agentContext": {
+    "managedAgentsMd": false,
+    "homeSkill": true,
+    "defaultsVersion": 2,
+    "registerMcp": true,
+    "cleanupPending": false
+  },
+  "remoteDaemon": {
+    "host": {
+      "config": {
+        "enabled": false,
+        "listenHost": "127.0.0.1",
+        "listenPort": 42137,
+        "pairingRequired": true,
+        "allowInsecureHttpOnLoopback": true
+      },
+      "clients": [],
+      "mobilePush": {
+        "registrations": [],
+        "attentionSequence": 0,
+        "panelStates": {}
+      }
+    },
+    "client": {
+      "computers": [],
+      "profiles": [],
+      "activeProfileId": null,
+      "mode": "local"
+    }
+  },
+  "keyboardShortcutsEnabled": true,
+  "commandPaletteShortcutEnabled": true,
+  "keymapNotice": "seen",
+  "terminalShortcuts": [
+    {
+      "id": "default-root-cause",
+      "label": "Root cause or symptom?",
+      "key": "e",
+      "text": "Think hard: is this the root cause or a symptom? How might we solve this at the root?",
+      "enabled": true
+    },
+    {
+      "id": "default-plan-first",
+      "label": "Plan before editing",
+      "key": "p",
+      "text": "Before you change any code, explain your plan in a few short steps and wait for my go-ahead.",
+      "enabled": true
+    },
+    {
+      "id": "default-review-diff",
+      "label": "Review your own diff",
+      "key": "r",
+      "text": "Before you say you're done, review your own diff. Fix any bugs, leftover debug code, or missed edge cases.",
+      "enabled": true
+    },
+    {
+      "id": "default-show-it-works",
+      "label": "Show it works",
+      "key": "t",
+      "text": "Show me it works: run the relevant tests or the app and share the real output.",
+      "enabled": true
+    }
+  ],
+  "worktreeFileSync": [
+    {
+      "id": "env",
+      "path": ".env*",
+      "enabled": true,
+      "recursive": true
+    },
+    {
+      "id": "claude",
+      "path": ".claude",
+      "enabled": true,
+      "recursive": false
+    },
+    {
+      "id": "codex",
+      "path": ".codex",
+      "enabled": true,
+      "recursive": false
+    },
+    {
+      "id": "cursor",
+      "path": ".cursor",
+      "enabled": true,
+      "recursive": false
+    },
+    {
+      "id": "pi",
+      "path": ".pi",
+      "enabled": true,
+      "recursive": false
+    },
+    {
+      "id": "continue",
+      "path": ".continue",
+      "enabled": true,
+      "recursive": false
+    },
+    {
+      "id": "windsurf",
+      "path": ".windsurf",
+      "enabled": true,
+      "recursive": false
+    },
+    {
+      "id": "amazonq",
+      "path": ".amazonq",
+      "enabled": true,
+      "recursive": false
+    },
+    {
+      "id": "roo",
+      "path": ".roo",
+      "enabled": true,
+      "recursive": false
+    },
+    {
+      "id": "cline",
+      "path": ".cline",
+      "enabled": true,
+      "recursive": false
+    },
+    {
+      "id": "gemini",
+      "path": ".gemini",
+      "enabled": true,
+      "recursive": false
+    },
+    {
+      "id": "junie",
+      "path": ".junie",
+      "enabled": true,
+      "recursive": false
+    },
+    {
+      "id": "aider-conf",
+      "path": ".aider.conf.yml",
+      "enabled": true,
+      "recursive": false
+    },
+    {
+      "id": "node_modules",
+      "path": "node_modules",
+      "enabled": true,
+      "recursive": true
+    }
+  ],
+  "notify": {
+    "enabled": true,
+    "showOutsidePane": false
+  }
+}

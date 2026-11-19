@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "todos": [
+    {
+      "ref": "T-1",
+      "number": 1,
+      "title": "Invoice PDFs",
+      "state": "in_progress",
+      "status": "idle",
+      "reason": "quiet 9m",
+      "parent": null,
+      "sessionId": "__orchestration_session_110a50a2-de76-4cc8-aebb-02b68b5e94c9__",
+      "requester": "Invoice work orchestrator",
+      "assignee": null,
+      "summary": "Render invoices as PDFs",
+      "doneWhen": [
+        {
+          "text": "PDF renders",
+          "met": false
+        }
+      ],
+      "attachmentCount": 0,
+      "updatedAt": "2026-11-19T21:14:56.068Z"
+    }
+  ]
+}

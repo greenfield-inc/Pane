@@ -1,0 +1,19 @@
+$ runpane todos list
+exit 1
+stdout: 
+stderr: To-dos is turned off in this Pane, so nothing was read or changed. Saved to-dos are kept.
+Next: Turn it on in Settings > Advanced > Experimental > To-dos, then run this again.
+
+$ runpane todos list --json
+exit 1
+stdout: {
+  "ok": false,
+  "error": {
+    "code": "TODOS_DISABLED",
+    "message": "To-dos is turned off in this Pane, so nothing was read or changed. Saved to-dos are kept.",
+    "next": "Turn it on in Settings > Advanced > Experimental > To-dos, then run this again."
+  }
+}
+
+stderr: To-dos is turned off in this Pane, so nothing was read or changed. Saved to-dos are kept.
+Next: Turn it on in Settings > Advanced > Experimental > To-dos, then run this again.

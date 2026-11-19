@@ -1,0 +1,83 @@
+{
+  "ok": true,
+  "mode": "command",
+  "source": "runpane-contract",
+  "command": {
+    "name": "agents start",
+    "summary": "Start an agent on a task and wait until it is ready: as a new tab in an existing Pane with --pane <id> (review, audit, fix, QA), or in a new Pane with --repo and --name for new work.",
+    "details": "For work that already has a Pane, pass --pane <id>: the agent opens as a new tab sharing that Pane's worktree and branch. Only when the work's branch has no Pane yet, pass --repo and --name to create one. It returns the pane and panel ids and a pane:// link to hand the user.",
+    "requiresPaneDaemon": true,
+    "mutates": true,
+    "arguments": [
+      {
+        "name": "--pane",
+        "value": "<pane-id>",
+        "required": false,
+        "description": "Existing Pane to add the agent to as a new tab. Use this for any work that already has a Pane."
+      },
+      {
+        "name": "--repo",
+        "value": "<selector>",
+        "required": false,
+        "description": "Repository: active, id, exact path, or saved name."
+      },
+      {
+        "name": "--name",
+        "value": "<name>",
+        "required": false,
+        "description": "Name for the new Pane. With --repo, only for work whose branch has no Pane yet."
+      },
+      {
+        "name": "--agent",
+        "value": "<codex|claude|cursor|opencode|pi>",
+        "required": false,
+        "description": "Built-in agent to launch."
+      },
+      {
+        "name": "--tool-command",
+        "value": "<command>",
+        "required": false,
+        "description": "Custom terminal command instead of a built-in agent."
+      },
+      {
+        "name": "--prompt",
+        "value": "<task>",
+        "required": true,
+        "description": "The task to send once the agent is ready."
+      },
+      {
+        "name": "--base-branch",
+        "value": "<branch>",
+        "required": false,
+        "description": "Branch to start the worktree from."
+      },
+      {
+        "name": "--yes",
+        "required": false,
+        "description": "Confirm this change; required in non-interactive shells."
+      },
+      {
+        "name": "--json",
+        "required": false,
+        "description": "Print machine-readable output."
+      },
+      {
+        "name": "--pane-dir",
+        "value": "<path>",
+        "required": false,
+        "description": "Connect to a specific Pane data directory."
+      }
+    ],
+    "examples": [
+      "runpane agents start --repo active --name fix-login --agent claude --prompt \"Fix the login redirect\" --yes --json",
+      "runpane agents start --pane <pane-id> --agent codex --prompt \"Review the PR from this branch and report findings\" --yes --json"
+    ],
+    "jsonSchemas": [
+      "agentTaskResult"
+    ],
+    "notes": [
+      "Creates the Pane in the background (no focus change), pinned, and waits for the agent to be ready before sending the prompt.",
+      "Check on it with `runpane agents status`; send follow-ups with `runpane agents send`."
+    ]
+  }
+}

@@ -1,0 +1,224 @@
+{
+  "ok": true,
+  "mode": "command",
+  "source": "runpane-contract",
+  "command": {
+    "name": "notify",
+    "summary": "Ask the person a question, or tell them something, wherever they are, and get their answer back.",
+    "details": "Asks the person through Pane: to pick between options (ui options), to approve or deny an action (ui approve), to type a short answer (ui ask), or tells them something that needs no answer (ui info). Pane shows it on screen even while the person works in another app, and the call waits until they answer, however long that takes. info returns at once.",
+    "requiresPaneDaemon": true,
+    "mutates": true,
+    "arguments": [
+      {
+        "name": "--ui",
+        "value": "<options|approve|ask|info>",
+        "required": false,
+        "description": "options: pick one of choices. approve: Approve or Deny. ask: a typed answer. info: an update that returns at once. Required unless resume, took or update.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "options",
+            "approve",
+            "ask",
+            "info"
+          ]
+        }
+      },
+      {
+        "name": "--title",
+        "value": "<text>",
+        "required": false,
+        "description": "The question or update in one line, about 80 characters; long titles wrap to 3 lines. Required unless resume, took or update."
+      },
+      {
+        "name": "--context",
+        "value": "<text>",
+        "required": false,
+        "description": "The card's subtitle: one or two sentences on why it matters, up to 240 characters."
+      },
+      {
+        "name": "--choices",
+        "value": "<json>",
+        "required": false,
+        "description": "ui options only, and required there unless questions: 1 to 9 choices. The answer is the chosen label. Say what each does in detail, and mark the one you recommend. With update, a reworded choice adds was, its old label.",
+        "schema": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 9,
+          "items": {
+            "$ref": "#/jsonSchemas/notifyChoice"
+          }
+        }
+      },
+      {
+        "name": "--detail",
+        "value": "<text>",
+        "required": false,
+        "description": "ui approve only: a preformatted block, such as the command or SQL to approve, behind a disclosure."
+      },
+      {
+        "name": "--detail-label",
+        "value": "<text>",
+        "required": false,
+        "description": "ui approve only, with detail: the disclosure's label, such as \"Show the SQL\"; up to 40 characters. Defaults to \"Show details\".",
+        "schema": {
+          "type": "string",
+          "maxLength": 40
+        }
+      },
+      {
+        "name": "--suggestions",
+        "value": "<json>",
+        "required": false,
+        "description": "ui ask only: suggested answers, shown as chips above the text field.",
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      {
+        "name": "--action",
+        "value": "<json>",
+        "required": false,
+        "description": "ui info only: one button that opens a URL.",
+        "schema": {
+          "$ref": "#/jsonSchemas/notifyAction"
+        }
+      },
+      {
+        "name": "--links",
+        "value": "<json>",
+        "required": false,
+        "description": "Any ui: up to 6 related files, pages or approvals, shown as chips on the card. A file is {label, path}, on this machine; a relative path resolves against the working directory. A page is {label, url}, http or https. Another approval is {label, approval}, its id or Q-n.",
+        "schema": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/jsonSchemas/notifyLink"
+          }
+        }
+      },
+      {
+        "name": "--relays",
+        "value": "<item>",
+        "required": false,
+        "description": "A Session orchestrator relaying a worker's question: the waiting item's id from `runpane inbox`. The same card gains these choices, context and links instead of a second card showing. ui and title are still required."
+      },
+      {
+        "name": "--about-session",
+        "value": "<id|name>",
+        "required": false,
+        "description": "Autopilot's own item: the Session it is about, shown as its connected Session. Without it, the item links to Autopilot's chat."
+      },
+      {
+        "name": "--questions",
+        "value": "<json>",
+        "required": false,
+        "description": "ui options only, instead of choices: 2 to 4 questions asked at once, each with 1 to 9 choices and one pick. The result's answers holds one label per question; answer joins them with \" \u00b7 \".",
+        "schema": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/jsonSchemas/notifySubQuestion"
+          }
+        }
+      },
+      {
+        "name": "--took",
+        "value": "<id|Q-n>",
+        "required": false,
+        "description": "After a reply result or a `reply:` line: the approval's id or Q-n, with tookAs question when the reply asked something (it reopens the approval; find out, then call update). The reply is already recorded as the answer, so tookAs answer changes nothing. Pass no question fields."
+      },
+      {
+        "name": "--took-as",
+        "value": "<answer|question>",
+        "required": false,
+        "description": "With took: answer or question. On the command line it can follow the id instead (`--took Q-20 question`).",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "answer",
+            "question"
+          ]
+        }
+      },
+      {
+        "name": "--status",
+        "value": "<text>",
+        "required": false,
+        "description": "With took question: what you are doing about it, shown on the approval. Defaults to \"Getting more context\u2026\"."
+      },
+      {
+        "name": "--update",
+        "value": "<id|Q-n>",
+        "required": false,
+        "description": "After you took a reply as a question and found out: the approval's id or Q-n. Saves a new version with any of title, context, choices, questions and links you pass (the rest stay), shows it as updated, and waits on it like any notify call. Needs whatChanged, and asked when it answers the person's typed question; takes no ui."
+      },
+      {
+        "name": "--asked",
+        "value": "<text>",
+        "required": false,
+        "description": "With update: the person's question, as they typed it. Required when the update answers their typed question; leave it out for your own update, such as a loop's next run."
+      },
+      {
+        "name": "--what-changed",
+        "value": "<text>",
+        "required": false,
+        "description": "With update: what changed, one line per change."
+      },
+      {
+        "name": "--resume",
+        "value": "<id>",
+        "required": false,
+        "description": "The id from a waiting result: keep waiting on that question. Pass no other fields."
+      },
+      {
+        "name": "--json",
+        "required": false,
+        "description": "Print machine-readable output."
+      },
+      {
+        "name": "--pane-dir",
+        "value": "<path>",
+        "required": false,
+        "description": "Connect to a specific Pane data directory."
+      }
+    ],
+    "examples": [
+      "runpane notify --ui options --title \"Which database for the cache?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]' --json",
+      "runpane notify --ui approve --title \"Drop the legacy_users table?\" --detail \"DROP TABLE legacy_users;\" --detail-label \"Show the SQL\" --json",
+      "runpane notify --ui ask --title \"Which branch should I base this on?\" --suggestions '[\"main\",\"release\"]' --json",
+      "runpane notify --ui info --title \"PR #812 is ready for review\" --action '{\"label\":\"Open PR\",\"url\":\"https://github.com/org/repo/pull/812\"}' --json",
+      "runpane notify --ui approve --title \"Ship the release notes?\" --links '[{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"},{\"label\":\"PR #812\",\"url\":\"https://github.com/org/repo/pull/812\"}]' --json",
+      "runpane notify --relays in-1a2b3c4d --ui options --title \"Q-39: Run the script?\" --choices '[{\"label\":\"Run it\",\"recommended\":true},{\"label\":\"Hold\"}]' --json",
+      "runpane notify --ui options --title \"Ship 2.5 today: which parts go out?\" --questions '[{\"title\":\"Release notes\",\"choices\":[{\"label\":\"Ship as written\",\"recommended\":true},{\"label\":\"Hold\"}]},{\"title\":\"Intel Mac build\",\"choices\":[{\"label\":\"Include it\"},{\"label\":\"Skip it\"}]}]' --json",
+      "runpane notify --took Q-20 question --status \"Checking whether it can be undone\" --json",
+      "runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: Settings > Search turns it off again\" --context \"Search takes 4 s; the index brings it under 100 ms. It can be undone from Settings.\" --json",
+      "runpane notify --resume n-4f2a --json"
+    ],
+    "jsonSchemas": [
+      "notifyRequest",
+      "notifyResult"
+    ],
+    "notes": [
+      "Ask only what you can't find out yourself, and put related questions in one card. Send `info` rarely, only for what the person must know now.",
+      "Write the card as its Summary: a title of about 80 to 100 characters on one line; context as a subtitle of one or two sentences saying why it matters; 2 to 4 choices, each saying what it does, with exactly one recommended; links to every file, page or approval it mentions. Pane refuses a title over 160 characters or with a line break, and two recommended choices.",
+      "The person is juggling many tasks and has lost the thread. In plain words, say what the work is for (the outcome, not the file), what just happened, and what you need. For a decision, give the options and what each one means. Pane already shows which Pane and agent sent it.",
+      "Results: options returns {answer: <chosen label>, note?}, with questions also answers (one label per question); approve returns {approved: true|false, note?}; ask returns {answer}; info returns {delivered: \"screen\"|\"inbox\"}.",
+      "A result of {reply, picks?, id, replyId, next} means the person typed a reply instead of only picking: Pane records it as the answer, so the approval is done. If it asks something instead, call `runpane notify --took <replyId> question` and find out, then `runpane notify --update <replyId> --asked \"<their question>\" --what-changed \"<one line per change>\"` with whatever changed, instead of asking again. With no open call the reply reaches your tab as a `reply:` line, recorded the same way; `correction:` lines fix how it was taken. --took returns {took, id, next?}. Use its replyId rather than the Q-n: only this call was given it, so it works from outside a Pane tab too.",
+      "Only the reply's reader may run took and update: the asker, the orchestrator that relayed it, or Autopilot. Anyone else gets ERR_NOTIFY_NOT_READER.",
+      "A result of {waiting: true, id} means the question is still on screen and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting. After 15 minutes on this loop Pane gives up and returns unavailable.",
+      "A result of {unavailable, next} means nobody can answer through Pane right now (Pane is not running, Notify is off, or the wait ended): ask in the terminal instead. It is a result, not an error.",
+      "Inside a Pane terminal the question names its Pane and panel (PANE_SESSION_ID and PANE_PANEL_ID); elsewhere it names the working directory.",
+      "An older Pane ignores links and shows the card without them.",
+      "With relays the call waits on the worker's card as on any notify, and the answer also goes straight to the worker's tab as `answer: Q-n \u2192 <answer> (by you)`. Then record it: `runpane inbox ack <item> --decision <D-n>`. If the worker takes a typed reply as a question, you get `reopened: Q-n \u2192 \u2026 (by <worker>)` instead, and the answer to the new version comes as `correction: Q-n \u2192 <answer> (by you)`.",
+      "Invalid input, such as choices with ui ask, 10 choices, or ui with took or update, fails with a message naming the field, and nothing is shown.",
+      "Examples of a good title and context. Needs a decision (ui approve): \"Speed up slow search: run the database change?\" with \"Search takes 4 s and an index brings it under 100 ms. It changes the live database and can't easily be undone.\", not \"Approve the migration?\" Blocked (ui options): \"The 2.5 release is stuck on a GitHub hiccup\" with \"The fixes pass everywhere except one Mac build machine, which errored. That's GitHub's machine, not our code.\", not \"Blocked\". Just so you know (ui info): \"Questions from agents now wait until you answer\", not \"Done\"."
+    ],
+    "helpIncludesNotes": true
+  }
+}

@@ -1,0 +1,5 @@
+  runpane todos list [--all] [--json]
+  runpane todos create <title> [--summary <markdown>] [--done-when <text>]... [--parent <T-n>] [--repo <selector>] [--no-start] [--json]
+  runpane todos show|start|stop|done|drop|archive <todo> [--json]
+  runpane todos attach <todo> <file|url> [--kind <kind>] [--label <label>] [--json]
+  runpane todos ask <todo> <question> | comment <todo> <text> | review <todo> [--json]
