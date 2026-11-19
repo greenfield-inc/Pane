@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
 
 // Cmd+F (Ctrl+F off macOS) opens Pane's find bar in the focused tab: J1
@@ -41,7 +41,7 @@ const scrollback = Array.from({ length: 40 }, (_, index) => (index % 10 < 3 ? `l
 const markdown = '# Install\n\nRun the install step first.\n\n```sh\npnpm install\n```\n';
 
 async function openPane(page: Page) {
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: `Expand project ${project.name}`, exact: true }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 }

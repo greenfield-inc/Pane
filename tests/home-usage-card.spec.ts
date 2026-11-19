@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 
 declare global {
   interface Window {
@@ -28,7 +28,7 @@ const POPULATED = report({
 
 async function openHome(page: Page, usage: JsonObject) {
   await installElectronApiMock(page, { initialProjects: [], initialSessions: [], initialPreferences: { hide_discord: 'true' }, initialUsageReport: usage });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   for (const name of ['No thanks', 'Get Started', 'Skip', 'Skip for now']) {
     const button = page.getByRole('dialog').getByRole('button', { name, exact: true });
     if (await button.isVisible({ timeout: 1500 }).catch(() => false)) await button.click();
