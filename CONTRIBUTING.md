@@ -170,17 +170,14 @@ To test approvals' timers without waiting, start a dev build with
   `OPENROUTER_API_KEY` set, one main test fails (#721). Unset it for the run.
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the
-  required browser suite: every spec `playwright.ci.minimal.config.ts` lists,
+  browser suite CI runs: every spec `playwright.ci.minimal.config.ts` lists,
   with the chat composer specs at a desktop and a phone size.
-- Some specs #1554 added to CI are stabilizing: CI runs them and reports, but
-  `CI result` does not wait for them. `playwright.ci.stabilizing.config.ts`,
-  `playwright.ci.webgl.config.ts` and `playwright.ci.stabilizing-electron.config.ts`
-  list them. A spec moves back to a required config once it is proven stable.
 - `pnpm test:chat-tabs` runs the chat tab journeys and the loop Session journey
   (`tests/loop-sessions.spec.ts`): it launches Electron from
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each
   test in its own temporary `PANE_DIR`, and serves the renderer from plain Vite.
-  CI runs the specs `playwright.chat-tabs.config.ts` lists, in two shards.
+  CI runs the specs `playwright.chat-tabs.config.ts` lists, in two shards, with
+  `PANE_ELECTRON_E2E=1` so the remote browser and browser auth specs run too.
 - A new spec runs only once a CI config lists it: CI fails until it is in
   `playwright.ci.minimal.config.ts`, `playwright.chat-tabs.config.ts`, or the
   `NOT_IN_CI` list in `scripts/ci-test-inventory.mjs` with its reason.

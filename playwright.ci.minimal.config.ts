@@ -4,23 +4,24 @@ import { getPlaywrightBaseURL, getPlaywrightPort, getPlaywrightServerEnv } from 
 
 const devServerPort = getPlaywrightPort();
 
-// The required browser specs: they run against the renderer from Vite with a mocked
-// Electron API, and CI result waits for them. The chat composer specs run here too,
-// at the desktop and phone sizes playwright.agent-chat.config.ts gives them. Specs
-// not yet proven stable run beside them, not gating, in
-// playwright.ci.stabilizing.config.ts. scripts/ci-test-inventory.mjs fails CI when a spec in tests/ runs in no
-// lane, so a new spec must be added here, to another CI config, or to its
-// NOT_IN_CI list.
+// Every spec that runs against the renderer from Vite with a mocked Electron API.
+// scripts/ci-test-inventory.mjs fails CI when a spec in tests/ runs in no lane, so a
+// new spec must be added here, to another CI config, or to its NOT_IN_CI list.
+// terminal-blur-recovery.spec.ts runs in its own lane (playwright.ci.webgl.config.ts).
 const BROWSER_SPECS = [
   'accessibility.spec.ts',
   'adaptive-panel-layout.spec.ts',
   'agent-status.spec.ts',
+  'agent-usage.spec.ts',
+  'all-machines.spec.ts',
   'analytics-consent.spec.ts',
+  'appearance-bootstrap.spec.ts',
   'approvals-system.spec.ts',
   'archive-cleanup.spec.ts',
   'autopilot-settings.spec.ts',
   'browser-ports.spec.ts',
   'changes-list-perf.spec.ts',
+  'changes-list.spec.ts',
   'chat-enter-focus.spec.ts',
   'chrome-evidence.spec.ts',
   'codeless-remote.spec.ts',
@@ -39,6 +40,7 @@ const BROWSER_SPECS = [
   'home-usage-card.spec.ts',
   'html-editable-source.spec.ts',
   'html-explorer-open.spec.ts',
+  'keyboard-navigation.spec.ts',
   'launch-outline.spec.ts',
   'launch-shortcuts.spec.ts',
   'leaderboard.spec.ts',
@@ -54,10 +56,12 @@ const BROWSER_SPECS = [
   'notify-cards.spec.ts',
   'notify.spec.ts',
   'onboarding-open-project.spec.ts',
+  'orchestration-sessions.spec.ts',
   'pair-phone.spec.ts',
   'pane-order.spec.ts',
   'pause.spec.ts',
   'project-dashboard-refresh.spec.ts',
+  'remote-host-switcher.spec.ts',
   'remote-network-rejection.spec.ts',
   'remote-pwa-browser.spec.ts',
   'remote-pwa-explorer.spec.ts',
@@ -81,10 +85,12 @@ const BROWSER_SPECS = [
   'tab-popover.spec.ts',
   'tailnet-https-banner.spec.ts',
   'terminal-dock.spec.ts',
+  'terminal-file-links.spec.ts',
   'terminal-keyboard-input.spec.ts',
   'terminal-selection-popover.spec.ts',
   'terminal-upload-button.spec.ts',
   'theme-screenshots.spec.ts',
+  'usage-and-limits.spec.ts',
   'window-title-bar.spec.ts',
 ];
 
@@ -128,7 +134,8 @@ export default defineConfig({
     },
   },
 
-  // Configure projects for major browsers
+  // Configure projects for major browsers. The chat composer specs run at the
+  // desktop and phone sizes playwright.agent-chat.config.ts gives them.
   projects: [
     {
       name: 'chromium',
