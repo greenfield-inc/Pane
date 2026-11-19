@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import { KEYBOARD_SHORTCUT_CATALOG } from '../shared/constants/keyboardShortcuts';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import { expectNoAxeViolations } from './axeTest';
 
 type ShortcutsMock = {
@@ -48,7 +48,7 @@ const panels = ['Bottom Terminal', 'Tab Terminal'].map((title, index) => ({
 }));
 const terminalStates = Object.fromEntries(panels.map((panel) => [panel.id, { scrollbackBuffer: 'ready\r\n' }]));
 
-const REFERENCE_ROW_COUNT = 16;
+const REFERENCE_ROW_COUNT = 17;
 const SNIPPET = { id: 'snip', label: 'Lint snippet', key: 'l', text: 'pnpm lint', enabled: true };
 const CUSTOM = { name: 'Deploy', command: 'pnpm deploy' };
 
@@ -60,7 +60,7 @@ async function mock(page: Page, initialConfig: JsonObject = {}, options: Paramet
 }
 
 async function openShortcuts(page: Page) {
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Settings' }).first().click();
   await expect(page.getByTestId('settings-page')).toBeVisible();
@@ -124,12 +124,18 @@ test('shows the same inventory from a Project view with a WSL project on a Windo
     initialTerminalStates: terminalStates,
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Shortcut settings fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await expect(page.getByRole('tabpanel').locator('.xterm-screen').first()).toBeVisible({ timeout: 15_000 });
+  // The terminal takes focus once it activates. There, Ctrl+K starts the two-step key
+  // only while Ctrl stays held; releasing it clears the terminal instead (D-250).
+  await expect(page.locator('.xterm-helper-textarea:visible')).toBeFocused();
   // navigator.platform reads Win32 here, so mod is Control.
-  await pressOpenShortcutSettings(page, 'Control');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('K');
+  await page.keyboard.press('S');
+  await page.keyboard.up('Control');
   await expect(page.getByTestId('settings-page')).toBeVisible();
   const map = page.locator('[data-setting-id="keyboard-shortcut-map"]');
 
@@ -290,7 +296,7 @@ test('Help and the Add Tool menu show the effective chord after a remap and afte
     initialTerminalStates: terminalStates,
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Shortcut settings fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await expect(page.getByRole('tabpanel').locator('.xterm-screen').first()).toBeVisible({ timeout: 15_000 });

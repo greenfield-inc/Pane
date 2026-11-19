@@ -105,8 +105,9 @@ export async function readControllingTerminals(): Promise<Map<number, string>> {
 
 /**
  * Forcefully terminates `pids` and everything descended from them, then waits
- * for them to leave the process table. Returns the pids still running when
- * `timeoutMs` ran out — empty when the whole tree is gone.
+ * for them to leave the process table and, on Windows, to close their handles.
+ * Returns the pids not confirmed exited when `timeoutMs` ran out — empty when
+ * the whole tree is gone.
  *
  * Used when a process outlives the polite shutdown its owner asked for. On
  * Windows that matters beyond leaking a process: a directory cannot be renamed
@@ -120,9 +121,60 @@ export async function terminateProcessTrees(
   if (roots.length === 0) return [];
   const deadline = Date.now() + (options.timeoutMs ?? DEFAULT_TERMINATE_TIMEOUT_MS);
   const tree = [...new Set([...roots, ...await listDescendantPids(roots)])];
+  const killedAt = Date.now();
   // Deepest first: killing a parent can orphan a child nothing can walk to.
   await killProcesses([...tree].reverse());
-  return waitForProcessesToExit(tree, Math.max(0, deadline - Date.now()));
+  const alive = await waitForProcessesToExit(tree, Math.max(0, deadline - Date.now()));
+  // A survivor already decides the answer, and with no time left there is nothing to wait on.
+  const left = deadline - Date.now();
+  if (process.platform !== 'win32' || alive.length > 0 || left <= 0) return alive;
+  return waitForWindowsExit(tree, killedAt, left);
+}
+
+/**
+ * Windows sets a killed process's exit code, which is all `isProcessAlive`
+ * sees, before it closes that process's handles (its current directory among
+ * them), and signals the process only once they are closed. Waits for that
+ * signal, so the directories the processes sat in can be moved once this
+ * returns. Returns the pids not signalled in time. A pid whose process is
+ * gone, or that a process born after `killedAt` now holds, has exited. When the
+ * wait cannot run (PowerShell's Constrained Language Mode, which AppLocker and
+ * WDAC enforce, blocks `Add-Type`), returns none: the exit-code poll's answer
+ * stands, as it did before this wait existed.
+ */
+async function waitForWindowsExit(pids: readonly number[], killedAt: number, timeoutMs: number): Promise<number[]> {
+  if (pids.length === 0) return [];
+  // FILETIME counts 100 ns ticks from 1601; Date.now() counts ms from 1970.
+  const killedAtFiletime = BigInt(killedAt) * 10_000n + 116_444_736_000_000_000n;
+  const script = [
+    `$deadline = [DateTime]::UtcNow.AddMilliseconds(${timeoutMs})`,
+    "Add-Type -Namespace Pane -Name ProcessExit -MemberDefinition '"
+      + '[DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(uint access, bool inherit, int pid);'
+      + '[DllImport("kernel32.dll")] public static extern bool GetProcessTimes(IntPtr process, out long created, out long exited, out long kernel, out long user);'
+      + '[DllImport("kernel32.dll")] public static extern uint WaitForSingleObject(IntPtr handle, uint ms);'
+      + '[DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);'
+      + "'",
+    `foreach ($id in @(${pids.join(',')})) {`,
+    // SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION. No handle means the process is gone.
+    '  $handle = [Pane.ProcessExit]::OpenProcess(0x00101000, $false, $id)',
+    '  if ($handle -eq [IntPtr]::Zero) { continue }',
+    '  $created = 0; $exited = 0; $kernel = 0; $user = 0',
+    '  [void][Pane.ProcessExit]::GetProcessTimes($handle, [ref]$created, [ref]$exited, [ref]$kernel, [ref]$user)',
+    `  if ($created -le ${killedAtFiletime}) {`,
+    '    $left = [Math]::Max(0, [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds)',
+    // WAIT_OBJECT_0 (0) means signalled.
+    '    if ([Pane.ProcessExit]::WaitForSingleObject($handle, [uint32]$left) -ne 0) { $id }',
+    '  }',
+    '  [void][Pane.ProcessExit]::CloseHandle($handle)',
+    '}',
+  ].join('\n');
+  try {
+    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: timeoutMs + SNAPSHOT_TIMEOUT_MS });
+    return stdout.split(/\r?\n/u).filter(line => /^\d+$/u.test(line.trim())).map(line => Number.parseInt(line, 10));
+  } catch (error) {
+    console.warn('[ProcessTree] exit_wait_failed:', error);
+    return [];
+  }
 }
 
 /** Kills these processes as forcefully as the platform allows. Never throws. */

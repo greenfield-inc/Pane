@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 declare global {
   interface Window {
@@ -29,7 +29,7 @@ test('interrupted panes start selected and the user can resume a subset', async 
     };
     Object.assign(window, { resumeSelectionCalls: { resumed, dismissed } });
   });
-  await page.goto('/');
+  await gotoApp(page);
   const dialog = page.getByRole('dialog', { name: 'Resume Previous Panes' });
   await expect(dialog.getByRole('checkbox', { name: 'First task' })).toBeChecked();
   await expect(dialog.getByRole('checkbox', { name: 'Second task' })).toBeChecked();

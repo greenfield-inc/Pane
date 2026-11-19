@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { DiffManifest } from '../shared/types/gitDiff';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 test('5,000-file list mounts only the viewport and reports paint timing', async ({ page }) => {
   const project = { id: 913, name: 'Perf fixture', path: '/tmp/perf', active: true, created_at: new Date(0).toISOString(), updated_at: new Date(0).toISOString() };
@@ -14,7 +14,7 @@ test('5,000-file list mounts only the viewport and reports paint timing', async 
     Object.assign(window, { __paneDiffLongTasks: tasks });
   });
   await installElectronApiMock(page, { initialProjects: [project], initialSessions: [session], initialPanels: panels, initialExecutions: [], diffManifests: { session: manifest }, initialUiState: { expandedProjects: [project.id] }, activeProjectId: project.id, testPerf: true });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await page.getByRole('tab', { name: 'Changes', exact: true }).click();
   const list = page.getByRole('listbox', { name: 'Changed files' });

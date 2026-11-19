@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import path from 'node:path';
 import type { RemoteDaemonClientRecord } from '../shared/types/remoteDaemon';
 import type { RelayStatus } from '../shared/types/relay';
-import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
+import { installElectronApiMock, type ElectronApiMockOptions, gotoApp } from './electronApiMock';
 
 type PairTestWindow = Window & {
   __paneTestElectronMock: {
@@ -33,7 +33,7 @@ async function openHome(page: Page, options: ElectronApiMockOptions = {}, theme:
     initialConfig: { theme: THEMES[theme], appearanceMode: 'fixed' },
     ...options,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   for (const name of ['No thanks', 'Get Started', 'Skip', 'Skip for now']) {
     const button = page.getByRole('dialog').getByRole('button', { name, exact: true });
     if (await button.isVisible({ timeout: 1500 }).catch(() => false)) await button.click();
@@ -224,7 +224,7 @@ test('first run ends on "Take your agents with you", whose Pair a phone opens Ad
   await page.addInitScript(() => {
     window.electronAPI.onboarding.detectEnvironment = async () => ({ success: true, data: { gitInstalled: true } });
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   await page.getByRole('dialog', { name: 'Which agent do you use?' }).getByRole('button', { name: 'Claude Code' }).click();
   await page.getByRole('dialog', { name: 'Open your project' }).getByRole('button', { name: 'Skip', exact: true }).click();
   const step = page.getByRole('dialog', { name: 'Take your agents with you' });

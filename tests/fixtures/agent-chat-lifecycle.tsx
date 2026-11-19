@@ -31,7 +31,7 @@ const client: AgentChatClient = {
 };
 const viewer=agentChatViewer(client,'qa-dom');
 Object.assign(window,{qaViewer:viewer,qaReadCount:()=>reads});
-function Harness(){const[mounted,setMounted]=useState(true);return <div style={{height:'100vh',display:'flex',flexDirection:'column'}}><nav style={{height:36,flexShrink:0}}><button onClick={()=>setMounted(false)}>Detach viewer</button> | <button onClick={()=>setMounted(true)}>Restore viewer</button> | <button onClick={()=>release?.()}>Release transcript</button></nav><div style={{minHeight:0,flex:1}}>{mounted&&<AgentChatPanel panelId="qa-dom" client={client}/>}</div></div>}
+function Harness(){const[mounted,setMounted]=useState(true);return <div style={{height:'100vh',display:'flex',flexDirection:'column'}}><nav style={{minHeight:36,flexShrink:0}}><button onClick={()=>setMounted(false)}>Detach viewer</button> | <button onClick={()=>setMounted(true)}>Restore viewer</button> | <button onClick={()=>release?.()}>Release transcript</button></nav><div style={{minHeight:0,flex:1}}>{mounted&&<AgentChatPanel panelId="qa-dom" client={client}/>}</div></div>}
 const root = window.qaRoot ??= createRoot(document.getElementById('root')!);
 root.render(<Harness />);
 

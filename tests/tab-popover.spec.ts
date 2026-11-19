@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const now = new Date(0).toISOString();
 const project = { id: 513, name: 'Popover', path: '/tmp/tab-popover', active: true, created_at: now, updated_at: now };
@@ -14,11 +14,16 @@ const panel = {
   state: { isActive: true, hasBeenViewed: true, customState: { isInitialized: false } },
   metadata: { createdAt: now, lastActiveAt: now, position: 0, permanent: true },
 };
+// The host's chat agent catalog (chat-tab:agents): Claude is installed and its terminal tabs can switch.
+const claudeCatalog = [{
+  id: 'claude', label: 'Claude', icon: 'claude', source: 'config', installed: true, fullAccess: 'agent', switchFromTerminal: { ok: true },
+}];
+
 test('add-tool popover supports keyboard navigation and dismissal', async ({ page }, testInfo) => {
   await installElectronApiMock(page, {
     platform: 'darwin', initialProjects: [project], initialSessions: [session], initialPanels: [panel], activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
 
@@ -45,7 +50,7 @@ test('Explorer in the add-tool menu creates a missing panel and opens the Files 
     platform: 'darwin', initialProjects: [project], initialSessions: [session],
     initialPanels: [panel], activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
 
@@ -60,7 +65,7 @@ test('agent presets create JSON-valid terminal state without a resume profile', 
     platform: 'darwin', initialProjects: [project], initialSessions: [session],
     initialPanels: [panel], activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
   await page.getByRole('button', { name: 'Add tool', exact: true }).click();
@@ -82,7 +87,7 @@ test('custom profiles keep their names and commands when renamed and launched', 
     platform: 'darwin', initialProjects: [project], initialSessions: [session],
     initialPanels: [panel], activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
   const trigger = page.getByRole('button', { name: 'Add tool', exact: true });
@@ -153,7 +158,7 @@ test('chat promotion sends the selected chat and preserves it when the move is r
       return original(channel, ...args);
     };
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
   await page.getByRole('button', { name: 'Move chat to Session', exact: true }).click();
@@ -176,7 +181,7 @@ test('inspector arrows move selection and focus through every tab', async ({ pag
       metadata: { ...panel.metadata, position: index + 1 },
     }))],
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
   const tabs = page.getByRole('tablist', { name: 'Inspector' });
@@ -200,12 +205,15 @@ for (const scheme of ['light', 'dark'] as const) {
       initialConfig: { chatTabsEnabled: true, appearanceMode: 'system' },
       initialPanels: [{ ...panel, title: 'Claude', metadata: { ...panel.metadata, permanent: false }, state: { ...panel.state, customState: { agentType: 'claude', agentSessionId: 'conv-1' } } }],
     });
-    await page.addInitScript(() => {
+    await page.addInitScript((catalog) => {
       const switched: string[] = [];
-      Object.assign(window.electronAPI, { chatTab: { switch: async (panelId: string) => { switched.push(panelId); return { panelId: 'chat-1', terminalKept: false }; } } });
+      Object.assign(window.electronAPI, { chatTab: {
+        agents: async () => catalog,
+        switch: async (panelId: string) => { switched.push(panelId); return { panelId: 'chat-1', terminalKept: false }; },
+      } });
       Object.assign(window, { __switchedToChat: switched });
-    });
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    }, claudeCatalog);
+    await gotoApp(page);
     await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
     await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Switch to chat' })).toHaveCount(0);
@@ -230,7 +238,10 @@ test('a terminal agent tab shows Switch to chat with chat tabs off, disabled, an
     initialConfig: { chatTabsEnabled: false, appearanceMode: 'system' },
     initialPanels: [{ ...panel, title: 'Claude', metadata: { ...panel.metadata, permanent: false }, state: { ...panel.state, customState: { agentType: 'claude', agentSessionId: 'conv-1' } } }],
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.addInitScript((catalog) => {
+    Object.assign(window.electronAPI, { chatTab: { agents: async () => catalog } });
+  }, claudeCatalog);
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
 
