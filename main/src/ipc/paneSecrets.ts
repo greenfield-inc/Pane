@@ -3,7 +3,8 @@ import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
   paneSecretProjectProblem,
-  secretLeaseRenewCommand,
+  paneSecretReferenceProblem,
+  SECRET_LEASE_MAX_MS,
   teammateSecretRefusal,
   type PaneSecretReferenceSummary,
   type PaneSecretsOverview,
@@ -13,16 +14,23 @@ import {
 } from '../../../shared/types/paneSecrets';
 import { isRemotePaneCommand, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { getRuntimeConfigManager } from '../core/runtime';
+import type { AppConfig } from '../types/config';
+
+/** The config the lease commands read and watch. */
+interface LeaseConfig {
+  getConfig(): AppConfig;
+  on(event: 'config-updated', listener: () => void): void;
+}
 import { onePassword } from '../services/onePassword';
 import { localHostLabel, paneSecretStore, secretLeaseStore, secretNotFound, validatePaneSecretAddress, type PaneSecretStore } from '../services/paneSecrets';
-import type { SecretLeaseStore } from '../services/secretLeases';
+import { leaseEndedNext, type SecretLeaseStore } from '../services/secretLeases';
+import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import { secretLeaseService } from '../services/secretLeaseRuntime';
 import {
   hostLeaseRefusal,
   leaseEndSchema,
   leasePushSchema,
   leaseRefused,
-  LOCAL_LEASE_MACHINE,
   type HostLeaseList,
   type SecretLeaseService,
 } from '../services/secretLeaseService';
@@ -65,6 +73,20 @@ function decode<Value>(value: PaneCommandValue, schema: Parameters<typeof decode
   }
 }
 
+/**
+ * A desktop's own channels to the machines it saved: only a paired device over HTTP may call them.
+ * The local socket passes the caller's own arguments, so a local "trusted" argument proves nothing.
+ */
+export function refuseLocalCaller(): void {
+  if (!isRemotePaneCommand()) {
+    throw new PaneError(
+      'SECRET_REMOTE_ONLY',
+      'Pane refused this from a program on this machine: only a desktop paired with this machine can send it. Nothing was changed.',
+      'Start or end leases from Settings → Secrets on your desktop, or run `runpane secrets lease`.',
+    );
+  }
+}
+
 /** These channels answer only this machine's own callers; other hosts get values through shared-key sync. */
 function refuseRemote(): void {
   if (isRemotePaneCommand()) {
@@ -86,9 +108,19 @@ export function registerPaneSecretHandlers(
   secrets: () => PaneSecretStore = paneSecretStore,
   leases: () => SecretLeaseStore = secretLeaseStore,
   service: () => SecretLeaseService | null = secretLeaseService,
+  config: LeaseConfig = getRuntimeConfigManager(),
 ): void {
   registerSettingsChannels(ipcMain, secrets, service);
-  registerLeaseHostCommands(commandRegistry, leases);
+  registerLeaseHostCommands(commandRegistry, leases, config);
+  // Every Pane process builds its lease store now, so leases that expired while it was closed are deleted at start.
+  void leases().ready();
+  // A machine shared with everyone on the tailnet holds no leases: teammates' commands there run as the owner.
+  let shared = hostLeaseRefusal(config.getConfig()) !== null;
+  config.on('config-updated', () => {
+    const now = hostLeaseRefusal(config.getConfig()) !== null;
+    if (now && !shared) void leases().endAll().catch(error => console.warn(`[SecretLeases] Could not end leases after sharing changed: ${reasonOf(error)}`));
+    shared = now;
+  });
 
   commandRegistry.register('runpane:secrets:list', async (request: PaneCommandValue): Promise<PaneSecretListResult> => {
     refuseRemote();
@@ -147,7 +179,7 @@ export function registerPaneSecretHandlers(
       throw new PaneError(
         'SECRET_LEASE_ENDED',
         `${unleased.map(name => `${project}/${name}`).join(', ')} come from 1Password and have no active lease on this machine. Nothing was run.`,
-        `Run \`${secretLeaseRenewCommand(project, unleased)}\`, and the person approves it on the card.`,
+        leaseEndedNext(project, unleased),
       );
     }
     const values: Record<string, string> = {};
@@ -196,7 +228,7 @@ function registerSettingsChannels(ipcMain: Pick<IpcMain, 'handle'>, secrets: () 
   }));
   ipcMain.handle('pane-secrets:start-lease', (_event, request: PaneCommandValue) => respond(async () => {
     const { project, names, machines } = decode(request, startLeaseSchema);
-    return desktop().start({ project, names, machines: machines.filter(id => id !== LOCAL_LEASE_MACHINE), requestedBy: 'Settings' });
+    return desktop().start({ project, names, machines: machines.filter(id => id !== LOCAL_MACHINE_ID), requestedBy: 'Settings' });
   }));
   ipcMain.handle('pane-secrets:end-lease', (_event, leaseId: PaneCommandValue) => respond(async () => {
     const { id } = decode({ id: leaseId }, leaseEndSchema);
@@ -254,18 +286,29 @@ async function moveToOnePassword(store: PaneSecretStore, project: string, name: 
  * remaining), end one, or list them (names and times, never values). The HTTP server lets only the
  * owner's paired devices call them, as for key sharing; a teammate is refused here too.
  */
-function registerLeaseHostCommands(commandRegistry: PaneCommandRegistry, leases: () => SecretLeaseStore): void {
-  const trust = (trusted: PaneCommandValue, action: string) => {
-    decode(trusted, trustedSchema);
+function registerLeaseHostCommands(commandRegistry: PaneCommandRegistry, leases: () => SecretLeaseStore, config: LeaseConfig): void {
+  /** The paired client that called, after refusing local callers (whose "trusted" argument is their own) and teammates. */
+  const trust = (trusted: PaneCommandValue, action: string): string => {
+    refuseLocalCaller();
+    const { clientId } = decode(trusted, trustedSchema);
     const teammate = teammatePaneCaller();
     if (teammate) throw teammateSecretRefusal(teammate, action);
+    return clientId;
   };
   commandRegistry.register('secrets:lease:push', async (input: PaneCommandValue, trusted: PaneCommandValue) => {
-    trust(trusted, 'push a lease');
-    const refusal = hostLeaseRefusal(getRuntimeConfigManager().getConfig());
+    const clientId = trust(trusted, 'push a lease');
+    const refusal = hostLeaseRefusal(config.getConfig());
     if (refusal) throw leaseRefused(localHostLabel(), refusal);
     const push = decode(input, leasePushSchema);
-    const lease = await leases().grant(push);
+    if (push.expiresInMs > SECRET_LEASE_MAX_MS) {
+      throw new PaneError('SECRET_INVALID', 'A lease lasts at most 7 days. Nothing was stored.', 'Start the lease again with a length from Settings → Secrets.');
+    }
+    for (const secret of push.secrets) {
+      validatePaneSecretAddress(push.project, secret.name);
+      const problem = paneSecretReferenceProblem(secret.reference);
+      if (problem) throw new PaneError('SECRET_INVALID', `${problem} Nothing was stored.`, 'Fix the reference in Settings → Secrets on the desktop, then start the lease again.');
+    }
+    const lease = await leases().grant({ ...push, pushedBy: clientId });
     return { ok: true, lease };
   });
   commandRegistry.register('secrets:lease:end', async (input: PaneCommandValue, trusted: PaneCommandValue) => {
@@ -276,6 +319,6 @@ function registerLeaseHostCommands(commandRegistry: PaneCommandRegistry, leases:
   commandRegistry.register('secrets:lease:list', async (_input: PaneCommandValue, trusted: PaneCommandValue): Promise<HostLeaseList> => {
     trust(trusted, 'list leases');
     await leases().ready();
-    return { leases: leases().list(), memoryOnly: leases().memoryOnly(), refusal: hostLeaseRefusal(getRuntimeConfigManager().getConfig()) };
+    return { leases: leases().list(), memoryOnly: leases().memoryOnly(), refusal: hostLeaseRefusal(config.getConfig()) };
   });
 }

@@ -56,7 +56,7 @@ export function startSecretLeases(deps: {
     machines: () => machineLinks(deps.machines),
     hostLabel: localHostLabel,
     testTiming: testTiming(deps.packaged),
-    postReminder: (lease, lengthMs) => {
+    postReminder: lease => {
       const queue = deps.notifyQueue();
       if (!queue) return;
       const names = lease.secrets.map(secret => secret.name);
@@ -64,11 +64,12 @@ export function startSecretLeases(deps: {
       reminderCards.set(lease.id, id);
       void queue.ask({
         id,
+        // The queue words the title and fills in the length, as for any lease card.
         question: {
           ui: 'approve',
-          title: `Extend the lease on ${names.length === 1 ? `${lease.project}/${names[0]}` : `${names.length} ${lease.project} secrets`}?`,
+          title: 'Extend lease',
           context: `It ends at ${new Date(lease.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. Extending reads 1Password again; ignored, it ends on time.`,
-          lease: { project: lease.project, names, renews: lease.id, lengthMs },
+          lease: { project: lease.project, names, renews: lease.id },
         },
         source: { name: 'Pane', agent: 'Pane' },
       }).catch(() => undefined).finally(() => reminderCards.delete(lease.id));
@@ -84,6 +85,5 @@ export function startSecretLeases(deps: {
   deps.machines.subscribe(event => {
     if (event.type === 'resync' && event.machineId !== LOCAL_MACHINE_ID) void service?.repushTo(event.machineId);
   });
-  store.ready().catch(error => console.warn('[SecretLeases] Start-up sweep failed:', error));
   return service;
 }

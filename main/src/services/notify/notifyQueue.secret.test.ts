@@ -223,4 +223,23 @@ describe('NotifyQueue lease cards', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(call.result).toEqual({ status: 'declined' });
   });
+
+  it('shows a host\'s lease card with the length and references the desktop will grant', () => {
+    // The host grants nothing itself, so its card names no length.
+    const host = new NotifyQueue({ settings: () => DEFAULT_NOTIFY_SETTINGS, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [], machine: 'devbox', leases: {
+      describe: (_project, names) => ({ references: Object.fromEntries(names.map(name => [name, `op://Old/${name}/credential`])), lengthMs: null, memoryOnly: true }),
+    } });
+    const desktop = new NotifyQueue({ settings: () => DEFAULT_NOTIFY_SETTINGS, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [], machine: 'studio', leases: {
+      describe: (_project, names) => ({ references: Object.fromEntries(names.map(name => [name, `op://Dev/${name}/credential`])), lengthMs: 7 * 24 * 60 * 60 * 1000, memoryOnly: false }),
+    } });
+    ask(host, { ui: 'approve', title: 'x', lease: { project: 'stripe', names: ['STRIPE_KEY'] } });
+    expect(host.snapshot().items[0]).toMatchObject({ title: 'Lease stripe/STRIPE_KEY?' });
+
+    desktop.setRemote('devbox-id', { machine: 'devbox', online: true, state: host.sharedState() });
+
+    expect(desktop.snapshot().items[0]).toMatchObject({
+      title: 'Lease stripe/STRIPE_KEY for 7 days?',
+      lease: { lengthMs: 7 * 24 * 60 * 60 * 1000, references: { STRIPE_KEY: 'op://Dev/STRIPE_KEY/credential' }, machine: 'devbox', memoryOnly: true },
+    });
+  });
 });

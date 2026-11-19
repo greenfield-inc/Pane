@@ -570,9 +570,10 @@ function QuestionCard({
     if (choice) sendAnswer(cardAnswer(item, { choice: choice.label }, withNote ?? ''));
   };
   const answerApproval = (approved: boolean, reason?: string) => sendAnswer(cardAnswer(item, { approved }, reason ?? ''));
-  // A lease card's Start lease waits on 1Password in main: busy until the item changes state or reports an error.
+  // A lease card's Start lease waits on 1Password in main: busy until the item changes state, error or
+  // attempt count (leaseAttempt rises on each finished attempt, so the same error twice still ends it).
   const [leasePress, setLeasePress] = useState<string | null>(null);
-  const leaseKey = `${item.state}|${item.leaseError ?? ''}`;
+  const leaseKey = `${item.state}|${item.leaseError ?? ''}|${item.leaseAttempt ?? 0}`;
   const leaseBusy = leasePress === leaseKey;
   const startLease = () => {
     if (leaseBusy) return;
@@ -943,6 +944,28 @@ function QuestionCard({
   );
 }
 
+/** A lease's names, each with its 1Password reference or a warning that it has none there. */
+export function LeaseRows({ item, className }: { item: NotifyItem; className?: string }) {
+  const lease = item.lease;
+  if (!lease) return null;
+  const host = leaseRemoteMachine(item) ?? lease.machine ?? 'this computer';
+  return (
+    <ul className={cn('space-y-1 text-[13px]', className)}>
+      {lease.names.map((name) => {
+        const reference = lease.references?.[name];
+        return (
+          <li key={name} className="flex min-w-0 items-baseline gap-3" data-testid="notify-lease-row">
+            <span className="w-[38%] shrink-0 truncate font-mono text-text-primary" title={name}>{name}</span>
+            {reference
+              ? <span className="min-w-0 truncate font-mono text-text-tertiary" title={reference}>{reference}</span>
+              : <span className="min-w-0 truncate text-status-warning">not a 1Password reference on {host}</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /** A lease card: each name with its 1Password reference, where the lease goes and when it ends, then Start lease or Decline. */
 function LeaseBody({ item, busy, inbox, className, onStart, onDecline }: {
   item: NotifyItem;
@@ -959,19 +982,7 @@ function LeaseBody({ item, busy, inbox, className, onStart, onDecline }: {
   const host = remote ?? lease.machine ?? 'this computer';
   return (
     <div className={cn(className, 'space-y-2.5')} data-testid="notify-lease">
-      <ul className="space-y-1 text-[13px]">
-        {lease.names.map((name) => {
-          const reference = lease.references?.[name];
-          return (
-            <li key={name} className="flex min-w-0 items-baseline gap-3" data-testid="notify-lease-row">
-              <span className="w-[38%] shrink-0 truncate font-mono text-text-primary" title={name}>{name}</span>
-              {reference
-                ? <span className="min-w-0 truncate font-mono text-text-tertiary" title={reference}>{reference}</span>
-                : <span className="min-w-0 truncate text-status-warning">not a 1Password reference on {host}</span>}
-            </li>
-          );
-        })}
-      </ul>
+      <LeaseRows item={item} />
       <div className="text-[12.5px] text-text-tertiary" data-testid="notify-lease-summary">
         {leaseSummary(item, now)}
         {lease.memoryOnly && <span className="block">{host === 'this computer' ? 'This computer' : host} holds it in memory only</span>}

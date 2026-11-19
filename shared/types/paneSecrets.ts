@@ -101,8 +101,8 @@ export function secretLeaseRenewCommand(project: string, names: readonly string[
   return `runpane secrets lease --project ${project} ${names.join(' ')}`;
 }
 
-/** op://vault/item/field or op://vault/item/section/field, with an optional ?attribute=…; names may hold spaces. */
-const ONE_PASSWORD_REFERENCE = /^op:\/\/[^/?{}\n]+\/[^/?{}\n]+(\/[^/?{}\n]+)?\/[^/?{}\n]+(\?[^{}\s]*)?$/;
+/** op://vault/item/field or op://vault/item/section/field, with an optional ?attribute=…; names may hold spaces. No `$`: op inject would expand it from Pane's environment. */
+const ONE_PASSWORD_REFERENCE = /^op:\/\/[^/?{}$\n]+\/[^/?{}$\n]+(\/[^/?{}$\n]+)?\/[^/?{}$\n]+(\?[^{}$\s]*)?$/;
 
 /** Why `reference` is not a 1Password secret reference, or null when it is. */
 export function paneSecretReferenceProblem(reference: string): string | null {

@@ -10,6 +10,8 @@ import { settingDomId } from '../catalog';
 import { formatDistanceToNow } from '../../../utils/timestampUtils';
 import { useNow } from '../../notify/useNow';
 import { leaseEndLabel } from '../../notify/notifyFormat';
+import { formatDuration } from '../../loops/loopRunView';
+import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
 import {
   paneSecretKey,
   paneSecretNameProblem,
@@ -37,15 +39,7 @@ const LEASE_LENGTHS: Array<{ ms: number; label: string }> = [
 ];
 
 function lengthLabel(ms: number): string {
-  return LEASE_LENGTHS.find((length) => length.ms === ms)?.label ?? `${Math.round(ms / HOUR)} hours`;
-}
-
-/** "45 min left", "5 h 20 min left", "3 days left". */
-function timeLeft(at: number, now: number): string {
-  const minutes = Math.max(0, Math.round((at - now) / 60_000));
-  if (minutes < 60) return `${minutes} min left`;
-  if (minutes < 48 * 60) return `${Math.floor(minutes / 60)} h ${minutes % 60} min left`;
-  return `${Math.floor(minutes / (24 * 60))} days left`;
+  return LEASE_LENGTHS.find((length) => length.ms === ms)?.label ?? formatDuration(ms);
 }
 
 type Outcome<T> = { ok: true; data: T | undefined } | { ok: false };
@@ -309,7 +303,7 @@ function StartLeaseForm({ project, references, machines, lengthMs, now, onStart,
   onCancel: () => void;
 }) {
   const [names, setNames] = useState(() => new Set(references.map((reference) => reference.name)));
-  const [picked, setPicked] = useState(() => new Set(machines.some((machine) => machine.id === 'local' && !machine.refusal) ? ['local'] : []));
+  const [picked, setPicked] = useState(() => new Set(machines.some((machine) => machine.id === LOCAL_MACHINE_ID && !machine.refusal) ? [LOCAL_MACHINE_ID] : []));
   const [busy, setBusy] = useState(false);
   const start = async (event: FormEvent) => {
     event.preventDefault();
@@ -411,7 +405,7 @@ function ActiveLeases({ leases, now, run }: { leases: SecretLeaseOnMachine[]; no
                   <span className="font-medium">{lease.project}</span> <span className="font-mono">{lease.names.join(', ')}</span>
                 </div>
                 <div className="truncate text-xs text-text-tertiary">
-                  On {held.map((copy) => copy.machine + (copy.memoryOnly ? ' (in memory)' : '')).join(', ')} · {timeLeft(endsAt, now)}, ends {leaseEndLabel(endsAt, now)} · asked by {lease.requestedBy}
+                  On {held.map((copy) => copy.machine + (copy.memoryOnly ? ' (in memory)' : '')).join(', ')} · {formatDuration(Math.max(0, endsAt - now))} left, ends {leaseEndLabel(endsAt, now)} · asked by {lease.requestedBy}
                 </div>
               </div>
               <Button type="button" variant="secondary" size="sm" onClick={() => void run(() => window.electronAPI.paneSecrets.endLease(id), 'Pane could not end the lease.')}>End now</Button>
@@ -490,7 +484,7 @@ function ProjectSection({ project, overview, now, run, set, remove }: {
   const references = overview.references.filter((reference) => reference.project === project).sort(byName);
   const lengthMs = overview.leaseLengths[project] ?? SECRET_LEASE_DEFAULT_MS;
   const leasedUntil = (name: string): number | null => overview.leases.reduce<number | null>((latest, lease) => {
-    if (lease.machineId !== 'local' || lease.project !== project || !lease.names.includes(name)) return latest;
+    if (lease.machineId !== LOCAL_MACHINE_ID || lease.project !== project || !lease.names.includes(name)) return latest;
     const ends = Date.parse(lease.expiresAt);
     return latest === null || ends > latest ? ends : latest;
   }, null);

@@ -15,7 +15,10 @@ import type { AppConfig } from '../types/config';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import type { OnePassword } from './onePassword';
 import type { PaneSecretStore } from './paneSecrets';
-import type { SecretLeaseRecord, SecretLeaseStore } from './secretLeases';
+import { MAX_TIMER_MS, type SecretLeaseRecord, type SecretLeaseStore } from './secretLeases';
+import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
+
+const LIST_TIMEOUT_MS = 3_000;
 
 /** A saved machine the desktop holds a connection to. */
 export interface LeaseMachineLink {
@@ -25,8 +28,6 @@ export interface LeaseMachineLink {
   invoke(channel: string, args: PaneCommandValue[]): Promise<PaneCommandValue>;
 }
 
-/** The desktop's own id in machine lists. */
-export const LOCAL_LEASE_MACHINE = 'local';
 
 /** What a machine answers to `secrets:lease:list`. */
 export interface HostLeaseList {
@@ -93,10 +94,8 @@ export interface SecretLeaseServiceDeps {
   now?: () => number;
   /** Test builds only: a short lease length and reminder, so expiry and renewal run in minutes. */
   testTiming?: () => { lengthMs?: number; reminderMs?: number };
-  /** Whether 1Password would answer a read now without asking the person. Absent: never known, so renewal is the card. */
-  approvalLive?: () => Promise<boolean>;
   /** Posts the "Extend" card for a lease about to end. */
-  postReminder?: (lease: SecretLeaseRecord, lengthMs: number) => void;
+  postReminder?: (lease: SecretLeaseRecord) => void;
   /** Closes that card once the lease renewed or ended without it. */
   closeReminder?: (leaseId: string) => void;
 }
@@ -109,6 +108,10 @@ export interface SecretLeaseStart {
   requestedBy: string;
   /** Renews this lease: same id, new values and expiry, pushed where it went before. */
   renews?: string;
+  /** The length the person saw and approved on the card. Absent: the project's length now. */
+  lengthMs?: number;
+  /** Started from the Extend card itself: that card ends with its own answer, so it isn't closed here. */
+  fromReminder?: boolean;
 }
 
 /**
@@ -122,6 +125,13 @@ export class SecretLeaseService {
 
   constructor(private readonly deps: SecretLeaseServiceDeps) {
     this.now = deps.now ?? Date.now;
+    // A lease that ran out takes its Extend card with it.
+    deps.store.onEnded(ids => {
+      for (const id of ids) {
+        this.reminded.delete(id);
+        this.deps.closeReminder?.(id);
+      }
+    });
   }
 
   /** The project's lease length, or the test length in a test build. */
@@ -131,8 +141,10 @@ export class SecretLeaseService {
     return this.deps.config().secretLeaseLengths?.[project] ?? SECRET_LEASE_DEFAULT_MS;
   }
 
-  private reminderMs(): number {
-    return this.deps.testTiming?.().reminderMs ?? SECRET_LEASE_REMINDER_MS;
+  /** How long before its end lease `lease` is reminded: an hour, or a quarter of a shorter lease, so a new one never reminds at once. */
+  private reminderMs(lease: SecretLeaseSummary): number {
+    const window = this.deps.testTiming?.().reminderMs ?? SECRET_LEASE_REMINDER_MS;
+    return Math.min(window, (Date.parse(lease.expiresAt) - Date.parse(lease.grantedAt)) / 4);
   }
 
   async setLength(project: string, lengthMs: number): Promise<void> {
@@ -170,10 +182,10 @@ export class SecretLeaseService {
     if (request.renews && !previous) {
       throw new PaneError('SECRET_LEASE_ENDED', 'That lease already ended, so it can\'t be extended. Nothing was read.', 'Start a new lease from Settings → Secrets, or ask the agent to run its lease command again.');
     }
-    const targets = request.renews ? previous?.pushedTo ?? [] : request.machines.filter(id => id !== LOCAL_LEASE_MACHINE);
+    const targets = request.renews ? previous?.pushedTo ?? [] : request.machines.filter(id => id !== LOCAL_MACHINE_ID);
     const values = await this.deps.onePassword().read(references);
     const secrets = request.names.map((name, index) => ({ name, reference: references[index], value: values[index] }));
-    const lengthMs = this.lengthFor(request.project);
+    const lengthMs = request.lengthMs ?? this.lengthFor(request.project);
     const lease = await this.deps.store.grant({
       id: request.renews,
       project: request.project,
@@ -184,9 +196,10 @@ export class SecretLeaseService {
       grantedOn: this.deps.hostLabel(),
     });
     const { pushed, refused } = await this.pushTo(targets, lease.id);
-    await this.deps.store.setPushedTo(lease.id, pushed.map(machine => machine.id));
+    // A renewal keeps every machine it went to before: one asleep now gets the new expiry when it reconnects.
+    await this.deps.store.setPushedTo(lease.id, [...new Set([...(previous?.pushedTo ?? []), ...pushed.map(machine => machine.id)])]);
     this.reminded.delete(lease.id);
-    this.deps.closeReminder?.(lease.id);
+    if (!request.fromReminder) this.deps.closeReminder?.(lease.id);
     this.armReminders();
     return { leaseId: lease.id, expiresAt: lease.expiresAt, machines: [this.deps.hostLabel(), ...pushed.map(machine => machine.name)], refused };
   }
@@ -245,13 +258,21 @@ export class SecretLeaseService {
     return ids.size;
   }
 
+  /** Each online machine's leases. A machine that doesn't answer within LIST_TIMEOUT_MS lists none, so one slow host never holds up Settings. */
   private async remoteLists(): Promise<Map<string, HostLeaseList>> {
     const lists = new Map<string, HostLeaseList>();
     await Promise.all(this.deps.machines().filter(link => link.online).map(async link => {
+      let timer: NodeJS.Timeout | undefined;
       try {
-        lists.set(link.id, decodeBoundary(await link.invoke('secrets:lease:list', []), hostLeaseListSchema));
+        const answer = await Promise.race([
+          link.invoke('secrets:lease:list', []),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('no answer')), LIST_TIMEOUT_MS); }),
+        ]);
+        lists.set(link.id, decodeBoundary(answer, hostLeaseListSchema));
       } catch {
         // A machine too old for leases, or one that stopped answering, lists none.
+      } finally {
+        clearTimeout(timer);
       }
     }));
     return lists;
@@ -261,8 +282,8 @@ export class SecretLeaseService {
   async overview(): Promise<{ leases: SecretLeaseOnMachine[]; machines: SecretLeaseMachine[] }> {
     const label = this.deps.hostLabel();
     const ownRefusal = hostLeaseRefusal(this.deps.config());
-    const leases: SecretLeaseOnMachine[] = this.deps.store.list().map(lease => ({ ...lease, machineId: LOCAL_LEASE_MACHINE, machine: label }));
-    const machines: SecretLeaseMachine[] = [{ id: LOCAL_LEASE_MACHINE, name: label, online: true, refusal: ownRefusal, memoryOnly: this.deps.store.memoryOnly() }];
+    const leases: SecretLeaseOnMachine[] = this.deps.store.list().map(lease => ({ ...lease, machineId: LOCAL_MACHINE_ID, machine: label }));
+    const machines: SecretLeaseMachine[] = [{ id: LOCAL_MACHINE_ID, name: label, online: true, refusal: ownRefusal, memoryOnly: this.deps.store.memoryOnly() }];
     const lists = await this.remoteLists();
     for (const link of this.deps.machines()) {
       const list = lists.get(link.id);
@@ -277,25 +298,51 @@ export class SecretLeaseService {
   }
 
   /**
-   * A machine reconnected: push each of this desktop's leases it should hold but doesn't (a
-   * memory-only machine that restarted), with the time remaining.
+   * A machine reconnected: push it each of this desktop's leases it missed. A memory-only machine
+   * that restarted lost them; any machine may have slept through a renewal. A lease an agent ended
+   * there on purpose (gone from a machine that keeps leases at rest) stays ended.
    */
   async repushTo(machineId: string): Promise<void> {
-    const due = this.deps.store.list().filter(lease => this.deps.store.get(lease.id)?.pushedTo?.includes(machineId));
-    if (due.length === 0) return;
-    const link = this.deps.machines().find(candidate => candidate.id === machineId);
-    if (!link?.online) return;
-    let held: Set<string>;
     try {
-      held = new Set(decodeBoundary(await link.invoke('secrets:lease:list', []), hostLeaseListSchema).leases.map(lease => lease.id));
-    } catch {
-      return;
+      const due = this.deps.store.list().filter(lease => this.deps.store.get(lease.id)?.pushedTo?.includes(machineId));
+      if (due.length === 0) return;
+      const link = this.deps.machines().find(candidate => candidate.id === machineId);
+      if (!link?.online) return;
+      const list = decodeBoundary(await link.invoke('secrets:lease:list', []), hostLeaseListSchema);
+      const held = new Map(list.leases.map(lease => [lease.id, Date.parse(lease.expiresAt)]));
+      for (const lease of due) {
+        const there = held.get(lease.id);
+        const missedRenewal = there !== undefined && there < Date.parse(lease.expiresAt) - 60_000;
+        if (!missedRenewal && (there !== undefined || !list.memoryOnly)) continue;
+        const { refused } = await this.pushTo([machineId], lease.id);
+        if (refused.length > 0) console.warn(`[SecretLeases] Could not push lease ${lease.id} again to ${link.name}: ${refused[0].reason}`);
+      }
+    } catch (error) {
+      console.warn(`[SecretLeases] Could not check the leases on a reconnected machine: ${reasonOf(error)}`);
     }
-    for (const lease of due) {
-      if (held.has(lease.id)) continue;
-      const { refused } = await this.pushTo([machineId], lease.id);
-      if (refused.length > 0) console.warn(`[SecretLeases] Could not push lease ${lease.id} again to ${link.name}: ${refused[0].reason}`);
+  }
+
+  /**
+   * A saved machine is being removed: end the leases pushed to it while it can still be told, and
+   * forget it. Returns how many leases it may still hold until they expire there (it was offline).
+   */
+  async releaseMachine(machineId: string): Promise<number> {
+    const held = this.deps.store.list().filter(lease => this.deps.store.get(lease.id)?.pushedTo?.includes(machineId));
+    if (held.length === 0) return 0;
+    const link = this.deps.machines().find(candidate => candidate.id === machineId);
+    let ended = false;
+    if (link?.online) {
+      try {
+        await Promise.all(held.map(lease => link.invoke('secrets:lease:end', [{ id: lease.id }])));
+        ended = true;
+      } catch (error) {
+        console.warn(`[SecretLeases] Could not end leases on a machine being removed: ${reasonOf(error)}`);
+      }
     }
+    for (const lease of held) {
+      await this.deps.store.setPushedTo(lease.id, (this.deps.store.get(lease.id)?.pushedTo ?? []).filter(id => id !== machineId));
+    }
+    return ended ? 0 : held.length;
   }
 
   /** Arms the timer for the next lease to reach its reminder point. */
@@ -304,38 +351,23 @@ export class SecretLeaseService {
     this.reminderTimer = null;
     const pending = this.deps.store.list().filter(lease => !this.reminded.has(lease.id));
     if (pending.length === 0) return;
-    const next = Math.min(...pending.map(lease => Date.parse(lease.expiresAt) - this.reminderMs()));
-    this.reminderTimer = setTimeout(() => { void this.remindDue(); }, Math.min(Math.max(next - this.now(), 0), 2 ** 31 - 1));
+    const next = Math.min(...pending.map(lease => Date.parse(lease.expiresAt) - this.reminderMs(lease)));
+    this.reminderTimer = setTimeout(() => { this.remindDue(); }, Math.min(Math.max(next - this.now(), 0), MAX_TIMER_MS));
     this.reminderTimer.unref?.();
   }
 
   /**
-   * At a lease's reminder point: renew it without a prompt when 1Password's approval is still live,
-   * else post the Extend card. Pane never reads 1Password just to keep its approval alive.
+   * At a lease's reminder point, post its Extend card. Renewal always goes through the person:
+   * Pane never reads 1Password on a timer (silent renewal waits on a real 1Password test, D-132).
    */
-  private async remindDue(): Promise<void> {
-    const due = this.deps.store.list().filter(lease => !this.reminded.has(lease.id) && Date.parse(lease.expiresAt) - this.reminderMs() <= this.now());
+  private remindDue(): void {
+    const due = this.deps.store.list().filter(lease => !this.reminded.has(lease.id) && Date.parse(lease.expiresAt) - this.reminderMs(lease) <= this.now());
     for (const summary of due) {
       this.reminded.add(summary.id);
       const lease = this.deps.store.get(summary.id);
-      if (!lease) continue;
-      if (await this.renewSilently(lease)) continue;
-      this.deps.postReminder?.(lease, this.lengthFor(lease.project));
+      if (lease) this.deps.postReminder?.(lease);
     }
     this.armReminders();
-  }
-
-  /** Renews `lease` with no prompt if 1Password says its approval is live. False when it can't. */
-  private async renewSilently(lease: SecretLeaseRecord): Promise<boolean> {
-    if (!this.deps.approvalLive) return false;
-    try {
-      if (!(await this.deps.approvalLive())) return false;
-      await this.start({ project: lease.project, names: lease.secrets.map(secret => secret.name), machines: [], requestedBy: lease.requestedBy, renews: lease.id });
-      return true;
-    } catch (error) {
-      console.warn(`[SecretLeases] Silent renewal of lease ${lease.id} failed; showing the card: ${reasonOf(error)}`);
-      return false;
-    }
   }
 
   dispose(): void {

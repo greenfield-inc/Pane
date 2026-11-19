@@ -55,6 +55,8 @@ export interface SecretEncryption {
 }
 
 const MAX_VALUE_BYTES = 64 * 1024;
+/** How far ahead of this host's clock a synced reference's time may be. */
+const MAX_CLOCK_AHEAD_MS = 5 * 60_000;
 
 function localHostLabel(): string {
   return os.hostname().replace(/\.local$/i, '');
@@ -438,6 +440,13 @@ export class PaneSecretStore {
   async read(project: string, name: string): Promise<string> {
     validatePaneSecretAddress(project, name);
     const leases = this.leases();
+    if (this.config.getConfig().workspaces?.visibility === 'tailnet' && (leases?.has(project, name) || this.referenceOf(project, name))) {
+      throw new PaneError(
+        'SECRET_LEASE_REFUSED',
+        `${paneSecretKey(project, name)} comes from 1Password, and this machine is shared with everyone on the tailnet, so it holds no leases. Nothing was run.`,
+        'Set this machine to "Only me" in Settings → Workspaces, then start a lease again.',
+      );
+    }
     // A lease answers first: a host can hold a lease pushed before the reference itself has synced.
     if (leases) {
       await leases.ready();
@@ -480,6 +489,8 @@ export class PaneSecretStore {
       for (const [key, record] of Object.entries(incoming)) {
         if (!parsePaneSecretKey(key) || !isNewer(record, current[key])) continue;
         if (record.value !== null && paneSecretReferenceProblem(record.value)) continue;
+        // A stamp from the future would win every later edit; no real host's clock is that far ahead.
+        if (Date.parse(record.updatedAt) > this.now().getTime() + MAX_CLOCK_AHEAD_MS) continue;
         applied[key] = record.value === null
           ? { updatedAt: record.updatedAt, source: record.source, deleted: true }
           : { updatedAt: record.updatedAt, source: record.source, reference: record.value };
@@ -557,7 +568,6 @@ export function secretLeaseStore(): SecretLeaseStore {
   sharedLeases ??= new SecretLeaseStore({
     directory: getAppDirectory(),
     values: hostValueBackend(),
-    canEncrypt: () => hostValueBackend().storage().encrypted,
     onChange: () => getPaneEventSink().send('pane-secrets:changed'),
   });
   return sharedLeases;

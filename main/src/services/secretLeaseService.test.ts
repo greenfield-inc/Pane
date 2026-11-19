@@ -33,10 +33,10 @@ function fakeOp(items: Record<string, string>) {
 }
 
 /** A saved machine that keeps what the desktop pushes in its own lease store. */
-async function fakeHost(name: string, clock: { now: number }, options: { online?: boolean; refuse?: string } = {}) {
+async function fakeHost(name: string, clock: { now: number }, options: { online?: boolean; refuse?: string; memoryOnly?: boolean } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-lease-host-'));
   dirs.push(dir);
-  const store = new SecretLeaseStore({ directory: dir, values: fileSecretBackend(path.join(dir, 'secrets.json'), plain), canEncrypt: () => true, now: () => clock.now });
+  const store = new SecretLeaseStore({ directory: dir, values: fileSecretBackend(path.join(dir, 'secrets.json'), plain), now: () => clock.now });
   const received: Array<{ channel: string; arg: PaneCommandValue }> = [];
   const link: LeaseMachineLink = {
     id: `${name}-id`,
@@ -49,22 +49,23 @@ async function fakeHost(name: string, clock: { now: number }, options: { online?
         return { ok: true, lease: await store.grant(decodeBoundary(args[0], leasePushSchema)) };
       }
       if (channel === 'secrets:lease:end') return { ok: true, ended: await store.end(decodeBoundary(args[0], leaseEndSchema).id) };
-      if (channel === 'secrets:lease:list') return { leases: store.list(), memoryOnly: false, refusal: null };
+      if (channel === 'secrets:lease:list') return { leases: store.list(), memoryOnly: options.memoryOnly ?? false, refusal: null };
       throw new Error(`unexpected ${channel}`);
     },
   };
   return { link, store, received };
 }
 
-async function desktop(clock: { now: number }, machines: LeaseMachineLink[], items: Record<string, string>, extra: { approvalLive?: () => Promise<boolean> } = {}) {
+async function desktop(clock: { now: number }, machines: LeaseMachineLink[], items: Record<string, string>) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-lease-desktop-'));
   dirs.push(dir);
   const config = memoryConfig();
   const values = fileSecretBackend(path.join(dir, 'secrets.json'), plain);
-  const store = new SecretLeaseStore({ directory: dir, values, canEncrypt: () => true, now: () => clock.now });
+  const store = new SecretLeaseStore({ directory: dir, values, now: () => clock.now });
   const secrets = new PaneSecretStore(config, values, () => 'studio', () => new Date(clock.now), () => undefined, () => store);
   const op = fakeOp(items);
   const reminders: string[] = [];
+  const closed: string[] = [];
   const service = new SecretLeaseService({
     store,
     secrets: () => secrets,
@@ -75,9 +76,9 @@ async function desktop(clock: { now: number }, machines: LeaseMachineLink[], ite
     hostLabel: () => 'studio',
     now: () => clock.now,
     postReminder: lease => reminders.push(lease.id),
-    ...extra,
+    closeReminder: id => closed.push(id),
   });
-  return { service, secrets, store, op, reminders, config, dir };
+  return { service, secrets, store, op, reminders, closed, config, dir };
 }
 
 const ITEMS = {
@@ -158,9 +159,9 @@ describe('SecretLeaseService', () => {
     service.dispose();
   });
 
-  it('pushes a lease again to a machine that reconnects without it, with only the time left', async () => {
+  it('pushes a lease again to a memory-only machine that lost it, with only the time left', async () => {
     const clock = { now: Date.parse('2026-11-18T12:00:00Z') };
-    const devbox = await fakeHost('devbox', clock);
+    const devbox = await fakeHost('devbox', clock, { memoryOnly: true });
     const { service, secrets } = await desktop(clock, [devbox.link], ITEMS);
     await secrets.setReference('stripe', 'STRIPE_KEY', 'op://Dev/Stripe/credential');
     const { leaseId } = await service.start({ project: 'stripe', names: ['STRIPE_KEY'], machines: ['devbox-id'], requestedBy: 'Settings' });
@@ -175,32 +176,66 @@ describe('SecretLeaseService', () => {
     service.dispose();
   });
 
-  it('at the reminder point renews silently while 1Password\'s approval is live, else posts the Extend card', async () => {
+  it('leaves a lease an agent ended on a host ended, and brings a host that slept through Extend up to date', async () => {
+    const clock = { now: Date.parse('2026-11-18T12:00:00Z') };
+    const devbox = await fakeHost('devbox', clock);
+    const links = [devbox.link];
+    const { service, secrets } = await desktop(clock, links, ITEMS);
+    await secrets.setReference('stripe', 'STRIPE_KEY', 'op://Dev/Stripe/credential');
+    const { leaseId } = await service.start({ project: 'stripe', names: ['STRIPE_KEY'], machines: ['devbox-id'], requestedBy: 'Settings' });
+
+    // The devbox sleeps while the person extends; it keeps the old expiry.
+    links[0] = { ...devbox.link, online: false };
+    clock.now += 23 * HOUR;
+    await service.start({ project: 'stripe', names: ['STRIPE_KEY'], machines: [], requestedBy: 'Settings', renews: leaseId });
+    links[0] = devbox.link;
+    await service.repushTo('devbox-id');
+    expect(devbox.store.list()[0]?.expiresAt).toBe('2026-11-20T11:00:00.000Z');
+
+    // An agent there ends it on purpose: a reconnect does not bring it back.
+    await devbox.store.end(leaseId);
+    await service.repushTo('devbox-id');
+    expect(devbox.store.list()).toEqual([]);
+    service.dispose();
+  });
+
+  it('ends the leases pushed to a machine being removed', async () => {
+    const clock = { now: Date.parse('2026-11-18T12:00:00Z') };
+    const devbox = await fakeHost('devbox', clock);
+    const { service, secrets, store } = await desktop(clock, [devbox.link], ITEMS);
+    await secrets.setReference('stripe', 'STRIPE_KEY', 'op://Dev/Stripe/credential');
+    const { leaseId } = await service.start({ project: 'stripe', names: ['STRIPE_KEY'], machines: ['devbox-id'], requestedBy: 'Settings' });
+
+    expect(await service.releaseMachine('devbox-id')).toBe(0);
+
+    expect(devbox.store.list()).toEqual([]);
+    expect(store.get(leaseId)?.pushedTo).toEqual([]);
+    service.dispose();
+  });
+
+  it('posts the Extend card an hour before the end, a quarter of the way from the end for a short lease, and closes it when the lease runs out', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const clock = { now: Date.parse('2026-11-18T12:00:00Z') };
-    let live = true;
-    const { service, secrets, op, reminders, store } = await desktop(clock, [], ITEMS, { approvalLive: async () => live });
+    const { service, secrets, reminders, closed, config } = await desktop(clock, [], ITEMS);
     await secrets.setReference('stripe', 'STRIPE_KEY', 'op://Dev/Stripe/credential');
+    await config.updateConfigWith(() => ({ secretLeaseLengths: { stripe: HOUR } }));
     const { leaseId } = await service.start({ project: 'stripe', names: ['STRIPE_KEY'], machines: [], requestedBy: 'Settings' });
-
-    // Timers are fake but the store's file writes are real: let each step finish before the next.
     const settle = (check: () => void) => vi.waitFor(async () => {
       await vi.advanceTimersByTimeAsync(0);
       check();
     });
 
-    clock.now += 23 * HOUR;
-    await vi.advanceTimersByTimeAsync(23 * HOUR);
-    await settle(() => expect(store.get(leaseId)?.pushedTo).toEqual([]));
-    expect(op.calls).toHaveLength(2);
-    expect(store.get(leaseId)?.expiresAt).toBe('2026-11-20T11:00:00.000Z');
+    clock.now += 30 * 60_000;
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
     expect(reminders).toEqual([]);
 
-    live = false;
-    clock.now += 23 * HOUR;
-    await vi.advanceTimersByTimeAsync(23 * HOUR);
+    clock.now += 15 * 60_000;
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
     await settle(() => expect(reminders).toEqual([leaseId]));
-    expect(op.calls).toHaveLength(2);
+
+    clock.now += 15 * 60_000;
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    await settle(() => expect(closed).toContain(leaseId));
     service.dispose();
   });
 });

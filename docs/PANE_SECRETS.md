@@ -73,6 +73,8 @@ In Settings → Secrets, choose **Add from 1Password**, then give the project, t
 name and the reference. To get the reference, open the item in 1Password and choose
 **Copy Secret Reference** on the field. It looks like `op://Dev/Stripe/secret key`.
 
+Pane refuses a reference that contains `$`, braces or a line break.
+
 Agents can't add or change a reference. `runpane secrets set` on a name that comes
 from 1Password fails with `SECRET_IS_REFERENCE`.
 
@@ -101,12 +103,16 @@ One card shows:
   the agent runs on
 - the length and the time the lease ends
 
+Your desktop decides the length. A card on another machine shows the length that
+desktop will grant; a card from a headless host shows no length until a desktop
+shows it.
+
 Press **Start lease** on your computer. Pane reads 1Password once, which asks for
 Touch ID or Windows Hello, and sends the values to each machine on the card. The
 agent gets back the lease id, end time and machines, never a value:
 
 ```text
-Leased stripe/STRIPE_LIVE_KEY, WEBHOOK_KEY until 2026-11-05T12:00:00.000Z on studio, devbox. Lease lease_3f9a2c. Use them with `runpane secrets exec --project stripe -- <command>`.
+Leased stripe/STRIPE_LIVE_KEY, WEBHOOK_KEY until 2026-11-05T12:00:00.000Z on studio, devbox. Lease 3f9a2c1b7d4e8f06. Use them with `runpane secrets exec --project stripe -- <command>`.
 ```
 
 **Decline** ends the card and the agent reads "The person declined the lease."
@@ -121,18 +127,25 @@ You can also start a lease yourself in Settings → Secrets.
 ### Machines
 
 A machine shared with "Everyone on tailnet" can't receive a lease: its teammates'
-commands run as you there and could use it. Settings → Secrets shows why a machine
-can't take one (that sharing, an offline machine, or a Pane too old for leases).
+commands run as you there and could use it. Switching a machine to that setting ends
+its leases at once, and it refuses to read leased values while the setting is on.
+Settings → Secrets shows why a machine can't take one (that sharing, an offline
+machine, or a Pane too old for leases).
+
+A machine refuses a lease longer than 7 days.
+
+Removing a saved computer ends the leases pushed to it if it is online; otherwise
+they last until they expire there. Removing a desktop's link on a host ends the
+leases that desktop pushed to it.
 
 ### Length and renewal
 
 A lease lasts 24 hours by default. Change the length per project in Settings →
 Secrets, from 1 hour to 7 days.
 
-<!-- P0: renewal -->
-About an hour before a lease ends, Pane renews it without asking if 1Password's
-approval is still live. Otherwise it posts an **Extend** card. If you ignore the
-card, the lease ends on time.
+About an hour before a lease ends (a quarter of its length for leases shorter than
+4 hours), Pane shows an **Extend** card. Extending reads 1Password again; ignored,
+the lease ends on time and the card closes.
 
 ### Ending a lease
 
@@ -140,7 +153,7 @@ Settings → Secrets lists the live leases on each machine, with **End now** for
 and **End all**. An agent can end a lease it no longer needs:
 
 ```sh
-runpane secrets lease end --id lease_3f9a2c --yes
+runpane secrets lease end --id 3f9a2c1b7d4e8f06 --yes
 ```
 
 When a lease ends, on time or early, each machine deletes its copy of the values.
@@ -154,9 +167,12 @@ starts.
 ### Machines without an OS keyring
 
 A Linux machine with no keyring can't encrypt at rest, so it holds a lease in memory
-only. The lease ends there if Pane restarts; when the desktop reconnects, it sends
-the lease again until it expires. The card and Settings → Secrets say when a machine
-holds a lease in memory.
+only. The lease ends there if Pane restarts. The card and Settings → Secrets say when
+a machine holds a lease in memory.
+
+When the desktop reconnects to a machine, it sends a lease again only if that
+machine held it in memory and lost it, or missed a renewal. A lease an agent ended
+on a machine stays ended.
 
 ### Lease log
 
@@ -191,8 +207,17 @@ their own copy: see [Project environment variables](PROJECT_ENV_VARS.md).
 | Code | What happened | Next step |
 | --- | --- | --- |
 | `SECRET_NOT_FOUND` | No secret by that name on this machine. | Request it, or open Pane on a desktop connected to that machine so it syncs. |
-| `SECRET_LEASE_ENDED` | The secret comes from 1Password and has no live lease on this machine. Nothing was run. | Run `runpane secrets lease --project <p> <NAME...>`, and the person approves it on the card. |
-| `SECRET_IS_REFERENCE` | `secrets set` named a secret that comes from 1Password. Nothing was saved. | Change it in Settings → Secrets. |
+| `SECRET_UNREADABLE` | Pane could not read a stored value (a typed secret or a leased one), for example because the keychain is locked. | Unlock the login keychain (macOS). Otherwise set a typed secret again with `runpane secrets set`, or end the lease in Settings → Secrets and run `runpane secrets lease --project <p> <NAME>`. |
+| `SECRET_LEASE_ENDED` | The secret comes from 1Password and has no live lease on this machine. Nothing was run. | Run `runpane secrets lease --project <p> <NAME...>`, and the person approves it on the card, or run with `--only` and the typed names you need. |
+| `SECRET_IS_REFERENCE` | `secrets set` named a secret that comes from 1Password. Nothing was changed. | Run `runpane secrets lease --project <p> <NAME>` to use it, or remove the reference in Settings → Secrets first. |
+| `SECRET_NOT_REFERENCE` | A lease named a secret that is not a 1Password reference on this computer. Nothing was leased. | Add it in Settings → Secrets with **Add from 1Password**, then start the lease again. |
+| `SECRET_LEASE_NEEDS_DESKTOP` | A lease was started somewhere other than Pane on a computer, such as the phone or a headless host. Nothing was leased. | Press **Start lease** on the card in Pane on your Mac or PC. |
+| `SECRET_LEASE_REFUSED` | A machine on the lease refused it or could not be reached, for example because it is shared with "Everyone on tailnet". Nothing was stored there, and a lease the asking machine could not take ends everywhere. | Set that machine to "Only me" in Settings → Workspaces, or lease without it. |
+| `SECRET_LEASE_STARTING` | **Start lease** was pressed again while 1Password was still asking. Nothing else was sent. | Approve or dismiss the 1Password prompt. |
+| `SECRET_REMOTE_ONLY` | A program on the machine itself called a channel only a paired desktop may use (pushing leases, key sharing). Nothing was changed. | Start or end leases from Settings → Secrets on your desktop, or run `runpane secrets lease`. |
+| `ONEPASSWORD_CLI_MISSING` | Pane could not find the 1Password CLI (`op`), or it has no account to use. Nothing was read. | Install the 1Password CLI, and in the 1Password app turn on Settings › Developer › Integrate with 1Password CLI. |
+| `ONEPASSWORD_NOT_APPROVED` | 1Password did not allow the read, for example because the prompt was dismissed. Nothing was read. | Unlock 1Password and approve its prompt (Touch ID or Windows Hello), then try again. |
+| `ONEPASSWORD_FAILED` | The 1Password CLI failed, timed out waiting for approval, or answered in a form Pane does not recognize. | Unlock 1Password, check the reference (Copy Secret Reference), and check that the CLI is installed and up to date. |
 | `SECRET_LEASE_UNSUPPORTED` | `secrets lease end` reached a Pane from before leases. | Update Pane. |
 | `SECRET_OWNER_REQUIRED` | A teammate's command asked for a secret. | The owner does it on their own devices. |
 

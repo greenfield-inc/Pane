@@ -4,8 +4,8 @@ import type { NotifyAnswer, NotifyCommand, NotifyItem, NotifySnapshot } from '..
 import { useDraftChoice } from '../../stores/approvalColumnStore';
 import { canReplyAlone } from '../approvals/approvalCard';
 import { cn } from '../../utils/cn';
-import { askedBy, cardAnswer, leaseRemoteMachine, leaseSummary, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs } from './notifyFormat';
-import { ShortcutCap, UnreachableNotice } from './NotifyCard';
+import { askedBy, cardAnswer, leaseSummary, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs } from './notifyFormat';
+import { LeaseRows, ShortcutCap, UnreachableNotice } from './NotifyCard';
 import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
 import { ClampedText } from './ClampedText';
@@ -234,14 +234,7 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
       {item.context && <ClampedText text={item.context} className="px-[26px] py-1.5 text-[14.5px] text-text-tertiary" />}
       {item.lease && (
         <div className="space-y-1 px-[26px] pt-1.5 text-[13px]" data-testid="notify-round-lease">
-          {item.lease.names.map((name) => (
-            <div key={name} className="flex min-w-0 items-baseline gap-3">
-              <span className="w-[38%] shrink-0 truncate font-mono text-text-primary" title={name}>{name}</span>
-              <span className="min-w-0 truncate font-mono text-text-tertiary" title={item.lease?.references?.[name]}>
-                {item.lease?.references?.[name] ?? `not a 1Password reference on ${leaseRemoteMachine(item) ?? item.lease?.machine ?? 'this computer'}`}
-              </span>
-            </div>
-          ))}
+          <LeaseRows item={item} />
           <div className="text-text-tertiary">{leaseSummary(item, now)}</div>
           {item.leaseError && <div className="text-status-error" role="alert">{item.leaseError}</div>}
         </div>

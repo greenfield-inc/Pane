@@ -50,6 +50,8 @@ export interface NotifyLeaseGranted {
   id: string;
   expiresAt: string;
   machines: string[];
+  /** Machines it could not reach, each as "<machine>: <why>"; a renewal reaches them when they reconnect. */
+  refused?: string[];
 }
 
 export interface NotifyChoice {
@@ -116,6 +118,8 @@ export interface NotifyQuestion {
   lease?: NotifyLeaseTarget;
   /** lease only, set by the desktop that tried: why the lease could not start. The card stays waiting. */
   leaseError?: string;
+  /** lease only, set by the desktop: rises with each finished Start lease attempt, so a screen can end its busy state even when the same error repeats. */
+  leaseAttempt?: number;
   /** Set when the question mirrors a prompt in an agent's terminal (Claude's permission and plan prompts). */
   agentPrompt?: NotifyAgentPrompt;
   /**

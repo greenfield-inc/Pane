@@ -118,7 +118,7 @@ runpane secrets delete --project stripe --name STRIPE_SECRET_KEY --yes --json
 runpane secrets exec --project stripe --only STRIPE_SECRET_KEY -- pnpm test:webhooks
 runpane secrets request --project stripe --name STRIPE_SECRET_KEY --title "Stripe test secret key" --reason "Run the webhook tests against Stripe test mode." --json
 runpane secrets lease --project stripe STRIPE_SECRET_KEY --reason "Run the webhook tests against Stripe test mode." --json
-runpane secrets lease end --id lease_3f9a2c --yes --json
+runpane secrets lease end --id 3f9a2c1b7d4e8f06 --yes --json
 runpane panes list --repo active --json
 runpane panes cost --pane <pane-id> --json
 runpane panes create --repo active --name issue-252 --agent <agent> --prompt "Kick off the discussion skill for issue 252" --source agent --no-focus --wait-ready --yes --json
@@ -209,7 +209,7 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 
 `runpane repos rename` trims and sets a saved repository's display name, the same rename as the repository settings in the app, and returns the updated repository record.
 
-`runpane secrets` manages Pane secrets: named values, addressed as `<project>/<NAME>`, that every machine saved in Pane keeps a copy of. `list` shows names, times and machines only. `set` reads the value from stdin. `delete` removes one everywhere. `exec` runs a command with secrets in its environment and returns its exit code. `request` asks the person on a masked Notify card and returns only `saved` or `declined`. A secret can instead be a 1Password reference, which the person sets in Settings; it has a value only during a lease. `lease` asks the person to start one and returns the lease's id, end time and machines; `lease end` ends one now. `exec` fails with `SECRET_LEASE_ENDED` when a reference has no live lease. No command prints a value, and the MCP server has no tool that sets or reads one. These commands run on the machine itself, so `runpane workspace <machine> secrets ...` is refused; use `runpane workspace <machine> exec -- runpane secrets ...`.
+`runpane secrets` manages Pane secrets: named values, addressed as `<project>/<NAME>`, that every machine saved in Pane keeps a copy of. `list` shows names, times and machines, 1Password references and live leases, never a value. `set` reads the value from stdin. `delete` removes one everywhere. `exec` runs a command with secrets in its environment and returns its exit code. `request` asks the person on a masked Notify card and returns only `saved` or `declined`. A secret can instead be a 1Password reference, which the person sets in Settings; it has a value only during a lease. `lease` asks the person to start one and returns the lease's id, end time and machines; `lease end` ends one now. `exec` fails with `SECRET_LEASE_ENDED` when a reference has no live lease. No command prints a value, and the MCP server has no tool that sets or reads one. These commands run on the machine itself, so `runpane workspace <machine> secrets ...` is refused; use `runpane workspace <machine> exec -- runpane secrets ...`.
 
 `runpane panes list` lists Pane sessions, optionally scoped to one saved repository.
 
@@ -653,7 +653,7 @@ Brief tools:
 - `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.
 - `repos update`: Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, system prompt, and environment variables.
 - `repos rename`: Rename a repository saved in the running Pane app.
-- `secrets list`: List Pane secrets: project, name, time and machine. Never a value.
+- `secrets list`: List Pane secrets: project, name, time and machine, plus 1Password references and live leases. Never a value.
 - `secrets exec`: Run a command with Pane secrets in its environment.
 - `secrets request`: Ask the person for a secret on a masked card; returns saved or declined, never the value.
 - `secrets lease`: Ask the person to lease 1Password-backed secrets; returns the lease id and end time, never a value.

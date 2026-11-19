@@ -173,7 +173,8 @@ export interface NotifyQueueEnvironment {
   };
   /** What a lease card shows about this machine's side of a lease. */
   leases?: {
-    describe(project: string, names: readonly string[]): { references: Record<string, string>; lengthMs: number; memoryOnly: boolean };
+    /** `lengthMs` is null on a machine that doesn't grant leases (a headless host). */
+    describe(project: string, names: readonly string[]): { references: Record<string, string>; lengthMs: number | null; memoryOnly: boolean };
   };
   /** The Session a Pane (and tab) works in, filed on each new item; Approvals groups by it. */
   sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
@@ -575,13 +576,24 @@ export class NotifyQueue extends EventEmitter {
     }
   }
 
+  /** Another machine's lease card, rewritten with this desktop's references and length, when this desktop grants leases. */
+  private asGranted(item: NotifyItem): NotifyItem {
+    if (!item.lease || !this.env.leases) return item;
+    const granted = leaseCard(item.lease, this.env.leases, item.lease.machine ?? item.machine ?? '');
+    if (granted.lease?.lengthMs === undefined) return item;
+    return { ...item, title: granted.title, lease: { ...granted.lease, memoryOnly: item.lease.memoryOnly } };
+  }
+
   /** Why this desktop could not start the lease a card asks for; the card keeps waiting with it shown. Null clears it. */
   noteLeaseError(id: string, text: string | null): void {
     // Another machine's card too: this screen shows the error until that machine's next state replaces the item.
     const item = this.find(id);
     if (!item?.lease || item.state !== 'waiting') return;
     if (text === null) delete item.leaseError;
-    else item.leaseError = text;
+    else {
+      item.leaseError = text;
+      item.leaseAttempt = (item.leaseAttempt ?? 0) + 1;
+    }
     this.changed();
   }
 
@@ -1517,7 +1529,8 @@ export class NotifyQueue extends EventEmitter {
     const machine = next.machine;
     // The card key, as the glasses key cards: `<machineId>:<id>`.
     const key = (id: string) => `${machineId}:${id}`;
-    const keyed = state.items.map(item => ({ ...item, id: key(item.id), machine, machineId }));
+    // A lease card shows the length and references this desktop will grant, not the asking host's (F-3).
+    const keyed = state.items.map(item => this.asGranted({ ...item, id: key(item.id), machine, machineId }));
     const items = new Map(keyed.map(item => [item.id, item]));
     const queue = state.queue.map(key);
     const stripId = this.strip()?.itemId;
@@ -1900,11 +1913,13 @@ export class NotifyQueue extends EventEmitter {
         'Press Start lease on the card in Pane on your Mac or PC.',
       );
     }
-    const { id, expiresAt, machines } = answer.lease;
+    const { id, expiresAt, machines, refused } = answer.lease;
+    // The receipt names machines the lease could not reach, so a refusal is never lost.
+    const missed = refused?.length ? `; not on ${refused.join('; ')}` : '';
     this.finishSecret(
       entry,
       { status: 'leased', project: target.project, names: [...target.names], leaseId: id, expiresAt, machines: [...machines] },
-      `Leased until ${new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} on ${machines.join(', ')}`,
+      `Leased until ${new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} on ${machines.join(', ')}${missed}`,
       device,
     );
   }
@@ -2331,10 +2346,19 @@ function leaseCard(
 ): Pick<NotifyItem, 'lease' | 'title'> {
   const names = [...new Set(lease.names)];
   const described = leases.describe(lease.project, names);
-  const hours = described.lengthMs / 3_600_000;
-  const length = hours >= 48 && Number.isInteger(hours / 24) ? `${hours / 24} days` : hours >= 1 ? `${Math.round(hours * 10) / 10} hours` : `${Math.round(described.lengthMs / 60_000)} minutes`;
   const what = names.length === 1 ? `${lease.project}/${names[0]}` : `${names.length} ${lease.project} secrets`;
-  const card: NotifyLeaseTarget = { project: lease.project, names, references: described.references, lengthMs: described.lengthMs, machine, memoryOnly: described.memoryOnly };
+  const card: NotifyLeaseTarget = { project: lease.project, names, references: described.references, machine, memoryOnly: described.memoryOnly };
   if (lease.renews) card.renews = lease.renews;
+  const lengthMs = described.lengthMs;
+  if (lengthMs === null) return { title: lease.renews ? `Extend the lease on ${what}?` : `Lease ${what}?`, lease: card };
+  card.lengthMs = lengthMs;
+  const length = leaseLengthText(lengthMs);
   return { title: lease.renews ? `Extend the lease on ${what} for ${length}?` : `Lease ${what} for ${length}?`, lease: card };
+}
+
+/** "24 hours", "3 days", "30 minutes". */
+function leaseLengthText(lengthMs: number): string {
+  const hours = lengthMs / 3_600_000;
+  if (hours >= 48 && Number.isInteger(hours / 24)) return `${hours / 24} days`;
+  return hours >= 1 ? `${Math.round(hours * 10) / 10} hours` : `${Math.round(lengthMs / 60_000)} minutes`;
 }

@@ -8434,7 +8434,7 @@ export const RUNPANE_CONTRACT = {
       "runpane secrets exec --project stripe --only STRIPE_SECRET_KEY -- pnpm test:webhooks",
       "runpane secrets request --project stripe --name STRIPE_SECRET_KEY --title \"Stripe test secret key\" --reason \"Run the webhook tests against Stripe test mode.\" --json",
       "runpane secrets lease --project stripe STRIPE_SECRET_KEY --reason \"Run the webhook tests against Stripe test mode.\" --json",
-      "runpane secrets lease end --id lease_3f9a2c --yes --json",
+      "runpane secrets lease end --id 3f9a2c1b7d4e8f06 --yes --json",
       "runpane panes list --repo active --json",
       "runpane panes cost --pane <pane-id> --json",
       "runpane panes create --repo active --name issue-252 --agent <agent> --prompt \"Kick off the discussion skill for issue 252\" --source agent --no-focus --wait-ready --yes --json",
@@ -8508,7 +8508,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane repos get` prints a saved repository's Project Settings. Each script shows its saved value, the fallback from the repository's config file, and the one Pane will run.",
       "`runpane repos update` changes a saved repository's Project Settings through the same save as the Project Settings dialog. It requires `--yes`, supports `--dry-run`, clears settings with `--clear`, and adds, replaces or removes project environment variables with `--env` and `--env-remove`.",
       "`runpane repos rename` trims and sets a saved repository's display name, the same rename as the repository settings in the app, and returns the updated repository record.",
-      "`runpane secrets` manages Pane secrets: named values, addressed as `<project>/<NAME>`, that every machine saved in Pane keeps a copy of. `list` shows names, times and machines only. `set` reads the value from stdin. `delete` removes one everywhere. `exec` runs a command with secrets in its environment and returns its exit code. `request` asks the person on a masked Notify card and returns only `saved` or `declined`. A secret can instead be a 1Password reference, which the person sets in Settings; it has a value only during a lease. `lease` asks the person to start one and returns the lease's id, end time and machines; `lease end` ends one now. `exec` fails with `SECRET_LEASE_ENDED` when a reference has no live lease. No command prints a value, and the MCP server has no tool that sets or reads one. These commands run on the machine itself, so `runpane workspace <machine> secrets ...` is refused; use `runpane workspace <machine> exec -- runpane secrets ...`.",
+      "`runpane secrets` manages Pane secrets: named values, addressed as `<project>/<NAME>`, that every machine saved in Pane keeps a copy of. `list` shows names, times and machines, 1Password references and live leases, never a value. `set` reads the value from stdin. `delete` removes one everywhere. `exec` runs a command with secrets in its environment and returns its exit code. `request` asks the person on a masked Notify card and returns only `saved` or `declined`. A secret can instead be a 1Password reference, which the person sets in Settings; it has a value only during a lease. `lease` asks the person to start one and returns the lease's id, end time and machines; `lease end` ends one now. `exec` fails with `SECRET_LEASE_ENDED` when a reference has no live lease. No command prints a value, and the MCP server has no tool that sets or reads one. These commands run on the machine itself, so `runpane workspace <machine> secrets ...` is refused; use `runpane workspace <machine> exec -- runpane secrets ...`.",
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. New Panes join the caller's Session automatically: the orchestrator's Session (`PANE_ORCHESTRATION_SESSION_ID`), or the open Session the calling tab's Pane belongs to; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
@@ -9961,7 +9961,7 @@ export const RUNPANE_CONTRACT = {
         "lease",
         "end",
         "--id",
-        "lease_3f9a2c",
+        "3f9a2c1b7d4e8f06",
         "--yes",
         "--json"
       ],
@@ -21245,7 +21245,7 @@ export const RUNPANE_CONTRACT = {
         },
         {
           "name": "secrets list",
-          "summary": "List Pane secrets: project, name, time and machine. Never a value.",
+          "summary": "List Pane secrets: project, name, time and machine, plus 1Password references and live leases. Never a value.",
           "arguments": [
             "--project <project>",
             "--json"
@@ -22523,7 +22523,7 @@ export const RUNPANE_CONTRACT = {
           "Only the person approves a lease, on their computer. You can ask for and end leases, never grant or extend one.",
           "A result of {waiting: true, id} means the card is still open and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting.",
           "A result of {unavailable, next} means nobody can answer through Pane right now; follow next.",
-          "Pane renews a lease before it ends, or asks the person to extend it. If a lease ends anyway, `secrets exec` fails with SECRET_LEASE_ENDED and names this command as the next step."
+          "About an hour before a lease ends (a quarter of its length for leases shorter than 4 hours), Pane shows the person an Extend card. If the lease ends, `secrets exec` fails with SECRET_LEASE_ENDED and names this command as the next step."
         ]
       },
       "secrets lease end": {
@@ -22557,7 +22557,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane secrets lease end --id lease_3f9a2c --yes --json"
+          "runpane secrets lease end --id 3f9a2c1b7d4e8f06 --yes --json"
         ],
         "jsonSchemas": [
           "secretLeaseEndRequest",

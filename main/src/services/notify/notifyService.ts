@@ -417,6 +417,9 @@ export class NotifyService {
     return { id: sent.type === 'agent-rewrite' && sent.newId ? `${target.machineId}:${sent.newId}` : action.id, machine: target.machine };
   }
 
+  /** Lease cards whose Start lease is waiting on 1Password here. */
+  private readonly leasesStarting = new Set<string>();
+
   async run(command: NotifyCommand): Promise<void> {
     switch (command.type) {
       case 'open-round': this.openRound(command.id); return;
@@ -447,12 +450,19 @@ export class NotifyService {
     if (!this.deps.startLease) {
       throw new PaneError('SECRET_LEASE_NEEDS_DESKTOP', 'This Pane can\'t start leases, because it has no 1Password access here. Nothing was leased.', 'Press Start lease in Pane on your Mac or PC.');
     }
+    // One Start lease at a time per card: a second press while 1Password asks would read it twice.
+    if (this.leasesStarting.has(command.id)) {
+      throw new PaneError('SECRET_LEASE_STARTING', 'This lease is already starting: 1Password is asking. Nothing else was sent.', 'Approve or dismiss the 1Password prompt.');
+    }
+    this.leasesStarting.add(command.id);
     this.queue.noteLeaseError(command.id, null);
     try {
       return { ...command, answer: { ...answer, lease: await this.deps.startLease(item, machineId) } };
     } catch (error) {
       this.queue.noteLeaseError(command.id, error instanceof PaneError ? paneErrorText(error) : error instanceof Error ? error.message : String(error));
       throw error;
+    } finally {
+      this.leasesStarting.delete(command.id);
     }
   }
 

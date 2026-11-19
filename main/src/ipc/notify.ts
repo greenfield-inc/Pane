@@ -36,7 +36,7 @@ import { thisMachineName, type ApprovalStore } from '../services/approvals/appro
 import type { LoopManager } from '../services/loops/loopManager';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 import type { AgentState } from '../../../shared/types/agentStatus';
-import { paneSecretNameProblem, paneSecretProjectProblem, SECRET_LEASE_DEFAULT_MS, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
+import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import { paneSecretStore, secretLeaseStore } from '../services/paneSecrets';
 import { secretLeaseService } from '../services/secretLeaseRuntime';
 import type { SecretLeaseStart } from '../services/secretLeaseService';
@@ -113,7 +113,12 @@ const answerSchema = boundary.union(
     approved: boundary.boolean,
     note: boundary.optional(boundary.string),
     // Set only by the desktop that started the lease a lease card asks for.
-    lease: boundary.optional(boundary.object({ id: boundary.nonEmptyString, expiresAt: boundary.string, machines: boundary.array(boundary.string) })),
+    lease: boundary.optional(boundary.object({
+      id: boundary.nonEmptyString,
+      expiresAt: boundary.string,
+      machines: boundary.array(boundary.string),
+      refused: boundary.optional(boundary.array(boundary.string)),
+    })),
   }),
   boundary.object({ text: boundary.string }),
 );
@@ -237,6 +242,7 @@ const notifyItemSchema = boundary.object({
     renews: boundary.optional(boundary.string),
   })),
   leaseError: boundary.optional(boundary.string),
+  leaseAttempt: boundary.optional(boundary.number),
   links: boundary.optional(boundary.array(linkSchema)),
   source: boundary.object({
     paneId: boundary.optional(boundary.string),
@@ -429,7 +435,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
           const reference = store.referenceOf(project, name);
           if (reference) references[name] = reference;
         }
-        const lengthMs = secretLeaseService()?.lengthFor(project) ?? services.configManager.getConfig().secretLeaseLengths?.[project] ?? SECRET_LEASE_DEFAULT_MS;
+        // Only a desktop knows the length it will grant; a headless host's card shows none until a desktop shows it.
+        const lengthMs = secretLeaseService()?.lengthFor(project) ?? null;
         return { references, lengthMs, memoryOnly: secretLeaseStore().memoryOnly() };
       },
     },
@@ -443,7 +450,12 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
         machines: machineId ? [machineId] : [],
         requestedBy: `${item.source.agent} in "${item.source.name}"`,
       };
-      if (lease.renews) request.renews = lease.renews;
+      // The length the person approved: this desktop wrote it on the card it showed.
+      if (lease.lengthMs) request.lengthMs = lease.lengthMs;
+      if (lease.renews) {
+        request.renews = lease.renews;
+        request.fromReminder = true;
+      }
       const started = await service.start(request);
       const refused = started.refused.map(entry => `${entry.machine}: ${entry.reason}`);
       // The machine that asked must hold it, or its agent can't use it.
@@ -451,7 +463,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
         await service.end(started.leaseId);
         throw new PaneError('SECRET_LEASE_REFUSED', `The lease could not reach the machine that asked (${refused.join('; ')}). It was ended everywhere.`, 'Fix that machine, then press Start lease again.');
       }
-      return { id: started.leaseId, expiresAt: started.expiresAt, machines: started.machines };
+      return { id: started.leaseId, expiresAt: started.expiresAt, machines: started.machines, refused };
     },
     publish: (state) => getPaneEventSink().send('notify:shared-changed', state),
     sendToMachine: async (machineId, command) => {

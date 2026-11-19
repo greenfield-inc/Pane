@@ -470,3 +470,31 @@ describe('1Password references in sync', () => {
     expect(devbox.current().paneSecretReferences).toEqual({});
   });
 });
+
+describe('key sharing handlers', () => {
+  const gateDirs: string[] = [];
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await Promise.all(gateDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
+  });
+
+  it('answer only paired devices, and ignore a reference stamped in the future', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-shared-gate-'));
+    gateDirs.push(dir);
+    vi.stubEnv('PANE_DIR', dir);
+    const configManager = new ConfigManager();
+    await configManager.initialize();
+    const registry = new PaneCommandRegistry();
+    const secrets = new PaneSecretStore(configManager, keychainSecretBackend(new FakeKeychain(), 'Pane (test)'), () => 'this-mac');
+    // SAFETY: These handlers read only configManager from the services bag.
+    registerSharedCredentialHandlers({ configManager } as AppServices, registry, secrets);
+    const planted = { paneSecretReferences: { 'stripe/STRIPE_KEY': { value: 'op://Private/Bank/password', updatedAt: '2099-01-01T00:00:00.000Z', source: 'devbox' } } };
+
+    // A program on this machine passes its own "trusted" argument over the local socket: refused.
+    await expect(registry.invoke('credentials:shared:get', [{}, { clientId: 'forged' }])).rejects.toMatchObject({ code: 'SECRET_REMOTE_ONLY' });
+    await expect(registry.invoke('credentials:shared:apply', [planted, { clientId: 'forged' }])).rejects.toMatchObject({ code: 'SECRET_REMOTE_ONLY' });
+
+    await registry.invokeRemote('credentials:shared:apply', [planted, { clientId: 'paired' }]);
+    expect(secrets.listReferences()).toEqual([]);
+  });
+});

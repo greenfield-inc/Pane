@@ -1,4 +1,4 @@
-import { execFile } from 'child_process';
+import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -31,33 +31,52 @@ function systemOpRunner(): OpRunner {
     }
     // op reads stdin only from a pipe or a terminal, and Node hands a child a socket on macOS and
     // Linux, so op would see no input: there a `cat |` gives it a real pipe. Values never touch disk.
-    const [file, argv] = process.platform === 'win32' ? [executable, [...args]] : ['/bin/sh', ['-c', 'cat | "$0" "$@"', executable, ...args]];
-    const child = execFile(file, argv, {
-      timeout: OP_TIMEOUT_MS,
-      encoding: 'utf8',
-      maxBuffer: 4 * 1024 * 1024,
-      windowsHide: true,
-      env: { ...process.env, PATH: getShellPath() },
-    }, (error, stdout, stderr) => {
-      // A non-zero exit carries its exit code; anything else (op missing, a timeout) never ran to the end.
-      if (error && !Number.isInteger(error.code)) {
-        reject(error.code === 'ENOENT' ? opMissing() : new PaneError('ONEPASSWORD_FAILED', `The 1Password CLI did not finish: ${error.killed ? 'it timed out waiting for approval' : error.message}. Nothing was read.`, 'Unlock 1Password and approve the prompt, then try again.'));
+    // The shell leads its own process group, so a timeout stops op and its prompt with it.
+    const unix = process.platform !== 'win32';
+    const child = unix
+      ? spawn('/bin/sh', ['-c', 'cat | "$0" "$@"', executable, ...args], { detached: true, env: { ...process.env, PATH: getShellPath() } })
+      : spawn(executable, [...args], { windowsHide: true, env: { ...process.env, PATH: getShellPath() } });
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk; });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        if (unix && child.pid) process.kill(-child.pid, 'SIGTERM');
+        else child.kill();
+      } catch {
+        // Already gone.
+      }
+    }, OP_TIMEOUT_MS);
+    child.on('error', error => {
+      clearTimeout(timer);
+      reject('code' in error && error.code === 'ENOENT' ? opMissing() : new PaneError('ONEPASSWORD_FAILED', `The 1Password CLI did not start: ${error.message}. Nothing was read.`, OP_INSTALL_NEXT));
+    });
+    child.on('close', code => {
+      clearTimeout(timer);
+      if (timedOut || code === null) {
+        reject(new PaneError('ONEPASSWORD_FAILED', 'The 1Password CLI did not finish: it timed out waiting for approval. Nothing was read.', 'Unlock 1Password and approve the prompt, then try again.'));
         return;
       }
-      resolve({ code: error ? Number(error.code) : 0, stdout, stderr });
+      resolve({ code, stdout, stderr });
     });
-    child.stdin?.end(stdin);
+    child.stdin.end(stdin);
   });
 }
 
 /** op's own message, for an error. op never prints a value on stderr. */
 function opReason(output: OpOutput): string {
   const line = output.stderr.split('\n').map(text => text.replace(/^\[ERROR\]\s*\S+\s+\S+\s*/, '').trim()).find(Boolean);
-  return line ?? `op exited with code ${output.code}`;
+  return (line ?? `op exited with code ${output.code}`).replace(/\.+$/, '');
 }
 
 function opFailed(action: string, output: OpOutput): PaneError {
   const reason = opReason(output);
+  if (/no accounts configured/i.test(reason)) {
+    return new PaneError('ONEPASSWORD_CLI_MISSING', `The 1Password CLI has no account to use: ${reason}. Nothing was read.`, OP_INSTALL_NEXT);
+  }
   if (/not currently signed in|no accounts configured|authorization prompt dismissed|not authorized|denied/i.test(reason)) {
     return new PaneError('ONEPASSWORD_NOT_APPROVED', `1Password did not allow Pane to ${action}: ${reason}. Nothing was read.`, 'Unlock 1Password and approve its prompt (Touch ID or Windows Hello), then try again.');
   }
@@ -94,11 +113,15 @@ export class OnePassword {
     return values;
   }
 
-  /** Vault names Pane can write to. 1Password may ask for approval. */
+  /** Vault names you can read; one you can't add items to fails when moving a secret into it. 1Password may ask for approval. */
   async vaults(): Promise<string[]> {
     const output = await this.run(['vault', 'list', '--format', 'json'], '');
     if (output.code !== 0) throw opFailed('list your vaults', output);
-    return decodeBoundary(JSON.parse(output.stdout), vaultListSchema).map(vault => vault.name).sort((a, b) => a.localeCompare(b));
+    try {
+      return decodeBoundary(JSON.parse(output.stdout), vaultListSchema).map(vault => vault.name).sort((a, b) => a.localeCompare(b));
+    } catch {
+      throw new PaneError('ONEPASSWORD_FAILED', 'The 1Password CLI listed your vaults in a form Pane does not recognize. Nothing was changed.', 'Update the 1Password CLI, then try again.');
+    }
   }
 
   /**

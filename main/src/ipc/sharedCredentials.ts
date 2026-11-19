@@ -10,6 +10,7 @@ import {
   sharedNotifySwitchSchema,
 } from '../services/sharedCredentials';
 import { paneSecretStore, type PaneSecretStore } from '../services/paneSecrets';
+import { refuseLocalCaller } from './paneSecrets';
 import type { AppServices } from './types';
 
 const trustedSchema = boundary.object({ clientId: boundary.nonEmptyString });
@@ -31,10 +32,13 @@ export function registerSharedCredentialHandlers(
     paneSecretReferences: secrets.exportReferencesForSync(),
   });
   commandRegistry.register('credentials:shared:get', async (_input: PaneCommandValue, trusted: PaneCommandValue) => {
+    // The local socket passes a caller's own "trusted" argument, so only paired devices over HTTP may sync.
+    refuseLocalCaller();
     decodeBoundary(trusted, trustedSchema);
     return readAll();
   });
   commandRegistry.register('credentials:shared:apply', async (input: PaneCommandValue, trusted: PaneCommandValue) => {
+    refuseLocalCaller();
     decodeBoundary(trusted, trustedSchema);
     const incoming = decodeBoundary(input, sharedCredentialsSchema);
     const { changed } = await applySharedCredentials(configManager, incoming);
