@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HealthProcess, MachineHealthSnapshot, PaneUsage, StorageInventory } from '../../../../shared/types/machineHealth';
 import { HealthCardController } from './healthCardController';
-import { CardGate, type CardQuestion } from './healthCards';
+import { CardGate, diskCard, type CardQuestion } from './healthCards';
 
 const HOUR = 3_600_000;
 
@@ -50,6 +50,28 @@ describe('HealthCardController', () => {
   const scanned: StorageInventory = { scannedAt: 0, durationMs: 0, panes: [], buckets: { paneWorktrees: 0, dependencies: 0, qaAndScratch: 0, agentTemp: 0, paneData: 0 },
     items: [{ id: 'update-snapshot:/u', kind: 'update-snapshot', tier: 1, path: '/u', sizeBytes: 9 * GB, modifiedAt: 0, sessionId: null, reason: 'old update' }] };
   const escaped = (pid: number, sessionId = 'p1'): HealthProcess => ({ pid, started: `start-${pid}`, name: 'tmux', sessionId, panelId: null, rssMB: 50, cpuPercent: 0, escaped: true });
+
+  it.each([false, true])('names the warning volume and gives healthy primary disk context (reversed=%s)', reversed => {
+    const sample = snapshot('warning');
+    sample.disk.volumes = [
+      { path: '/srv/pane-data', roles: ['pane-data', 'worktrees'], totalBytes: 1600 * GB, freeBytes: 800 * GB, level: 'ok' },
+      { path: '/tmp', roles: ['temp'], totalBytes: 32 * GB, freeBytes: 12 * GB, level: 'warning' },
+    ];
+    if (reversed) sample.disk.volumes.reverse();
+    const question = diskCard(sample, []);
+    expect(question.card).toMatchObject({ level: 'warning', freeBytes: 12 * GB, totalBytes: 32 * GB });
+    expect(question.context).toContain('/tmp: 12 GB free of 32 GB');
+    expect(question.card.agentPrompt).toContain('/tmp: 12 GB free of 32 GB (warning)');
+    expect(question.card.agentPrompt).toContain('/srv/pane-data: 800 GB free of 1600 GB (ok)');
+    expect(question.card.agentPrompt).not.toContain('mac has 12 GB of disk free');
+  });
+
+  it('keeps a single warning volume named with matching capacity and severity', () => {
+    const question = diskCard(snapshot('warning'), []);
+    expect(question.context).toBe('/: 13 GB free of 500 GB (warning).');
+    expect(question.card).toMatchObject({ level: 'warning', freeBytes: 13 * GB, totalBytes: 500 * GB });
+    expect(question.card.agentPrompt).toContain('mac disk volumes: /: 13 GB free of 500 GB (warning).');
+  });
 
   // A one-process leftovers card offers 'Stop it' / 'Keep it'.
   const singular = (answer: string) => (answer === 'Stop them' ? 'Stop it' : answer === 'Keep them' ? 'Keep it' : answer);

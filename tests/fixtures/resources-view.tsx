@@ -11,7 +11,7 @@ import { useSettingsPersistence } from '../../frontend/src/components/settings/u
 import type { AppConfig, UpdateConfigRequest } from '../../frontend/src/types/config';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../../shared/types/machineConnections';
 import type { ToolPanel } from '../../shared/types/panels';
-import type { CleanupRun, MachineHealthSnapshot, OtherApp, StorageInventory } from '../../shared/types/machineHealth';
+import type { CleanupRun, DiskVolume, MachineHealthSnapshot, OtherApp, StorageInventory } from '../../shared/types/machineHealth';
 import '../../frontend/src/index.css';
 
 // The Resources page on canned machines: ?machine=local|devbox, ?theme=dark, ?leak=1 (a leaking dev server),
@@ -53,7 +53,11 @@ function snapshot(machine: 'local' | 'devbox'): MachineHealthSnapshot {
     ({ pid, started: 'Sun Nov 15 12:00:00 2026', name, sessionId, panelId, rssMB, cpuPercent, escaped: false });
   return {
     sampledAt: now, platform: mac ? 'darwin' : 'win32', hostname: mac ? 'Studio-Mac' : 'devbox', cpuPercent: mac ? 38 : 12,
-    disk: { level: mac ? 'critical' : 'ok', volumes: [{ path: '/', roles: ['pane-data', 'worktrees', 'temp'], totalBytes: 926 * GB, freeBytes: (mac ? 13 : 212) * GB, level: mac ? 'critical' : 'ok' }] },
+    // Invented mixed-volume sizes and paths, independent of machine telemetry.
+    disk: params.has('mixed-volumes') ? { level: 'warning', volumes: ([
+      { path: '/srv/pane-data', roles: ['pane-data', 'worktrees'], totalBytes: 1600 * GB, freeBytes: 800 * GB, level: 'ok' },
+      { path: '/tmp', roles: ['temp'], totalBytes: 32 * GB, freeBytes: 12 * GB, level: 'warning' },
+    ] satisfies DiskVolume[]).reverse() } : { level: mac ? 'critical' : 'ok', volumes: [{ path: '/', roles: ['pane-data', 'worktrees', 'temp'], totalBytes: 926 * GB, freeBytes: (mac ? 13 : 212) * GB, level: mac ? 'critical' : 'ok' }] },
     memory: { level: mac ? 'warning' : 'ok', source: mac ? 'macos-pressure' : 'available', detail: '', totalBytes: (mac ? 32 : 64) * GB, freeBytes: (mac ? 1.1 : 30) * GB, swapUsedBytes: mac ? 3 * GB : null },
     app: { rssMB: 2600, cpuPercent: 4 },
     panes: [

@@ -32,7 +32,11 @@ the last scan right away and never wait for a new one.
 | Memory, Linux without PSI, and Windows | under 10% of memory available | under 5% |
 
 A memory level counts after two samples in a row, so a moment's spike raises
-nothing. Change the disk figures in Settings › Machine health.
+nothing. Change the disk figures in Settings › Machine health. The thresholds
+apply to each watched volume, including a separate temporary filesystem.
+Resources labels the primary disk by its watched path and shows other volumes
+with their own free space, capacity and severity. Disk cards and their agent
+prompts name the affected volume and include the other watched volumes for context.
 
 The critical disk figure also limits files sent to this computer (from the
 phone, a terminal or a chat): Pane refuses one whose rest would leave less free

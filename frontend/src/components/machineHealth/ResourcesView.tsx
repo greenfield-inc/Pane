@@ -97,7 +97,7 @@ function MeterSectionSkeleton({ title, legend }: { title: string; legend: number
   );
 }
 
-function DiskSection({ data }: { data: MachineHealthData }) {
+export function DiskSection({ data }: { data: MachineHealthData }) {
   const { snapshot, inventory } = data;
   const volume = snapshot.disk.volumes.find(item => item.roles.includes('pane-data')) ?? snapshot.disk.volumes[0];
   if (!volume) return null;
@@ -110,14 +110,20 @@ function DiskSection({ data }: { data: MachineHealthData }) {
     + data.finished.filter(pane => !pane.protection).reduce((sum, pane) => sum + (pane.sizeBytes ?? 0), 0);
   return (
     <section className="rounded-xl border border-border-primary p-5" aria-label="Disk">
-      <div className="flex items-center gap-1.5 text-sm text-text-secondary"><HardDrive className="h-4 w-4" aria-hidden="true" />Disk</div>
+      <div className="flex items-center gap-1.5 text-sm text-text-secondary"><HardDrive className="h-4 w-4" aria-hidden="true" />Disk<span className="min-w-0 break-all">· {volume.path}</span></div>
       <div className="mt-1 flex flex-wrap items-center gap-3">
         <span className="text-2xl font-semibold text-text-primary">{`${formatBytes(used)} of ${formatBytes(volume.totalBytes)} used`}</span>
-        <LevelBadge level={snapshot.disk.level} text={`${formatBytes(volume.freeBytes)} free`} />
+        <LevelBadge level={volume.level} text={`${formatBytes(volume.freeBytes)} free`} />
         {inventory && <span className="ml-auto text-sm text-text-secondary">{`Pane can free about ${formatBytes(frees)}`}</span>}
       </div>
       <div className="mt-3"><StackedBar parts={parts} total={volume.totalBytes} /></div>
       <Legend parts={[...parts, { label: 'Free', bytes: volume.freeBytes, className: 'bg-surface-tertiary border border-border-primary' }]} />
+      {snapshot.disk.volumes.filter(item => item !== volume).map(item => (
+        <div key={item.path} className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="min-w-0 break-all text-text-secondary">{item.path} ({item.roles.join(', ')})</span>
+          <LevelBadge level={item.level} text={`${formatBytes(item.freeBytes)} free of ${formatBytes(item.totalBytes)}`} />
+        </div>
+      ))}
     </section>
   );
 }
