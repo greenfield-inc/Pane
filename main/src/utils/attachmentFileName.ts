@@ -1,6 +1,6 @@
 import path from 'path';
 
-/** Below the common 255-byte limit on a name (ext4, APFS), counted in encoded bytes. */
+/** Below the common 255-byte limit on a file name (ext4, APFS), counted in encoded bytes. */
 const MAX_BYTES = 200;
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i;
 
