@@ -27,6 +27,16 @@ const SIGN_UP = `<!doctype html><html><head><meta charset="utf-8"><title>Sign up
 <label>Avatar <input id="file" type="file" onchange="document.getElementById('picked').textContent = 'Picked ' + this.files[0].name"></label>
 <span id="picked"></span>
 <a href="/next">Next page</a>
+<one-deep></one-deep><two-deep></two-deep><md-button>Save draft</md-button><span id="shadow-clicks"></span>
+<script>
+  const note = label => { document.getElementById('shadow-clicks').textContent += ' ' + label; };
+  const define = (name, html) => customElements.define(name, class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: 'open' }).innerHTML = html; } });
+  define('one-deep', '<button>Shadow button</button>');
+  define('inner-el', '<button>Nested button</button>');
+  define('two-deep', '<div><inner-el></inner-el></div>');
+  define('md-button', '<button><span><slot></slot></span></button>');
+  document.addEventListener('click', event => { const button = event.composedPath().find(node => node instanceof HTMLButtonElement); if (button && button.getRootNode() instanceof ShadowRoot) note(button.textContent || 'slotted'); });
+</script>
 <div style="height:2000px"></div><p>Bottom of the page</p>
 </body></html>`;
 const NEXT = '<!doctype html><html><head><title>Next</title></head><body><h1>Next page</h1></body></html>';
@@ -107,6 +117,14 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
   app.context().on('page', leaveDialogs);
   try {
     await dismissDialogs(page);
+    // A loaded test machine can raise Pane's own "Memory is tight" card over the window at any time.
+    await page.addLocatorHandler(page.getByText('Memory is tight', { exact: true }).first(), async () => {
+      await page.getByRole('button', { name: 'Not now', exact: true }).first().click();
+    });
+    // And the first-run "Which agent do you use?" card, once the app finishes starting.
+    await page.addLocatorHandler(page.getByText('Which agent do you use?', { exact: true }).first(), async () => {
+      await page.getByRole('button', { name: 'Skip', exact: true }).first().click();
+    });
     await expect.poll(() => runpane(pane, ['sessions', 'list', '--json']).then(() => true, () => false), { timeout: 30_000 }).toBe(true);
     await runpane(pane, ['repos', 'add', '--path', repo, '--yes', '--json']);
     const other = await newPane(pane, 'repo', 'other');
@@ -127,6 +145,11 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     await shot(page, 'j1-agent-driving');
     const after = await browser(pane, agent, 'snapshot');
     expect(after.snapshot).toContain('Welcome, ada@example.com (ca)');
+    // Controls inside shadow roots (one deep, two deep, and a web component's slotted label) take clicks.
+    for (const label of ['button "Shadow button"', 'button "Nested button"', 'button "Save draft"']) {
+      expect(await browser(pane, agent, 'click', ['--ref', refIn(after.snapshot, label)])).toMatchObject({ ok: true });
+    }
+    expect(await browser(pane, agent, 'evaluate', ['--expression', "document.getElementById('shadow-clicks').textContent.trim()"])).toMatchObject({ value: 'Shadow button Nested button slotted' });
     // J8: the password is dots in the snapshot, never its value.
     expect(after.snapshot).toMatch(/textbox "Password" \[ref=e\d+\]: "••••••••"/);
     expect(after.snapshot).not.toContain('hunter22');
@@ -177,25 +200,13 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     expect((await browser(pane, agent, 'tabs')).code).toBe('ERR_BROWSER_TOOLS_OFF');
     await page.evaluate(() => window.electronAPI.config.update({ browser: { agentTools: true } }));
 
-    // J2: the person clicks into the page while the agent drives: they drive until they stop, and
-    // the agent's refs go stale.
+    // J2: Take over holds until Hand to: the agent's next call waits, then runs. Touch takeover is
+    // in main/src/ipc/browser.test.ts: Playwright's synthetic clicks don't reach a webview's page reliably.
     let email = (await refs(pane, agent))('textbox "Email"');
-    const box = await page.locator('webview').last().boundingBox();
-    if (!box) throw new Error('The browser tab has no page on screen.');
-    const touch = { x: box.x + box.width / 2, y: box.y + 200 };
-    await browser(pane, agent, 'click', ['--ref', email]);
-    // Input within 300 ms of the agent's own counts as the agent's; the person comes a moment later.
-    await page.waitForTimeout(500);
-    // A synthetic click into a webview that lacks focus can miss it; retry until Pane sees the person.
-    await expect(async () => {
-      await page.mouse.click(touch.x, touch.y);
-      await expect(page.getByTestId('browser-agent-overlay').last()).toHaveAttribute('data-driving', 'person', { timeout: 600 });
-    }).toPass({ timeout: 15_000 });
-    expect((await browser(pane, agent, 'click', ['--ref', email])).code).toBe('ERR_BROWSER_STALE_REF');
-    email = (await refs(pane, agent))('textbox "Email"');
-    expect(await browser(pane, agent, 'click', ['--ref', email])).toMatchObject({ ok: true });
-    // Take over holds until Hand to: the agent's next call waits, then runs.
+    // The chip, with its Take over button, shows while the agent drives: a call that takes a while.
+    const working = browser(pane, agent, 'evaluate', ['--expression', 'new Promise(resolve => setTimeout(resolve, 5000))']);
     await page.getByTestId('browser-driver-chip').getByRole('button', { name: 'Take over' }).click();
+    expect(await working).toMatchObject({ ok: true });
     email = (await refs(pane, agent))('textbox "Email"');
     const waiting = browser(pane, agent, 'click', ['--ref', email]);
     await expect(page.getByTestId('browser-driver-chip')).toContainText("You're driving · Claude is waiting");
