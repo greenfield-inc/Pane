@@ -119,8 +119,8 @@ const NAVIGATION_WAIT_MS = 30_000;
 const PAGE_CALL_MS = 10_000;
 const EVALUATE_TIMEOUT_MS = 30_000;
 const EVALUATE_RESULT_LIMIT = 64 * 1024;
-/** How long a screenshot or still may take before the capture queue gives up on it. */
-const CAPTURE_MS = 10_000;
+/** How long a screenshot may wait for the page to paint. */
+const CAPTURE_MS = 15_000;
 export const WAIT_DEFAULT_MS = 10_000;
 export const WAIT_MAX_MS = 120_000;
 
@@ -186,7 +186,8 @@ export class PageDriver {
   private forwarding = 0;
   private lastForwardEnd = 0;
 
-  constructor(private readonly contents: BrowserPageContents) {
+  /** `captureMs`: how long a screenshot may wait for the page to paint before the queue gives up on it. */
+  constructor(private readonly contents: BrowserPageContents, private readonly captureMs = CAPTURE_MS) {
     drivers.set(contents.id, this);
     contents.once('destroyed', () => {
       clearTimeout(this.unfocusTimer);
@@ -330,7 +331,10 @@ export class PageDriver {
   }
 
   /** A PNG of what the tab shows, or of the whole page. One capture per tab at a time. */
-  screenshot(fullPage: boolean): Promise<PageScreenshot> {
+  async screenshot(fullPage: boolean): Promise<PageScreenshot> {
+    // An open dialog blocks the page's renderer, so no capture would answer.
+    await this.attach();
+    this.refuseWhileDialog();
     return this.capture(() => this.screenshotNow(fullPage));
   }
 
@@ -339,6 +343,7 @@ export class PageDriver {
    * screencast alone would leave it blank.
    */
   still(quality: number): Promise<ScreencastFrame> {
+    if (this.dialog) return Promise.reject(new PaneError('ERR_BROWSER_DIALOG_PENDING', 'The page has a dialog open, so it can give no picture now.', 'Answer the dialog.'));
     return this.capture(async () => {
       await this.attach();
       // The size screencast frames report (the view, scrollbars included, or a viewer's size), so
@@ -360,7 +365,7 @@ export class PageDriver {
       let timer: NodeJS.Timeout | undefined;
       // A page that never paints never answers a capture: give up, so the queue never jams.
       const late = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new PaneError('ERR_BROWSER_PAGE_FAILED', `The page did not give a picture within ${CAPTURE_MS / 1000} seconds; it may not be painting.`, 'Show the tab, then try again.')), CAPTURE_MS);
+        timer = setTimeout(() => reject(new PaneError('ERR_BROWSER_SCREENSHOT_TIMEOUT', `The page gave no picture within ${this.captureMs / 1000} seconds. Pane's window on this computer may be minimized or covered, and the page doesn't paint then. Nothing was saved.`, 'Read the page with browser_snapshot instead, or ask the person to bring Pane\'s window forward and try again.')), this.captureMs);
       });
       try {
         return await Promise.race([work(), late]);
@@ -684,7 +689,7 @@ export class PageDriver {
     });
     if (result === 'dialog') {
       const dialog = this.dialog;
-      throw new PaneError('ERR_BROWSER_DIALOG_PENDING', `The script opened a ${dialog?.type ?? 'dialog'} ("${(dialog?.message ?? '').slice(0, 120)}"), and the page is blocked until it is answered. The script is still running.`, 'Answer it with browser_dialog; the script then finishes, but its value is not returned.');
+      throw new PaneError('ERR_BROWSER_DIALOG_PENDING', `The script opened ${article(dialog?.type ?? 'dialog')} ${dialog?.type ?? 'dialog'} ("${(dialog?.message ?? '').slice(0, 120)}"), and the page is blocked until it is answered. The script is still running.`, 'Answer it with browser_dialog; the script then finishes, but its value is not returned.');
     }
     if (result === 'overdue') {
       await this.send('Runtime.terminateExecution').catch(() => undefined);
@@ -727,7 +732,7 @@ export class PageDriver {
   private refuseWhileDialog(): void {
     const dialog = this.dialog;
     if (dialog) {
-      throw new PaneError('ERR_BROWSER_DIALOG_PENDING', `The page has a ${dialog.type} dialog open ("${dialog.message.slice(0, 120)}"), and it blocks the page until it is answered. Nothing ran.`, 'Answer it with browser_dialog (accept or dismiss), or ask the person to.');
+      throw new PaneError('ERR_BROWSER_DIALOG_PENDING', `The page has ${article(dialog.type)} ${dialog.type} dialog open ("${dialog.message.slice(0, 120)}"), and it blocks the page until it is answered. Nothing ran.`, 'Answer it with browser_dialog (accept or dismiss), or ask the person to.');
     }
   }
 
@@ -892,6 +897,11 @@ export class PageDriver {
     }
     return this.contents.debugger.sendCommand(method, params);
   }
+}
+
+/** "an alert", "a confirm". */
+function article(word: string): string {
+  return /^[aeiou]/i.test(word) ? 'an' : 'a';
 }
 
 function evaluateTimeout(): PaneError {
