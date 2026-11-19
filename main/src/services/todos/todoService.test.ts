@@ -505,6 +505,35 @@ describe('TodoService', () => {
       expect(service.require(queued.number).sessionId).toBe('s2');
     });
 
+    it('a restart held while Holding is a real restart when load clears, and keeps the quiet time (F-7)', async () => {
+      const todo = await service.create({ title: 'Quiet under load' }, person);
+      const progressAt = service.require(todo.number).lastProgressAt;
+      host.load = { cpuPercent: 5, memory: 'warning' };
+      const queuedLine = () => service.detail(todo.number).activity.some(row => row.body === 'Restart queued: the machine is busy');
+      for (let step = 0; step < 6 * 40 && !queuedLine(); step += 1) {
+        now += 10_000;
+        await service.loadTick();
+        await service.supervisorPass();
+      }
+      expect(service.gate.state).toBe('holding');
+      expect(service.require(todo.number).loadHold).toBe('queued');
+      expect(service.snapshot().rows.find(row => row.todo.number === todo.number)?.status.status).toBe('queued');
+      for (let i = 0; i < 3; i += 1) await service.flush();
+      expect(service.queuedFor('s1-orch')).toEqual([]);
+      const typedBefore = host.typedInto('s1-orch').length;
+      host.load = { cpuPercent: 5, memory: 'ok' };
+      for (let step = 0; step < 30 && host.restarted.length === 0; step += 1) { now += 10_000; await service.loadTick(); }
+      expect(host.restarted).toEqual(['s1-orch']);
+      expect(host.resumed).toEqual([]);
+      const after = service.require(todo.number);
+      expect(after).toMatchObject({ loadHold: null, episodeRestarts: 1, lastProgressAt: progressAt });
+      for (let i = 0; i < 3; i += 1) await service.flush();
+      const typed = host.typedInto('s1-orch').slice(typedBefore);
+      expect(typed).toHaveLength(1);
+      expect(typed[0]).toContain('Pane restarted you because T-1 went quiet.');
+      expect(service.detail(todo.number).activity.at(-1)?.body).toMatch(/^Quiet \d+m: Pane restarted the orchestrator in its same conversation$/);
+    });
+
     it('Start anyway starts at once and marks it Never pause', async () => {
       await holdGate();
       const todo = await service.create({ title: 'Urgent', startNow: false }, person);

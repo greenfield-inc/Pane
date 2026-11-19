@@ -193,6 +193,11 @@ export class TodoService extends EventEmitter {
   private flushAgain: Promise<void> | null = null;
   private readonly resumeFailures = new Map<string, number>();
   private readonly startFailures = new Map<number, number>();
+  /**
+   * Supervisor restarts held by the load gate, keyed by to-do, valued by the hold's loadHoldSince: the gate's
+   * release of that same hold restarts the agent rather than resuming it (F-7). Any re-queue changes the time.
+   */
+  private readonly queuedRestarts = new Map<number, number>();
   /** Raw mid-turn since, and last seen mid-turn, per tab: settled into Working after 10 s. */
   private readonly activity = new Map<string, { since: number | null; lastSeen: number | null }>();
   private readonly settled = new Set<string>();
@@ -1241,13 +1246,15 @@ export class TodoService extends EventEmitter {
       this.gate.noteQueuedStart(now);
       const next = queued[0];
       // The hold stays until the launch succeeds (launch clears it), so a failed start is never left untracked (F-5).
-      try {
-        await this.launch(next.number, null);
-        this.startFailures.delete(next.number);
-        this.event(next, 'Load came down: started');
-      } catch (error) {
-        this.host.log(`[Todos] ${next.ref} start failed`, error instanceof Error ? error : String(error));
-        this.queuedStartFailed(next, error instanceof Error ? error.message : String(error), now);
+      if (!await this.releaseQueuedRestart(next, now)) {
+        try {
+          await this.launch(next.number, null);
+          this.startFailures.delete(next.number);
+          this.event(next, 'Load came down: started');
+        } catch (error) {
+          this.host.log(`[Todos] ${next.ref} start failed`, error instanceof Error ? error : String(error));
+          this.queuedStartFailed(next, error instanceof Error ? error.message : String(error), now);
+        }
       }
       this.changed();
     }
@@ -1439,24 +1446,15 @@ export class TodoService extends EventEmitter {
         this.store.update(todo.number, { ...stalls, episodeReminders: todo.episodeReminders + 1 }, todo.updatedAt);
         this.event(todo, `Quiet ${quietMinutes}m: Pane reminded the orchestrator (${action.rung} of 2)`);
         break;
-      case 'restart': {
+      case 'restart':
         // Never over the person's draft or a turn that just started: the next pass looks again.
         if (this.host.isMidTurn(orchestrator) || await this.host.hasUnsentText(orchestrator)) return;
-        this.ladderLog.push({ at: now, kind: 'restart' });
-        this.lastRestartAt.set(todo.number, now);
-        this.store.update(todo.number, { ...stalls, episodeRestarts: todo.episodeRestarts + 1 }, todo.updatedAt);
-        // A live but quiet agent is stopped and started again; Resume alone leaves it running (F-7).
-        const restarted = await this.restartTab(orchestrator);
-        if (!restarted) {
-          this.event(todo, `Quiet ${quietMinutes}m: Pane couldn't restart the orchestrator`);
-          break;
-        }
-        this.enqueue({ panelId: orchestrator, text: reminderText(todo, quietMinutes, true), todoNumber: todo.number, resumeIfDown: true });
-        this.event(todo, action.why === 'down' ? 'The orchestrator was down or hung: Pane restarted it in its same conversation' : `Quiet ${quietMinutes}m: Pane restarted the orchestrator in its same conversation`);
+        await this.restartOrchestrator(todo, orchestrator, stalls, now, action.why);
         break;
-      }
       case 'queue_restart':
+        // Reads Queued while the gate holds; its release restarts the agent (applyGate), keeping the quiet time.
         this.store.update(todo.number, { ...stalls, loadHold: 'queued', loadHoldSince: now }, todo.updatedAt);
+        this.queuedRestarts.set(todo.number, now);
         this.event(todo, 'Restart queued: the machine is busy');
         break;
       case 'card': {
@@ -1472,6 +1470,39 @@ export class TodoService extends EventEmitter {
       }
     }
     this.changed();
+  }
+
+  /** The ladder's restart rung: stop and start the orchestrator in its same conversation, and say so. */
+  private async restartOrchestrator(todo: TodoRecord, orchestrator: string, patch: TodoPatch, now: number, why: 'quiet' | 'down'): Promise<void> {
+    const quietMinutes = Math.round((now - lastMovedAt(todo, null)) / MINUTE);
+    this.ladderLog.push({ at: now, kind: 'restart' });
+    this.lastRestartAt.set(todo.number, now);
+    // Not progress: the stored time stays, so the ladder goes on to the card if the restart doesn't help.
+    this.store.update(todo.number, { ...patch, episodeRestarts: todo.episodeRestarts + 1 }, todo.updatedAt);
+    // A live but quiet agent is stopped and started again; Resume alone leaves it running (F-7).
+    if (!await this.restartTab(orchestrator)) {
+      this.event(todo, `Quiet ${quietMinutes}m: Pane couldn't restart the orchestrator`);
+      return;
+    }
+    this.enqueue({ panelId: orchestrator, text: reminderText(todo, quietMinutes, true), todoNumber: todo.number, resumeIfDown: true });
+    this.event(todo, why === 'down' ? 'The orchestrator was down or hung: Pane restarted it in its same conversation' : `Quiet ${quietMinutes}m: Pane restarted the orchestrator in its same conversation`);
+  }
+
+  /** A held supervisor restart the gate now lets go: true when it was one (handled here), false for a plain start. */
+  private async releaseQueuedRestart(todo: TodoRecord, now: number): Promise<boolean> {
+    const heldAt = this.queuedRestarts.get(todo.number);
+    if (heldAt === undefined) return false;
+    this.queuedRestarts.delete(todo.number);
+    const orchestrator = this.orchestratorOf(todo);
+    if (heldAt !== todo.loadHoldSince || !todo.sessionId || !orchestrator) return false;
+    // A draft or a turn under way: back of the queue, still a restart, so other queued starts aren't held up.
+    if (this.host.isMidTurn(orchestrator) || await this.host.hasUnsentText(orchestrator)) {
+      this.store.update(todo.number, { loadHoldSince: now }, todo.updatedAt);
+      this.queuedRestarts.set(todo.number, now);
+      return true;
+    }
+    await this.restartOrchestrator(todo, orchestrator, { loadHold: null, loadHoldSince: null }, now, 'quiet');
+    return true;
   }
 
   /** Starts a down tab again, or stops and starts a running one, in its same conversation. */

@@ -513,7 +513,7 @@ answered, or you comment. A turn on its own doesn't count.
 | --- | --- |
 | 10 minutes | Types a reminder into the orchestrator's tab: `[From Pane, To-dos] T-12 "…" is in progress and nothing has moved for 10 minutes. Carry it on, ask for review with runpane todos review T-12, ask with runpane todos ask T-12, or say why it can't move.` |
 | 20 minutes | A second reminder. |
-| 30 minutes | Restarts the orchestrator in place: stops its agent and starts it again in its same conversation, then sends a third message saying so. While the load gate holds, the restart waits and the to-do reads Queued. If the agent doesn't start again, the thread says "Pane couldn't restart the orchestrator" and the card follows 10 minutes later. |
+| 30 minutes | Restarts the orchestrator in place: stops its agent and starts it again in its same conversation, then sends a third message saying so. While the load gate holds, the restart waits and the to-do reads Queued; when load comes down it is restarted the same way, and the wait doesn't count as progress. If the agent doesn't start again, the thread says "Pane couldn't restart the orchestrator" and the card follows 10 minutes later. |
 | 40 minutes, or 10 minutes after a restart with no progress | Raises a card linked to the to-do: "T-12 has been stuck for 40 minutes. The orchestrator was reminded twice and restarted once." with **Restart its agents**, **Stop it** and **I'll look**. The to-do reads Waiting on you and the ladder stops until you answer. |
 
 An orchestrator whose process stopped, whose tab is gone, or that has been
