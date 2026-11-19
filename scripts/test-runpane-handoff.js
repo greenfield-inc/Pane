@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { test } = require('node:test');
+const { test } = require('./runpane-test-shard');
 
 const dist = path.join(__dirname, '..', 'packages', 'runpane', 'dist');
 const cli = path.join(dist, 'cli.js');

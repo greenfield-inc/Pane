@@ -397,13 +397,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** The device tab (docs/DEVICES.md): the local screen, frames, and the person's own controls. */
   devices: {
     input: (panelId: string, input: DeviceInput): Promise<IPCResponse> => invokeIpc('devices:input', panelId, input),
-    frame: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame', panelId),
+    frame: (panelId: string, maxPx?: number): Promise<IPCResponse> => invokeIpc('devices:frame', panelId, maxPx),
     frameRate: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame-rate', panelId),
     controls: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:controls', panelId),
     capture: (panelId: string, image?: string): Promise<IPCResponse> => invokeIpc('devices:capture', panelId, image),
     stage: (panelId: string, agentPanelId: string, text: string): Promise<IPCResponse> => invokeIpc('devices:stage', panelId, agentPanelId, text),
     record: (panelId: string, action: 'start' | 'stop'): Promise<IPCResponse> => invokeIpc('devices:record', panelId, action),
-    recording: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:recording', panelId),
     logs: (panelId: string, since: number): Promise<IPCResponse> => invokeIpc('devices:logs', panelId, since),
     driver: (panelId: string, who: 'person' | 'agent'): Promise<IPCResponse> => invokeIpc('devices:driver', panelId, who),
     visible: (panelId: string, clientId: string, visible: boolean): Promise<IPCResponse> => invokeIpc('devices:visible', panelId, clientId, visible),
