@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { KEYBOARD_EMPTY, keyboardEdit, PhoneControl } from './browserStream';
+import { PhoneControl } from '@shared/utils/browserStreamInput';
+import { KEYBOARD_EMPTY, keyboardEdit } from './browserStream';
 
 const backspace = { kind: 'key', key: 'Backspace', modifiers: 0 };
 

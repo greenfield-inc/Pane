@@ -36,34 +36,6 @@ export function driverChip(driver: DeviceDriver, agentName: string | undefined):
   return { label: driver.agentWaiting ? `You're driving · ${driver.agentWaiting} is waiting` : "You're driving", action: `Hand to ${agent}`, to: 'agent' };
 }
 
-/**
- * Whether this phone controls the page. Its first touch only takes control (the page resizes to the
- * phone and gets its phone layout); later touches act. Control ends when the page leaves the phone's
- * size (another screen took it) or an agent starts driving.
- */
-export class PhoneControl {
-  private held = false;
-  private sawPhoneSize = false;
-  private lastDriver: DeviceDriver['by'] | undefined;
-
-  /** A touch: true when it only takes control and must not act on the page. */
-  touch(): boolean {
-    if (this.held) return false;
-    this.held = true;
-    this.sawPhoneSize = false;
-    return true;
-  }
-
-  /** The tab's newest state from the host. */
-  view(view: Pick<BrowserTabView, 'size' | 'driver'>): void {
-    const phoneSize = view.size?.mobile === true;
-    const driver = view.driver?.by;
-    if (driver === 'agent' && this.lastDriver !== 'agent') this.held = false;
-    if (this.held && this.sawPhoneSize && !phoneSize) this.held = false;
-    this.sawPhoneSize = phoneSize;
-    this.lastDriver = driver;
-  }
-}
 
 /**
  * What the hidden keyboard field holds when empty: one zero-width space, so Backspace on an empty

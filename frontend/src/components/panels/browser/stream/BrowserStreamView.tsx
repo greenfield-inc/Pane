@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { MousePointer2 } from 'lucide-react';
-import type { BrowserInputResult } from '../../../../../../shared/types/browserStream';
+import type { BrowserInput, BrowserInputResult } from '../../../../../../shared/types/browserStream';
 import { cn } from '../../../../utils/cn';
 import { DriverChip } from '../../device/DeviceToolViews';
-import { browserInputQueue, clickCounter, fitFrame, modifiersOf, pagePoint } from '../../../../../../shared/utils/browserStreamInput';
+import { browserInputQueue, clickCounter, fitFrame, modifiersOf, pagePoint, PhoneControl } from '../../../../../../shared/utils/browserStreamInput';
 import type { BrowserStream, StreamStop } from './useBrowserStream';
 import type { BrowserStreamClient } from './streamClient';
 
@@ -77,7 +77,16 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       else if (phone) keysRef.current?.blur();
     }
   }, [phone]);
-  const send = useMemo(() => browserInputQueue(batch => client.input(panelId, batch), onResult), [client, panelId, onResult]);
+  const queue = useMemo(() => browserInputQueue(batch => client.input(panelId, batch), onResult), [client, panelId, onResult]);
+  // Input made while the host can't be reached is dropped, never replayed late onto a page that may have changed.
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
+  const send = useCallback((input: BrowserInput | null) => {
+    if (stopRef.current && stopRef.current !== 'older') return;
+    // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
+    if ((input?.kind === 'key' && (input.key === 'Enter' || input.key === 'Tab')) || input?.kind === 'navigate' || input?.kind === 'history') setField('password');
+    queue(input);
+  }, [queue]);
 
   useLayoutEffect(() => {
     const element = boxRef.current;
@@ -123,18 +132,21 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
     return pagePoint(event.clientX - rect.left, event.clientY - rect.top, box, page);
   };
 
-  // A phone controls the page once it took control: the page has the phone's size.
-  const [inControl, setInControl] = useState(false);
-  const mobileSize = view?.size?.mobile === true;
-  const agentNow = view?.driver?.by === 'agent';
-  useEffect(() => { if (!mobileSize || agentNow) setInControl(false); }, [mobileSize, agentNow]);
+  // A phone controls the page once it took control (the same rule as the phone app): its first touch only takes it.
+  const control = useMemo(() => new PhoneControl(), []);
+  useEffect(() => { if (view) control.view(view); }, [control, view]);
+  const takesControl = () => {
+    if (!phone || !control.touch()) return false;
+    send(null);
+    return true;
+  };
 
   // Double and triple clicks: pointer events carry no count, so the view counts presses itself.
   const countClick = useMemo(() => clickCounter(), []);
   const clicks = useRef(1);
 
   // Touch: a tap clicks, a drag scrolls, a long press is a right click.
-  const touch = useRef<{ x: number; y: number; lastX: number; lastY: number; moved: boolean; timer: number | undefined; longPressed: boolean } | undefined>(undefined);
+  const touch = useRef<{ x: number; y: number; lastX: number; lastY: number; moved: boolean; timer: number | undefined; longPressed: boolean; tookControl?: boolean } | undefined>(undefined);
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (stop === 'asleep') { stream.wake(); return; }
@@ -147,6 +159,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
         const current = touch.current;
         if (!current || current.moved) return;
         current.longPressed = true;
+        if (takesControl()) return;
         send({ kind: 'mouse', action: 'down', x: point.x, y: point.y, button: 'right', clicks: 1, modifiers: 0 });
         send({ kind: 'mouse', action: 'up', x: point.x, y: point.y, button: 'right', clicks: 1, modifiers: 0 });
       }, LONG_PRESS_MS);
@@ -162,8 +175,12 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
     const current = touch.current;
     if (event.pointerType === 'touch' && current) {
       if (!current.moved && Math.hypot(event.clientX - current.x, event.clientY - current.y) < TAP_SLOP_PX) return;
+      if (!current.moved) {
+        window.clearTimeout(current.timer);
+        current.tookControl = takesControl();
+      }
       current.moved = true;
-      window.clearTimeout(current.timer);
+      if (current.tookControl) return;
       const point = toPage(event);
       const scale = page && drawn.width ? page.width / drawn.width : 1;
       if (point) send({ kind: 'wheel', ...point, dx: (current.lastX - event.clientX) * scale, dy: (current.lastY - event.clientY) * scale });
@@ -185,13 +202,12 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       if (!current) return;
       window.clearTimeout(current.timer);
       const point = toPage({ clientX: current.x, clientY: current.y });
-      if (phone && !inControl && !current.moved && !current.longPressed) {
-        // The first tap only takes control: the page resizes to the phone and gets its phone layout.
-        setInControl(true);
-        send(null);
-        return;
-      }
-      if (!current.moved && !current.longPressed && point) {
+      if (current.moved || current.longPressed) return;
+      // The first tap only takes control: the page resizes to the phone and gets its phone layout.
+      if (takesControl()) return;
+      if (point) {
+        // Focused inside the tap, or iOS opens no keyboard; the host's answer closes it again when no field took the tap.
+        if (phone) keysRef.current?.focus({ preventScroll: true });
         // A tap goes as a mouse click: Chromium makes no click (or one in the wrong place) from a
         // synthetic touch on a page shown at another size.
         send({ kind: 'mouse', action: 'down', ...point, button: 'left', clicks: 1, modifiers: 0 });

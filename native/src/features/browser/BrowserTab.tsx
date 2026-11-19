@@ -1,11 +1,11 @@
-import type { BrowserFrame, BrowserTabView } from '@shared/types/browserStream';
+import type { BrowserFrame, BrowserInput, BrowserTabView } from '@shared/types/browserStream';
 import type { ToolPanel } from '@shared/types/panels';
 import { normalizeUrl } from '@shared/utils/browserUrl';
-import { browserInputQueue, fitFrame, pagePoint, type FrameBox } from '@shared/utils/browserStreamInput';
+import { browserInputQueue, fitFrame, pagePoint, PhoneControl, type FrameBox } from '@shared/utils/browserStreamInput';
 import * as Clipboard from 'expo-clipboard';
 import { useIsFocused } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Image, Modal, PixelRatio, Pressable, StyleSheet, TextInput, View, type LayoutChangeEvent } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, AppState, Image, Keyboard, Modal, PixelRatio, Pressable, StyleSheet, TextInput, View, type LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -18,7 +18,7 @@ import type { IconProps } from '@/ui/Icon';
 import { isDemoProfile } from '../demo/demoHost';
 import { pickFiles, type AttachSource } from '../upload/pickFiles';
 import { splitAddress } from './browserPage';
-import { driverChip, KEYBOARD_EMPTY, keyboardEdit, PhoneControl, stopLine } from './browserStream';
+import { driverChip, KEYBOARD_EMPTY, keyboardEdit, stopLine } from './browserStream';
 import { OwnCopyBrowserTab } from './OwnCopyBrowserTab';
 import { browserChannels, useBrowserStream } from './useBrowserStream';
 
@@ -36,6 +36,9 @@ const NOTICE_MS = 4_000;
  * who drives sit on top, Back, Forward, Reload and the keyboard at the bottom. A computer on an
  * older Pane streams nothing: the phone then loads its own copy of the page.
  */
+/** The most a page takes from the phone's file picker in one go (the host's limit). */
+const UPLOAD_LIMIT_BYTES = 10 * 1_048_576;
+
 export function BrowserTab({ panel }: { panel: ToolPanel }) {
   const { profile } = useDaemon();
   // The demo's pages are sample files on the phone.
@@ -54,7 +57,16 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
     return () => subscription.remove();
   }, []);
   const [box, setBox] = useState<{ width: number; height: number }>();
-  const stream = useBrowserStream(panel.id, focused && active, box && { ...box, scale: PixelRatio.get() });
+  // The page keeps the size the stage has without the keyboard: opening or closing it never resizes the host's page.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
+    const hidden = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
+    return () => { shown.remove(); hidden.remove(); };
+  }, []);
+  const [space, setSpace] = useState(box);
+  useEffect(() => { if (box && !keyboardOpen) setSpace(box); }, [box, keyboardOpen]);
+  const stream = useBrowserStream(panel.id, focused && active, space && { ...space, scale: PixelRatio.get() });
   const { frame, view, stop } = stream;
   const host = view?.host || profile.label;
 
@@ -69,19 +81,34 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
   const keyboardTextRef = useRef(KEYBOARD_EMPTY);
   const [notice, setNotice] = useState<string>();
   const fieldRef = useRef<'text' | 'password' | null>(null);
-  const [send] = useState(() => browserInputQueue(async batch => {
+  const [queue] = useState(() => browserInputQueue(async batch => {
     const result = await browserChannels(clientRef.current).input(panel.id, batch);
     if (result.copied) void Clipboard.setStringAsync(result.copied).catch(() => undefined);
-    if (result.field !== undefined && result.field !== fieldRef.current) {
+    const tapped = batch.some(input => input.kind === 'mouse' && input.action === 'up' && input.button === 'left');
+    // Every tap into a field starts the keyboard's text afresh, so the last field's text never edits this one.
+    if (result.field !== undefined && (result.field !== fieldRef.current || tapped)) {
       fieldRef.current = result.field;
       setField(result.field);
       keyboardTextRef.current = KEYBOARD_EMPTY;
       setKeyboardText(KEYBOARD_EMPTY);
     }
-    // A tap on a text field opens the keyboard; scrolling or typing leaves it as it is.
-    if (result.field && batch.some(input => input.kind === 'mouse' && input.action === 'up' && input.button === 'left')) keysRef.current?.focus();
+    // A tap on a text field opens the keyboard; a tap anywhere else closes it.
+    if (tapped && result.field) keysRef.current?.focus();
+    else if (tapped && result.field === null) keysRef.current?.blur();
     return result;
   }));
+  // Input made while the host can't be reached is dropped, never replayed late onto a page that may have changed.
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
+  const send = useCallback((input: BrowserInput | null) => {
+    if (stopRef.current && stopRef.current !== 'older') return;
+    // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
+    if ((input?.kind === 'key' && (input.key === 'Enter' || input.key === 'Tab')) || input?.kind === 'navigate' || input?.kind === 'history') {
+      fieldRef.current = 'password';
+      setField('password');
+    }
+    queue(input);
+  }, [queue]);
   const [control] = useState(() => new PhoneControl());
   useEffect(() => { if (view) control.view(view); }, [control, view]);
 
@@ -207,6 +234,12 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
         const picked = await pickFiles(source);
         if (picked.length === 0) { send({ kind: 'files-cancel' }); return; }
         const chosen = fileChooser.multiple ? picked : picked.slice(0, 1);
+        const bytes = chosen.reduce((sum, file) => sum + file.size, 0);
+        if (bytes > UPLOAD_LIMIT_BYTES) {
+          send({ kind: 'files-cancel' });
+          setNotice(`The files come to ${(bytes / 1_048_576).toFixed(1)} MB; a page takes up to ${UPLOAD_LIMIT_BYTES / 1_048_576} MB from the phone at once.`);
+          return;
+        }
         const files = await Promise.all(chosen.map(async file => ({ name: file.name, data: await file.read(0, file.size) })));
         send({ kind: 'files', files });
       } catch (cause) {
@@ -344,7 +377,7 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
         <ToolButton testID="browser-back" label="Back" ios="chevron.left" android="arrow_back" disabled={!view?.canGoBack} onPress={() => history('back')} />
         <ToolButton testID="browser-forward" label="Forward" ios="chevron.right" android="arrow_forward" disabled={!view?.canGoForward} onPress={() => history('forward')} />
         <ToolButton testID="browser-reload" label="Reload" ios="arrow.clockwise" android="refresh" disabled={!view?.url} onPress={() => history('reload')} />
-        <ToolButton testID="browser-keyboard" label="Keyboard" ios="keyboard" android="keyboard" onPress={() => keysRef.current?.focus()} />
+        <ToolButton testID="browser-keyboard" label="Keyboard" ios="keyboard" android="keyboard" onPress={() => (keysRef.current?.isFocused() ? keysRef.current.blur() : keysRef.current?.focus())} />
         <Text variant="footnote" tone="muted" numberOfLines={1} style={styles.host}>{`on ${host}`}</Text>
       </View>
       <Modal visible={prompt !== null} transparent animationType="fade" onRequestClose={() => { setPrompt(null); send({ kind: 'dialog', accept: false }); }} statusBarTranslucent>
