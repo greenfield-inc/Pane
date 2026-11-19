@@ -44,6 +44,7 @@ jobs:
       with:
         # The freshness check compares this commit with the deployed one.
         fetch-depth: 0
+        filter: blob:none
 
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
