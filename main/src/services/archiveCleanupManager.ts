@@ -12,10 +12,14 @@ import { detectProjectConfig } from './projectConfigDetector';
 import { archiveFs, archiveErrorCode, archivePathKey, directoryIdentity, purgeArchiveBatch, type ArchivePurgeCursor } from './archiveCleanupFilesystem';
 import { getAppSubdirectory } from '../utils/appDirectory';
 import { withArchiveRepositoryKey } from './archiveRepositoryLock';
-import { ArchiveProcessTracker } from './archiveProcessTracker';
+import { ArchiveProcessTracker, type ArchiveProcessIdentity } from './archiveProcessTracker';
 import { preserveAgentLogs } from './archiveRetention';
 import { PANE_SCRATCH_FOLDER } from '../../../shared/constants/paneFolders';
 import { PaneError, reasonOf } from '../../../shared/paneError';
+
+/** The fields a cleanup job persists for each process; the job schema names every one. */
+const jobProcesses = (identities: readonly ArchiveProcessIdentity[]): NonNullable<ArchiveCleanupJob['processes']> =>
+  identities.map(({ pid, parent, started, kernelStart }) => ({ pid, parent, started, kernelStart }));
 
 /** File-system errors a short wait usually clears (a lock, a scanner); the cleanup job retries them. */
 const RETRYABLE_CLEANUP_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY']);
@@ -60,7 +64,7 @@ export class ArchiveCleanupManager {
     // Capture before the atomic archive/intent commit. A capture failure leaves
     // the session active; a crash after commit retains the known process tree.
     job.processes = [];
-    await new ArchiveProcessTracker([], identities => { job.processes = identities; })
+    await new ArchiveProcessTracker([], identities => { job.processes = jobProcesses(identities); })
       .capture(this.processRoots(session.id));
     return job;
   }
@@ -122,7 +126,7 @@ export class ArchiveCleanupManager {
     this.waitingForTeardown.add(job.sessionId);
     this.publish();
     const tracker = new ArchiveProcessTracker([...(job.processes ?? [])], identities => {
-      job.processes = identities;
+      job.processes = jobProcesses(identities);
       this.save(job);
     });
     const pending = Promise.resolve().then(async () => {
