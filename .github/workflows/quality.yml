@@ -303,7 +303,7 @@ jobs:
         save: ${{ matrix.shard == 1 }}
 
     - name: Run maintained functional smoke tests
-      run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      run: pnpm test:ci:minimal todos --repeat-each=10 --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # Reported only: CI result does not wait for this job (REPORTED_ONLY_JOBS in
   # scripts/ci-gate.mjs). It runs playwright.ci.stabilizing.config.ts, whose
@@ -471,10 +471,18 @@ jobs:
     # PANE_ELECTRON_E2E turns on the remote browser and browser auth specs.
     - name: Run chat tab journeys
       if: ${{ !cancelled() }}
-      run: xvfb-run -a pnpm test:chat-tabs --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      run: xvfb-run -a pnpm test:chat-tabs todos --repeat-each=10 --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
         PANE_ELECTRON_E2E: '1'
+
+    - name: Upload probe traces
+      if: ${{ failure() }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: probe-electron-${{ matrix.shard }}
+        path: test-results/
+        retention-days: 3
 
     # Last, so only a build that Electron loaded and passed the tests with is saved.
     - name: Save the Electron SQLite build
