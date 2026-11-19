@@ -84,21 +84,14 @@ function CreditsLine({ limits }: { limits: UsageRateLimitSample[] }) {
   return null;
 }
 
+/** One limit of an account: its window, how much is left, and when it was reported. */
 function LimitBar({ limit }: { limit: UsageRateLimitSample }) {
   const remaining = Math.max(0, Math.round(100 - limit.usedPercent));
   return (
     <div>
       <div className="flex items-baseline justify-between gap-2 text-[11px]">
         <span className="truncate text-text-secondary">
-          {PROVIDER_META[limit.provider].label}
-          {limit.planType && (
-            <span className="ml-1 text-text-muted">· {limit.planType}</span>
-          )}
-          {limit.windowMinutes && (
-            <span className="ml-1 text-text-muted">
-              {formatWindow(limit.windowMinutes)}
-            </span>
-          )}
+          {limit.windowMinutes ? formatWindow(limit.windowMinutes) : 'Limit'}
           {limit.limitName && (
             <span className="ml-1 text-text-muted">· {limit.limitName}</span>
           )}
@@ -186,7 +179,7 @@ export function MachinesNotice({ machines, states }: { machines: MachineState[];
     const why = state.reason === 'offline' ? 'is offline' : 'did not answer';
     return [state.readAt === null
       ? `${machine.label} ${why} and has not been read since Pane opened, so its usage is not included.`
-      : `${machine.label} ${why}: showing its numbers from ${formatAge(state.readAt)}.`];
+      : `${machine.label} ${why}. Its numbers are from its last read, ${formatAge(state.readAt)}.`];
   });
   if (notes.length === 0) return null;
   return (

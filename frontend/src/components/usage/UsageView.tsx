@@ -279,26 +279,24 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
     setRescanning(true);
     try {
       // Only this computer's index can be rescanned from here; every machine is read again.
-      if (allView || machineId === 'local') await API.usage.rescan();
+      if (allView || machineId === 'local') await API.usage.rescan().catch(() => undefined);
       await reload(allView ? undefined : machineId);
-    } catch {
-      // The reload after it says what each machine answered.
     } finally {
       setRescanning(false);
     }
   }, [allView, machineId, reload]);
 
   /** Each machine's line in the picker: whether its numbers are live, and its tokens in the range. */
-  const describeMachine = useCallback((machine: MachineState): MachineLine => {
+  const describeMachine = useCallback((machine: MachineState): MachineLine | null => {
     const state = states[machine.id];
     const usage = usages.find(item => item.machineId === machine.id);
     const tokens = usage ? `${formatTokens(usage.report.totals.totalTokens)} tokens` : null;
-    if (!state) return { text: 'Reading…', tone: 'muted' };
+    if (!state) return null;
     if (state.kind === 'live') return { text: tokens ?? 'No usage in this range' };
     const why = state.reason === 'offline' ? 'Offline' : 'Not answering';
     return state.readAt === null
       ? { text: `${why} · not read yet`, tone: 'warning', dim: true }
-      : { text: `${why} · ${tokens ?? 'no usage'} as of ${formatTimeAgo(new Date(state.readAt).toISOString())}`, tone: 'warning', dim: true };
+      : { text: `${why} · ${tokens ?? 'no usage'}, read ${formatTimeAgo(new Date(state.readAt).toISOString())}`, tone: 'warning', dim: true };
   }, [states, usages]);
 
   const allLine = `${machines.length} machine${machines.length === 1 ? '' : 's'} · each account counted once`;

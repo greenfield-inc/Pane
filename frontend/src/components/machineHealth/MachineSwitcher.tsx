@@ -30,7 +30,7 @@ export const ALL_MACHINES = 'all';
 /** A machine's line under its name, when the page describes machines itself. */
 export interface MachineLine {
   text: string;
-  tone?: 'ok' | 'warning' | 'muted';
+  tone?: 'ok' | 'warning';
   /** Dims the row, as an offline machine's. */
   dim?: boolean;
 }
@@ -48,7 +48,8 @@ export function MachineSwitcher({ machineId, hostname, onSelect, all, describe }
   onSelect: (machineId: string) => void;
   /** The All machines row's line; the row shows only when this is given. */
   all?: string;
-  describe?: (machine: MachineState) => MachineLine;
+  /** Each machine's line; null while it is read, which shows a skeleton. */
+  describe?: (machine: MachineState) => MachineLine | null;
 }) {
   const [machines, setMachines] = useState<MachineState[]>([]);
   const [open, setOpen] = useState(false);
@@ -111,9 +112,9 @@ export function MachineSwitcher({ machineId, hostname, onSelect, all, describe }
             </li>
           )}
           {machines.map(machine => {
-            const line = describe?.(machine);
+            const line = describe ? describe(machine) : undefined;
             const summary = summaries[machine.id];
-            const offline = line ? line.dim === true : machine.status === 'offline' || summary?.kind === 'offline';
+            const offline = describe ? line?.dim === true : machine.status === 'offline' || summary?.kind === 'offline';
             const local = machine.kind === 'local';
             const snapshot = summary?.kind === 'ok' ? summary.snapshot : undefined;
             const label = local ? (snapshot?.hostname ?? (machine.id === machineId ? hostname : undefined) ?? machine.label) : machine.label;
@@ -127,11 +128,13 @@ export function MachineSwitcher({ machineId, hostname, onSelect, all, describe }
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2 text-sm text-text-primary">
                       {label}
-                      {local && <span className="text-text-tertiary">{thisMachine(snapshot?.platform)}</span>}
+                      {local && label !== machine.label && <span className="text-text-tertiary">{thisMachine(snapshot?.platform)}</span>}
                       {snapshot && !local && <span className="rounded bg-surface-secondary px-1.5 text-xs text-text-secondary">{osLabel(snapshot.platform)}</span>}
                     </span>
-                    {line ? (
-                      <span className={cn('block text-sm', line.tone === 'warning' ? 'text-status-warning' : line.tone === 'muted' ? 'text-text-tertiary' : 'text-text-secondary')}>{line.text}</span>
+                    {describe ? (
+                      <SkeletonSwap loading={!line} skeleton={<Skeleton className="flex h-5 items-center"><Bone className="h-3.5 w-36" /></Skeleton>}>
+                        {line && <span className={cn('block text-sm', line.tone === 'warning' ? 'text-status-warning' : 'text-text-secondary')}>{line.text}</span>}
+                      </SkeletonSwap>
                     ) : (
                     <SkeletonSwap loading={!summary || summary.kind === 'loading'} skeleton={<Skeleton className="flex h-5 items-center"><Bone className="h-3.5 w-36" /></Skeleton>}>
                       {summary && summary.kind !== 'loading' && (
