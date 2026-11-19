@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import type { ComputerRoute, RemoteComputer } from '../shared/types/remoteComputers';
 
 type SettingsMock = {
@@ -18,7 +18,7 @@ type SettingsMock = {
 
 async function bootSettings(page: Page, options: Parameters<typeof installElectronApiMock>[1] = {}) {
   await installElectronApiMock(page, options);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
 
   const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
@@ -138,7 +138,7 @@ test.describe('Settings', () => {
       initialTerminalStates: { [panel.id]: { scrollbackBuffer: 'ready\r\n' } },
       activeProjectId: project.id,
     });
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await gotoApp(page);
     await page.getByRole('button', { name: /^Expand project Terminal font fixture$/ }).click();
     await page.getByRole('button', { name: session.name, exact: true }).click();
     await expect(page.locator('.xterm-screen')).toHaveCount(1, { timeout: 15_000 });
@@ -240,7 +240,7 @@ test.describe('Settings', () => {
 
   test('opens Keyboard Shortcuts with the two-step key ⌘K ⌘S (D-250)', async ({ page }) => {
     await installElectronApiMock(page);
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await gotoApp(page);
     await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
 
     await page.keyboard.press('ControlOrMeta+k');

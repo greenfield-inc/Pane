@@ -163,6 +163,23 @@ export type ElectronApiMockOptions = {
   computers?: RemoteComputer[];
 };
 
+/**
+ * Opens the desktop app and waits until it reports ready. `page.goto` returns before the app's code
+ * has loaded; on a cold Vite server the app can start seconds later. The app reports ready after its
+ * first loaded frame, when its event listeners are subscribed and its first data is on screen, so a
+ * test's own waits count from a running app. The mock drops events emitted before that.
+ */
+export async function gotoApp(page: Page, path = '/'): Promise<void> {
+  await page.goto(path, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.waitForFunction(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    const mock = (window as typeof window & {
+      __paneTestElectronMock?: { isRendererReady: () => boolean };
+    }).__paneTestElectronMock;
+    return mock?.isRendererReady() ?? false;
+  }, undefined, { timeout: 30_000 });
+}
+
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
   type SerializedOptions = ElectronApiMockOptions & {
     appearance: { defaults: AppearanceConfig; seeded: AppearanceConfig };
@@ -490,6 +507,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       : mockOptions.activeProjectId;
     let lastProjectUpdate: { projectId: string; updates: JsonObject } | null = null;
     let configGetCount = 0;
+    // The app reports ready after its first loaded frame, when its event listeners are subscribed.
+    let rendererReady = false;
     let nextConfigUpdateError: string | null = null;
     let nextPreferenceSetError: string | null = null;
     let nextBackgroundColorWriteError: string | null = null;
@@ -1085,7 +1104,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         titleBarOverlayWrites.push(clone(colors));
         return success();
       },
-      notifyRendererReady: () => {},
+      notifyRendererReady: () => {
+        rendererReady = true;
+      },
       setBackgroundColor: (payload: { theme: string; color: string }) => {
         backgroundColorWrites.push(clone(payload));
         if (nextBackgroundColorWriteError) {
@@ -2149,6 +2170,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getConfigReadCount() {
           return configGetCount;
+        },
+        isRendererReady() {
+          return rendererReady;
         },
         setSessions(sessions: JsonObject[]) {
           mockSessions = clone(sessions);

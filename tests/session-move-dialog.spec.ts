@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
+import { gotoApp, installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import type { MachineState } from '../shared/types/machineConnections';
 import type { TailnetMachine, TailnetMachineList } from '../shared/types/workspaceAccess';
@@ -260,7 +260,7 @@ async function openSidebar(page: Page, theme: Theme, sessions: JsonObject[], ext
     preflights: { 'studio-a': readyPreflight('studio-a'), 'build-box': readyPreflight('build-box'), 'studio-b': readyPreflight('studio-b'), 'loop-b': readyPreflight('loop-b'), 'studio-c': blockedPreflight },
     afterFix: { 'studio-c': readyPreflight('studio-c') },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   await dismissStartupDialogs(page);
 }
 
