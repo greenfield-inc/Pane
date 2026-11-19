@@ -349,7 +349,13 @@ export interface BrowserPanelState {
 }
 
 /** A browser tab page's size in CSS pixels; `mobile` gives it a phone's layout and touch. */
-export interface BrowserPageSize { width: number; height: number; mobile: boolean }
+export interface BrowserPageSize {
+  width: number;
+  height: number;
+  mobile: boolean;
+  /** The controlling screen's device pixels per CSS pixel, so the page renders sharp there (a phone's 3). */
+  scale?: number;
+}
 
 export interface ToolPanelMetadata {
   createdAt: string;

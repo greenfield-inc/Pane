@@ -134,7 +134,7 @@ const driverSchema = boundary.optional(boundary.union(
   boundary.object({ by: boundary.literal('agent'), agent: boundary.string }),
   boundary.object({ by: boundary.literal('person'), agentWaiting: boundary.optional(boundary.string) }),
 ));
-const pageSizeSchema = boundary.object({ width: boundary.number, height: boundary.number, mobile: boundary.boolean });
+const pageSizeSchema = boundary.object({ width: boundary.number, height: boundary.number, mobile: boundary.boolean, scale: boundary.optional(boundary.number) });
 const tabStateSchema = boundary.object({ currentUrl: boundary.optional(boundary.string), isPopup: boundary.optional(boundary.boolean), driver: driverSchema, pageSize: boundary.optional(pageSizeSchema) });
 /** What a screen showing a tab reports (`browser:watch`); null when it stops showing it. */
 const watchReportSchema = boundary.optional(boundary.object({
@@ -160,6 +160,8 @@ const inputSchema: BoundarySchema<BrowserInput[]> = boundary.array(boundary.unio
 const FRAME_WAIT_MS = 1_000;
 /** The screencast stops this long after the last frame read. */
 const STREAM_IDLE_MS = 10_000;
+/** How long after a load or resize the page settles before the screens get a still of it. */
+const STILL_SETTLE_MS = 300;
 /** JPEG quality of streamed frames (T3 Code's default). */
 const FRAME_QUALITY = 70;
 /** This run of Pane: page ids start again at 1 when it restarts, so screens see `<run>-<id>`. */
@@ -383,7 +385,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       watching: [...new Set(holds.viewers(tab.id).filter(viewer => viewer.onScreen).map(viewer => viewer.kind))],
     };
     if (state.driver) item.driving = state.driver.by === 'person' ? 'person' : state.driver.agent;
-    if (state.pageSize) item.size = state.pageSize;
+    if (state.pageSize) item.size = { width: state.pageSize.width, height: state.pageSize.height, mobile: state.pageSize.mobile };
     const dialog = page ? pages.get(page.id)?.pendingDialog : undefined;
     if (dialog) item.dialog = dialog;
     const saved = downloads.get(tab.id);
@@ -496,6 +498,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     // The page's own view takes the size, so what streams is exactly the page (the window's tab
     // reads it from the tab's state).
     host.sizeHidden(tabId, size);
+    void refreshStill(tabId);
     applyWatch(tabId);
     changedView(tabId);
   }
@@ -511,7 +514,9 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     controllers.set(tabId, viewerId);
     const width = Math.round(Math.min(Math.max(viewer.width, PAGE_MIN), PAGE_MAX.width));
     const height = Math.round(Math.min(Math.max(viewer.height, PAGE_MIN), PAGE_MAX.height));
-    return setPageSize(tabId, { width, height, mobile: viewer.kind === 'phone' });
+    const size: BrowserPageSize = { width, height, mobile: viewer.kind === 'phone' };
+    if (viewer.scale) size.scale = Math.min(Math.max(viewer.scale, 1), 3);
+    return setPageSize(tabId, size);
   }
 
   async function personTouched(tabId: string, pageId: number): Promise<void> {
@@ -832,6 +837,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       // One listener per page, however often its stream stops and starts again.
       if (!streamPages.has(page.id)) {
         streamPages.add(page.id);
+        // A page that finished loading may paint nothing more: the screens get it as a still.
+        page.on('did-stop-loading', () => void refreshStill(tabId));
         page.once('destroyed', () => { streamPages.delete(page.id); const gone = streams.get(page.id); streams.delete(page.id); for (const wake of gone?.waiters ?? []) wake(); });
       }
     }
@@ -842,6 +849,23 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       for (const wake of current.waiters) wake();
     }).catch(cause => console.warn(`[browser] Could not stream tab ${tabId}:`, cause));
     return stream;
+  }
+
+  /**
+   * Sends the screens reading a page a fresh still: after a load or a resize the screencast can
+   * stay quiet until something on the page repaints, leaving them on the old picture.
+   */
+  async function refreshStill(tabId: string): Promise<void> {
+    const page = host.page(tabId);
+    const stream = page ? streams.get(page.id) : undefined;
+    if (!page || !stream || Date.now() - stream.lastRead > STREAM_IDLE_MS) return;
+    await new Promise(resolve => setTimeout(resolve, STILL_SETTLE_MS));
+    if (page.isDestroyed() || streams.get(page.id) !== stream) return;
+    const still = await stream.driver.still(FRAME_QUALITY).catch(() => undefined);
+    if (!still) return;
+    frameSeq += 1;
+    stream.frame = { seq: frameSeq, data: `data:image/jpeg;base64,${still.data}`, width: still.width, height: still.height };
+    for (const wake of stream.waiters) wake();
   }
 
   /** Waits until `ready()` holds or `ms` pass; `waiters` wakes it early. */
