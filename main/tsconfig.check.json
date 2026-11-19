@@ -1,0 +1,16 @@
+// Type checking with bun check (TypeScript 7). tsconfig.json stays the build
+// config for TypeScript 5, which still emits dist; TypeScript 7 dropped
+// `moduleResolution: node` and no longer infers rootDir.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "..",
+    "moduleResolution": "bundler",
+    "paths": {
+      "@agentclientprotocol/sdk/unstable": ["./node_modules/@agentclientprotocol/sdk/dist/v1/unstable/acp.d.ts"],
+      // Its package.json `exports` hides `types` from bundler resolution.
+      "@lydell/node-pty": ["./node_modules/@lydell/node-pty/node-pty.d.ts"]
+    }
+  }
+}

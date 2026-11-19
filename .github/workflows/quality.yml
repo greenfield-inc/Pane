@@ -146,9 +146,10 @@ jobs:
       run: CI=1 pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # Type checking and lint get their own runner: beside the unit tests they
-  # competed for its CPUs and slowed the tests by about 30s. Oxlint runs
-  # first, alone, then the type check, the lint checks and Knip run in parallel; the Finish steps print
-  # each output and fail on errors.
+  # competed for its CPUs and slowed the tests by about 30s. Oxlint, then the
+  # type check (bun check over every tsconfig), each run alone on the 4 CPUs;
+  # then the lint checks and Knip run in parallel. The Finish steps print each
+  # output and fail on errors.
   typecheck-lint:
     name: Type Check and Lint
     runs-on: ubuntu-latest
@@ -162,14 +163,20 @@ jobs:
       with:
         install: 'true'
 
+    # bun's install script puts its binary in place (0.1s; `pnpm rebuild bun`
+    # took 6s). It is the one install script this job needs.
+    - name: Install bun's binary
+      run: node node_modules/bun/install.js
+
     # Oxlint runs alone first: beside the type check it shared the 4 CPUs and
-    # took 21-23s. The other lint:code checks run with the type check.
+    # took 21-23s.
     - name: Lint
       run: scripts/ci-background.sh start lint node scripts/oxlint.mjs && scripts/ci-background.sh wait lint
 
-    - name: Start type checking
+    # Alone too: beside Knip and the lint checks it took 6s.
+    - name: Type check
       if: ${{ !cancelled() }}
-      run: scripts/ci-background.sh start typecheck pnpm typecheck
+      run: scripts/ci-background.sh start typecheck pnpm typecheck && scripts/ci-background.sh wait typecheck
 
     - name: Start lint checks
       if: ${{ !cancelled() }}
@@ -178,10 +185,6 @@ jobs:
     - name: Start dead-code check
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh start deadcode pnpm deadcode
-
-    - name: Finish type checking
-      if: ${{ !cancelled() }}
-      run: scripts/ci-background.sh wait typecheck
 
     - name: Finish dead-code check
       if: ${{ !cancelled() }}
@@ -287,12 +290,6 @@ jobs:
       with:
         install: 'true'
 
-    # pnpm test:renderer-selection in two parts: the tests' type check runs
-    # once, in shard 1, behind the browser install.
-    - name: Start renderer test type check
-      if: ${{ matrix.shard == 1 }}
-      run: scripts/ci-background.sh start renderer-types pnpm --filter frontend exec tsc --noEmit -p ../tests/renderer/tsconfig.json
-
     - name: Install Playwright browsers
       uses: ./.github/actions/playwright-browsers
 
@@ -300,10 +297,6 @@ jobs:
       run: pnpm exec playwright test --config=tests/renderer/playwright.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       env:
         PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
-
-    - name: Check renderer test types
-      if: ${{ !cancelled() && matrix.shard == 1 }}
-      run: scripts/ci-background.sh wait renderer-types
 
   functional-smoke-electron:
     name: Functional Smoke (Electron)
