@@ -604,6 +604,8 @@ export type NotifyCommand =
   | { type: 'ask-agent'; id: string }
   /** Approvals: open the item's link `index` as a tab of `paneId` (the Pane shown beside it), else of the asking Pane. */
   | { type: 'open-link'; id: string; index: number; paneId?: string }
+  /** A link in a card's text: opens where Settings > Links says, beside the asking Pane by default. */
+  | { type: 'open-url'; id: string; url: string }
   | { type: 'hover-info'; id: string; hovering: boolean }
   | { type: 'pause'; minutes: number }
   | { type: 'resume' }
@@ -633,7 +635,7 @@ export interface NotifyFixCommand {
  * Where main asks the window to go. `toggle-inbox` is the Notify shortcut
  * pressed while Pane is in front: Approvals, or back to where you were (D-251).
  */
-export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | { approval: string } | { askAgent: string };
+export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | { approval: string } | { askAgent: string } | { link: string; paneId: string };
 
 /** The floating windows report their card's size so main can fit and place them. */
 export interface NotifyWindowSize {
