@@ -217,8 +217,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       agent => { const tab = host.tab(agent); return tab !== undefined && services.sessionManager.getSession(tab.sessionId)?.archived !== true; },
       // A dialog waiting for an answer counts as action.
       tabId => { const page = host.page(tabId); return page !== undefined && pages.get(page.id)?.pendingDialog !== undefined; },
-      // The person closed the tab: it holds nothing and counts toward no limit.
-      tabId => host.tab(tabId) !== undefined,
+      // The person closed the tab, or archived its Pane: it holds nothing and counts toward no limit.
+      tabId => { const tab = host.tab(tabId); return tab !== undefined && services.sessionManager.getSession(tab.sessionId)?.archived !== true; },
     );
     // The window closed or came back: the live pages move between it and hidden windows, so they
     // are handed over again (each reloads once from its URL).
@@ -304,7 +304,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
 
   function callerOf(): BrowserCaller {
     if (isRemotePaneCommand()) {
-      throw new PaneError('ERR_BROWSER_LOCAL_ONLY', 'Browser tools answer only agents running on this computer, and this call came from another one. Nothing ran.', 'Run the agent in a Pane on the computer that shows the tab.');
+      throw new PaneError('ERR_BROWSER_LOCAL_ONLY', 'Browser tools answer only agents running on this computer, and this call came from another one. Nothing ran.', 'Run the agent in a Pane on the computer that owns the tab\'s Pane.');
     }
     const caller = paneCommandCaller();
     const session = caller?.paneId ? services.sessionManager.getSession(caller.paneId) : undefined;

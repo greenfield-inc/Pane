@@ -547,6 +547,15 @@ describe('browser tabs: the screens that watch them', () => {
     await vi.waitFor(() => expect(held).toEqual(['streamed']));
   });
 
+  it('lets a watched tab go at once when its Pane is archived', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { held, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000, graceMs: 60_000 } } });
+    await fromAfar(fixture, 'persons', 'phone-1', phone);
+    expect(held).toEqual(['persons']);
+    fixture.archive('pane-a');
+    expect(held).toEqual([]);
+  });
+
   it('takes reports only from Pane\'s own screens, never from an agent', async () => {
     const fixture = setup([browserTab('persons', 'pane-a')]);
     expect(await fixture.registry.invokeConnected('browser:watch', ['persons', 'v', phone], signal, claudeInA)).toMatchObject({ success: false });
