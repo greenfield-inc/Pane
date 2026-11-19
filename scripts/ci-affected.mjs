@@ -213,7 +213,7 @@ function fileReferences(text, file) {
   const refs = [];
   const relative = (value, bases) => bases.map((from) => ({ from, path: value }));
   const fromLiteral = (value, line, computed = false) => {
-    if (/^(?:\.\.?\/?)+$/.test(value) && !computed) return;
+    if (/^[./]*$/.test(value) && !computed) return;
     if (value.startsWith('./') || value.startsWith('../')) {
       refs.push({ line, candidates: relative(value, ['file', 'workspace']), computed });
     } else if (/^[A-Za-z0-9_.@-]+\//.test(value)) {
@@ -251,9 +251,10 @@ function fileReferences(text, file) {
     if (!name || args.length < 2 || !FILE_BASE.test(args[0].code ?? '') || args.slice(1).some((arg) => arg.value === undefined)) continue;
     const folder = path.posix.join(...args.slice(1).map((arg) => arg.value));
     if (!/^\.\.(?:\/\.\.)*$/.test(folder)) continue;
-    const uses = [...masked.matchAll(new RegExp(`\\b${name.replace(/\$/g, '\\$')}\\b`, 'g'))];
+    const word = new RegExp(`(?<![\\w$])${name.replace(/[$\\]/g, '\\$&')}(?![\\w$])`, 'g');
+    const uses = [...masked.matchAll(word)];
     const followed = uses.filter((use) => /\b(?:join|resolve|relative)\s*\(\s*$/.test(masked.slice(Math.max(0, use.index - 40), use.index))).length;
-    const inTemplates = [...templateCode.matchAll(new RegExp(`\\b${name.replace(/\$/g, '\\$')}\\b`, 'g'))].length;
+    const inTemplates = [...templateCode.matchAll(word)].length;
     bindings.set(name, { folder, unfollowed: uses.length - 1 - followed + inTemplates, line: text.slice(0, index).split('\n').length });
   }
   for (const [, binding] of bindings) {
