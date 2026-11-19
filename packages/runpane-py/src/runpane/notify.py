@@ -391,7 +391,11 @@ def describe_notify_outcome(result: Dict[str, Any]) -> str:
     if "answer" in result:
         return with_note(f"Answer: {result['answer']}")
     if "status" in result:
-        return f"Saved as {result.get('project')}/{result.get('name')}" if result["status"] == "saved" else "Declined"
+        if result["status"] == "saved":
+            return f"Saved as {result.get('project')}/{result.get('name')}"
+        if result["status"] == "leased":
+            return f"Leased {result.get('project')}/{', '.join(result.get('names') or [])} until {result.get('expiresAt')}"
+        return "Declined"
     return "Shown on screen." if result.get("delivered") == "screen" else "Added to the Notify inbox."
 
 

@@ -292,7 +292,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1500): Promise<void
 }
 
 describe('PaneRemoteHttpApiServer', () => {
-  it.each(['mobile:push-status', 'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke', 'credentials:shared:get', 'credentials:shared:apply', 'notify:switch:get', 'notify:switch:apply'])(
+  it.each(['mobile:push-status', 'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke', 'credentials:shared:get', 'credentials:shared:apply', 'notify:switch:get', 'notify:switch:apply', 'secrets:lease:push', 'secrets:lease:end', 'secrets:lease:list'])(
     'uses the authenticated client for %s even when extra arguments forge an identity', async channel => {
       const registry = new PaneCommandRegistry();
       const handler = vi.fn(async () => ({ ok: true }));
@@ -384,7 +384,7 @@ describe('PaneRemoteHttpApiServer', () => {
     });
   });
 
-  it.each(['credentials:shared:get', 'credentials:shared:apply'])(
+  it.each(['credentials:shared:get', 'credentials:shared:apply', 'secrets:lease:push', 'secrets:lease:end', 'secrets:lease:list'])(
     'refuses %s when the host does not require pairing, so no unpaired caller reads keys', async channel => {
       const registry = new PaneCommandRegistry();
       const handler = vi.fn(async () => ({}));
@@ -1713,7 +1713,7 @@ describe('workspace identity mode', () => {
     expect((await requestJson(server, 'POST', invokePath, invoke, undefined, as(owner))).body).toEqual({ ok: true, result: { teammate: null } });
   });
 
-  it.each(['credentials:shared:get', 'credentials:shared:apply'])(
+  it.each(['credentials:shared:get', 'credentials:shared:apply', 'secrets:lease:push', 'secrets:lease:end', 'secrets:lease:list'])(
     'shares keys over %s with the owner only, even when teammates can connect', async (channel) => {
       const registry = new PaneCommandRegistry();
       const handler = vi.fn(async () => ({}));

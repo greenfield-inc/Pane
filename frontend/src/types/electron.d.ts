@@ -74,7 +74,7 @@ import type { MissionControlAgentPanel, MissionControlSnapshotRequest, MissionCo
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import type { ProjectEnvVar, ProjectEnvVarInput } from '../../../shared/types/projectEnvVars';
-import type { PaneSecretStorage, PaneSecretSummary } from '../../../shared/types/paneSecrets';
+import type { PaneSecretsOverview, SecretLeaseStartRequest, SecretLeaseStartResult } from '../../../shared/types/paneSecrets';
 import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
@@ -145,10 +145,25 @@ interface ElectronAPI {
     updateSettings: (patch: { enabled?: boolean; iosMachineId?: string | null; maxBooted?: number }) => Promise<IPCResponse<DeviceSettings>>;
   };
   paneSecrets: {
-    list: () => Promise<IPCResponse<{ secrets: PaneSecretSummary[]; storage: PaneSecretStorage }>>;
+    list: () => Promise<IPCResponse<PaneSecretsOverview>>;
     /** Data is true when it replaced a saved value. */
     set: (project: string, name: string, value: string) => Promise<IPCResponse<boolean>>;
+    /** Deletes a typed secret, or removes a 1Password reference. */
     delete: (project: string, name: string) => Promise<IPCResponse<boolean>>;
+    /** Points a name at a 1Password item. Data is true when it replaced (deleted) a typed secret of that name. */
+    setReference: (project: string, name: string, reference: string) => Promise<IPCResponse<boolean>>;
+    /** Reads 1Password once (it may ask for Touch ID or Windows Hello) and leases to the machines named. */
+    startLease: (request: SecretLeaseStartRequest) => Promise<IPCResponse<SecretLeaseStartResult>>;
+    /** Ends a lease here and on every machine that holds it. */
+    endLease: (leaseId: string) => Promise<IPCResponse<boolean>>;
+    endAllLeases: () => Promise<IPCResponse<number>>;
+    setLeaseLength: (project: string, lengthMs: number) => Promise<IPCResponse<boolean>>;
+    setMoveVault: (vault: string) => Promise<IPCResponse<boolean>>;
+    /** Vault names from 1Password; it may ask for approval. */
+    listVaults: () => Promise<IPCResponse<string[]>>;
+    /** Writes the typed value into a new item in the picked vault, then makes the name a reference. */
+    moveToOnePassword: (project: string, name: string) => Promise<IPCResponse<{ reference: string }>>;
+    onChanged: (callback: () => void) => () => void;
   };
   onNotesChanged: (callback: () => void) => () => void;
   preferences: PreferencesApi;

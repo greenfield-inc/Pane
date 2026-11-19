@@ -25,9 +25,29 @@ const secretSummarySchema: BoundarySchema<SecretSummary> = boundary.object({
   updatedAt: boundary.string,
   machine: boundary.string,
 });
+const referenceSummarySchema = boundary.object({
+  project: boundary.string,
+  name: boundary.string,
+  reference: boundary.string,
+  updatedAt: boundary.string,
+  machine: boundary.string,
+});
+const leaseSummarySchema = boundary.object({
+  id: boundary.string,
+  project: boundary.string,
+  names: boundary.array(boundary.string),
+  grantedAt: boundary.string,
+  expiresAt: boundary.string,
+  requestedBy: boundary.string,
+  grantedOn: boundary.string,
+  memoryOnly: boundary.boolean,
+});
+// references and leases are optional so an older Pane, which has neither, still decodes.
 const listResultSchema = boundary.object({
   ok: boundary.literal(true),
   secrets: boundary.array(secretSummarySchema),
+  references: boundary.optional(boundary.array(referenceSummarySchema)),
+  leases: boundary.optional(boundary.array(leaseSummarySchema)),
   storage: boundary.object({ kind: boundary.enumeration('keychain', 'file'), encrypted: boundary.boolean }),
 });
 const setResultSchema = boundary.object({ ok: boundary.literal(true), replaced: boundary.boolean, secret: secretSummarySchema });
@@ -36,10 +56,13 @@ const deleteResultSchema = boundary.object({
   deleted: boundary.object({ project: boundary.string, name: boundary.string }),
 });
 const resolveResultSchema = boundary.object({ ok: boundary.literal(true), values: boundary.jsonObject });
+const leaseEndResultSchema = boundary.object({ ok: boundary.literal(true), ended: boundary.boolean });
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const NOT_FOUND_NEXT = 'Run `runpane secrets request`, or open Pane on a desktop connected to this machine so it syncs.';
 const UNAVAILABLE_NEXT = 'Ask the person to save it in Pane under Settings > Secrets, then run your command with `runpane secrets exec`. Do not ask them to paste it into the chat.';
+const LEASE_UNAVAILABLE_NEXT = 'Ask the person to start the lease in Pane under Settings > Secrets, then run your command with `runpane secrets exec`.';
+const LEASE_UNSUPPORTED = 'This Pane doesn\'t support leases yet.';
 
 function invalid(message: string, next: string): RunpaneError {
   return new RunpaneError('SECRET_INVALID', message, next);
@@ -72,11 +95,20 @@ export async function runSecretsList(parsed: ParsedArgs): Promise<number> {
     console.log(JSON.stringify(result, null, 2));
     return 0;
   }
-  if (result.secrets.length === 0) {
+  const references = result.references ?? [];
+  if (result.secrets.length === 0 && references.length === 0) {
     console.log(`No Pane secrets${parsed.project === undefined ? '' : ` in project ${parsed.project}`} on this machine yet.`);
   }
   for (const secret of result.secrets) {
     console.log(`${secret.project}/${secret.name}  set ${secret.updatedAt} on ${secret.machine}`);
+  }
+  for (const reference of references) {
+    const until = (result.leases ?? [])
+      .filter((lease) => lease.project === reference.project && lease.names.includes(reference.name))
+      .map((lease) => lease.expiresAt)
+      .sort()
+      .at(-1);
+    console.log(`${reference.project}/${reference.name}  from 1Password (${reference.reference})  ${until ? `leased until ${until}` : 'no lease'}`);
   }
   if (result.storage.kind === 'file' && !result.storage.encrypted) {
     console.log('This machine has no OS keyring, so its secret values are stored unencrypted in a file only you can read.');
@@ -279,19 +311,75 @@ export async function runSecretsRequest(parsed: ParsedArgs, env: NodeJS.ProcessE
   const reason = requireFlag(parsed, parsed.reason, '--reason', outcome);
   const { caller, timing } = notifyCallerFields(env, process.cwd());
   const request: NotifyRequest = { ui: 'secret', title, context: reason, secret: { project, name }, ...timing, caller };
-  let result: NotifyResult;
+  const result = await askOnCard(parsed, request, UNAVAILABLE_NEXT);
+  console.log(parsed.json ? JSON.stringify(result, null, 2) : describeNotifyResult(result));
+  return 0;
+}
+
+/** Asks Pane's runpane:notify channel and waits; Pane not running or too old reads as unavailable. */
+async function askOnCard(parsed: ParsedArgs, request: NotifyRequest, unavailableNext: string): Promise<NotifyResult> {
   try {
-    result = await invokeDaemon('runpane:notify', [request], notifyResultSchema, { paneDir: parsed.paneDir, timeoutMs: Infinity });
+    return await invokeDaemon('runpane:notify', [request], notifyResultSchema, { paneDir: parsed.paneDir, timeoutMs: Infinity });
   } catch (error) {
     if (!(error instanceof PaneDaemonClientError)) throw error;
-    if (error.connectionFailure) {
-      result = { unavailable: 'Pane is not running.', next: UNAVAILABLE_NEXT };
-    } else if (error.code === 'ERR_UNKNOWN_CHANNEL') {
-      result = { unavailable: 'This Pane doesn\'t support notify yet.', next: UNAVAILABLE_NEXT };
-    } else {
-      throw error;
+    if (error.connectionFailure) return { unavailable: 'Pane is not running.', next: unavailableNext };
+    if (error.code === 'ERR_UNKNOWN_CHANNEL') return { unavailable: 'This Pane doesn\'t support notify yet.', next: unavailableNext };
+    throw error;
+  }
+}
+
+/**
+ * `runpane secrets lease`: a lease card for 1Password-backed secrets. The person starts the lease on
+ * their computer; only the lease's id, end time and machines come back, never a value.
+ */
+export async function runSecretsLease(parsed: ParsedArgs, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  refuseTeammate('ask for a lease', env);
+  const outcome = 'Nothing was shown to the person.';
+  const project = requireFlag(parsed, parsed.project, '--project', outcome);
+  const names = [...new Set(parsed.secretNames ?? [])];
+  if (names.length === 0) {
+    throw invalid(`runpane secrets lease needs the names of the secrets to lease. ${outcome}`, `Run \`runpane secrets lease --project ${project} <NAME>...\`.`);
+  }
+  for (const name of names) {
+    if (!ENV_NAME.test(name)) {
+      throw invalid(`"${name}" is not a valid secret name: use letters, digits and underscores, not starting with a digit. ${outcome}`, 'See the secret names with `runpane secrets list`.');
     }
   }
-  console.log(parsed.json ? JSON.stringify(result, null, 2) : describeNotifyResult(result));
+  const { caller, timing } = notifyCallerFields(env, process.cwd());
+  const title = `Lease ${names.length} secret${names.length === 1 ? '' : 's'}`;
+  const reason = parsed.reason?.trim() ? { context: parsed.reason } : {};
+  const request: NotifyRequest = { ui: 'approve', title, ...reason, lease: { project, names }, ...timing, caller };
+  const result = await askOnCard(parsed, request, LEASE_UNAVAILABLE_NEXT);
+  console.log(parsed.json ? JSON.stringify(result, null, 2) : describeLeaseResult(result));
+  return 0;
+}
+
+function describeLeaseResult(result: NotifyResult): string {
+  if ('status' in result && result.status === 'leased') {
+    return `Leased ${result.project}/${result.names.join(', ')} until ${result.expiresAt} on ${result.machines.join(', ')}. Lease ${result.leaseId}. `
+      + `Use them with \`runpane secrets exec --project ${result.project} -- <command>\`.`;
+  }
+  if (('status' in result && result.status === 'declined') || ('approved' in result && !result.approved)) return 'The person declined the lease.';
+  // A Pane from before leases shows a plain approve card and starts nothing.
+  if ('approved' in result) return `${LEASE_UNSUPPORTED} Nothing was leased. Update Pane.`;
+  return describeNotifyResult(result);
+}
+
+/** `runpane secrets lease end`: ends a lease on this machine. It only removes access, so an agent may do it. */
+export async function runSecretsLeaseEnd(parsed: ParsedArgs): Promise<number> {
+  refuseTeammate('end a lease');
+  const leaseId = requireFlag(parsed, parsed.leaseId, '--id', 'Nothing was ended.');
+  await confirmMutation(parsed);
+  let result;
+  try {
+    result = await invokeDaemon('runpane:secrets:lease:end', [{ leaseId }], leaseEndResultSchema, { paneDir: parsed.paneDir });
+  } catch (error) {
+    if (error instanceof PaneDaemonClientError && error.code === 'ERR_UNKNOWN_CHANNEL') {
+      throw new RunpaneError('SECRET_LEASE_UNSUPPORTED', `${LEASE_UNSUPPORTED} Nothing was ended.`, 'Update Pane.');
+    }
+    throw error;
+  }
+  if (parsed.json) console.log(JSON.stringify(result, null, 2));
+  else console.log(result.ended ? `Ended lease ${leaseId}.` : `No lease ${leaseId} here; it may have ended already.`);
   return 0;
 }
