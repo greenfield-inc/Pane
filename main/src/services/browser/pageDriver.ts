@@ -412,6 +412,16 @@ export class PageDriver {
    * it, and the text a copy or cut took.
    */
   async personInput(batch: readonly BrowserInput[]): Promise<BrowserInputResult> {
+    // While a dialog is open, every command that reaches the page waits behind it (the input that
+    // opened it has not returned): answer it with the browser-side command alone, and send nothing else.
+    if (this.dialog) {
+      const answer = batch.find(input => input.kind === 'dialog');
+      if (answer?.kind === 'dialog') {
+        await this.send('Page.handleJavaScriptDialog', answer.text === undefined ? { accept: answer.accept } : { accept: answer.accept, promptText: answer.text });
+        this.dialog = undefined;
+      }
+      return { field: null };
+    }
     await this.attach();
     // A pointer only passing over the page (hover) gives it no focus.
     const hoverOnly = batch.every(input => input.kind === 'mouse' && input.action === 'move');

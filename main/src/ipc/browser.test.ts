@@ -601,6 +601,18 @@ describe('browser tabs: streaming a page to another screen', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(TOUCH_HOLD_MS - 300);
   });
 
+  it('answers a page\'s dialog from a screen with the browser-side command alone, as the page stays blocked until then', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    await fixture.registry.invokeRemote('browser:view', ['persons', 0], { caller: undefined });
+    const page = fixture.pages.get('persons');
+    page?.debugger.emit('message', {}, 'Page.javascriptDialogOpening', { type: 'confirm', message: 'Delete it?' });
+    page?.sent.splice(0, Infinity);
+    expect(await input(fixture, 'persons', [{ kind: 'dialog', accept: true }])).toEqual({ field: null });
+    expect(page?.sent).toEqual(['Page.handleJavaScriptDialog']);
+    expect(page?.params.get('Page.handleJavaScriptDialog')).toEqual({ accept: true });
+  });
+
   it('lets a pointer pass over the stream without taking the page from the agent', async () => {
     const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
     await fixture.registry.invokeRemote('browser:watch', ['mine', 'phone-1', phone], { caller: undefined });
