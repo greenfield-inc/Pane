@@ -44,7 +44,7 @@ export function useBrowserStream(client: BrowserStreamClient, panelId: string, o
     let cancelled = false;
     let seq = 0;
     let version = 0;
-    let page: number | undefined;
+    let page: string | undefined;
     let frameRetry = RETRY_MIN_MS;
     let viewRetry = RETRY_MIN_MS;
     let timer: number | undefined;
