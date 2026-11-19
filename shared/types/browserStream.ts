@@ -69,6 +69,8 @@ export interface BrowserTabView {
   fileChooser?: { multiple: boolean };
   /** Recent downloads that saved on the host, newest last. */
   downloads: Array<{ name: string; at: number; agent?: string }>;
+  /** The live page's id on the host: a new one means the page reloaded there (it slept, or Pane restarted). */
+  page?: number;
   /** The host's name, for "on studio-mac". */
   host: string;
   stopped?: BrowserStop;
