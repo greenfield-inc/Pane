@@ -1,6 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import { dropRemoteConnection, openConnectedRemotePwa, restoreRemoteConnection } from './remotePwaMock';
 
 test.beforeEach(async ({ page }) => {
@@ -40,17 +40,6 @@ async function dismissStartupDialogs(page: Page) {
     await getStartedButton.click();
     await page.waitForTimeout(500);
   }
-}
-
-/** Main sends the renderer events only once it reports ready, so a test standing in for main waits for that too. */
-async function waitForRendererReady(page: Page) {
-  await expect.poll(() => page.evaluate(() => {
-    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
-    const mock = (window as typeof window & {
-      __paneTestElectronMock?: { isRendererReady: () => boolean };
-    }).__paneTestElectronMock;
-    return mock?.isRendererReady() ?? false;
-  }), { timeout: 30_000 }).toBe(true);
 }
 
 async function clickDomNode(locator: ReturnType<Page['locator']>) {
@@ -107,7 +96,7 @@ async function openAdvancedRemoteSetup(page: Page) {
 test.describe('Smoke Tests', () => {
   test('Application should start successfully', async ({ page }) => {
     // Navigate to the app
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     // Wait for any content to appear
     await page.waitForSelector('body', { timeout: 10000 });
@@ -122,7 +111,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Main UI elements should be visible', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -136,7 +125,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Settings menu item is clickable', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -147,7 +136,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Worktree file sync custom entries remain editable while typing', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -168,7 +157,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Repository menu opens Project Settings with editable Worktree Folder', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -201,7 +190,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Remote daemon settings can pair a device and switch modes', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -232,7 +221,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Remote daemon settings can save an existing connection', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -252,7 +241,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Remote daemon settings seed IPv6 loopback defaults with brackets', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -272,10 +261,9 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Permission dialog can approve a daemonized permission request', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
-    await waitForRendererReady(page);
 
     await page.evaluate(() => {
       // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -303,10 +291,9 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Remote daemon resync refreshes renderer config', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
-    await waitForRendererReady(page);
 
     const beforeCount = await page.evaluate(() => {
       // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -333,10 +320,9 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Remote daemon resync replaces stale renderer sessions', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
-    await waitForRendererReady(page);
 
     const staleSessionName = 'Remote stale pane';
 

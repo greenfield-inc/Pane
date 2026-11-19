@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { gunzipSync } from 'node:zlib';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 
 // The renderer's Content-Security-Policy only lets analytics reach the default host.
 const POSTHOG_HOST = 'https://runpane.com/api/c';
@@ -143,7 +143,7 @@ test('bundled analytics preserves identity and opt-out without remote code, conf
     ],
   });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoApp(page);
   await expect(page.getByRole('button', { name: 'Settings' }).first()).toBeVisible({ timeout: 15000 });
 
   await expect.poll(() => parseCapturedEvents(requests).map((event) => event.event)).toEqual(
@@ -253,7 +253,7 @@ for (const [name, analyticsConsentShown] of [
     ],
   });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoApp(page);
 
   await page.getByRole('button', { name: 'Settings' }).first().click();
   await page.getByRole('button', { name: 'Privacy', exact: true }).click();
@@ -277,7 +277,7 @@ test('DO_NOT_TRACK in the environment sends nothing and locks the Settings switc
     mainAnalyticsEvents: [{ eventName: 'app_opened', properties: { is_first_launch: true } }],
   });
 
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Settings' }).first().click();
   await page.getByRole('button', { name: 'Privacy', exact: true }).click();
   await expect(page.getByText('DO_NOT_TRACK or RUNPANE_TELEMETRY_DISABLED is set')).toBeVisible();

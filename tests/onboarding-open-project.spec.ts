@@ -4,7 +4,7 @@ import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import type { FirstRunAgent, FoundRepo, HostRepos, WslRepos } from '../shared/types/onboarding';
 import type { ImportSession, SessionImportScan } from '../shared/types/sessionImport';
 import type { OrchestrationSessionCreateInput, OrchestrationSessionSelector } from '../shared/types/orchestrationSession';
-import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
+import { gotoApp, installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
 
 // The renderer's Content-Security-Policy only lets analytics reach the default host.
 const POSTHOG_HOST = 'https://runpane.com/api/c';
@@ -128,7 +128,7 @@ async function openFirstRun(page: Page, finder: FinderSetup, options: ElectronAp
       onboarding.checkFolder = async () => answer;
     }
   }, finder);
-  await page.goto('/');
+  await gotoApp(page);
   // goto returns at the page's load event, before main.tsx imports the app; the outline goes once the app has loaded its data.
   await page.locator('#pane-launch-outline').waitFor({ state: 'detached' });
   if (finder.done) return page.getByRole('heading', { name: 'Get Started', exact: true });
