@@ -211,16 +211,17 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     // J2: Take over holds until Hand to: the agent's next call waits, then runs. Touch takeover is
     // in main/src/ipc/browser.test.ts: Playwright's synthetic clicks don't reach a webview's page reliably.
     let email = (await refs(pane, agent))('textbox "Email"');
-    // The chip, with its Take over button, shows while the agent drives: a call that takes a while.
-    // A busy loop, not a timer: a page Chromium counts as hidden may hold its timers back.
+    // The chip, with its Take over button, shows while the agent drives (a call that takes a while)
+    // and a moment after. Take over may land before or during that call: either way it, and the
+    // click after it, wait for Hand to.
     const working = browser(pane, agent, 'evaluate', ['--expression', '(() => { const end = Date.now() + 5000; while (Date.now() < end) { /* busy */ } return true; })()']);
     await page.getByTestId('browser-driver-chip').getByRole('button', { name: 'Take over' }).click();
-    expect(await working).toMatchObject({ ok: true });
     email = (await refs(pane, agent))('textbox "Email"');
     const waiting = browser(pane, agent, 'click', ['--ref', email]);
     await expect(page.getByTestId('browser-driver-chip')).toContainText("You're driving · Claude is waiting");
     await shot(page, 'j2-person-driving');
     await page.getByTestId('browser-driver-chip').getByRole('button', { name: 'Hand to Claude' }).click();
+    expect(await working).toMatchObject({ ok: true });
     expect(await waiting).toMatchObject({ ok: true });
 
     // J15: tab rules.
