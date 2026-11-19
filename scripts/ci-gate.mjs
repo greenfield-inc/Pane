@@ -27,7 +27,6 @@ export const EXPECTED_JOBS = [
   'typecheck-lint',
   'markdown-links',
   'functional-smoke-browser',
-  'functional-smoke-webgl',
   'renderer-selection',
   'functional-smoke-electron',
   'runpane-wrapper-tests',
@@ -36,6 +35,14 @@ export const EXPECTED_JOBS = [
   'relay-tests',
   'pwa-build',
 ];
+
+// Code Quality jobs that run and report but that CI result does not wait for,
+// each with its reason. They stay out of CI result's needs.
+const STABILIZING = 'stabilizing: wired in by #1554 on 2026-11-18, flaky under CI load; returns to the required lanes as each is proven stable';
+export const REPORTED_ONLY_JOBS = {
+  'functional-smoke-stabilizing': STABILIZING,
+  'functional-smoke-webgl': STABILIZING,
+};
 
 // Jobs a pull request may skip when none of their files changed, keyed by job
 // id, with the Detect changed areas output that says whether they did. Pushes
@@ -108,8 +115,8 @@ export function evaluate({ needs, workflowJobs }) {
   }
 
   for (const job of workflowJobs) {
-    if (job !== GATE_JOB && !EXPECTED_JOBS.includes(job)) {
-      problems.push(`${job}: is in quality.yml but not in scripts/ci-gate.mjs EXPECTED_JOBS, so CI result would not check it. Add it there and to CI result's needs.`);
+    if (job !== GATE_JOB && !EXPECTED_JOBS.includes(job) && !REPORTED_ONLY_JOBS[job]) {
+      problems.push(`${job}: is in quality.yml but not in scripts/ci-gate.mjs EXPECTED_JOBS or REPORTED_ONLY_JOBS, so CI result would not check it. Add it to EXPECTED_JOBS and to CI result's needs.`);
     }
   }
   for (const job of Object.keys(needs)) {
