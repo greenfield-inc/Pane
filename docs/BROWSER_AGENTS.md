@@ -108,7 +108,8 @@ Each desktop draws its own copy of a tab. A call goes to the copy you watch:
   when the port has none.
 - **On the agent's computer.** Otherwise the call uses the tab here. When the tab is not in view,
   its page loads in the background and the tab never comes forward. With no Pane window (a
-  headless host), Pane loads the page in a hidden window.
+  headless host), Pane loads the page in a hidden window, where it can't open popups or hand
+  links to other apps, since nobody is there to approve them.
 
 When the page doesn't load within 5 seconds, the call fails with `ERR_BROWSER_NOT_SHOWING`, or
 `ERR_BROWSER_NOT_LINKED` on a host with no window. A

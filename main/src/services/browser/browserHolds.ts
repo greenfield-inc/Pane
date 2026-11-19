@@ -47,34 +47,43 @@ export class BrowserHolds {
     hold.agent = agent;
     hold.running += 1;
     hold.lastAction = this.now();
-    let evicted: string | undefined;
-    if (!existing) {
-      this.holds.set(tabId, hold);
-      const mine = [...this.holds].filter(([, other]) => other.agent === agent);
-      if (mine.length > this.options.limit) {
-        const [oldest] = mine.filter(([id, other]) => id !== tabId && other.running === 0).sort(([, a], [, b]) => a.lastAction - b.lastAction)[0] ?? [];
-        if (oldest) {
-          this.sleep(oldest);
-          evicted = oldest;
-        }
-      }
-    }
+    if (!existing) this.holds.set(tabId, hold);
+    const evicted = this.overLimit(agent, tabId);
     this.changed();
     return evicted === undefined ? { wasAsleep } : { evicted, wasAsleep };
   }
 
-  /** The call finished; the idle clock starts now. */
+  /** The call finished; the idle clock starts now. Calls that all ran at once may leave the agent over its limit. */
   end(tabId: string): void {
     const hold = this.holds.get(tabId);
     if (!hold) return;
     hold.running = Math.max(0, hold.running - 1);
     hold.lastAction = this.now();
+    if (this.overLimit(hold.agent, tabId) !== undefined) this.changed();
   }
 
-  /** Puts holds idle for `idleMs` to sleep, and drops the holds of agents that are gone. */
-  sweep(agentAlive: (agent: string) => boolean, busy: (tabId: string) => boolean): void {
+  /** Puts the agent's longest-idle hold to sleep while it holds more than `limit`; returns the last one. */
+  private overLimit(agent: string, keep: string): string | undefined {
+    let evicted: string | undefined;
+    for (;;) {
+      const mine = [...this.holds].filter(([, other]) => other.agent === agent);
+      if (mine.length <= this.options.limit) return evicted;
+      const [idlest] = mine.filter(([id, other]) => id !== keep && other.running === 0).sort(([, a], [, b]) => a.lastAction - b.lastAction)[0] ?? [];
+      if (!idlest) return evicted;
+      this.sleep(idlest);
+      evicted = idlest;
+    }
+  }
+
+  /** Puts holds idle for `idleMs` to sleep, drops the holds of agents that are gone, and forgets tabs that closed. */
+  sweep(agentAlive: (agent: string) => boolean, busy: (tabId: string) => boolean, tabExists: (tabId: string) => boolean): void {
     let changed = false;
     for (const [tabId, hold] of this.holds) {
+      if (!tabExists(tabId)) {
+        this.holds.delete(tabId);
+        changed = true;
+        continue;
+      }
       if (hold.running > 0 || busy(tabId)) continue;
       if (!agentAlive(hold.agent) || this.now() - hold.lastAction >= this.options.idleMs) {
         this.sleep(tabId);

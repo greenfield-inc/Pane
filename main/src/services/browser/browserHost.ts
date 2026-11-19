@@ -1,4 +1,5 @@
 import { app, BrowserWindow, session, webContents } from 'electron';
+import { hasHeadlessDaemonLaunchArg } from '../../utils/runtimeMode';
 import { SHARED_BROWSER_PARTITION } from '../../../../shared/constants/browserPartitions';
 import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../../../shared/types/browser';
 import path from 'path';
@@ -131,6 +132,19 @@ function newestPage(panelId: string): Electron.WebContents | undefined {
 /** A host with no window keeps each held tab's page in a hidden window, in the shared sign-in store. */
 const headlessPages = new Map<string, BrowserWindow>();
 
+let headlessPartitionGuarded = false;
+
+/**
+ * Nobody watches a hidden page: it opens no windows, and the OS hands it no app (zoommtg:, slack:),
+ * where a tab in a window would ask the person first. A window's tabs set the partition's own rules.
+ */
+function guardHeadlessPage(contents: Electron.WebContents): void {
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  if (headlessPartitionGuarded || !hasHeadlessDaemonLaunchArg()) return;
+  headlessPartitionGuarded = true;
+  session.fromPartition(SHARED_BROWSER_PARTITION).setPermissionRequestHandler((_contents, permission, callback) => callback(permission !== 'openExternal'));
+}
+
 function holdHeadless(tabIds: readonly string[]): void {
   const wanted = new Set(tabIds);
   for (const [panelId, window] of headlessPages) {
@@ -146,9 +160,16 @@ function holdHeadless(tabIds: readonly string[]): void {
     const webPreferences = { partition: SHARED_BROWSER_PARTITION };
     hardenWebviewPreferences(webPreferences);
     const window = new BrowserWindow({ show: false, width: 1280, height: 800, paintWhenInitiallyHidden: true, webPreferences });
+    guardHeadlessPage(window.webContents);
     headlessPages.set(panelId, window);
     getPaneWebviewContextMap().set(window.webContents.id, { panelId, sessionId: panel.sessionId });
     window.webContents.once('destroyed', () => { if (headlessPages.get(panelId) === window) headlessPages.delete(panelId); });
-    void window.loadURL(url).catch(() => undefined);
+    // The tab remembers where its page went, as a tab in a window does, so waking it returns there.
+    window.webContents.on('did-navigate', (_event, pageUrl) => {
+      const current = panelManager.getPanel(panelId);
+      if (!current) return;
+      void panelManager.updatePanel(panelId, { state: { ...current.state, customState: { ...decodeOptionalBoundary(current.state.customState, boundary.jsonObject), currentUrl: pageUrl } } }).catch(() => undefined);
+    });
+    void window.loadURL(url).catch(error => console.warn(`[browser] A held tab's hidden page did not load ${url}:`, error));
   }
 }

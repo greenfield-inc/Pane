@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { PaneError } from '../../../shared/paneError';
 import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { BrowserPanelState, ToolPanel } from '../../../shared/types/panels';
@@ -119,7 +119,18 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
     hasWindow: () => true,
     shotsDirectory: async () => path.join(worktree, '.shots'),
     showCursor: (panelId) => { options.cursors?.push(panelId); },
-    setHeld: (tabIds) => { options.held?.splice(0, Infinity, ...tabIds); },
+    // As the window does: a tab whose hold ends loses its page; a newly held tab gets one.
+    setHeld: (tabIds) => {
+      for (const id of options.held ?? []) if (!tabIds.includes(id)) pages.delete(id);
+      for (const id of tabIds) {
+        const tab = tabs.find(candidate => candidate.id === id);
+        if (!tab || pages.has(id) || options.pagesHere === false) continue;
+        // SAFETY: browserTab builds every tab's customState as a BrowserPanelState.
+        const state = tab.state.customState as BrowserPanelState | undefined;
+        pages.set(id, fakePage(nextPage++, state?.currentUrl ?? 'http://localhost:4173/'));
+      }
+      options.held?.splice(0, Infinity, ...tabIds);
+    },
     onGone: (listener) => { goneListeners.push(listener); },
     setBusy: () => undefined,
     linked: () => options.linked,
@@ -144,7 +155,7 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
     configManager: { getConfig: () => ({ browser: { agentTools: tools } }) },
   };
   const registry = new PaneCommandRegistry();
-  registerBrowserHandlers(services, registry, host, options.holds);
+  onTestFinished(registerBrowserHandlers(services, registry, host, options.holds));
   const archive = (paneId: string) => { archived.add(paneId); for (const listener of goneListeners) listener(); };
   return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree, download, shownDownloads, archive };
 }
@@ -311,7 +322,7 @@ describe('browser tabs: downloads', () => {
 
 describe('browser tools: a tab a linked computer shows (P2)', () => {
   /** The agent's computer, whose tab only the linked desktop shows, wired to that desktop's real channel. */
-  function linkedPair(duringRun?: () => Promise<void>) {
+  function linkedPair(duringRun?: () => Promise<void>, held?: string[]) {
     const viewerCursors: string[] = [];
     const viewer = setup([], { cursors: viewerCursors });
     viewer.pages.set('shown-there', fakePage(9, 'http://localhost:4173/'));
@@ -323,9 +334,16 @@ describe('browser tools: a tab a linked computer shows (P2)', () => {
         return viewer.registry.invokeRemote('runpane:machine:browser', [request], { caller: { paneId: 'remote' } });
       },
     };
-    const agentSide = setup([browserTab('shown-there', 'pane-a', 'claude-a')], { linked, pagesHere: false });
+    const agentSide = setup([browserTab('shown-there', 'pane-a', 'claude-a')], { linked, pagesHere: false, held });
     return { agentSide, viewer, viewerCursors };
   }
+
+  it('holds nothing on the agent\'s computer for a call that runs on the linked computer', async () => {
+    const held: string[] = [];
+    const { agentSide } = linkedPair(undefined, held);
+    expect(await call(agentSide, 'snapshot', {})).toMatchObject({ ok: true });
+    expect(held).toEqual([]);
+  });
 
   it('runs the call on the linked computer\'s copy and brings a screenshot home', async () => {
     const { agentSide, viewer, viewerCursors } = linkedPair();
@@ -465,14 +483,16 @@ describe('browser tools: tabs an agent holds (P4)', () => {
     const held: string[] = [];
     const fixture = setup([], { held });
     const opened: string[] = [];
-    for (let site = 1; site <= 5; site += 1) {
-      const result = await call(fixture, 'open', { url: `http://site-${site}.test/` });
-      opened.push(JSON.parse(JSON.stringify(result)).tab);
-      if (site === 5) expect(result).toMatchObject({ note: expect.stringContaining(`tab ${opened[0]} went to sleep`) });
-    }
-    expect(held.sort()).toEqual(opened.slice(1).sort());
+    for (let site = 1; site <= 4; site += 1) opened.push(JSON.parse(JSON.stringify(await call(fixture, 'open', { url: `http://site-${site}.test/` }))).tab);
+    // The first tab opened is used again, a moment later, so the second is now the one idle longest.
+    await new Promise(resolve => setTimeout(resolve, 10));
+    await call(fixture, 'snapshot', { tab: opened[0] });
+    const fifth = await call(fixture, 'open', { url: 'http://site-5.test/' });
+    expect(fifth).toMatchObject({ note: expect.stringContaining(`tab ${opened[1]} went to sleep`) });
+    expect(held).not.toContain(opened[1]);
+    expect(held).toHaveLength(4);
     const listed = JSON.parse(JSON.stringify(await call(fixture, 'tabs', {}))).tabs;
-    expect(listed.find((tab: { id: string }) => tab.id === opened[0])).toMatchObject({ held: false, asleep: true });
+    expect(listed.find((tab: { id: string }) => tab.id === opened[1])).toMatchObject({ held: false, asleep: true });
   });
 
   it('puts the held tabs to sleep at once when the agent\'s Pane is archived', async () => {
@@ -487,11 +507,43 @@ describe('browser tools: tabs an agent holds (P4)', () => {
 
   it('puts a tab to sleep after the idle time with no agent action, and says so when the agent wakes it', async () => {
     const held: string[] = [];
-    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { held, holds: { limit: 4, idleMs: 150, sweepMs: 40 } });
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { held, holds: { limit: 4, idleMs: 600, sweepMs: 40 } });
     await call(fixture, 'snapshot', {});
     expect(held).toEqual(['mine']);
-    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
+    // Several sweeps later, still inside the idle time: still held.
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(held).toEqual(['mine']);
+    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 3_000 });
     expect(await call(fixture, 'snapshot', {})).toMatchObject({ note: expect.stringContaining('was asleep') });
     expect(held).toEqual(['mine']);
+  });
+
+  it('forgets the hold of a tab the person closed, so it counts toward no limit', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { held, holds: { limit: 4, idleMs: 60_000, sweepMs: 40 } });
+    await call(fixture, 'snapshot', {});
+    expect(held).toEqual(['mine']);
+    fixture.tabs.splice(0, 1);
+    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
+  });
+
+  it('keeps an agent at four held tabs when its calls to five tabs run at once', async () => {
+    const held: string[] = [];
+    const tabs = [1, 2, 3, 4, 5].map(n => browserTab(`t${n}`, 'pane-a', 'claude-a', `http://site-${n}.test/`));
+    const fixture = setup(tabs, { held });
+    await Promise.all(tabs.map(tab => call(fixture, 'snapshot', { tab: tab.id })));
+    expect(held).toHaveLength(4);
+  });
+
+  it('says a tab was asleep only when its page really went away', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { held, holds: { limit: 4, idleMs: 100, sweepMs: 40 } });
+    await call(fixture, 'snapshot', {});
+    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
+    // The person selected the tab meanwhile, so its page is back.
+    fixture.pages.set('mine', fakePage(50, 'http://localhost:4173/'));
+    const listed = JSON.parse(JSON.stringify(await call(fixture, 'tabs', {}))).tabs;
+    expect(listed[0]).toMatchObject({ asleep: false });
+    expect(JSON.parse(JSON.stringify(await call(fixture, 'snapshot', {}))).note ?? '').not.toContain('was asleep');
   });
 });

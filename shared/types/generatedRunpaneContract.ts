@@ -1029,7 +1029,7 @@ export const RUNPANE_CONTRACT = {
     {
       "name": "browser tabs",
       "mcpName": "browser_tabs",
-      "summary": "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, any pending dialog, whether you hold it or it is asleep, and files you downloaded.",
+      "summary": "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, any pending dialog, whether an agent holds it or it is asleep, and files you downloaded.",
       "usage": [
         "runpane browser tabs [--json] [--pane-dir <path>]"
       ],
@@ -6434,7 +6434,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane browser tabs [--json] [--pane-dir <path>]",
         "",
-        "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, any pending dialog, whether you hold it or it is asleep, and files you downloaded. Use an id with --tab when the Pane has more than one browser tab.",
+        "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, any pending dialog, whether an agent holds it or it is asleep, and files you downloaded. Use an id with --tab when the Pane has more than one browser tab.",
         "",
         "Options:",
         "  --json                         Print machine-readable output",
@@ -21243,7 +21243,7 @@ export const RUNPANE_CONTRACT = {
         },
         "showing": {
           "type": "boolean",
-          "description": "Whether its page is live now. A tab that is not showing comes forward on your next call."
+          "description": "Whether its page is live now. A tab whose page is not live loads it in the background on your next call; it never comes forward."
         },
         "held": {
           "type": "boolean",
@@ -29389,7 +29389,7 @@ export const RUNPANE_CONTRACT = {
       },
       "browser tabs": {
         "name": "browser tabs",
-        "summary": "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, any pending dialog, whether you hold it or it is asleep, and files you downloaded.",
+        "summary": "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, any pending dialog, whether an agent holds it or it is asleep, and files you downloaded.",
         "details": "Use an id with --tab when the Pane has more than one browser tab.",
         "requiresPaneDaemon": true,
         "mutates": false,

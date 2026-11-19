@@ -1,7 +1,8 @@
-import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { Suspense, lazy, memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import type { ToolPanel } from '../../../../../shared/types/panels';
 import { usePanelStore } from '../../../stores/panelStore';
 import { panelApi } from '../../../services/panelApi';
+import { PanelErrorBoundary } from '../PanelErrorBoundary';
 
 const BrowserPanel = lazy(() => import('./BrowserPanel'));
 
@@ -60,7 +61,7 @@ export function BrowserSlot({ panel, isActive }: { panel: ToolPanel; isActive: b
 }
 
 /** The pages of browser tabs in view or held, each over its tab's slot or hidden. */
-export function BrowserLayer() {
+export const BrowserLayer = memo(function BrowserLayer() {
   useSyncExternalStore(subscribe, () => version);
   const panelsBySession = usePanelStore(state => state.panels);
   const [, relayout] = useState(0);
@@ -108,14 +109,16 @@ export function BrowserLayer() {
 
   return (
     <>
-      {[...ids].map(id => {
+      {/* A fixed order: React never moves a page's element, which would reload its webview. */}
+      {[...ids].sort().map(id => {
         const slot = slots.get(id);
         const panel = slot?.panel ?? byId.get(id) ?? lastPanels.get(id);
         if (!panel) return null;
         lastPanels.set(id, panel);
-        const visible = slot !== undefined && slot.active && slot.element.isConnected;
-        const measured = visible ? slot.element.getBoundingClientRect() : undefined;
-        const rect = measured && measured.width > 0 ? { left: measured.left, top: measured.top, width: measured.width, height: measured.height } : lastRects.get(id) ?? { left: 0, top: 0, width: 1280, height: 800 };
+        // A slot inside something hidden (Settings over the Pane) is not on screen, whatever its tab says.
+        const measured = slot?.active && slot.element.isConnected && slot.element.checkVisibility() ? slot.element.getBoundingClientRect() : undefined;
+        const visible = measured !== undefined && measured.width > 0 && measured.height > 0;
+        const rect = visible ? { left: measured.left, top: measured.top, width: measured.width, height: measured.height } : lastRects.get(id) ?? { left: 0, top: 0, width: 1280, height: 800 };
         lastRects.set(id, rect);
         // A hidden page is not drawn, and Chromium throttles it. While a call runs on it, it is drawn
         // fully transparent under the tab in view, so its screenshots are current.
@@ -131,12 +134,14 @@ export function BrowserLayer() {
         };
         return (
           <div key={id} style={style} aria-hidden={!visible} inert={!visible ? true : undefined} data-browser-page={id} data-browser-page-visible={visible}>
-            <Suspense fallback={null}>
-              <BrowserPanel panel={panel} isActive={visible} />
-            </Suspense>
+            <PanelErrorBoundary panelId={panel.id}>
+              <Suspense fallback={null}>
+                <BrowserPanel panel={panel} isActive={visible} />
+              </Suspense>
+            </PanelErrorBoundary>
           </div>
         );
       })}
     </>
   );
-}
+});

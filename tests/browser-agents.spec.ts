@@ -107,6 +107,10 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
   app.context().on('page', leaveDialogs);
   try {
     await dismissDialogs(page);
+    // A loaded test machine can raise Pane's own "Memory is tight" card over the window at any time.
+    await page.addLocatorHandler(page.getByText('Memory is tight', { exact: true }).first(), async () => {
+      await page.getByRole('button', { name: 'Not now', exact: true }).first().click();
+    });
     await expect.poll(() => runpane(pane, ['sessions', 'list', '--json']).then(() => true, () => false), { timeout: 30_000 }).toBe(true);
     await runpane(pane, ['repos', 'add', '--path', repo, '--yes', '--json']);
     const other = await newPane(pane, 'repo', 'other');
@@ -123,7 +127,7 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     await browser(pane, agent, 'select', ['--ref', form('combobox "Country"'), '--values', '["Canada"]']);
     await browser(pane, agent, 'click', ['--ref', form('button "Create account"')]);
     // The tab shows who drives while the agent's calls run.
-    await expect(page.getByTestId('browser-driver-chip')).toContainText('is driving');
+    await expect(page.locator('[data-browser-page-visible="true"]').getByTestId('browser-driver-chip')).toContainText('is driving');
     await shot(page, 'j1-agent-driving');
     const after = await browser(pane, agent, 'snapshot');
     expect(after.snapshot).toContain('Welcome, ada@example.com (ca)');
@@ -177,31 +181,40 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     expect((await browser(pane, agent, 'tabs')).code).toBe('ERR_BROWSER_TOOLS_OFF');
     await page.evaluate(() => window.electronAPI.config.update({ browser: { agentTools: true } }));
 
-    // J2: the person clicks into the page while the agent drives: they drive until they stop, and
-    // the agent's refs go stale.
+    // J2: Take over holds until Hand to: the agent's next call waits, then runs. Touch takeover is
+    // in main/src/ipc/browser.test.ts: Playwright's synthetic clicks don't reach a webview's page reliably.
     let email = (await refs(pane, agent))('textbox "Email"');
-    const box = await page.locator('webview').last().boundingBox();
-    if (!box) throw new Error('The browser tab has no page on screen.');
-    const touch = { x: box.x + box.width / 2, y: box.y + 200 };
-    await browser(pane, agent, 'click', ['--ref', email]);
-    // Input within 300 ms of the agent's own counts as the agent's; the person comes a moment later.
-    await page.waitForTimeout(500);
-    // A synthetic click into a webview that lacks focus can miss it; retry until Pane sees the person.
-    await expect(async () => {
-      await page.mouse.click(touch.x, touch.y);
-      await expect(page.getByTestId('browser-agent-overlay').last()).toHaveAttribute('data-driving', 'person', { timeout: 600 });
-    }).toPass({ timeout: 15_000 });
-    expect((await browser(pane, agent, 'click', ['--ref', email])).code).toBe('ERR_BROWSER_STALE_REF');
-    email = (await refs(pane, agent))('textbox "Email"');
-    expect(await browser(pane, agent, 'click', ['--ref', email])).toMatchObject({ ok: true });
-    // Take over holds until Hand to: the agent's next call waits, then runs.
-    await page.getByTestId('browser-driver-chip').getByRole('button', { name: 'Take over' }).click();
+    // The chip, with its Take over button, shows while the agent drives: a call that takes a while.
+    const working = browser(pane, agent, 'evaluate', ['--expression', 'new Promise(resolve => setTimeout(resolve, 5000))']);
+    await page.locator('[data-browser-page-visible="true"]').getByTestId('browser-driver-chip').getByRole('button', { name: 'Take over' }).click();
+    expect(await working).toMatchObject({ ok: true });
     email = (await refs(pane, agent))('textbox "Email"');
     const waiting = browser(pane, agent, 'click', ['--ref', email]);
-    await expect(page.getByTestId('browser-driver-chip')).toContainText("You're driving · Claude is waiting");
+    await expect(page.locator('[data-browser-page-visible="true"]').getByTestId('browser-driver-chip')).toContainText("You're driving · Claude is waiting");
     await shot(page, 'j2-person-driving');
-    await page.getByTestId('browser-driver-chip').getByRole('button', { name: 'Hand to Claude' }).click();
+    await page.locator('[data-browser-page-visible="true"]').getByTestId('browser-driver-chip').getByRole('button', { name: 'Hand to Claude' }).click();
     expect(await waiting).toMatchObject({ ok: true });
+
+    // J13: background tabs. A second tab comes forward; the first keeps its half-filled form while
+    // hidden, across a Pane switch, and no page is drawn over Settings.
+    const first = opened.tab ?? '';
+    await browser(pane, agent, 'navigate', ['--tab', first, '--url', `${origin}/`]);
+    const firstForm = (await browser(pane, agent, 'snapshot', ['--tab', first])).snapshot;
+    await browser(pane, agent, 'type', ['--tab', first, '--ref', refIn(firstForm, 'textbox "Email"'), '--text', 'half@filled.test']);
+    const second = await browser(pane, agent, 'open', ['--url', `${origin.replace('127.0.0.1', 'localhost')}/`]);
+    expect(second).toMatchObject({ ok: true, reused: false });
+    const emailValue = async () => (await browser(pane, agent, 'evaluate', ['--tab', first, '--expression', "document.getElementById('email').value"])).value;
+    expect(await emailValue()).toBe('half@filled.test');
+    await page.locator(`[data-sidebar-key="pane-${other.paneId}"]`).click();
+    await expect(page.locator('[data-browser-page-visible="true"]')).toHaveCount(0);
+    await page.locator(`[data-sidebar-key="pane-${agent.paneId}"]`).click();
+    await expect(page.locator('[data-browser-page-visible="true"]')).toHaveCount(1);
+    expect(await emailValue()).toBe('half@filled.test');
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('pane:open-settings', { detail: { category: 'browser' } })));
+    await expect(page.locator('[data-browser-page-visible="true"]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Back', exact: true }).first().click();
+    await expect(page.locator('[data-browser-page-visible="true"]')).toHaveCount(1);
+    expect(await browser(pane, agent, 'close', ['--tab', second.tab ?? ''])).toMatchObject({ ok: true });
 
     // J15: tab rules.
     expect((await browser(pane, other, 'snapshot')).code).toBe('ERR_BROWSER_NO_TAB');
