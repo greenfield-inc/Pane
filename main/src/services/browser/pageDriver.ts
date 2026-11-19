@@ -296,8 +296,9 @@ export class PageDriver {
     const run = this.screenshots.then(async (): Promise<PageScreenshot> => {
       const size = this.size;
       if (!fullPage && size) {
-        // The view is the tab's size, and the page a viewer's: capture the page at its own size.
-        const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 } }), screenshotSchema);
+        // The view is the tab's size, and the page a viewer's: the debugger captures the emulated
+        // viewport at its own size, where it is scrolled to (a clip would be in document coordinates).
+        const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'png' }), screenshotSchema);
         // The PNG is in device pixels (2x on a Retina host), as capturePage's is: report its own size.
         const png = Buffer.from(shot.data, 'base64');
         return { png, width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
