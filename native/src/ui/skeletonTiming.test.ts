@@ -26,3 +26,8 @@ it('continues the timing of a skeleton that ended just before, and starts fresh 
   expect(skeletonStart(2_300, { started: 1_000, ended: 2_000 })).toBe(2_300);
   expect(skeletonStart(2_300, null)).toBe(2_300);
 });
+
+it('never moves a skeleton’s start later, so two skeletons can’t keep taking over from each other', () => {
+  // The skeleton's own earlier span, recorded as it took over a start of 1 000.
+  expect(skeletonStart(1_000, { started: 2_000, ended: 2_010 })).toBe(1_000);
+});

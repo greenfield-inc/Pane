@@ -10,10 +10,10 @@ const SKELETON_HANDOFF_MS = 100;
 /**
  * When a load starting at `now` counts as started: a skeleton that takes over from one that just
  * ended (a Pane's skeleton handing over to its terminal's) keeps that one's start, so the screen
- * never goes blank between them for another 150 ms.
+ * never goes blank between them for another 150 ms. A start only ever moves earlier.
  */
 export function skeletonStart(now: number, lastEnded: { started: number; ended: number } | null): number {
-  return lastEnded && now - lastEnded.ended <= SKELETON_HANDOFF_MS ? lastEnded.started : now;
+  return lastEnded && lastEnded.started < now && now - lastEnded.ended <= SKELETON_HANDOFF_MS ? lastEnded.started : now;
 }
 
 export interface SkeletonState {
