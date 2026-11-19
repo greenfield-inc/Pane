@@ -373,7 +373,7 @@ function upgrade(options: RelayAgentOptions, path: string): Promise<{ stream: tl
       socket.off('error', onError);
       clearTimeout(timer);
       const statusLine = head.subarray(0, head.indexOf('\r\n')).toString('latin1');
-      if (!/^HTTP\/1\.1 101 /u.test(statusLine)) {
+      if (!statusLine.startsWith('HTTP/1.1 101 ')) {
         socket.destroy();
         reject(new Error(`The relay refused ${path.startsWith('/v1/data') ? 'a data connection' : 'this computer'}: ${statusLine}`));
         return;

@@ -799,7 +799,7 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /** One conditional row write: false means another answer or close got there first, and the row's version is back in memory. */
-  private claimRow(entry: Entry, before: NotifyItem): boolean {
+  private claimRow(entry: Entry, _before: NotifyItem): boolean {
     const { store } = this.env;
     if (!store) return true;
     let claimed: boolean;

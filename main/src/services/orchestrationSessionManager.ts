@@ -14,7 +14,7 @@ import { panelManager } from './panelManager';
 import { getChatTabManager } from './chatTabs';
 import { sessionChatLaunch } from './chatTabs/launch';
 import type { SessionAdoption } from './chatTabs/switchToChat';
-import type { ChatPanelState, ChatTabLaunch } from '../../../shared/types/chatTab';
+import type { ChatPanelState } from '../../../shared/types/chatTab';
 import type { NotifySession } from '../../../shared/types/notify';
 
 /** What a Session needs from the host's chat tabs. */

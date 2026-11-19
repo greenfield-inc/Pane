@@ -47,7 +47,7 @@ function deps(panes: InventoryPane[], overrides: Partial<InventoryDeps> = {}): I
 }
 
 const pane = (id: string, name: string, extra: Partial<InventoryPane> = {}): InventoryPane & { worktreePath: string } => ({
-  id, name, worktreePath: path.join(root, 'repo', 'worktrees', name), projectPath: path.join(root, 'repo'), branch: name,
+  id, name, projectPath: path.join(root, 'repo'), branch: name,
   archived: false, paused: false, updatedAt: NOW - 30 * DAY, isMainRepo: false, ownedByPane: true, ...extra, worktreePath: path.join(root, 'repo', 'worktrees', name),
 });
 

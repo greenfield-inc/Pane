@@ -5,6 +5,7 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
+const { inShard } = require('./runpane-test-shard');
 
 const rootDir = path.resolve(__dirname, '..');
 const npmCli = path.join(rootDir, 'packages', 'runpane', 'dist', 'cli.js');
@@ -7316,102 +7317,127 @@ print(json.dumps(errors))
   assert.ok(!validAnswer({ id: 'n-1', answer: { text: 'main', note: 'x' }, because: 'D-1' }), 'a typed answer takes no note');
 }
 
+function runSetupPtyCheck() {
+  runPythonSnippet('import runpy; runpy.run_path("scripts/test-runpane-setup-pty.py", run_name="__main__")');
+}
+
+function runNodeTestFile(name) {
+  childProcess.execFileSync(process.execPath, ['--test', path.join(__dirname, name)], {
+    cwd: rootDir,
+    env: { ...process.env, PYTHON: findPython() },
+    stdio: 'inherit',
+  });
+}
+
+function runDispatchTests() {
+  runNodeTestFile('test-runpane-dispatch.js');
+}
+
+function runPythonParityTests() {
+  runNodeTestFile('test-runpane-python-parity.js');
+}
+
+// Each runs in one RUNPANE_TEST_SHARD part (scripts/runpane-test-shard.js),
+// dealt out back and forth, so the list runs slowest first (Windows CI times)
+// to give each part a fair share of the slow checks. The two prerequisites above the
+// list run in every part.
+const checks = [
+  checkWatchStreamParity,
+  checkAutopilotParity,
+  checkPanelsConversation,
+  checkWatchUntilEvent,
+  checkNotifyParity,
+  checkProfiles,
+  checkDispatchWait,
+  checkSecretsParity,
+  compareAgentContextParity,
+  checkPythonDaemonTimeouts,
+  checkReportOutcome,
+  checkReportStructuredOptions,
+  runPythonParityTests,
+  checkPauseCommands,
+  checkDryRunMessages,
+  checkReportDeliveryLine,
+  runDispatchTests,
+  compareParserParity,
+  checkSessionPinCommands,
+  checkHelpOutput,
+  checkPanesCreateBaseNotice,
+  checkReportParity,
+  checkCliEventSubscriptions,
+  checkPaneArchiveDryRunParity,
+  compareRemoteSetupDiagnosticParity,
+  checkNoArgsAndSetupFallback,
+  checkDoctorExitStatus,
+  checkOverviewReportsAndLocks,
+  checkDoctorReportSafety,
+  compareLegacyRemoteDaemonHealthParity,
+  checkGuidedRemoteSetup,
+  checkFollowRequiresPositiveTimeout,
+  checkExistingDaemonShortCircuit,
+  checkComposerStrategyRequests,
+  checkLockParity,
+  checkLeadingDashTextArguments,
+  checkWatchFormatterGoldens,
+  checkPythonWatchReaderClosedErrnos,
+  compareWrapperTelemetrySanitizers,
+  checkFromJsonAcceptsBom,
+  checkWrapperAgentParity,
+  checkAttachParity,
+  checkDeliveryParity,
+  checkOlderOutputNote,
+  checkArchiveClosedAndCallerPanel,
+  checkPanesCostParity,
+  checkPanesAdoptCliParity,
+  checkPaneCreateResultFields,
+  compareExistingReusePolicy,
+  checkCreateAssociationSource,
+  checkPanePinParity,
+  checkFilePointerParity,
+  checkChatTabCreateParity,
+  checkPanelsCloseParity,
+  checkPanelResumeCommandExitedReadiness,
+  checkPanelCloseForceParity,
+  checkSessionChildPinDefaults,
+  checkPaneRenameParity,
+  checkRepoSettingsParity,
+  checkMachineParity,
+  checkLoopsParity,
+  checkInstallerFailures,
+  compareArtifactSelectionParity,
+  checkPreferredDownloadUrls,
+  compareDaemonLaunchEnvironmentParity,
+  checkPythonUnixEndpointSeparatorsAreHostIndependent,
+  compareDaemonLaunchArgsParity,
+  checkPlatformMatchingEdgeCases,
+  checkWindowsPaneVersionDoesNotLaunchExecutable,
+  checkCreatePayloadErrorPaths,
+  comparePlatformParity,
+  compareDaemonEndpointParity,
+  runSetupPtyCheck,
+  compareDaemonRepairJsonParity,
+  checkLinuxPackageCompatibilityAlias,
+  checkUpdateInstallsWhenPaneIsNotRunning,
+  checkPaneAdoptOverrides,
+  checkPaneCreateBlockedReadiness,
+  checkSessionRuntime,
+  checkBoundaryDecoderCollectsEveryIssue,
+  checkSessionPayloadErrors,
+  checkContractDocListsEveryCommand,
+  checkAgentTemplateParity,
+  checkWorkspacesSummarySchema,
+  checkNodeReleaseTimeout,
+];
+
 async function runChecks() {
   checkGeneratedContractFresh();
   ensureBuiltCli();
-  await checkCliEventSubscriptions();
-  checkFollowRequiresPositiveTimeout();
-  await checkDoctorExitStatus();
-  await checkInstallerFailures();
-  await checkCreatePayloadErrorPaths();
-  await checkPaneCreateResultFields();
-  await checkDryRunMessages();
-  checkLeadingDashTextArguments();
-  await checkPythonDaemonTimeouts();
-  compareParserParity();
-  checkWatchFormatterGoldens();
-  await checkWatchStreamParity();
-  await checkWatchUntilEvent();
-  await checkDispatchWait();
-  checkPythonWatchReaderClosedErrnos();
-  compareLegacyRemoteDaemonHealthParity();
-  compareDaemonRepairJsonParity();
-  await checkLinuxPackageCompatibilityAlias();
-  comparePlatformParity();
-  compareDaemonEndpointParity();
-  checkPythonUnixEndpointSeparatorsAreHostIndependent();
-  compareArtifactSelectionParity();
-  await checkPreferredDownloadUrls();
-  await checkUpdateInstallsWhenPaneIsNotRunning();
-  compareWrapperTelemetrySanitizers();
-  compareExistingReusePolicy();
-  compareDaemonLaunchEnvironmentParity();
-  compareDaemonLaunchArgsParity();
-  compareRemoteSetupDiagnosticParity();
-  checkPlatformMatchingEdgeCases();
-  await checkGuidedRemoteSetup();
-  runPythonSnippet('import runpy; runpy.run_path("scripts/test-runpane-setup-pty.py", run_name="__main__")');
-  await checkExistingDaemonShortCircuit();
-  checkWindowsPaneVersionDoesNotLaunchExecutable();
-  await checkFromJsonAcceptsBom();
-  await checkCreateAssociationSource();
-  checkComposerStrategyRequests();
-  await checkPaneAdoptOverrides();
-  await checkPaneArchiveDryRunParity();
-  await checkPanePinParity();
-  await checkWrapperAgentParity();
-  await checkFilePointerParity();
-  await checkAttachParity();
-  await checkChatTabCreateParity();
-  await checkDeliveryParity();
-  await checkReportParity();
-  await checkOlderOutputNote();
-  await checkPanelsCloseParity();
-  await checkArchiveClosedAndCallerPanel();
-  await checkReportDeliveryLine();
-  await checkReportStructuredOptions();
-  await checkReportOutcome();
-  await checkProfiles();
-  await checkPanelsConversation();
-  await checkNotifyParity();
-  await checkAutopilotParity();
-  await checkPaneCreateBlockedReadiness();
-  await checkPanelResumeCommandExitedReadiness();
-  await checkPanelCloseForceParity();
-  await checkSessionChildPinDefaults();
-  await checkPanesCostParity();
-  await checkPaneRenameParity();
-  await checkRepoSettingsParity();
-  await checkSecretsParity();
-  await checkLockParity();
-  await checkMachineParity();
-  await checkLoopsParity();
-  await checkOverviewReportsAndLocks();
-  await checkSessionRuntime();
-  checkBoundaryDecoderCollectsEveryIssue();
-  await checkSessionPayloadErrors();
-  await checkSessionPinCommands();
-  await checkPauseCommands();
-  await checkPanesAdoptCliParity();
-  await checkPanesCreateBaseNotice();
-  checkContractDocListsEveryCommand();
-  await checkAgentTemplateParity();
-  checkHelpOutput();
-  checkWorkspacesSummarySchema();
-  compareAgentContextParity();
-  await checkNodeReleaseTimeout();
-  checkNoArgsAndSetupFallback();
-  checkDoctorReportSafety();
-  childProcess.execFileSync(process.execPath, ['--test', path.join(__dirname, 'test-runpane-dispatch.js')], {
-    cwd: rootDir,
-    env: { ...process.env, PYTHON: findPython() },
-    stdio: 'inherit',
-  });
-  childProcess.execFileSync(process.execPath, ['--test', path.join(__dirname, 'test-runpane-python-parity.js')], {
-    cwd: rootDir,
-    env: { ...process.env, PYTHON: findPython() },
-    stdio: 'inherit',
-  });
+  for (const [position, check] of checks.entries()) {
+    if (!inShard(position)) continue;
+    const started = Date.now();
+    await check();
+    console.log(`contract check ${check.name} passed (${((Date.now() - started) / 1000).toFixed(1)}s)`);
+  }
   console.log('runpane CLI contract checks passed');
 }
 

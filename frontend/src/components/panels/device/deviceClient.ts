@@ -13,7 +13,8 @@ export interface DeviceTabClient {
   streamUrl?(panelId: string, maxPx: number): string;
   /** Frames per second the stream delivers now, for clients that stream; null when unknown. */
   frameRate?(panelId: string): Promise<number | null>;
-  frame(panelId: string): Promise<string>;
+  /** The latest frame as a data URL; given `maxPx`, no larger than that on its longest side. */
+  frame(panelId: string, maxPx?: number): Promise<string>;
   /** Whether the device turns and folds, and how it is turned and folded now. */
   controls(panelId: string): Promise<DeviceControls>;
   /** A full-resolution screenshot saved as a PNG on the host; given `image` (a PNG data URL), that image saved instead. */
@@ -24,8 +25,6 @@ export interface DeviceTabClient {
   attachToChat(chatPanelId: string, file: File): Promise<void>;
   /** Starts a recording (answering null) or stops it (answering the saved recording). */
   record(panelId: string, action: 'start' | 'stop'): Promise<DeviceRecording | null>;
-  /** When the tab's recording started (epoch ms), or null. */
-  recording(panelId: string): Promise<number | null>;
   logs(panelId: string, since: number): Promise<DeviceLogPage>;
   /** Take over (`person`), or hand the device back to the agent. */
   driver(panelId: string, who: 'person' | 'agent'): Promise<void>;
@@ -51,13 +50,12 @@ export function desktopDeviceClient(remote: boolean): DeviceTabClient {
     clientId: 'desktop',
     streamUrl: remote ? undefined : (panelId, maxPx) => `pane-media://device/${panelId}?max=${maxPx}`,
     frameRate: remote ? undefined : panelId => unwrap(devices.frameRate(panelId)),
-    frame: panelId => unwrap(devices.frame(panelId)),
+    frame: (panelId, maxPx) => unwrap(devices.frame(panelId, maxPx)),
     controls: panelId => unwrap(devices.controls(panelId)),
     capture: (panelId, image) => unwrap(devices.capture(panelId, image)),
     stage: async (panelId, agentPanelId, text) => { await unwrap(devices.stage(panelId, agentPanelId, text)); },
     attachToChat: (chatPanelId, file) => addDraftAttachment(window.electronAPI.chatTab, chatPanelId, file),
     record: (panelId, action) => unwrap(devices.record(panelId, action)),
-    recording: panelId => unwrap(devices.recording(panelId)),
     logs: (panelId, since) => unwrap(devices.logs(panelId, since)),
     driver: async (panelId, who) => { await unwrap(devices.driver(panelId, who)); },
     input: async (panelId, input) => { await unwrap(devices.input(panelId, input)); },

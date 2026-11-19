@@ -352,7 +352,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `devices screenshot`: Capture the screen of this Pane's open device as an image.
 - `devices act`: Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs, orientation landscape-left, fold half-open, record start|stop. Waits while the person has taken over the device in its tab, up to 4 minutes, then fails with ERR_DEVICE_PERSON_DRIVING.
 - `devices run`: Run a command where this Pane's device runs, such as a build (npx expo run:ios) or Metro with --background.
-- `devices close`: Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. The device stays warm for 10 minutes.
+- `devices close`: Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. A device Pane booted stays warm for 10 minutes, then shuts down.
 - `devices usage`: Report every simulator and emulator on this machine, and the memory and disk they, Pane's device tools and build checkouts use.
 - `devices free`: Shut down unused devices (--idle), or also delete every unused device Pane made and the build checkouts no Pane holds (--all).
 - `theme read`: Show Pane's own theme: what is selected, the Custom theme, every colour token with its current value, the stable selectors, and the guide for restyling Pane.

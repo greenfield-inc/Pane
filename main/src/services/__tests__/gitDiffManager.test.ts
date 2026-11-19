@@ -495,7 +495,7 @@ describe('NUL parsers', () => {
   it('coalesces duplicate conflict records and prefers the unmerged kind', () => {
     expect(mergeSummaries(
       parseNameStatusZ('M\0conflict.ts\0U\0conflict.ts\0'),
-      parseNumstatZ('1\t2\tconflict.ts\0' + '3\t4\tconflict.ts\0'),
+      parseNumstatZ('1\t2\tconflict.ts\x003\t4\tconflict.ts\0'),
       [],
     )).toEqual([{
       path: 'conflict.ts',

@@ -2847,7 +2847,7 @@ export class TerminalPanelManager extends EventEmitter {
 
     const state = panel.state;
     state.customState = {
-      ...(state.customState ?? {}),
+      ...state.customState,
       scrollbackBuffer: '',
       serializedBuffer: undefined,
     };
