@@ -9,11 +9,27 @@ export interface BrowserStream {
   frame?: BrowserFrame;
   view?: BrowserTabView;
   stop?: StreamStop;
+  /** When the page was found reloaded on the host (it slept, or Pane there restarted). */
+  reloadedAt?: number;
 }
 
 /** Retries after a failed read back off from 500 ms to 5 s. */
 const RETRY_MIN_MS = 500;
 const RETRY_MAX_MS = 5_000;
+/**
+ * A frame read the host leaves unanswered this long means the host can't be reached: the host
+ * answers within about a second even with nothing new, while a connection that is reconnecting
+ * holds reads instead of failing them.
+ */
+const FRAME_DEADLINE_MS = 5_000;
+
+/** Rejects when `work` takes longer than `ms`; the late answer is dropped. */
+function within<Value>(work: Promise<Value>, ms: number): Promise<Value> {
+  work.catch(() => undefined);
+  let timer: number | undefined;
+  const late = new Promise<never>((_, reject) => { timer = window.setTimeout(() => reject(new Error('The host did not answer in time.')), ms); });
+  return Promise.race([work, late]).finally(() => window.clearTimeout(timer));
+}
 
 /**
  * A browser tab streamed from its host while `on`: the newest frame (one read on its way at a
@@ -28,6 +44,7 @@ export function useBrowserStream(client: BrowserStreamClient, panelId: string, o
     let cancelled = false;
     let seq = 0;
     let version = 0;
+    let page: number | undefined;
     let frameRetry = RETRY_MIN_MS;
     let viewRetry = RETRY_MIN_MS;
     let timer: number | undefined;
@@ -37,7 +54,7 @@ export function useBrowserStream(client: BrowserStreamClient, panelId: string, o
       while (!cancelled) {
         if (document.visibilityState !== 'visible') { await sleep(500); continue; }
         try {
-          const answer = await client.frame(panelId, seq);
+          const answer = await within(client.frame(panelId, seq), FRAME_DEADLINE_MS);
           if (cancelled) return;
           frameRetry = RETRY_MIN_MS;
           if ('frame' in answer) {
@@ -66,7 +83,10 @@ export function useBrowserStream(client: BrowserStreamClient, panelId: string, o
           if (cancelled) return;
           viewRetry = RETRY_MIN_MS;
           version = view.version;
-          setStream(current => ({ ...current, view }));
+          // A different page than before means the host loaded it again from its URL.
+          const reloaded = page !== undefined && view.page !== undefined && view.page !== page;
+          if (view.page !== undefined) page = view.page;
+          setStream(current => (reloaded ? { ...current, view, reloadedAt: Date.now() } : { ...current, view }));
         } catch (cause) {
           if (cancelled) return;
           if (older(cause instanceof Error ? cause : undefined)) { setStream(current => ({ ...current, stop: 'older' })); return; }
