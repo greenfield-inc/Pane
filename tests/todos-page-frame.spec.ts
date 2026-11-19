@@ -165,13 +165,13 @@ test('R1: opens by click and by Enter with the plan showing, details closed, foc
   await expect(page.getByTestId('todo-page')).toHaveAttribute('data-todo', /\d+/);
 });
 
-test('R2: details toggle, narrows the split, closed again after a sub-to-do, width survives reload', async ({ page }) => {
+test('R2: details toggle, takes the split’s column (two splits at most, D-448), closed again after a sub-to-do, width survives reload', async ({ page }) => {
   await open(page);
   await openTodo(page, 12);
   const toggle = page.getByTestId('todo-details-toggle');
   await expect(toggle).toHaveAttribute('aria-label', 'Show details');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  const before = (await page.getByTestId('todo-page-split').boundingBox())!;
+  await expect(page.getByTestId('todo-page-split')).toBeVisible();
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-label', 'Hide details');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
@@ -179,10 +179,11 @@ test('R2: details toggle, narrows the split, closed again after a sub-to-do, wid
   for (const label of ['Status', 'Session', 'Requested by', 'Managed by', 'Working it', 'Repo', 'Machine', 'Machine load', 'Keep moving', 'Created']) {
     await expect(details.locator('dt', { hasText: new RegExp(`^${label}$`) })).toBeVisible();
   }
-  const split = (await page.getByTestId('todo-page-split').boundingBox())!;
+  // The page and the details are the two splits: the file split steps aside while they are open.
+  await expect(page.getByTestId('todo-page-split')).toHaveCount(0);
+  const main = (await page.getByTestId('todo-page-main').boundingBox())!;
   const aside = (await details.boundingBox())!;
-  expect(split.width).toBeLessThan(before.width);
-  expect(split.x + split.width).toBeLessThanOrEqual(aside.x + 1);
+  expect(main.x + main.width).toBeLessThanOrEqual(aside.x + 1);
   // Attachments tab.
   await page.getByTestId('todo-details-tab-files').click();
   await expect(details.getByTestId('todo-file')).toHaveCount(5);
