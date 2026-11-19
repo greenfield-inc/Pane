@@ -39,7 +39,7 @@ export const EXPECTED_JOBS = [
 
 // Jobs a pull request may skip when none of their files changed, keyed by job
 // id, with the Detect changed areas output that says whether they did. Pushes
-// to main and manual runs skip nothing.
+// to main, merge groups and manual runs skip nothing.
 export const SKIP_WHEN_UNCHANGED = {
   'runpane-wrapper-tests': 'runpane',
   'cross-os-main-tests': 'main',

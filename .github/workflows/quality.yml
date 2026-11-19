@@ -5,10 +5,14 @@ on:
     branches: [ main ]
   # Stacked and integration PRs need the same gates before they reach main.
   pull_request:
+  # The merge queue's runs. Each merge group runs every job on its exact merge
+  # commit. The queue is a repository setting (RUNBOOK.md, "Merge queue").
+  merge_group:
+    types: [ checks_requested ]
   workflow_dispatch:
 
 # A new push to a PR cancels that PR's in-flight run. Every other event gets
-# its own group, so no main commit ever loses its run.
+# its own group, so no main commit or merge group ever loses its run.
 concurrency:
   group: code-quality-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
@@ -35,8 +39,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v7
 
+    # A merge group selects nothing, so it never diffs paths (the manifest
+    # below skips jobs only on pull requests).
     - name: Filter changed paths
       id: filter
+      if: github.event_name != 'merge_group'
       uses: dorny/paths-filter@v3
       with:
         filters: |

@@ -220,6 +220,8 @@ interactive `mcp-publisher login github` cannot publish to an organization
 namespace. Check the listing with
 `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=runpane"`.
 
+## CI
+
 `CI result` is the check branch protection requires. It runs even when the
 run is cancelled, and passes only when every `Code Quality` job named in
 `scripts/ci-gate.mjs` `EXPECTED_JOBS` succeeded, or skipped with a reason from
@@ -281,6 +283,41 @@ to `main` writes the new key. Dependencies install fresh in every job: a
 `node_modules` cache saved about 2 s per job on Linux, and its restore breaks
 pnpm's junctions on Windows. To drop a bad entry, delete it with
 `gh cache delete <key>`; the next push to `main` writes it again.
+
+### Merge queue
+
+`Code Quality` also runs on the merge queue's `merge_group` events, so the
+queue can hold every merge to `main` until every `Code Quality` job passes on
+the exact merge commit. In a merge group, Detect changed areas diffs no paths
+and its manifest skips nothing, so every job runs. That covers every lane in
+`scripts/ci-test-inventory.mjs` except the Linux package build's packaged-app
+tests, which run in `linux-package-build.yml` on pull requests that touch
+packaging, and the files its `NOT_IN_CI` list names. No release or
+deploy workflow runs: their push triggers name `main`, `nightly`, `release` or
+tags, never the queue's `gh-readonly-queue/main/*` branches. `CI result` is a
+`Code Quality` job and the only required check, so no other workflow needs the
+trigger.
+
+The queue is off until a repository admin turns it on for `main` (Settings ›
+Rules › Rulesets, or the branch protection rule):
+
+1. Turn on **Require merge queue**.
+2. Choose its merge method. The queue merges every pull request the same way.
+   A stack ([CONTRIBUTING.md](CONTRIBUTING.md#merging)) needs **Merge commit**,
+   so with that choice single pull requests stop being squash-merged. Choosing
+   **Squash** keeps single pull requests as they are but breaks the stack
+   steps.
+3. Keep `CI result` as the only required check. Set the status check timeout
+   above a full run (`main` runs take about 11 minutes at p95), for example 30
+   minutes.
+4. Keep **Only merge non-failing pull requests** on, and remove the bypasses
+   that let anyone merge around the queue.
+
+Once it is on, merging a pull request adds it to the queue
+(`gh pr merge <number>` does this too). GitHub builds a merge group of `main`
+plus the queued pull requests, and `Code Quality` runs on it. A group whose
+`CI result` fails is not merged, and its pull requests leave the queue. Pushes
+to `main` still run `Code Quality` as before.
 
 ## Recovery and rollback
 
