@@ -786,11 +786,19 @@ test('an observed active terminal resize debounces through the existing xterm re
     // SAFETY: This test exclusively owns the optional recorder property for this page.
     const testWindow = window as typeof window & {
       __terminalResizeCalls?: Array<{ panelId: string; cols: number; rows: number }>;
+      __activationBackstopResized?: boolean;
     };
     const originalInvoke = window.electronAPI.invoke.bind(window.electronAPI);
     testWindow.__terminalResizeCalls = [];
-    // SAFETY: The wrapper preserves invoke's arguments and return value and only records one channel.
+    let backstopStarted = false;
+    // SAFETY: The wrapper preserves invoke's arguments and return value and only records two channels.
     window.electronAPI.invoke = ((channel: string, ...args: unknown[]) => {
+      if (channel === 'console:log' && JSON.stringify(args).includes('Delayed activation refresh for panel adaptive-dock')) {
+        backstopStarted = true;
+      }
+      if (channel === 'terminal:resize' && args[0] === 'adaptive-dock' && backstopStarted) {
+        testWindow.__activationBackstopResized = true;
+      }
       if (channel === 'terminal:resize') {
         testWindow.__terminalResizeCalls?.push({
           panelId: String(args[0]),
@@ -807,8 +815,12 @@ test('an observed active terminal resize debounces through the existing xterm re
   await expect(terminalDock.locator('.xterm')).toBeVisible();
   await expect(terminalDock.locator('.pane-terminal-shell-body')).not.toHaveAttribute('inert', '');
 
-  // Let mount and activation fitting settle so only the observed container change is recorded.
-  await page.waitForTimeout(700);
+  // Let mount and activation fitting settle so only the observed container change is
+  // recorded: the activation's delayed backstop refit is the last one it makes.
+  await expect.poll(() => page.evaluate(() => {
+    // SAFETY: The recorder was installed by this test earlier in the same page lifetime.
+    return (window as typeof window & { __activationBackstopResized?: boolean }).__activationBackstopResized === true;
+  })).toBe(true);
   await page.evaluate(() => {
     // SAFETY: The recorder was installed by this test earlier in the same page lifetime.
     const testWindow = window as typeof window & { __terminalResizeCalls?: unknown[] };
@@ -818,14 +830,8 @@ test('an observed active terminal resize debounces through the existing xterm re
   const initialHeight = (await terminalDock.boundingBox())!.height;
   const terminalSeparator = page.getByRole('separator', { name: 'Resize terminal' });
   await terminalSeparator.focus();
-  // Two steps two frames apart, well inside the 150 ms resize debounce. Sent from the
-  // page, so a slow runner's key round trips can't stretch the gap past the debounce.
-  await terminalSeparator.evaluate(async (separator) => {
-    const press = () => separator.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
-    press();
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    press();
-  });
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
   await expect.poll(async () => (await terminalDock.boundingBox())!.height).toBe(initialHeight + 20);
 
   await expect.poll(() => page.evaluate(() => {
