@@ -104,3 +104,11 @@ test('the map check accepts a sound map and rejects a broken one', () => {
     'lane main: job main-tests names frontend/page.ts in quality.yml, which is outside the lane\'s inputs.',
   ]);
 });
+
+test('the map check rejects a test file the inventory runs in a lane job but the lane leaves out', () => {
+  const testLanes = [{ workflow: 'quality.yml', job: 'main-tests', list: { named: ['frontend/page.ts', 'scripts/tool.js'] } }];
+  const workflowText = WORKFLOW.replace('--filter website ', '');
+  assert.deepEqual(mapProblems({ lanes: LANES, laneFree: LANE_FREE, files: FILES, workflowText, testLanes }), [
+    'lane main: job main-tests runs frontend/page.ts (scripts/ci-test-inventory.mjs), which is outside the lane\'s inputs.',
+  ]);
+});

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 declare global {
   interface Window {
@@ -61,7 +61,7 @@ for (const fullscreen of [false, true]) {
         initialTerminalStates: { [panels[1].id]: { scrollbackBuffer: modes } },
         activeProjectId: project.id,
       });
-      await page.goto('/');
+      await gotoApp(page);
       await page.evaluate((isAlternateScreen) => {
         const calls: string[] = [];
         window.__terminalInputMessages = calls;
@@ -118,7 +118,7 @@ test('keys typed while the terminal is still opening reach the shell', async ({ 
     const load = document.fonts.load.bind(document.fonts);
     document.fonts.load = (...args) => (window.__holdFontLoads ?? Promise.resolve()).then(() => load(...args));
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.evaluate(() => {
     const calls: string[] = [];
     window.__terminalInputMessages = calls;
@@ -152,7 +152,7 @@ test('macOS Ctrl+Backslash sends SIGQUIT while Cmd+Backslash splits a multi-tab 
     initialProjects: [project], initialSessions: [session], initialPanels: [...panels, extraPanel],
     activeProjectId: project.id,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.evaluate(() => {
     window.__terminalInputMessages = [];
     const invoke = window.electronAPI.invoke;

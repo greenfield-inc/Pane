@@ -20,7 +20,7 @@ each computer its `runpane.net` address for QR pairing.
 | Android build check | `Native Android Build` (`native-android.yml`) | pull requests and pushes to `main` whose Expo Android fingerprint changed, or that change the workflow; weekly; manual | Builds the Android dev client APK with the Firebase config. Pull requests build `arm64-v8a` only; pushes to `main`, the weekly run and manual runs build all four ABIs, one job per ABI |
 | Relays | `Deploy Pane relays` (`relay-deploy.yml`) | manual only | Builds `relay/`, pushes the image to Google Artifact Registry, and creates or updates the three relay VMs; see [relay/deploy/RUNBOOK.md](relay/deploy/RUNBOOK.md) |
 | Website notification | `Notify website on release` (`notify-website.yml`) | manual only | Re-sends the release event to the website repo; tag releases already do this from `Build & Release` |
-| PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux and Windows, the runpane wrapper matrix, and the Playwright smoke suite |
+| PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux and Windows (plus the native, glasses and mobile apps), the runpane wrapper matrix, the Playwright browser and Electron suites, and a check that every test file runs in one of them |
 | React review | `React Doctor` (`react-doctor.yml`) | pull requests that touch `frontend/` | Comments on new React findings; advisory, never blocks |
 | Traffic snapshot | `GitHub traffic → PostHog` (`traffic-snapshot.yml`) | daily 06:00 UTC | Copies GitHub traffic and release download counts into PostHog |
 
@@ -233,6 +233,15 @@ workflow. It is the only check a merge waits for; how
 to merge a pull request or a stack is in
 [CONTRIBUTING.md](CONTRIBUTING.md#merging).
 
+Every test file runs in a CI lane or is listed with its reason.
+`node scripts/ci-test-inventory.mjs check` (run by Type Check and Lint) reads
+each lane's files from the runner itself (`vitest list`,
+`playwright test --list`) or from the job's steps, and fails when a tracked
+test file runs in no lane and is not in its `NOT_IN_CI` list, or when a lane
+in its `LANES` list no longer matches the workflow. `node
+scripts/ci-test-inventory.mjs list` prints every test file with its lanes.
+
+
 Detect changed areas runs `node scripts/ci-affected.mjs manifest`. On a pull
 request it skips a lane (a set of jobs in `LANES`) only when every changed
 path, both sides of a rename or delete, is inside another lane's inputs or in
@@ -241,7 +250,8 @@ workflows, most of `scripts/`), an empty diff, an unreadable base and every
 event other than `pull_request` run every lane. Before it selects, it fails
 the run when the map is broken (an empty map, a job the gate does not know,
 an entry that names no file, a path a lane's job names in `quality.yml`
-outside that lane) or when a lane's code names a path in another lane or in
+outside that lane, a test file `scripts/ci-test-inventory.mjs` names for a
+lane's job outside that lane) or when a lane's code names a path in another lane or in
 `LANE_FREE`: a `../` or top-level literal, a `join()`/`resolve()` of
 `__dirname`, `process.cwd()` or a name for a folder above the file, or a
 climb followed by a computed part. Declare the path in the lane, or in

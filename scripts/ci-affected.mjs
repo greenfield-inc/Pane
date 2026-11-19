@@ -38,6 +38,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { EXPECTED_JOBS, workflowJobIds } from './ci-gate.mjs';
+import { LANES as TEST_LANES } from './ci-test-inventory.mjs';
 
 // Each lane: the Code Quality jobs it is, and every path their tests read.
 // An entry ending in / is a folder; anything else is one file. The guard
@@ -67,7 +68,7 @@ const RELAY = ['relay/', 'direct/'];
 
 export const LANES = {
   main: { jobs: ['main-tests', 'cross-os-main-tests'], inputs: MAIN },
-  renderer: { jobs: ['functional-smoke-browser', 'renderer-selection', 'pwa-build'], inputs: RENDERER },
+  renderer: { jobs: ['functional-smoke-browser', 'functional-smoke-webgl', 'renderer-selection', 'pwa-build'], inputs: RENDERER },
   // Builds main, which builds runpane (docs included), then runs Electron journeys.
   electron: { jobs: ['functional-smoke-electron'], inputs: [...MAIN, ...RENDERER, ...RUNPANE, 'scripts/smoke-sandboxed-preload.cjs'] },
   runpane: { jobs: ['runpane-wrapper-tests'], inputs: RUNPANE },
@@ -338,7 +339,7 @@ function covers(inputs, target, dir = false) {
 }
 
 /** Problems with the lane map itself: an empty map, a job the gate does not know, an entry that names no file. */
-export function mapProblems({ lanes, laneFree, files, workflowText }) {
+export function mapProblems({ lanes, laneFree, files, workflowText, testLanes = [] }) {
   const problems = [];
   const workflowJobs = workflowJobIds(workflowText);
   if (Object.keys(lanes).length === 0) problems.push('LANES is empty, so nothing could be selected.');
@@ -378,6 +379,17 @@ export function mapProblems({ lanes, laneFree, files, workflowText }) {
         const named = covers(entries, target.path, target.dir) || (target.dir && entries.some((entry) => entry.startsWith(`${target.path}/`)));
         if (!inLane && named) problems.push(`lane ${lane}: job ${job} names ${target.path} in quality.yml, which is outside the lane's inputs.`);
       }
+    }
+  }
+
+  // Every test file the test inventory names for a lane's job is in that lane,
+  // or in no entry at all.
+  for (const { workflow, job, list } of testLanes) {
+    const lane = Object.entries(lanes).find(([, { jobs }]) => jobs?.includes(job))?.[0];
+    if (workflow !== 'quality.yml' || !lane) continue;
+    const named = list.named ?? (list.glob ? files.filter((file) => list.glob.test(file)) : []);
+    for (const file of named) {
+      if (!covers(lanes[lane].inputs, file) && covers(entries, file)) problems.push(`lane ${lane}: job ${job} runs ${file} (scripts/ci-test-inventory.mjs), which is outside the lane's inputs.`);
     }
   }
   return problems;
@@ -472,6 +484,7 @@ function runGuard() {
     laneFree: LANE_FREE,
     files,
     workflowText: readFileSync(path.join(REPO, '.github/workflows/quality.yml'), 'utf8'),
+    testLanes: TEST_LANES,
   });
   for (const v of guardViolations({ lanes: LANES, files, read: (file) => readFileSync(path.join(REPO, file), 'utf8') })) {
     problems.push(`${v.file}:${v.line} ${v.computed ? 'builds a path under' : 'reads'} ${v.target}, which is outside the ${v.lane} lane's inputs in scripts/ci-affected.mjs. Add it to that lane (or to NOT_READ with a reason), or a change there skips this lane.`);

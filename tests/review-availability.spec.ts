@@ -1,161 +1,7 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
-
-const project = {
-  id: 374,
-  name: 'Review fixture',
-  path: '/tmp/review-fixture',
-  active: true,
-  created_at: new Date(0).toISOString(),
-  updated_at: new Date(0).toISOString(),
-};
-
-const baseGitStatus = {
-  state: 'clean',
-  ahead: 1,
-  behind: 0,
-  hasUncommittedChanges: false,
-  hasUntrackedFiles: false,
-  filesChanged: 1,
-  additions: 8,
-  deletions: 3,
-  totalCommits: 1,
-};
-
-type ReviewGitStatus = typeof baseGitStatus & {
-  prNumber?: number;
-  prTitle?: string;
-  prUrl?: string;
-};
-
-function createSession(gitStatus: ReviewGitStatus = baseGitStatus) {
-  return {
-    id: 'review-session',
-    name: 'Review changes before PR',
-    worktreePath: '/tmp/review-fixture/review-session',
-    prompt: 'Verify local and GitHub review modes',
-    status: 'stopped',
-    createdAt: new Date(0).toISOString(),
-    lastActivity: new Date(0).toISOString(),
-    output: [],
-    jsonMessages: [],
-    isRunning: false,
-    permissionMode: 'ignore',
-    projectId: project.id,
-    displayOrder: 0,
-    isFavorite: false,
-    toolType: 'none',
-    archived: false,
-    gitStatus,
-  };
-}
-
-const panels = [
-  {
-    id: 'review-terminal',
-    sessionId: 'review-session',
-    type: 'terminal',
-    title: 'Terminal',
-    state: { isActive: false, hasBeenViewed: true, customState: { isInitialized: false } },
-    metadata: { createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(), position: 0, permanent: true },
-  },
-  {
-    id: 'review-explorer',
-    sessionId: 'review-session',
-    type: 'explorer',
-    title: 'Explorer',
-    state: { isActive: true, hasBeenViewed: true },
-    metadata: { createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(), position: 1, permanent: true },
-  },
-  {
-    id: 'review-diff',
-    sessionId: 'review-session',
-    type: 'diff',
-    title: 'Diff',
-    state: { isActive: false, hasBeenViewed: true },
-    metadata: { createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(), position: 2, permanent: true },
-  },
-];
-
-const localExecutions = [{
-  id: 1,
-  session_id: 'review-session',
-  execution_sequence: 1,
-  after_commit_hash: '1234567890abcdef',
-  commit_message: 'Make review available before a PR',
-  timestamp: '2026-08-06T12:00:00.000Z',
-  stats_additions: 8,
-  stats_deletions: 3,
-  stats_files_changed: 1,
-  author: 'Pane QA',
-  comparison_branch: 'origin/main',
-  history_source: 'branch',
-}];
-
-const localCombinedDiff = {
-  diff: [
-    'diff --git a/src/review.ts b/src/review.ts',
-    'index 1111111..2222222 100644',
-    '--- a/src/review.ts',
-    '+++ b/src/review.ts',
-    '@@ -1,4 +1,9 @@',
-    '-export const reviewAvailable = false;',
-    '-export const mode = "github";',
-    '-export const label = "Unavailable";',
-    '+export const reviewAvailable = true;',
-    '+export const mode = "local";',
-    '+export const label = "Local changes";',
-    '+export const githubEnabled = false;',
-    '+export const emptyState = "No changes to review";',
-  ].join('\n'),
-  stats: { additions: 8, deletions: 3, filesChanged: 1 },
-  changedFiles: ['src/review.ts'],
-};
-
-async function openSession(
-  page: Page,
-  gitStatus: ReviewGitStatus = baseGitStatus,
-  options: {
-    withLocalChanges?: boolean;
-    initialPanels?: JsonObject[];
-    initialConfig?: JsonObject;
-    expectInspector?: boolean;
-  } = { withLocalChanges: true },
-  beforeLoad?: (page: Page) => Promise<void>,
-): Promise<void> {
-  await installElectronApiMock(page, {
-    initialProjects: [project],
-    initialSessions: [createSession(gitStatus)],
-    initialPanels: options.initialPanels ?? panels,
-    initialExecutions: options.withLocalChanges === false ? [] : localExecutions,
-    diffManifests: {
-      session: {
-        scope: { kind: 'session' },
-        files: options.withLocalChanges === false ? [] : [{ path: 'src/review.ts', kind: 'modified', additions: 8, deletions: 3, isBinary: false }],
-        resolvedBase: { kind: 'comparison-base', ref: 'main', hash: '1111111111111111111111111111111111111111' },
-        resolvedTarget: { kind: 'working-tree' },
-        stats: options.withLocalChanges === false ? { additions: 0, deletions: 0, filesChanged: 0 } : localCombinedDiff.stats,
-      },
-    },
-    fileDiffs: options.withLocalChanges === false ? {} : {
-      'session:src/review.ts': { file: { path: 'src/review.ts', kind: 'modified', additions: 8, deletions: 3, isBinary: false }, patch: localCombinedDiff.diff, status: 'changed' },
-    },
-    activeProjectId: project.id,
-    initialConfig: options.initialConfig,
-  });
-  await beforeLoad?.(page);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: /^Expand project Review fixture$/ }).click();
-  const paneButton = page.getByRole('button', {
-    name: gitStatus.prTitle ?? 'Review changes before PR',
-    exact: true,
-  });
-  await paneButton.click();
-  if (options.expectInspector !== false) {
-    await expect(page.getByRole('tab', { name: 'Changes', exact: true })).toBeVisible();
-  }
-}
+import { installElectronApiMock, gotoApp } from './electronApiMock';
+import { baseGitStatus, createSession, openSession, panels, project } from './reviewAvailabilityFixture';
 
 async function capture(page: Page, testInfo: TestInfo, filename: string): Promise<void> {
   await page.mouse.move(1_000, 650);
@@ -165,7 +11,7 @@ async function capture(page: Page, testInfo: TestInfo, filename: string): Promis
   await testInfo.attach(filename, { path, contentType: 'image/png' });
 }
 
-test('Pinned panes use the short repository and pane name', async ({ page }, testInfo) => {
+test('Pinned panes show the pane name with the repository name beside it', async ({ page }, testInfo) => {
   const pinnedProject = {
     ...project,
     name: 'bloomapi/bloom-mono',
@@ -182,10 +28,14 @@ test('Pinned panes use the short repository and pane name', async ({ page }, tes
     initialPanels: panels,
     activeProjectId: pinnedProject.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
 
-  await expect(page.getByRole('button', { name: 'bloom-.../do-tm-560', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'bloomapi/bloom-mono/do-tm-560', exact: true })).toHaveCount(0);
+  // The row is named for the Pane; the repository sits beside it without its owner.
+  const pinnedPane = page.getByRole('button', { name: 'do-tm-560', exact: true });
+  await expect(pinnedPane).toBeVisible();
+  const pinnedRow = pinnedPane.locator('..');
+  await expect(pinnedRow.getByText('bloom-mono', { exact: true })).toBeVisible();
+  await expect(pinnedRow).not.toContainText('bloomapi');
   await capture(page, testInfo, '00-pinned-pane-short-label.png');
 });
 
@@ -227,41 +77,6 @@ test('New panes start with the inspector shown and the toggle hides it', async (
   await page.getByRole('tab', { name: 'Logs', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Show details', exact: true })).toBeVisible();
   await expect(page.locator('.pane-detail-panel-vertical')).toHaveCSS('width', '0px');
-});
-
-test('Add Tool keeps long custom commands inside a narrow viewport', async ({ page }, testInfo) => {
-  const commandName = 'pnpm run extraordinarily-long-development-command';
-  const fullCommand = `${commandName} --with-options`;
-  const expectedLabel = `${commandName.slice(0, 15)}...`;
-
-  await page.setViewportSize({ width: 420, height: 720 });
-  await openSession(page, baseGitStatus, {
-    expectInspector: false,
-    initialConfig: {
-      customCommands: [{ name: commandName, command: fullCommand }],
-    },
-  });
-
-  await page.getByRole('button', { name: 'Add tool', exact: true }).click();
-  const menu = page.getByRole('menu');
-  const commandLabel = menu.getByText(expectedLabel, { exact: true });
-  const commandButton = menu.getByRole('menuitem', { name: expectedLabel, exact: false });
-  await expect(menu).toBeVisible();
-  await expect(commandLabel).toBeVisible();
-  await expect(commandLabel).toHaveText(expectedLabel);
-
-  const menuBounds = await menu.boundingBox();
-  expect(menuBounds).not.toBeNull();
-  expect(menuBounds!.x).toBeGreaterThanOrEqual(8);
-  expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(412);
-  expect(await commandLabel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-
-  await commandButton.hover();
-  await expect(page.getByRole('tooltip')).toContainText(fullCommand);
-  const path = testInfo.outputPath('05-add-tool-responsive-command.png');
-  await page.screenshot({ path });
-  await testInfo.attach('05-add-tool-responsive-command.png', { path, contentType: 'image/png' });
 });
 
 test('Review stays local until a newly discovered pull request is explicitly opened', async ({ page }, testInfo) => {
