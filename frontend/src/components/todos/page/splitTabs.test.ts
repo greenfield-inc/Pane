@@ -10,6 +10,7 @@ import {
   splitHasTabs,
   splitItemKey,
   startsHidden,
+  stripMove,
   todoSplitReducer,
   type TodoSplitState,
 } from './splitTabs';
@@ -360,5 +361,76 @@ describe('closing and reopening tabs (T-25)', () => {
   it('file tabs count every file, closed or not, and never the Overview', () => {
     const closed = todoSplitReducer(base, { type: 'close', index: 0 });
     expect(splitFileItems(closed).map(splitItemKey)).toEqual([plan, pr, findings].map((a) => `attachment:${a.id}`));
+  });
+});
+
+describe('the To-do tab where no split is available (T-38, D-448)', () => {
+  const plan = attachment('plan', 1, 12, 'cover-sheet.html');
+  const doc = attachment('doc', 2, 12, 'p5-p8.html');
+  const base = initialSplit([own(plan, doc)], true);
+
+  it('a to-do opens on its To-do tab', () => {
+    expect(base.todoShown).toBe(true);
+  });
+
+  it('picking or opening a file shows its tab; the To-do tab comes back with show-todo', () => {
+    const picked = todoSplitReducer(base, { type: 'activate', index: 1 });
+    expect([picked.todoShown, labels(picked)[picked.active]]).toEqual([false, 'p5-p8.html']);
+    const opened = todoSplitReducer(base, { type: 'open', item: { kind: 'attachment', attachment: plan } });
+    expect([opened.todoShown, labels(opened)[opened.active]]).toEqual([false, 'cover-sheet.html']);
+    const back = todoSplitReducer(picked, { type: 'show-todo' });
+    expect([back.todoShown, labels(back)[back.active]]).toEqual([true, 'p5-p8.html']);
+  });
+
+  it('activating the tab already selected under the To-do tab shows it, and un-hides the split', () => {
+    const picked = todoSplitReducer(base, { type: 'activate', index: base.active });
+    expect([picked.todoShown, picked.hidden]).toEqual([false, false]);
+  });
+
+  it('wide: an arrow to another tab selects it as a click does, so the one-column layout shows it too', () => {
+    const shown = { ...base, hidden: false };
+    const stepped = todoSplitReducer(shown, { type: 'step', delta: 1 });
+    expect([labels(stepped)[stepped.active], stepped.todoShown]).toEqual(['p5-p8.html', false]);
+  });
+
+  it('closing the last file goes back to the To-do tab', () => {
+    const shown = todoSplitReducer(base, { type: 'activate', index: 0 });
+    const one = todoSplitReducer(shown, { type: 'close', index: 0 });
+    expect(one.todoShown).toBe(false);
+    const none = todoSplitReducer(one, { type: 'close', index: 0 });
+    expect(none.todoShown).toBe(true);
+  });
+
+  it('hiding the split leaves the To-do tab selected for the one-column layout', () => {
+    const shown = todoSplitReducer(base, { type: 'activate', index: 1 });
+    expect(todoSplitReducer(shown, { type: 'set-hidden', hidden: true }).todoShown).toBe(true);
+    expect(todoSplitReducer(shown, { type: 'toggle-hidden' }).todoShown).toBe(true);
+    expect(todoSplitReducer(base, { type: 'set-hidden', hidden: false }).todoShown).toBe(false);
+  });
+
+  it('an attached file arriving shows its tab', () => {
+    const waiting = todoSplitReducer(base, { type: 'reveal', target: '/tmp/new.html' });
+    const fresh = { ...attachment('doc', 3, 12, 'new'), target: '/tmp/new.html' };
+    const arrived = todoSplitReducer(waiting, { type: 'sync', groups: [own(plan, doc, fresh)] });
+    expect([arrived.todoShown, labels(arrived)[arrived.active]]).toEqual([false, 'new']);
+  });
+});
+
+describe('stripMove: keys on the one-column strip (To-do, each file, then an open approval)', () => {
+  // Five positions: To-do 0, three files 1–3, the approval 4.
+  it('arrows wrap round every position, the approval included', () => {
+    expect(stripMove(4, 5, 'ArrowRight')).toBe(0);
+    expect(stripMove(0, 5, 'ArrowLeft')).toBe(4);
+    expect(stripMove(4, 5, 'ArrowLeft')).toBe(3);
+    expect(stripMove(2, 5, 'ArrowRight')).toBe(3);
+  });
+
+  it('Home is To-do and End the last tab', () => {
+    expect(stripMove(3, 5, 'Home')).toBe(0);
+    expect(stripMove(1, 5, 'End')).toBe(4);
+  });
+
+  it('other keys move nowhere', () => {
+    expect(stripMove(2, 5, 'Enter')).toBeNull();
   });
 });

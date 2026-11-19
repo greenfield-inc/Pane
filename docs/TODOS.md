@@ -217,8 +217,24 @@ with its **plan beside it** in a split at half the width.
   rebinding Split Right in Settings rebinds this too. Hidden is remembered per
   to-do on this computer; the page then takes the full width and a
   "Plan · N files" chip shows the split again, as does clicking any
-  attachment or approval. When the to-do area is under 1,000 px wide, every
-  to-do opens with the split hidden and showing it lasts for that visit.
+  attachment or approval.
+- **At most two splits, never a third column** (D-448). The main area shows
+  at most two splits side by side. On the full To-dos page the to-do page and
+  one file are those two; opening another file selects its tab in the split.
+  A to-do that is already one of the two (in a Session's To-dos tab, beside
+  the chat) never splits further: its page and files share one column, with
+  one tab strip reading "To-do · Plan · Overview · cover-sheet.html …" and an
+  open approval as the last tab. The To-do tab is always first and never
+  closes; the others close as the split's tabs do (✕ and ⌘W, remembered per
+  to-do), and opening a file or approval from the page selects its tab. A
+  place given no room for a split (a sidebar, later an iPad) gets the same
+  tabs. The details count too: on the To-dos page they take the split's
+  column (an approval and the details take it from each other, and opening a
+  file from Files gives it back to the file); in one column they lie over it.
+  In a Session's To-dos tab, ⌘W closes the to-do's selected file or approval
+  while focus is in the to-do, and is the Session's anywhere else. The rule is
+  one shared module (`frontend/src/utils/mainSplits.ts`); Session panel splits
+  will adopt it in a follow-up.
 - **The Session's Overview** is a tab in the split, after the plan, when the
   to-do (or its parent) has a Session on this machine: the same goal, next
   step, decisions, Panes and activity as the Session's own Overview tab.
