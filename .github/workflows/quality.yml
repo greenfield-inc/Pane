@@ -167,11 +167,6 @@ jobs:
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait lint-checks
 
-    # THROWAWAY (P12 evidence): previous checkers vs bun check, clean and seeded.
-    - name: Type check side by side (throwaway)
-      if: ${{ !cancelled() }}
-      run: scripts/typecheck-side-by-side.sh "$RUNNER_TEMP/side-by-side" | tee -a "$GITHUB_STEP_SUMMARY"
-
     # CI result's gate and its contract with this file (expected jobs, needs,
     # skip manifest). Here rather than in CI result, which runs it every time
     # at the end of the critical path.
