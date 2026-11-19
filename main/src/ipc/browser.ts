@@ -161,7 +161,7 @@ const STREAM_IDLE_MS = 10_000;
 /** JPEG quality of streamed frames (T3 Code's default). */
 const FRAME_QUALITY = 70;
 /** How long a state read waits for a change before answering with the same state. */
-const VIEW_WAIT_MS = 15_000;
+const VIEW_WAIT_MS = 10_000;
 /** Files a person sends one page's picker in one batch, at most (base64 grows it by a third). */
 const PERSON_UPLOAD_BYTES = 10 * 1_048_576;
 /** Electron's cursor names that differ from CSS's. */
@@ -779,6 +779,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   /** Each live page viewers read frames of: its newest frame, the reads waiting for the next, and the last read. */
   interface Stream { driver: PageDriver; frame?: BrowserFrame; waiters: Set<() => void>; lastRead: number }
   const streams = new Map<number, Stream>();
+  const streamPages = new Set<number>();
   let frameSeq = 0;
 
   /** The frame size the screens watching from afar need: the largest of them, in device pixels. */
@@ -796,7 +797,11 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       const created: Stream = { driver, waiters: new Set(), lastRead: Date.now() };
       stream = created;
       streams.set(page.id, created);
-      page.once('destroyed', () => { streams.delete(page.id); for (const wake of created.waiters) wake(); });
+      // One listener per page, however often its stream stops and starts again.
+      if (!streamPages.has(page.id)) {
+        streamPages.add(page.id);
+        page.once('destroyed', () => { streamPages.delete(page.id); const gone = streams.get(page.id); streams.delete(page.id); for (const wake of gone?.waiters ?? []) wake(); });
+      }
     }
     const current = stream;
     void driver.startScreencast(settingsFor(tabId), frame => {
@@ -874,9 +879,13 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const page = id ? host.page(id) : undefined;
     if (!id || !host.tab(id) || !page || page.isDestroyed()) return { success: false, error: 'That tab has no live page here.' };
     const driver = driverFor(id, page);
-    driver.notePersonInput();
-    await personTouched(id, page.id);
-    if (viewerId) await takeControl(id, viewerId);
+    // A pointer only passing over the stream (hover) is not the person acting: it takes nothing over.
+    const acts = batch.length === 0 || batch.some(input => !(input.kind === 'mouse' && input.action === 'move'));
+    if (acts) {
+      driver.notePersonInput();
+      await personTouched(id, page.id);
+      if (viewerId) await takeControl(id, viewerId);
+    }
     const files = batch.flatMap(input => (input.kind === 'files' ? input.files : []));
     const bytes = files.reduce((sum, file) => sum + Math.floor(file.data.length * 3 / 4), 0);
     if (bytes > PERSON_UPLOAD_BYTES) return { success: false, error: `Files from another screen go up to ${PERSON_UPLOAD_BYTES / 1_048_576} MB at once.` };
