@@ -15,6 +15,7 @@ import {
   type NotifyConnected,
   type NotifyInstructionsFile,
   type NotifyItem,
+  type NotifyLeaseGranted,
   type NotifyLink,
   type NotifyNavigateTarget,
   type NotifyRemoteCommand,
@@ -28,7 +29,7 @@ import {
   type NotifyWindowSize,
 } from '../../../../shared/types/notify';
 import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed } from './notifyQueue';
-import { PaneError } from '../../../../shared/paneError';
+import { PaneError, paneErrorText } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
 import { NotifyTray } from './notifyTray';
@@ -62,10 +63,16 @@ export interface NotifyServiceDependencies {
   machine: string;
   /** This host's Pane secret store, where secret cards save their answer. */
   secrets?: NotifyQueueEnvironment['secrets'];
+  leases?: NotifyQueueEnvironment['leases'];
   /** Sends the shared state to every connected screen and phone (`notify:shared-changed`). */
   publish: (state: NotifySharedState) => void;
   /** Sends a command for a saved machine's question to that machine, under the id it knows the question by. */
   sendToMachine: (machineId: string, command: NotifyRemoteCommand) => Promise<void>;
+  /**
+   * Start lease on a lease card, on this desktop: reads 1Password (one prompt), stores and pushes the
+   * lease. `machineId` is the saved machine the card came from, or null for this computer's own card.
+   */
+  startLease?: (item: NotifyItem, machineId: string | null) => Promise<NotifyLeaseGranted>;
   /** Reads a saved machine's state again, after it refused or missed a command. */
   refreshMachine: (machineId: string) => Promise<void>;
   /** The phone alert: sent about 90 s after a question starts ringing if it's still waiting, cleared when it stops (D-144). */
@@ -163,6 +170,7 @@ export class NotifyService {
       machine: deps.machine,
       machineId: deps.configManager.getConfig().machineId,
       secrets: deps.secrets,
+      leases: deps.leases,
       sessionOf: deps.sessionOf,
       sameLoop: deps.sameLoop,
       savedMachineIds: () => (deps.configManager.getConfig().remoteDaemon?.client.computers ?? []).map(computer => computer.id),
@@ -414,6 +422,9 @@ export class NotifyService {
     return { id: sent.type === 'agent-rewrite' && sent.newId ? `${target.machineId}:${sent.newId}` : action.id, machine: target.machine };
   }
 
+  /** Lease cards whose Start lease is waiting on 1Password here. */
+  private readonly leasesStarting = new Set<string>();
+
   async run(command: NotifyCommand): Promise<void> {
     switch (command.type) {
       case 'open-round': this.openRound(command.id); return;
@@ -424,9 +435,40 @@ export class NotifyService {
       case 'ask-agent': this.askAgentInMainWindow(command.id); return;
       case 'open-link': await this.openLink(command.id, command.index, command.paneId); return;
       case 'open-url': await this.openUrl(command.id, command.url); return;
-      default:
-        if ('id' in command && command.id && this.queue.remoteTarget(command.id)) await this.runOnMachine(command);
-        else await this.queue.run(command);
+      default: {
+        const remote = 'id' in command && command.id ? this.queue.remoteTarget(command.id) : null;
+        const sent = command.type === 'answer' ? await this.withLease(command, remote?.machineId ?? null) : command;
+        if (remote && 'id' in sent) await this.runOnMachine(sent);
+        else await this.queue.run(sent);
+      }
+    }
+  }
+
+  /**
+   * Start lease pressed on a lease card here: this desktop reads 1Password and pushes the lease first,
+   * then the Approve carries it to the machine that holds the card. A failure keeps the card waiting.
+   */
+  private async withLease<Command extends Extract<NotifyCommand, { type: 'answer' }>>(command: Command, machineId: string | null): Promise<Command> {
+    const { answer } = command;
+    if (!('approved' in answer) || !answer.approved || answer.lease) return command;
+    const item = this.queue.find(command.id);
+    if (!item?.lease) return command;
+    if (!this.deps.startLease) {
+      throw new PaneError('SECRET_LEASE_NEEDS_DESKTOP', 'This Pane can\'t start leases, because it has no 1Password access here. Nothing was leased.', 'Press Start lease in Pane on your Mac or PC.');
+    }
+    // One Start lease at a time per card: a second press while 1Password asks would read it twice.
+    if (this.leasesStarting.has(command.id)) {
+      throw new PaneError('SECRET_LEASE_STARTING', 'This lease is already starting: 1Password is asking. Nothing else was sent.', 'Approve or dismiss the 1Password prompt.');
+    }
+    this.leasesStarting.add(command.id);
+    this.queue.noteLeaseError(command.id, null);
+    try {
+      return { ...command, answer: { ...answer, lease: await this.deps.startLease(item, machineId) } };
+    } catch (error) {
+      this.queue.noteLeaseError(command.id, error instanceof PaneError ? paneErrorText(error) : error instanceof Error ? error.message : String(error));
+      throw error;
+    } finally {
+      this.leasesStarting.delete(command.id);
     }
   }
 

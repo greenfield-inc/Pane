@@ -24,6 +24,8 @@ from .notify import RunpaneError, describe_notify_result, notify_caller_fields
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 NOT_FOUND_NEXT = "Run `runpane secrets request`, or open Pane on a desktop connected to this machine so it syncs."
 UNAVAILABLE_NEXT = "Ask the person to save it in Pane under Settings > Secrets, then run your command with `runpane secrets exec`. Do not ask them to paste it into the chat."
+LEASE_UNAVAILABLE_NEXT = "Ask the person to start the lease in Pane under Settings > Secrets, then run your command with `runpane secrets exec`."
+LEASE_UNSUPPORTED = "This Pane doesn't support leases yet."
 WINDOWS = os.name == "nt"
 
 
@@ -64,11 +66,21 @@ def run_secrets_list(parsed: Any) -> int:
     if parsed.json:
         print_json(result)
         return 0
-    if not result["secrets"]:
+    # references and leases are absent on an older Pane, which has neither.
+    references = result.get("references") or []
+    if not result["secrets"] and not references:
         scope = "" if parsed.project is None else f" in project {parsed.project}"
         print(f"No Pane secrets{scope} on this machine yet.")
     for secret in result["secrets"]:
         print(f"{secret['project']}/{secret['name']}  set {secret['updatedAt']} on {secret['machine']}")
+    for reference in references:
+        ends = sorted(
+            lease["expiresAt"]
+            for lease in result.get("leases") or []
+            if lease["project"] == reference["project"] and reference["name"] in lease["names"]
+        )
+        until = f"leased until {ends[-1]}" if ends else "no lease"
+        print(f"{reference['project']}/{reference['name']}  from 1Password ({reference['reference']})  {until}")
     storage = result.get("storage") or {}
     if storage.get("kind") == "file" and not storage.get("encrypted"):
         print("This machine has no OS keyring, so its secret values are stored unencrypted in a file only you can read.")
@@ -292,8 +304,15 @@ def run_secrets_request(parsed: Any, env: Optional[Mapping[str, str]] = None) ->
     reason = require_flag(parsed, parsed.reason, "--reason", outcome)
     caller, timing = notify_caller_fields(os.environ if env is None else env, os.getcwd())
     request = {"ui": "secret", "title": title, "context": reason, "secret": {"project": project, "name": name}, **timing, "caller": caller}
+    result = ask_on_card(parsed, request, UNAVAILABLE_NEXT)
+    print(json.dumps(result, indent=2) if parsed.json else describe_notify_result(result))
+    return 0
+
+
+def ask_on_card(parsed: Any, request: Dict[str, Any], unavailable_next: str) -> Dict[str, Any]:
+    """Asks Pane's runpane:notify channel and waits; Pane not running or too old reads as unavailable."""
     try:
-        result = invoke_daemon("runpane:notify", [request], pane_dir=parsed.pane_dir, timeout_ms=math.inf)
+        return invoke_daemon("runpane:notify", [request], pane_dir=parsed.pane_dir, timeout_ms=math.inf)
     except PaneDaemonClientError as error:
         if error.connection_failure:
             reason_text = "Pane is not running."
@@ -301,6 +320,59 @@ def run_secrets_request(parsed: Any, env: Optional[Mapping[str, str]] = None) ->
             reason_text = "This Pane doesn't support notify yet."
         else:
             raise
-        result = {"unavailable": reason_text, "next": UNAVAILABLE_NEXT}
-    print(json.dumps(result, indent=2) if parsed.json else describe_notify_result(result))
+        return {"unavailable": reason_text, "next": unavailable_next}
+
+
+def run_secrets_lease(parsed: Any, env: Optional[Mapping[str, str]] = None) -> int:
+    """A lease card for 1Password-backed secrets. Only the lease's id, end time and machines come back, never a value."""
+    refuse_teammate("ask for a lease", env)
+    outcome = "Nothing was shown to the person."
+    project = require_flag(parsed, parsed.project, "--project", outcome)
+    names = list(dict.fromkeys(parsed.secret_names or []))
+    if not names:
+        raise invalid(f"runpane secrets lease needs the names of the secrets to lease. {outcome}", f"Run `runpane secrets lease --project {project} <NAME>...`.")
+    for name in names:
+        if not ENV_NAME.fullmatch(name):
+            raise invalid(
+                f'"{name}" is not a valid secret name: use letters, digits and underscores, not starting with a digit. {outcome}',
+                "See the secret names with `runpane secrets list`.",
+            )
+    caller, timing = notify_caller_fields(os.environ if env is None else env, os.getcwd())
+    title = f"Lease {len(names)} secret{'' if len(names) == 1 else 's'}"
+    reason = {"context": parsed.reason} if parsed.reason and parsed.reason.strip() else {}
+    request = {"ui": "approve", "title": title, **reason, "lease": {"project": project, "names": names}, **timing, "caller": caller}
+    result = ask_on_card(parsed, request, LEASE_UNAVAILABLE_NEXT)
+    print(json.dumps(result, indent=2) if parsed.json else describe_lease_result(result))
+    return 0
+
+
+def describe_lease_result(result: Dict[str, Any]) -> str:
+    if result.get("status") == "leased":
+        return (
+            f"Leased {result['project']}/{', '.join(result['names'])} until {result['expiresAt']} on {', '.join(result['machines'])}. "
+            f"Lease {result['leaseId']}. Use them with `runpane secrets exec --project {result['project']} -- <command>`."
+        )
+    if result.get("status") == "declined" or result.get("approved") is False:
+        return "The person declined the lease."
+    # A Pane from before leases shows a plain approve card and starts nothing.
+    if "approved" in result:
+        return f"{LEASE_UNSUPPORTED} Nothing was leased. Update Pane."
+    return describe_notify_result(result)
+
+
+def run_secrets_lease_end(parsed: Any) -> int:
+    """Ends a lease on this machine. It only removes access, so an agent may do it."""
+    refuse_teammate("end a lease")
+    lease_id = require_flag(parsed, parsed.lease_id, "--id", "Nothing was ended.")
+    confirm_mutation(parsed)
+    try:
+        result = invoke_daemon("runpane:secrets:lease:end", [{"leaseId": lease_id}], pane_dir=parsed.pane_dir)
+    except PaneDaemonClientError as error:
+        if error.code == "ERR_UNKNOWN_CHANNEL":
+            raise RunpaneError("SECRET_LEASE_UNSUPPORTED", f"{LEASE_UNSUPPORTED} Nothing was ended.", "Update Pane.") from error
+        raise
+    if parsed.json:
+        print_json(result)
+    else:
+        print(f"Ended lease {lease_id}." if result.get("ended") else f"No lease {lease_id} here; it may have ended already.")
     return 0

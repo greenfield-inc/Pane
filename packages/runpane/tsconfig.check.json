@@ -1,0 +1,10 @@
+// Type checking with bun check (TypeScript 7). tsconfig.json stays the build
+// config for TypeScript 5, which still emits dist; TypeScript 7 dropped
+// `moduleResolution: node`.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "moduleResolution": "bundler"
+  }
+}

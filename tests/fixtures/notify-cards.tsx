@@ -9,7 +9,7 @@ import '../../frontend/src/index.css';
 // Notify's round (?surface=round), a card (?surface=card, docked in a terminal unless
 // ?form=strip|inbox), or the floating strip window (?surface=strip-window, two waiting questions:
 // Dismiss shows the next, as main does; ?next=in-terminal makes that one a terminal prompt). One waiting question: ?ui=options (a recommended choice)
-// or ?ui=approve. ?optionsOnly=1 takes only its options.
+// or ?ui=approve. ?optionsOnly=1 takes only its options. ?lease=1 makes the approval a lease card.
 // Every command the surface sends lands in window.qaCommands.
 declare global { interface Window { qaCommands: NotifyCommand[] } }
 window.qaCommands = [];
@@ -23,6 +23,9 @@ const item: NotifyItem = {
   // On Approvals a card opens in place on Details, which a choice's note offers.
   choices: params.get('ui') === 'approve' ? undefined : [{ label: 'Postgres table', recommended: true }, { label: 'Keep Redis', detail: params.get('form') === 'inbox' ? 'No migration.' : undefined }],
   optionsOnly: params.has('optionsOnly') || undefined,
+  lease: params.has('lease')
+    ? { project: 'stripe', names: ['STRIPE_KEY'], references: { STRIPE_KEY: 'op://Dev/Stripe/credential' }, lengthMs: 24 * 60 * 60 * 1000, machine: 'this-mac' }
+    : undefined,
   source: { name: 'auth-refactor', agent: 'Claude', paneId: 'pane-auth', panelId: 'panel-1' },
   state: 'waiting',
   createdAt: Date.now(),

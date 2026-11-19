@@ -1,0 +1,16 @@
+// `pnpm typecheck` (bun check -b -p tsconfig.check.json) checks every project
+// listed here. It is not named tsconfig.json so Vite never loads it.
+{
+  "files": [],
+  "references": [
+    { "path": "frontend" },
+    { "path": "frontend/tsconfig.node.json" },
+    { "path": "main/tsconfig.check.json" },
+    { "path": "packages/runpane/tsconfig.check.json" },
+    { "path": "glasses" },
+    { "path": "mobile" },
+    { "path": "native" },
+    { "path": "native/terminal-web" },
+    { "path": "tests/renderer" }
+  ]
+}

@@ -301,7 +301,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   // Their BROWSER follows Settings > Links (pane-browser).
   const openLinksIn = () => ({ ...DEFAULT_BROWSER_SETTINGS, ...configManager.getConfig().browser }).openLinksIn;
   installRunpaneShimBestEffort(getAppDirectory(), openLinksIn());
-  configManager.on('config-updated', () => writeBrowserShim(openLinksIn()));
+  configManager.on('config-updated', () => {
+    // A shim Pane can't write keeps the last choice; the setting still saves and other listeners still run.
+    try {
+      writeBrowserShim(openLinksIn());
+    } catch (error) {
+      console.error('[runpane] Could not rewrite pane-browser for Settings > Links:', error);
+    }
+  });
   // The loopback listener for the tabs Pane starts (Claude's prompt hooks, Pane's MCP tools). Not awaited: the
   // first window doesn't wait for it, and a tab spawned before it listens just keeps stdio.
   void tabListener.start().catch(error => {

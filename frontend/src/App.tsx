@@ -40,6 +40,7 @@ import { DISCORD_INVITE_URL } from './components/DiscordIcon';
 import { ResumeSessionsDialog } from './components/ResumeSessionsDialog';
 import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
+import { openLink } from './utils/openLink';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeSessionActivity } from './services/sessionActivitySync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
@@ -239,6 +240,11 @@ function App() {
     }
     if (target === 'inbox') {
       openApprovals();
+      return;
+    }
+    if ('link' in target) {
+      // A link from a floating card: show the Pane it came from, then open the link beside it.
+      void useSessionStore.getState().setActiveSession(target.paneId).then(() => openLink(target.link, target.paneId));
       return;
     }
     if ('askAgent' in target) {

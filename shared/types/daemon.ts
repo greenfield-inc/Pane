@@ -151,6 +151,10 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'credentials:shared:apply',
   'notify:switch:get',
   'notify:switch:apply',
+  // A desktop pushes, ends and lists secret leases on the machines it saved.
+  'secrets:lease:push',
+  'secrets:lease:end',
+  'secrets:lease:list',
   'git:restore',
   'git:revert',
   'permission:getPending',

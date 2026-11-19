@@ -42,7 +42,13 @@ const { shared, command } = vi.hoisted(() => {
   };
   // A loop's next run refreshed its own card: no question of the person's to quote.
   const refreshed: NotifyItem = { ...trains, id: 'q-loop', title: '5 new deals', revision: { asked: '', whatChanged: ['Two more deals'], by: 'deal-watch', at: 3_000 } };
-  const shared: NotifySharedState = { machine: 'Work Mac', epoch: 'e1', revision: 1, enabled: true, queue: ['q-secret', 'q-trains', 'q-both', 'q-loop'], hidden: [], items: [secret, trains, both, refreshed] };
+  const lease: NotifyItem = {
+    id: 'q-lease', ui: 'approve', title: 'Lease Stripe keys', state: 'waiting', createdAt: 4_000,
+    source: { paneId: 'pane-1', name: 'auth-refactor', agent: 'Claude' },
+    lease: { project: 'stripe', names: ['STRIPE_KEY'], references: { STRIPE_KEY: 'op://Dev/Stripe/key' }, lengthMs: 86_400_000, machine: 'devbox', memoryOnly: true },
+    leaseError: '1Password is locked.',
+  };
+  const shared: NotifySharedState = { machine: 'Work Mac', epoch: 'e1', revision: 1, enabled: true, queue: ['q-secret', 'q-trains', 'q-both', 'q-loop', 'q-lease'], hidden: [], items: [secret, trains, both, refreshed, lease] };
   return { shared, command: { isPending: false, isError: false, mutate: vi.fn() } };
 });
 vi.mock('./hooks', () => ({
@@ -73,6 +79,26 @@ describe('NotifySheet', () => {
     expect(field?.props.multiline).toBeUndefined();
     expect(tree.find(element => element.props.testID === 'notify-secret-one-line')?.props.children)
       .toBe('Takes one line. Answer a multi-line value, such as a PEM key, on your computer.');
+  });
+});
+
+describe('NotifySheet lease cards', () => {
+  const tree = () => elements(createElement(NotifySheet, { notifyId: 'q-lease' }));
+  const byId = (testID: string) => tree().find(element => element.props.testID === testID);
+
+  it('lists each name with its reference, where and how long, and why the last try failed', () => {
+    expect(byId('notify-lease-row-STRIPE_KEY')?.props.children).toBe('STRIPE_KEY  op://Dev/Stripe/key');
+    expect(byId('notify-lease-on')?.props.children).toBe('On: devbox · 24 hours');
+    expect(byId('notify-lease-memory-only')?.props.children).toBe('Held in memory only on devbox');
+    expect(byId('notify-lease-error')?.props.children).toBe('1Password is locked.');
+  });
+
+  it('sends Approve to the computer and keeps Decline', () => {
+    command.mutate.mockClear();
+    expect(byId('notify-approve')).toBeUndefined();
+    expect(byId('notify-lease-approve-elsewhere')?.props.children).toBe('Approve on your computer: 1Password asks there.');
+    (byId('notify-deny')?.props.onPress as () => void)();
+    expect(command.mutate).toHaveBeenCalledWith([{ type: 'answer', id: 'q-lease', answer: { approved: false } }]);
   });
 });
 

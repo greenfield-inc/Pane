@@ -9,11 +9,15 @@ import {
   paneSecretKey,
   paneSecretNameProblem,
   paneSecretProjectProblem,
+  paneSecretReferenceProblem,
   parsePaneSecretKey,
+  secretLeaseRenewCommand,
+  type PaneSecretReferenceSummary,
   type PaneSecretStorage,
   type PaneSecretSummary,
 } from '../../../shared/types/paneSecrets';
 import type { SharedCredential } from '../../../shared/types/sharedCredentials';
+import { SecretLeaseStore } from './secretLeases';
 import type { AppConfig } from '../types/config';
 import type { ConfigManager } from './configManager';
 import { getPaneEventSink, getRuntimeConfigManager } from '../core/runtime';
@@ -29,6 +33,12 @@ export interface PaneSecretMeta {
   deleted?: true;
 }
 
+/** Index record for a secret whose value lives in 1Password, kept in config.json under `paneSecretReferences`. */
+export interface PaneSecretReferenceMeta extends PaneSecretMeta {
+  /** `op://<vault>/<item>/<field>`; absent once removed. */
+  reference?: string;
+}
+
 /** Where values live: the macOS keychain, or one 0600 file elsewhere. Addressed by `<project>/<NAME>`. */
 export interface SecretValueBackend {
   storage(): PaneSecretStorage;
@@ -37,14 +47,16 @@ export interface SecretValueBackend {
   remove(key: string): Promise<void>;
 }
 
-/** Encryption for the file backend; Electron's safeStorage in the app. */
+/** Encryption for the file backend; Electron's async safeStorage API in the app. */
 export interface SecretEncryption {
   available(): boolean;
-  encrypt(text: string): Buffer;
-  decrypt(data: Buffer): string;
+  encrypt(text: string): Promise<Buffer>;
+  decrypt(data: Buffer): Promise<string>;
 }
 
 const MAX_VALUE_BYTES = 64 * 1024;
+/** How far ahead of this host's clock a synced reference's time may be. */
+const MAX_CLOCK_AHEAD_MS = 5 * 60_000;
 
 function localHostLabel(): string {
   return os.hostname().replace(/\.local$/i, '');
@@ -187,12 +199,12 @@ export function fileSecretBackend(filePath: string, encryption: SecretEncryption
     read: key => serial(async () => {
       const entry = (await load()).values[key];
       if (!entry) throw new Error('No value is stored for it on this host');
-      return entry.encrypted ? encryption.decrypt(Buffer.from(entry.data, 'base64')) : entry.data;
+      return entry.encrypted ? await encryption.decrypt(Buffer.from(entry.data, 'base64')) : entry.data;
     }),
     write: (key, value) => serial(async () => {
       const file = await load();
       const encrypted = encryption.available();
-      file.values[key] = { encrypted, data: encrypted ? encryption.encrypt(value).toString('base64') : value };
+      file.values[key] = { encrypted, data: encrypted ? (await encryption.encrypt(value)).toString('base64') : value };
       await save(file);
     }),
     remove: key => serial(async () => {
@@ -204,7 +216,11 @@ export function fileSecretBackend(filePath: string, encryption: SecretEncryption
   };
 }
 
-/** Electron's safeStorage, or no encryption outside Electron. Linux's `basic_text` backend counts as none. */
+/**
+ * Electron's safeStorage, or no encryption outside Electron. Linux's `basic_text` backend counts as none.
+ * Writes use the async API (the sync one is removed in Electron 46); a value the async API cannot
+ * decrypt is read with the sync one, so values written before the move keep reading.
+ */
 function electronSecretEncryption(): SecretEncryption {
   type SafeStorage = Electron.SafeStorage;
   const safeStorage: SafeStorage | null = electronSafeStorage ?? null;
@@ -214,13 +230,18 @@ function electronSecretEncryption(): SecretEncryption {
   };
   return {
     available,
-    encrypt: text => {
+    encrypt: async text => {
       if (!safeStorage) throw new Error('Encryption is not available');
-      return safeStorage.encryptString(text);
+      return safeStorage.encryptStringAsync(text);
     },
-    decrypt: data => {
+    decrypt: async data => {
       if (!safeStorage) throw new Error('Encryption is not available');
-      return safeStorage.decryptString(data);
+      try {
+        return (await safeStorage.decryptStringAsync(data)).result;
+      } catch {
+        // Written by the sync API before the move. Electron 46 removes it: re-encrypt such values before upgrading.
+        return safeStorage.decryptString(data);
+      }
     },
   };
 }
@@ -229,6 +250,14 @@ function electronSecretEncryption(): SecretEncryption {
 export function systemSecretBackend(appDirectory: string, platform: string = process.platform): SecretValueBackend {
   if (platform === 'darwin') return keychainSecretBackend(systemKeychain(platform), paneKeychainService(appDirectory));
   return fileSecretBackend(path.join(appDirectory, 'secrets.json'), electronSecretEncryption());
+}
+
+/**
+ * A reference read back from config.json passes the same check as one the person set: an edited
+ * file can't point a name at text op would expand (a `$`, braces) or that isn't a reference at all.
+ */
+function usableReference(reference: string | undefined): reference is string {
+  return reference !== undefined && paneSecretReferenceProblem(reference) === null;
 }
 
 export function secretNotFound(project: string, name: string): PaneError {
@@ -272,6 +301,8 @@ export class PaneSecretStore {
     private readonly now: () => Date = () => new Date(),
     /** Called after a set or delete made on this host, never for one that arrived by sync. */
     private readonly onLocalChange: () => void = () => undefined,
+    /** Leases that hold the values of 1Password references; none means references have no value here. */
+    private readonly leases: () => SecretLeaseStore | null = () => null,
   ) {}
 
   storage(): PaneSecretStorage {
@@ -280,6 +311,53 @@ export class PaneSecretStore {
 
   private index(): Record<string, PaneSecretMeta> {
     return this.config.getConfig().paneSecrets ?? {};
+  }
+
+  private referenceIndex(): Record<string, PaneSecretReferenceMeta> {
+    return this.config.getConfig().paneSecretReferences ?? {};
+  }
+
+  /** The 1Password reference behind `project/name`, or null when it is a typed secret or none. */
+  referenceOf(project: string, name: string): string | null {
+    const meta = this.referenceIndex()[paneSecretKey(project, name)];
+    return meta && !meta.deleted && usableReference(meta.reference) ? meta.reference : null;
+  }
+
+  /** Secrets whose values live in 1Password, sorted by project then name. */
+  listReferences(project?: string): PaneSecretReferenceSummary[] {
+    return Object.entries(this.referenceIndex()).flatMap(([key, meta]) => {
+      const address = parsePaneSecretKey(key);
+      if (!address || meta.deleted || !usableReference(meta.reference) || (project !== undefined && address.project !== project)) return [];
+      return [{ ...address, reference: meta.reference, updatedAt: meta.updatedAt, machine: meta.source }];
+    }).sort((a, b) => a.project.localeCompare(b.project) || a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Points `project/name` at a 1Password item. Only the person does this, from Settings. A typed
+   * secret of the same name is deleted here and, through sync, on every host: that is "Move to 1Password".
+   */
+  async setReference(project: string, name: string, reference: string): Promise<{ replacedTyped: boolean }> {
+    validatePaneSecretAddress(project, name);
+    const problem = paneSecretReferenceProblem(reference);
+    if (problem) throw invalidSecret(problem);
+    const replacedTyped = this.has(project, name) && !this.referenceOf(project, name);
+    if (replacedTyped) await this.delete(project, name);
+    return this.serial(async () => {
+      const key = paneSecretKey(project, name);
+      const meta: PaneSecretReferenceMeta = { updatedAt: this.now().toISOString(), source: this.hostLabel(), reference };
+      await this.config.updateConfigWith(config => ({ paneSecretReferences: { ...config.paneSecretReferences, [key]: meta } }));
+      this.onLocalChange();
+      return { replacedTyped };
+    });
+  }
+
+  private async deleteReference(project: string, name: string): Promise<void> {
+    return this.serial(async () => {
+      const key = paneSecretKey(project, name);
+      const meta: PaneSecretReferenceMeta = { updatedAt: this.now().toISOString(), source: this.hostLabel(), deleted: true };
+      await this.config.updateConfigWith(config => ({ paneSecretReferences: { ...config.paneSecretReferences, [key]: meta } }));
+      this.onLocalChange();
+    });
   }
 
   private serial<T>(work: () => Promise<T>): Promise<T> {
@@ -297,9 +375,10 @@ export class PaneSecretStore {
     }).sort((a, b) => a.project.localeCompare(b.project) || a.name.localeCompare(b.name));
   }
 
+  /** Whether `project/name` exists here, typed or as a 1Password reference. */
   has(project: string, name: string): boolean {
     const meta = this.index()[paneSecretKey(project, name)];
-    return Boolean(meta && !meta.deleted);
+    return Boolean(meta && !meta.deleted) || this.referenceOf(project, name) !== null;
   }
 
   /** Store `value` under `project/name`, replacing any saved value. */
@@ -307,6 +386,13 @@ export class PaneSecretStore {
     validatePaneSecretAddress(project, name);
     if (!value) throw invalidSecret('A secret value cannot be empty.');
     if (Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) throw invalidSecret('A secret value can be at most 64 KiB.');
+    if (this.referenceOf(project, name)) {
+      throw new PaneError(
+        'SECRET_IS_REFERENCE',
+        `${paneSecretKey(project, name)} comes from 1Password, so Pane does not store a value for it. Nothing was changed.`,
+        `Run \`${secretLeaseRenewCommand(project, [name])}\` to use it, or remove the reference in Settings → Secrets first.`,
+      );
+    }
     return this.serial(async () => {
       const key = paneSecretKey(project, name);
       const replaced = this.has(project, name);
@@ -332,6 +418,7 @@ export class PaneSecretStore {
   /** Delete `project/name` here; the deletion reaches other hosts on the next sync. */
   async delete(project: string, name: string): Promise<void> {
     validatePaneSecretAddress(project, name);
+    if (this.referenceOf(project, name)) return this.deleteReference(project, name);
     return this.serial(async () => {
       if (!this.has(project, name)) throw secretNotFound(project, name);
       const key = paneSecretKey(project, name);
@@ -354,9 +441,29 @@ export class PaneSecretStore {
     });
   }
 
-  /** The value of `project/name`. Throws SECRET_NOT_FOUND or SECRET_UNREADABLE, never with the value. */
+  /**
+   * The value of `project/name`: typed, or from its live lease when it is a 1Password reference.
+   * Throws SECRET_NOT_FOUND, SECRET_LEASE_ENDED or SECRET_UNREADABLE, never with the value.
+   */
   async read(project: string, name: string): Promise<string> {
     validatePaneSecretAddress(project, name);
+    const leases = this.leases();
+    if (this.config.getConfig().workspaces?.visibility === 'tailnet' && (leases?.has(project, name) || this.referenceOf(project, name))) {
+      throw new PaneError(
+        'SECRET_LEASE_REFUSED',
+        `${paneSecretKey(project, name)} comes from 1Password, and this machine is shared with everyone on the tailnet, so it holds no leases. Nothing was run.`,
+        'Set this machine to "Only me" in Settings → Workspaces, then start a lease again.',
+      );
+    }
+    // A lease answers first: a host can hold a lease pushed before the reference itself has synced.
+    if (leases) {
+      await leases.ready();
+      if (leases.has(project, name)) return leases.read(project, name);
+    }
+    if (this.referenceOf(project, name)) {
+      if (leases) return leases.read(project, name);
+      throw secretNotFound(project, name);
+    }
     if (!this.has(project, name)) throw secretNotFound(project, name);
     const key = paneSecretKey(project, name);
     try {
@@ -370,6 +477,38 @@ export class PaneSecretStore {
           : 'Set it again with `runpane secrets set`, or from Settings → Secrets.',
       );
     }
+  }
+
+  /** References and their removals, for the other hosts. Addresses only: a reference carries no value. */
+  exportReferencesForSync() {
+    const records: Record<string, SharedCredential> = {};
+    for (const [key, meta] of Object.entries(this.referenceIndex())) {
+      if (!parsePaneSecretKey(key)) continue;
+      records[key] = { value: meta.deleted ? null : meta.reference ?? null, updatedAt: meta.updatedAt, source: meta.source };
+    }
+    return records;
+  }
+
+  /** Saves each reference newer than this host's copy. Returns the keys that changed. */
+  async applyReferencesFromSync(incoming: Record<string, SharedCredential>): Promise<string[]> {
+    return this.serial(async () => {
+      const current = this.referenceIndex();
+      const applied: Record<string, PaneSecretReferenceMeta> = {};
+      for (const [key, record] of Object.entries(incoming)) {
+        if (!parsePaneSecretKey(key) || !isNewer(record, current[key])) continue;
+        if (record.value !== null && paneSecretReferenceProblem(record.value)) continue;
+        // A stamp from the future would win every later edit; no real host's clock is that far ahead.
+        if (Date.parse(record.updatedAt) > this.now().getTime() + MAX_CLOCK_AHEAD_MS) continue;
+        applied[key] = record.value === null
+          ? { updatedAt: record.updatedAt, source: record.source, deleted: true }
+          : { updatedAt: record.updatedAt, source: record.source, reference: record.value };
+      }
+      const changed = Object.keys(applied);
+      if (changed.length > 0) {
+        await this.config.updateConfigWith((config: AppConfig) => ({ paneSecretReferences: { ...config.paneSecretReferences, ...applied } }));
+      }
+      return changed;
+    });
   }
 
   /** Every live record with its value, and every deletion, for the other hosts. Unreadable values are left out. */
@@ -423,14 +562,34 @@ export class PaneSecretStore {
 }
 
 let shared: PaneSecretStore | null = null;
+let sharedValues: SecretValueBackend | null = null;
+let sharedLeases: SecretLeaseStore | null = null;
+
+/** One value store per host, so secrets and leases share its write queue. */
+function hostValueBackend(): SecretValueBackend {
+  sharedValues ??= systemSecretBackend(getAppDirectory());
+  return sharedValues;
+}
+
+/** This host's leases, built on first use. Its first read deletes any that expired while Pane was closed. */
+export function secretLeaseStore(): SecretLeaseStore {
+  sharedLeases ??= new SecretLeaseStore({
+    directory: getAppDirectory(),
+    values: hostValueBackend(),
+    onChange: () => getPaneEventSink().send('pane-secrets:changed'),
+  });
+  return sharedLeases;
+}
 
 /** This host's secret store, built on first use from the runtime config and data directory. */
 export function paneSecretStore(): PaneSecretStore {
   if (!shared) {
     // A connected desktop syncs when its hosts report a settings change, as they do for shared keys.
-    shared = new PaneSecretStore(getRuntimeConfigManager(), systemSecretBackend(getAppDirectory()), localHostLabel, () => new Date(), () => {
+    shared = new PaneSecretStore(getRuntimeConfigManager(), hostValueBackend(), localHostLabel, () => new Date(), () => {
       getPaneEventSink().send('remote:settings-changed');
-    });
+    }, secretLeaseStore);
   }
   return shared;
 }
+
+export { localHostLabel };

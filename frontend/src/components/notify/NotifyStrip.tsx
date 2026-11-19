@@ -3,7 +3,6 @@ import { isMac } from '../../utils/platformUtils';
 import { notifyItem, runNotify } from '../../stores/notifyStore';
 import { NotifyCard, type NotifyCardProps, type NotifyQueuePosition } from './NotifyCard';
 import { shortcutLabel } from './notifyFormat';
-import { openLink } from '../../utils/openLink';
 
 interface NotifyStripProps {
   snapshot: NotifySnapshot;
@@ -43,7 +42,8 @@ export function NotifyStrip({ snapshot, narrow, menuPlacement, onFieldFocusReque
       menuPlacement={menuPlacement}
       onFieldFocusRequest={onFieldFocusRequest}
       className={className}
-      onOpenUrl={(url) => { void openLink(url, item.source.paneId); }}
+      // The floating card's window has no Settings: main decides where the link opens (Settings > Links).
+      onOpenUrl={(url) => runNotify({ type: 'open-url', id: item.id, url })}
     />
   );
 }
