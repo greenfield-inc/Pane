@@ -168,6 +168,16 @@ test.describe('a remote desktop loading a host page', () => {
   });
 });
 
+test('a page that loads after its skeleton shows still follows the page\'s own navigation', async ({ page }) => {
+  await openBrowserPanel(page, 'http://localhost:5173/login');
+  await expect(page.locator('[data-skeleton="visible"]')).toBeAttached();
+  await loadConfig(page, 'local');
+
+  await guestEvent(page, 'did-navigate', 'http://localhost:5173/settings', { canGoBack: true });
+  await expect(page.getByPlaceholder('Enter a URL (e.g. localhost:3000)')).toHaveValue('http://localhost:5173/settings');
+  await expect(page.getByTitle('Back')).toBeEnabled();
+});
+
 test('Open in your browser hands the tab\'s address to the OS, and says why when it cannot', async ({ page }) => {
   await openBrowserPanel(page, 'http://localhost:5173/login');
   await loadConfig(page, 'local');
