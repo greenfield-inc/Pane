@@ -374,6 +374,10 @@ A stack (each pull request based on the one below) is merged bottom-up with
    Do not rebase or push it.
 4. Merge it with a merge commit, and repeat up the stack.
 
+When the merge queue is on ([RUNBOOK.md](RUNBOOK.md#merge-queue)), merging
+adds the pull request to the queue instead, and it reaches `main` only after
+`CI result` passes on the merge group, which runs every `Code Quality` job.
+
 Agents merge only when the person asks for that pull request.
 
 ### Manual Testing
