@@ -29,15 +29,7 @@ import { AgentFarmProfileDialog } from '../chatTab/AgentFarmProfileDialog';
 import { LaunchProfileDialog } from '../profiles/LaunchProfileDialog';
 import type { LibraryProfile } from '../../../../shared/types/profiles';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
-
-const ADD_TOOL_MENU_WIDTH = 280;
-const ADD_TOOL_MENU_VIEWPORT_MARGIN = 8;
-const MAX_CUSTOM_COMMAND_LABEL_LENGTH = 18;
-
-function truncateCustomCommandLabel(label: string): string {
-  if (label.length <= MAX_CUSTOM_COMMAND_LABEL_LENGTH) return label;
-  return `${label.slice(0, MAX_CUSTOM_COMMAND_LABEL_LENGTH - 3)}...`;
-}
+import { ADD_TOOL_MENU_VIEWPORT_MARGIN, placeAddToolMenu, truncateCustomCommandLabel } from './addToolMenuLayout';
 
 // Build prompt for setting up intelligent dev command — adapts based on Worktree File Sync config
 function buildSetupRunScriptPrompt(fileSyncEntries?: WorktreeFileSyncEntry[]): string {
@@ -188,17 +180,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     const updatePosition = () => {
       if (!dropdownRef.current) return;
       const rect = externalAnchorRef.current ?? dropdownRef.current.getBoundingClientRect();
-      const width = Math.min(
-        ADD_TOOL_MENU_WIDTH,
-        window.innerWidth - (ADD_TOOL_MENU_VIEWPORT_MARGIN * 2),
-      );
-      const left = Math.max(
-        ADD_TOOL_MENU_VIEWPORT_MARGIN,
-        Math.min(
-          rect.left,
-          window.innerWidth - width - ADD_TOOL_MENU_VIEWPORT_MARGIN,
-        ),
-      );
+      const { left, width } = placeAddToolMenu({ anchorLeft: rect.left, viewportWidth: window.innerWidth });
       setDropdownStyle({
         position: 'fixed',
         top: rect.bottom + 4,
