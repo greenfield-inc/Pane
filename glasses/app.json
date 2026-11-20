@@ -2,16 +2,18 @@
   "package_id": "com.runpane.glasses",
   "edition": "202601",
   "name": "Pane",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "min_sdk_version": "0.0.16",
   "entrypoint": "index.html",
   "permissions": [
     {
       "name": "network",
-      "desc": "Connects only to the Pane computers you pair, over your own private Tailscale network, to show their cards and terminals and send your answers.",
+      "desc": "Connects only to the Pane computers you pair, over your own private Tailscale network or through Pane's relay at runpane.net, which forwards encrypted traffic it can't read, to show their cards and terminals and send your answers.",
       "whitelist": [
         "https://*.ts.net:8443",
-        "wss://*.ts.net:8443"
+        "wss://*.ts.net:8443",
+        "https://*.runpane.net",
+        "wss://*.runpane.net"
       ]
     },
     {

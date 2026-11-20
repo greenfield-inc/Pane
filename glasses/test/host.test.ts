@@ -161,7 +161,8 @@ async function until(check: () => boolean, ms = 2_000): Promise<void> {
 
 describe('pairing', () => {
   it('trades each computer’s secret once, in the body, and keeps only the device token', async () => {
-    const studio = new FakeHost('https://studio.tail1.ts.net:8443');
+    // studio-mac was paired by QR, so the code names its relay address; devbox is on Tailscale.
+    const studio = new FakeHost('https://k7qd2m4xbn.runpane.net');
     studio.handlers.set('runpane:glasses:pair', () => ({ token: 'pgt_studio', device: { id: 'glasses-1', label: 'Even G2 · iPhone', createdAt: '2026-10-28T00:00:00Z' } }));
     const devbox = new FakeHost('https://devbox.tail1.ts.net:8443');
     devbox.refuse = { status: 403, code: 'ERR_GLASSES_PAIRING_SECRET_INVALID', message: 'This pairing code was already used or is more than 10 minutes old.', next: 'Make a new code in the Pane app.' };
@@ -211,7 +212,7 @@ describe('pairing', () => {
       name: 'studio-mac',
       url,
       code: 'ERR_GLASSES_NO_ANSWER',
-      message: "studio-mac didn't answer. If this is the first time, allow the Even app on it: Pane › Settings › Remote Access › Glasses › Allow (origin https://even.example).",
+      message: "studio-mac didn't answer. If this is the first time, allow the Even app on it: Pane › Settings › Remote Access › Phones and glasses › Allow (origin https://even.example).",
       next: 'Then paste again.',
     }]);
   });
@@ -536,7 +537,7 @@ describe('HostHub', () => {
 
   it("shows a refusal in the host's words and tries again only every 30 s, or on a press", async () => {
     const a = host('https://studio.tail1.ts.net:8443');
-    a.refuse = { status: 403, code: 'ERR_GLASSES_ORIGIN_REFUSED', message: 'This computer accepts glasses tokens only from the Even app; this request came from https://x.example.', next: 'Allow it in Settings › Remote Access › Glasses.' };
+    a.refuse = { status: 403, code: 'ERR_GLASSES_ORIGIN_REFUSED', message: 'This computer accepts glasses tokens only from the Even app; this request came from https://x.example.', next: 'Allow it in Settings › Remote Access › Phones and glasses.' };
     const { hub: one, timers } = hub([a]);
     await until(() => one.computers()[0]?.status === 'refused');
     expect(one.computers()[0]?.refusal).toEqual({ code: 'ERR_GLASSES_ORIGIN_REFUSED', message: a.refuse.message, next: a.refuse.next });

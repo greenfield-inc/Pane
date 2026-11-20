@@ -21,6 +21,11 @@ It talks straight to each of your computers over Tailscale, or through each comp
   you talk to: **Settings › Integrations › Voice transcription** on the computer, or **Settings › Voice** in the
   Pane phone app.
 
+The Even app lets the glasses reach only the addresses in their network permission: Tailscale
+(`https://*.ts.net:8443`) and Pane's relay (`https://*.runpane.net`), each with its `wss://` twin for
+voice. A computer paired through [your own relay](QR_PAIRING.md#use-your-own-relay) is on another
+domain, so pair the glasses with it over Tailscale.
+
 ## Install and pair
 
 1. In the Even Realities app, open **Even Hub** and install **Pane**.
@@ -262,7 +267,7 @@ The pairing code on your clipboard holds one-time pairing secrets, not tokens, a
 | not answering | Start Pane on that computer and check that Tailscale is on there. The glasses try again within 10 minutes. |
 | Can't turn speech into text | Add a Deepgram or fal key on that computer. |
 | Deepgram rejected X's key, or X's Deepgram key isn't a valid key | On that computer, paste a current key from the Deepgram console in **Settings › Integrations › Voice transcription**. Pane checks it with Deepgram when you save. |
-| Lost the connection to X while listening | Hold to talk again. If it keeps happening, check Tailscale on the phone. |
+| Lost the connection to X while listening | Hold to talk again. If it keeps happening, check the phone's connection, and Tailscale on it if you use it. |
 
 ## For developers
 
@@ -272,6 +277,11 @@ several; a loopback one covers every port). `glasses/dev/gallery.html` shows the
 can't reach, and `glasses/dev/ambient.html?at=35:q,60:answer` runs the demo with ambient mode on and
 raises or answers cards on a schedule (see the top of `glasses/dev/ambient.ts`). The host side is `main/src/daemon/glassesAccess.ts`; the shared pairing-code format is
 `shared/types/glasses.ts`.
+
+A new kind of computer address needs an entry in the `network` whitelist in `glasses/app.json`:
+`glasses/test/appJson.test.ts` checks that every address form a pairing code accepts is on it. To
+publish, raise `version` in `glasses/app.json`, run `pnpm --filter @pane/glasses run pack`, and upload
+`glasses/pane.ehpk` in the Even Hub developer portal.
 
 Joining other computers is `glasses/src/autoJoin.ts`; the host side is the `runpane:glasses:vouch`
 command. The home list is `glasses/src/homeList.ts`. The firmware list can't show images, so the app draws its

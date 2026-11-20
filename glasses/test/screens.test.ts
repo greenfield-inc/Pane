@@ -157,7 +157,7 @@ describe('connecting', () => {
 
 describe('errors', () => {
   it("shows an origin refusal in the host's words, under \"Allow this app on the computer\"", () => {
-    const page = refusedPage('devbox', { code: 'ERR_GLASSES_ORIGIN_REFUSED', message: 'This computer accepts glasses tokens only from the Even app; this request came from https://x.example.', next: 'Allow it in Settings › Remote Access › Glasses.' });
+    const page = refusedPage('devbox', { code: 'ERR_GLASSES_ORIGIN_REFUSED', message: 'This computer accepts glasses tokens only from the Even app; this request came from https://x.example.', next: 'Allow it in Settings › Remote Access › Phones and glasses.' });
     expect(texts(page)[0]).toBe('devbox · not allowed');
     expect(texts(page)[1]?.replace(/\n/g, ' ')).toContain('Allow this app on the computer.');
     expect(texts(page)[1]?.replace(/\n/g, ' ')).toContain('https://x.example.');
