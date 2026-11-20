@@ -88,7 +88,7 @@ const CHAT_TABS_OFF = /^Chat tabs are turned off/;
 
 /**
  * What the menu says about a preview: ready when some tab can switch, else why nothing can,
- * counted by reason ("Nothing to switch: 2 busy, 1 plain Codex"). Plain shells are not counted.
+ * counted by reason ("Nothing to switch: 2 busy, 1 no saved conversation"). Plain shells are not counted.
  */
 export function switchMenuState(preview: SessionChatSwitchPreview, machineName: string): SessionSwitchMenuState {
   if (switchable(preview.items).length > 0) return { state: 'ready', preview };
