@@ -4,7 +4,9 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SkillCacheManager } from './skillCacheManager';
-import { buildPaneHomeSkill } from './paneHomeSkill';
+import { buildPaneHomeSkill, buildPaneTodosSkill } from './paneHomeSkill';
+import { readTodosSwitchFrom } from './todos/todosFeature';
+import { withTodosText } from '../../../shared/todosText';
 import { prepareSessionWorkspace } from './sessionWorkspace';
 
 function normalizePathSeparators(value: string): string {
@@ -138,6 +140,7 @@ describe('SkillCacheManager Pane Chat guide', () => {
       await fs.rm(tempDir, { recursive: true, force: true });
       tempDir = undefined;
     }
+    readTodosSwitchFrom(() => undefined);
   });
 
   it('points the Pane Chat entry skill only at files that exist before any sync', async () => {
@@ -546,6 +549,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
 
   it('puts the to-do attach rule, word for word, in every Pane instruction text (J38)', async () => {
     const rule = "Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists. Read a to-do's attachments before you start on it.";
+    readTodosSwitchFrom(() => ({ todosEnabled: true }));
     const manager = new SkillCacheManager();
     await manager.ensurePaneChatGuide();
     const bundle = path.join(__dirname, 'paneChatBundle', 'skills');
@@ -557,7 +561,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
       'pane-orchestrator (Cursor)': await fs.readFile(manager.cursorPaneOrchestratorRulePath, 'utf8'),
       'bundled pane-orchestration': await fs.readFile(path.join(bundle, 'pane-orchestration', 'SKILL.md'), 'utf8'),
       'bundled runpane': await fs.readFile(path.join(bundle, 'runpane', 'SKILL.md'), 'utf8'),
-      'pane home skill': buildPaneHomeSkill(),
+      'pane-todos home skill': buildPaneTodosSkill(),
     };
     for (const [name, text] of Object.entries(texts)) {
       expect(text.replace(/\s+/g, ' '), name).toContain(rule);
@@ -565,6 +569,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
   });
 
   it('teaches orchestrators the to-do workflow and the lines Pane types', async () => {
+    readTodosSwitchFrom(() => ({ todosEnabled: true }));
     const manager = new SkillCacheManager();
     await manager.ensurePaneChatGuide();
     const texts = [
@@ -583,6 +588,48 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     }
     const liveness = (await fs.readFile(manager.paneChatOrchestratorSkillPath, 'utf8')).replace(/\s+/g, ' ');
     expect(liveness).toContain("To-dos: this watch still keeps the workers on a to-do's sub-to-dos moving.");
+  });
+
+  it('writes no To-dos text for agents while To-dos is off, and all of it again once it is on (T-39)', async () => {
+    const manager = new SkillCacheManager();
+    const todoText = /to-do|todos|--todo/i;
+    // Not Pane's To-dos: code TODOs (refactor), other tools' todos (rewrite-simply), the status page's CSS.
+    const notPaneTodos = new Set(['refactor/SKILL.md', 'rewrite-simply/SKILL.md']);
+    const written = async () => {
+      const files = new Map([
+        ['Session folder AGENTS.md', await fs.readFile(path.join(prepareSessionWorkspace('flag-flip'), 'AGENTS.md'), 'utf8')],
+        ['pane-orchestrator (Pane Chat)', await fs.readFile(manager.paneChatOrchestratorSkillPath, 'utf8')],
+        ['pane-orchestrator (Claude)', await fs.readFile(manager.claudePaneOrchestratorSkillPath, 'utf8')],
+        ['pane-orchestrator (Cursor)', await fs.readFile(manager.cursorPaneOrchestratorRulePath, 'utf8')],
+        ['runtime context', await fs.readFile(manager.paneChatRuntimeContextPath, 'utf8')],
+      ]);
+      for (const root of [manager.paneChatSkillsRoot, manager.claudeProjectSkillsRoot, manager.codexProjectSkillsRoot]) {
+        for (const skill of await fs.readdir(root)) {
+          const file = path.join(root, skill, 'SKILL.md');
+          if (!notPaneTodos.has(`${skill}/SKILL.md`)) files.set(file, await fs.readFile(file, 'utf8'));
+        }
+      }
+      return files;
+    };
+
+    await manager.ensurePaneChatGuide();
+    for (const [name, text] of await written()) {
+      // The checkout's own folder may be named for a to-do; it isn't text Pane wrote.
+      expect(text.split(path.join(__dirname, '..', '..', '..')).join('<repo>').match(todoText)?.[0], name).toBeUndefined();
+      expect(text, name).not.toContain('pane:todos');
+    }
+
+    readTodosSwitchFrom(() => ({ todosEnabled: true }));
+    await manager.ensurePaneChatGuide();
+    const on = await written();
+    const bundle = path.join(__dirname, 'paneChatBundle', 'skills');
+    for (const skill of ['pane-orchestration', 'runpane', 'orchestrate-sessions']) {
+      const source = await fs.readFile(path.join(bundle, skill, 'SKILL.md'), 'utf8');
+      expect(on.get(path.join(manager.paneChatSkillsRoot, skill, 'SKILL.md')), skill).toBe(source.replace(/^<!-- \/?pane:todos -->\n/gm, '').replace(/<!-- \/?pane:todos -->/g, ''));
+    }
+    expect(on.get('Session folder AGENTS.md')).toContain('## To-dos: your work list');
+    expect(on.get('Session folder AGENTS.md')).toContain("For a to-do's own Session, `runpane todos archive T-n`");
+    for (const [name, text] of on) expect(text, name).not.toContain('pane:todos');
   });
 
   it('installs the wrap-up skill only where Session orchestrators look, not in the home skill workers get', async () => {
@@ -643,7 +690,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     for (const root of [manager.codexProjectSkillsRoot, manager.claudeProjectSkillsRoot]) {
       const installed = await fs.readdir(root);
       expect(installed).toEqual(expect.arrayContaining([...bundledSkills, 'pane-orchestrator']));
-      await expect(fs.readFile(path.join(root, 'runpane', 'SKILL.md'), 'utf8')).resolves.toBe(bundledRunpane);
+      await expect(fs.readFile(path.join(root, 'runpane', 'SKILL.md'), 'utf8')).resolves.toBe(withTodosText(bundledRunpane, false));
     }
     const font = path.join('orchestrate-sessions', 'assets', 'status-page', 'inter-latin-wght-normal.woff2');
     expect((await fs.readFile(path.join(manager.paneChatSkillsRoot, font))).equals(await fs.readFile(path.join(bundleRoot, font)))).toBe(true);

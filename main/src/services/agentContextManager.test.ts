@@ -8,6 +8,7 @@ import {
   PANE_AGENT_CONTEXT_END,
   PANE_AGENT_CONTEXT_START,
 } from './agentContextManager';
+import { readTodosSwitchFrom } from './todos/todosFeature';
 
 const tempDirs: string[] = [];
 
@@ -27,6 +28,7 @@ async function createTempProject(): Promise<string> {
 
 describe('agentContextManager', () => {
   afterEach(async () => {
+    readTodosSwitchFrom(() => undefined);
     while (tempDirs.length > 0) {
       const dir = tempDirs.pop();
       if (dir) {
@@ -57,6 +59,22 @@ describe('agentContextManager', () => {
     expect(content).not.toContain('Typical workflow: register the saved base repository once');
     expect(content).not.toContain('Skill routing reference:');
     expect(content).toContain(PANE_AGENT_CONTEXT_END);
+  });
+
+  it('writes the To-dos paragraph only while To-dos is on (T-39)', async () => {
+    const projectPath = await createTempProject();
+    const agentsFile = path.join(projectPath, 'AGENTS.md');
+
+    await ensureProjectAgentContext({ path: projectPath }, enabledConfig());
+    const off = await fs.readFile(agentsFile, 'utf8');
+    expect(off).not.toMatch(/to-do|todos|--todo/i);
+    expect(off).toContain('This repository is used with [Pane]');
+
+    readTodosSwitchFrom(() => ({ todosEnabled: true }));
+    await ensureProjectAgentContext({ path: projectPath }, enabledConfig());
+    const on = await fs.readFile(agentsFile, 'utf8');
+    expect(on).toContain('To-dos: `runpane todos` (or the `todos_*` MCP tools) is a work list Pane keeps moving.');
+    expect(on.replace(/^To-dos: .*\n/m, '')).toBe(off);
   });
 
   it('leaves repositories untouched when the setting is absent', async () => {

@@ -74,7 +74,8 @@ import { requestOpenSettings } from '../utils/openSettings';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
-import { isChatTabsEnabled, isMissionControlEnabled, isProfilesEnabled, useConfigStore } from '../stores/configStore';
+import { isChatTabsEnabled, isMissionControlEnabled, isProfilesEnabled, isTodosEnabled, useConfigStore } from '../stores/configStore';
+import { leaveTodos } from './todos/todosNavigation';
 import { configuredIde } from '../../../shared/utils/ideCommands';
 import { cycleIndex } from '../utils/arrayUtils';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
@@ -140,6 +141,11 @@ export const SessionView = memo(() => {
   useEffect(() => {
     if (config && !profilesOn && activeView === 'profiles') navigateToSessions();
   }, [activeView, config, profilesOn, navigateToSessions]);
+  // To-dos is opt-in too (T-39): turned off while open, it goes back to where you were.
+  const todosOn = isTodosEnabled(config);
+  useEffect(() => {
+    if (config && !todosOn && activeView === 'todos') leaveTodos();
+  }, [activeView, config, todosOn]);
   const customCommands = useMemo(
     () => (config?.customCommands ?? []).filter(cmd => cmd?.name && cmd?.command),
     [config?.customCommands]
@@ -1972,7 +1978,7 @@ export const SessionView = memo(() => {
     return <LoopsView />;
   }
 
-  if (activeView === 'todos') {
+  if (activeView === 'todos' && todosOn) {
     return <TodosView />;
   }
 

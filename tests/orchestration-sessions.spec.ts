@@ -1831,6 +1831,19 @@ test('the Overview is the first tab of every Session\'s right split, beside the 
   await expect(page.getByRole('menuitem', { name: 'Close tab' })).toHaveCount(0);
 });
 
+test('with To-dos off a Session shows no To-dos tab in its split or its sidebar, and no count (T-39)', async ({ page }) => {
+  await installSessionsFixture(page, [sessionFixture('roadmap', 'Roadmap', 'Plan the next release.', '', new Date(0).toISOString())], [], { rememberPaneLayouts: true, initialConfig: { todosEnabled: false } });
+  await gotoApp(page);
+  await page.getByTestId('orchestration-session-roadmap').click();
+  const groupStrips = page.locator('.panel-group-tab-bar');
+  await expect(groupStrips).toHaveCount(2);
+  await expect.poll(() => tabNames(groupStrips.nth(1))).toEqual(['Overview']);
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
+  await expect(page.getByRole('tablist', { name: 'Session inspector' }).getByRole('tab')).toHaveText(['Files', 'Changes']);
+  await expect(page.getByTestId('todos-nav')).toHaveCount(0);
+  await expect(page.getByTestId('sidebar-todos')).toHaveCount(0);
+});
+
 test('a saved split without the Overview gains it as the leftmost tab and keeps its selected tab', async ({ page }) => {
   const sessionId = '__orchestration_session_plansterminal__';
   const now = new Date(0).toISOString();

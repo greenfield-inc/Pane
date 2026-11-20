@@ -11,6 +11,8 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { paneCommandCaller, type IpcMainHandleLike, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { isKnownZone, isoInZone } from '../services/todos/snoozeClock';
 import type { TodoActor, TodoService } from '../services/todos/todoService';
+import { requireTodosOn } from '../services/todos/todosFeature';
+import type { AppConfig } from '../types/config';
 import type { AppServices } from './types';
 
 /** The app's own channels: the To-dos screens act as the person. */
@@ -31,7 +33,9 @@ async function respond<T>(work: () => T | Promise<T>): Promise<TodoResponse<T>> 
   }
 }
 
-function requireTodoService(services: Pick<AppServices, 'todoService'>): TodoService {
+function requireTodoService(services: Pick<TodoHandlerServices, 'todoService' | 'configManager'>): TodoService {
+  // T-39: To-dos is off unless the person turned it on; the refusal names the switch, and the data stays.
+  requireTodosOn(services.configManager.getConfig());
   if (!services.todoService) {
     throw new PaneError('ERR_TODOS_UNAVAILABLE', 'To-dos are unavailable: this Pane has not started its to-do service. Nothing was changed.', 'Restart Pane, then run the command again.');
   }
@@ -175,7 +179,8 @@ function absoluteTarget(target: string): string {
 }
 
 /** What the to-do handlers read from Pane's services. */
-export type TodoHandlerServices = Pick<AppServices, 'todoService'> & { databaseService: Pick<AppServices['databaseService'], 'getAllProjects'> };
+export type TodoHandlerServices = Pick<AppServices, 'todoService'> & {
+  configManager: { getConfig(): Pick<AppConfig, 'todosEnabled'> }; databaseService: Pick<AppServices['databaseService'], 'getAllProjects'> };
 
 function projectIdOf(services: TodoHandlerServices, project: string | undefined): number | null {
   if (!project) return null;
@@ -197,8 +202,14 @@ export function registerTodoHandlers(ipcMain: IpcMainHandleLike, services: TodoH
   commandRegistry.register('todos:act', (value: PaneCommandValue) => respond((): Promise<TodoActionResult> => runTodoAction(service(), decodeBoundary(value, actionSchema))));
   commandRegistry.bindChannels(ipcMain, TODO_APP_CHANNELS);
 
-  // runpane todos … (agents).
-  commandRegistry.register('runpane:todos:create', async (value: PaneCommandValue): Promise<RunpaneTodoResult> => {
+  // runpane todos … (agents). Each refuses with TODOS_DISABLED before reading its request while To-dos is off.
+  const register = <TResult extends PaneCommandValue>(channel: string, handler: (value: PaneCommandValue) => TResult | Promise<TResult>): void => {
+    commandRegistry.register(channel, (value: PaneCommandValue) => {
+      requireTodosOn(services.configManager.getConfig());
+      return handler(value);
+    });
+  };
+  register('runpane:todos:create', async (value: PaneCommandValue): Promise<RunpaneTodoResult> => {
     const request = decodeBoundary(value, boundary.object({
       title: boundary.string, summary: optionalString, doneWhen: optionalStrings, parent: optionalString, project: optionalString,
       agent: optionalString, attach: optionalStrings, start: boundary.optional(boundary.boolean), ...callerField,
@@ -211,7 +222,7 @@ export function registerTodoHandlers(ipcMain: IpcMainHandleLike, services: TodoH
     return { ok: true, todo: runpaneTodo(service(), created.number) };
   });
 
-  commandRegistry.register('runpane:todos:update', (value: PaneCommandValue): RunpaneTodoResult => {
+  register('runpane:todos:update', (value: PaneCommandValue): RunpaneTodoResult => {
     const request = decodeBoundary(value, boundary.object({
       todo: boundary.string, title: optionalString, summary: optionalString, doneWhen: optionalStrings, check: optionalNumbers, uncheck: optionalNumbers, ...callerField,
     }));
@@ -219,7 +230,7 @@ export function registerTodoHandlers(ipcMain: IpcMainHandleLike, services: TodoH
     return { ok: true, todo: runpaneTodo(service(), updated.number) };
   });
 
-  commandRegistry.register('runpane:todos:attach', (value: PaneCommandValue): RunpaneTodoAttachResult => {
+  register('runpane:todos:attach', (value: PaneCommandValue): RunpaneTodoAttachResult => {
     const request = decodeBoundary(value, boundary.object({ todo: boundary.string, target: boundary.string, kind: optionalString, label: optionalString, note: optionalString, ...callerField }));
     const todoNumber = requireRef(request.todo);
     service().attach(todoNumber, { target: absoluteTarget(request.target), kind: request.kind, label: request.label, note: request.note }, agentActor(request.callerPanelId));
@@ -227,14 +238,14 @@ export function registerTodoHandlers(ipcMain: IpcMainHandleLike, services: TodoH
     return { ok: true, todo: todoRef(todoNumber), attachment: attachments[attachments.length - 1] };
   });
 
-  commandRegistry.register('runpane:todos:detach', (value: PaneCommandValue): RunpaneTodoDetachResult => {
+  register('runpane:todos:detach', (value: PaneCommandValue): RunpaneTodoDetachResult => {
     const request = decodeBoundary(value, boundary.object({ todo: boundary.string, attachment: boundary.number, ...callerField }));
     const todoNumber = requireRef(request.todo);
     service().detach(todoNumber, request.attachment, agentActor(request.callerPanelId));
     return { ok: true, todo: todoRef(todoNumber), detached: request.attachment };
   });
 
-  commandRegistry.register('runpane:todos:show', (value: PaneCommandValue): RunpaneTodoShowResult => {
+  register('runpane:todos:show', (value: PaneCommandValue): RunpaneTodoShowResult => {
     const request = decodeBoundary(value, refSchema);
     const detail = service().detail(requireRef(request.todo));
     const attachments = runpaneAttachments(detail);
@@ -245,7 +256,7 @@ export function registerTodoHandlers(ipcMain: IpcMainHandleLike, services: TodoH
     };
   });
 
-  commandRegistry.register('runpane:todos:list', (value: PaneCommandValue): RunpaneTodoListResult => {
+  register('runpane:todos:list', (value: PaneCommandValue): RunpaneTodoListResult => {
     const request = decodeBoundary(value ?? {}, boundary.object({ all: boundary.optional(boundary.boolean), status: boundary.optional(boundary.enumeration(...SHOWN_STATUSES)) }));
     const snapshot = service().snapshot();
     const counts = service().attachmentCounts();
@@ -256,65 +267,65 @@ export function registerTodoHandlers(ipcMain: IpcMainHandleLike, services: TodoH
     return { ok: true, todos: rows.map(row => runpaneTodoOf(row, counts.get(row.todo.number) ?? 0)) };
   });
 
-  commandRegistry.register('runpane:todos:assign', (value: PaneCommandValue): RunpaneTodoResult => {
+  register('runpane:todos:assign', (value: PaneCommandValue): RunpaneTodoResult => {
     const request = decodeBoundary(value, boundary.object({ todo: boundary.string, panel: optionalString, ...callerField }));
     const updated = service().assign(requireRef(request.todo), request.panel ?? null, agentActor(request.callerPanelId));
     return { ok: true, todo: runpaneTodo(service(), updated.number) };
   });
 
-  commandRegistry.register('runpane:todos:ask', async (value: PaneCommandValue): Promise<RunpaneTodoAskResult> => {
+  register('runpane:todos:ask', async (value: PaneCommandValue): Promise<RunpaneTodoAskResult> => {
     const request = decodeBoundary(value, boundary.object({ todo: boundary.string, question: boundary.string, ...callerField }));
     const todoNumber = requireRef(request.todo);
     const result = await service().ask(todoNumber, request.question, agentActor(request.callerPanelId));
     return { ok: true, todo: todoRef(todoNumber), routedTo: result.routedTo, approvalId: result.approvalId ?? null };
   });
 
-  commandRegistry.register('runpane:todos:comment', async (value: PaneCommandValue): Promise<RunpaneTodoCommentResult> => {
+  register('runpane:todos:comment', async (value: PaneCommandValue): Promise<RunpaneTodoCommentResult> => {
     const request = decodeBoundary(value, boundary.object({ todo: boundary.string, body: boundary.string, escalate: boundary.optional(boundary.boolean), ...callerField }));
     const todoNumber = requireRef(request.todo);
     const activity = await service().comment(todoNumber, request.body, agentActor(request.callerPanelId), { escalate: request.escalate });
     return { ok: true, todo: todoRef(todoNumber), activityId: activity.id };
   });
 
-  commandRegistry.register('runpane:todos:review', async (value: PaneCommandValue): Promise<RunpaneTodoReviewResult> => {
+  register('runpane:todos:review', async (value: PaneCommandValue): Promise<RunpaneTodoReviewResult> => {
     const request = decodeBoundary(value, boundary.object({ todo: boundary.string, summary: optionalString, noAttachments: optionalString, ...callerField }));
     const result = await service().review(requireRef(request.todo), { summary: request.summary, noAttachments: request.noAttachments }, agentActor(request.callerPanelId));
     return { ok: true, todo: runpaneTodo(service(), result.todo.number), approvalId: result.approvalId };
   });
 
-  commandRegistry.register('runpane:todos:done', (value: PaneCommandValue): RunpaneTodoResult => {
+  register('runpane:todos:done', (value: PaneCommandValue): RunpaneTodoResult => {
     const request = decodeBoundary(value, boundary.object({ todo: boundary.string, personSaid: optionalString, ...callerField }));
     const done = service().done(requireRef(request.todo), { personSaid: request.personSaid }, agentActor(request.callerPanelId));
     return { ok: true, todo: runpaneTodo(service(), done.number) };
   });
 
-  commandRegistry.register('runpane:todos:drop', (value: PaneCommandValue): RunpaneTodoResult => {
+  register('runpane:todos:drop', (value: PaneCommandValue): RunpaneTodoResult => {
     const request = decodeBoundary(value, boundary.object({ todo: boundary.string, reason: optionalString, ...callerField }));
     const dropped = service().drop(requireRef(request.todo), { reason: request.reason }, agentActor(request.callerPanelId));
     return { ok: true, todo: runpaneTodo(service(), dropped.number) };
   });
 
-  commandRegistry.register('runpane:todos:archive', async (value: PaneCommandValue): Promise<RunpaneTodoArchiveResult> => {
+  register('runpane:todos:archive', async (value: PaneCommandValue): Promise<RunpaneTodoArchiveResult> => {
     const request = decodeBoundary(value, refSchema);
     const todoNumber = requireRef(request.todo);
     const result = await service().archive(todoNumber, agentActor(request.callerPanelId));
     return { ok: true, todo: todoRef(todoNumber), ...result };
   });
 
-  commandRegistry.register('runpane:todos:start', async (value: PaneCommandValue): Promise<RunpaneTodoStartResult> => {
+  register('runpane:todos:start', async (value: PaneCommandValue): Promise<RunpaneTodoStartResult> => {
     const request = decodeBoundary(value, refSchema);
     const result = await service().start(requireRef(request.todo), agentActor(request.callerPanelId));
     return { ok: true, todo: runpaneTodo(service(), result.todo.number), queued: result.queued };
   });
 
-  commandRegistry.register('runpane:todos:stop', (value: PaneCommandValue): RunpaneTodoResult => {
+  register('runpane:todos:stop', (value: PaneCommandValue): RunpaneTodoResult => {
     const request = decodeBoundary(value, refSchema);
     const stopped = service().stop(requireRef(request.todo), agentActor(request.callerPanelId));
     return { ok: true, todo: runpaneTodo(service(), stopped.number) };
   });
 
   // Round 9 (T-17). The CLI reads the time in its own zone and sends the instant; `by` is the calling tab.
-  commandRegistry.register('runpane:todos:snooze', (value: PaneCommandValue): RunpaneTodoResult => {
+  register('runpane:todos:snooze', (value: PaneCommandValue): RunpaneTodoResult => {
     const request = decodeBoundary(value, boundary.object({
       todo: boundary.string, until: boundary.number, zone: boundary.string, note: optionalString, remindMe: boundary.optional(boundary.boolean), ...callerField,
     }));
@@ -322,7 +333,7 @@ export function registerTodoHandlers(ipcMain: IpcMainHandleLike, services: TodoH
     return { ok: true, todo: runpaneTodo(service(), snoozed.number) };
   });
 
-  commandRegistry.register('runpane:todos:wake', async (value: PaneCommandValue): Promise<RunpaneTodoResult> => {
+  register('runpane:todos:wake', async (value: PaneCommandValue): Promise<RunpaneTodoResult> => {
     const request = decodeBoundary(value, refSchema);
     const woken = await service().wake(requireRef(request.todo), agentActor(request.callerPanelId));
     return { ok: true, todo: runpaneTodo(service(), woken.number) };

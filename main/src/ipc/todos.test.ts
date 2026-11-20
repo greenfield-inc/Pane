@@ -6,6 +6,7 @@ import { TodoStore } from '../services/todos/todoStore';
 import { FakeHost } from '../services/todos/todoTestHost';
 import { RUNPANE_TODO_VERBS } from '../../../shared/types/todos';
 import { TODO_APP_CHANNELS, registerTodoHandlers, type TodoHandlerServices } from './todos';
+import type { AppConfig } from '../types/config';
 
 interface IpcStub extends IpcMainHandleLike {
   bound: string[];
@@ -22,8 +23,10 @@ describe('to-do channels', () => {
   let registry: PaneCommandRegistry;
   let ipcMain: IpcStub;
   let service: TodoService;
+  let config: Pick<AppConfig, 'todosEnabled'>;
 
   beforeEach(() => {
+    config = { todosEnabled: true };
     db = new Database(':memory:');
     host = new FakeHost();
     const todoService = new TodoService(new TodoStore(db), host, () => 1_000);
@@ -32,13 +35,26 @@ describe('to-do channels', () => {
     ipcMain = ipcMainStub();
     // SAFETY: projectIdOf reads only a project's id and name.
     const projects = [{ id: 4, name: 'Pane' }] as ReturnType<TodoHandlerServices['databaseService']['getAllProjects']>;
-    registerTodoHandlers(ipcMain, { todoService, databaseService: { getAllProjects: () => projects } }, registry);
+    registerTodoHandlers(ipcMain, { todoService, configManager: { getConfig: () => config }, databaseService: { getAllProjects: () => projects } }, registry);
   });
   afterEach(() => db.close());
 
   it('binds the app channels and a runpane channel for every todos verb', () => {
     expect(ipcMain.bound.sort()).toEqual([...TODO_APP_CHANNELS].sort());
     for (const verb of RUNPANE_TODO_VERBS) expect(registry.listChannels()).toContain(`runpane:todos:${verb}`);
+  });
+
+  it('refuses every channel with TODOS_DISABLED while To-dos is off, and keeps the saved to-dos (T-39)', async () => {
+    await registry.invoke('runpane:todos:create', [{ title: 'Kept', callerPanelId: 'x' }]);
+    config = {};
+    for (const verb of RUNPANE_TODO_VERBS) {
+      await expect(registry.invoke(`runpane:todos:${verb}`, [{}]), verb).rejects.toMatchObject({
+        code: 'TODOS_DISABLED', next: expect.stringContaining('Settings > Advanced > Experimental > To-dos'),
+      });
+    }
+    expect(await registry.invoke('todos:snapshot', [])).toMatchObject({ success: false, error: expect.stringContaining('To-dos is turned off') });
+    config = { todosEnabled: true };
+    expect(await registry.invoke('runpane:todos:list', [{}])).toMatchObject({ ok: true, todos: [{ ref: 'T-1', title: 'Kept' }] });
   });
 
   it('creates a to-do for an agent, with its repo, a sub-to-do, attachments listed first in show', async () => {

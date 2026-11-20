@@ -3,9 +3,23 @@ import type { ParsedArgs } from './commands';
 import { readWorkspaceSummary, type WorkspaceSummary } from './workspace';
 import { paneIntro, renderPaneIntro, type PaneIntro } from './paneIntro';
 import { resolvePaneDirectory } from './daemonClient';
+import { isTodoCommand, todosDisabledError, todosOn, withoutTodoArguments, withoutTodoLines } from './todosFeature';
 
 type AgentContextCommand =
   typeof RUNPANE_CONTRACT.agentContext.commands[keyof typeof RUNPANE_CONTRACT.agentContext.commands];
+
+/** What agent-context prints of a command: the contract's entry, less its to-do parts while To-dos is off. */
+interface CommandView {
+  name: string;
+  summary: string;
+  details: string;
+  requiresPaneDaemon: boolean;
+  mutates: boolean;
+  arguments: readonly { name: string; value?: string; required?: boolean; description: string }[];
+  examples: readonly string[];
+  jsonSchemas?: readonly string[];
+  notes?: readonly string[];
+}
 
 interface AgentContextBriefResult {
   ok: true;
@@ -24,7 +38,7 @@ interface AgentContextCommandResult {
   ok: true;
   mode: 'command';
   source: 'runpane-contract';
-  command: AgentContextCommand;
+  command: CommandView;
 }
 
 type AgentContextResult = AgentContextBriefResult | AgentContextCommandResult;
@@ -39,10 +53,13 @@ interface AgentContextUnknownCommandError {
 const MAX_COMMAND_CANDIDATES = 5;
 
 export async function runAgentContext(parsed: Pick<ParsedArgs, 'contextCommand' | 'json' | 'paneDir'>): Promise<number> {
-  if (parsed.contextCommand !== undefined && !findCommandDetail(parsed.contextCommand)) {
-    return printUnknownCommand(parsed.contextCommand, parsed.json);
+  const todos = todosOn(parsed.paneDir);
+  const found = parsed.contextCommand === undefined ? undefined : findCommandDetail(parsed.contextCommand);
+  if (!todos && found && isTodoCommand(found.name)) throw todosDisabledError();
+  if (parsed.contextCommand !== undefined && !found) {
+    return printUnknownCommand(parsed.contextCommand, parsed.json, todos);
   }
-  const result = await buildAgentContextResult(parsed.contextCommand, parsed.paneDir);
+  const result = await buildAgentContextResult(parsed.contextCommand, parsed.paneDir, todos);
   if (parsed.json) {
     console.log(JSON.stringify(result, null, 2));
     return 0;
@@ -54,13 +71,14 @@ export async function runAgentContext(parsed: Pick<ParsedArgs, 'contextCommand' 
   return 0;
 }
 
-async function buildAgentContextResult(commandName?: string, paneDir?: string): Promise<AgentContextResult> {
+async function buildAgentContextResult(commandName: string | undefined, paneDir: string | undefined, todos: boolean): Promise<AgentContextResult> {
   if (commandName) {
+    const command = getCommandDetail(commandName);
     return {
       ok: true,
       mode: 'command',
       source: 'runpane-contract',
-      command: getCommandDetail(commandName)
+      command: todos ? command : withoutTodoArguments(command)
     };
   }
 
@@ -70,9 +88,9 @@ async function buildAgentContextResult(commandName?: string, paneDir?: string): 
     mode: 'brief',
     source: 'runpane-contract',
     intro: paneIntro(resolvePaneDirectory(paneDir)),
-    workspaceRules: RUNPANE_CONTRACT.agentContext.workspaceRules,
+    workspaceRules: todos ? RUNPANE_CONTRACT.agentContext.workspaceRules : withoutTodoLines(RUNPANE_CONTRACT.agentContext.workspaceRules),
     summary: brief.summary,
-    rules: brief.rules,
+    rules: todos ? brief.rules : withoutTodoLines(brief.rules),
     tools: brief.tools,
     detailCommand: brief.detailCommand,
     workspaces: await readWorkspaceSummary(paneDir)
@@ -94,12 +112,12 @@ function getCommandDetail(commandName: string): AgentContextCommand {
   throw new Error(`Unknown runpane command: ${commandName}. Expected one of: ${commandNames().join(', ')}`);
 }
 
-function printUnknownCommand(commandName: string, json: boolean): number {
+function printUnknownCommand(commandName: string, json: boolean, todos: boolean): number {
   const error: AgentContextUnknownCommandError = {
     ok: false,
     code: 'unknown_command',
     message: `Unknown runpane command: ${commandName}. Run \`runpane agent-context --json\` to list every command.`,
-    candidates: rankCommandCandidates(commandName),
+    candidates: rankCommandCandidates(commandName, commandNames().filter((name) => todos || !isTodoCommand(name))),
   };
   if (json) {
     console.log(JSON.stringify(error, null, 2));
@@ -190,7 +208,7 @@ function renderBrief(result: AgentContextBriefResult): string {
   return lines.join('\n');
 }
 
-function renderCommandDetail(command: AgentContextCommand): string {
+function renderCommandDetail(command: CommandView): string {
   const lines = [
     `runpane ${command.name}`,
     '',

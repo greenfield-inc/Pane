@@ -6,7 +6,7 @@ import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
-import { isChatTabsEnabled, isMissionControlEnabled, isNotesEnabled, isProfilesEnabled } from '../../../stores/configStore';
+import { isChatTabsEnabled, isMissionControlEnabled, isNotesEnabled, isProfilesEnabled, isTodosEnabled } from '../../../stores/configStore';
 import type { Journey, JourneyTimingSummary } from '../../../../../shared/types/journeyTimings';
 import type { IPCResponse } from '../../../utils/api';
 import { useAutopilotStore } from '../../../stores/autopilotStore';
@@ -230,6 +230,18 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
             label="Profiles"
             value={isProfilesEnabled(config)}
             onSave={(value) => persistence.saveConfig('profiles', { profilesEnabled: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="todos"
+          label="To-dos"
+          description="Add To-dos: the work list Pane keeps moving, with its page, each Session's To-dos tab, to-do approvals, and runpane todos for agents. Turning it off hides it and stops its reminders; every saved to-do and its Session is kept. New Sessions and agents pick up the change."
+          saveState={persistence.saveStates.todos}
+        >
+          <ImmediateToggle
+            label="To-dos"
+            value={isTodosEnabled(config)}
+            onSave={(value) => persistence.saveConfig('todos', { todosEnabled: value })}
           />
         </SettingRow>
         <SettingRow

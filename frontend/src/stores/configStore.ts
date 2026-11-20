@@ -45,6 +45,11 @@ export function isProfilesEnabled(config: AppConfig | null): boolean {
   return config?.profilesEnabled === true;
 }
 
+/** To-dos is experimental (T-39): every screen, shortcut and palette entry waits for this opt-in. */
+export function isTodosEnabled(config: AppConfig | null): boolean {
+  return config?.todosEnabled === true;
+}
+
 /** Copy on select (Settings > Terminal); always on in remote mode, so text lands on this computer's clipboard. */
 export function isCopyOnSelectEnabled(config: AppConfig | null): boolean {
   return config?.terminalCopyOnSelect === true || config?.remoteDaemon?.client.mode === 'remote';

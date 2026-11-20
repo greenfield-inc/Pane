@@ -25,6 +25,7 @@ const PANE_MANAGED_SKILL_VERSION = 4;
 export const PANE_MANAGED_SKILL_MARKER = `<!-- pane-managed-skill v${PANE_MANAGED_SKILL_VERSION} -->`;
 const MANAGED_MARKER_PATTERN = /<!-- pane-managed-skill v(\d+) -->/;
 const SKILL_DIR_NAME = 'pane';
+const TODOS_SKILL_DIR_NAME = 'pane-todos';
 const SKILL_FILE = 'SKILL.md';
 const execFileAsync = promisify(execFile);
 let syncQueue: Promise<void> = Promise.resolve();
@@ -91,7 +92,7 @@ async function writeWslDistroRecord(distros: string[]): Promise<void> {
 }
 
 export function syncPaneHomeSkill(
-  config: Pick<AppConfig, 'agentContext'>,
+  config: Pick<AppConfig, 'agentContext' | 'todosEnabled'>,
   dirs: string[] = paneHomeSkillDirs(),
   wslDistros: string[] = [],
 ): Promise<PaneHomeSkillResult[]> {
@@ -104,11 +105,12 @@ export function syncPaneHomeSkill(
 }
 
 async function syncPaneHomeSkillNow(
-  config: Pick<AppConfig, 'agentContext'>,
+  config: Pick<AppConfig, 'agentContext' | 'todosEnabled'>,
   dirs: string[],
   wslDistros: string[],
 ): Promise<PaneHomeSkillResult[]> {
   const enabled = isPaneHomeSkillEnabled(config);
+  const todos = enabled && config.todosEnabled === true;
   // Pane's Claude plugin carries this skill, so Claude's copy steps aside while the plugin is on.
   const claudeDir = paneHomeSkillDirs()[0];
   const claudeSettings = path.join(path.dirname(path.dirname(claudeDir)), 'settings.json');
@@ -116,6 +118,8 @@ async function syncPaneHomeSkillNow(
   const results: PaneHomeSkillResult[] = [];
   for (const dir of dirs) {
     results.push(...(enabled && dir !== retired ? await installPaneHomeSkill([dir]) : await removePaneHomeSkill([dir])));
+    // The plugin carries no To-dos skill, so pane-todos stays beside a retired Claude copy too.
+    results.push(...await syncPaneTodosSkill(dir, todos));
   }
   if (process.platform !== 'win32') return results;
 
@@ -127,6 +131,7 @@ async function syncPaneHomeSkillNow(
     try {
       const wslDirs = await resolveWslHomeSkillDirs(distro);
       results.push(...(enabled ? await installPaneHomeSkill(wslDirs) : await removePaneHomeSkill(wslDirs)));
+      for (const dir of wslDirs) results.push(...await syncPaneTodosSkill(dir, todos));
     } catch (error) {
       failed.push(distro);
       console.warn(`[PaneHomeSkill] Could not sync skill in WSL distro ${distro}:`, error);
@@ -136,8 +141,15 @@ async function syncPaneHomeSkillNow(
   return results;
 }
 
-export async function installPaneHomeSkill(dirs: string[] = paneHomeSkillDirs()): Promise<PaneHomeSkillResult[]> {
-  const content = buildPaneHomeSkill();
+/** The pane-todos skill beside the pane skill in `paneSkillDir`'s folder: written while To-dos is on, removed while it is off. */
+async function syncPaneTodosSkill(paneSkillDir: string, todos: boolean): Promise<PaneHomeSkillResult[]> {
+  const dir = path.join(path.dirname(paneSkillDir), TODOS_SKILL_DIR_NAME);
+  const results = todos ? await installPaneHomeSkill([dir], buildPaneTodosSkill()) : await removePaneHomeSkill([dir]);
+  // Nothing to report while To-dos stays off and the skill was never written.
+  return results.filter(result => result.outcome !== 'absent');
+}
+
+export async function installPaneHomeSkill(dirs: string[] = paneHomeSkillDirs(), content = buildPaneHomeSkill()): Promise<PaneHomeSkillResult[]> {
   const results: PaneHomeSkillResult[] = [];
   for (const dir of dirs) {
     const skillPath = path.join(dir, SKILL_FILE);
@@ -484,7 +496,43 @@ the project, not Pane.
 - Another machine in the person's workspace: \`runpane workspace list\`, then
   \`runpane workspace <machine> exec -- <command>\`.
 
-## To-dos
+## Orchestrating workers
+
+To launch, wait on, answer or resume workers (including wrappers launched with
+\`--tool-command\`, such as \`agent-farm run\`), read and follow Pane's
+orchestrator guide: \`runpane docs read --doc skills/pane-orchestration/SKILL.md\`.
+It covers delivery checks, what each wake means, worker reports and status
+files, resume after a restart, showing pages, and shared-checkout etiquette.
+
+## Sessions
+
+When \`PANE_ORCHESTRATION_SESSION_ID\` is set you are a Session orchestrator.
+When \`panes create\` or \`panes adopt\` returns an \`association\` result,
+check \`association.ok\`. Confirm with
+\`runpane sessions overview --session "$PANE_ORCHESTRATION_SESSION_ID" --json\`.
+If the Pane is absent, including when an older CLI returns no association
+result, run \`runpane sessions associate --session "$PANE_ORCHESTRATION_SESSION_ID" --pane <pane-id> --json\`
+and confirm again before sending work.
+Never take over a Pane that belongs to another Session.
+
+Opening a terminal or Session is not a request to start work. Act on the
+user's request, and do not focus Pane windows unless the user asks.
+`;
+}
+
+/**
+ * To-dos (T-39) is experimental: its part of the home skill is a skill of its own, written next to
+ * `pane` only while To-dos is on, so neither the home skill nor the plugin's static copy of it
+ * mentions To-dos while it is off.
+ */
+export function buildPaneTodosSkill(): string {
+  return `---
+name: pane-todos
+description: Use when Pane assigns you a to-do (T-n), when a line in your tab starts with [From Pane, To-dos] or [From the person, via To-dos T-n], or before you run runpane todos, --todo, or the todos_* MCP tools.
+---
+${PANE_MANAGED_SKILL_MARKER}
+
+# Pane To-dos
 
 A to-do (T-n) is one piece of the person's agent work in Pane. When Pane
 assigns you one, it types \`[From Pane, To-dos] You are assigned T-n …\` into
@@ -508,27 +556,5 @@ shows it again, attachments first.
   wait. Pane types "Capacity is back" into your tab when load comes down.
 - \`[From Pane, To-dos]\` lines come from Pane; \`[From the person, via To-dos T-n]\`
   lines carry the person's own words from the to-do's page.
-
-## Orchestrating workers
-
-To launch, wait on, answer or resume workers (including wrappers launched with
-\`--tool-command\`, such as \`agent-farm run\`), read and follow Pane's
-orchestrator guide: \`runpane docs read --doc skills/pane-orchestration/SKILL.md\`.
-It covers delivery checks, what each wake means, worker reports and status
-files, resume after a restart, showing pages, and shared-checkout etiquette.
-
-## Sessions
-
-When \`PANE_ORCHESTRATION_SESSION_ID\` is set you are a Session orchestrator.
-When \`panes create\` or \`panes adopt\` returns an \`association\` result,
-check \`association.ok\`. Confirm with
-\`runpane sessions overview --session "$PANE_ORCHESTRATION_SESSION_ID" --json\`.
-If the Pane is absent, including when an older CLI returns no association
-result, run \`runpane sessions associate --session "$PANE_ORCHESTRATION_SESSION_ID" --pane <pane-id> --json\`
-and confirm again before sending work.
-Never take over a Pane that belongs to another Session.
-
-Opening a terminal or Session is not a request to start work. Act on the
-user's request, and do not focus Pane windows unless the user asks.
 `;
 }

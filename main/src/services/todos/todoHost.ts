@@ -15,6 +15,7 @@ import { panelManager } from '../panelManager';
 import { terminalPanelManager } from '../terminalPanelManager';
 import type { LoadSample, MemoryLevel } from './loadGate';
 import type { CreatedTodoSession, TodoCard, TodoHost, TodoPanelInfo, TodoSessionInfo } from './todoService';
+import { todosEnabled } from './todosFeature';
 
 const resumeResultSchema = boundary.object({ action: boundary.optional(boundary.string) });
 const screenSchema = boundary.object({ composer: boundary.object({ hasUndeliveredText: boundary.boolean }) });
@@ -183,6 +184,7 @@ export function createTodoHost(services: AppServices, commandRegistry: PaneComma
     },
 
     loadGateEnabled: () => services.configManager.getConfig().machineHealth?.holdTodoAgents !== false,
+    todosOn: () => todosEnabled(services.configManager.getConfig()),
 
     prOf(paneIds: string[]): TodoListRow['pr'] | undefined {
       for (const paneId of paneIds) {

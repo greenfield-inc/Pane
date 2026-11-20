@@ -122,7 +122,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     description: 'Disk and memory warnings, finished Panes, leaks, and what Pane may clean up by itself.',
     icon: HardDrive,
     settingIds: ['machine-health-disk', 'machine-health-memory', 'machine-health-finished', 'machine-health-leak', 'machine-health-auto-archive', 'machine-health-auto-agent-temp', 'machine-health-auto-paused-scratch', 'machine-health-auto-archived-folders', 'machine-health-auto-pause', 'machine-health-hold-todo-agents', 'machine-health-run-now'],
-    aliases: ['storage', 'disk', 'disk space', 'free space', 'memory', 'ram', 'pressure', 'swap', 'leak', 'leaking', 'cleanup', 'clean up', 'resources', 'temp', 'tmp', 'snapshot', 'backup', 'finished', 'archive', 'processes', 'to-dos', 'todos', 'load', 'busy', 'cpu', 'queue', 'hold'],
+    aliases: ['storage', 'disk', 'disk space', 'free space', 'memory', 'ram', 'pressure', 'swap', 'leak', 'leaking', 'cleanup', 'clean up', 'resources', 'temp', 'tmp', 'snapshot', 'backup', 'finished', 'archive', 'processes', 'load', 'busy', 'cpu', 'queue', 'hold'],
   },
   {
     id: 'notifications',
@@ -201,8 +201,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Advanced',
     description: 'Diagnostics, terminal backend, environment paths, and experimental features.',
     icon: SlidersHorizontal,
-    settingIds: ['verbose-logging', 'developer-mode', 'journey-timings', 'pty-host', 'additional-paths', 'mission-control', 'autopilot', 'notes', 'profiles', 'attention-inbox'],
-    aliases: ['debug', 'verbose', 'developer', 'performance', 'timings', 'pty', 'path', 'experimental', 'mission control', 'inbox', 'attention', 'autopilot', 'agent above sessions', 'profiles', 'workflow', 'team of agents'],
+    settingIds: ['verbose-logging', 'developer-mode', 'journey-timings', 'pty-host', 'additional-paths', 'mission-control', 'autopilot', 'notes', 'profiles', 'todos', 'attention-inbox'],
+    aliases: ['debug', 'verbose', 'developer', 'performance', 'timings', 'pty', 'path', 'experimental', 'mission control', 'inbox', 'attention', 'autopilot', 'agent above sessions', 'profiles', 'workflow', 'team of agents', 'to-dos', 'todos', 'work list'],
   },
 ] as const;
 

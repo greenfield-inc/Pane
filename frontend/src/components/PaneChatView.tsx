@@ -41,7 +41,7 @@ import {
 import { useSessionWorkspaceLayoutStore } from '../stores/sessionWorkspaceLayoutStore';
 import { usePanelStore } from '../stores/panelStore';
 import { useNavigationStore } from '../stores/navigationStore';
-import { useSessionTodosWaiting, useTodosStore } from '../stores/todosStore';
+import { useSessionTodosWaiting, useTodosEnabled, useTodosStore } from '../stores/todosStore';
 import { TodoStatusIcon } from './todos/TodoStatusIcon';
 import { openTodo } from './todos/todosNavigation';
 import { todoForSession } from './todos/page/todoSessionLink';
@@ -833,7 +833,8 @@ function TodoBreadcrumb({ session }: { session: OrchestrationSessionRecord }) {
   const rows = useTodosStore(state => state.snapshot?.rows);
   const origin = useNavigationStore(state => state.todoSessionOrigin);
   const link = useMemo(() => todoForSession(session, rows, origin), [session, rows, origin]);
-  if (!link) return null;
+  const enabled = useTodosEnabled();
+  if (!link || !enabled) return null;
   const words = link.title ? `${link.ref} · ${link.title}` : link.ref;
   const action = link.cameFrom ? `Back to ${words}` : `Open ${words}`;
   return (

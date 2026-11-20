@@ -54,6 +54,9 @@ export class FakeHost implements TodoHost {
   async restoreSession() {}
   async sampleLoad() { return this.load; }
   loadGateEnabled() { return this.gateEnabled; }
+  /** Settings › Advanced › Experimental › To-dos (T-39). */
+  todosEnabled = true;
+  todosOn() { return this.todosEnabled; }
   prOf() { return undefined; }
   log() {}
 

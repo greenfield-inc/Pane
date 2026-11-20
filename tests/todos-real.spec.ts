@@ -40,7 +40,7 @@ async function start(prefix: string, baseURL: string | undefined) {
   execFileSync('git', ['-c', 'user.email=qa@example.com', '-c', 'user.name=QA', 'commit', '-qm', 'init'], { cwd: repo });
   const { app, page } = await launchIsolated(pane, baseURL);
   const projectId = await page.evaluate(async repoPath => {
-    await window.electronAPI.config.update({ notify: { enabled: true, showOutsidePane: false } });
+    await window.electronAPI.config.update({ todosEnabled: true, notify: { enabled: true, showOutsidePane: false } });
     const created = await window.electronAPI.projects.create({ name: 'demo', path: repoPath, active: true });
     // SAFETY: projects:create returns the new project in `data` when it succeeds.
     return (created.data as { id: number }).id;

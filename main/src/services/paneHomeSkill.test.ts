@@ -180,6 +180,23 @@ describe('Pane home skill', () => {
     expect((await syncPaneHomeSkill({}, dirs)).map(result => result.outcome)).toEqual(['written', 'unchanged']);
   });
 
+  it('writes the pane-todos skill beside pane only while To-dos is on, and keeps To-dos out of pane (T-39)', async () => {
+    const todosDirs = dirs.map(dir => path.join(path.dirname(dir), 'pane-todos'));
+    await syncPaneHomeSkill({}, dirs);
+    for (const dir of todosDirs) await expect(fs.access(dir)).rejects.toThrow();
+    for (const dir of dirs) expect(await fs.readFile(path.join(dir, 'SKILL.md'), 'utf8')).not.toMatch(/to-do|todos|--todo/i);
+
+    await syncPaneHomeSkill({ todosEnabled: true }, dirs);
+    for (const dir of todosDirs) {
+      const skill = await fs.readFile(path.join(dir, 'SKILL.md'), 'utf8');
+      expect(skill).toContain('name: pane-todos');
+      expect(skill).toContain('runpane report --state blocked --question "<question>" --todo T-n');
+    }
+
+    await syncPaneHomeSkill({ todosEnabled: false }, dirs);
+    for (const dir of todosDirs) await expect(fs.access(dir)).rejects.toThrow();
+  });
+
   it('follows the setting: on by default, off removes', async () => {
     expect((await syncPaneHomeSkill({}, dirs)).map(result => result.outcome)).toEqual(['written', 'written']);
     expect((await syncPaneHomeSkill({ agentContext: { managedAgentsMd: false, homeSkill: false } }, dirs))
