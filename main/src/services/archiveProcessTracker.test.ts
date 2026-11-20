@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { once } from 'events';
 import { describe, expect, it, vi } from 'vitest';
-import { ArchiveProcessTracker, readArchiveProcesses, stopProcessIdentities, type ArchiveProcessIdentity, type ArchiveProcessObservation } from './archiveProcessTracker';
+import { ArchiveProcessTracker, attachKernelStarts, parseProcStat, readArchiveProcesses, stopProcessIdentities, type ArchiveProcessIdentity, type ArchiveProcessObservation } from './archiveProcessTracker';
 import { isProcessAlive } from '../utils/processTree';
 import { spawnDetachedWorkerPty } from '../test/detachedWorkerPty';
 
@@ -153,5 +153,140 @@ describe('stopProcessIdentities', () => {
     });
     expect(forced).toEqual([20]);
     expect(left).toEqual([{ pid: 20, started: 'Mon Nov 16 09:00:00 2026' }]);
+  });
+});
+
+/** A `/proc/<pid>/stat` line: pid, (comm), state, ppid, then fields 5..21, starttime (22) and the rest. */
+const procStat = (pid: number, comm: string, parent: number, startTicks: number) =>
+  `${pid} (${comm}) S ${parent} ${Array.from({ length: 17 }, (_, index) => index + 5).join(' ')} ${startTicks} 4096 512 18446744073709551615\n`;
+
+describe('parseProcStat', () => {
+  it('reads the parent and start ticks', () => {
+    expect(parseProcStat(procStat(4242, 'node', 1, 987654))).toEqual({ parent: 1, startTicks: '987654' });
+  });
+
+  it('counts fields from the last parenthesis, so a command name with spaces and parentheses does not shift them', () => {
+    expect(parseProcStat(procStat(4242, 'tmux: server) (2 3', 77, 123456))).toEqual({ parent: 77, startTicks: '123456' });
+  });
+
+  it('rejects a line it cannot read', () => {
+    expect(parseProcStat('')).toBeUndefined();
+    expect(parseProcStat('4242 (node) S 1 2 3')).toBeUndefined();
+    expect(parseProcStat('4242 node S 1')).toBeUndefined();
+  });
+});
+
+describe('attachKernelStarts', () => {
+  const boot = '6a1f0c7e-3b44-4f0e-9a51-2a0c1d9e7b10';
+  const row = (pid: number, parent: number): ArchiveProcessObservation => ({ pid, parent, started: 'Mon Nov 16 09:00:00 2026', exited: false });
+  const files = (entries: Record<string, string>) => async (path: string) => {
+    const text = entries[path];
+    if (text === undefined) throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+    return text;
+  };
+
+  it('tags each row with the boot and its start ticks', async () => {
+    const rows = [row(10, 1), row(11, 10)];
+    await attachKernelStarts(rows, files({
+      '/proc/sys/kernel/random/boot_id': `${boot}\n`,
+      '/proc/10/stat': procStat(10, 'bash', 1, 500),
+      '/proc/11/stat': procStat(11, 'sleep (x)', 10, 600),
+    }));
+    expect(rows.map(item => item.kernelStart)).toEqual([`${boot}:500`, `${boot}:600`]);
+  });
+
+  it('leaves a row on its lstart when its /proc entry is gone or names another parent', async () => {
+    const rows = [row(10, 1), row(11, 10)];
+    await attachKernelStarts(rows, files({
+      '/proc/sys/kernel/random/boot_id': boot,
+      // pid 10 exited after ps ran; pid 11 was reused by a child of another process.
+      '/proc/11/stat': procStat(11, 'sleep', 999, 600),
+    }));
+    expect(rows.map(item => item.kernelStart)).toEqual([undefined, undefined]);
+  });
+
+  it('leaves every row on its lstart when /proc cannot be read', async () => {
+    const rows = [row(10, 1)];
+    await attachKernelStarts(rows, files({ '/proc/10/stat': procStat(10, 'bash', 1, 500) }));
+    expect(rows[0].kernelStart).toBeUndefined();
+  });
+
+  it.runIf(process.platform === 'linux')('reads the live table with a kernel start for this process', async () => {
+    const self = (await readArchiveProcesses()).find(item => item.pid === process.pid);
+    expect(self?.kernelStart).toMatch(/^[0-9a-f-]+:\d+$/u);
+  });
+});
+
+// POSIX only: these rows carry ps lstart text and a Linux kernel start, while Windows compares
+// CIM creation times as integers and has no /proc.
+describe.skipIf(process.platform === 'win32')('identity across a clock step', () => {
+  const boot = '6a1f0c7e-3b44-4f0e-9a51-2a0c1d9e7b10';
+  // A clock step moves boot time, so ps prints a live process's lstart a few seconds later.
+  const before = 'Mon Nov 16 09:00:00 2026';
+  const after = 'Mon Nov 16 09:00:04 2026';
+  const observed = (pid: number, parent: number, started: string, kernelStart: string): ArchiveProcessObservation =>
+    ({ pid, parent, started, kernelStart, exited: false });
+
+  it('still kills a captured worker whose lstart shifted', async () => {
+    let table = [observed(1000001, 1, before, `${boot}:500`), observed(1000002, 1000001, before, `${boot}:600`)];
+    let saved: ArchiveProcessIdentity[] = [];
+    const terminate = vi.fn(async (_identities: readonly ArchiveProcessIdentity[]) => { table = []; });
+    const tracker = new ArchiveProcessTracker([], items => { saved = items; }, async () => table, terminate);
+    await tracker.capture([1000001]);
+    table = table.map(row => ({ ...row, started: after }));
+
+    await tracker.refresh();
+    expect(saved.map(item => item.pid)).toEqual([1000001, 1000002]);
+    await tracker.terminateSurvivors();
+    expect(terminate.mock.calls[0][0].map(item => item.pid)).toEqual([1000002, 1000001]);
+    await tracker.verifyExited(0);
+    expect(saved).toEqual([]);
+  });
+
+  it('keeps waiting on a survivor whose lstart shifted instead of forgetting it', async () => {
+    const tracker = new ArchiveProcessTracker([{ pid: 1000001, parent: 1, started: before, kernelStart: `${boot}:500` }], () => {},
+      async () => [observed(1000001, 1, after, `${boot}:500`)]);
+    await expect(tracker.verifyExited(0)).rejects.toThrow('PIDs 1000001');
+  });
+
+  it('never kills a reused pid, even one whose lstart text happens to match', async () => {
+    const terminate = vi.fn(async (_identities: readonly ArchiveProcessIdentity[]) => {});
+    let saved: ArchiveProcessIdentity[] = [];
+    const tracker = new ArchiveProcessTracker([{ pid: 1000001, parent: 1, started: before, kernelStart: `${boot}:500` }], items => { saved = items; },
+      async () => [observed(1000001, 1, before, `${boot}:90000`), observed(1000002, 1000001, before, `${boot}:90100`)], terminate);
+    await tracker.terminateSurvivors();
+    await tracker.verifyExited(0);
+    expect(terminate).toHaveBeenCalledWith([]);
+    expect(saved).toEqual([]);
+  });
+
+  it('never kills a pid reused after a reboot that landed on the same tick', async () => {
+    const terminate = vi.fn(async (_identities: readonly ArchiveProcessIdentity[]) => {});
+    const tracker = new ArchiveProcessTracker([{ pid: 1000001, parent: 1, started: before, kernelStart: `${boot}:500` }], () => {},
+      async () => [observed(1000001, 1, after, 'c0ffee00-0000-4000-8000-000000000000:500')], terminate);
+    await tracker.terminateSurvivors();
+    expect(terminate).toHaveBeenCalledWith([]);
+  });
+
+  it('falls back to the lstart text when either side has no kernel start', async () => {
+    const terminate = vi.fn(async (_identities: readonly ArchiveProcessIdentity[]) => {});
+    // Saved before kernel starts were read (or on macOS): the text still has to match.
+    const tracker = new ArchiveProcessTracker([
+      { pid: 1000001, parent: 1, started: before },
+      { pid: 1000003, parent: 1, started: before },
+    ], () => {}, async () => [observed(1000001, 1, before, `${boot}:500`), observed(1000003, 1, after, `${boot}:700`)], terminate);
+    await tracker.terminateSurvivors();
+    expect(terminate.mock.calls[0][0].map(item => item.pid)).toEqual([1000001]);
+  });
+
+  it('stopProcessIdentities signals a pid whose lstart shifted, and not a reused one', async () => {
+    const signalled: number[] = [];
+    let table = [observed(30, 1, after, `${boot}:500`), observed(31, 1, before, `${boot}:90000`)];
+    const left = await stopProcessIdentities(
+      [{ pid: 30, started: before, kernelStart: `${boot}:500` }, { pid: 31, started: before, kernelStart: `${boot}:600` }],
+      { read: async () => table, signal: pid => { signalled.push(pid); table = table.filter(item => item.pid !== pid); }, terminate: async () => {}, graceMs: 0 },
+    );
+    expect(signalled).toEqual(process.platform === 'win32' ? [] : [30]);
+    expect(left).toEqual(process.platform === 'win32' ? [{ pid: 30, started: before, kernelStart: `${boot}:500` }] : []);
   });
 });

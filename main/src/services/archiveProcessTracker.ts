@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import { readFile } from 'fs/promises';
 import { promisify } from 'util';
 import { cLocaleEnv, isProcessAlive, readControllingTerminals } from '../utils/processTree';
 
@@ -7,13 +8,61 @@ const execFileAsync = promisify(execFile);
 export interface ArchiveProcessIdentity {
   pid: number;
   parent: number;
+  /** `ps` lstart text on POSIX, CreationDate ticks on Windows; machine health compares this text. */
   started: string;
+  /**
+   * Linux only: `<boot_id>:<starttime>`, the start in clock ticks since boot from
+   * `/proc/<pid>/stat`. lstart is boot time plus those ticks, and boot time moves
+   * when the clock is stepped (WSL after host sleep, an NTP step), so a live
+   * process's lstart can shift; this cannot. Absent where /proc can't be read.
+   */
+  kernelStart?: string;
 }
 
 export interface ArchiveProcessObservation extends ArchiveProcessIdentity {
   exited: boolean;
   /** POSIX: leads its session, as every PTY shell does (`ps` stat flag `s`). */
   sessionLeader?: boolean;
+}
+
+/**
+ * Parent pid and start time (clock ticks since boot) from a `/proc/<pid>/stat` line.
+ * The command name sits in parentheses and may itself hold spaces and `)`, so the
+ * fields are counted from the last `)`.
+ */
+export function parseProcStat(text: string): { parent: number; startTicks: string } | undefined {
+  const close = text.lastIndexOf(')');
+  if (close < 0) return undefined;
+  // fields[0] is field 3 (state), so field 4 (ppid) is fields[1] and field 22 (starttime) is fields[19].
+  const fields = text.slice(close + 1).trim().split(/\s+/u);
+  const parent = fields[1] ?? '';
+  const startTicks = fields[19] ?? '';
+  if (!/^\d+$/u.test(parent) || !/^\d+$/u.test(startTicks)) return undefined;
+  return { parent: Number(parent), startTicks };
+}
+
+const PROC_READ_BATCH = 64;
+
+/**
+ * Linux: add each row's clock-independent start (`kernelStart`). A row whose /proc
+ * entry can't be read, or names another parent (its pid was reused, or it was
+ * reparented, since `ps` ran), keeps only its lstart text.
+ */
+export async function attachKernelStarts(
+  records: ArchiveProcessObservation[],
+  read: (path: string) => Promise<string> = path => readFile(path, 'utf8'),
+): Promise<void> {
+  let boot: string;
+  try { boot = (await read('/proc/sys/kernel/random/boot_id')).trim(); } catch { return; }
+  if (!boot) return;
+  for (let index = 0; index < records.length; index += PROC_READ_BATCH) {
+    await Promise.all(records.slice(index, index + PROC_READ_BATCH).map(async record => {
+      try {
+        const stat = parseProcStat(await read(`/proc/${record.pid}/stat`));
+        if (stat && stat.parent === record.parent) record.kernelStart = `${boot}:${stat.startTicks}`;
+      } catch { /* exited since ps ran, or /proc is hidden: lstart still identifies it */ }
+    }));
+  }
 }
 
 /** A failed snapshot must never be interpreted as an empty process table. */
@@ -24,7 +73,7 @@ export async function readArchiveProcesses(): Promise<ArchiveProcessObservation[
     ? await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
       '$ErrorActionPreference = "Stop"; Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { [long]$ticks = $_.CreationDate.ToUniversalTime().Ticks; $birth = ($ticks - ($ticks % [long]10)).ToString(); "$($_.ProcessId) $($_.ParentProcessId) $birth" } }'], options)
     : await execFileAsync('ps', ['-Ao', 'pid=,ppid=,lstart=,stat='], { ...options, env: cLocaleEnv() });
-  return stdout.split('\n').filter(line => line.trim()).map(line => {
+  const records = stdout.split('\n').filter(line => line.trim()).map(line => {
     const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/u.exec(line);
     if (!match) throw new Error('Cannot parse the process identity snapshot');
     const record: ArchiveProcessObservation = { pid: Number(match[1]), parent: Number(match[2]), started: match[3], exited: false };
@@ -39,6 +88,21 @@ export async function readArchiveProcesses(): Promise<ArchiveProcessObservation[
     }
     return record;
   });
+  if (process.platform === 'linux') await attachKernelStarts(records);
+  return records;
+}
+
+type Lifetime = Pick<ArchiveProcessIdentity, 'started' | 'kernelStart'>;
+
+/**
+ * Whether two observations of one pid are the same process rather than a reused pid.
+ * When both carry a kernel start it decides, since lstart text can shift under a
+ * clock step; otherwise (macOS, Windows, /proc unreadable, an identity saved before
+ * kernel starts were read, or one machine health passed) the start text must match.
+ */
+function sameLifetime(a: Lifetime, b: Lifetime): boolean {
+  if (a.kernelStart !== undefined && b.kernelStart !== undefined) return a.kernelStart === b.kernelStart;
+  return a.started === b.started;
 }
 
 /** Escalate only freshly matched lifetimes; never taskkill /T or signal a group
@@ -63,7 +127,7 @@ async function terminateArchiveProcesses(identities: readonly ArchiveProcessIden
   // signal, and never signal a changed/missing identity or an entire PID group.
   for (const identity of identities) {
     const current = (await readArchiveProcesses()).find(item => item.pid === identity.pid);
-    if (!current || current.exited || current.started !== identity.started) continue;
+    if (!current || current.exited || !sameLifetime(current, identity)) continue;
     try { process.kill(identity.pid, 'SIGKILL'); } catch { /* verification retains survivors */ }
   }
 }
@@ -80,11 +144,11 @@ export interface StopProcessDeps {
  * waits, then force-stops what is left. Every signal goes only to a pid whose start
  * time still matches, so a reused pid is never hit. Resolves with those still running.
  */
-export async function stopProcessIdentities(identities: readonly { pid: number; started: string }[], deps: StopProcessDeps = {}): Promise<{ pid: number; started: string }[]> {
+export async function stopProcessIdentities<Identity extends { pid: number } & Lifetime>(identities: readonly Identity[], deps: StopProcessDeps = {}): Promise<Identity[]> {
   const read = deps.read ?? readArchiveProcesses;
   const matching = async () => {
     const table = await read();
-    return identities.filter(identity => table.some(row => row.pid === identity.pid && row.started === identity.started && !row.exited));
+    return identities.filter(identity => table.some(row => row.pid === identity.pid && sameLifetime(row, identity) && !row.exited));
   };
   if (process.platform !== 'win32') {
     const signal = deps.signal ?? ((pid: number) => process.kill(pid, 'SIGTERM'));
@@ -164,7 +228,7 @@ export class ArchiveProcessTracker {
       }
     }
     for (const record of table.filter(item => selected.has(item.pid) && !item.exited)) {
-      if (!this.identities.some(item => item.pid === record.pid && item.started === record.started)) {
+      if (!this.identities.some(item => item.pid === record.pid && sameLifetime(item, record))) {
         this.identities.push(record);
       }
     }
@@ -176,7 +240,7 @@ export class ArchiveProcessTracker {
     if (this.identities.length === 0) return;
     const table = await this.read();
     const matching = this.identities.filter(identity => table.some(item =>
-      item.pid === identity.pid && item.started === identity.started && !item.exited));
+      item.pid === identity.pid && sameLifetime(item, identity) && !item.exited));
     this.captureTable(table, new Set(matching.map(identity => identity.pid)));
   }
 
@@ -184,11 +248,11 @@ export class ArchiveProcessTracker {
     if (this.identities.length === 0) return;
     const table = await this.read();
     const matching = this.identities.filter(identity => table.some(item =>
-      item.pid === identity.pid && item.started === identity.started && !item.exited));
+      item.pid === identity.pid && sameLifetime(item, identity) && !item.exited));
     // Include children born since capture while a known parent still exists.
     this.captureTable(table, new Set(matching.map(identity => identity.pid)));
     const survivors = this.identities.filter(identity => table.some(item =>
-      item.pid === identity.pid && item.started === identity.started && !item.exited));
+      item.pid === identity.pid && sameLifetime(item, identity) && !item.exited));
     await this.terminate([...survivors].reverse());
   }
 
@@ -201,7 +265,7 @@ export class ArchiveProcessTracker {
         const current = table.find(record => record.pid === identity.pid);
         if (current?.exited) return false;
         if (!current && isProcessAlive(identity.pid)) return true;
-        return current?.started === identity.started;
+        return current !== undefined && sameLifetime(current, identity);
       });
       if (this.identities.length === 0 || Date.now() >= deadline) break;
       await new Promise(resolve => setTimeout(resolve, 50));
