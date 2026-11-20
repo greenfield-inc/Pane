@@ -238,12 +238,26 @@ export function stepFocus(delta: 1 | -1): void {
   if (target) focusStop(target);
 }
 
-/** Into the main area from the sidebar (Enter on a row): its focused group. */
+/**
+ * Into the main area from the sidebar (Enter on a row): its focused group.
+ *
+ * With Sessions tiled, only the focused tile holds what Enter just opened, and
+ * focusing any other tile selects that tile's Session (T-45). While the opened
+ * Session is still loading its tile has no group yet, so focus waits on the
+ * tile itself (not its first control, the tile's close button) rather than
+ * going to the first group on screen, which is another Session's.
+ */
 function focusMainArea(): void {
-  const stops = collectFocusStops();
+  const tile = queryShown('[data-session-tile][data-session-focused="true"]')[0];
+  const stops = collectFocusStops().filter(stop => !tile || tile.contains(stop.ref));
   const target = stops.find(stop => stop.kind === 'group' && stop.preferred)
     ?? stops.find(stop => stop.kind === 'group' || stop.kind === 'main' || stop.kind === 'approvals');
-  if (target) focusStop(target);
+  if (target) {
+    focusStop(target);
+  } else if (tile) {
+    if (!tile.hasAttribute('tabindex')) tile.setAttribute('tabindex', '-1');
+    tile.focus({ preventScroll: true });
+  }
 }
 
 /**
