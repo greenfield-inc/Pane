@@ -101,6 +101,9 @@ others in `PANE_UNSNAPSHOTTED_FOLDERS`), git checkouts, and folders Pane does
 not know are left out. Preflight lists the last two in `snapshotSkipped`, so a
 dry run shows them; back them up yourself if they matter. A test fails when the
 code writes a top-level folder that is on neither list.
+The Electron profile is copied whole except Chromium's caches (`Cache`,
+`Code Cache`, `GPUCache` and the shader caches, `PROFILE_CACHE_FOLDERS`), which
+Chromium rebuilds on the next launch.
 
 The CLI that requested an update may be answering a remote
 `runpane workspace <machine> exec` through the Pane it is about to stop. The
@@ -280,7 +283,32 @@ An operation releases its locks when it ends `complete` or `failed`, or ends
 `needs-attention` after its `install` step completed (for example, a failed
 health check or panel restoration). The next `runpane update` also reclaims a
 lock left by such an operation. It runs in a new operation directory, so the
-old journal, checkpoint and snapshot stay in place.
+old journal, checkpoint and snapshot stay in place while it runs.
+
+## Removing old snapshots
+
+A snapshot is a full copy of Pane's state and Electron profile, and each
+operation keeps its own. When an update completes, its helper removes the
+operation directory and the previous app copy (for example
+`/Applications/Pane.app.before-<id>`) of every earlier operation that has ended
+and released its locks, whatever its outcome: once a newer update installed
+and passed its health checks, an older snapshot can only restore older data
+over a database the new release has migrated. The completed update keeps its
+own snapshot and previous app copy, so the newest rollback copy always stays.
+An earlier operation that may still have an installer running stays too.
+
+Pane's storage scan removes the same copies. It also removes those of an ended
+operation that the running Pane has moved past: Pane is newer than the release
+the operation installed or, when it never installed, the release it started
+from. That covers a failed `runpane update` followed by the built-in updater,
+which keeps no journal. To see and remove them yourself:
+
+```sh
+runpane machine cleanup --kind update-snapshot --json
+runpane machine cleanup --kind update-snapshot --yes --json
+```
+
+See [Machine health](MACHINE_HEALTH.md#what-pane-may-delete).
 
 A `needs-attention` operation that stopped before or during `install` keeps
 its locks, because an installer child may still be running. A lock owned by an

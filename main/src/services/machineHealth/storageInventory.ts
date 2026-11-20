@@ -1,10 +1,11 @@
 import { lstat, readdir, realpath, stat } from 'fs/promises';
 import * as path from 'path';
 import type { DiskBuckets, PaneDiskUsage, ReclaimItem, StorageInventory } from '../../../../shared/types/machineHealth';
-import { agentTempFolderName, classifyPaneDataFile, isWslPath, replacedUpdates, type UpdateRecord } from './reclaimRules';
+import { agentTempFolderName, classifyPaneDataFile, isWslPath } from './reclaimRules';
 import { measureSizes, type SizeRequest, type SizeResult } from './sizeWalker';
 import { PANE_SCRATCH_FOLDER } from '../../../../shared/constants/paneFolders';
 import { appBackupPath } from '../../../../packages/runpane/src/updateArtifacts';
+import { replacedUpdates, type UpdateRecord } from '../../../../packages/runpane/src/updateRetention';
 import { RESERVE_WORKTREE_PREFIX } from '../worktreePoolManager';
 
 const DAY = 86_400_000;
@@ -50,6 +51,8 @@ export interface InventoryDeps {
   /** Panes whose archive cleanup job is still queued or running. */
   archiveJobsInFlight: () => ReadonlySet<string>;
   readUpdates: () => Promise<UpdateRecord[]>;
+  /** The running Pane's version: an ended update it is newer than is replaced. */
+  appVersion: () => string;
   /** Git's worktrees of the Pane's project, with file-system paths. */
   listGitWorktrees: (pane: InventoryPane) => Promise<Array<{ path: string; branch?: string }>>;
   /** Folders git ignores in the Pane's worktree. */
@@ -209,7 +212,7 @@ export async function scanStorage(deps: InventoryDeps): Promise<StorageInventory
   }
 
   // Pane's data folder: replaced update copies and top-level files.
-  const replaced = new Set(replacedUpdates(await deps.readUpdates()));
+  const replaced = new Set(replacedUpdates(await deps.readUpdates(), deps.appVersion()));
   for (const id of replaced) {
     addItem({ kind: 'update-snapshot', tier: 1, path: path.join(deps.paneDir, 'updates', id), sessionId: null, reason: 'The rollback copy of an update a newer update replaced.' });
   }

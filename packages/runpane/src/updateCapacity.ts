@@ -42,7 +42,16 @@ export const PANE_UNSNAPSHOTTED_FOLDERS = [
   'agent-farm',
 ] as const;
 
+/**
+ * Chromium caches at the top of the Electron profile. Chromium rebuilds them on
+ * the next launch and they can hold gigabytes, so the snapshot leaves them out.
+ */
+const PROFILE_CACHE_FOLDERS = [
+  'Cache', 'Code Cache', 'GPUCache', 'DawnCache', 'DawnGraphiteCache', 'DawnWebGPUCache', 'GrShaderCache', 'ShaderCache',
+] as const;
+
 const stateFolders = new Set<string>(PANE_STATE_FOLDERS);
+const profileCaches = new Set<string>(PROFILE_CACHE_FOLDERS);
 const knownFolders = new Set<string>([...PANE_STATE_FOLDERS, ...PANE_UNSNAPSHOTTED_FOLDERS]);
 
 /** .git is a folder in a clone and a file in a worktree. */
@@ -57,15 +66,20 @@ function inUpdateSnapshot(file: string): boolean {
   return !stat.isDirectory() || !isCheckout(file);
 }
 
+const entriesOf = (directory: string): string[] => fs.readdirSync(directory).map(entry => path.join(directory, entry)).filter(inUpdateSnapshot);
+
 /**
  * What the snapshot takes from `source`. Pane data keeps only top-level files
  * and Pane's state folders: anything else there (a repository, someone's
  * backups) is not Pane's, and opening every file of it kept preflight silent
- * for minutes behind antivirus scans. The Electron profile is copied whole.
+ * for minutes behind antivirus scans. The Electron profile is copied whole
+ * except Chromium's caches.
  */
 function snapshotEntries(source: string, paneData: boolean): string[] {
-  return fs.readdirSync(source).map(entry => path.join(source, entry)).filter(file =>
-    inUpdateSnapshot(file) && (!paneData || !fs.lstatSync(file).isDirectory() || stateFolders.has(path.basename(file))));
+  return entriesOf(source).filter(file => {
+    if (!fs.lstatSync(file).isDirectory()) return true;
+    return paneData ? stateFolders.has(path.basename(file)) : !profileCaches.has(path.basename(file));
+  });
 }
 
 /** Folders in Pane data the snapshot skips that Pane does not know, and repositories inside its state folders. */
@@ -101,7 +115,7 @@ function filesBytes(files: string[], liveProfile: boolean): number {
   let total = 0;
   for (const file of files) {
     const stat = fs.lstatSync(file);
-    if (stat.isDirectory()) total += filesBytes(fs.readdirSync(file).map(entry => path.join(file, entry)).filter(inUpdateSnapshot), liveProfile);
+    if (stat.isDirectory()) total += filesBytes(entriesOf(file), liveProfile);
     else if (stat.isSymbolicLink()) { fs.readlinkSync(file); total += stat.size; }
     else if (stat.isFile()) {
       try { const fd = fs.openSync(file, 'r'); fs.closeSync(fd); }
@@ -120,7 +134,7 @@ const snapshotSize = (source: string, paneData: boolean, liveProfile = false) =>
 
 export function assertUpdateCapacity(paneDir: string, host: { paneDir: string; userData: string } | null, install: string, cliPrefix?: string): void {
   const GiB = 1024 ** 3;
-  const installBytes = host ? (fs.statSync(install).isDirectory() ? snapshotSize(install, false) : fs.statSync(install).size) : 0;
+  const installBytes = host ? (fs.statSync(install).isDirectory() ? filesBytes(entriesOf(install), false) : fs.statSync(install).size) : 0;
   const snapshotBytes = host ? snapshotSize(host.paneDir, true) + snapshotSize(host.userData, false, true) : 0;
   const requirements = [
     { directory: paneDir, bytes: snapshotBytes * 1.2 + (host ? installBytes * 3 : 0) + 2 * GiB },
