@@ -151,9 +151,9 @@ function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-// Building the handler is synchronous CPU, not a process start: 1 to 1.6 s on a 32-thread
-// Windows devbox (#1624). This whole test took at most 2.9 s on Windows CI before this budget,
-// so the build gets the default test timeout, and the counted Node starts go on top.
+// Building the handler is synchronous CPU, not a process start. It took 1 to 1.6 s on a 32-thread
+// Windows devbox before #1624 and about 0.1 s since; the build keeps the default test timeout as
+// headroom on slow runners, and the counted Node starts go on top.
 const HANDLER_BUILD_BUDGET_MS = 5_000;
 
 describe('PaneMcpEndpoint', () => {
