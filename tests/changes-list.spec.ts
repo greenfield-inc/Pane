@@ -89,6 +89,8 @@ interface OpenChangesOptions {
   panels?: JsonObject[];
   gitCommands?: JsonObject;
   waitForList?: boolean;
+  /** Entries the Details tab's history graph lists, newest first. */
+  historyGraph?: JsonObject[];
 }
 
 async function openChanges(page: Page, options: OpenChangesOptions = {}): Promise<void> {
@@ -105,6 +107,11 @@ async function openChanges(page: Page, options: OpenChangesOptions = {}): Promis
     initialUiState: { expandedProjects: [project.id] },
     activeProjectId: project.id,
   });
+  if (options.historyGraph) {
+    await page.addInitScript(entries => {
+      window.electronAPI.sessions.getGitGraph = async () => ({ success: true, data: { entries, currentBranch: 'feature' } });
+    }, options.historyGraph);
+  }
   await gotoApp(page);
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await page.getByRole('tab', { name: 'Changes', exact: true }).click();
@@ -332,6 +339,71 @@ test('the diff:view-commit handoff scopes the list and All changes returns to th
   await page.getByRole('button', { name: 'All changes' }).click();
   await expect(page.getByRole('option', { name: 'Open diff for README.md' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'All changes' })).toHaveCount(0);
+});
+
+test('Details history opens one commit on a click and a commit or working-tree range on a shift-click', async ({ page }) => {
+  const olderHash = '1234567890abcdef1234567890abcdef12345678';
+  const newerHash = 'abcdef0123456789abcdef0123456789abcdef01';
+  const graphEntry = (hash: string, message: string): JsonObject => ({
+    hash, parents: [], branch: 'feature', message, committerDate: timestamp, author: 'Pane QA',
+  });
+  await openChanges(page, {
+    executions: [
+      execution(0, 'UNCOMMITTED', 'Uncommitted changes'),
+      execution(1, newerHash, 'Newer commit'),
+      execution(2, olderHash, 'Older commit'),
+    ],
+    manifests: {
+      session: manifest,
+      [`commit:${olderHash}`]: createManifest({ kind: 'commit', hash: olderHash }, [changed('older-only.ts')]),
+      [`commit:${newerHash}`]: createManifest({ kind: 'commit', hash: newerHash }, [changed('newer-only.ts')]),
+      [`range:${olderHash}:${newerHash}`]: createManifest({ kind: 'commit-range', olderHash, newerHash }, [changed('commit-range.ts')]),
+      [`working-range:${olderHash}`]: createManifest({ kind: 'working-tree-range', baseHash: olderHash }, [changed('working-range.ts')]),
+    },
+    historyGraph: [
+      graphEntry('index', 'Uncommitted changes'),
+      graphEntry(newerHash, 'Newer commit'),
+      graphEntry(olderHash, 'Older commit'),
+    ],
+  });
+  const history = page.getByRole('region', { name: 'Commit history' });
+  const row = (name: string) => history.getByRole('button', { name: new RegExp(name) });
+  const openDetails = async () => {
+    await page.getByRole('tab', { name: 'Details', exact: true }).click();
+    await expect(row('Older commit')).toBeVisible();
+  };
+  const pressed = async () => Promise.all(['Uncommitted changes', 'Newer commit', 'Older commit']
+    .map(name => row(name).getAttribute('aria-pressed')));
+
+  await openDetails();
+  await row('Older commit').click();
+  await expect(page.getByRole('option', { name: 'Open diff for older-only.ts' })).toBeVisible();
+
+  // The anchor outlives the Details tab, so the shift-click back there extends from it.
+  await openDetails();
+  expect(await pressed()).toEqual(['false', 'false', 'true']);
+  await row('Newer commit').click({ modifiers: ['Shift'] });
+  await expect(page.getByRole('option', { name: 'Open diff for commit-range.ts' })).toBeVisible();
+
+  await openDetails();
+  expect(await pressed()).toEqual(['false', 'true', 'true']);
+  await row('Uncommitted changes').click({ modifiers: ['Shift'] });
+  await expect(page.getByRole('option', { name: 'Open diff for working-range.ts' })).toBeVisible();
+
+  // A plain click moves the anchor; Shift+Enter from a focused older row spans back up to it.
+  await openDetails();
+  expect(await pressed()).toEqual(['true', 'true', 'true']);
+  await row('Newer commit').click();
+  await expect(page.getByRole('option', { name: 'Open diff for newer-only.ts' })).toBeVisible();
+  await openDetails();
+  expect(await pressed()).toEqual(['false', 'true', 'false']);
+  await row('Older commit').focus();
+  await page.keyboard.press('Shift+Enter');
+  await expect(page.getByRole('option', { name: 'Open diff for commit-range.ts' })).toBeVisible();
+
+  const rangeScopes = (await manifestCalls(page)).map(call => call.scope).filter(scope => scope.kind === 'commit-range' || scope.kind === 'working-tree-range');
+  expect(rangeScopes).toContainEqual({ kind: 'commit-range', olderHash, newerHash });
+  expect(rangeScopes).toContainEqual({ kind: 'working-tree-range', baseHash: olderHash });
 });
 
 test('switching sessions cannot show rows from the previous session', async ({ page }) => {
