@@ -1927,4 +1927,24 @@ describe('stopping with kept-alive clients', () => {
 
     expect(await timedStop(server)).toBeLessThan(1000);
   });
+
+  it('lets a request that is running when stop() starts answer, then closes its connection', async () => {
+    const registry = new PaneCommandRegistry();
+    let finish = () => {};
+    const started = new Promise<void>((resolveStarted) => {
+      registry.register('sessions:get-all', () => new Promise((resolve) => {
+        finish = () => resolve([{ id: 'session-1' }]);
+        resolveStarted();
+      }));
+    });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    await server.start();
+    const answer = send(server, keepAliveAgent(), 'POST', '/invoke', { channel: 'sessions:get-all', args: [] });
+    await started;
+
+    const stopped = timedStop(server);
+    setTimeout(() => finish(), 100);
+    await expect(answer).resolves.toEqual({ statusCode: 200, body: JSON.stringify({ ok: true, result: [{ id: 'session-1' }] }) });
+    expect(await stopped).toBeLessThan(1000);
+  });
 });

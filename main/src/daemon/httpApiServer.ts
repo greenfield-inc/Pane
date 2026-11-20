@@ -384,6 +384,8 @@ export class PaneRemoteHttpApiServer {
   private readonly admittedSockets = new Map<WebSocket, AdmittedIdentity>();
   private admittedSocketCheckTimer: NodeJS.Timeout | null = null;
   private readonly eventClients = new Map<string, ConnectedRemoteEventClient>();
+  /** Responses not yet closed, so stop() can close each connection once its response ends. */
+  private readonly openResponses = new Set<ServerResponse>();
   private readonly deviceLabelsByRuntime = new Map<string, string>();
   private readonly recentWrites = new RecentWrites();
   private readonly daemonEventSink: PaneEventSink;
@@ -494,6 +496,8 @@ export class PaneRemoteHttpApiServer {
       : this.getValidatedPairingListenAddress();
 
     const server = http.createServer((request, response) => {
+      this.openResponses.add(response);
+      response.once('close', () => this.openResponses.delete(response));
       void this.handleRequest(request, response).catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         if (!response.headersSent) {
@@ -601,8 +605,13 @@ export class PaneRemoteHttpApiServer {
       const closed = new Promise<void>((resolve) => {
         server.close(() => resolve());
       });
-      // close() only refuses new connections; a kept-alive one would stay open until its client drops it.
+      // close() only refuses new connections; a kept-alive one would stay open until its client drops
+      // it, about 4 s for Node's global agent. One still answering (a file being streamed, an event stream
+      // ended above) is closed as soon as its response ends.
       server.closeIdleConnections();
+      for (const response of this.openResponses) {
+        response.once('close', () => server.closeIdleConnections());
+      }
       await closed;
     }
   }
