@@ -191,6 +191,8 @@ const MAX_PAIRING_PREVIEW_BODY_BYTES = 4 * 1024;
 const MAX_AUTHENTICATED_REQUEST_BODY_BYTES = 16 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_REMOTE_DAEMON_HEARTBEAT_INTERVAL_MS = 5_000;
+/** How long stop() lets requests already running answer before it closes their connections. */
+const DEFAULT_STOP_GRACE_MS = 1_000;
 const REMOTE_VISIBILITY_VIEWER_STALE_MS = 15 * 60 * 1000;
 const MIN_GZIP_BODY_BYTES = 1024;
 const GZIP_HEADERS = { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' } as const;
@@ -256,6 +258,8 @@ const REMOTE_DAEMON_CORS_HEADERS = {
 
 interface PaneRemoteHttpApiServerOptions {
   heartbeatIntervalMs?: number;
+  /** How long stop() waits for running requests before closing their connections; 1 s by default. */
+  stopGraceMs?: number;
   analyticsSink?: RemotePaneAnalyticsSink;
   /** Serve workspaces on loopback behind Tailscale Serve, trusting the Tailscale logins `access` allows. */
   workspace?: WorkspaceIdentityOptions;
@@ -384,12 +388,15 @@ export class PaneRemoteHttpApiServer {
   private readonly admittedSockets = new Map<WebSocket, AdmittedIdentity>();
   private admittedSocketCheckTimer: NodeJS.Timeout | null = null;
   private readonly eventClients = new Map<string, ConnectedRemoteEventClient>();
+  /** Responses not yet closed, so stop() can close each connection once its response ends. */
+  private readonly openResponses = new Set<ServerResponse>();
   private readonly deviceLabelsByRuntime = new Map<string, string>();
   private readonly recentWrites = new RecentWrites();
   private readonly daemonEventSink: PaneEventSink;
   private address: RemoteHttpAddress | null = null;
   private nextClientConnectionId = 1;
   private readonly heartbeatIntervalMs: number;
+  private readonly stopGraceMs: number;
   private readonly analyticsSink?: RemotePaneAnalyticsSink;
   private readonly workspace?: WorkspaceIdentityOptions;
   private readonly isForwardedPort: (port: number) => boolean | Promise<boolean>;
@@ -406,6 +413,7 @@ export class PaneRemoteHttpApiServer {
     options: PaneRemoteHttpApiServerOptions = {},
   ) {
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_REMOTE_DAEMON_HEARTBEAT_INTERVAL_MS;
+    this.stopGraceMs = options.stopGraceMs ?? DEFAULT_STOP_GRACE_MS;
     this.analyticsSink = options.analyticsSink;
     this.workspace = options.workspace;
     this.isForwardedPort = options.isForwardedPort ?? (() => false);
@@ -494,6 +502,8 @@ export class PaneRemoteHttpApiServer {
       : this.getValidatedPairingListenAddress();
 
     const server = http.createServer((request, response) => {
+      this.openResponses.add(response);
+      response.once('close', () => this.openResponses.delete(response));
       void this.handleRequest(request, response).catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         if (!response.headersSent) {
@@ -598,9 +608,23 @@ export class PaneRemoteHttpApiServer {
     }
 
     if (server) {
-      await new Promise<void>((resolve) => {
+      const closed = new Promise<void>((resolve) => {
         server.close(() => resolve());
       });
+      // close() only refuses new connections; a kept-alive one would stay open until its client drops
+      // it, about 4 s for Node's global agent. One still answering (a file being streamed, an event stream
+      // ended above) is closed as soon as its response ends, and any still open after the grace period
+      // (a stuck command, a slow upload) is closed then.
+      server.closeIdleConnections();
+      for (const response of this.openResponses) {
+        response.once('close', () => server.closeIdleConnections());
+      }
+      const grace = setTimeout(() => server.closeAllConnections(), this.stopGraceMs);
+      try {
+        await closed;
+      } finally {
+        clearTimeout(grace);
+      }
     }
   }
 
