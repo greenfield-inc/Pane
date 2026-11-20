@@ -312,6 +312,8 @@ export class NotifyQueue extends EventEmitter {
   /** Waiting question ids, oldest first. */
   private queue: string[] = [];
   private readonly hidden = new Set<string>();
+  /** The tabs each moving Session is stopping, by move id: their cards are held for the move (T-44). */
+  private readonly moveHoldPanels = new Map<string, Set<string>>();
   private transient: { view: NotifyStripView; timer?: Timer } | null = null;
   private paneFocused = false;
   private roundOpen = false;
@@ -1651,7 +1653,7 @@ export class NotifyQueue extends EventEmitter {
   panelStatus(panelId: string, idle: boolean): void {
     for (const entry of this.entries.values()) {
       // Only an open call can be abandoned: a saved item with no call is waiting on its tab's answer.
-      if (entry.item.source.panelId !== panelId || !isOpen(entry.item) || !entry.waiter || entry.moveHold) continue;
+      if (entry.item.source.panelId !== panelId || !isOpen(entry.item) || !entry.waiter || this.heldForMove(entry)) continue;
       clearTimeout(entry.idleTimer);
       entry.idleTimer = idle ? setTimeout(() => this.expire(entry.item.id), NOTIFY_IDLE_BACKSTOP_MS) : undefined;
     }
@@ -1665,7 +1667,7 @@ export class NotifyQueue extends EventEmitter {
     let withdrawn = false;
     for (const entry of [...this.entries.values()]) {
       const panelId = entry.item.source.panelId;
-      if (panelId && panelIds.includes(panelId) && isOpen(entry.item) && !entry.moveHold) {
+      if (panelId && panelIds.includes(panelId) && isOpen(entry.item) && !this.heldForMove(entry)) {
         this.expire(entry.item.id, unavailable('Its tab was paused in Pane.'), false);
         // Hidden, not moved to Earlier today: a paused Pane leaves nothing behind in Notify.
         this.entries.delete(entry.item.id);
@@ -1675,11 +1677,19 @@ export class NotifyQueue extends EventEmitter {
     if (withdrawn) this.changed();
   }
 
+  /** Whether a move holds this card: by its id, or because its asking tab is one a move is stopping. */
+  private heldForMove(entry: Entry): boolean {
+    if (entry.moveHold) return true;
+    const panelId = entry.item.source.panelId;
+    return !!panelId && [...this.moveHoldPanels.values()].some(panels => panels.has(panelId));
+  }
+
   /**
-   * A Session starts moving (T-44): these waiting cards are held, so stopping its tabs doesn't end
-   * them. Returns the ids held.
+   * A Session starts moving (T-44): these waiting cards are held, and so is any card its tabs
+   * (`panelIds`) post until the move packs, so stopping the tabs doesn't end them. Returns the ids held.
    */
-  holdForMove(ids: readonly string[]): string[] {
+  holdForMove(moveId: string, ids: readonly string[], panelIds: readonly string[]): string[] {
+    this.moveHoldPanels.set(moveId, new Set(panelIds));
     const held: string[] = [];
     for (const id of ids) {
       const entry = this.entries.get(id);
@@ -1691,7 +1701,8 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /** The move didn't get as far as taking them: these cards are this machine's again, as before. */
-  releaseMoveHold(ids: readonly string[]): void {
+  releaseMoveHold(moveId: string, ids: readonly string[]): void {
+    this.moveHoldPanels.delete(moveId);
     for (const id of ids) {
       const entry = this.entries.get(id);
       if (entry) entry.moveHold = undefined;
@@ -1703,7 +1714,8 @@ export class NotifyQueue extends EventEmitter {
    * write, so an answer that got there first wins), and leaves nothing here: no card, no call. A card
    * answered meanwhile stays here with its answer (`stayed`), so no answer is ever lost.
    */
-  takeForMove(ids: readonly string[], target: string): MoveTaken {
+  takeForMove(moveId: string, ids: readonly string[], target: string): MoveTaken {
+    this.moveHoldPanels.delete(moveId);
     const carried: NotifyItem[] = [];
     const stayed: MoveStayed[] = [];
     for (const id of ids) {
@@ -1906,7 +1918,7 @@ export class NotifyQueue extends EventEmitter {
         // A worker's question doesn't belong to the call relaying it: the worker still waits for
         // its answer in its tab, so an orchestrator's ended --relays call only lets go of it.
         // A card held for a move waits for its answer on the other machine, in the moved tab.
-        if (entry.item.originKind === 'worker' || entry.moveHold) {
+        if (entry.item.originKind === 'worker' || this.heldForMove(entry)) {
           waiter.detach();
           return;
         }

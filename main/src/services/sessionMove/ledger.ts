@@ -102,6 +102,8 @@ export interface LedgerEntry {
   rollbackDone?: boolean;
   /** The person was told about steps that kept failing. */
   noticed?: boolean;
+  /** The commit took in the move's approvals (T-44): a resumed commit doesn't take them in again. */
+  approvalsTaken?: boolean;
 }
 
 const NEXT = {
@@ -151,6 +153,7 @@ const entrySchema = boundary.object({
   })),
   rollbackDone: boundary.optional(boundary.boolean),
   noticed: boundary.optional(boundary.boolean),
+  approvalsTaken: boundary.optional(boundary.boolean),
 });
 
 /** Finished moves are kept this long, so a source that comes back late still gets its answer. */
@@ -267,6 +270,11 @@ export class MoveLedger {
       throw new PaneError('ERR_MOVE_DECIDED', `Move ${moveId} is already ${current.decision} here, so it can't become ${decision}.`, current.decision === 'rolledBack' ? 'Start the move again.' : 'Use the Session on this machine.');
     }
     return this.write({ ...current, decision, at: new Date().toISOString() });
+  }
+
+  /** Records that the commit took in the move's approvals. */
+  approvalsTaken(moveId: string): void {
+    this.write({ ...this.require(moveId), approvalsTaken: true });
   }
 
   /** Notes a tab the start handled, so a resumed start skips it. */

@@ -25,6 +25,8 @@ import { addWorktree, applySnapshot, deleteRefs, importBundle, MoveGitError, pla
 import { moveManifestSchema, movedApprovals, panelBuffersSchema, readTabFields, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveRepo, type MoveTab } from './manifest';
 import { buildPathMap, mapPath, rewriteText, type PathMap } from './pathMap';
 import { arrivingPreview, previewSourcePath, relativeInside, type MovedRoot } from './filePreviews';
+import { bindMovedApprovals } from './approvals';
+import type { MovedApproval } from '../notify/notifyService';
 import { MoveReceiver, type WriteRequest, type WriteResult } from './transfer';
 import { isRegeneratedSessionFile, isTextFile } from './sessionFolder';
 import { agentFarmProfileOf, movedLine } from './rules';
@@ -81,6 +83,8 @@ interface Job {
   lastWriteAt: number;
   manifest?: MoveManifest;
   map?: PathMap;
+  /** The folders the build placed here: its worktrees and the Session folder. */
+  roots?: string[];
   conversations: PlacedConversation[];
   /** Tabs to start, and their cwd here. */
   tabs: Array<{ paneId: string; tab: MoveTab; cwd: string }>;
@@ -156,15 +160,28 @@ async function tryGit(cwd: string, args: string[]): Promise<string | null> {
   try { return await git(cwd, args); } catch { return null; }
 }
 
+/** Git's output as it printed it (NUL-separated lists keep a name's leading spaces). */
+async function gitRaw(cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await run('git', args, { cwd, env: { ...process.env, PATH: getShellPath() }, maxBuffer: 16 * 1024 * 1024 });
+  return stdout;
+}
+
 /**
- * Of the previewed source files under `sourceRoot`, those the snapshot just placed in `worktree`
- * (tracked, or untracked and not ignored), relative and `/`-separated.
+ * Of the previewed source files under `sourceRoot`, those in the moved working tree (`snapshot`'s
+ * tree: tracked and untracked files as they were on the source, never ignored or deleted ones),
+ * each with its blob id, relative and `/`-separated.
  */
-async function placedFiles(worktree: string, sourceRoot: string, previewPaths: readonly string[]): Promise<Set<string>> {
+async function snapshotBlobs(worktree: string, snapshot: string, sourceRoot: string, previewPaths: readonly string[]): Promise<Map<string, string>> {
   const wanted = previewPaths.map(file => relativeInside(sourceRoot, file)).filter((file): file is string => file !== null);
-  if (wanted.length === 0) return new Set();
-  const listed = await git(worktree, ['--literal-pathspecs', 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', ...wanted]);
-  return new Set(listed.split('\0').filter(Boolean));
+  if (wanted.length === 0) return new Map();
+  const listed = await gitRaw(worktree, ['--literal-pathspecs', 'ls-tree', '-r', '-z', '--full-tree', snapshot, '--', ...wanted]);
+  const blobs = new Map<string, string>();
+  for (const entry of listed.split('\0')) {
+    // `<mode> blob <id>\t<path>`; a symlink (120000) or submodule is never a previewable file.
+    const match = /^100(?:644|755) blob ([0-9a-f]+)\t(.+)$/s.exec(entry);
+    if (match) blobs.set(match[2], match[1]);
+  }
+  return blobs;
 }
 
 /** `<executable> --version`, or null when it isn't installed here. */
@@ -617,7 +634,11 @@ export class MoveImporter {
       if (!(await snapshotMatches(placement.worktreePath, imported.snapshot))) {
         throw new PaneError('ERR_MOVE_SNAPSHOT_MISMATCH', `The uncommitted work of Pane “${pane.name}” didn't come out the same on ${thisMachineName()}.`, 'Nothing was kept here. Try the move again.');
       }
-      movedRoots.push({ from: pane.worktreePath, to: placement.worktreePath, files: await placedFiles(placement.worktreePath, pane.worktreePath, previewPaths) });
+      const blobs = await snapshotBlobs(placement.worktreePath, imported.snapshot, pane.worktreePath, previewPaths);
+      movedRoots.push({
+        from: pane.worktreePath, to: placement.worktreePath, files: new Set(blobs.keys()),
+        same: async (relative, file) => blobs.get(relative) === await gitRaw(placement.worktreePath, ['hash-object', '--no-filters', '--', file]).then(out => out.trim(), () => null),
+      });
       for (const entry of pane.ignored) leftBehind.push(`${entry} in ${pane.name}`);
       step();
       // Moving a Session back: the archived Pane left here by the earlier move gives way to the
@@ -698,6 +719,7 @@ export class MoveImporter {
     job.status.detail = 'Filing conversations';
     const arrivingPause: TerminalPausedMark = { at: new Date().toISOString(), by: 'move', machine: manifest.source.machine, arriving: true };
     movedRoots.push({ from: sourceFolder, to: targetFolder, files: new Set(manifest.sessionFolder.files.filter(relative => !isRegeneratedSessionFile(relative))) });
+    job.roots = movedRoots.map(root => root.to);
     const previewsNotCarried: string[] = [];
     for (const pane of manifest.panes) {
       const paneId = pane.role === 'owner' ? arriving.internalSessionId : pane.id;
@@ -789,9 +811,22 @@ export class MoveImporter {
       movedLine: movedLine(manifest.source.machine, thisMachineName(), job.map!),
       setAside: [...job.setAside], leftovers: job.conversations.flatMap(placed => placed.leftovers),
       approvals: manifest.approvals.length, leftBehind, missingEnv, previewsNotCarried,
-      // Shown here only once the move commits, with this machine's paths: until then the source may still roll it back.
-      approvalItems: manifest.approvals.map(approval => decodeBoundary(JSON.parse(rewriteText(job.map!, JSON.stringify(approval))), boundary.jsonObject)),
+      // Shown here only once the move commits, with this machine's paths and bound to the tabs it made:
+      // until then the source may still roll it back.
+      approvalItems: this.boundApprovals(job).map(approval => toJsonObject(approval)),
     };
+  }
+
+  /** The move's approvals with this machine's paths, each bound to a tab this build made (approvals.ts). */
+  private boundApprovals(job: Job): MovedApproval[] {
+    const manifest = job.manifest!;
+    if (!manifest.approvals.length) return [];
+    const rewritten = manifest.approvals.map(approval => decodeBoundary(JSON.parse(rewriteText(job.map!, JSON.stringify(approval))), boundary.jsonObject));
+    const ownerPaneId = decodeBoundary(manifest.session.internalSessionId, boundary.nonEmptyString);
+    const tabs = new Map(job.tabs.filter(({ tab }) => tab.type === 'terminal' || tab.type === 'chat').map(({ paneId, tab }) => [tab.id, paneId]));
+    return bindMovedApprovals(movedApprovals(rewritten), {
+      sessionId: String(manifest.session.id), sessionName: String(manifest.session.name ?? manifest.session.id), ownerPaneId, tabs, roots: job.roots ?? [],
+    });
   }
 
   private envNamesHere(): Set<string> {
@@ -1095,7 +1130,11 @@ export class MoveImporter {
     for (const file of plan.leftovers) await fs.promises.rm(file, { force: true }).catch(error => console.warn("[SessionMove] A previous conversation copy wasn't removed:", error));
     await manager.setMoveMark(plan.sessionId, undefined, `Moved here from ${plan.source}.`);
     // The approvals that came along wait here now; each answer goes to its tab once that tab is at its prompt.
-    if (plan.approvalItems?.length) this.services.notifyService?.adoptMovedApprovals(movedApprovals(plan.approvalItems));
+    // Once per move: a commit resumed after a restart never brings back a card handled here since.
+    if (plan.approvalItems?.length && !entry.approvalsTaken) {
+      this.services.notifyService?.adoptMovedApprovals(movedApprovals(plan.approvalItems));
+      this.ledger.approvalsTaken(moveId);
+    }
     const told = new Set(plan.told);
     const tell: Array<{ panelId: string; title: string; input: string }> = [];
     for (const tab of plan.tabs) {

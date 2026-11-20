@@ -42,7 +42,7 @@ import { agentFarmProfileOf, heldBackChecks, sessionApprovals, type SessionAppro
 import type { MovedApproval } from '../notify/notifyService';
 import { keepIgnoredFiles } from './ignoredFiles';
 import { runpaneWaits } from '../agentStatus/midTurn';
-import { moveManifestSchema, movedApprovals, readTabFields, sessionMoveCheckSchema, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveTab, type PackageFile } from './manifest';
+import { movedApprovals, readTabFields, sessionMoveCheckSchema, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveTab, type PackageFile } from './manifest';
 import { resolvePeer, type MovePeer } from './peer';
 import { settleAfterFreeze, type FreezeOutcome, type FreezeWait } from './afterFreeze';
 import { listSessionFolder } from './sessionFolder';
@@ -309,7 +309,20 @@ export class MoveCoordinator {
   private approvalsOf(record: OrchestrationSessionRecord): SessionApprovals {
     const store = this.services.approvalStore;
     if (!store) return { carried: [], held: [] };
-    return sessionApprovals(store.openItems(), [record.id, record.internalSessionId, ...this.memberPaneIds(record)]);
+    const paneIds = new Set([record.internalSessionId, ...this.memberPaneIds(record)]);
+    return sessionApprovals(store.openItems(), {
+      // Its asking tab, as this machine has it, is in one of the Session's Panes.
+      askedHere: item => {
+        const pane = item.source.panelId ? panelManager.getPanel(item.source.panelId)?.sessionId : undefined;
+        return pane !== undefined && paneIds.has(pane);
+      },
+      filedHere: item => item.source.session?.id === record.id || (item.connected?.kind === 'session' && item.connected.id === record.id),
+    });
+  }
+
+  /** Every tab of the Session's Panes: the move holds the cards they ask until it packs. */
+  private panelIdsOf(record: OrchestrationSessionRecord): string[] {
+    return [record.internalSessionId, ...this.memberPaneIds(record)].flatMap(paneId => panelManager.getPanelsForSession(paneId).map(panel => panel.id));
   }
 
   // ── Preflight ──────────────────────────────────────────────────────────
@@ -450,6 +463,7 @@ export class MoveCoordinator {
   /** On app start: every Session left frozen by a move carries on to its outcome without the dialog. */
   async resume(): Promise<void> {
     const sessions = (await this.services.orchestrationSessionManager?.list())?.sessions ?? [];
+    await this.recoverHandoffs(sessions).catch(error => console.warn('[SessionMove] Approvals left by an unfinished move weren\'t checked:', error));
     for (const session of sessions) {
       if (session.move?.state !== 'moving') continue;
       await this.recoverFrozen(session.id).catch(error => console.warn(`[SessionMove] The move of ${session.name} didn't resume:`, error));
@@ -487,8 +501,8 @@ export class MoveCoordinator {
   }
 
   private async run(job: SourceJob): Promise<void> {
-    // Held before any tab stops: a stopping tab would otherwise end its waiting cards (T-44).
-    job.heldApprovals = this.services.notifyService?.holdMovingApprovals(this.approvalsOf(job.record).carried.map(item => item.id)) ?? [];
+    // Held before any tab stops, with any card its tabs post meanwhile: a stopping tab would otherwise end them (T-44).
+    job.heldApprovals = this.services.notifyService?.holdMovingApprovals(job.progress.moveId, this.approvalsOf(job.record).carried.map(item => item.id), this.panelIdsOf(job.record)) ?? [];
     await this.stopTabs(job);
     this.checkCancelled(job);
     this.setStep(job, 'stop', 'done', this.stoppedSummary(job));
@@ -500,10 +514,15 @@ export class MoveCoordinator {
     // Asked again once every tab stopped: Stop now can leave a queue, and an approval can open while turns end.
     const held = this.heldBackChecks(record, true).find(check => check.level === 'block');
     if (held) throw new PaneError('ERR_MOVE_HELD_BACK', `${held.title}, so the Session didn't move.`, held.detail ?? 'Check again.');
-    // The held cards leave this machine now; one answered meanwhile stays here, with its answer.
-    const taken = this.services.notifyService?.takeMovingApprovals(job.heldApprovals, job.progress.target) ?? { carried: [], stayed: [] };
+    // The held cards leave this machine now, those its tabs posted since the hold too; one answered
+    // meanwhile stays here, with its answer. What leaves is saved first, so a restart here can put it back.
+    const notify = this.services.notifyService;
+    const moving = [...new Set([...job.heldApprovals, ...this.approvalsOf(record).carried.map(item => item.id)])];
+    if (notify && moving.length) await this.saveHandoff(job, notify.movingApprovals(moving));
+    const taken = notify?.takeMovingApprovals(job.progress.moveId, moving, job.progress.target) ?? { carried: [], stayed: [] };
     job.heldApprovals = [];
     job.carriedApprovals = taken.carried;
+    if (notify && moving.length) await this.saveHandoff(job, taken.carried);
     job.approvalsStayed = taken.stayed.map(card => `“${card.title}” was answered while the move stopped the Session's tabs${card.answer ? ` (${card.answer})` : ''}. The answer stays on ${thisMachineName()}; its tab moved before it heard it, so tell the agent on ${job.progress.target}.`);
     const { manifest, sources } = await this.manifest(record, job.progress.moveId, { outDir: job.outDir, tabs: job.tabs, snapshotRefs: job.snapshotRefs, approvals: taken.carried });
     this.setStep(job, 'pack', 'done', `${manifest.panes.filter(pane => pane.role === 'member').length} Panes, ${manifest.panes.reduce((sum, pane) => sum + pane.tabs.filter(tab => tab.conversation).length, 0)} conversations, the Session folder`);
@@ -777,7 +796,7 @@ export class MoveCoordinator {
     }
     await restartRunScripts(this.registry, job.scripts);
     // The move didn't happen: its approvals are this machine's again, waiting, their answers going to their tabs here.
-    this.services.notifyService?.releaseMovingApprovals(job.heldApprovals);
+    this.services.notifyService?.releaseMovingApprovals(job.progress.moveId, job.heldApprovals);
     const carried = await this.carriedApprovalsOf(job);
     if (carried.length) this.services.notifyService?.adoptMovedApprovals(carried);
     // The move didn't happen: its snapshot refs go, and an earlier move's ref (kept for Restore) comes back.
@@ -788,12 +807,41 @@ export class MoveCoordinator {
     return cleaned;
   }
 
-  /** The cards the pack took: from memory, or after a restart here from the manifest it sent. */
+  /** The cards the pack took: from memory, or after a restart here from the handoff it saved. */
   private async carriedApprovalsOf(job: SourceJob): Promise<MovedApproval[]> {
-    if (job.carriedApprovals) return job.carriedApprovals;
-    const text = await fs.promises.readFile(path.join(job.outDir, 'manifest.json'), 'utf8').catch(() => null);
-    if (!text) return [];
-    return movedApprovals(decodeBoundary(JSON.parse(text), moveManifestSchema).approvals);
+    return job.carriedApprovals ?? readHandoff(job.outDir);
+  }
+
+  /** Writes what leaves this machine, before it leaves: the only copy of a waiting card while it travels. */
+  private async saveHandoff(job: SourceJob, approvals: readonly MovedApproval[]): Promise<void> {
+    await fs.promises.mkdir(job.outDir, { recursive: true });
+    const file = path.join(job.outDir, HANDOFF_FILE);
+    await fs.promises.writeFile(`${file}.tmp`, JSON.stringify(approvals));
+    await fs.promises.rename(`${file}.tmp`, file);
+  }
+
+  /**
+   * On app start: a move that took cards and never froze (Pane quit between the pack and the freeze)
+   * gives them back here, waiting again. A frozen move settles them itself; a finished one keeps none.
+   */
+  private async recoverHandoffs(sessions: readonly OrchestrationSessionRecord[]): Promise<void> {
+    const root = path.join(getAppDirectory(), 'moves-out');
+    const moves: string[] = await fs.promises.readdir(root).catch(() => []);
+    for (const moveId of moves) {
+      const outDir = path.join(root, moveId);
+      if (!fs.existsSync(path.join(outDir, HANDOFF_FILE))) continue;
+      const mark = sessions.find(session => session.move?.moveId === moveId)?.move;
+      if (mark?.state === 'moving') continue;
+      try {
+        if (mark?.state !== 'moved') {
+          const approvals = await readHandoff(outDir);
+          if (approvals.length) this.services.notifyService?.adoptMovedApprovals(approvals);
+        }
+        await fs.promises.rm(path.join(outDir, HANDOFF_FILE), { force: true });
+      } catch (error) {
+        console.warn(`[SessionMove] The approvals of move ${moveId} weren't put back here:`, error);
+      }
+    }
   }
 
   private async fail(job: SourceJob, error: Error): Promise<void> {
@@ -815,6 +863,15 @@ export class MoveCoordinator {
       : { message: `${reasonOf(error)}. ${there} The Session is running here again, unchanged.`, next: 'Try again.' };
     this.touch(job, cancelled ? { phase: 'cancelled', error: undefined } : { phase: 'failed', error: failure });
   }
+}
+
+/** The approvals a move took from this machine, saved in its outbox before they left. */
+const HANDOFF_FILE = 'approvals.json';
+
+async function readHandoff(outDir: string): Promise<MovedApproval[]> {
+  const text = await fs.promises.readFile(path.join(outDir, HANDOFF_FILE), 'utf8').catch(() => null);
+  if (!text) return [];
+  return movedApprovals(decodeBoundary(JSON.parse(text), boundary.array(boundary.jsonObject)));
 }
 
 function formatBytes(bytes: number): string {

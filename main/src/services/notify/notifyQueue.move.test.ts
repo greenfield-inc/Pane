@@ -44,13 +44,13 @@ describe('NotifyQueue moving a Session\'s approvals', () => {
     void a.queue.ask({ question: ask('Q-5: ship?'), source: orchestrator }, controller.signal).then(value => { result = value; });
     const [{ id }] = a.queue.snapshot().items;
 
-    expect(a.queue.holdForMove([id])).toEqual([id]);
+    expect(a.queue.holdForMove('m1', [id], ['orch'])).toEqual([id]);
     // The move stops the tab: its call ends and the tab is paused. Neither ends a held card.
     controller.abort();
     a.queue.withdrawForPanels(['orch']);
     expect(a.item(id)?.state).toBe('waiting');
 
-    const taken = a.queue.takeForMove([id], 'studio');
+    const taken = a.queue.takeForMove('m1', [id], 'studio');
     expect(taken.stayed).toEqual([]);
     expect(taken.carried.map(card => card.id)).toEqual([id]);
     // Nothing left on the source: no card in Approvals, and its row says where it went.
@@ -74,8 +74,8 @@ describe('NotifyQueue moving a Session\'s approvals', () => {
     const a = machine('mini');
     void a.queue.ask({ question: ask('Q-6: deploy?'), source: orchestrator });
     const [{ id }] = a.queue.snapshot().items;
-    a.queue.holdForMove([id]);
-    const taken = a.queue.takeForMove([id], 'studio');
+    a.queue.holdForMove('m1', [id], ['orch']);
+    const taken = a.queue.takeForMove('m1', [id], 'studio');
     a.queue.takeIn(taken.carried);
     expect(a.item(id)?.state).toBe('waiting');
     a.queue.run({ type: 'answer', id, answer: { text: 'Now' } });
@@ -87,10 +87,10 @@ describe('NotifyQueue moving a Session\'s approvals', () => {
     const a = machine('mini');
     void a.queue.ask({ question: ask('Q-7: merge?'), source: orchestrator });
     const [{ id }] = a.queue.snapshot().items;
-    a.queue.holdForMove([id]);
+    a.queue.holdForMove('m1', [id], ['orch']);
     // The person answers while the move stops tabs: the answer is in its Undo hold when the move packs.
     a.queue.run({ type: 'answer', id, answer: { text: 'Merge it' } });
-    const taken = a.queue.takeForMove([id], 'studio');
+    const taken = a.queue.takeForMove('m1', [id], 'studio');
     expect(taken.carried).toEqual([]);
     expect(taken.stayed).toEqual([expect.objectContaining({ id, title: 'Q-7: merge?', answer: 'Merge it' })]);
     await vi.advanceTimersByTimeAsync(3_000);
@@ -101,10 +101,27 @@ describe('NotifyQueue moving a Session\'s approvals', () => {
     const a = machine('mini');
     void a.queue.ask({ question: ask('Q-8: retry?'), source: orchestrator });
     const [{ id }] = a.queue.snapshot().items;
-    a.queue.holdForMove([id]);
-    a.queue.releaseMoveHold([id]);
+    a.queue.holdForMove('m1', [id], ['orch']);
+    a.queue.releaseMoveHold('m1', [id]);
     a.queue.withdrawForPanels(['orch']);
     expect(a.store.readItem(id)?.state).toBe('expired');
+  });
+
+  it('a card a moving tab posts after the hold began is held too, and moves (S1)', () => {
+    const a = machine('mini');
+    a.queue.holdForMove('m1', [], ['orch']);
+    const controller = new AbortController();
+    void a.queue.ask({ question: ask('Q-10: late?'), source: orchestrator }, controller.signal);
+    const [{ id }] = a.queue.snapshot().items;
+    controller.abort();
+    a.queue.withdrawForPanels(['orch']);
+    expect(a.item(id)?.state).toBe('waiting');
+    expect(a.queue.takeForMove('m1', [id], 'studio').carried.map(card => card.id)).toEqual([id]);
+    // Taken: the tab's hold ended with the move's pack, so a later card of that tab ends as before.
+    void a.queue.ask({ question: ask('Q-11: after?'), source: orchestrator });
+    const later = a.queue.snapshot().items.find(card => card.title === 'Q-11: after?')!;
+    a.queue.withdrawForPanels(['orch']);
+    expect(a.store.readItem(later.id)?.state).toBe('expired');
   });
 
   it('takes in a card once: a second arrival of the same card changes nothing', () => {
@@ -112,8 +129,8 @@ describe('NotifyQueue moving a Session\'s approvals', () => {
     const b = machine('studio');
     void a.queue.ask({ question: ask('Q-9: go?'), source: orchestrator });
     const [{ id }] = a.queue.snapshot().items;
-    a.queue.holdForMove([id]);
-    const { carried } = a.queue.takeForMove([id], 'studio');
+    a.queue.holdForMove('m1', [id], ['orch']);
+    const { carried } = a.queue.takeForMove('m1', [id], 'studio');
     b.queue.takeIn(carried);
     b.queue.takeIn(carried);
     expect(b.queue.snapshot().queue).toEqual([id]);

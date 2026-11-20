@@ -53,7 +53,11 @@ function item(id: string, extra: Partial<NotifyItem> = {}): NotifyItem {
 }
 
 describe('sessionApprovals', () => {
-  const ids = ['session-1', 'orch-pane', 'member-pane'];
+  // The moving Session's tabs, and the card fields that file a card under it.
+  const ids = {
+    askedHere: (card: NotifyItem) => ['tab-1', 'orch-tab'].includes(card.source.panelId ?? ''),
+    filedHere: (card: NotifyItem) => card.source.session?.id === 'session-1' || card.connected?.id === 'session-1',
+  };
 
   it('carries waiting approvals, dismissed ones too, and holds none of them (T-3, T-44)', () => {
     const found = sessionApprovals([item('1', { dismissedAt: 5 }), item('2')], ids);
@@ -63,12 +67,16 @@ describe('sessionApprovals', () => {
 
   it('holds an answer in its Undo hold, and an open card that can\'t move; ignores other Sessions\' and ended ones', () => {
     const elsewhere = item('3', { source: { name: 'w', agent: 'Claude', paneId: 'other-pane', panelId: 't', session: { id: 'session-2', name: 'X', paneId: 'x' } } });
+    // Another Session's card that only mentions this Session (say, a link into its folder) is never this move's.
+    const mentions = item('8', { links: [{ label: 'x', path: '/p/.pane/sessions/session-1/plan.html' }], source: { name: 'w', agent: 'Claude', panelId: 't9', session: { id: 'session-2', name: 'X', paneId: 'x' } } });
+    // Filed under this Session but asked from a tab that isn't moving: it can't reach its asker there, so it holds the move.
+    const outside = item('9', { source: { name: 'w', agent: 'Claude', panelId: 'elsewhere-tab', session: { id: 'session-1', name: 'Doozy', paneId: 'orch-pane' } } });
     // SAFETY: sessionApprovals reads only whether these fields are present, never their contents.
     const secret = item('5', { secret: { project: 'p', name: 'TOKEN' } as NotifyItem['secret'] });
     // SAFETY: as above, only its presence counts.
     const prompt = item('6', { agentPrompt: {} as NotifyItem['agentPrompt'] });
-    const found = sessionApprovals([item('1', { state: 'sent' }), elsewhere, item('4', { state: 'answered' }), secret, prompt, item('7', { dismissedAt: 1, secret: secret.secret })], ids);
-    expect(found.held.map(approval => approval.id)).toEqual(['1', '5', '6']);
+    const found = sessionApprovals([item('1', { state: 'sent' }), elsewhere, mentions, item('4', { state: 'answered' }), secret, prompt, item('7', { dismissedAt: 1, secret: secret.secret }), outside], ids);
+    expect(found.held.map(approval => approval.id)).toEqual(['1', '5', '6', '9']);
     expect(found.carried).toEqual([]);
   });
 });

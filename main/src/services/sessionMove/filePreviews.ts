@@ -16,11 +16,16 @@ export type ArrivingPreview =
   | { kind: 'carried'; currentUrl: string }
   | { kind: 'notCarried'; note: string };
 
-/** A folder the build placed: its source path, its path here, and the files (relative, `/`-separated) the move brought into it. */
+/**
+ * A folder the build placed: its source path, its path here, and the files (relative, `/`-separated)
+ * the move brought into it. `same`, when given, says whether the file there now is still the one the
+ * move brought (setup may have replaced it).
+ */
 export interface MovedRoot {
   from: string;
   to: string;
   files: ReadonlySet<string>;
+  same?: (relative: string, file: string) => Promise<boolean>;
 }
 
 const browserUrlSchema = boundary.object({ currentUrl: boundary.optional(boundary.string) });
@@ -71,7 +76,7 @@ export async function arrivingPreview(tab: MoveTab, roots: readonly MovedRoot[],
   const real = await fs.promises.realpath(mapped).catch(() => null);
   const realRoot = await fs.promises.realpath(root.to).catch(() => null);
   const isFile = real ? (await fs.promises.stat(real).catch(() => null))?.isFile() : false;
-  if (!real || !realRoot || !isFile) return gone;
+  if (!real || !realRoot || !isFile || (root.same && !(await root.same(relative, mapped)))) return gone;
   if (relativeInside(realRoot, real) === null) {
     return { kind: 'notCarried', note: `${tab.title} (${sourcePath}): not carried, the file links outside the Session's worktrees and folder` };
   }

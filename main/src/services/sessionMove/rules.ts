@@ -59,19 +59,28 @@ function carriable(item: NotifyItem): boolean {
   return !item.secret && !item.lease && !item.agentPrompt && !!item.source.panelId;
 }
 
+/** How a move tells a card is its Session's, from the card's structured references. */
+export interface ApprovalOwnership {
+  /** Its asking tab is one of the moving Session's tabs. */
+  askedHere(item: NotifyItem): boolean;
+  /** It is filed under the moving Session (connected to it, or asked in it). */
+  filedHere(item: NotifyItem): boolean;
+}
+
 /**
- * A Session's approvals (`ids` are the Session's and its Panes'): waiting ones it carries, dismissed
- * ones too, and those that hold it back: an answer still in its Undo hold, which has to reach its tab
- * first, and an open card that can't move. A dismissed card that can't move doesn't count (T-3).
+ * A Session's approvals: waiting ones it carries (asked by one of its tabs; dismissed ones too), and
+ * those that hold it back: an answer still in its Undo hold, which has to reach its tab first, and an
+ * open card of the Session that can't move (a secret, lease or prompt, or asked from outside its tabs).
+ * A dismissed card that can't move doesn't count (T-3).
  */
-export function sessionApprovals(items: readonly NotifyItem[], ids: readonly string[]): SessionApprovals {
+export function sessionApprovals(items: readonly NotifyItem[], owner: ApprovalOwnership): SessionApprovals {
   const found: SessionApprovals = { carried: [], held: [] };
   for (const item of items) {
     if (item.state !== 'waiting' && item.state !== 'sent') continue;
-    const text = JSON.stringify(item);
-    if (!ids.some(id => text.includes(id))) continue;
+    const askedHere = owner.askedHere(item);
+    if (!askedHere && !owner.filedHere(item)) continue;
     if (item.state === 'sent') found.held.push(item);
-    else if (carriable(item)) found.carried.push(item);
+    else if (askedHere && carriable(item)) found.carried.push(item);
     else if (isOpenForSession(item)) found.held.push(item);
   }
   return found;

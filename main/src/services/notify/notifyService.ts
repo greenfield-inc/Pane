@@ -344,22 +344,37 @@ export class NotifyService {
 
   // ── A Session moving to another machine (T-44) ─────────────────────────
 
-  /** Before the move stops the Session's tabs: its waiting cards are held, so stopping them doesn't end them. */
-  holdMovingApprovals(ids: readonly string[]): string[] {
-    return this.queue.holdForMove(ids);
+  /**
+   * Before the move stops the Session's tabs: its waiting cards are held, and any its tabs post
+   * until the pack, so stopping them doesn't end them.
+   */
+  holdMovingApprovals(moveId: string, ids: readonly string[], panelIds: readonly string[]): string[] {
+    return this.queue.holdForMove(moveId, ids, panelIds);
   }
 
   /** The move ended before it took them: they are this machine's again. */
-  releaseMovingApprovals(ids: readonly string[]): void {
-    this.queue.releaseMoveHold(ids);
+  releaseMovingApprovals(moveId: string, ids: readonly string[]): void {
+    this.queue.releaseMoveHold(moveId, ids);
+  }
+
+  /** What the move would take, changing nothing: each waiting card, with a worker question's inbox item. Saved before anything is taken. */
+  movingApprovals(ids: readonly string[]): MovedApproval[] {
+    const wanted = new Set(ids);
+    const reports = new Map((this.deps.inbox?.all() ?? []).map(report => [report.id, report]));
+    return this.queue.snapshot().items.filter(item => wanted.has(item.id) && item.state === 'waiting' && (item.machineId ?? 'local') === 'local').map(item => {
+      const approval: MovedApproval = { item: JSON.parse(JSON.stringify(item)) };
+      const report = item.originKind === 'worker' ? reports.get(item.id) : undefined;
+      if (report) approval.report = report;
+      return approval;
+    });
   }
 
   /**
    * The move packs: the held cards leave this machine, each worker question with its inbox item
    * (which the orchestrator acks), and those answered meanwhile stay here with their answer.
    */
-  takeMovingApprovals(ids: readonly string[], target: string): MovedApprovalsTaken {
-    const { carried, stayed } = this.queue.takeForMove(ids, target);
+  takeMovingApprovals(moveId: string, ids: readonly string[], target: string): MovedApprovalsTaken {
+    const { carried, stayed } = this.queue.takeForMove(moveId, ids, target);
     const reports = new Map((this.deps.inbox?.release?.(carried.filter(item => item.originKind === 'worker').map(item => item.id)) ?? []).map(report => [report.id, report]));
     const approvals = carried.map(item => {
       const approval: MovedApproval = { item };

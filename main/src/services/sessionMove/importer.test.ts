@@ -259,11 +259,12 @@ describe('MoveImporter', { timeout: BUILD_TIMEOUT_MS }, () => {
     const moveId = newMoveId();
     const card = {
       id: 'in-7', ui: 'options', title: 'Q-7: Ship it?', state: 'waiting', createdAt: 1, originKind: 'worker', machine: 'A',
-      source: { name: 'Pane p1', agent: 'Claude', paneId: 'p1', panelId: 't-agent', session: { id: 'sess-1', name: 'S', paneId: '__owner__' } },
-      links: [{ label: 'plan', path: '/a/.pane/sessions/sess-1/plan.html' }],
+      source: { name: 'Orchestrator', agent: 'Claude', paneId: '__owner__', panelId: 't-agent', session: { id: 'sess-1', name: 'S', paneId: '__owner__' } },
+      links: [{ label: 'plan', path: '/a/.pane/sessions/sess-1/plan.html' }, { label: 'elsewhere', path: '/a/secrets.txt' }],
+      relayedBy: { panelId: 'some-other-tab', name: 'x' },
     };
-    const report = { id: 'in-7', sessionId: 'sess-1', kind: 'report', at: '2026-11-20T18:00:00.000Z', paneId: 'p1', paneName: 'Pane p1', panelId: 't-agent' };
-    await stage(importer, manifest(moveId, [], { approvals: [{ item: card, report }] }), {});
+    const report = { id: 'in-7', sessionId: 'sess-1', kind: 'report', at: '2026-11-20T18:00:00.000Z', paneId: '__owner__', paneName: 'S', panelId: 't-agent' };
+    await stage(importer, manifest(moveId, [ownerWithAgent()], { approvals: [{ item: card, report }] }), {});
     importer.build(moveId);
     const built = await waitStage(importer, moveId, ['built', 'failed']);
     expect(built.error?.message ?? built.stage).toBe('built');
@@ -272,7 +273,33 @@ describe('MoveImporter', { timeout: BUILD_TIMEOUT_MS }, () => {
     expect(adopted).toEqual([]);
     importer.start(moveId);
     expect((await waitStage(importer, moveId, ['started', 'failed'])).stage).toBe('started');
-    expect(adopted).toEqual([{ item: { ...card, links: [{ label: 'plan', path: `${sessionWorkspacePath('sess-1')}/plan.html` }] }, report }]);
+    expect(adopted).toHaveLength(1);
+    expect(adopted[0].report).toEqual(report);
+    expect(adopted[0].item).toMatchObject({ id: 'in-7', title: 'Q-7: Ship it?', connected: { kind: 'session', id: 'sess-1', paneId: '__owner__' } });
+    // This machine's path for the Session folder's file; a path outside what moved, and the source's relay, are dropped.
+    expect(adopted[0].item.links).toEqual([{ label: 'plan', path: `${sessionWorkspacePath('sess-1')}/plan.html` }]);
+    expect(adopted[0].item.relayedBy).toBeUndefined();
+
+    // A commit resumed after a restart (the ledger still says committed) never takes them in again.
+    const entry = JSON.parse(fs.readFileSync(ledgerFile(moveId), 'utf8'));
+    fs.writeFileSync(ledgerFile(moveId), JSON.stringify({ ...entry, decision: 'committed', done: {} }));
+    const restarted = new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
+    await restarted.status(moveId);
+    expect((await waitStage(restarted, moveId, ['started', 'failed'])).stage).toBe('started');
+    expect(adopted).toHaveLength(1);
+  });
+
+  it('refuses approvals for a tab the move didn\'t bring, before anything shows here (T-44)', async () => {
+    const { services, adopted } = fakeServices(target);
+    const importer = new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
+    const moveId = newMoveId();
+    const card = { id: 'n-1', ui: 'ask', title: 'Q-8: go?', state: 'waiting', createdAt: 1, source: { name: 'x', agent: 'Claude', panelId: 'a-tab-already-here' } };
+    await stage(importer, manifest(moveId, [ownerWithAgent()], { approvals: [{ item: card }] }), {});
+    importer.build(moveId);
+    const status = await waitStage(importer, moveId, ['built', 'failed']);
+    expect(status.stage).toBe('failed');
+    expect(status.error?.message).toMatch(/a tab that didn't come with it/);
+    expect(adopted).toEqual([]);
   });
 
   it('a failed move back puts back the archived Pane, its tabs and its snapshot ref, and deletes nothing it saved (F-6)', async () => {
@@ -437,7 +464,7 @@ describe('MoveImporter with file preview tabs (T-42)', { timeout: BUILD_TIMEOUT_
     ]);
   });
 
-  it('never grants a file the move did not place: a worktree it skipped, or one setup wrote', async () => {
+  it('never grants a file the move did not place: a worktree it skipped, or one setup wrote or replaced', async () => {
     let release!: () => void;
     const tabs = memoryTabs();
     const { services } = fakeServices(target, new Promise(resolve => { release = resolve; }), tabs.panels);
@@ -451,6 +478,7 @@ describe('MoveImporter with file preview tabs (T-42)', { timeout: BUILD_TIMEOUT_
       previewTab('skipped', 'file:///a/worktrees/p9/private.html'),
       previewTab('setup-output', 'file:///a/worktrees/p1/generated.html'),
       previewTab('moved-json', 'file:///a/.pane/sessions/sess-1/moved.json'),
+      previewTab('replaced', 'file:///a/worktrees/p1/a.txt'),
     ] };
     await stage(importer, manifest(moveId, [owner, member('p1'), skipped]), { 'panes/p1.bundle': bundle });
     const building = buildRemotely(importer, moveId);
@@ -458,11 +486,13 @@ describe('MoveImporter with file preview tabs (T-42)', { timeout: BUILD_TIMEOUT_
     const generated = path.join(root, 'worktrees', 'p1', 'generated.html');
     for (let attempt = 0; attempt < 300 && (await importer.status(moveId)).detail !== 'Pane p1: setup'; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
     fs.writeFileSync(generated, 'made by setup');
+    // Setup also rewrites a file the move did bring: what is there now isn't what moved.
+    fs.writeFileSync(path.join(root, 'worktrees', 'p1', 'a.txt'), 'rewritten by setup\n');
     release();
     const status = await building;
     expect(status.error?.message ?? status.stage).toBe('built');
-    expect(['skipped', 'setup-output', 'moved-json'].filter(id => tabs.panels.has(id))).toEqual([]);
-    expect(status.previewsNotCarried).toHaveLength(3);
+    expect(['skipped', 'setup-output', 'moved-json', 'replaced'].filter(id => tabs.panels.has(id))).toEqual([]);
+    expect(status.previewsNotCarried).toHaveLength(4);
   });
 
   it('a cancelled move puts back this machine\'s own file preview it set aside, though the source asked remotely', async () => {
