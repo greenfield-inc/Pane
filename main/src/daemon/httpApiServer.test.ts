@@ -1947,4 +1947,27 @@ describe('stopping with kept-alive clients', () => {
     await expect(answer).resolves.toEqual({ statusCode: 200, body: JSON.stringify({ ok: true, result: [{ id: 'session-1' }] }) });
     expect(await stopped).toBeLessThan(1000);
   });
+
+  it('closes a connection whose request is still running once the grace period ends', async () => {
+    const registry = new PaneCommandRegistry();
+    const started = new Promise<void>((resolveStarted) => {
+      registry.register('sessions:get-all', () => {
+        resolveStarted();
+        return new Promise(() => {});
+      });
+    });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()), { stopGraceMs: 300 });
+    await server.start();
+    const answer = send(server, keepAliveAgent(), 'POST', '/invoke', { channel: 'sessions:get-all', args: [] });
+    const outcome = answer.then(() => 'answered', () => 'cut off');
+    await started;
+
+    const stopped = timedStop(server);
+    const early = await Promise.race([outcome, new Promise((resolve) => setTimeout(() => resolve('still open'), 150))]);
+    expect(early).toBe('still open');
+    const elapsed = await stopped;
+    expect(elapsed).toBeGreaterThanOrEqual(250);
+    expect(elapsed).toBeLessThan(1500);
+    await expect(outcome).resolves.toBe('cut off');
+  });
 });
