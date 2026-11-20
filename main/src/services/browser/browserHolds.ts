@@ -104,13 +104,14 @@ export class BrowserHolds {
     if (!existing && !report.onScreen) return;
     this.asleep.delete(tabId);
     const watch = existing ?? { viewers: new Map<string, Viewer>(), lastWatched: now, lastOnScreen: now };
-    const joined = !watch.viewers.has(viewerId);
+    const before = watch.viewers.get(viewerId);
+    // A screen joining, or coming back on screen, can change which pages keep painting for other devices.
+    const changed = before === undefined || before.onScreen !== report.onScreen;
     watch.viewers.set(viewerId, { ...report, id: viewerId, lastSeen: now });
     watch.lastWatched = now;
     if (report.onScreen) watch.lastOnScreen = now;
-    // A screen joining a watched tab can change which pages keep painting for other devices.
     if (existing) {
-      if (joined) this.changed();
+      if (changed) this.changed();
       return;
     }
     this.watches.set(tabId, watch);
