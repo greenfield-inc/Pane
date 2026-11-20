@@ -24,6 +24,11 @@ export class CardGate {
     return now >= last.snoozedUntil && now - last.at >= REPEAT_AFTER_MS;
   }
 
+  /** Forgets a card that was never delivered. */
+  forget(key: string): void {
+    this.last.delete(key);
+  }
+
   shown(key: string, level: HealthLevel): void {
     const previous = this.last.get(key);
     this.last.set(key, { at: this.now(), level, snoozedUntil: previous?.snoozedUntil ?? 0 });
@@ -94,9 +99,13 @@ export function diskCard(snapshot: MachineHealthSnapshot, items: readonly Reclai
   const free = volume?.freeBytes ?? 0;
   const frees = items.reduce((sum, item) => sum + item.sizeBytes, 0);
   const rows = items.map(item => ({ label: item.path.split(/[\\/]/u).pop() ?? item.path, detail: item.reason, bytes: item.sizeBytes, note: `Tier ${item.tier}` }));
+  const critical = snapshot.disk.level === 'critical';
+  const canFree = frees > 0 ? ` Pane can free about ${formatBytes(frees)} of its own leftovers and finished work.` : '';
+  // Critical always notifies, so it says what to do.
+  const todo = critical ? ` Open Resources to see what uses the disk${frees > 0 ? ' and clean up' : ''}.` : '';
   return {
-    title: snapshot.disk.level === 'critical' ? 'Disk is almost full' : 'Disk almost full',
-    context: frees > 0 ? `${formatBytes(free)} free. Pane can free about ${formatBytes(frees)} of its own leftovers and finished work.` : `${formatBytes(free)} free.`,
+    title: critical ? 'Disk is almost full' : 'Disk almost full',
+    context: `${formatBytes(free)} free.${canFree}${todo}`,
     choices: frees > 0 ? [CLEAN_UP, NOT_NOW] : [NOT_NOW],
     card: {
       kind: 'disk', level: snapshot.disk.level, hostname: snapshot.hostname,
@@ -111,9 +120,14 @@ export function memoryCard(snapshot: MachineHealthSnapshot, offer: IdleOffer, ho
   const used = snapshot.memory.totalBytes - snapshot.memory.freeBytes;
   const swap = snapshot.memory.swapUsedBytes ? `, plus ${formatBytes(snapshot.memory.swapUsedBytes)} of swap` : '';
   const rows = topConsumers(snapshot);
+  const critical = snapshot.memory.level === 'critical';
+  // Critical always notifies, so it says what to do.
+  const effect = critical
+    ? `Apps may freeze. Quit apps you don't need${offer.paneIds.length > 0 ? ' or pause idle Panes' : ''}; Resources shows what uses the most.`
+    : 'Agents and dev servers may slow down.';
   return {
-    title: 'Memory is tight',
-    context: `Using ${formatBytes(used)} of ${formatBytes(snapshot.memory.totalBytes)}${swap}. Agents and dev servers may slow down.`,
+    title: critical ? 'Memory is almost out' : 'Memory is tight',
+    context: `Using ${formatBytes(used)} of ${formatBytes(snapshot.memory.totalBytes)}${swap}. ${effect}`,
     choices: offer.paneIds.length > 0 ? [PAUSE_IDLE, NOT_NOW] : [NOT_NOW],
     card: {
       kind: 'memory', level: snapshot.memory.level, hostname: snapshot.hostname,

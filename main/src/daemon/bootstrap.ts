@@ -1009,6 +1009,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   }
   const healthCards = new HealthCardController({
     now: () => Date.now(),
+    notificationsOn: () => configManager.getConfig().machineHealth?.notifications !== false,
     ask: question => {
       const queue = services.notifyService?.queue;
       if (!queue) return Promise.resolve({ unavailable: 'Approvals are not running.', next: 'Turn on Approvals in Settings.' });

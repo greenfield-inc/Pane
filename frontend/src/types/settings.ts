@@ -24,6 +24,7 @@ export type SettingsCategoryId =
 export type RemoteAccessSubviewId = 'host-setup' | 'advanced-host';
 
 export type SettingsSettingId =
+  | 'machine-health-notifications'
   | 'machine-health-disk'
   | 'machine-health-memory'
   | 'machine-health-finished'

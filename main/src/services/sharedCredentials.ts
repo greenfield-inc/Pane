@@ -122,21 +122,25 @@ function isApplicable(id: SharedCredentialId, credential: SharedCredential | und
 
 const cardsOnSchema = boundary.object({ id: boundary.nonEmptyString, name: boundary.nonEmptyString });
 
-/** A host from before "Show cards on" sends neither of its fields; an older host drops them. */
+/** A host from before "Show cards on" or the machine health switch sends none of that part's fields; an older host drops them. */
 export const sharedNotifySwitchSchema: BoundarySchema<SharedNotifySwitch> = boundary.object({
   enabled: boundary.boolean,
   changedAt: boundary.number,
   cardsOn: boundary.optional(boundary.nullable(cardsOnSchema)),
   cardsOnChangedAt: boundary.optional(boundary.number),
+  healthNotifications: boundary.optional(boundary.boolean),
+  healthNotificationsChangedAt: boundary.optional(boundary.number),
 });
 
-/** This host's Approvals switch and "Show cards on". A missing switch means on; an off saved before sharing existed has time 0. */
+/** This host's Approvals switch, "Show cards on" and machine health Notifications. A missing switch means on; an off saved before sharing existed has time 0. */
 export function readNotifySwitch(config: AppConfig): SharedNotifySwitch {
   return {
     enabled: config.notify?.enabled ?? true,
     changedAt: config.notifyEnabledChangedAt ?? 0,
     cardsOn: config.notify?.cardsOn ?? null,
     cardsOnChangedAt: config.notifyCardsOnChangedAt ?? 0,
+    healthNotifications: config.machineHealth?.notifications !== false,
+    healthNotificationsChangedAt: config.machineHealthNotificationsChangedAt ?? 0,
   };
 }
 
@@ -159,6 +163,14 @@ export function restampCardsOn(previous: AppConfig, next: AppConfig): number | n
   return restampAfter(after.cardsOnChangedAt ?? 0);
 }
 
+/** The new time for a machine health Notifications switch the person changed between `previous` and `next`, or null when it wasn't. */
+export function restampHealthNotifications(previous: AppConfig, next: AppConfig): number | null {
+  const before = readNotifySwitch(previous);
+  const after = readNotifySwitch(next);
+  if (before.healthNotifications === after.healthNotifications || before.healthNotificationsChangedAt !== after.healthNotificationsChangedAt) return null;
+  return restampAfter(after.healthNotificationsChangedAt ?? 0);
+}
+
 /** Saves each part of `incoming` that beats this host's, keeping its time. The other Approvals settings stay per-machine. */
 export async function applyNotifySwitch(configManager: ConfigManager, incoming: SharedNotifySwitch): Promise<{ notifySwitch: SharedNotifySwitch; changed: boolean }> {
   let changed = false;
@@ -166,7 +178,7 @@ export async function applyNotifySwitch(configManager: ConfigManager, incoming: 
     const current = readNotifySwitch(config);
     const merged = mergeNotifySwitch(current, incoming).notifySwitch;
     const notify: Partial<NotifySettings> = {};
-    const patch: Partial<AppConfig> = { notify };
+    const patch: Partial<AppConfig> = {};
     if (merged.changedAt !== current.changedAt || merged.enabled !== current.enabled) {
       notify.enabled = merged.enabled;
       patch.notifyEnabledChangedAt = merged.changedAt;
@@ -176,8 +188,13 @@ export async function applyNotifySwitch(configManager: ConfigManager, incoming: 
       notify.cardsOn = merged.cardsOn ?? null;
       patch.notifyCardsOnChangedAt = merged.cardsOnChangedAt;
     }
-    changed = Object.keys(notify).length > 0;
-    return changed ? patch : {};
+    if (merged.healthNotificationsChangedAt !== current.healthNotificationsChangedAt || merged.healthNotifications !== current.healthNotifications) {
+      patch.machineHealth = { notifications: merged.healthNotifications !== false };
+      patch.machineHealthNotificationsChangedAt = merged.healthNotificationsChangedAt;
+    }
+    if (Object.keys(notify).length > 0) patch.notify = notify;
+    changed = Object.keys(patch).length > 0;
+    return patch;
   });
   return { notifySwitch: readNotifySwitch(configManager.getConfig()), changed };
 }

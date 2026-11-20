@@ -28,13 +28,14 @@ const defaultDeps: MemoryPressureDeps = {
 /** PSI "some avg60": share of the last minute some task stalled on memory. */
 const PSI_WARNING = 10;
 const PSI_CRITICAL = 30;
-/** Available physical memory, as a share of the total. */
-const AVAILABLE_WARNING = 0.10;
-const AVAILABLE_CRITICAL = 0.05;
+/** Available physical memory: a share of the total, or a floor in bytes, whichever is larger. The warning floor stays above the critical one. */
+const AVAILABLE_WARNING = { share: 0.10, floorBytes: 2 * 1024 ** 3 };
+const AVAILABLE_CRITICAL = { share: 0.05, floorBytes: 1024 ** 3 };
 
 function fromAvailable(available: number, total: number): MemoryPressureReading {
   const share = total > 0 ? available / total : 1;
-  const level: HealthLevel = share < AVAILABLE_CRITICAL ? 'critical' : share < AVAILABLE_WARNING ? 'warning' : 'ok';
+  const below = (line: { share: number; floorBytes: number }) => total > 0 && available < Math.max(total * line.share, line.floorBytes);
+  const level: HealthLevel = below(AVAILABLE_CRITICAL) ? 'critical' : below(AVAILABLE_WARNING) ? 'warning' : 'ok';
   return { level, source: 'available', detail: `${Math.round(share * 100)}% available` };
 }
 

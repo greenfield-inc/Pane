@@ -309,7 +309,7 @@ describe('SharedCredentialSync and the Approvals switch', () => {
     throw new Error('Each sync set off another for 10 rounds: the machines keep trading values.');
   };
 
-  it('keeps two real machines on one switch and one "Show cards on", in both directions, and settles', async () => {
+  it('keeps two real machines on one switch, one "Show cards on" and one machine health Notifications switch, in both directions, and settles', async () => {
     const hostFor = async () => {
       const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-switch-sync-'));
       dirs.push(dir);
@@ -358,6 +358,18 @@ describe('SharedCredentialSync and the Approvals switch', () => {
     await settled();
     expect(a.configManager.getConfig().notify?.cardsOn).toBeNull();
     await settled();
+
+    await a.configManager.updateConfig({ machineHealth: { notifications: false } });
+    await settled();
+    expect(b.configManager.getConfig().machineHealth?.notifications).toBe(false);
+    expect(b.configManager.getConfig().notify?.enabled).toBe(true);
+    await b.configManager.updateConfig({ machineHealth: { notifications: true, diskWarningGB: 30 } });
+    await settled();
+    expect(a.configManager.getConfig().machineHealth?.notifications).toBe(true);
+    // Only the switch travels; thresholds stay on each machine.
+    expect(a.configManager.getConfig().machineHealth?.diskWarningGB).toBeUndefined();
+    await settled();
+    expect(b.configManager.getConfig().machineHealthNotificationsChangedAt).toBe(a.configManager.getConfig().machineHealthNotificationsChangedAt);
 
     const stamp = a.configManager.getConfig().notifyEnabledChangedAt;
     expect(b.configManager.getConfig().notifyEnabledChangedAt).toBe(stamp);

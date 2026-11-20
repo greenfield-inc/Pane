@@ -19,7 +19,7 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { CustomThemeManager } from './customThemeManager';
 import { CUSTOM_THEME_FILE } from '../../../shared/types/customTheme';
 import { clearShellPathCache } from '../utils/shellPath';
-import { restampCardsOn, restampNotifySwitch, restampSharedCredentials } from './sharedCredentials';
+import { restampCardsOn, restampHealthNotifications, restampNotifySwitch, restampSharedCredentials } from './sharedCredentials';
 import {
   boundary,
   decodeBoundary,
@@ -416,6 +416,11 @@ export class ConfigManager extends EventEmitter {
       this.config.notifyCardsOnChangedAt = cardsOnRestamped;
       shouldPersistMigration = true;
     }
+    const healthRestamped = lastRead ? restampHealthNotifications(lastRead, this.config) : null;
+    if (healthRestamped !== null) {
+      this.config.machineHealthNotificationsChangedAt = healthRestamped;
+      shouldPersistMigration = true;
+    }
     // A config from before install ids keeps the id this run created (the defaults' or the last read's).
     if (!loadedConfig.machineId) shouldPersistMigration = true;
     // A config from before computers (D-51) saves its converted computers; the old entries stay beside them.
@@ -701,6 +706,9 @@ export class ConfigManager extends EventEmitter {
     }
     if (!('notifyCardsOnChangedAt' in rawUpdates)) {
       next.notifyCardsOnChangedAt = restampCardsOn(current, next) ?? next.notifyCardsOnChangedAt;
+    }
+    if (!('machineHealthNotificationsChangedAt' in rawUpdates)) {
+      next.machineHealthNotificationsChangedAt = restampHealthNotifications(current, next) ?? next.machineHealthNotificationsChangedAt;
     }
     this.validateAppearanceUpdate(updates);
     if (!this.applyKeyboardShortcutOverrides(next.keyboardShortcutOverrides, next)) {

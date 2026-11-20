@@ -106,6 +106,11 @@ export interface MachineHealthSettings {
    * gate queues to-do starts and pauses to-dos under heavy sustained load.
    */
   holdTodoAgents?: boolean;
+  /**
+   * Settings › Machine health › Cards and notifications. On unless set to false; off quiets every card and
+   * notification except critical disk and critical memory. Shared with the person's other computers.
+   */
+  notifications?: boolean;
 }
 
 /** The value of every machine health setting nobody has overridden. */

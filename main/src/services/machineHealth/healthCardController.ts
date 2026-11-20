@@ -10,6 +10,8 @@ const LEFTOVERS_OPEN = 'leftovers';
 
 export interface HealthCardDeps {
   now: () => number;
+  /** Settings › Machine health › Cards and notifications. Off: only critical disk and memory raise a card or a notification. */
+  notificationsOn: () => boolean;
   /** Raises a Pane-sourced options card and resolves with the answer. */
   ask: (question: CardQuestion) => Promise<NotifyResult>;
   inventory: () => StorageInventory | null;
@@ -48,6 +50,8 @@ const identity = (proc: HealthProcess) => `${proc.pid}:${proc.started}`;
 export class HealthCardController {
   private readonly gate: CardGate;
   private readonly critical = new Set<'disk' | 'memory'>();
+  /** Kinds whose card was raised in the current critical episode, while notifications are off. */
+  private readonly urgentCard = new Set<'disk' | 'memory'>();
   /** Leftover processes the person chose to keep, by pid and start time. */
   private readonly kept: Set<string>;
 
@@ -62,22 +66,31 @@ export class HealthCardController {
     this.alertOnCritical('disk', snapshot.disk.level, () => diskCard(snapshot, items));
     this.alertOnCritical('memory', snapshot.memory.level, () => memoryCard(snapshot, this.deps.idleOffer(), this.deps.pauseIdleHours()));
     // Without a scan the card could offer only Not now; the warning level starts one, and the next sample raises the card.
-    if (snapshot.disk.level !== 'ok' && inventory && this.gate.shouldShow('disk', snapshot.disk.level)) {
+    if (inventory && this.mayRaise('disk', snapshot.disk.level)) {
       this.raise('disk', snapshot.disk.level, diskCard(snapshot, items), async answer => {
         if (answer === CLEAN_UP) await this.deps.cleanUp(items.map(item => item.id));
       });
     }
-    if (snapshot.memory.level !== 'ok' && this.gate.shouldShow('memory', snapshot.memory.level)) {
+    if (this.mayRaise('memory', snapshot.memory.level)) {
       this.raise('memory', snapshot.memory.level, memoryCard(snapshot, this.deps.idleOffer(), this.deps.pauseIdleHours()), async answer => {
         if (answer === PAUSE_IDLE) await this.deps.pauseIdle();
       });
     }
-    this.askAboutLeftovers(snapshot);
+    if (this.deps.notificationsOn()) this.askAboutLeftovers(snapshot);
+  }
+
+  /** The gate decides in both modes; off, only a critical level passes, once per critical episode. */
+  private mayRaise(kind: 'disk' | 'memory', level: HealthLevel): boolean {
+    if (level === 'ok') return false;
+    if (!this.deps.notificationsOn() && (level !== 'critical' || this.urgentCard.has(kind))) return false;
+    if (!this.gate.shouldShow(kind, level)) return false;
+    if (level === 'critical') this.urgentCard.add(kind);
+    return true;
   }
 
   async onLeak(leak: LeakWarning, snapshot: MachineHealthSnapshot): Promise<void> {
     // A WSL process has no identity Pane can stop or restart by.
-    if (leak.started.startsWith('wsl:')) return;
+    if (leak.started.startsWith('wsl:') || !this.deps.notificationsOn()) return;
     const key = `leak:${leak.pid}:${leak.started}`;
     if (!this.gate.shouldShow(key, 'warning')) return;
     const tabName = leak.panelId ? this.deps.tabName(leak.panelId) : null;
@@ -91,7 +104,7 @@ export class HealthCardController {
 
   onFinished(finished: FinishedPane[], snapshot: MachineHealthSnapshot): void {
     const ready = finished.filter(pane => !pane.protection);
-    if (ready.length === 0 || !this.gate.shouldShow('finished', 'warning')) return;
+    if (ready.length === 0 || !this.deps.notificationsOn() || !this.gate.shouldShow('finished', 'warning')) return;
     this.raise('finished', 'warning', finishedCard(finished, snapshot), async answer => {
       if (answer !== NOT_NOW) await this.deps.archive(ready.map(pane => pane.sessionId));
     });
@@ -127,6 +140,7 @@ export class HealthCardController {
   private alertOnCritical(kind: 'disk' | 'memory', level: HealthLevel, question: () => CardQuestion): void {
     if (level !== 'critical') {
       this.critical.delete(kind);
+      this.urgentCard.delete(kind);
       return;
     }
     if (this.critical.has(kind)) return;
@@ -139,6 +153,12 @@ export class HealthCardController {
     this.gate.shown(key, level);
     this.gate.open(openKey);
     void this.deps.ask(question).then(async result => {
+      if ('unavailable' in result) {
+        // Not delivered (Approvals off): the next sample may ask again.
+        this.gate.forget(key);
+        if (key === 'disk' || key === 'memory') this.urgentCard.delete(key);
+        return;
+      }
       if (!('answer' in result)) return;
       if (result.answer === NOT_NOW) {
         this.gate.snooze(key, level);
