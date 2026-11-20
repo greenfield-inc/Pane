@@ -11,7 +11,8 @@ import type { BrowserPageContents } from '../services/browser/pageDriver';
 import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHoldSettings, type BrowserHost, type BrowserServices, type TabDownload } from './browser';
 import { readFileSync } from 'fs';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
-import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
+import { decodeBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
+import { browserFrameAnswerSchema, browserTabViewSchema } from '../../../shared/validation/browserStreamSchemas';
 
 /** The start of a PNG of `width` by `height` pixels: its signature and IHDR chunk, which hold its size. */
 function pngOf(width: number, height: number): Buffer {
@@ -592,6 +593,7 @@ describe('browser tabs: streaming a page to another screen', () => {
     const fixture = setup([browserTab('persons', 'pane-a')], { holds });
     await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
     const first = await frame(fixture, 'persons', 0);
+    expect(decodeBoundary(first, browserFrameAnswerSchema)).toEqual(first);
     expect(first.frame).toMatchObject({ data: `data:image/jpeg;base64,${pngOf(780, 1688).toString('base64')}`, width: 800 });
     const page = fixture.pages.get('persons');
     expect(page?.params.get('Page.startScreencast')).toMatchObject({ format: 'jpeg', maxWidth: 1170, maxHeight: 2532 });
@@ -630,7 +632,7 @@ describe('browser tabs: streaming a page to another screen', () => {
     for (const channel of ['browser:frame', 'browser:view']) {
       expect(await code(fixture.registry.invokeConnected(channel, ['persons', 'v', 0], signal, claudeInA))).toBe('ERR_BROWSER_SCREENS_ONLY');
     }
-    expect(await fixture.registry.invokeConnected('browser:input', ['persons', 'v', []], signal, claudeInA)).toMatchObject({ success: false });
+    expect(await code(fixture.registry.invokeConnected('browser:input', ['persons', 'v', []], signal, claudeInA))).toBe('ERR_BROWSER_SCREENS_ONLY');
   });
 
   it('acks each frame a screen reads, so Chromium keeps painting between reads', async () => {
@@ -685,7 +687,7 @@ describe('browser tabs: streaming a page to another screen', () => {
       { kind: 'touch', action: 'start', x: 10, y: 20 },
       { kind: 'touch', action: 'end', x: 10, y: 20 },
       { kind: 'wheel', x: 10, y: 20, dx: 0, dy: 300 },
-    ])).toMatchObject({ success: true });
+    ])).toEqual({ field: null });
     const sent = page?.sent ?? [];
     const inputs = sent.filter(method => method.startsWith('Input.'));
     expect(inputs).toEqual(['Input.dispatchTouchEvent', 'Input.dispatchTouchEvent', 'Input.dispatchMouseEvent']);
@@ -761,7 +763,9 @@ describe('browser tabs: streaming a page to another screen', () => {
     await call(fixture, 'click', { ref: 'e2' });
     expect(await waiting).toMatchObject({ version: expect.any(Number) });
     expect(Date.now() - started).toBeLessThan(5_000);
-    expect(await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined })).toMatchObject({ driver: { by: 'agent' }, agentCursor: { x: 40, y: 80 } });
+    // What screens decode (shared/validation/browserStreamSchemas.ts) is what the host sends.
+    expect(decodeBoundary(await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined }), browserTabViewSchema)).toMatchObject({ driver: { by: 'agent' }, agentCursor: { x: 40, y: 80 } });
+    expect(decodeBoundary(await fixture.registry.invokeRemote('browser:view', ['closed', 0], { caller: undefined }), browserTabViewSchema)).toMatchObject({ stopped: 'gone' });
   });
 
   it('says a tab is asleep, so the screen offers to wake it', async () => {

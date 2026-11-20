@@ -439,7 +439,7 @@ export class PageDriver {
         await this.send('Page.handleJavaScriptDialog', answer.text === undefined ? { accept: answer.accept } : { accept: answer.accept, promptText: answer.text });
         this.dialog = undefined;
       }
-      return { success: true, field: null };
+      return { field: null };
     }
     await this.attach();
     // A pointer only passing over the page (hover) gives it no focus.
@@ -474,7 +474,7 @@ export class PageDriver {
       if (!hoverOnly) this.unfocusLater();
     }
     const field = this.dialog ? null : decodeOptionalBoundary(await this.page('focusedField').catch(() => null), fieldSchema) ?? null;
-    const result: BrowserInputResult = { success: true, field };
+    const result: BrowserInputResult = { field };
     if (copied !== undefined) result.copied = copied;
     return result;
   }
