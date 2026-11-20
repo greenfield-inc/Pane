@@ -222,7 +222,9 @@ seconds), the card stays open, and your answer is typed into the asking tab as
 `answer: Q-n → <answer> (by you)`, the way a worker's answer reaches it; a typed
 reply arrives as a `reply:` line, and a close as `closed: Q-n (by you)`. A later
 `runpane notify --resume <id>` still gets the answer. The card closes only when
-you answer or close it, or its tab, Pane or Session is gone (see
+you answer or close it, its asker withdraws it with
+`runpane notify --close <id|Q-n>` ("closed: its asker withdrew it"), or its
+tab, Pane or Session is gone (see
 [When an approval goes away](#when-an-approval-goes-away)). Codex 0.164 doesn't
 tell Pane when you press Esc, so Pane lets go of the call when a Codex panel
 sits idle at its prompt for 10 seconds; the card waits on the same way.
@@ -514,6 +516,7 @@ An approval exists only while you can act on it and someone can take the answer
 | Its Session is closed or archived | Closes within 5 s: "closed: Session closed", "closed: Session archived". |
 | Its asker is gone: its Pane archived or deleted, its tab closed, the worker sent a newer report, or a `notify` caller from outside Pane stopped waiting | Closes within 5 s of Pane learning it, with the reason: "closed: the asking tab was closed", "closed: the worker moved on", "closed: the asker stopped waiting". A sweep every 60 seconds catches anything missed. One exception: when only its tab closed and the orchestrator that relayed it, or Autopilot, can still read a reply for it, it stays open. |
 | The call waiting on a question asked from a Pane tab ends (killed, timed out, stopped, the agent restarted) | Nothing: it stays open while its tab lives, and its answer is typed into that tab. |
+| Its asker withdraws it (`runpane notify --close <id\|Q-n>`, from the tab that asked) | Closes at once: "closed: its asker withdrew it". Nothing is sent to anyone. |
 | Pane restarts | Items whose asking tab still exists stay waiting. |
 | Unanswered for 3 days | Stale: moved to a collapsed **Stale** group at the bottom of Waiting. It never rings or pushes again. |
 | You close one | One action on any card, with an optional reason. Its asker's open call returns "The person closed this question.", or `closed: Q-n (by you)` is typed into its tab; several closes waiting for the same tab go as one line, `closed: Q-1, Q-2, Q-3 (by you)`. **Reopen** puts it back. |

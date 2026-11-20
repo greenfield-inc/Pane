@@ -266,6 +266,11 @@ waits on it. `--ui options` may ask 2 to 4 `--questions` (`[{title, choices}]`)
 at once instead of `--choices`, and `--links` may name another approval as
 `{label, approval}`.
 
+A question asked from a Pane tab stays open if the call waiting on it ends
+first (killed, timed out, the agent restarted): Pane types the answer into the
+tab as `answer: Q-n → <answer> (by you)`. To withdraw a card you no longer
+need, run `runpane notify --close <id|Q-n>`; it prints `{closed: true, id}`.
+
 Autopilot (experimental) reads `runpane autopilot status|waiting|stack` and adds
 to its stack with `runpane autopilot stack push (--item <id>|--file <path>|--url
 <url>|--session <id|name>) [--tab <path-or-url>]... [--next]`. It acts on waiting

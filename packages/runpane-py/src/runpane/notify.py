@@ -69,6 +69,7 @@ def build_notify_request(parsed: Any, env: Mapping[str, str], cwd: str) -> Dict[
         "update": parsed.notify_update,
         "asked": parsed.notify_asked,
         "whatChanged": parsed.notify_what_changed,
+        "close": parsed.notify_close,
     }
     caller, timing = notify_caller_fields(env, cwd)
 
@@ -79,6 +80,13 @@ def build_notify_request(parsed: Any, env: Mapping[str, str], cwd: str) -> Dict[
         if extra:
             raise invalid("resume", f"resume keeps waiting on an earlier question, so it takes no other fields; remove {', '.join(extra)}.", "Call notify again with only resume.")
         return {"resume": parsed.resume, **timing, "caller": caller}
+    if others["close"] is not None:
+        if not others["close"].strip():
+            raise invalid("close", "close must be the approval's id or Q-n, such as --close Q-20.")
+        extra = given_fields({**given, **others}, ("close",))
+        if extra:
+            raise invalid("close", f"close withdraws a card you asked, so it takes no other fields; remove {', '.join(extra)}.")
+        return {"close": others["close"], "caller": caller}
     if others["took"] is not None or others["tookAs"] is not None:
         return build_took_request(given, others, caller)
     if others["status"] is not None:
@@ -381,6 +389,8 @@ def describe_notify_outcome(result: Dict[str, Any]) -> str:
         picks = result.get("picks") or []
         picked = f" (picked: {' · '.join(pick or '—' for pick in picks)})" if any(picks) else ""
         return f'Reply {result.get("replyId")} on {result.get("id")}: "{result["reply"]}"{picked}. {result.get("next")}'
+    if "closed" in result:
+        return f"Closed {result.get('id')}. Nothing was sent."
     if "took" in result:
         taken = "the answer" if result["took"] == "answer" else "a question"
         return f"Taken as {taken} (id {result.get('id')})." + (f" {result['next']}" if result.get("next") else "")

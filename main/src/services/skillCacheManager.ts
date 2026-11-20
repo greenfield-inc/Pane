@@ -203,11 +203,12 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
   approval; \`correction: Q-n → that was your answer: "…" (by you)\` means it is
   recorded as the answer: act on it. Only the reply's reader may run
   \`--took\` and \`--update\`.
-- Stop waiting on an item that is superseded or no longer needed: stop its
-  background command (TaskStop in Claude Code). Never leave a stale card up.
-- When you start, resume or wake, reconcile your open background calls
+- Withdraw an item that is superseded or no longer needed with
+  \`runpane notify --close <id|Q-n>\`: stopping its background command no
+  longer closes the card. Never leave a stale card up.
+- When you start, resume or wake, reconcile your posted items
   against the status files, your ledger and \`runpane inbox\`: relay or post
-  what is missing, stop what is stale, and record each answer with no
+  what is missing, withdraw what is stale, and record each answer with no
   \`decision\`. Approvals survive a restart and their commands ending.
 - If notify returns \`unavailable\` because Approvals is off ("Approvals are
   off in Pane."), ask in this tab as before.

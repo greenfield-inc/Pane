@@ -179,6 +179,7 @@ NOTIFY_VALUE_FLAGS = {
     "--update": "notify_update",
     "--asked": "notify_asked",
     "--what-changed": "notify_what_changed",
+    "--close": "notify_close",
 }
 # Autopilot's commands that take a waiting item's id as their first word.
 AUTOPILOT_ITEM_COMMANDS = {"autopilot answer", "autopilot close", "autopilot rewrite"}
@@ -191,6 +192,7 @@ FLAG_OWNERS = {
     "--outcome": ("report",),
     "--took": ("notify",),
     "--took-as": ("notify",),
+    "--close": ("notify",),
     "--status": ("notify", "update", "todos list"),
     "--update": ("notify",),
     "--asked": ("notify",),
@@ -405,6 +407,8 @@ class ParsedArgs:
     notify_update: Optional[str] = None
     notify_asked: Optional[str] = None
     notify_what_changed: Optional[str] = None
+    # `notify --close <id|Q-n>`: the asker withdraws its own waiting card.
+    notify_close: Optional[str] = None
     # `runpane todos <verb>`: the words after the verb (the to-do, then a title, target, id or text).
     todo_args: List[str] = field(default_factory=list)
     # todos create|update --done-when, repeatable; a JSON array of lines also works (the MCP tool's input).

@@ -311,6 +311,34 @@ describe('NotifyQueue with its store', () => {
     expect(item(queue, id)).toMatchObject({ state: 'answered', delivered: { via: 'tab' } });
   });
 
+  it('--close: the asking tab withdraws its own card, its open call hears it, and nothing is typed', async () => {
+    const queue = queueWith();
+    let result: unknown;
+    void queue.ask({ question: ask('Q-2: ship?'), source: orchestrator }).then((value) => { result = value; });
+    const [{ id }] = queue.snapshot().items;
+    expect(queue.withdraw({ paneId: 'sp', panelId: 'orch' }, 'Q-2')).toEqual({ closed: true, id });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(item(queue, id)).toMatchObject({ state: 'expired', closed: { by: 'pane', reason: 'its asker withdrew it' } });
+    expect(store.readItem(id)?.closed?.reason).toBe('its asker withdrew it');
+    expect(result).toMatchObject({ unavailable: 'You withdrew this question.' });
+    expect(queue.snapshot().queue).toEqual([]);
+    expect(typed).toEqual([]);
+  });
+
+  it('--close is refused for another tab, a relayed worker card, and a card already answered', async () => {
+    const queue = queueWith();
+    void queue.ask({ question: ask('Q-2: ship?'), source: orchestrator });
+    expect(() => queue.withdraw({ paneId: 'wp', panelId: 'w1' }, 'Q-2')).toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_NOT_READER' }));
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-39: run?', source: worker, at: Date.now() });
+    expect(() => queue.withdraw({ paneId: 'sp', panelId: 'orch' }, 'Q-39')).toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_NOT_READER' }));
+    const [{ id }] = queue.snapshot().items.filter(candidate => candidate.title === 'Q-2: ship?');
+    queue.run({ type: 'answer', id, answer: { text: 'Yes' } });
+    expect(() => queue.withdraw({ paneId: 'sp', panelId: 'orch' }, 'Q-2')).toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_ANSWERED' }));
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(() => queue.withdraw({ paneId: 'sp', panelId: 'orch' }, 'Q-2')).toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_GONE' }));
+    expect(item(queue, 'in-1')?.state).toBe('waiting');
+  });
+
   it('a close between resume rounds reaches the tab too', async () => {
     const queue = queueWith();
     const first = queue.ask({ question: ask('Q-2: ship?'), source: orchestrator, returnAfterMs: 50_000 });
