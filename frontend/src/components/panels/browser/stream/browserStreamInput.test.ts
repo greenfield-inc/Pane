@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BrowserInput } from '../../../../../../shared/types/browserStream';
-import { browserInputQueue, clickCounter, pagePoint } from '../../../../../../shared/utils/browserStreamInput';
+import { browserInputQueue, clickCounter, keyboardField, pagePoint } from '../../../../../../shared/utils/browserStreamInput';
 
 describe('pagePoint', () => {
   it('maps a point in a letterboxed frame to the page, and the bars to nothing', () => {
@@ -56,5 +56,26 @@ describe('clickCounter', () => {
     expect(count(11, 11, 600)).toBe(1);
     expect(count(11, 11, 1_300)).toBe(1);
     expect(count(40, 11, 1_400)).toBe(1);
+  });
+});
+
+describe('keyboardField', () => {
+  const enter: BrowserInput[] = [{ kind: 'key', key: 'Enter', modifiers: 0 }];
+  const letter: BrowserInput[] = [{ kind: 'text', text: 's' }];
+
+  it('keeps the keyboard secure for the answer to Enter that still names the email field', () => {
+    expect(keyboardField(enter, 'text')).toBe('password');
+    expect(keyboardField([{ kind: 'key', key: 'Tab', modifiers: 0 }], 'text')).toBe('password');
+    expect(keyboardField([{ kind: 'navigate', url: 'https://example.com/' }], 'text')).toBe('password');
+  });
+
+  it('takes the next answer as given, so a search typed after Enter gets autocorrect back', () => {
+    expect(keyboardField(letter, 'text')).toBe('text');
+    expect(keyboardField(letter, 'password')).toBe('password');
+  });
+
+  it('takes "no field" as given, so a form that blurs on submit closes the keyboard', () => {
+    expect(keyboardField(enter, null)).toBeNull();
+    expect(keyboardField(enter, undefined)).toBeUndefined();
   });
 });

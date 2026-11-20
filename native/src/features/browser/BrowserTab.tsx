@@ -1,7 +1,7 @@
 import type { BrowserFrame, BrowserInput, BrowserTabView } from '@shared/types/browserStream';
 import type { ToolPanel } from '@shared/types/panels';
 import { normalizeUrl } from '@shared/utils/browserUrl';
-import { browserInputQueue, fitFrame, pagePoint, PhoneControl, type FrameBox } from '@shared/utils/browserStreamInput';
+import { browserInputQueue, fitFrame, keyboardField, movesFocus, pagePoint, PhoneControl, type FrameBox } from '@shared/utils/browserStreamInput';
 import * as Clipboard from 'expo-clipboard';
 import { useIsFocused } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -82,25 +82,21 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
   const keyboardTextRef = useRef(KEYBOARD_EMPTY);
   const [notice, setNotice] = useState<string>();
   const fieldRef = useRef<'text' | 'password' | null>(null);
-  // After Enter, Tab or a navigation the keyboard is secure until a tap's answer names the field: a
-  // two-step sign-in answers Enter with the email field, then focuses the password field by itself.
-  const securedRef = useRef(false);
   const [queue] = useState(() => browserInputQueue(async batch => {
     const result = await browserChannels(clientRef.current).input(panel.id, batch);
     if (result.copied) void Clipboard.setStringAsync(result.copied).catch(() => undefined);
     const tapped = batch.some(input => input.kind === 'mouse' && input.action === 'up' && input.button === 'left');
-    if (tapped) securedRef.current = false;
-    if (securedRef.current && result.field !== 'password') return result;
+    const field = keyboardField(batch, result.field);
     // Every tap into a field starts the keyboard's text afresh, so the last field's text never edits this one.
-    if (result.field !== undefined && (result.field !== fieldRef.current || tapped)) {
-      fieldRef.current = result.field;
-      setField(result.field);
+    if (field !== undefined && (field !== fieldRef.current || tapped)) {
+      fieldRef.current = field;
+      setField(field);
       keyboardTextRef.current = KEYBOARD_EMPTY;
       setKeyboardText(KEYBOARD_EMPTY);
     }
     // A tap on a text field opens the keyboard; a tap anywhere else closes it.
-    if (tapped && result.field) keysRef.current?.focus();
-    else if (tapped && result.field === null) keysRef.current?.blur();
+    if (tapped && field) keysRef.current?.focus();
+    else if (tapped && field === null) keysRef.current?.blur();
     return result;
   }));
   // Input made while the host can't be reached is dropped, never replayed late onto a page that may have changed.
@@ -109,8 +105,7 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
   const send = useCallback((input: BrowserInput | null) => {
     if (stopRef.current && stopRef.current !== 'older') return;
     // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
-    if ((input?.kind === 'key' && (input.key === 'Enter' || input.key === 'Tab')) || input?.kind === 'navigate' || input?.kind === 'history') {
-      securedRef.current = true;
+    if (movesFocus(input)) {
       fieldRef.current = 'password';
       setField('password');
     }
