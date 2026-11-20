@@ -70,9 +70,13 @@ pub struct Config {
     )]
     pub acme_directory: String,
 
-    /// The CA domain the DNS helper names in CAA records: the only CA that may issue for <D> and
-    /// computer names, with no wildcard for all of <D>. Empty serves no CAA records.
-    #[arg(long, env = "PANE_RELAY_CAA_ISSUER", default_value = "letsencrypt.org")]
+    /// The CA domains the DNS helper names in CAA records, comma-separated: the only CAs that may
+    /// issue for <D> and computer names, with no wildcard for all of <D>. Empty serves no CAA records.
+    #[arg(
+        long,
+        env = "PANE_RELAY_CAA_ISSUER",
+        default_value = "letsencrypt.org,pki.goog"
+    )]
     pub caa_issuer: String,
 
     /// Development mode: generate a self-signed certificate when --cert/--key are absent.
@@ -247,14 +251,35 @@ pub struct Config {
     #[arg(long, hide = true, default_value = "https://fcm.googleapis.com")]
     pub fcm_url: String,
 
-    /// The metadata server's token URL for keyless FCM (tests).
+    /// Google Cloud project whose Public CA API mints computers' one-time EAB keys for Google
+    /// Trust Services, with the VM's attached service account (GCE metadata server). Unset,
+    /// computers asking for one get `unconfigured`.
+    #[arg(long, env = "PANE_RELAY_EAB_PROJECT")]
+    pub eab_project: Option<String>,
+
+    /// Per computer: EAB keys a day before answering `throttled`.
+    #[arg(long, env = "PANE_RELAY_LIMIT_EAB_PER_DAY", default_value_t = 3)]
+    pub limit_eab_per_day: u64,
+
+    #[arg(long, hide = true, default_value = "https://publicca.googleapis.com")]
+    pub publicca_url: String,
+
     #[arg(
         long,
         hide = true,
-        env = "PANE_RELAY_FCM_METADATA_URL",
+        default_value = "https://preprod-publicca.googleapis.com"
+    )]
+    pub publicca_staging_url: String,
+
+    /// The metadata server's token URL for keyless FCM and EAB keys (tests).
+    #[arg(
+        long,
+        hide = true,
+        alias = "fcm-metadata-url",
+        env = "PANE_RELAY_METADATA_URL",
         default_value = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
     )]
-    pub fcm_metadata_url: String,
+    pub metadata_url: String,
 
     /// Overrides the service account's token_uri.
     #[arg(long, hide = true)]

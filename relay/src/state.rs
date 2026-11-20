@@ -2,6 +2,7 @@
 
 use crate::alerts::Alerts;
 use crate::config::Config;
+use crate::eab::Eab;
 use crate::io::BoxStream;
 use crate::registry::{Registry, Update};
 use std::collections::{HashMap, HashSet};
@@ -71,6 +72,7 @@ impl Bucket {
 
 const MINUTE: Duration = Duration::from_secs(60);
 const HOUR: Duration = Duration::from_secs(3600);
+const DAY: Duration = Duration::from_secs(86_400);
 /// A control connection sending more frames than this a minute is cut off.
 const MAX_FRAMES_PER_MIN: u64 = 600;
 
@@ -88,6 +90,8 @@ pub enum Charge<'a> {
     AgentConns(&'a str),
     /// Computers new to this relay, by source.
     NewIds(&'a str),
+    /// Google Trust Services EAB keys, by computer id.
+    Eab(&'a str),
 }
 
 /// The address a client is counted under: IPv4 as is, IPv6 by its /64, the
@@ -121,6 +125,7 @@ pub struct State {
     pub domain: String,
     pub registry: Registry,
     pub alerts: Alerts,
+    pub eab: Eab,
     /// The in-process iroh relay's loopback address.
     pub direct_addr: SocketAddr,
     /// The port the https listener is bound to.
@@ -162,6 +167,7 @@ impl State {
         domain: String,
         registry: Registry,
         alerts: Alerts,
+        eab: Eab,
         direct_addr: SocketAddr,
         https_port: u16,
     ) -> Self {
@@ -170,6 +176,7 @@ impl State {
             domain,
             registry,
             alerts,
+            eab,
             direct_addr,
             https_port,
             shutdown: CancellationToken::new(),
@@ -310,6 +317,7 @@ impl State {
                 cfg.limit_agent_conns_per_min,
             ),
             Charge::NewIds(source) => (format!("new {source}"), HOUR, cfg.limit_new_ids_per_hour),
+            Charge::Eab(id) => (format!("eab {id}"), DAY, cfg.limit_eab_per_day),
         };
         let mut usage = self.usage.lock().unwrap();
         let now = Instant::now();
@@ -437,7 +445,16 @@ mod tests {
         let alerts = Alerts::load(&cfg).unwrap();
         let registry = Registry::new(&[], None, None, 10).unwrap();
         let direct = "127.0.0.1:1".parse().unwrap();
-        let state = State::new(cfg, "pane.localhost".into(), registry, alerts, direct, 8443);
+        let eab = Eab::load(&cfg).unwrap();
+        let state = State::new(
+            cfg,
+            "pane.localhost".into(),
+            registry,
+            alerts,
+            eab,
+            direct,
+            8443,
+        );
         let new_id = |ip: &str| {
             let source = registration_source(ip.parse().unwrap());
             state.charge(Charge::NewIds(&source), 1)

@@ -8,6 +8,7 @@ mod client;
 pub mod config;
 mod direct;
 mod dns;
+mod eab;
 pub mod id;
 mod io;
 pub mod registry;
@@ -127,6 +128,7 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
         .transpose()?;
     let blocklist = cfg.blocklist.clone();
     let alerts = alerts::Alerts::load(&cfg)?;
+    let eab = eab::Eab::load(&cfg)?;
     let direct = direct::spawn(cfg.direct_quic, &tls).await?;
     let direct_addr = direct.http_addr().ok_or("iroh relay has no address")?;
     let direct_quic_addr = direct.quic_addr();
@@ -135,6 +137,7 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
         domain,
         registry,
         alerts,
+        eab,
         direct_addr,
         https_addr.port(),
     ));

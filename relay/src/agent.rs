@@ -243,6 +243,38 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
                 };
                 let _ = tx.send(Out::Frame(frame(answer)));
             }
+            "eab" => {
+                let staging = v["staging"].as_bool().unwrap_or(false);
+                let refusal = if !state.eab.configured() {
+                    Some(json!({"t": "error", "req": req, "code": "unconfigured",
+                        "message": "This relay does not hand out Google Trust Services keys."}))
+                } else if state.charge(Charge::Eab(&id), 1) != Level::Ok {
+                    Some(json!({"t": "error", "req": req, "code": "throttled",
+                        "message": format!("At most {} Google Trust Services keys a day per computer.", state.cfg.limit_eab_per_day)}))
+                } else {
+                    None
+                };
+                if let Some(refusal) = refusal {
+                    let _ = tx.send(Out::Frame(frame(refusal)));
+                    continue;
+                }
+                let (state, tx, id) = (state.clone(), tx.clone(), id.clone());
+                tokio::spawn(async move {
+                    // The key's secret goes only to this computer, never to the log.
+                    let answer = match state.eab.mint(staging).await {
+                        Ok(key) => {
+                            tracing::info!(id, staging, "EAB key minted");
+                            json!({"t": "ok", "req": req, "keyId": key.key_id, "hmacKey": key.hmac_key})
+                        }
+                        Err(e) => {
+                            tracing::warn!(id, staging, error = %e, "EAB key failed");
+                            json!({"t": "error", "req": req, "code": "provider",
+                                "message": format!("The relay could not get a Google Trust Services key: {e}")})
+                        }
+                    };
+                    let _ = tx.send(Out::Frame(frame(answer)));
+                });
+            }
             "alert" | "grant" => {
                 let (state, tx, id) = (state.clone(), tx.clone(), id.clone());
                 tokio::spawn(async move {

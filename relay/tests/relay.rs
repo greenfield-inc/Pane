@@ -587,7 +587,8 @@ fn a_records(m: &Message) -> Vec<Ipv4Addr> {
 }
 
 #[tokio::test]
-async fn caa_lets_only_lets_encrypt_issue_and_no_wildcard_for_the_whole_domain() {
+async fn caa_lets_only_lets_encrypt_and_google_trust_services_issue_and_no_wildcard_for_the_whole_domain()
+ {
     let env = Env::start(&["--dns", "127.0.0.1:0", "--public-ip", "203.0.113.10"]).await;
     let agent = Agent::connect(&env, &SigningKey::generate()).await;
     let id = agent.id.clone();
@@ -605,16 +606,22 @@ async fn caa_lets_only_lets_encrypt_issue_and_no_wildcard_for_the_whole_domain()
     // A certificate for *.<D> would cover every computer's name.
     assert_eq!(
         caa(format!("{D}.")).await,
-        vec!["0 issue \"letsencrypt.org\"", "0 issuewild \";\""]
+        vec![
+            "0 issue \"letsencrypt.org\"",
+            "0 issue \"pki.goog\"",
+            "0 issuewild \";\""
+        ]
     );
-    // Each computer's own names, *.<id>.<D> included, only through DNS-01 at Let's Encrypt,
+    // Each computer's own names, *.<id>.<D> included, only through DNS-01 at those two CAs,
     // whether or not the relay knows the id.
     for name in [format!("{id}.{D}."), format!("aaaaaaaaaaaaaaaa.{D}.")] {
         assert_eq!(
             caa(name).await,
             vec![
                 "0 issue \"letsencrypt.org; validationmethods=dns-01\"",
+                "0 issue \"pki.goog; validationmethods=dns-01\"",
                 "0 issuewild \"letsencrypt.org; validationmethods=dns-01\"",
+                "0 issuewild \"pki.goog; validationmethods=dns-01\"",
             ]
         );
     }
@@ -1914,7 +1921,7 @@ async fn android_alerts_without_a_key_use_the_metadata_server_token() {
     let env = Env::start(&[
         "--fcm-project",
         "pane-keyless",
-        "--fcm-metadata-url",
+        "--metadata-url",
         &metadata_url,
         "--fcm-url",
         &fcm.url,
@@ -2424,4 +2431,119 @@ async fn the_resync_restores_the_region_of_a_computer_connected_here() {
         (&ours["region"], &ours["online"]),
         (&json!("us"), &json!(true))
     );
+}
+
+#[tokio::test]
+async fn computers_get_one_time_google_trust_services_keys_minted_with_the_vm_account() {
+    let mut publicca = Provider::start(|path, _| match path {
+        "/v1/projects/pane-eab/locations/global/externalAccountKeys" => (
+            200,
+            r#"{"name":"projects/pane-eab/locations/global/externalAccountKeys/k1","keyId":"kid-production","b64MacKey":"c2VjcmV0LXByb2R1Y3Rpb24="}"#.to_string(),
+        ),
+        "/staging/v1/projects/pane-eab/locations/global/externalAccountKeys" => (
+            200,
+            r#"{"keyId":"kid-staging","b64MacKey":"c2VjcmV0LXN0YWdpbmc="}"#.to_string(),
+        ),
+        _ => (404, String::new()),
+    })
+    .await;
+    let (metadata_url, _metadata) = metadata_server().await;
+    let staging_url = format!("{}/staging", publicca.url);
+    let env = Env::start(&[
+        "--eab-project",
+        "pane-eab",
+        "--limit-eab-per-day",
+        "2",
+        "--metadata-url",
+        &metadata_url,
+        "--publicca-url",
+        &publicca.url,
+        "--publicca-staging-url",
+        &staging_url,
+        "--provider-ca",
+        publicca.ca.to_str().unwrap(),
+    ])
+    .await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+
+    agent.send(json!({"t": "eab", "req": "1"})).await;
+    assert_eq!(
+        agent.next().await,
+        json!({"t": "ok", "req": "1", "keyId": "kid-production", "hmacKey": "c2VjcmV0LXByb2R1Y3Rpb24="})
+    );
+    let mint = publicca.next().await;
+    assert_eq!(header(&mint, "authorization"), Some("Bearer ya29.keyless"));
+
+    agent
+        .send(json!({"t": "eab", "req": "2", "staging": true}))
+        .await;
+    assert_eq!(
+        agent.next().await,
+        json!({"t": "ok", "req": "2", "keyId": "kid-staging", "hmacKey": "c2VjcmV0LXN0YWdpbmc="})
+    );
+    assert_eq!(
+        publicca.next().await.path,
+        "/staging/v1/projects/pane-eab/locations/global/externalAccountKeys"
+    );
+
+    // Past its daily keys the computer is refused without a call to Google.
+    agent.send(json!({"t": "eab", "req": "3"})).await;
+    let answer = agent.next().await;
+    assert_eq!(
+        (answer["req"].as_str(), answer["code"].as_str()),
+        (Some("3"), Some("throttled"))
+    );
+    assert!(publicca.received.try_recv().is_err());
+
+    // Another computer has its own keys.
+    let mut other = Agent::connect(&env, &SigningKey::generate()).await;
+    other.send(json!({"t": "eab", "req": "1"})).await;
+    assert_eq!(other.next().await["keyId"], "kid-production");
+}
+
+#[tokio::test]
+async fn a_relay_without_an_eab_project_says_it_has_no_keys() {
+    let env = Env::start(&[]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    agent.send(json!({"t": "eab", "req": "1"})).await;
+    let answer = agent.next().await;
+    assert_eq!(
+        (answer["req"].as_str(), answer["code"].as_str()),
+        (Some("1"), Some("unconfigured"))
+    );
+}
+
+#[tokio::test]
+async fn a_public_ca_refusal_reaches_the_computer_without_a_key() {
+    let publicca = Provider::start(|_, _| {
+        (
+            403,
+            r#"{"error":{"code":403,"message":"Permission 'publicca.externalAccountKeys.create' denied","status":"PERMISSION_DENIED"}}"#.to_string(),
+        )
+    })
+    .await;
+    let (metadata_url, _metadata) = metadata_server().await;
+    let env = Env::start(&[
+        "--eab-project",
+        "pane-eab",
+        "--metadata-url",
+        &metadata_url,
+        "--publicca-url",
+        &publicca.url,
+        "--provider-ca",
+        publicca.ca.to_str().unwrap(),
+    ])
+    .await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    agent.send(json!({"t": "eab", "req": "1"})).await;
+    let answer = agent.next().await;
+    assert_eq!(answer["code"], "provider");
+    assert!(
+        answer["message"]
+            .as_str()
+            .unwrap()
+            .contains("answered 403 Permission 'publicca.externalAccountKeys.create' denied"),
+        "{answer}"
+    );
+    assert!(answer.get("hmacKey").is_none());
 }

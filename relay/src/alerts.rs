@@ -273,7 +273,7 @@ impl Alerts {
         let fcm = match &cfg.fcm_service_account {
             None => cfg.fcm_project.as_ref().map(|project| Fcm {
                 auth: FcmAuth::Metadata {
-                    url: cfg.fcm_metadata_url.clone(),
+                    url: cfg.metadata_url.clone(),
                 },
                 project: project.clone(),
                 url: cfg.fcm_url.trim_end_matches('/').to_string(),
@@ -677,10 +677,10 @@ async fn key_token(
 }
 
 /// GETs a token from the GCE metadata server (plain HTTP/1.0 on the VM's link).
-async fn metadata_get(url: &str) -> Result<(u16, Bytes), String> {
+pub(crate) async fn metadata_get(url: &str) -> Result<(u16, Bytes), String> {
     let rest = url
         .strip_prefix("http://")
-        .ok_or("--fcm-metadata-url must start with http://")?;
+        .ok_or("--metadata-url must start with http://")?;
     let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
     let fetch = async {
         let mut tcp = TcpStream::connect(authority).await?;
@@ -708,13 +708,13 @@ async fn metadata_get(url: &str) -> Result<(u16, Bytes), String> {
 }
 
 /// A minimal HTTP/2 client that keeps one connection per provider host.
-struct Http {
+pub(crate) struct Http {
     tls: tokio_rustls::TlsConnector,
     conns: Mutex<HashMap<String, h2::client::SendRequest<Bytes>>>,
 }
 
 impl Http {
-    fn new(extra_ca: Option<&std::path::Path>) -> Result<Http, Error> {
+    pub(crate) fn new(extra_ca: Option<&std::path::Path>) -> Result<Http, Error> {
         let mut roots = rustls::RootCertStore::empty();
         for cert in rustls_native_certs::load_native_certs().certs {
             let _ = roots.add(cert);
@@ -779,7 +779,7 @@ impl Http {
     }
 
     /// POSTs `body` (JSON unless a content-type header says otherwise); returns the status and body.
-    async fn post(
+    pub(crate) async fn post(
         &self,
         url: &str,
         headers: &[(&str, String)],

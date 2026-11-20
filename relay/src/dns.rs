@@ -53,14 +53,17 @@ fn name(s: &str) -> Name {
     Name::from_ascii(format!("{s}.")).unwrap_or_else(|_| Name::root())
 }
 
-/// The CAA issuer: `--caa-issuer` as a domain without the trailing dot (RFC 8659), or None
-/// when it is empty and no CAA records are served.
-fn caa_issuer(state: &State) -> Option<Name> {
-    let issuer = state.cfg.caa_issuer.trim().trim_end_matches('.');
-    if issuer.is_empty() {
-        return None;
-    }
-    Name::from_ascii(issuer).ok()
+/// The CAA issuers: `--caa-issuer`'s domains without the trailing dot (RFC 8659); none when
+/// it is empty and no CAA records are served.
+fn caa_issuers(state: &State) -> Vec<Name> {
+    state
+        .cfg
+        .caa_issuer
+        .split(',')
+        .map(|issuer| issuer.trim().trim_end_matches('.'))
+        .filter(|issuer| !issuer.is_empty())
+        .filter_map(|issuer| Name::from_ascii(issuer).ok())
+        .collect()
 }
 
 fn soa(state: &State) -> SOA {
@@ -123,15 +126,20 @@ fn lookup(state: &State, qname: &str, qtype: RecordType) -> Lookup {
                     .map(|n| RData::NS(NS(name(n))))
                     .collect(),
                 RecordType::SOA => vec![RData::SOA(soa(state))],
-                // One CA, and no `*.<D>`: that one certificate would cover every computer's name.
-                RecordType::CAA => caa_issuer(state)
-                    .map(|issuer| {
-                        vec![
-                            RData::CAA(CAA::new_issue(false, Some(issuer), Vec::new())),
-                            RData::CAA(CAA::new_issuewild(false, None, Vec::new())),
-                        ]
-                    })
-                    .unwrap_or_default(),
+                // The named CAs, and no `*.<D>`: that one certificate would cover every computer's name.
+                RecordType::CAA => {
+                    let issuers = caa_issuers(state);
+                    let mut records: Vec<RData> = issuers
+                        .iter()
+                        .map(|issuer| {
+                            RData::CAA(CAA::new_issue(false, Some(issuer.clone()), Vec::new()))
+                        })
+                        .collect();
+                    if !issuers.is_empty() {
+                        records.push(RData::CAA(CAA::new_issuewild(false, None, Vec::new())));
+                    }
+                    records
+                }
                 _ => Vec::new(),
             };
             return Lookup::Found(records);
@@ -153,16 +161,18 @@ fn lookup(state: &State, qname: &str, qtype: RecordType) -> Lookup {
             let entry = state.registry.get(id);
             let region = entry.as_ref().map_or(&state.cfg.region, |e| &e.region);
             let records = match labels.as_slice() {
-                // A computer's own names, `*.<id>.<D>` included, only through DNS-01 at Let's Encrypt.
+                // A computer's own names, `*.<id>.<D>` included, only through DNS-01 at the named CAs.
                 [_] if qtype == RecordType::CAA => {
                     let dns01 = || vec![KeyValue::new("validationmethods", "dns-01")];
-                    match caa_issuer(state) {
-                        Some(issuer) => vec![
-                            RData::CAA(CAA::new_issue(false, Some(issuer.clone()), dns01())),
-                            RData::CAA(CAA::new_issuewild(false, Some(issuer), dns01())),
-                        ],
-                        None => Vec::new(),
-                    }
+                    caa_issuers(state)
+                        .into_iter()
+                        .flat_map(|issuer| {
+                            [
+                                RData::CAA(CAA::new_issue(false, Some(issuer.clone()), dns01())),
+                                RData::CAA(CAA::new_issuewild(false, Some(issuer), dns01())),
+                            ]
+                        })
+                        .collect()
                 }
                 [_] => by_type(qtype, a(state.cfg.region_addr(region)), None),
                 ["_acme-challenge", _] => {
