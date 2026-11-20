@@ -97,7 +97,6 @@ function HostStream({ adapter, panel, hostName, ownCopy, driving, onBack }: { ad
       </button>
     </>
   );
-  const onHost = <LiveChip host={host} driving={driving} onBack={onBack} />;
 
   return (
     <div ref={rootRef} className="flex min-h-0 flex-1 flex-col bg-bg-primary" data-browser-streamed={panel.id}>
@@ -118,15 +117,14 @@ function HostStream({ adapter, panel, hostName, ownCopy, driving, onBack }: { ad
             className="min-w-0 flex-1 bg-transparent px-2.5 py-1.5 text-[16px] text-text-primary placeholder-text-tertiary focus:outline-none sm:text-sm"
           />
         </form>
-        {!phone && onHost}
       </div>
+      <LiveChip host={host} driving={driving} onBack={onBack} />
       {error && <div className="border-b border-border-primary px-3 py-1 text-xs text-status-error">{error}</div>}
       <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} phone={touchScreen} keyboardRef={keyboard} />
       {phone && (
         <div className="flex flex-shrink-0 items-center gap-1 border-t border-border-primary bg-bg-chrome px-2 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
           {controls}
           <button type="button" className={TOOL_BUTTON} onClick={() => keyboard.current?.()} aria-label="Keyboard"><Keyboard className="h-4 w-4" /></button>
-          <span className="ml-auto flex min-w-0 pr-1">{onHost}</span>
         </div>
       )}
     </div>

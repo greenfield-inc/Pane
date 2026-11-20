@@ -117,11 +117,11 @@ function HostStreamPanel({ panel, isActive, ownCopy, driving, onBack }: { panel:
             className="min-w-0 flex-1 bg-transparent px-2.5 py-1 text-sm text-text-primary placeholder-text-tertiary focus:outline-none"
           />
         </form>
-        <LiveChip host={host} driving={driving} onBack={onBack} />
         <button type="button" className={button} disabled={!view?.url} onClick={() => { if (view?.url) void navigator.clipboard.writeText(view.url).then(() => setCopied(true), () => undefined); }} title="Copy URL">
           {copied ? <Check className="h-3.5 w-3.5 text-status-success" /> : <Copy className="h-3.5 w-3.5" />}
         </button>
       </div>
+      <LiveChip host={host} driving={driving} onBack={onBack} />
       {error && <div className="border-b border-border-primary bg-bg-primary px-2 py-1 text-xs text-status-error">{error}</div>}
       <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} />
     </div>

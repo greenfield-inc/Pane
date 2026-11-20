@@ -1,13 +1,14 @@
 import { expect, test } from '@playwright/test';
 import { openConnectedRemotePwa } from './remotePwaMock';
 
-// The web app draws a browser tab as frames from the host's one page and sends input back
-// (docs/BROWSER_AGENTS.md, Streaming to other screens).
+// The web app shows a browser tab as its own copy, and while an agent acts on it, as frames from
+// the host's page with input sent back (docs/BROWSER_AGENTS.md, On another screen).
+const AGENT = { by: 'agent' as const, agent: 'Claude Code' };
 
-test('a browser tab streams from the host: frames arrive, a click and typing land, and Take over works', async ({ page }) => {
+test('a tab an agent acts on streams from the host: frames arrive, a click and typing land, and Take over works', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   const host = await openConnectedRemotePwa(page, {
-    browserPanels: [{ title: 'Sign up', url: 'http://localhost:5173/signup' }],
+    browserPanels: [{ title: 'Sign up', url: 'https://example.com/signup', driver: AGENT }],
     activePanelIndex: 2,
     browserStream: { driver: { by: 'agent', agent: 'Claude Code' } },
   });
@@ -15,8 +16,8 @@ test('a browser tab streams from the host: frames arrive, a click and typing lan
   await expect(stream).toBeVisible();
   // The first frame is drawn and the host's address shows.
   await expect(stream.getByText(/Loading the page/)).toHaveCount(0);
-  await expect(page.getByRole('textbox', { name: 'Address' })).toHaveValue('http://localhost:5173/signup');
-  await expect(page.getByText('on MacBook Pro', { exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Address' })).toHaveValue('https://example.com/signup');
+  await expect(page.getByTestId('browser-live-chip')).toContainText('Agent driving · live from MacBook Pro');
   await expect.poll(() => host.browserStream?.calls.some(call => call.channel === 'browser:watch')).toBe(true);
 
   await expect(page.getByTestId('browser-driver-chip')).toContainText('Claude Code is driving');
@@ -38,9 +39,38 @@ test('a browser tab streams from the host: frames arrive, a click and typing lan
   expect(sent()).toMatch(/"action":"down","x":400(\.\d+)?,"y":300/);
 });
 
+test('a web page no agent acts on shows the own copy', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const host = await openConnectedRemotePwa(page, { browserPanels: [{ title: 'Docs', url: 'https://example.com/docs' }], activePanelIndex: 2, browserStream: {} });
+  // The own copy has the Ports list; the stream has none.
+  await expect(page.getByRole('button', { name: 'Ports' })).toBeVisible();
+  await expect(page.getByTestId('browser-stream')).toHaveCount(0);
+  expect(host.browserStream?.calls.some(call => call.channel === 'browser:watch')).toBe(false);
+});
+
+test('a host dev server stays the own copy while an agent acts on it', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await openConnectedRemotePwa(page, { browserPanels: [{ title: 'App', url: 'http://localhost:5173/', driver: AGENT }], activePanelIndex: 2, browserStream: {} });
+  await expect(page.getByRole('button', { name: 'Ports' })).toBeVisible();
+  await expect(page.getByTestId('browser-stream')).toHaveCount(0);
+});
+
+test('Back to my copy leaves the stream for the own copy', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await openConnectedRemotePwa(page, {
+    browserPanels: [{ title: 'Sign up', url: 'https://example.com/signup', driver: AGENT }],
+    activePanelIndex: 2,
+    browserStream: {},
+  });
+  await expect(page.getByTestId('browser-stream')).toBeVisible();
+  await page.getByRole('button', { name: 'Back to my copy' }).click();
+  await expect(page.getByTestId('browser-stream')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Ports' })).toBeVisible();
+});
+
 test('a host on an older Pane gets the page\'s own copy, and says so', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await openConnectedRemotePwa(page, { browserPanels: [{ title: 'Browser', url: '' }], activePanelIndex: 2 });
+  await openConnectedRemotePwa(page, { browserPanels: [{ title: 'Browser', url: 'https://example.com/', driver: AGENT }], activePanelIndex: 2 });
   await expect(page.getByText('MacBook Pro is on an older Pane. Showing your own copy.')).toBeVisible();
 });
 
@@ -48,7 +78,7 @@ test('a tap on a phone takes control first, then clicks where it lands', async (
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   const page = await context.newPage();
   const host = await openConnectedRemotePwa(page, {
-    browserPanels: [{ title: 'Sign up', url: 'http://localhost:5173/signup' }],
+    browserPanels: [{ title: 'Sign up', url: 'https://example.com/signup', driver: AGENT }],
     activePanelIndex: 2,
     browserStream: {},
   });
