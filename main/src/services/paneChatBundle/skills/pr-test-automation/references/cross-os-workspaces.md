@@ -90,7 +90,10 @@ with `git merge-base --is-ancestor <requested-head> HEAD`. Retain `git status
 Preserve the person's checkout and running Pane instance. Use separate
 dependencies/build output, ports, app user-data, and Pane app-build `PANE_DIR`.
 Scope `PANE_DIR` to the test app while the orchestration CLI stays connected
-to its existing daemon. Clean up only resources this run created.
+to its existing daemon. Clean up only resources this run created: quit the
+test app and remove its own `PANE_DIR`. Its socket is `daemon.endpoint.path`
+in `runpane doctor --pane-dir <test PANE_DIR> --json`; never glob
+`/tmp/pane-daemon-*`, which also holds the person's Pane's socket.
 
 ## Collect per-OS proof
 

@@ -771,8 +771,14 @@ test('when Pane is not running, the CLI keeps the connection error and says what
     const { ok, error } = JSON.parse(result.stdout);
     assert.equal(ok, false);
     assert.equal(error.code, 'ENOENT');
-    assert.match(error.message, /Could not connect to Pane daemon at .*ENOENT.*Pane is not running for .* Nothing was changed\./s);
-    assert.match(error.next, /Open Pane.*`runpane doctor --pane-dir /);
+    if (process.platform === 'win32') {
+      assert.match(error.message, /Could not connect to Pane daemon at .*ENOENT.*Pane is not running for .* Nothing was changed\./s);
+      assert.match(error.next, /Open Pane.*`runpane doctor --pane-dir /);
+    } else {
+      // No socket: Pane is not running, or a /tmp cleanup deleted it while Pane ran (#1057).
+      assert.match(error.message, /^No Pane daemon socket at .*daemon\.sock \(ENOENT\)\. Pane is not running for .*, or its socket was deleted while it ran; a running Pane re-creates it within 5 s\. Nothing was changed\.$/s);
+      assert.match(error.next, /^Open Pane on this machine\. If it is already open, wait 5 s and try again; if it still fails, quit and reopen Pane\. Then check the connection with `runpane doctor --pane-dir /);
+    }
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });
   }
@@ -818,7 +824,10 @@ test('the doctor hint checks the Pane the command used', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane errors-'));
   try {
     const result = await runCli(['repos', 'list', '--pane-dir', paneDir, '--json']);
-    assert.equal(JSON.parse(result.stdout).error.next, `Open Pane on this machine, then check the connection with \`runpane doctor --pane-dir '${paneDir}'\`.`);
+    const doctor = `\`runpane doctor --pane-dir '${paneDir}'\``;
+    assert.equal(JSON.parse(result.stdout).error.next, process.platform === 'win32'
+      ? `Open Pane on this machine, then check the connection with ${doctor}.`
+      : `Open Pane on this machine. If it is already open, wait 5 s and try again; if it still fails, quit and reopen Pane. Then check the connection with ${doctor}.`);
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });
   }

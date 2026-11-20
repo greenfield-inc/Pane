@@ -82,7 +82,8 @@ def update_in_app(parsed, pane_dir: Path, refusal: PaneDaemonClientError) -> int
     try:
         result = invoke_daemon("runpane:update:in-app", [], pane_dir=str(pane_dir), timeout_ms=15 * 60_000)
     except PaneDaemonClientError as error:
-        if error.code == "ERR_RUNPANE_DAEMON_CONNECT_FAILED":
+        # Pane not running: the caller installs the release instead, as in the Node CLI.
+        if error.connection_failure:
             raise
         if error.code != "ERR_UNKNOWN_CHANNEL":
             raise PaneDaemonClientError(

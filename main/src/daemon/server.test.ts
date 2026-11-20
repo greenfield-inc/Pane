@@ -2,7 +2,7 @@ import fs from 'fs';
 import net from 'net';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PaneDaemonFrame } from '../../../shared/types/daemon';
 import { PaneCommandRegistry } from './commandRegistry';
 import { encodePaneDaemonFrame, PaneDaemonFrameDecoder } from './socketFraming';
@@ -556,6 +556,128 @@ describe('PaneDaemonServer', () => {
     await expect(server.start()).resolves.toBeUndefined();
     expect(Buffer.byteLength(server.getEndpoint().path)).toBeLessThan(100);
     expect(fs.existsSync(server.getEndpoint().path)).toBe(true);
+  });
+});
+
+async function requestUnknownChannel(client: TestClient, id: number): Promise<void> {
+  client.socket.write(encodePaneDaemonFrame({ type: 'request', id, channel: 'sessions:get-all', args: [] }));
+  await expect(client.nextFrame()).resolves.toMatchObject({ type: 'response', id, ok: false, error: { code: 'ERR_UNKNOWN_CHANNEL' } });
+}
+
+async function waitForPath(target: string): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (!fs.existsSync(target)) {
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out waiting for ${target} to be re-created`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+describe('PaneDaemonServer local socket recovery', () => {
+  it('re-creates its Unix socket folder and socket after they are deleted, and new clients connect again', async () => {
+    if (process.platform === 'win32') {
+      return;
+    }
+
+    const server = new PaneDaemonServer(new PaneCommandRegistry(), createTempAppDirectory(), 'linux', undefined, { unixSocketCheckIntervalMs: 20 });
+    activeServers.push(server);
+    await server.start();
+    const connectedBefore = await connectClient(server);
+
+    const socketPath = server.getEndpoint().path;
+    const socketDirectory = path.dirname(socketPath);
+    // What a QA cleanup of /tmp/pane-daemon-<uid>-*/ does to a running Pane.
+    fs.rmSync(socketDirectory, { recursive: true, force: true });
+    await expect(new Promise((resolve, reject) => {
+      const probe = net.createConnection(socketPath, () => reject(new Error('connected to a deleted socket')));
+      probe.once('error', (error: NodeJS.ErrnoException) => resolve(error.code));
+    })).resolves.toBe('ENOENT');
+
+    await waitForPath(socketPath);
+    expect(fs.statSync(socketDirectory).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(socketPath).mode & 0o777).toBe(0o600);
+
+    const connectedAfter = await connectClient(server);
+    await requestUnknownChannel(connectedAfter, 21);
+    // The client that connected before the deletion keeps its connection.
+    await requestUnknownChannel(connectedBefore, 22);
+    expect(server.getSubscriberCount()).toBe(2);
+  });
+
+  it('re-creates a deleted socket file on demand and does nothing while it exists', async () => {
+    if (process.platform === 'win32') {
+      return;
+    }
+
+    const server = new PaneDaemonServer(new PaneCommandRegistry(), createTempAppDirectory(), 'linux');
+    activeServers.push(server);
+    await server.start();
+    await expect(server.restoreUnixSocketIfMissing()).resolves.toBe(false);
+
+    fs.unlinkSync(server.getEndpoint().path);
+    await expect(server.restoreUnixSocketIfMissing()).resolves.toBe(true);
+    await requestUnknownChannel(await connectClient(server), 31);
+  });
+
+  it('leaves a file someone else put at its socket path', async () => {
+    if (process.platform === 'win32') {
+      return;
+    }
+
+    const server = new PaneDaemonServer(new PaneCommandRegistry(), createTempAppDirectory(), 'linux');
+    activeServers.push(server);
+    await server.start();
+    const socketPath = server.getEndpoint().path;
+    fs.unlinkSync(socketPath);
+    fs.writeFileSync(socketPath, 'not ours');
+
+    await expect(server.restoreUnixSocketIfMissing()).resolves.toBe(false);
+    expect(fs.readFileSync(socketPath, 'utf8')).toBe('not ours');
+  });
+
+  it('keeps retrying when re-creating the socket fails', async () => {
+    if (process.platform === 'win32') {
+      return;
+    }
+
+    const server = new PaneDaemonServer(new PaneCommandRegistry(), createTempAppDirectory(), 'linux');
+    activeServers.push(server);
+    await server.start();
+    const socketPath = server.getEndpoint().path;
+    fs.unlinkSync(socketPath);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const mkdirSpy = vi.spyOn(fs, 'mkdirSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    });
+    try {
+      await expect(server.restoreUnixSocketIfMissing()).resolves.toBe(false);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('it will try again in 5 s'), expect.any(Error));
+    } finally {
+      mkdirSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+
+    await expect(server.restoreUnixSocketIfMissing()).resolves.toBe(true);
+    await requestUnknownChannel(await connectClient(server), 41);
+  });
+
+  it('never watches a Windows named pipe', async () => {
+    if (process.platform !== 'win32') {
+      return;
+    }
+
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    try {
+      const server = new PaneDaemonServer(new PaneCommandRegistry(), createTempAppDirectory(), 'win32', undefined, { unixSocketCheckIntervalMs: 20 });
+      activeServers.push(server);
+      await server.start();
+      expect(setIntervalSpy).not.toHaveBeenCalled();
+      await expect(server.restoreUnixSocketIfMissing()).resolves.toBe(false);
+      await requestUnknownChannel(await connectClient(server), 51);
+    } finally {
+      setIntervalSpy.mockRestore();
+    }
   });
 });
 

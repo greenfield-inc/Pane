@@ -667,6 +667,9 @@ def resolve_daemon_recovery_command(endpoint: Dict[str, str], message: str) -> s
         "ECONNREFUSED" in message or "connection refused" in message.lower() or os.path.exists(endpoint["path"])
     ):
         return "Quit Pane completely, reopen Pane, then rerun runpane doctor --json"
+    if endpoint["transport"] == "unix":
+        # Not running, or a /tmp cleanup deleted the socket of a running Pane, which re-creates it.
+        return "Open Pane. If it is already open, wait 5 s for it to re-create its socket, or quit and reopen Pane. Then rerun runpane doctor --json"
     return "Open Pane, then rerun runpane doctor --json"
 
 
