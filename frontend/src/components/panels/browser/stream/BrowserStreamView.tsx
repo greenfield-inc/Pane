@@ -3,7 +3,7 @@ import { MousePointer2 } from 'lucide-react';
 import type { BrowserInput, BrowserInputResult } from '../../../../../../shared/types/browserStream';
 import { cn } from '../../../../utils/cn';
 import { DriverChip } from '../../device/DeviceToolViews';
-import { browserInputQueue, clickCounter, fitFrame, modifiersOf, pagePoint, PhoneControl } from '../../../../../../shared/utils/browserStreamInput';
+import { browserInputQueue, clickCounter, fitFrame, keyboardField, modifiersOf, movesFocus, pagePoint, PhoneControl } from '../../../../../../shared/utils/browserStreamInput';
 import type { BrowserStream, StreamStop } from './useBrowserStream';
 import type { BrowserStreamClient } from './streamClient';
 
@@ -83,13 +83,9 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       else if (phone) keysRef.current?.blur();
     }
   }, [phone]);
-  // After Enter, Tab or a navigation the field is secure until a tap's answer names it: a two-step
-  // sign-in answers Enter with the email field, then focuses the password field by itself.
-  const secured = useRef(false);
   const queue = useMemo(() => browserInputQueue(async batch => {
     const result = await client.input(panelId, batch);
-    if (batch.some(input => input.kind === 'mouse' && input.action === 'up' && input.button === 'left')) secured.current = false;
-    return secured.current && result.field !== 'password' ? { ...result, field: undefined } : result;
+    return { ...result, field: keyboardField(batch, result.field) };
   }, onResult), [client, panelId, onResult]);
   // Input made while the host can't be reached is dropped, never replayed late onto a page that may have changed.
   const stopRef = useRef(stop);
@@ -97,10 +93,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   const send = useCallback((input: BrowserInput | null) => {
     if (stopRef.current && stopRef.current !== 'older') return;
     // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
-    if ((input?.kind === 'key' && (input.key === 'Enter' || input.key === 'Tab')) || input?.kind === 'navigate' || input?.kind === 'history') {
-      secured.current = true;
-      setField('password');
-    }
+    if (movesFocus(input)) setField('password');
     queue(input);
   }, [queue]);
 

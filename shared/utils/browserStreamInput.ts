@@ -85,6 +85,21 @@ export function clickCounter(): (x: number, y: number, at: number) => number {
   };
 }
 
+/** Enter, Tab or a navigation: the page may move focus by itself, to a password field in a two-step sign-in. */
+export function movesFocus(input: BrowserInput | null): boolean {
+  return (input?.kind === 'key' && (input.key === 'Enter' || input.key === 'Tab')) || input?.kind === 'navigate' || input?.kind === 'history';
+}
+
+/**
+ * The field a screen's keyboard serves after a batch's answer. The answer to a batch that moves
+ * focus can name the field before the page moves on (a sign-in answers Enter with the email field,
+ * then focuses the password), so that answer keeps the keyboard secure; every other answer, and
+ * "no field", is taken as given.
+ */
+export function keyboardField(batch: readonly BrowserInput[], answered: BrowserInputResult['field']): BrowserInputResult['field'] {
+  return answered === 'text' && batch.some(movesFocus) ? 'password' : answered;
+}
+
 /**
  * Whether this phone (the app or the web app on a touch screen) controls the page. Its first touch only takes control (the page resizes to the
  * phone and gets its phone layout); later touches act. Control ends when the page leaves the phone's
