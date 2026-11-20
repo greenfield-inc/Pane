@@ -25,6 +25,8 @@ export interface TerminalSessionOptions {
   sink: TerminalSink;
   /** A restore failed; the screen shows stale or no output until the next one. */
   onError?: (error: unknown) => void;
+  /** This screen is starting the panel: its shell, and any agent in it, are only now launching. */
+  onStart?: () => void;
 }
 
 export interface TerminalSize {
@@ -78,6 +80,7 @@ export class TerminalSession {
         // shows its first frame, which the host's snapshot can lag behind.
         sink.reset('');
         this.live = true;
+        this.options.onStart?.();
         await invoke('panels:initialize', [panelId, { sessionId, cols: cols(), rows: rows() }]);
         return;
       }

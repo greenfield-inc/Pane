@@ -7,6 +7,7 @@ import { queryClient } from '@/daemon/queryClient';
 import { createSavedState } from '@/daemon/savedState';
 import { savedStateFiles } from '@/daemon/savedStateFiles';
 import { DEMO_PROFILE, resetDemoHost } from '@/features/demo/demoHost';
+import { forgetKeptScreens } from '@/features/terminal/keptScreens';
 
 import { addHost, addHosts, EMPTY_HOSTS, loadHosts, removeHost, saveHosts, type SavedHosts } from './hosts';
 import { secureStore } from './secureStore';
@@ -36,8 +37,12 @@ export const useHostsStore = create<HostsState>((set, get) => {
   });
   const commit = async (next: SavedHosts) => {
     const { profiles, activeId } = get();
-    // A computer removed, signed out or paired again under a new id leaves its saved lists behind.
-    for (const profile of profiles) if (!next.profiles.some(kept => kept.id === profile.id)) savedState.forget(profile.id);
+    // A computer removed, signed out or paired again under a new id leaves no saved lists or terminal screens behind.
+    for (const profile of profiles) {
+      if (next.profiles.some(kept => kept.id === profile.id)) continue;
+      savedState.forget(profile.id);
+      forgetKeptScreens(profile.id);
+    }
     // Pairing or picking a real computer ends the demo.
     set({ ...next, demo: false });
     await saveHosts(secureStore, next, { profiles, activeId });

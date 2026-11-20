@@ -11,12 +11,15 @@ import { connectionMark, perfMark } from '../perf/perfMarks';
 
 import { parsePageEvent, type TerminalCommand } from './bridge';
 import { TerminalSession, type TerminalSize } from './terminalSession';
+import { keepScreen, keptScreen as keptScreenOf } from './keptScreens';
+import { lastTerminalSize, rememberTerminalSize, TERMINAL_FONT_SIZE } from './terminalSize';
 
-const FONT_SIZE = 12;
 /** The host forgets viewers after a few minutes; the web app re-announces every minute too. */
 const VISIBILITY_REFRESH_MS = 60_000;
 /** Keyboard and rotation animations resize the view every frame; tell the PTY once it settles. */
 const RESIZE_SETTLE_MS = 150;
+/** The computer says an agent is ready when it first draws, or after 10 s regardless. */
+const AGENT_READY_LIMIT_MS = 12_000;
 
 export type TerminalStatus = 'loading' | 'ready' | 'error';
 
@@ -25,7 +28,12 @@ export type TerminalStatus = 'loading' | 'ready' | 'error';
  * `key={panelId}` so switching tabs starts a fresh terminal.
  */
 export function useTerminal(panelId: string, sessionId: string) {
-  const { client, connection } = useDaemon();
+  const { client, connection, profile } = useDaemon();
+  // The rows this terminal showed last time it was open, painted until its screen is read again.
+  const [keptScreen] = useState(() => keptScreenOf(profile.id, panelId));
+  // Set when this screen starts the panel: its agent is launching until the computer says it's ready.
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [agentReady, setAgentReady] = useState(false);
   const theme = useTheme();
   const webView = useRef<WebView>(null);
   const [status, setStatus] = useState<TerminalStatus>('loading');
@@ -33,8 +41,15 @@ export function useTerminal(panelId: string, sessionId: string) {
   // Whether the page shows a screen from the host, which stays up while it reloads.
   const [hasContent, setHasContent] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
+  // Read by the page's messages: a screen scrolled back is not kept, since a revisit opens at the bottom.
+  const scrolledBack = useRef(false);
   const [screenText, setScreenText] = useState('');
-  const [size, setSize] = useState<TerminalSize | null>(null);
+  // Starts from the size the last page measured, so the screen is read while this page loads.
+  const [size, setSize] = useState<TerminalSize | null>(lastTerminalSize);
+  // The page can take commands; until then a screen read waits here, and output after it waits in `pending`.
+  const pageReady = useRef(false);
+  const pageLoads = useRef(0);
+  const pendingScreen = useRef<string | null>(null);
 
   // Output arrives in bursts of small events; hand it to xterm once per frame.
   const pending = useRef('');
@@ -42,13 +57,25 @@ export function useTerminal(panelId: string, sessionId: string) {
   const frame = useRef<number | null>(null);
 
   const send = (command: TerminalCommand) => {
+    if (!pageReady.current) return;
     webView.current?.injectJavaScript(`window.paneTerminal.receive(${JSON.stringify(command)});true;`);
   };
   const flush = () => {
     frame.current = null;
-    if (!pending.current) return;
+    if (!pending.current || !pageReady.current) return;
     send({ type: 'write', data: pending.current });
     pending.current = '';
+  };
+
+  /** Draws a screen read from the host: the terminal now matches the computer. */
+  const showScreen = (data: string) => {
+    send({ type: 'reset', data });
+    // A screen read after a return, open or switch.
+    connectionMark('terminal-screen', { repeat: true });
+    perfMark('terminal', 'screen', { repeat: true });
+    setHasContent(true);
+    setStatus('ready');
+    setError(null);
   };
 
   const [session] = useState(() => new TerminalSession({
@@ -61,19 +88,15 @@ export function useTerminal(panelId: string, sessionId: string) {
         // Output buffered for the old screen is replaced, but the host still needs its ack.
         if (pending.current) session.ack(pending.current.length);
         pending.current = '';
-        send({ type: 'reset', data });
-        // A screen read after a return, open or switch: the terminal now matches the computer.
-        connectionMark('terminal-screen', { repeat: true });
-        perfMark('terminal', 'screen', { repeat: true });
-        setHasContent(true);
-        setStatus('ready');
-        setError(null);
+        if (pageReady.current) showScreen(data);
+        else pendingScreen.current = data;
       },
       write: data => {
         pending.current += data;
         frame.current ??= requestAnimationFrame(flush);
       },
     },
+    onStart: () => setStartedAt(Date.now()),
     onError: cause => {
       // A restore cut short by a reconnect is retried once the connection is back.
       if (client.getState().status !== 'connected') return;
@@ -83,6 +106,16 @@ export function useTerminal(panelId: string, sessionId: string) {
   }));
 
   useDaemonEvent('terminal:output', event => session.receiveOutput(event.args[0]));
+  useDaemonEvent('terminal:cliReady', event => {
+    if ((event.args[0] as { panelId?: unknown } | undefined)?.panelId !== panelId) return;
+    perfMark('terminal', 'agent-ready');
+    setAgentReady(true);
+  });
+  useEffect(() => {
+    if (startedAt === null) return undefined;
+    const timer = setTimeout(() => setAgentReady(true), AGENT_READY_LIMIT_MS);
+    return () => clearTimeout(timer);
+  }, [startedAt]);
 
   const restore = useEffectEvent(() => {
     if (size) void session.restore(size);
@@ -131,7 +164,7 @@ export function useTerminal(panelId: string, sessionId: string) {
     return () => clearTimeout(timer);
   }, [session, size, status]);
 
-  const themeCommand: TerminalCommand = { type: 'theme', theme: theme.terminal, fontSize: FONT_SIZE };
+  const themeCommand: TerminalCommand = { type: 'theme', theme: theme.terminal, fontSize: TERMINAL_FONT_SIZE };
   const themeJson = JSON.stringify(themeCommand);
   useEffect(() => {
     webView.current?.injectJavaScript(`window.paneTerminal&&window.paneTerminal.receive(${themeJson});true;`);
@@ -142,13 +175,23 @@ export function useTerminal(panelId: string, sessionId: string) {
     if (!message) return;
     switch (message.type) {
       case 'ready': {
+        pageReady.current = true;
         send(themeCommand);
         const next = { cols: message.cols, rows: message.rows };
-        // A page that loads again (after iOS reclaimed it) starts blank.
-        setHasContent(false);
-        if (size && connection.status === 'connected') {
-          setStatus('loading');
-          void session.restore(next);
+        rememberTerminalSize(next);
+        if (++pageLoads.current > 1) {
+          // A page that loads again (after iOS reclaimed it) starts blank.
+          pendingScreen.current = null;
+          setHasContent(false);
+          if (size && connection.status === 'connected') {
+            setStatus('loading');
+            void session.restore(next);
+          }
+        } else if (pendingScreen.current !== null) {
+          // The screen was read while this page loaded; output after it follows.
+          showScreen(pendingScreen.current);
+          pendingScreen.current = null;
+          flush();
         }
         setSize(next);
         break;
@@ -169,9 +212,12 @@ export function useTerminal(panelId: string, sessionId: string) {
         break;
       case 'scrolled':
         setAtBottom(message.atBottom);
+        scrolledBack.current = !message.atBottom;
+        if (scrolledBack.current) keepScreen(profile.id, panelId, null);
         break;
       case 'screen':
         setScreenText(message.text);
+        keepScreen(profile.id, panelId, scrolledBack.current ? null : message.text);
         break;
     }
   };
@@ -182,10 +228,14 @@ export function useTerminal(panelId: string, sessionId: string) {
     /** iOS may reclaim the page's process under memory pressure; load it again. */
     reload: () => {
       session.detach();
+      pageReady.current = false;
       webView.current?.reload();
     },
     status,
     hasContent,
+    keptScreen,
+    /** This screen started an agent's panel and the agent hasn't drawn yet (up to 12 s). */
+    agentStarting: startedAt !== null && !agentReady,
     error,
     atBottom,
     screenText,
