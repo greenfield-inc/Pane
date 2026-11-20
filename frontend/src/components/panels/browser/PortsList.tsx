@@ -96,7 +96,10 @@ const PortRow: React.FC<{ port: ListeningPort; isCurrent: boolean; canOpen: bool
   );
   const rowClass = 'flex w-full items-center gap-2 px-3 py-1 text-left';
   if (!opens) {
-    return <div className={rowClass} title={isWeb ? undefined : `${port.port} does not answer HTTP`}>{content}</div>;
+    const title = isWeb ? undefined : port.unprobed
+      ? `${port.port} was not checked for HTTP: Settings › General › Ports keeps Pane from connecting to it`
+      : `${port.port} does not answer HTTP`;
+    return <div className={rowClass} title={title}>{content}</div>;
   }
   return (
     <button

@@ -43,6 +43,8 @@ export type SettingsSettingId =
   | 'keep-awake-plugged-in'
   | 'keep-awake-on-battery'
   | 'background-activity'
+  | 'port-probes'
+  | 'port-probe-excluded-ports'
   | 'resume-paused-on-open'
   | 'auto-pause'
   | 'auto-pause-hours'

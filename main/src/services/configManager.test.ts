@@ -232,6 +232,21 @@ describe('ConfigManager appearance persistence', () => {
     expect(await fs.readFile(configPath, 'utf8')).toBe(before);
   });
 
+  it('probes ports by default, saves an excluded-ports list, and refuses one it cannot read without changing memory or disk', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig()).toMatchObject({ portProbesEnabled: true, portProbeExcludedPorts: '' });
+    await manager.updateConfig({ portProbeExcludedPorts: '5173, 9000-9100' });
+    expect(manager.getConfig().portProbeExcludedPorts).toBe('5173, 9000-9100');
+    const before = await fs.readFile(configPath, 'utf8');
+    await expect(manager.updateConfig({ portProbeExcludedPorts: '9000-80000' })).rejects.toMatchObject({
+      code: 'ERR_PORT_PROBE_EXCLUSIONS_INVALID',
+      message: expect.stringContaining('80000 is outside 1 to 65535'),
+    });
+    expect(manager.getConfig().portProbeExcludedPorts).toBe('5173, 9000-9100');
+    expect(await fs.readFile(configPath, 'utf8')).toBe(before);
+  });
+
   it('keeps memory and disk unchanged when the atomic rename fails', async () => {
     const manager = new ConfigManager();
     await manager.initialize();
