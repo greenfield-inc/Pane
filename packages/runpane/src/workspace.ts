@@ -453,7 +453,7 @@ async function readMachines(paneDir?: string): Promise<Tailnet> {
       || left.name.localeCompare(right.name));
   if (tailnet.ok) return { ...tailnet, machines };
   if (!saved.length) return tailnet;
-  const hostname = os.hostname().replace(/\.local$/i, '');
+  const hostname = await machineHostname();
   const self: TailnetMachine = {
     name: machineSlug(hostname), dnsName: hostname, os: process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux',
     online: true, ips: [], self: true, owner: 'you', mine: true,
@@ -466,7 +466,7 @@ const NOT_ANSWERING = 'Pane is not answering there; it needs a Pane with workspa
 const CERTIFICATES_OFF = 'this tailnet has HTTPS certificates turned off. Fix: Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns.';
 
 async function probeMachine(machine: TailnetMachine, target = workspaceTarget(machine), notAnswering = NOT_ANSWERING): Promise<{ info?: MachineInfo; error?: string }> {
-  if (!machine.online) return { error: 'offline' };
+  if (!machine.online) return { error: machine.unreachable ?? 'offline' };
   try {
     return { info: await invokeRemoteDaemon(target, 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS) };
   } catch (error) {
@@ -526,7 +526,7 @@ export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
       ok: true,
       self: { ...tailnet.self, workspace: local, relay },
       // Route tokens stay internal: the list names where each route goes and which key it holds.
-      machines: rows.map(({ machine: { routes, aliases, ...machine }, probe, route }) => ({
+      machines: rows.map(({ machine: { routes, aliases, unreachable: _unreachable, ...machine }, probe, route }) => ({
         ...machine,
         ids: aliases,
         routes: routes?.map((candidate) => ({ kind: candidate.kind, baseUrl: candidate.baseUrl, fingerprint: candidate.fingerprint, answered: candidate === route })),
@@ -684,6 +684,18 @@ async function readLocalStatus(paneDir?: string): Promise<ReturnType<typeof loca
       ? { enabled: false, state: 'off', reason: 'this Pane is older than workspaces', fix: 'Update Pane, then restart it.', machineName: undefined, url: undefined }
       : null;
   }
+}
+
+/**
+ * This machine's name as Pane and Tailscale give it (main/src/utils/computerName.ts): a Mac with a
+ * network-assigned host name (`Mac.localdomain`, `localhost`) goes by its LocalHostName.
+ */
+async function machineHostname(): Promise<string> {
+  const host = os.hostname().replace(/\.local$/i, '');
+  if (process.platform !== 'darwin' || (!host.includes('.') && host !== 'localhost')) return host;
+  return new Promise((resolve) => {
+    execFile('/usr/sbin/scutil', ['--get', 'LocalHostName'], { encoding: 'utf8', timeout: 2_000 }, (error, stdout) => resolve((!error && stdout.trim()) || host));
+  });
 }
 
 /** null when Pane does not answer here or is older than phone access. */

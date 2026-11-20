@@ -1,7 +1,8 @@
 import { execFileSync } from 'child_process';
 import os from 'os';
 
-let cached: string | null = null;
+/** The LocalHostName read for a host name, so it is read once per host name and a failed read is tried again. */
+let cached: { host: string; name: string } | null = null;
 
 /**
  * This computer's name as people and Tailscale know it: the host name without `.local`. A Mac that
@@ -9,15 +10,14 @@ let cached: string | null = null;
  * instead, the name Sharing settings show and Tailscale uses.
  */
 export function computerName(): string {
-  cached ??= readComputerName();
-  return cached;
-}
-
-function readComputerName(): string {
   const host = os.hostname().replace(/\.local$/iu, '');
   if (process.platform !== 'darwin' || (!host.includes('.') && host !== 'localhost')) return host;
+  if (cached?.host === host) return cached.name;
   try {
-    return execFileSync('/usr/sbin/scutil', ['--get', 'LocalHostName'], { encoding: 'utf8', timeout: 2_000 }).trim() || host;
+    const name = execFileSync('/usr/sbin/scutil', ['--get', 'LocalHostName'], { encoding: 'utf8', timeout: 2_000 }).trim();
+    if (!name) return host;
+    cached = { host, name };
+    return name;
   } catch {
     return host;
   }

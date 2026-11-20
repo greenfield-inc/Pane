@@ -403,6 +403,10 @@ test('list says why a saved computer cannot be reached instead of only "offline"
     const line = list.output.split('\n').find((text) => text.startsWith('studio-mac'));
     assert.match(line, /: not reachable: Could not reach Pane on studio-mac \(https:\/\/localhost:1\/k7xq\): .*ECONNREFUSED/);
     assert.doesNotMatch(line, /workspaces on/);
+    const json = await run('workspace', 'list', '--json');
+    const [listed] = JSON.parse(json.output).machines;
+    assert.match(listed.error, /ECONNREFUSED/);
+    assert.equal(listed.unreachable, undefined);
   });
 });
 
