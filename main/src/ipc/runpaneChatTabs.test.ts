@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ToolPanel } from '../../../shared/types/panels';
 import type { ChatPanelState } from '../../../shared/types/chatTab';
 import { ChatTabManager, type ChatTabStore } from '../services/chatTabs/manager';
@@ -9,7 +9,10 @@ import { chatTabLastMessage, chatTabNoTerminal, chatTabOutput, chatTabScreen, su
 
 const AGENT = path.join(__dirname, '..', 'services', 'chatTabs', 'testing', 'scriptedAgent.mjs');
 const cleanup: Array<() => Promise<void> | void> = [];
-afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
+afterEach(async () => {
+  vi.useRealTimers();
+  for (const step of cleanup.splice(0).reverse()) await step();
+});
 
 function setup() {
   const directory = mkdtempSync(path.join(tmpdir(), 'pane-runpane-chat-'));
@@ -101,11 +104,16 @@ describe('runpane on a chat tab', () => {
     await expect.poll(() => manager.view(panel.id, 0).status).toBe('working');
     // "steps" replies "Done.", so only the queued prompt contains QUEUED-ONLY.
     expect((await submitChatTab(manager, panel, 'steps 2 QUEUED-ONLY', { interrupt: false })).delivery.state).toBe('queued');
-    const prompt = waitForChatTab(manager, panel, { panelId: panel.id, condition: 'text', contains: 'QUEUED-ONLY', timeoutMs: 3_000 });
+    const prompt = waitForChatTab(manager, panel, { panelId: panel.id, condition: 'text', contains: 'QUEUED-ONLY', timeoutMs: 10_000 });
     const reply = waitForChatTab(manager, panel, { panelId: panel.id, condition: 'text', contains: 'Done.', timeoutMs: 10_000 });
     await manager.cancel(panel.id);
     await expect(reply).resolves.toMatchObject({ ok: true, matched: true });
+    // The prompt is now in the transcript, ahead of the reply. Move the clock past the prompt wait's
+    // timeout, so its next poll reads that transcript once more and then times out, instead of
+    // polling it for the rest of the 10 s in real time.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 10_000 });
     await expect(prompt).resolves.toMatchObject({ matched: false, timedOut: true });
+    vi.useRealTimers();
     expect(chatTabScreen(manager, panel, 80).text).toContain('user: steps 2 QUEUED-ONLY');
   });
 

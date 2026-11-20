@@ -9,7 +9,7 @@ import os from 'os';
 import path from 'path';
 import { getRemoteDaemonExecutableCandidates } from '../daemon/remoteDaemonService';
 import { pathToFileURL } from 'url';
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
@@ -319,15 +319,18 @@ afterEach(() => {
   fs.rmSync(path.join(process.env.PANE_DIR!, 'expected-reports.json'), { force: true });
 });
 
-function createTempGitRepo(name = 'repo'): string {
+/**
+ * A fresh repository on `main` with a commit identity, removed by `owner`'s cleanup (each test's,
+ * by default). One `git` start: the identity is written to the repository's config directly,
+ * because every process start costs a busy Windows runner a large share of a test's 5 s.
+ */
+function createTempGitRepo(name = 'repo', owner: string[] = tempDirs): string {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-runpane-test-'));
-  tempDirs.push(parent);
+  owner.push(parent);
   const repoPath = path.join(parent, name);
   fs.mkdirSync(repoPath);
-  execFileSync('git', ['init'], { cwd: repoPath, stdio: 'ignore' });
-  execFileSync('git', ['branch', '-M', 'main'], { cwd: repoPath, stdio: 'ignore' });
-  execFileSync('git', ['config', 'user.name', 'Pane Test'], { cwd: repoPath, stdio: 'ignore' });
-  execFileSync('git', ['config', 'user.email', 'pane-test@example.invalid'], { cwd: repoPath, stdio: 'ignore' });
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoPath, stdio: 'ignore' });
+  fs.appendFileSync(path.join(repoPath, '.git', 'config'), '[user]\n\tname = Pane Test\n\temail = pane-test@example.invalid\n');
   return repoPath;
 }
 
@@ -9288,6 +9291,14 @@ describe('runpane IPC handlers', () => {
        * the test past vitest's 5 s default.
        */
       const REAL_GH_TIMEOUT_MS = 30_000;
+      /**
+       * For archives that check several Panes: each check runs about seven `git` processes one
+       * after another (upstream, remotes, a fetch from the local bare remote, ref and ahead checks,
+       * status), and the Panes are checked one at a time. Up to six checks per test is ~40
+       * sequential process starts; with its fixture, the slowest of these took 4.8 s on a busy
+       * Windows runner.
+       */
+      const MULTI_PANE_CHECK_TIMEOUT_MS = 15_000;
 
       function createBulkServices(panes: Session[], associations: string[], lookupPr: (paneId: string) => Promise<PrLookup> = async () => merged) {
         const byId = new Map(panes.map(pane => [pane.id, pane]));
@@ -9323,9 +9334,9 @@ describe('runpane IPC handlers', () => {
         return { services, get };
       }
 
-      /** A repository whose main is on a bare remote, with one linked worktree per Pane. */
-      function createRemoteRepo() {
-        const repoPath = createTempGitRepo('bulk-repo');
+      /** A repository whose main is on a bare remote, with one linked worktree per Pane, removed by `owner`'s cleanup. */
+      function createRemoteRepo(owner: string[] = tempDirs) {
+        const repoPath = createTempGitRepo('bulk-repo', owner);
         const remotePath = path.join(path.dirname(repoPath), 'bulk-remote.git');
         execFileSync('git', ['init', '--bare', '-q', remotePath], { stdio: 'ignore' });
         execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoPath, stdio: 'ignore' });
@@ -9456,7 +9467,7 @@ describe('runpane IPC handlers', () => {
           ],
         });
         expect(result).toEqual(expect.not.objectContaining({ closed: true }));
-      });
+      }, MULTI_PANE_CHECK_TIMEOUT_MS);
 
       it('dry-runs the Session archive, says what it would do, and reports a reason for every skipped Pane', async () => {
         const { pane } = createRemoteRepo();
@@ -9569,15 +9580,27 @@ describe('runpane IPC handlers', () => {
       }, REAL_GH_TIMEOUT_MS);
 
       describe('archiving the Session', () => {
-        /** A clean Pane, one with an agent mid-turn, one with uncommitted work and one already archived. */
-        function createSessionPanes() {
-          const { pane } = createRemoteRepo();
-          const panes = [
+        /**
+         * Built once: archiving goes through the stubbed `sessions:delete`, so no test here changes
+         * the worktrees, and the archive checks only read them (their fetch is idempotent).
+         */
+        const fixtureDirs: string[] = [];
+        let fixturePanes: Session[] = [];
+        beforeAll(() => {
+          const { pane } = createRemoteRepo(fixtureDirs);
+          fixturePanes = [
             pane('pane-clean'),
             pane('pane-busy'),
             pane('pane-dirty', worktreePath => fs.writeFileSync(path.join(worktreePath, 'draft.txt'), 'unsaved work')),
-            { ...session, id: 'pane-archived', name: 'archived', archived: true },
           ];
+        });
+        afterAll(() => {
+          for (const dir of fixtureDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+        });
+
+        /** A clean Pane, one with an agent mid-turn, one with uncommitted work and one already archived. */
+        function createSessionPanes() {
+          const panes = [...fixturePanes, { ...session, id: 'pane-archived', name: 'archived', archived: true }];
           const busyPanel: ToolPanel = { ...terminalPanel, id: 'busy-panel', sessionId: 'pane-busy', title: 'Claude Code' };
           vi.mocked(panelManager.getPanelsForSession).mockImplementation((paneId: string) => paneId === 'pane-busy' ? [busyPanel] : []);
           vi.mocked(terminalPanelManager.getAgentStatus).mockImplementation(panelId => panelId === 'busy-panel' ? 'working' : 'idle');
@@ -9617,7 +9640,7 @@ describe('runpane IPC handlers', () => {
               failedPanes: [],
             },
           });
-        });
+        }, MULTI_PANE_CHECK_TIMEOUT_MS);
 
         it('archives the other Panes when checking one fails, and previews that one as unsafe', async () => {
           const { services, registry, sessionsDelete } = createSessionPanes();
@@ -9640,7 +9663,7 @@ describe('runpane IPC handlers', () => {
             keptPanes: [],
             failedPanes: [{ paneId: 'pane-busy', name: 'pane-busy', error: 'panel store unavailable' }],
           });
-        });
+        }, MULTI_PANE_CHECK_TIMEOUT_MS);
 
         it('archives the unsafe Panes the person chose to archive anyway', async () => {
           const { services, registry, sessionsDelete } = createSessionPanes();
@@ -9652,7 +9675,7 @@ describe('runpane IPC handlers', () => {
 
           expect(sessionsDelete.mock.calls.map(([paneId]) => paneId)).toEqual(['pane-clean', 'pane-busy', 'pane-dirty']);
           expect(panes?.archivedPaneIds).toEqual(['pane-clean', 'pane-busy', 'pane-dirty']);
-        });
+        }, MULTI_PANE_CHECK_TIMEOUT_MS);
 
         it('keeps a Pane the person chose to keep even after its agent goes idle, and one that became busy after the check', async () => {
           const { services, registry, sessionsDelete } = createSessionPanes();
