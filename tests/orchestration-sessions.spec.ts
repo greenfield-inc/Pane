@@ -2261,6 +2261,17 @@ test('a tab dragged over a tiled neighbour Session is refused there and moves no
   await expect(tiles).toHaveCount(2);
 });
 
+/** The base mock's machine controls (T-45): another machine's events, navigation memory and host switches. */
+type MachinesMock = {
+  emitMachineEvent: (event: JsonObject, reads?: Record<string, Record<string, JsonObject | null>>) => void;
+  getNavigationMemory: (hostId: string | null) => JsonObject | null;
+  emitRemoteDaemonResyncRequested: (event: { hostChanged: boolean }) => void;
+};
+const machinesMock = (page: Page) => page.evaluateHandle(() => {
+  // SAFETY: installElectronApiMock defines this test-only object before the app loads.
+  return (window as typeof window & { __paneTestElectronMock: MachinesMock }).__paneTestElectronMock;
+});
+
 for (const neighbour of ['terminal', 'chat'] as const) {
   test(`Enter on a highlighted sidebar Session opens that Session, not the first tile's, while Sessions are tiled (T-45, neighbour shows a ${neighbour})`, async ({ page }) => {
     await page.setViewportSize({ width: 1400, height: 900 });
@@ -2290,23 +2301,22 @@ for (const neighbour of ['terminal', 'chat'] as const) {
     await page.evaluate(() => {
       const api = window.electronAPI.orchestrationSessions;
       const get = api.get.bind(api);
-      let release = () => undefined as void;
-      const released = new Promise<void>(resolve => { release = resolve; });
-      (window as typeof window & { __releaseGamma?: () => void }).__releaseGamma = release;
+      const released = new Promise<void>(resolve => { window.__releaseGamma = resolve; });
       api.get = async (selector) => {
         if (selector.sessionId === 'gamma') await released;
         return get(selector);
       };
     });
 
-    // The cursor walks to Gamma with the keyboard, and Enter opens it.
-    // A terminal that finishes opening focuses itself, so retry until the cursor is on the row.
+    // The cursor walks to Gamma with the keyboard, and Enter opens it. A terminal that finishes
+    // opening focuses itself and can take a key meant for the row, so retry until Gamma opens.
     await expect(async () => {
       await page.getByTestId('orchestration-session-beta').focus();
       await page.keyboard.press('j');
       await expect(page.getByTestId('orchestration-session-gamma')).toBeFocused({ timeout: 500 });
+      await page.keyboard.press('Enter');
+      await expect(page.getByTestId('orchestration-session-gamma')).toHaveAttribute('aria-current', 'page', { timeout: 500 });
     }).toPass();
-    await page.keyboard.press('Enter');
 
     // While Gamma loads, focus waits in Gamma's tile; it never enters Alpha's tile, which would select Alpha.
     const focusedTile = () => page.evaluate(() => document.activeElement?.closest('[data-session-tile]')?.getAttribute('data-session-tile') ?? null);
@@ -2316,7 +2326,7 @@ for (const neighbour of ['terminal', 'chat'] as const) {
     await expect(page.getByTestId('orchestration-session-gamma')).toHaveAttribute('aria-current', 'page');
 
     // Once Gamma's workspace shows, Gamma is still the selected Session and holds focus.
-    await page.evaluate(() => (window as typeof window & { __releaseGamma?: () => void }).__releaseGamma?.());
+    await page.evaluate(() => window.__releaseGamma?.());
     await expect(page.locator('[data-session-tile="gamma"] [data-panel-group-id]').first()).toBeVisible();
     await expect(page.locator('[data-session-tile="gamma"]')).toHaveAttribute('data-session-focused', 'true');
     await expect.poll(focusedTile).toBe('gamma');
@@ -2324,6 +2334,121 @@ for (const neighbour of ['terminal', 'chat'] as const) {
     await expect(page.getByTestId('orchestration-session-alpha')).not.toHaveAttribute('aria-current', 'page');
   });
 }
+
+test('In All machines, Enter on a highlighted Session opens it, from this machine and from another one, while another machine\'s Sessions change (T-45)', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const local = [
+    sessionFixture('alpha', 'Alpha', 'Alpha goal.', '', '2026-09-16T12:00:00.000Z'),
+    sessionFixture('beta', 'Beta', 'Beta goal.', '', '2026-09-16T12:01:00.000Z'),
+    sessionFixture('gamma', 'Gamma', 'Gamma goal.', '', '2026-09-16T12:02:00.000Z'),
+  ];
+  const remote = [
+    sessionFixture('rotate', 'Backup rotation', '', '', '2026-09-16T11:00:00.000Z'),
+    sessionFixture('nightly', 'Nightly rebuild', '', '', '2026-09-16T11:30:00.000Z'),
+  ];
+  const lists = (sessions: UiSessionFixture[]) => ({
+    'sessions:get-all-with-projects': { success: true, data: [] },
+    'orchestration-sessions:list': { success: true, data: { sessions } },
+    'panels:agent-statuses': { success: true, data: [] },
+    'permission:getPending': { success: true, data: [] },
+    'notify:remote-snapshot': null,
+  });
+  // The mock answers one Session list whichever machine the app is on, so build-box's Sessions are in it too.
+  await installSessionsFixture(page, [...local, ...remote], [], {
+    machines: {
+      platform: 'darwin',
+      workspaceAccess: { machineName: 'studio-mac' },
+      machineConnections: {
+        machines: [
+          { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+          { id: 'build', label: 'build-box', kind: 'remote', status: 'online', offlineSince: null },
+        ],
+        reads: { local: lists(local), build: lists([remote[0]]) },
+      },
+    },
+  });
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+  await page.evaluate(() => window.electronAPI.remoteDaemon.upsertConnectionProfile({
+    id: 'build', label: 'build-box', baseUrl: 'https://build-box.tail1234.ts.net:8443', token: '', transport: 'http+sse',
+    tailnetMachine: 'build-box', tailnetDomain: 'tail1234.ts.net',
+  }));
+
+  // Alpha and Beta tiled, Beta's tile focused, as in the Sessions sidebar.
+  await page.getByTestId('orchestration-session-alpha').click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached();
+  const tileLayout = await layoutBox(page.getByTestId('session-tile-layout'));
+  await dragSessionOntoTile(page, 'orchestration-session-beta', { x: tileLayout.x + tileLayout.width - 20, y: tileLayout.y + tileLayout.height / 2 });
+  await expect(page.getByTestId('session-tile-header')).toHaveCount(2);
+  await page.locator('[data-session-tile="beta"]').click({ position: { x: 40, y: 10 } });
+
+  await page.getByRole('button', { name: /Switch machine$/ }).click();
+  await page.getByRole('menuitemradio', { name: /All machines/ }).click();
+  await expect(page.getByTestId('all-machines-sidebar')).toBeVisible();
+  const row = (name: string, machine: string) => page.getByRole('button', { name: `Session ${name} on ${machine}`, exact: true });
+  await expect(row('Backup rotation', 'build-box')).toBeVisible();
+
+  // Gamma's workspace stays loading until the test lets it, as a real host's reply would.
+  await page.evaluate(() => {
+    const api = window.electronAPI.orchestrationSessions;
+    const get = api.get.bind(api);
+    const released = new Promise<void>(resolve => { window.__releaseGamma = resolve; });
+    api.get = async (selector) => {
+      if (selector.sessionId === 'gamma') await released;
+      return get(selector);
+    };
+  });
+  const emitBuild = async (sessions: UiSessionFixture[]) => (await machinesMock(page)).evaluate((api, build) => {
+    api.emitMachineEvent({ type: 'event', machineId: 'build', channel: 'orchestration-sessions:changed', args: [] }, { build });
+  }, lists(sessions));
+
+  // This machine's row: the cursor walks to Gamma while build-box's Session changes, then Enter.
+  const order = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-testid="all-machines-sidebar"] [data-sidebar-item]'))
+    .map(element => element.getAttribute('aria-label') ?? ''));
+  const walk = async (from: string, to: string, during?: () => Promise<void>) => {
+    await expect(async () => {
+      const labels = await order();
+      const [start, end] = [labels.indexOf(from), labels.indexOf(to)];
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(end).toBeGreaterThanOrEqual(0);
+      await page.getByRole('button', { name: from, exact: true }).focus();
+      for (let step = 0; step < Math.abs(end - start); step += 1) await page.keyboard.press(end > start ? 'j' : 'k');
+      await during?.();
+      await expect(page.getByRole('button', { name: to, exact: true })).toBeFocused({ timeout: 500 });
+    }).toPass();
+  };
+  await walk('Session Alpha on studio-mac', 'Session Gamma on studio-mac', () => emitBuild([{ ...remote[0], blockers: ['waiting on review'] }]));
+  await page.screenshot({ path: testInfo.outputPath('all-machines-01-cursor-on-gamma.png') });
+  // A terminal that finishes opening can take a key meant for the row: retry until Gamma opens.
+  await expect(async () => {
+    if (!(await row('Gamma', 'studio-mac').evaluate(element => element === document.activeElement))) await row('Gamma', 'studio-mac').focus();
+    await page.keyboard.press('Enter');
+    await expect(row('Gamma', 'studio-mac')).toHaveAttribute('aria-current', 'page', { timeout: 500 });
+  }).toPass();
+  const focusedTile = () => page.evaluate(() => document.activeElement?.closest('[data-session-tile]')?.getAttribute('data-session-tile') ?? null);
+  await expect.poll(focusedTile).toBe('gamma');
+  await page.evaluate(() => window.__releaseGamma?.());
+  await expect(page.locator('[data-session-tile="gamma"] [data-panel-group-id]').first()).toBeVisible();
+  await expect.poll(focusedTile).toBe('gamma');
+  await expect(row('Gamma', 'studio-mac')).toHaveAttribute('aria-current', 'page');
+  await expect(row('Alpha', 'studio-mac')).not.toHaveAttribute('aria-current', 'page');
+  await page.screenshot({ path: testInfo.outputPath('all-machines-02-gamma-opened.png') });
+
+  // Another machine's row: a Session arrives on build-box while the cursor is on its way, then Enter.
+  await walk('Session Gamma on studio-mac', 'Session Backup rotation on build-box', () => emitBuild([remote[1], remote[0]]));
+  await expect(row('Nightly rebuild', 'build-box')).toBeVisible();
+  await walk('Session Backup rotation on build-box', 'Session Nightly rebuild on build-box');
+  await page.screenshot({ path: testInfo.outputPath('all-machines-03-cursor-on-nightly-build-box.png') });
+  await page.keyboard.press('Enter');
+  // The switch leaves that Session in build-box's navigation memory, which the host change restores.
+  const mockApi = await machinesMock(page);
+  await expect.poll(() => mockApi.evaluate(api => api.getNavigationMemory('build')))
+    .toMatchObject({ view: 'pane-chat', orchestrationSessionId: 'nightly' });
+  await mockApi.evaluate(api => api.emitRemoteDaemonResyncRequested({ hostChanged: true }));
+  await expect(row('Nightly rebuild', 'build-box')).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('heading', { level: 1, name: 'Nightly rebuild', exact: true })).toBeAttached();
+  await page.screenshot({ path: testInfo.outputPath('all-machines-04-nightly-opened-on-build-box.png') });
+});
 
 test('New offers Session and Pane in one dialog and restores keyboard focus', async ({ page }) => {
   await installSessionsFixture(page, []);
@@ -3090,6 +3215,8 @@ type PaneChatOfferRecord = { preferences: string[]; creates: Array<{ name: strin
 declare global {
   interface Window {
     __paneChatOffer?: PaneChatOfferRecord;
+    /** T-45: lets the held-back Gamma Session answer its load. */
+    __releaseGamma?: () => void;
   }
 }
 

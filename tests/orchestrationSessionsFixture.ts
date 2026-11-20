@@ -80,6 +80,8 @@ export type SessionFixtureOptions = {
   notifySnapshot?: NotifySnapshot;
   initialPanels?: JsonObject[];
   initialLayout?: JsonObject;
+  /** Machines for All machines (T-45): the other machines, their reads, and this computer's name. */
+  machines?: Pick<NonNullable<Parameters<typeof installElectronApiMock>[1]>, 'machineConnections' | 'workspaceAccess' | 'platform'>;
 };
 
 export function sessionFixture(
@@ -174,6 +176,7 @@ export async function installSessionsFixture(
     notifySnapshot: fixtureOptions.notifySnapshot,
     initialPanels: fixtureOptions.initialPanels,
     initialLayout: fixtureOptions.initialLayout,
+    ...fixtureOptions.machines,
   });
   await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes, distributions }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]>; distributions: string[] }) => {
     type SessionRecord = UiSessionFixture;
