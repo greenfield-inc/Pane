@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { AppServices } from '../../ipc/types';
 import { PaneCommandRegistry } from '../../daemon/commandRegistry';
@@ -21,8 +21,15 @@ import type { MoveManifest, MovePane } from './manifest';
 
 let root: string;
 let previousPaneDir: string | undefined;
-const gitEnv = () => ({ ...process.env, GIT_CONFIG_NOSYSTEM: '1', HOME: root, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.invalid' });
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: gitEnv() }).toString().trim();
+const gitEnv = (home: string) => ({ ...process.env, GIT_CONFIG_NOSYSTEM: '1', HOME: home, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.invalid' });
+const gitAt = (home: string, cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: gitEnv(home) }).toString().trim();
+const git = (cwd: string, ...args: string[]) => gitAt(root, cwd, ...args);
+
+// A git process start takes about 30-60 ms on Windows, more on a busy CI runner; each git-backed test states its bound from this.
+const GIT_START_BUDGET_MS = 250;
+// Building one Pane from a real bundle, then starting or rolling it back, runs about 30 git commands one after another
+// (remote lookup, fetch, bundle verify and fetch, worktree add, the snapshot's apply and check, then the undo steps).
+const BUILD_TIMEOUT_MS = 30 * GIT_START_BUDGET_MS;
 
 /** Pane's panels, in memory, as PanelManager keeps them: a permanent tab refuses delete, and creating an existing ID returns it. */
 function memoryTabs(panels = new Map<string, ToolPanel>()): ImporterTabs & { panels: Map<string, ToolPanel> } {
@@ -170,28 +177,46 @@ async function waitStage(importer: MoveImporter, moveId: string, wanted: Array<T
   return importer.status(moveId);
 }
 
-/** A scratch PANE_DIR, a source repository with uncommitted work packed as p1's bundle, and the target's clone. */
-async function gitFixture(prefix: string): Promise<{ target: string; bundle: Buffer }> {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  previousPaneDir = process.env.PANE_DIR;
-  process.env.PANE_DIR = path.join(root, 'pane');
-  const source = path.join(root, 'source');
+/**
+ * A source repository with uncommitted work packed as p1's bundle, and the target's clone, built once
+ * per file: every test gets its own copy of the clone (tests change its refs and worktrees) and the same bundle.
+ */
+let template: Promise<{ dir: string; bundle: Buffer }> | undefined;
+async function buildTemplate(): Promise<{ dir: string; bundle: Buffer }> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-importer-template-'));
+  const source = path.join(dir, 'source');
   fs.mkdirSync(source);
-  git(source, 'init', '-q');
+  gitAt(dir, source, 'init', '-q');
   fs.writeFileSync(path.join(source, 'a.txt'), 'one\n');
-  git(source, 'add', '-A');
-  git(source, 'commit', '-q', '-m', 'base');
-  git(root, 'clone', '-q', source, 'target');
-  const target = path.join(root, 'target');
-  git(target, 'remote', 'set-url', 'origin', 'https://example.invalid/o/r.git');
+  gitAt(dir, source, 'add', '-A');
+  gitAt(dir, source, 'commit', '-q', '-m', 'base');
+  gitAt(dir, dir, 'clone', '-q', source, 'target');
+  gitAt(dir, path.join(dir, 'target'), 'remote', 'set-url', 'origin', 'https://example.invalid/o/r.git');
   // The source's uncommitted work, as a move packs it.
   fs.writeFileSync(path.join(source, 'a.txt'), 'two\n');
   await createSnapshot(source, 'refs/pane/move/p1');
-  await createBundle(source, ['refs/pane/move/p1'], path.join(root, 'p1.bundle'));
-  return { target, bundle: fs.readFileSync(path.join(root, 'p1.bundle')) };
+  await createBundle(source, ['refs/pane/move/p1'], path.join(dir, 'p1.bundle'));
+  return { dir, bundle: fs.readFileSync(path.join(dir, 'p1.bundle')) };
 }
 
-describe('MoveImporter', () => {
+afterAll(async () => {
+  const built = await template?.catch(() => undefined);
+  if (built) fs.rmSync(built.dir, { recursive: true, force: true });
+});
+
+/** A scratch PANE_DIR, and this test's copy of the target's clone with p1's bundle. */
+async function gitFixture(prefix: string): Promise<{ target: string; bundle: Buffer }> {
+  template ??= buildTemplate();
+  const { dir, bundle } = await template;
+  root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  previousPaneDir = process.env.PANE_DIR;
+  process.env.PANE_DIR = path.join(root, 'pane');
+  const target = path.join(root, 'target');
+  fs.cpSync(path.join(dir, 'target'), target, { recursive: true, preserveTimestamps: true });
+  return { target, bundle };
+}
+
+describe('MoveImporter', { timeout: BUILD_TIMEOUT_MS }, () => {
   let target: string;
   let bundle: Buffer;
   const registry = new PaneCommandRegistry();
@@ -517,7 +542,7 @@ describe('MoveImporter after a restart (F-10, J9)', () => {
   });
 });
 
-describe('MoveImporter full roll-back after a restart (D-1)', () => {
+describe('MoveImporter full roll-back after a restart (D-1)', { timeout: BUILD_TIMEOUT_MS }, () => {
   let target: string;
   let bundle: Buffer;
 
