@@ -206,6 +206,27 @@ test('a new contract command becomes a tool with inputs from its usage and agent
   assert.throws(() => buildToolArgv(tool, { widget: 'w1', color: 'red' }), /Unknown argument\(s\) for widgets_frob: color/);
 });
 
+test('building tools decodes each schema once, not once per node (#1624)', () => {
+  const { buildMcpTools } = require(dist('mcpTools.js'));
+  const decoder = require(dist('boundaryDecoder.js'));
+  const { RUNPANE_CONTRACT } = require(dist('generated/contract.js'));
+  const contract = JSON.parse(JSON.stringify(RUNPANE_CONTRACT));
+  const original = decoder.decodeBoundary;
+  let decodes = 0;
+  decoder.decodeBoundary = (...args) => { decodes += 1; return original(...args); };
+  let tools;
+  try {
+    tools = buildMcpTools(contract);
+  } finally {
+    decoder.decodeBoundary = original;
+  }
+  assert.deepEqual(tools, buildMcpTools());
+  assert.notEqual(tools, buildMcpTools());
+  // A few decodes per tool (its typed inputs and output schemas). Before #1624 a build decoded every
+  // node's whole subtree, about 19,000 times for 155 tools.
+  assert.ok(decodes < tools.length * 5, `${decodes} decodes for ${tools.length} tools`);
+});
+
 test('todos tools need no yes, take the to-do and text as inputs, and pass lists the CLI reads back', () => {
   const { buildMcpTools, buildToolArgv } = require(dist('mcpTools.js'));
   const { parseRunpaneArgs } = require(dist('commands.js'));

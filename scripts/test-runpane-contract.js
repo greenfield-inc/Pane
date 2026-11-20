@@ -6848,6 +6848,19 @@ function checkBoundaryDecoderCollectsEveryIssue() {
   assert.throws(() => decodeBoundary({ items: [{}] }, schema), /input\.items\.0\.label: expected string/);
 }
 
+/** The CLI decoder copy's non-throwing helpers, which MCP tool generation uses on every schema node (#1624). */
+function checkBoundaryDecoderOptionalHelpers() {
+  const { asJsonObject, boundary, decodeOptionalBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const ref = boundary.object({ $ref: boundary.string });
+  assert.deepStrictEqual(decodeOptionalBoundary({ $ref: '#/x', type: 'object' }, ref), { $ref: '#/x' });
+  assert.strictEqual(decodeOptionalBoundary({ type: 'object' }, ref), undefined);
+  assert.strictEqual(decodeOptionalBoundary({ $ref: 1 }, boundary.union(ref, boundary.object({ $ref: boundary.boolean }))), undefined);
+  assert.throws(() => decodeOptionalBoundary(1, { decode() { throw new RangeError('schema bug'); } }), RangeError);
+  const object = { a: [1, { b: null }] };
+  assert.strictEqual(asJsonObject(object), object, 'asJsonObject neither walks nor copies');
+  for (const value of [undefined, null, [], 'x', 0, true]) assert.strictEqual(asJsonObject(value), undefined);
+}
+
 /** `sessions update --from-json` names every payload problem in one error before reaching the daemon. */
 async function checkSessionPayloadErrors() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
@@ -7734,6 +7747,7 @@ const checks = [
   checkPaneCreateBlockedReadiness,
   checkSessionRuntime,
   checkBoundaryDecoderCollectsEveryIssue,
+  checkBoundaryDecoderOptionalHelpers,
   checkSessionPayloadErrors,
   checkContractDocListsEveryCommand,
   checkAgentTemplateParity,

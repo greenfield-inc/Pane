@@ -1,4 +1,4 @@
-import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
+import { asJsonObject, boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
 import { RUNPANE_CONTRACT } from './generated/contract';
 
 /**
@@ -273,12 +273,12 @@ function inlineContractRefs(node: JsonValue | undefined, schemas: JsonObject, de
   if (depth > 32) throw new Error('runpane contract schema refs nest too deeply');
   if (node === undefined) throw new Error('runpane contract names a JSON schema that does not exist');
   if (Array.isArray(node)) return node.map((item) => inlineContractRefs(item, schemas, depth + 1));
-  const object = asObject(node);
+  const object = asJsonObject(node);
   if (!object) return node;
   const ref = asRef(object);
   if (ref?.startsWith(CONTRACT_REF_PREFIX)) {
     const target = ref.slice(CONTRACT_REF_PREFIX.length).split('/')
-      .reduce<JsonValue | undefined>((current, segment) => (Array.isArray(current) ? current[Number(segment)] : asObject(current)?.[segment]), schemas);
+      .reduce<JsonValue | undefined>((current, segment) => (Array.isArray(current) ? current[Number(segment)] : asJsonObject(current)?.[segment]), schemas);
     return inlineContractRefs(target, schemas, depth + 1);
   }
   const inlined = Object.fromEntries(Object.entries(object).map(([key, value]) => [key, inlineContractRefs(value, schemas, depth + 1)]));
@@ -288,21 +288,10 @@ function inlineContractRefs(node: JsonValue | undefined, schemas: JsonObject, de
   return { ...rest, anyOf: type.map((member) => ({ type: member })) };
 }
 
-function asObject(value: JsonValue | undefined): JsonObject | undefined {
-  if (value === undefined || value === null || Array.isArray(value)) return undefined;
-  try {
-    return decodeBoundary(value, boundary.jsonObject);
-  } catch {
-    return undefined;
-  }
-}
-
+// inlineContractRefs visits every node of every schema, so it reads nodes in place (asJsonObject)
+// and a node without a $ref builds no error: decoding each node in full made a build take a second.
 function asRef(value: JsonObject): string | undefined {
-  try {
-    return decodeBoundary(value, refSchema).$ref;
-  } catch {
-    return undefined;
-  }
+  return decodeOptionalBoundary(value, refSchema)?.$ref;
 }
 
 /** Builds the argv for one tool call; the result is `runpane <argv>` with `--json`. */
@@ -337,7 +326,7 @@ export function buildToolArgv(tool: McpTool, input: JsonObject = {}): string[] {
       continue;
     }
     // `--flag=value` keeps values that start with "-" (like "- [ ] item") from reading as flags.
-    const text = parameter.json && (Array.isArray(value) || asObject(value))
+    const text = parameter.json && (Array.isArray(value) || asJsonObject(value))
       ? JSON.stringify(value)
       : String(decodeBoundary(value, flagValueSchema));
     argv.push(`${parameter.flag}=${text}`);

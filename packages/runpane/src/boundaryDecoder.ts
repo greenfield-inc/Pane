@@ -376,3 +376,25 @@ export function decodeBoundaryAll<Value>(
   if (issues.length > 0) throw new BoundaryDecodeIssues(issues);
   return decoded;
 }
+
+/** Like `decodeBoundary`, but undefined when the value does not match; the miss builds no error. */
+export function decodeOptionalBoundary<Value>(
+  value: unknown,
+  schema: BoundarySchema<Value>,
+): Value | undefined {
+  try {
+    return schema.decode(rootCursor(value).discarding());
+  } catch (error) {
+    if (error instanceof BoundaryDecodeError) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * The value as a JSON object, or undefined for an array or primitive. For a value already decoded
+ * as JSON: unlike `decodeBoundary(value, boundary.jsonObject)` it neither walks nor copies the value.
+ */
+export function asJsonObject(value: JsonValue | undefined): JsonObject | undefined {
+  if (value === undefined || value === null || Array.isArray(value) || typeof value !== "object") return undefined;
+  return value;
+}
