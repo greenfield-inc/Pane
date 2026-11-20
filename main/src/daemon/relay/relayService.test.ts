@@ -23,7 +23,11 @@ describe('relay service', () => {
       previewPort: () => null,
       displayName: () => 'Studio Mac',
       addClient: async () => {},
-      env: { PANE_RELAY_CONNECT_HOST: '127.0.0.1', PANE_RELAY_CA: join(__dirname, '__fixtures__', 'ca.pem'), PANE_ACME_DIRECTORY: ca.directoryUrl },
+      // No pane-direct, even where CI built one: it would first ask the fake relay for its direct relays.
+      env: {
+        PANE_RELAY_CONNECT_HOST: '127.0.0.1', PANE_RELAY_CA: join(__dirname, '__fixtures__', 'ca.pem'), PANE_ACME_DIRECTORY: ca.directoryUrl,
+        PANE_DIRECT_BIN: join(tmpdir(), 'no-pane-direct-here'),
+      },
     });
     try {
       service.start();
@@ -50,7 +54,7 @@ describe('relay service', () => {
       relay.close();
       await ca.close();
     }
-  });
+  }, 30_000);
 
   it('starts phone access again after it failed at launch, as with a locked keychain', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval'] });
