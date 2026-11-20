@@ -16,10 +16,21 @@ export function useStreamWatch(invoke: Invoke, panelId: string, kind: 'desktop' 
   useEffect(() => {
     if (!on) return;
     const box = () => rootRef.current?.querySelector('[data-testid="browser-stream"]');
+    // The room before a phone's keyboard opened: the keyboard shrinks the stream's box, and the
+    // host's page must not reflow to it.
+    let steady: { width: number; height: number } | undefined;
+    const typing = () => {
+      const active = document.activeElement;
+      return kind !== 'desktop' && active instanceof HTMLElement && rootRef.current?.contains(active) === true && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+    };
     const report = () => {
       const rect = box()?.getBoundingClientRect();
       if (!rect || rect.width === 0) return;
-      void invoke('browser:watch', panelId, VIEWER_ID, { kind, onScreen: document.visibilityState === 'visible', width: Math.round(rect.width), height: Math.round(rect.height), scale: window.devicePixelRatio || 1 }).catch(() => undefined);
+      let size = { width: Math.round(rect.width), height: Math.round(rect.height) };
+      // A rotation changes the width too: that size is the new room.
+      if (typing() && steady?.width === size.width) size = steady;
+      else steady = size;
+      void invoke('browser:watch', panelId, VIEWER_ID, { kind, onScreen: document.visibilityState === 'visible', ...size, scale: window.devicePixelRatio || 1 }).catch(() => undefined);
     };
     report();
     const timer = window.setInterval(report, WATCH_EVERY_MS);

@@ -63,10 +63,7 @@ export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: Tool
   const act = (input: BrowserInput) => {
     if (stream.stop === 'unreachable' || stream.stop === 'gone') return;
     if (stream.stop === 'asleep') stream.wake();
-    void client.input(panel.id, [input]).then(
-      result => { if (!result.success && result.error) setError(result.error); },
-      (cause: unknown) => setError(`${host} didn't take that: ${cause instanceof Error ? cause.message : String(cause)}`),
-    );
+    void client.input(panel.id, [input]).catch((cause: unknown) => setError(`${host} didn't take that: ${cause instanceof Error ? cause.message : String(cause)}`));
   };
   const go = (event: FormEvent) => {
     event.preventDefault();

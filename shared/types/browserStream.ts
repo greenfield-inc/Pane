@@ -28,10 +28,8 @@ export type BrowserInput =
   /** The person cancelled the page's file picker. */
   | { kind: 'files-cancel' };
 
-/** What a batch of input left for the screen to know. */
+/** What a batch of input left for the screen to know. The host refuses a batch by failing the call. */
 export interface BrowserInputResult {
-  success: boolean;
-  error?: string;
   /** The kind of field that has the page's focus after the batch, so a phone opens its keyboard. */
   field?: 'text' | 'password' | null;
   /** Text a copy or cut put on the host's clipboard, for the screen's own clipboard. */

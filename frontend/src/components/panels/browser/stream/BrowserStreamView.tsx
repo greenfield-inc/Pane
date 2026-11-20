@@ -3,7 +3,7 @@ import { MousePointer2 } from 'lucide-react';
 import type { BrowserInput, BrowserInputResult } from '../../../../../../shared/types/browserStream';
 import { cn } from '../../../../utils/cn';
 import { DriverChip } from '../../device/DeviceToolViews';
-import { browserInputQueue, clickCounter, fitFrame, modifiersOf, pagePoint } from './streamInput';
+import { browserInputQueue, clickCounter, fitFrame, keyboardField, modifiersOf, movesFocus, pagePoint, PhoneControl } from '../../../../../../shared/utils/browserStreamInput';
 import type { BrowserStream, StreamStop } from './useBrowserStream';
 import type { BrowserStreamClient } from './streamClient';
 
@@ -11,6 +11,8 @@ import type { BrowserStreamClient } from './streamClient';
 const CURSOR_SHOWN_MS = 1_200;
 /** How long "The page reloaded on <host>" stays. */
 const RELOADED_SHOWN_MS = 8_000;
+/** iPhone and iPad browsers (iPadOS reports a Mac): their keyboard opens only for a focus inside a tap. */
+const IOS_WEBKIT = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 /** How long a failed Take over or Hand back stays on screen. */
 const NOTE_SHOWN_MS = 5_000;
 /** The pointer's position goes to the host at most this often while it hovers. */
@@ -23,12 +25,17 @@ const TAP_SLOP_PX = 8;
 const PAGE_KEYS = new Set(['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 /** Editing chords (with Cmd or Ctrl) the page gets; every other chord stays Pane's hotkey. */
 const EDIT_CHORDS = new Set(['a', 'c', 'x', 'z']);
+/**
+ * The text field always holds this zero-width character, so a phone keyboard's Backspace on an
+ * empty field still deletes something and shows up (Android sends no key for it).
+ */
+const SENTINEL = '\u200b';
 
 /** The line a stopped stream shows over its last frame, dimmed. */
-export function stopLine(stop: StreamStop, host: string): string {
+export function stopLine(stop: StreamStop, host: string, phone = false): string {
   switch (stop) {
     case 'unreachable': return `${host} can't be reached (asleep or offline). The page resumes when it's back.`;
-    case 'asleep': return 'This tab is asleep. Click to wake it.';
+    case 'asleep': return `This tab is asleep. ${phone ? 'Tap' : 'Click'} to wake it.`;
     case 'gone': return `This tab closed on ${host}.`;
     case 'older': return `${host} is on an older Pane. Showing your own copy.`;
   }
@@ -40,8 +47,10 @@ interface BrowserStreamViewProps {
   stream: BrowserStream & { wake(): void };
   /** The host's name until its state arrives. */
   hostName: string;
-  /** Hears the kind of field focused after each input, so a phone can open its keyboard. */
-  onField?: (field: 'text' | 'password' | null) => void;
+  /** A phone: the first tap only takes control (the page gets the phone's size), and a tap into a field opens the keyboard. */
+  phone?: boolean;
+  /** Set by the view: focuses its text field, opening a phone's keyboard (the keyboard button). */
+  keyboardRef?: { current: (() => void) | null };
 }
 
 /**
@@ -50,10 +59,15 @@ interface BrowserStreamViewProps {
  * and goes to the host in order. Shows who drives, the agent's cursor, the page's dialogs and file
  * pickers, downloads and why the stream stopped.
  */
-export function BrowserStreamView({ client, panelId, stream, hostName, onField }: BrowserStreamViewProps) {
+export function BrowserStreamView({ client, panelId, stream, hostName, phone = false, keyboardRef }: BrowserStreamViewProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const keysRef = useRef<HTMLTextAreaElement>(null);
+  const keysRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!keyboardRef) return;
+    keyboardRef.current = () => keysRef.current?.focus({ preventScroll: true });
+    return () => { keyboardRef.current = null; };
+  }, [keyboardRef]);
   const [box, setBox] = useState({ width: 0, height: 0 });
   const [field, setField] = useState<'text' | 'password' | null>(null);
   const { frame, view, stop } = stream;
@@ -64,15 +78,22 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     if (result.copied) void navigator.clipboard.writeText(result.copied).catch(() => undefined);
     if (result.field !== undefined) {
       setField(result.field);
-      onField?.(result.field);
+      // A tap into a field opens the phone's keyboard; elsewhere it closes.
+      if (phone && result.field) keysRef.current?.focus({ preventScroll: true });
+      else if (phone) keysRef.current?.blur();
     }
-  }, [onField]);
-  const queue = useMemo(() => browserInputQueue(batch => client.input(panelId, batch), onResult), [client, panelId, onResult]);
+  }, [phone]);
+  const queue = useMemo(() => browserInputQueue(async batch => {
+    const result = await client.input(panelId, batch);
+    return { ...result, field: keyboardField(batch, result.field) };
+  }, onResult), [client, panelId, onResult]);
   // Input made while the host can't be reached is dropped, never replayed late onto a page that may have changed.
   const stopRef = useRef(stop);
   useEffect(() => { stopRef.current = stop; }, [stop]);
   const send = useCallback((input: BrowserInput | null) => {
     if (stopRef.current && stopRef.current !== 'older') return;
+    // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
+    if (movesFocus(input)) setField('password');
     queue(input);
   }, [queue]);
 
@@ -149,24 +170,34 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
   };
   const pressed = useRef<{ button: 'left' | 'middle' | 'right'; x: number; y: number } | null>(null);
 
+  // A phone controls the page once it took control (the same rule as the phone app): its first touch only takes it.
+  const control = useMemo(() => new PhoneControl(), []);
+  useEffect(() => { if (view) control.view(view); }, [control, view]);
+  const takesControl = () => {
+    if (!phone || !control.touch()) return false;
+    send(null);
+    return true;
+  };
+
   // Double and triple clicks: pointer events carry no count, so the view counts presses itself.
   const countClick = useMemo(() => clickCounter(), []);
   const clicks = useRef(1);
 
   // Touch: a tap clicks, a drag scrolls, a long press is a right click.
-  const touch = useRef<{ x: number; y: number; lastX: number; lastY: number; moved: boolean; timer: number | undefined; longPressed: boolean } | undefined>(undefined);
+  const touch = useRef<{ x: number; y: number; lastX: number; lastY: number; moved: boolean; timer: number | undefined; longPressed: boolean; tookControl?: boolean } | undefined>(undefined);
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (stop === 'asleep') { stream.wake(); return; }
     const point = toPage(event);
     if (!point) return;
     event.preventDefault();
-    keysRef.current?.focus({ preventScroll: true });
+    if (!phone) keysRef.current?.focus({ preventScroll: true });
     if (event.pointerType === 'touch') {
       const timer = window.setTimeout(() => {
         const current = touch.current;
         if (!current || current.moved) return;
         current.longPressed = true;
+        if (takesControl()) return;
         send({ kind: 'mouse', action: 'down', x: point.x, y: point.y, button: 'right', clicks: 1, modifiers: 0 });
         send({ kind: 'mouse', action: 'up', x: point.x, y: point.y, button: 'right', clicks: 1, modifiers: 0 });
       }, LONG_PRESS_MS);
@@ -184,8 +215,12 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     const current = touch.current;
     if (event.pointerType === 'touch' && current) {
       if (!current.moved && Math.hypot(event.clientX - current.x, event.clientY - current.y) < TAP_SLOP_PX) return;
+      if (!current.moved) {
+        window.clearTimeout(current.timer);
+        current.tookControl = takesControl();
+      }
       current.moved = true;
-      window.clearTimeout(current.timer);
+      if (current.tookControl) return;
       const point = toPage(event);
       const scale = page && drawn.width ? page.width / drawn.width : 1;
       if (point) send({ kind: 'wheel', ...point, dx: (current.lastX - event.clientX) * scale, dy: (current.lastY - event.clientY) * scale });
@@ -212,7 +247,13 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       if (!current) return;
       window.clearTimeout(current.timer);
       const point = toPage({ clientX: current.x, clientY: current.y });
-      if (!current.moved && !current.longPressed && point) {
+      if (current.moved || current.longPressed) return;
+      // The first tap only takes control: the page resizes to the phone and gets its phone layout.
+      if (takesControl()) return;
+      if (point) {
+        // iOS opens a keyboard only for a focus inside the tap; the host's answer closes it again when
+        // no field took the tap. Elsewhere the answer opens it, so a link tap never flashes it.
+        if (phone && IOS_WEBKIT) keysRef.current?.focus({ preventScroll: true });
         // A tap goes as a mouse click: Chromium makes no click (or one in the wrong place) from a
         // synthetic touch on a page shown at another size.
         send({ kind: 'mouse', action: 'down', ...point, button: 'left', clicks: 1, modifiers: 0 });
@@ -250,7 +291,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     return () => element.removeEventListener('wheel', onWheel);
   }, [page, send]);
 
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing) return;
     const chord = event.metaKey || event.ctrlKey;
     if (chord) {
@@ -266,10 +307,10 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       send({ kind: 'key', key: event.key.toLowerCase(), modifiers: modifiersOf(event) });
       return;
     }
-    // One printable character goes as a key press, so the page sees keydown (Space, site shortcuts);
-    // IME and dictation text still arrive through the input event.
-    // Option/Alt characters (@, [, ], € on many layouts) arrive as text through the input event.
-    if ((!event.altKey && [...event.key].length === 1) || PAGE_KEYS.has(event.key)) {
+    // On a desktop one printable character goes as a key press, so the page sees keydown (Space, site
+    // shortcuts). A phone's keyboard keeps its text path, for autocorrect and IME, and Option/Alt
+    // characters (@, [, ], € on many layouts) arrive as text through the input event.
+    if ((!phone && !event.altKey && [...event.key].length === 1) || PAGE_KEYS.has(event.key)) {
       event.preventDefault();
       send({ kind: 'key', key: event.key, modifiers: modifiersOf(event) });
     }
@@ -279,8 +320,13 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
   const onInput = () => {
     const keys = keysRef.current;
     if (!keys || composing.current) return;
-    const text = keys.value;
-    keys.value = '';
+    const typed = keys.value;
+    keys.value = SENTINEL;
+    if (!typed.includes(SENTINEL)) {
+      // The keyboard deleted the sentinel: a Backspace, then whatever replaced it.
+      send({ kind: 'key', key: 'Backspace', modifiers: 0 });
+    }
+    const text = typed.split(SENTINEL).join('');
     if (text) send({ kind: 'text', text });
   };
   const composing = useRef(false);
@@ -334,6 +380,12 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     if (firstDownload.current === null) { firstDownload.current = download?.at; return; }
     if (download && download.at !== firstDownload.current) setDownloadSeenAt(Date.now());
   }, [download?.at]);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const noticeSeen = dismissed === host || readNoticeSeen(host);
+  const dismissNotice = () => {
+    setDismissed(host);
+    try { localStorage.setItem(noticeKey(host), 'seen'); } catch { /* storage blocked: the note shows again next time */ }
+  };
 
   return (
     <div
@@ -354,14 +406,19 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
         className={cn('absolute transition-opacity duration-200', stop ? 'opacity-40' : 'opacity-100')}
         style={{ left: drawn.left, top: drawn.top, width: drawn.width, height: drawn.height }}
       />
-      <textarea
+      <input
         ref={keysRef}
+        // A password field gets the keyboard's secure mode; nothing typed stays in this field.
+        type={field === 'password' ? 'password' : 'text'}
+        defaultValue={SENTINEL}
         aria-label="Type into the page"
         autoCapitalize="off"
-        autoComplete={field === 'password' ? 'current-password' : 'off'}
+        autoComplete="off"
         autoCorrect={field === 'password' ? 'off' : 'on'}
         spellCheck={false}
-        className="absolute left-0 top-0 h-px w-px resize-none border-0 bg-transparent p-0 text-[16px] opacity-0"
+        enterKeyHint="go"
+        // 16 px keeps iOS from zooming the page when the field takes focus.
+        className="absolute left-0 top-0 h-px w-px border-0 bg-transparent p-0 text-[16px] opacity-0"
         onKeyDown={onKeyDown}
         onInput={onInput}
         onCompositionStart={() => { composing.current = true; }}
@@ -386,9 +443,15 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
           />
         )}
       </div>
+      {view && !noticeSeen && (
+        <div role="note" className="absolute left-3 top-12 z-10 flex max-w-[min(32rem,calc(100%-24px))] items-start gap-3 rounded-md bg-surface-primary px-3 py-2 text-xs text-text-secondary shadow-md" onPointerDown={event => event.stopPropagation()} data-testid="browser-sign-in-notice">
+          <span>This page runs on {host}, signed in as {host}. Sign in here once and every device sees it.</span>
+          <button type="button" className="flex-shrink-0 text-interactive hover:text-interactive-hover" onClick={dismissNotice}>Got it</button>
+        </div>
+      )}
       {stop && stop !== 'older' && (
         <div role="status" className="absolute inset-x-0 bottom-0 flex justify-center p-3">
-          <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">{stopLine(stop, host)}</p>
+          <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">{stopLine(stop, host, phone)}</p>
         </div>
       )}
       {!frame && !stop && (
@@ -446,6 +509,15 @@ function jpegBlob(dataUrl: string): Blob {
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return new Blob([bytes], { type: dataUrl.slice(5, dataUrl.indexOf(';')) || 'image/jpeg' });
+}
+
+/** Each host's one-time note about whose sign-ins its tabs use is remembered per screen. */
+function noticeKey(host: string): string {
+  return `pane.browserSignInNotice.${host}`;
+}
+
+function readNoticeSeen(host: string): boolean {
+  try { return localStorage.getItem(noticeKey(host)) === 'seen'; } catch { return false; }
 }
 
 function toBase64(file: File): Promise<string> {

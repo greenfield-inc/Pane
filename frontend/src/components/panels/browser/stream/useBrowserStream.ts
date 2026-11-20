@@ -86,6 +86,8 @@ export function useBrowserStream(client: BrowserStreamClient, panelId: string, o
           // A different page than before means the host loaded it again from its URL.
           const reloaded = page !== undefined && view.page !== undefined && view.page !== page;
           if (view.page !== undefined) page = view.page;
+          // A reloaded page numbers its frames afresh: read from the start.
+          if (reloaded) seq = 0;
           setStream(current => (reloaded ? { ...current, view, reloadedAt: Date.now() } : { ...current, view }));
           // A closed tab answers at once: ask again in a while, not in a tight loop.
           if (view.stopped === 'gone') await sleep(2_000);

@@ -945,17 +945,17 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
    * An empty batch only takes control.
    */
   commandRegistry.register('browser:input', async (panelId: PaneCommandValue, viewer: PaneCommandValue, batchValue: PaneCommandValue): Promise<PaneCommandValue> => {
-    if (paneCommandCaller() || teammatePaneCaller()) return { success: false, error: 'This channel belongs to the person\'s screens.' };
+    if (paneCommandCaller() || teammatePaneCaller()) throw new PaneError('ERR_BROWSER_SCREENS_ONLY', 'This channel belongs to the person\'s screens. Nothing ran.', 'Agents use runpane browser.');
     const id = decodeOptionalBoundary(panelId, boundary.string);
     const viewerId = decodeOptionalBoundary(viewer, boundary.string);
     let batch: BrowserInput[];
     try {
       batch = decodeBoundary(batchValue, inputSchema);
     } catch (cause) {
-      return { success: false, error: `The input is malformed: ${reasonOf(cause)}.` };
+      throw new PaneError('ERR_BROWSER_INVALID_REQUEST', `The input is malformed: ${reasonOf(cause)}. Nothing ran.`, 'Update Pane on this screen.');
     }
     const page = id ? host.page(id) : undefined;
-    if (!id || !host.tab(id) || !page || page.isDestroyed()) return { success: false, error: 'That tab has no live page here.' };
+    if (!id || !host.tab(id) || !page || page.isDestroyed()) throw new PaneError('ERR_BROWSER_NOT_SHOWING', 'That tab has no live page on this computer now, so the input went nowhere.', 'Show the tab again; its page wakes and loads.');
     const driver = driverFor(id, page);
     // A pointer only passing over the stream (hover) is not the person acting: it takes nothing over.
     const acts = batch.length === 0 || batch.some(input => !(input.kind === 'mouse' && input.action === 'move'));
@@ -967,7 +967,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     }
     const files = batch.flatMap(input => (input.kind === 'files' ? input.files : []));
     const bytes = files.reduce((sum, file) => sum + Math.floor(file.data.length * 3 / 4), 0);
-    if (bytes > PERSON_UPLOAD_BYTES) return { success: false, error: `Files from another screen go up to ${PERSON_UPLOAD_BYTES / 1_048_576} MB at once.` };
+    if (bytes > PERSON_UPLOAD_BYTES) throw new PaneError('ERR_BROWSER_UPLOAD_TOO_LARGE', `The files come to ${(bytes / 1_048_576).toFixed(1)} MB, and a page takes up to ${PERSON_UPLOAD_BYTES / 1_048_576} MB from another screen at once. Nothing was sent.`, 'Choose smaller files, or upload them on the computer that runs the tab.');
     // Input answers by a deadline too: a page that stopped answering never holds a screen's queue.
     let timer: NodeJS.Timeout | undefined;
     const late = new Promise<never>((_, reject) => {

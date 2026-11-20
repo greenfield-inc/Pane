@@ -1,4 +1,5 @@
-import type { BrowserInput, BrowserInputResult } from '../../../../../../shared/types/browserStream';
+import type { BrowserInput, BrowserInputResult, BrowserTabView } from '../types/browserStream';
+import type { DeviceDriver } from '../types/devices';
 
 /** Where the frame is drawn inside its box: scaled to fit whole, centred (letterboxed). */
 export interface FrameBox { left: number; top: number; width: number; height: number }
@@ -46,8 +47,9 @@ export function browserInputQueue(send: (batch: BrowserInput[]) => Promise<Brows
       const batch = waiting;
       waiting = [];
       takeControl = false;
-      const result = await send(batch).catch((cause: unknown): BrowserInputResult => ({ success: false, error: cause instanceof Error ? cause.message : String(cause) }));
-      onResult?.(result);
+      // A refused batch is dropped; the next one still goes.
+      const result = await send(batch).catch(() => undefined);
+      if (result) onResult?.(result);
     }
     sending = false;
   };
@@ -81,4 +83,48 @@ export function clickCounter(): (x: number, y: number, at: number) => number {
     last = { x, y, at, count };
     return count;
   };
+}
+
+/** Enter, Tab or a navigation: the page may move focus by itself, to a password field in a two-step sign-in. */
+export function movesFocus(input: BrowserInput | null): boolean {
+  return (input?.kind === 'key' && (input.key === 'Enter' || input.key === 'Tab')) || input?.kind === 'navigate' || input?.kind === 'history';
+}
+
+/**
+ * The field a screen's keyboard serves after a batch's answer. The answer to a batch that moves
+ * focus can name the field before the page moves on (a sign-in answers Enter with the email field,
+ * then focuses the password), so that answer keeps the keyboard secure; every other answer, and
+ * "no field", is taken as given.
+ */
+export function keyboardField(batch: readonly BrowserInput[], answered: BrowserInputResult['field']): BrowserInputResult['field'] {
+  return answered === 'text' && batch.some(movesFocus) ? 'password' : answered;
+}
+
+/**
+ * Whether this phone (the app or the web app on a touch screen) controls the page. Its first touch only takes control (the page resizes to the
+ * phone and gets its phone layout); later touches act. Control ends when the page leaves the phone's
+ * size (another screen took it) or an agent starts driving.
+ */
+export class PhoneControl {
+  private held = false;
+  private sawPhoneSize = false;
+  private lastDriver: DeviceDriver['by'] | undefined;
+
+  /** A touch: true when it only takes control and must not act on the page. */
+  touch(): boolean {
+    if (this.held) return false;
+    this.held = true;
+    this.sawPhoneSize = false;
+    return true;
+  }
+
+  /** The tab's newest state from the host. */
+  view(view: Pick<BrowserTabView, 'size' | 'driver'>): void {
+    const phoneSize = view.size?.mobile === true;
+    const driver = view.driver?.by;
+    if (driver === 'agent' && this.lastDriver !== 'agent') this.held = false;
+    if (this.held && this.sawPhoneSize && !phoneSize) this.held = false;
+    this.sawPhoneSize = phoneSize;
+    this.lastDriver = driver;
+  }
 }

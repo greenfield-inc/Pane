@@ -632,7 +632,7 @@ describe('browser tabs: streaming a page to another screen', () => {
     for (const channel of ['browser:frame', 'browser:view']) {
       expect(await code(fixture.registry.invokeConnected(channel, ['persons', 'v', 0], signal, claudeInA))).toBe('ERR_BROWSER_SCREENS_ONLY');
     }
-    expect(await fixture.registry.invokeConnected('browser:input', ['persons', 'v', []], signal, claudeInA)).toMatchObject({ success: false });
+    expect(await code(fixture.registry.invokeConnected('browser:input', ['persons', 'v', []], signal, claudeInA))).toBe('ERR_BROWSER_SCREENS_ONLY');
   });
 
   it('acks each frame a screen reads, so Chromium keeps painting between reads', async () => {
@@ -687,7 +687,7 @@ describe('browser tabs: streaming a page to another screen', () => {
       { kind: 'touch', action: 'start', x: 10, y: 20 },
       { kind: 'touch', action: 'end', x: 10, y: 20 },
       { kind: 'wheel', x: 10, y: 20, dx: 0, dy: 300 },
-    ])).toMatchObject({ success: true });
+    ])).toEqual({ field: null });
     const sent = page?.sent ?? [];
     const inputs = sent.filter(method => method.startsWith('Input.'));
     expect(inputs).toEqual(['Input.dispatchTouchEvent', 'Input.dispatchTouchEvent', 'Input.dispatchMouseEvent']);

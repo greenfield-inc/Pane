@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BrowserInput } from '../../../../../../shared/types/browserStream';
-import { browserInputQueue, clickCounter, pagePoint } from './streamInput';
+import { browserInputQueue, clickCounter, keyboardField, pagePoint } from '../../../../../../shared/utils/browserStreamInput';
 
 describe('pagePoint', () => {
   it('maps a point in a letterboxed frame to the page, and the bars to nothing', () => {
@@ -23,7 +23,7 @@ describe('browserInputQueue', () => {
     const queue = browserInputQueue(async (batch) => {
       sent.push(batch);
       await new Promise<void>(resolve => { release = resolve; });
-      return { success: true };
+      return {};
     });
     const move = (x: number): BrowserInput => ({ kind: 'mouse', action: 'move', x, y: 0, button: 'none', clicks: 0, modifiers: 0 });
     queue({ kind: 'mouse', action: 'down', x: 1, y: 1, button: 'left', clicks: 1, modifiers: 0 });
@@ -42,7 +42,7 @@ describe('browserInputQueue', () => {
 
   it('sends an empty batch to take control without input', async () => {
     const sent: BrowserInput[][] = [];
-    const queue = browserInputQueue(async (batch) => { sent.push(batch); return { success: true }; });
+    const queue = browserInputQueue(async (batch) => { sent.push(batch); return {}; });
     queue(null);
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(sent).toEqual([[]]);
@@ -56,5 +56,26 @@ describe('clickCounter', () => {
     expect(count(11, 11, 600)).toBe(1);
     expect(count(11, 11, 1_300)).toBe(1);
     expect(count(40, 11, 1_400)).toBe(1);
+  });
+});
+
+describe('keyboardField', () => {
+  const enter: BrowserInput[] = [{ kind: 'key', key: 'Enter', modifiers: 0 }];
+  const letter: BrowserInput[] = [{ kind: 'text', text: 's' }];
+
+  it('keeps the keyboard secure for the answer to Enter that still names the email field', () => {
+    expect(keyboardField(enter, 'text')).toBe('password');
+    expect(keyboardField([{ kind: 'key', key: 'Tab', modifiers: 0 }], 'text')).toBe('password');
+    expect(keyboardField([{ kind: 'navigate', url: 'https://example.com/' }], 'text')).toBe('password');
+  });
+
+  it('takes the next answer as given, so a search typed after Enter gets autocorrect back', () => {
+    expect(keyboardField(letter, 'text')).toBe('text');
+    expect(keyboardField(letter, 'password')).toBe('password');
+  });
+
+  it('takes "no field" as given, so a form that blurs on submit closes the keyboard', () => {
+    expect(keyboardField(enter, null)).toBeNull();
+    expect(keyboardField(enter, undefined)).toBeUndefined();
   });
 });
