@@ -422,6 +422,34 @@ describe('MoveImporter with file preview tabs (T-42)', { timeout: BUILD_TIMEOUT_
     ]);
   });
 
+  it('never grants a file the move did not place: a worktree it skipped, or one setup wrote', async () => {
+    let release!: () => void;
+    const tabs = memoryTabs();
+    const { services } = fakeServices(target, new Promise(resolve => { release = resolve; }), tabs.panels);
+    const importer = new MoveImporter(services, new PaneCommandRegistry(), path.join(root, 'moves'), tabs);
+    const moveId = newMoveId();
+    // A target file in a worktree a Pane without a bundle names, which the build never places.
+    fs.mkdirSync(path.join(root, 'worktrees', 'p9'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'worktrees', 'p9', 'private.html'), 'target only');
+    const skipped: MovePane = { ...member('p9'), bundle: null, snapshot: null };
+    const owner: MovePane = { ...ownerWithAgent(), tabs: [
+      previewTab('skipped', 'file:///a/worktrees/p9/private.html'),
+      previewTab('setup-output', 'file:///a/worktrees/p1/generated.html'),
+      previewTab('moved-json', 'file:///a/.pane/sessions/sess-1/moved.json'),
+    ] };
+    await stage(importer, manifest(moveId, [owner, member('p1'), skipped]), { 'panes/p1.bundle': bundle });
+    const building = buildRemotely(importer, moveId);
+    // Setup runs: it writes the file the source previewed, here.
+    const generated = path.join(root, 'worktrees', 'p1', 'generated.html');
+    for (let attempt = 0; attempt < 300 && (await importer.status(moveId)).detail !== 'Pane p1: setup'; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+    fs.writeFileSync(generated, 'made by setup');
+    release();
+    const status = await building;
+    expect(status.error?.message ?? status.stage).toBe('built');
+    expect(['skipped', 'setup-output', 'moved-json'].filter(id => tabs.panels.has(id))).toEqual([]);
+    expect(status.previewsNotCarried).toHaveLength(3);
+  });
+
   it('a cancelled move puts back this machine\'s own file preview it set aside, though the source asked remotely', async () => {
     const tabs = memoryTabs();
     const { services } = fakeServices(target, undefined, tabs.panels);

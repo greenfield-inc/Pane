@@ -24,7 +24,7 @@ import { placeConversation, undoConversationPlacement, type PlacedConversation }
 import { addWorktree, applySnapshot, deleteRefs, importBundle, MoveGitError, placeBranch, snapshotMatches } from './gitSnapshot';
 import { moveManifestSchema, panelBuffersSchema, readTabFields, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveRepo, type MoveTab } from './manifest';
 import { buildPathMap, mapPath, rewriteText, type PathMap } from './pathMap';
-import { arrivingPreview } from './filePreviews';
+import { arrivingPreview, previewSourcePath, relativeInside, type MovedRoot } from './filePreviews';
 import { MoveReceiver, type WriteRequest, type WriteResult } from './transfer';
 import { isRegeneratedSessionFile, isTextFile } from './sessionFolder';
 import { agentFarmProfileOf, movedLine } from './rules';
@@ -154,6 +154,17 @@ async function git(cwd: string, args: string[]): Promise<string> {
 
 async function tryGit(cwd: string, args: string[]): Promise<string | null> {
   try { return await git(cwd, args); } catch { return null; }
+}
+
+/**
+ * Of the previewed source files under `sourceRoot`, those the snapshot just placed in `worktree`
+ * (tracked, or untracked and not ignored), relative and `/`-separated.
+ */
+async function placedFiles(worktree: string, sourceRoot: string, previewPaths: readonly string[]): Promise<Set<string>> {
+  const wanted = previewPaths.map(file => relativeInside(sourceRoot, file)).filter((file): file is string => file !== null);
+  if (wanted.length === 0) return new Set();
+  const listed = await git(worktree, ['--literal-pathspecs', 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', ...wanted]);
+  return new Set(listed.split('\0').filter(Boolean));
 }
 
 /** `<executable> --version`, or null when it isn't installed here. */
@@ -562,6 +573,9 @@ export class MoveImporter {
 
     // Panes: worktree on the same branch, uncommitted work reapplied and checked, then setup.
     const leftBehind: string[] = [];
+    // File previews (T-42) carry only files the move itself placed, listed before setup can add any.
+    const previewPaths = manifest.panes.flatMap(pane => pane.tabs.map(previewSourcePath)).filter((file): file is string => file !== null);
+    const movedRoots: MovedRoot[] = [];
     // Every Pane settles before the build goes on or fails, so clean-up never races a sibling still setting up.
     const settled = await Promise.allSettled(members.map(async pane => {
       step();
@@ -601,6 +615,7 @@ export class MoveImporter {
       if (!(await snapshotMatches(placement.worktreePath, imported.snapshot))) {
         throw new PaneError('ERR_MOVE_SNAPSHOT_MISMATCH', `The uncommitted work of Pane “${pane.name}” didn't come out the same on ${thisMachineName()}.`, 'Nothing was kept here. Try the move again.');
       }
+      movedRoots.push({ from: pane.worktreePath, to: placement.worktreePath, files: await placedFiles(placement.worktreePath, pane.worktreePath, previewPaths) });
       for (const entry of pane.ignored) leftBehind.push(`${entry} in ${pane.name}`);
       step();
       // Moving a Session back: the archived Pane left here by the earlier move gives way to the
@@ -680,8 +695,7 @@ export class MoveImporter {
     // Tabs: the same IDs, titles, order and split, stopped and marked arriving; conversations filed here.
     job.status.detail = 'Filing conversations';
     const arrivingPause: TerminalPausedMark = { at: new Date().toISOString(), by: 'move', machine: manifest.source.machine, arriving: true };
-    // What the move placed here: a file preview carries only when its file is in one of these.
-    const movedRoots = [targetFolder, ...[...placements.values()].map(placement => placement.worktreePath)];
+    movedRoots.push({ from: sourceFolder, to: targetFolder, files: new Set(manifest.sessionFolder.files.filter(relative => !isRegeneratedSessionFile(relative))) });
     const previewsNotCarried: string[] = [];
     for (const pane of manifest.panes) {
       const paneId = pane.role === 'owner' ? arriving.internalSessionId : pane.id;
@@ -690,7 +704,7 @@ export class MoveImporter {
       for (const tab of pane.tabs) {
         const state = decodeBoundary(JSON.parse(rewriteText(map, JSON.stringify(tab.state))), boundary.jsonObject);
         // A file preview is never left to the remote-edit guard: the build checks and grants it here, or leaves it behind.
-        const preview = await arrivingPreview(tab, map, movedRoots, manifest.source.machine);
+        const preview = await arrivingPreview(tab, movedRoots, manifest.source.machine);
         if (preview?.kind === 'notCarried') {
           previewsNotCarried.push(preview.note);
           continue;

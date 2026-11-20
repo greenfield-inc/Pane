@@ -269,8 +269,11 @@ PANE_MOVE_TEST_PEERS='[{"name":"robert-b","paneDir":"/tmp/pane-b/pane"}]' PANE_D
 ```
 
 The target then appears in **Move to machine…**, and the move reaches it
-through its daemon socket under that folder, never the network. Packaged
-builds ignore the variable.
+through its daemon socket under that folder, never the network. Start the
+target with `PANE_MOVE_TEST_PEERS` too (naming the source, so you can also move
+back): a dev build that has test peers handles the move's incoming calls as
+remote commands, the way they arrive over Tailscale, so it hits the same checks
+as a real move. Packaged builds ignore the variable.
 
 ## Code Style
 
