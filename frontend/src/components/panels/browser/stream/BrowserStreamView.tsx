@@ -11,6 +11,10 @@ import type { BrowserStreamClient } from './streamClient';
 const CURSOR_SHOWN_MS = 1_200;
 /** How long "The page reloaded on <host>" stays. */
 const RELOADED_SHOWN_MS = 8_000;
+/** iPhone and iPad browsers (iPadOS reports a Mac): their keyboard opens only for a focus inside a tap. */
+const IOS_WEBKIT = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+/** How long a failed Take over or Hand back stays on screen. */
+const NOTE_SHOWN_MS = 5_000;
 /** The pointer's position goes to the host at most this often while it hovers. */
 const HOVER_MS = 60;
 /** A touch held this long without moving is a right click. */
@@ -79,14 +83,24 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       else if (phone) keysRef.current?.blur();
     }
   }, [phone]);
-  const queue = useMemo(() => browserInputQueue(batch => client.input(panelId, batch), onResult), [client, panelId, onResult]);
+  // After Enter, Tab or a navigation the field is secure until a tap's answer names it: a two-step
+  // sign-in answers Enter with the email field, then focuses the password field by itself.
+  const secured = useRef(false);
+  const queue = useMemo(() => browserInputQueue(async batch => {
+    const result = await client.input(panelId, batch);
+    if (batch.some(input => input.kind === 'mouse' && input.action === 'up' && input.button === 'left')) secured.current = false;
+    return secured.current && result.field !== 'password' ? { ...result, field: undefined } : result;
+  }, onResult), [client, panelId, onResult]);
   // Input made while the host can't be reached is dropped, never replayed late onto a page that may have changed.
   const stopRef = useRef(stop);
   useEffect(() => { stopRef.current = stop; }, [stop]);
   const send = useCallback((input: BrowserInput | null) => {
     if (stopRef.current && stopRef.current !== 'older') return;
     // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
-    if ((input?.kind === 'key' && (input.key === 'Enter' || input.key === 'Tab')) || input?.kind === 'navigate' || input?.kind === 'history') setField('password');
+    if ((input?.kind === 'key' && (input.key === 'Enter' || input.key === 'Tab')) || input?.kind === 'navigate' || input?.kind === 'history') {
+      secured.current = true;
+      setField('password');
+    }
     queue(input);
   }, [queue]);
 
@@ -244,8 +258,9 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       // The first tap only takes control: the page resizes to the phone and gets its phone layout.
       if (takesControl()) return;
       if (point) {
-        // Focused inside the tap, or iOS opens no keyboard; the host's answer closes it again when no field took the tap.
-        if (phone) keysRef.current?.focus({ preventScroll: true });
+        // iOS opens a keyboard only for a focus inside the tap; the host's answer closes it again when
+        // no field took the tap. Elsewhere the answer opens it, so a link tap never flashes it.
+        if (phone && IOS_WEBKIT) keysRef.current?.focus({ preventScroll: true });
         // A tap goes as a mouse click: Chromium makes no click (or one in the wrong place) from a
         // synthetic touch on a page shown at another size.
         send({ kind: 'mouse', action: 'down', ...point, button: 'left', clicks: 1, modifiers: 0 });
@@ -300,8 +315,9 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       return;
     }
     // On a desktop one printable character goes as a key press, so the page sees keydown (Space, site
-    // shortcuts). A phone's keyboard keeps its text path, for autocorrect and IME.
-    if ((!phone && [...event.key].length === 1) || PAGE_KEYS.has(event.key)) {
+    // shortcuts). A phone's keyboard keeps its text path, for autocorrect and IME, and Option/Alt
+    // characters (@, [, ], € on many layouts) arrive as text through the input event.
+    if ((!phone && !event.altKey && [...event.key].length === 1) || PAGE_KEYS.has(event.key)) {
       event.preventDefault();
       send({ kind: 'key', key: event.key, modifiers: modifiersOf(event) });
     }
@@ -330,6 +346,18 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
     if (!files || files.length === 0) { send({ kind: 'files-cancel' }); return; }
     const read = await Promise.all([...files].map(async file => ({ name: file.name, data: await toBase64(file) })));
     send({ kind: 'files', files: read });
+  };
+
+  // Take over and Hand back: nothing is sent while the host can't be reached; a failure shows for a few seconds.
+  const [driveFailed, setDriveFailed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!driveFailed) return;
+    const timer = window.setTimeout(() => setDriveFailed(null), NOTE_SHOWN_MS);
+    return () => window.clearTimeout(timer);
+  }, [driveFailed]);
+  const drive = (who: 'person' | 'agent') => {
+    if (stopRef.current) return;
+    void client.driver(panelId, who).catch((cause: unknown) => setDriveFailed(`${who === 'person' ? 'Take over' : 'Hand back'} didn't reach ${host}: ${cause instanceof Error ? cause.message : String(cause)}`));
   };
 
   const [, rerender] = useState(0);
@@ -405,7 +433,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       <div className={cn('pointer-events-none absolute inset-0 border-2 transition-colors duration-200', agentDriving ? 'border-interactive' : 'border-transparent')} data-testid="browser-agent-overlay" data-driving={agentDriving ? 'agent' : view?.driver?.by ?? 'none'}>
         {view?.driver && (
           <div className="pointer-events-auto absolute left-1/2 top-2 max-w-[calc(100%-16px)] -translate-x-1/2 whitespace-nowrap rounded-full bg-surface-primary text-xs shadow-md" data-testid="browser-driver-chip" onPointerDown={event => event.stopPropagation()}>
-            <DriverChip driver={view.driver} agentName={lastAgent} onTakeOver={() => void client.driver(panelId, 'person')} onHandBack={() => void client.driver(panelId, 'agent')} />
+            <DriverChip driver={view.driver} agentName={lastAgent} onTakeOver={() => drive('person')} onHandBack={() => drive('agent')} />
           </div>
         )}
         {cursor && page && (
@@ -423,6 +451,11 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       )}
       {!frame && !stop && (
         <div role="status" className="absolute inset-0 flex items-center justify-center text-xs text-text-tertiary">Loading the page on {host}…</div>
+      )}
+      {driveFailed && !stop && (
+        <div role="status" className="absolute inset-x-0 bottom-0 flex justify-center p-3">
+          <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-status-error shadow-md">{driveFailed}</p>
+        </div>
       )}
       {stream.reloadedAt !== undefined && Date.now() - stream.reloadedAt < RELOADED_SHOWN_MS && !stop && (
         <div role="status" className="absolute inset-x-0 bottom-0 flex justify-center p-3">
