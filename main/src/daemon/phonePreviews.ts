@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
-import { authenticateWorkspaceRequest } from './auth';
+import { isWorkspaceRequestAdmitted } from './auth';
 import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remote-setup-command';
 import { resolveTailscaleCommandAsync, runTailscaleServe, type ResolvedCommand } from './tailscaleSetup';
 import { startPreviewProxy, type PreviewFiles, type PreviewProxy } from './previewProxy';
@@ -142,7 +142,7 @@ export class PhonePreviewHost {
       dnsName: tailnet.dnsName,
       machineName: tailnet.machineName,
       ownerLogin: tailnet.ownerLogin,
-      admits: (login: string) => authenticateWorkspaceRequest(login, undefined, policy).ok,
+      admits: (login: string) => isWorkspaceRequestAdmitted(login, undefined, policy),
       // Detection revokes a port at once, before Serve confirms its handler is gone.
       refusal: policy.verifySecret ? `${tailnet.machineName} is password protected, so its pages do not open on phones.` : undefined,
       ports: new Set([...this.handlers.keys()].filter(key => key !== FILES).map(Number).filter(port => detected.has(port))),

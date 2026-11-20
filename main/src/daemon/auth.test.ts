@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RemoteDaemonClientRecord } from '../../../shared/types/remoteDaemon';
-import { authenticateRemoteDaemonBearerToken, hashRemoteDaemonToken } from './auth';
+import { authenticateRemoteDaemonBearerToken, hashRemoteDaemonToken, isWorkspaceRequestAdmitted, type WorkspaceAccessPolicy } from './auth';
 
 function createClientRecord(id: string, token: string): RemoteDaemonClientRecord {
   return {
@@ -55,5 +55,35 @@ describe('remote daemon auth', () => {
         code: 'ERR_REMOTE_DAEMON_AUTH_REQUIRED',
       },
     });
+  });
+});
+
+describe('isWorkspaceRequestAdmitted', () => {
+  const policy = (overrides: Partial<WorkspaceAccessPolicy> = {}): WorkspaceAccessPolicy => ({
+    ownerLogin: 'owner@example.com',
+    visibility: 'owner',
+    tailnetLogins: new Set(['owner@example.com', 'teammate@example.com']),
+    verifySecret: null,
+    ...overrides,
+  });
+
+  it('applies the same visibility check as a new request', () => {
+    expect(isWorkspaceRequestAdmitted('Owner@Example.com', undefined, policy())).toBe(true);
+    expect(isWorkspaceRequestAdmitted('teammate@example.com', undefined, policy())).toBe(false);
+    expect(isWorkspaceRequestAdmitted('teammate@example.com', undefined, policy({ visibility: 'tailnet' }))).toBe(true);
+    expect(isWorkspaceRequestAdmitted(undefined, undefined, policy())).toBe(false);
+    expect(isWorkspaceRequestAdmitted('owner@example.com', undefined, null)).toBe(false);
+  });
+
+  it('counts a password only once a check proved it, and never runs a check itself', () => {
+    let checks = 0;
+    const verifySecret = {
+      check: async () => { checks += 1; return 'valid' as const; },
+      isProved: (secret: string) => secret === 'proved',
+    };
+    expect(isWorkspaceRequestAdmitted('owner@example.com', 'Bearer proved', policy({ verifySecret }))).toBe(true);
+    expect(isWorkspaceRequestAdmitted('owner@example.com', 'Bearer unproved', policy({ verifySecret }))).toBe(false);
+    expect(isWorkspaceRequestAdmitted('owner@example.com', undefined, policy({ verifySecret }))).toBe(false);
+    expect(checks).toBe(0);
   });
 });
