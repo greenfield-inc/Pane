@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
 import { create as createQr } from 'qrcode';
 import { Button } from '../ui/Button';
-import { DISCORD_INVITE_URL, DiscordIcon } from '../DiscordIcon';
 
 /** A URL as a QR code, drawn as one SVG path. */
 export function QrCode({ url, label }: { url: string; label: string }) {
@@ -31,20 +30,21 @@ export function QrCode({ url, label }: { url: string; label: string }) {
 /** Cameras read dark modules on a light ground, so a code keeps these colors in every theme. */
 export const QR_PAPER = 'rounded-xl border border-border-secondary bg-white p-2 text-black';
 
-/** D-46: the iPhone app is in TestFlight; Discord is where people ask to join. */
+/** The iPhone app's public TestFlight beta (D-140). */
+const TESTFLIGHT_URL = 'https://testflight.apple.com/join/eKJmnzXF';
+
 export function TestFlightLine() {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg bg-surface-secondary px-4 py-3 text-sm text-text-secondary">
-      <span className="min-w-0">No Pane app yet? It&apos;s in TestFlight.</span>
+      <span className="min-w-0">No Pane app yet? The iPhone beta is open in TestFlight.</span>
       <Button
         type="button"
         variant="secondary"
         size="sm"
         className="flex-none"
-        icon={<DiscordIcon className="h-3.5 w-3.5 text-discord" />}
-        onClick={() => void window.electronAPI.openExternal(DISCORD_INVITE_URL)}
+        onClick={() => void window.electronAPI.openExternal(TESTFLIGHT_URL)}
       >
-        Ask to join on Discord
+        Join the beta
       </Button>
     </div>
   );

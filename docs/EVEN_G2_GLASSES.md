@@ -10,7 +10,7 @@ It talks straight to each of your computers over Tailscale, or through each comp
 ## What you need
 
 - G2 glasses (the R1 ring is optional; the temple touchpads do the same gestures).
-- The Even Realities app on your phone, and the Pane app ([iOS and Android](NATIVE_MOBILE.md)).
+- The Even Realities app on your phone, and the Pane iPhone app ([public TestFlight beta](QR_PAIRING.md#pair-a-phone)).
 - Each computer reachable from the Pane phone app in one of two ways:
   - paired with the phone by [QR code](QR_PAIRING.md); or
   - over Tailscale: Tailscale on the phone and the computer, signed in with the same login, and
