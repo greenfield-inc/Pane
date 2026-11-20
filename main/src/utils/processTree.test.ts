@@ -78,8 +78,8 @@ async function waitForDescendants(pid: number, expected: readonly number[]): Pro
 afterEach(async () => {
   // Teardown knows every process a test started: the roots and the children
   // they reported. It kills them by pid instead of walking the tree, because a
-  // walk costs two PowerShell processes on Windows, and on a loaded runner
-  // those alone outlast the 10 s hook timeout.
+  // walk costs a PowerShell process on Windows, and on a loaded runner that
+  // alone can take most of the 10 s hook timeout.
   const exited = spawned.map(child => child.exitCode !== null || child.signalCode !== null
     ? Promise.resolve()
     : new Promise(resolve => child.once('exit', resolve)));
