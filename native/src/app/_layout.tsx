@@ -11,6 +11,7 @@ import { RelayComputerSync } from '@/features/hosts/RelayComputerSync';
 import { SharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
 import { NotificationTapRouter, NotifyAlertCleanup } from '@/features/notifications/NotificationRouting';
 import { PushRegistrationSync } from '@/features/notifications/usePushSetup';
+import { TerminalPrewarm } from '@/features/terminal/TerminalPrewarm';
 import { useTheme } from '@/theme';
 
 void SplashScreen.preventAutoHideAsync();
@@ -51,6 +52,7 @@ export default function RootLayout() {
             <>
               <DaemonProvider key={activeHost.id} profile={activeHost}>
                 <RootStack signedIn />
+                <TerminalPrewarm />
                 <NotifyAlertCleanup />
                 <RelayComputerSync />
               </DaemonProvider>
