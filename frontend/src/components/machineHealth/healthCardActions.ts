@@ -1,10 +1,12 @@
+import { Archive, Ghost, HardDrive, MemoryStick, TrendingUp } from 'lucide-react';
 import { MACHINE_HEALTH_ASK_AGENT_CHANNEL, type MachineHealthCard } from '../../../../shared/types/machineHealth';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { showActionError } from '../../stores/errorStore';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
-import { runNotify } from '../../stores/notifyStore';
 
 export type HealthNotifyItem = NotifyItem & { machineHealth: MachineHealthCard };
+
+export const KIND_ICON = { disk: HardDrive, memory: MemoryStick, leak: TrendingUp, finished: Archive, leftovers: Ghost } as const;
 
 export function isHealthCard(item: NotifyItem): item is HealthNotifyItem {
   return item.machineHealth !== undefined;
@@ -32,10 +34,6 @@ export async function reviewHealthCard(item: NotifyItem): Promise<void> {
   // Loaded on use: Notify surfaces render in windows and tests that have no navigation store.
   const { useNavigationStore } = await import('../../stores/navigationStore');
   useNavigationStore.getState().navigateToResources(item.machineId ?? 'local');
-}
-
-export function answerHealthCard(item: NotifyItem, choice: string): void {
-  runNotify({ type: 'answer', id: item.id, answer: { choice } });
 }
 
 /** A request to an agent about one machine's disk and memory. */
