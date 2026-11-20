@@ -24,7 +24,7 @@
     "@agentclientprotocol/sdk": "2.0.1",
     "@greenfieldco/agent-farm": "0.2.34",
     "@anthropic-ai/sdk": "^0.60.0",
-    "@lydell/node-pty": "1.2.0-beta.3",
+    "@lydell/node-pty": "1.2.0-beta.18",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/addon-unicode11": "0.9.0",

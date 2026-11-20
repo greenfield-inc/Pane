@@ -3773,7 +3773,7 @@ SOFTWARE.
 --------------------------------------------------------------------------------
 
 Package: @lydell/node-pty
-Version: 1.2.0-beta.3
+Version: 1.2.0-beta.18
 Author: Simon Lydell
 Repository: git://github.com/lydell/node-pty.git
 
@@ -3804,27 +3804,27 @@ SOFTWARE.
 --------------------------------------------------------------------------------
 
 Package: @lydell/node-pty-darwin-arm64
-Version: 1.2.0-beta.3
+Version: 1.2.0-beta.18
 Repository: git://github.com/lydell/node-pty.git
 
 Package: @lydell/node-pty-darwin-x64
-Version: 1.2.0-beta.3
+Version: 1.2.0-beta.18
 Repository: git://github.com/lydell/node-pty.git
 
 Package: @lydell/node-pty-linux-arm64
-Version: 1.2.0-beta.3
+Version: 1.2.0-beta.18
 Repository: git://github.com/lydell/node-pty.git
 
 Package: @lydell/node-pty-linux-x64
-Version: 1.2.0-beta.3
+Version: 1.2.0-beta.18
 Repository: git://github.com/lydell/node-pty.git
 
 Package: @lydell/node-pty-win32-arm64
-Version: 1.2.0-beta.3
+Version: 1.2.0-beta.18
 Repository: git://github.com/lydell/node-pty.git
 
 Package: @lydell/node-pty-win32-x64
-Version: 1.2.0-beta.3
+Version: 1.2.0-beta.18
 Repository: git://github.com/lydell/node-pty.git
 
 Copyright (c) 2012-2015, Christopher Jeffrey (https://github.com/chjj/)
