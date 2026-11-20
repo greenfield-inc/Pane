@@ -1,9 +1,10 @@
-import { type ChildProcess, spawn } from 'child_process';
+import { type ChildProcess, execFile, spawn } from 'child_process';
 import { mkdtempSync, promises as fs, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { promisify } from 'util';
 import { afterEach, describe, expect, it } from 'vitest';
-import { isProcessAlive, listDescendantPids, terminateProcessTrees, waitForProcessesToExit } from './processTree';
+import { isProcessAlive, listDescendantPids, terminateProcessTrees, waitForProcessesToExit, windowsTerminateScript } from './processTree';
 
 const spawned: ChildProcess[] = [];
 const reportedChildren = new Set<number>();
@@ -196,4 +197,20 @@ describe('terminateProcessTrees', () => {
     await expect(terminateProcessTrees([])).resolves.toEqual([]);
     await expect(terminateProcessTrees([0, -7])).resolves.toEqual([]);
   });
+});
+
+describe.skipIf(process.platform !== 'win32')('windowsTerminateScript', () => {
+  it('leaves alone a pid that a newer process holds than the table read', async () => {
+    const child = idleProcess(temporaryDirectory());
+    if (!child.pid) throw new Error('spawn reported no pid');
+    // The table says this pid belonged to a process born yesterday: whatever
+    // holds it now is a different process that took the pid since.
+    const staleTable = `function Get-CimInstance { [pscustomobject]@{ ProcessId = ${child.pid}; ParentProcessId = 0; CreationDate = (Get-Date).AddDays(-1) } }`;
+    const script = `${staleTable}\n${windowsTerminateScript([child.pid], Date.now() + 10_000)}`;
+
+    const { stdout } = await promisify(execFile)('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: 20_000, windowsHide: true });
+
+    expect(stdout.split(/\r?\n/u)).toEqual(expect.arrayContaining([`tree ${child.pid}`, `exited ${child.pid}`]));
+    expect(isProcessAlive(child.pid)).toBe(true);
+  }, 30_000);
 });
