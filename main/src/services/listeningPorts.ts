@@ -13,6 +13,7 @@ import {
   type ListeningPortsSnapshot,
   PORTS_QUIET_INTERVAL_MS,
 } from '../../../shared/types/listeningPorts';
+import { isPortInRanges, type PortProbeSettings } from '../../../shared/types/portProbes';
 
 /**
  * How often the gate below is checked, so how long a new server waits to be listed while agents
@@ -62,6 +63,11 @@ export interface ListeningPortMonitorOptions {
    * `refresh` read them. Absent: always.
    */
   watched?(): boolean;
+  /**
+   * Whether ports are probed for HTTP, and which never are; read at every read. An unprobed port
+   * is still listed, as `tcp` with `unprobed`, and nothing connects to it. Absent: probe every port.
+   */
+  probes?(): PortProbeSettings;
   onChange?(snapshot: ListeningPortsSnapshot): void;
 }
 
@@ -94,7 +100,8 @@ interface Owner {
 
 /**
  * Lists every listening TCP port on this machine, except Pane's port tunnels, with the
- * process that owns it, which group that process belongs to, and whether the port speaks HTTP.
+ * process that owns it, which group that process belongs to, and whether the port speaks HTTP,
+ * unless `probes` keeps it from asking.
  */
 export function createListeningPortMonitor(options: ListeningPortMonitorOptions): ListeningPortMonitor {
   const panePid = options.panePid ?? process.pid;
@@ -135,7 +142,11 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
     }
     // SAFETY: every live socket was classified above.
     const ownerOf = (socket: ListeningSocket) => (owners.get(key(socket)) ?? provisional.get(key(socket)))!;
-    await Promise.all(sockets.filter(socket => (kinds.get(key(socket))?.retriesLeft ?? 1) > 0).map(async socket => {
+    const probes = options.probes?.() ?? { enabled: true, excluded: [] };
+    const unprobed = new Set(sockets.filter(socket => !probes.enabled || isPortInRanges(socket.port, probes.excluded)).map(key));
+    // Forget what an unprobed port answered before, so it is probed afresh once allowed again.
+    for (const skipped of unprobed) kinds.delete(skipped);
+    await Promise.all(sockets.filter(socket => !unprobed.has(key(socket)) && (kinds.get(key(socket))?.retriesLeft ?? 1) > 0).map(async socket => {
       if (ONE_SHOT_LISTENERS.has(ownerOf(socket).process ?? socket.process)) {
         kinds.set(key(socket), { kind: 'tcp', retriesLeft: 0 });
         return;
@@ -155,8 +166,10 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
     const paneNames = new Map(terminalPanes.map(terminal => [terminal.sessionId, terminal.paneName]));
     const ports = sockets.map((socket): ListeningPort => {
       const owner = ownerOf(socket);
-      // SAFETY: every live socket was probed above.
-      const port: ListeningPort = { ...socket, ...owner, kind: kinds.get(key(socket))!.kind };
+      // SAFETY: every live socket was probed above, unless it is unprobed.
+      const port: ListeningPort = unprobed.has(key(socket))
+        ? { ...socket, ...owner, kind: 'tcp', unprobed: true }
+        : { ...socket, ...owner, kind: kinds.get(key(socket))!.kind };
       const currentName = owner.sessionId === undefined ? undefined : paneNames.get(owner.sessionId);
       if (currentName !== undefined) port.paneName = currentName;
       return port;

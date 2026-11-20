@@ -1,11 +1,13 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { buildSync } from 'esbuild';
 import fs from 'fs/promises';
+import http from 'http';
 import net from 'net';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createListeningPortMonitor } from './listeningPorts';
+import { parsePortRanges, type PortProbeSettings } from '../../../shared/types/portProbes';
 
 const HTTP_SERVER = `require('http').createServer((_, res) => res.end('ok')).listen(0, '127.0.0.1', function () { console.log(this.address().port); });`;
 // Accepts connections and never answers, like a database waiting for its own protocol.
@@ -17,9 +19,11 @@ const TRICKLING_SERVER = `require('net').createServer(socket => { socket.write('
 const NOT_PANE = 2_147_483_000;
 
 const children: ChildProcess[] = [];
+const servers: net.Server[] = [];
 const grandchildren: number[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map(server => new Promise(resolve => server.close(resolve))));
   for (const child of children.splice(0)) child.kill('SIGKILL');
   for (const pid of grandchildren.splice(0)) {
     try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
@@ -83,6 +87,24 @@ process.stdin.once('end', () => process.exit()).resume();`);
       await exited(child);
     },
   };
+}
+
+/**
+ * A loopback server in this process on an ephemeral port that counts every connection it
+ * accepts, like a one-shot OAuth callback. `web` answers HTTP; otherwise it closes at once.
+ */
+async function startCountingServer(web: boolean): Promise<{ port: number; connections(): number }> {
+  let connections = 0;
+  const server = web
+    ? http.createServer((_, res) => res.end('ok'))
+    : net.createServer(socket => socket.destroy());
+  server.on('connection', () => { connections++; });
+  servers.push(server);
+  server.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  // SAFETY: a TCP server listening on a port reports an AddressInfo.
+  const { port } = server.address() as net.AddressInfo;
+  return { port, connections: () => connections };
 }
 
 async function freePort(): Promise<number> {
@@ -327,5 +349,49 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
       monitor.stop();
       vi.useRealTimers();
     }
+  });
+  describe('probe settings', () => {
+    it('probes a port for HTTP by default', async () => {
+      const server = await startCountingServer(true);
+      const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [] });
+
+      const listed = (await monitor.refresh()).ports.find(entry => entry.port === server.port);
+      expect(listed).toMatchObject({ port: server.port, kind: 'web' });
+      expect(listed).not.toHaveProperty('unprobed');
+      expect(server.connections()).toBeGreaterThan(0);
+    });
+
+    it('lists a listener without connecting to it while probes are off, and probes it once they are back on', async () => {
+      const server = await startCountingServer(true);
+      let probes: PortProbeSettings = { enabled: false, excluded: [] };
+      const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [], probes: () => probes });
+
+      expect((await monitor.refresh()).ports.find(entry => entry.port === server.port)).toMatchObject({ port: server.port, kind: 'tcp', unprobed: true });
+      await monitor.refresh();
+      expect(server.connections()).toBe(0);
+
+      probes = { enabled: true, excluded: [] };
+      const listed = (await monitor.refresh()).ports.find(entry => entry.port === server.port);
+      expect(listed).toMatchObject({ kind: 'web' });
+      expect(listed).not.toHaveProperty('unprobed');
+      expect(server.connections()).toBeGreaterThan(0);
+    });
+
+    it('never connects to an excluded port, and still probes the others', async () => {
+      const excluded = await startCountingServer(false);
+      const other = await startCountingServer(true);
+      // The port sits inside a range; ephemeral ports can be neighbours, so the range stops short of the other.
+      const from = other.port === excluded.port - 1 ? excluded.port : excluded.port - 1;
+      const to = other.port === excluded.port + 1 ? excluded.port : excluded.port + 1;
+      const ranges = parsePortRanges(`${from}-${to}`);
+      const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [], probes: () => ({ enabled: true, excluded: ranges }) });
+
+      const ports = (await monitor.refresh()).ports;
+      await monitor.refresh();
+      expect(ports.find(entry => entry.port === excluded.port)).toMatchObject({ kind: 'tcp', unprobed: true, group: 'other' });
+      expect(excluded.connections()).toBe(0);
+      expect(ports.find(entry => entry.port === other.port)).toMatchObject({ kind: 'web' });
+      expect(other.connections()).toBeGreaterThan(0);
+    });
   });
 });
