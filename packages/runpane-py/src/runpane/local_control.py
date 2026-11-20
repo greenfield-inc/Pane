@@ -812,6 +812,17 @@ def run_pr_watch_command(parsed: Any) -> int:
     return 0
 
 
+_OWN_WATCH_TOKEN: Optional[str] = None
+
+
+def watch_owner_token() -> str:
+    """One token per runpane process, sent with every named watch request it makes."""
+    global _OWN_WATCH_TOKEN
+    if _OWN_WATCH_TOKEN is None:
+        _OWN_WATCH_TOKEN = f"watch-{os.getpid()}-{uuid.uuid4()}"
+    return _OWN_WATCH_TOKEN
+
+
 def run_watch(parsed: Any, dispatch: Optional[Dict[str, Any]] = None) -> int:
     stdout = sys.stdout
     sys.stdout = _ReaderClosedGuard(stdout)
@@ -869,6 +880,9 @@ def watch_until_done(parsed: Any, dispatch: Optional[Dict[str, Any]] = None) -> 
     quiet = dispatch is not None
     request: Dict[str, Any] = {
         **optional_value("as", watch_as),
+        # This process's own token for its cursor: its retries and reconnects replace its earlier wait
+        # quietly, so only a different watcher supersedes it.
+        **optional_value("owner", watch_owner_token() if watch_as else None),
         **optional_value("since", parsed.watch_since),
         **optional_value("epoch", parsed.watch_epoch),
         **optional_value("from", parsed.watch_from),
@@ -935,6 +949,7 @@ def watch_until_done(parsed: Any, dispatch: Optional[Dict[str, Any]] = None) -> 
                 call_request["timeoutMs"] = timeout_ms
                 if parsed.self_test:
                     call_request.pop("as", None)
+                    call_request.pop("owner", None)
                     call_request.pop("since", None)
                     call_request.pop("epoch", None)
                     call_request.update({"from": "now", "idleAfterMs": 0, "timeoutMs": 0})
@@ -948,6 +963,9 @@ def watch_until_done(parsed: Any, dispatch: Optional[Dict[str, Any]] = None) -> 
                     event_include=[],
                 )
             except PaneDaemonClientError as error:
+                if error.code == "ERR_WORKSPACE_WATCH_REPLACED":
+                    # This same process re-armed the cursor, which dropped its older wait: re-arm silently.
+                    continue
                 if not keeps_waiting or error.code not in {
                     "ERR_RUNPANE_DAEMON_CLOSED",
                     "ERR_RUNPANE_DAEMON_CONNECT_FAILED",

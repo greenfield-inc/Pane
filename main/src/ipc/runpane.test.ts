@@ -1706,6 +1706,41 @@ describe('runpane IPC handlers', () => {
     }
   });
 
+  it('replaces a named wait quietly when the same owner re-arms it, and supersedes it for another owner', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-watch-owner-'));
+    const workspaceJournal = new WorkspaceJournal();
+    const registry = createRegistry(createServices({
+      workspaceJournal,
+      workspaceCursorStore: new WorkspaceCursorStore(path.join(directory, 'cursors.json')),
+    }));
+    const request = { as: 'owned-monitor', owner: 'watch-1-a', timeoutMs: 60_000 };
+    try {
+      await registry.invoke('runpane:workspace:wait', [request]); // Establish the cursor.
+      const first = registry.invoke('runpane:workspace:wait', [request]).catch(error => error);
+      const retry = registry.invoke('runpane:workspace:wait', [request]).catch(error => error);
+      expect(await first).toMatchObject({ code: 'ERR_WORKSPACE_WATCH_REPLACED' });
+      const other = registry.invoke('runpane:workspace:wait', [{ ...request, owner: 'watch-2-b' }]);
+      expect(await retry).toMatchObject({ code: 'ERR_WORKSPACE_WATCH_SUPERSEDED', message: expect.stringContaining('superseded') });
+      const assertion = expect(other).resolves.toMatchObject({ ok: true, entries: [{ kind: 'pane.created' }] });
+      workspaceJournal.append({ kind: 'pane.created', paneId: 'new', paneName: 'New', source: 'session' });
+      await assertion;
+    } finally {
+      workspaceJournal.dispose();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a workspace wait owner without a named cursor', async () => {
+    const workspaceJournal = new WorkspaceJournal();
+    const registry = createRegistry(createServices({ workspaceJournal }));
+    try {
+      await expect(registry.invoke('runpane:workspace:wait', [{ owner: 'watch-1-a', timeoutMs: 0 }])).rejects.toThrow('owner requires as');
+      await expect(registry.invoke('runpane:workspace:wait', [{ as: 'monitor', owner: 'bad owner', timeoutMs: 0 }])).rejects.toThrow('owner must contain');
+    } finally {
+      workspaceJournal.dispose();
+    }
+  });
+
   it('emits session-scoped, re-firing idle events without advancing the journal cursor', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T12:00:00.000Z'));

@@ -291,6 +291,11 @@ export interface RunpaneWorkspaceWaitRequest {
   /** Expected journal epoch for a numeric cursor; mismatch requires resynchronization. */
   epoch?: string;
   as?: string;
+  /**
+   * The watcher's own token for `as`, kept across its retries and reconnects. A request with the
+   * same owner replaces the earlier wait quietly; any other request supersedes it. Requires `as`.
+   */
+  owner?: string;
   from?: 'now' | 'earliest';
   timeoutMs?: number;
   limit?: number;

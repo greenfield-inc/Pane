@@ -10230,7 +10230,7 @@
       "If composer submission cannot be verified without risking a duplicate, the create item is unsuccessful with `initialInput.staged`, `initialInput.attempts`, `initialInput.blocked.kind: submission_unverified`, and an actionable `nextCommand`. The CLI-facing `--prompt` alias maps to this canonical `initialInput` result.",
       "When running from WSL while Pane is installed on Windows, a Linux-installed runpane cannot reach Pane: it looks for a missing `/tmp/pane-daemon.../daemon.sock`. Pane's own `runpane` (on PATH in Pane's WSL terminals, or `/mnt/c/Users/<you>/.pane/bin/runpane` from any WSL shell) runs the Windows CLI through WSL interop and converts path arguments. With a Pane build older than that shim, invoke the Windows wrapper through PowerShell from a Windows cwd, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.",
       "`runpane watch` waits for agent, Pane, panel, and PR events from the daemon journal without polling. `--follow` keeps watching with defaults tuned for an agent watching unattended (quiet, batched, and it ends itself after 3 hours with nothing happening); individual duration flags override these defaults. Cadence requires a named follow consumer; `--follow --since <generation>` has no consumer name and bypasses settling and batching. `--until-event` waits for one event worth waking for, prints it immediately without follow settling or batching, and exits 0. The defaults are listed in the contract under defaults.watch.",
-      "A watch releases its pending slot when its client socket or named pipe disconnects. Re-arming the same named cursor takes over the previous request; the superseded watcher exits with a WATCH ERROR instead of competing for the cursor. Anonymous concurrent watchers retain the eight-wait limit. Each request also has a 125-second lease (slightly longer than the maximum 120-second long poll), so an abandoned request is reclaimed even if no disconnect arrives.",
+      "A watch releases its pending slot when its client socket or named pipe disconnects. Re-arming the same named cursor takes over the previous request; the superseded watcher exits with a WATCH ERROR instead of competing for the cursor. Each runpane process sends one `owner` token with every request on its named cursor, so its own retries and reconnects replace its earlier wait quietly (`ERR_WORKSPACE_WATCH_REPLACED`, which runpane re-arms without printing anything); only a different watcher supersedes it (`ERR_WORKSPACE_WATCH_SUPERSEDED`). Anonymous concurrent watchers retain the eight-wait limit. Each request also has a 125-second lease (slightly longer than the maximum 120-second long poll), so an abandoned request is reclaimed even if no disconnect arrives.",
       "The desktop app treats one consumer name specially: while a `runpane watch --as dictate` request is in flight, and for 30 seconds after the last one ends, Pane skips its own \"needs your input\" and \"finished\" desktop notifications, because [Dictate](https://github.com/parsakhaz/open-dictate) shows those events on its pill. When that watcher stops, Pane's notifications come back. The CLI's flags and output are unchanged.",
       "`sessions list` list durable named orchestration Sessions.",
       "`sessions create` create a durable named orchestration Session and its hidden terminal owner.",
@@ -15205,6 +15205,10 @@
         },
         "as": {
           "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "description": "The watcher's own token for as, kept across its retries and reconnects. A request with the same owner replaces the earlier wait quietly (ERR_WORKSPACE_WATCH_REPLACED); any other request supersedes it (ERR_WORKSPACE_WATCH_SUPERSEDED). Requires as."
         },
         "from": {
           "enum": [

@@ -919,6 +919,7 @@ Dead watch: the monitor has died when it exits non-zero or prints a WATCH ERROR
 line (\`_error\`). Silence is expected: heartbeats are off by default.
 If the error says "Workspace watch superseded by a new request for this cursor",
 another monitor has taken over: keep the replacement and do not re-arm the old one.
+A watch's own retries and reconnects never supersede it: runpane re-arms those silently.
 For other failures, re-arm once. If it dies again, save the last 20 output lines to a file, run
 \`runpane doctor --report --title "runpane watch failed" --body-file <evidence-file> --json\`,
 and tell the human.
