@@ -5,7 +5,7 @@ import { decodeChatPanelState } from '../services/chatTabs/state';
 import { createChatTab } from './chatTabs';
 import { chatTabLastMessage, chatTabNoTerminal, chatTabOutput, chatTabScreen, submitChatTab, waitForChatTab } from './runpaneChatTabs';
 import { paneCommandCaller, paneCommandSignal } from '../daemon/commandRegistry';
-import { MAX_WORKSPACE_WAIT_TIMEOUT_MS, WorkspaceWatchCancelledError, WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
+import { MAX_WORKSPACE_WAIT_TIMEOUT_MS, parkUnderLease, WorkspaceWatchCancelledError, WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
 import { failureDetails, FailureLimiter } from '../utils/failureTelemetry';
 import { ownsRemovableWorktree } from '../utils/owns-removable-worktree';
 import { resolveProjectRegistration, projectRegistrationKey, validateProjectRepository } from '../services/projectRegistration';
@@ -2242,15 +2242,20 @@ export function registerRunpaneHandlers(
               nextIdleDeadline(idleCandidates, idleSchedule, now) ?? Number.POSITIVE_INFINITY,
               cadence?.nextDeadline(now) ?? Number.POSITIVE_INFINITY,
             );
-            waited = await workspaceJournal.waitAfter(
-              cursor,
-              readFilter,
-              Math.max(0, parkUntil - now),
-              limit,
-              normalized.as ?? 'anonymous',
-              lease.signal,
+            const parkCursor = cursor;
+            waited = await parkUnderLease(
+              lease,
+              deadlineAt,
+              signal => workspaceJournal.waitAfter(
+                parkCursor,
+                readFilter,
+                Math.max(0, parkUntil - now),
+                limit,
+                normalized.as ?? 'anonymous',
+                signal,
+              ),
+              () => ({ ...workspaceJournal.readAfter(parkCursor, readFilter, limit), timedOut: true }),
             );
-            lease.signal.throwIfAborted();
             idleEntries = currentIdleEntries(workspaceIdleCandidates(workspaceStateReader, workspaceJournal, project?.id));
           }
           if (waited.dropped) {
