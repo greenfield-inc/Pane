@@ -95,7 +95,7 @@ A question can wait for hours, and each client limits a tool call differently:
 
 - While any call runs, the server sends a `notifications/progress` about every minute when the request carried a progress token. That keeps Claude Code's 30-minute idle window open, over stdio and over Pane's HTTP endpoint alike.
 - Claude Code and Codex wait in one call. Pane's registration gives Codex a long per-server tool timeout.
-- Every other client, including Cursor's CLI (which ends each call after a fixed 60 seconds), gets `{waiting: true, id, next}` after about 50 seconds. The question stays on screen, and the agent calls `notify` again with `resume: <id>`. Pane ends this loop after 15 minutes without an answer and returns `unavailable`.
+- Every other client, including Cursor's CLI (which ends each call after a fixed 60 seconds), gets `{waiting: true, id, next}` after about 50 seconds. The question stays on screen, and the agent calls `notify` again with `resume: <id>`. For a question asked from outside Pane, Pane ends this loop after 15 minutes without an answer and returns `unavailable`. A question asked from a Pane tab has no such limit and outlives the call: if the agent stops resuming, its answer is typed into its tab as an `answer:` line.
 
 The server tells Pane which agent is asking (Claude, Codex, Cursor, or the client's own name) from the client's MCP name, and inside a Pane terminal the question names its Pane and panel. See [Pane Notify](PANE_NOTIFY.md).
 

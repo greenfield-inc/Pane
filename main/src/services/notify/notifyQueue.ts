@@ -1235,7 +1235,8 @@ export class NotifyQueue extends EventEmitter {
     }
     entry.item.answeredOn = device;
     const who = by === 'autopilot' ? 'Autopilot' : 'The person';
-    const heardOnCall = entry.waiter !== undefined || entry.resumeLoop;
+    // Between resume rounds a tab's asker may never call again, so its tab hears it too.
+    const heardOnCall = entry.waiter !== undefined || (entry.resumeLoop && !outlivesCall(entry.item));
     this.closeOpen(entry, { by, reason }, closedResult(`${who} closed this question${reason ? `: ${reason}` : ''}.`));
     if (!heardOnCall && entry.item.source.panelId) {
       const tail = `(by ${by === 'autopilot' ? 'Autopilot' : 'you'})${reason ? `: ${reason}` : ''}`;
@@ -1655,7 +1656,7 @@ export class NotifyQueue extends EventEmitter {
       // Only an open call can be abandoned: a saved item with no call is waiting on its tab's answer.
       if (entry.item.source.panelId !== panelId || !isOpen(entry.item) || !entry.waiter || this.heldForMove(entry)) continue;
       clearTimeout(entry.idleTimer);
-      entry.idleTimer = idle ? setTimeout(() => this.expire(entry.item.id), NOTIFY_IDLE_BACKSTOP_MS) : undefined;
+      entry.idleTimer = idle ? setTimeout(() => this.callEnded(entry), NOTIFY_IDLE_BACKSTOP_MS) : undefined;
     }
   }
 
@@ -1928,7 +1929,7 @@ export class NotifyQueue extends EventEmitter {
           return;
         }
         // Pane stopping its server ends every call; that isn't the asker leaving (J6).
-        if (!this.quitting) this.expire(entry.item.id);
+        if (!this.quitting) this.callEnded(entry);
       };
       const waiter: Waiter = {
         resolve: (result) => {
@@ -1951,23 +1952,21 @@ export class NotifyQueue extends EventEmitter {
         // Each round has its own 15 minutes: an updated version counts from when it was posted. A
         // worker's question has no such limit, so each of its relay calls waits a full round.
         const remaining = (entry.item.revision?.at ?? entry.item.createdAt) + NOTIFY_RESUME_CAP_MS - Date.now();
+        // A worker's question, and one asked from a tab, outlive their calls: neither has the cap.
+        const uncapped = entry.item.originKind === 'worker' || outlivesCall(entry.item);
         returnTimer = setTimeout(() => {
           const worker = entry.item.originKind === 'worker';
-          if (remaining <= returnAfterMs && !worker) {
+          if (remaining <= returnAfterMs && !uncapped) {
             // An answer in its Undo hold reaches this call when the hold ends.
             if (entry.item.state === 'sent') return;
             this.expire(entry.item.id, unavailable('Nobody answered within 15 minutes.'));
             return;
           }
           entry.resumeLoop = true;
-          waiter.resolve({
-            waiting: true,
-            id: entry.item.id,
-            next: `Call \`runpane notify --resume ${entry.item.id}\` now to keep waiting for the answer.`,
-          });
+          waiter.resolve(waitingResult(entry.item));
           // A relayed worker question keeps waiting for its worker even if the relay never resumes.
-          if (!worker) entry.graceTimer = setTimeout(() => this.expire(entry.item.id), NOTIFY_RESUME_GRACE_MS);
-        }, entry.item.originKind === 'worker' ? returnAfterMs : Math.min(returnAfterMs, Math.max(remaining, 0)));
+          if (!worker) entry.graceTimer = setTimeout(() => this.callEnded(entry), NOTIFY_RESUME_GRACE_MS);
+        }, uncapped ? returnAfterMs : Math.min(returnAfterMs, Math.max(remaining, 0)));
       }
     });
   }
@@ -2114,6 +2113,30 @@ export class NotifyQueue extends EventEmitter {
     this.save(entry);
     this.queue = [id, ...this.queue];
     if (this.transient?.view.itemId === id) this.clearTransient();
+  }
+
+  /**
+   * Its call ended (killed, cancelled, idle, or never resumed). A card asked from a Pane tab keeps
+   * waiting: the tab takes its answer, so only an answer, a close, or the tab, Pane or Session going
+   * ends it. A call from outside Pane, or a permission prompt's hook, can't be told later, so it expires.
+   */
+  private callEnded(entry: Entry): void {
+    const { item } = entry;
+    if (!outlivesCall(item)) {
+      this.expire(item.id);
+      return;
+    }
+    clearTimeout(entry.graceTimer);
+    clearTimeout(entry.idleTimer);
+    entry.graceTimer = undefined;
+    entry.idleTimer = undefined;
+    entry.resumeLoop = false;
+    // A call still holding on (an idle Codex tab's) returns now; a dropped one is let go.
+    entry.waiter?.resolve(waitingResult(item));
+    // Answered between resume rounds and never collected: the tab gets it after all (a later --resume still does).
+    if (entry.pending && item.state === 'answered' && item.delivered?.via !== 'tab' && !this.env.askerGone?.(item)) {
+      this.enqueueTabMessage(item, answerLine(item), true);
+    }
   }
 
   /** The caller stopped waiting: the card says so, then moves to Earlier today as Expired. */
@@ -2346,6 +2369,24 @@ function withDeviceLabels(item: NotifyItem, label: (device: string | undefined) 
 /** A machine's items under its current name, after a rename. */
 function withMachine(items: Map<string, NotifyItem>, machine: string): Map<string, NotifyItem> {
   return new Map([...items].map(([key, item]) => [key, item.machine === machine ? item : { ...item, machine }]));
+}
+
+/**
+ * A card asked from a Pane tab outlives the call waiting on it: the answer can still be typed into
+ * that tab. A permission prompt belongs to its hook, which has its own way to end.
+ */
+function outlivesCall(item: NotifyItem): boolean {
+  return item.source.panelId !== undefined && !item.agentPrompt;
+}
+
+/** A call that returns before the answer: `--resume` keeps waiting; a tab's card can also be left to its tab. */
+function waitingResult(item: NotifyItem): NotifyResult {
+  const resume = `Call \`runpane notify --resume ${item.id}\` now to keep waiting for the answer`;
+  return {
+    waiting: true,
+    id: item.id,
+    next: outlivesCall(item) ? `${resume}, or stop waiting: the card stays open, and its answer is typed into this tab as an answer: line.` : `${resume}.`,
+  };
 }
 
 function isOpen(item: NotifyItem): boolean {
