@@ -9,6 +9,8 @@ const DAY = 24 * 60 * 60_000;
 const session = { id: 's1', name: 'Sales', paneId: 'sp', orchestrator: true };
 const orchestrator: NotifySource = { name: 'Session: Sales', agent: 'Claude', paneId: 'sp', panelId: 'orch', session };
 const worker: NotifySource = { name: 'workos-sso', agent: 'Claude', paneId: 'wp', panelId: 'w1', session: { id: 's1', name: 'Sales', paneId: 'sp' } };
+/** Asked from outside Pane: nothing could take a late answer. */
+const outside: NotifySource = { name: 'scripts', agent: 'Claude' };
 const ask = (title: string): NotifyQuestion => ({ ui: 'ask', title });
 
 describe('NotifyQueue with its store', () => {
@@ -238,14 +240,74 @@ describe('NotifyQueue with its store', () => {
     expect(queue.snapshot().items).toEqual([]);
   });
 
-  it('J18: a call that ends closes its item with the reason', async () => {
+  it('J18: a call from outside Pane that ends closes its item with the reason', async () => {
     const queue = queueWith();
     const controller = new AbortController();
-    void queue.ask({ question: ask('Q-2: x?'), source: orchestrator }, controller.signal);
+    void queue.ask({ question: ask('Q-2: x?'), source: outside }, controller.signal);
     const [{ id }] = queue.snapshot().items;
     controller.abort();
     expect(item(queue, id)).toMatchObject({ state: 'expired', closed: { by: 'pane', reason: 'the asker stopped waiting' } });
     expect(store.readItem(id)?.closed?.reason).toBe('the asker stopped waiting');
+  });
+
+  it("a tab's card outlives its killed call, and the answer is typed into the asking tab", async () => {
+    const queue = queueWith();
+    const controller = new AbortController();
+    void queue.ask({ question: ask('Q-2: ship?'), source: orchestrator }, controller.signal);
+    const [{ id }] = queue.snapshot().items;
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(60_000);
+    queue.sweep();
+    expect(item(queue, id)).toMatchObject({ state: 'waiting' });
+    expect(item(queue, id)?.closed).toBeUndefined();
+    expect(queue.snapshot().queue).toEqual([id]);
+
+    queue.run({ type: 'answer', id, answer: { text: 'Yes' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(typed).toEqual([['orch', 'answer: Q-2 → Yes (by you)']]);
+    expect(item(queue, id)).toMatchObject({ state: 'answered', delivered: { via: 'tab' } });
+    // A later --resume still gets the answer.
+    expect(await queue.ask({ resume: id, source: orchestrator })).toEqual({ answer: 'Yes' });
+  });
+
+  it("a tab's card whose call was killed closes once its tab is gone, not before", async () => {
+    const queue = queueWith();
+    const controller = new AbortController();
+    void queue.ask({ question: ask('Q-2: ship?'), source: orchestrator }, controller.signal);
+    const [{ id }] = queue.snapshot().items;
+    controller.abort();
+    queue.sweep();
+    expect(item(queue, id)?.state).toBe('waiting');
+    gone.set('orch', 'the asking tab was closed');
+    queue.sweep();
+    expect(item(queue, id)).toMatchObject({ state: 'expired', closed: { by: 'pane', reason: 'the asking tab was closed' } });
+    expect(typed).toEqual([]);
+  });
+
+  it('an answer given between resume rounds reaches the tab when no resume comes', async () => {
+    const queue = queueWith();
+    const first = queue.ask({ question: ask('Q-2: ship?'), source: orchestrator, returnAfterMs: 50_000 });
+    await vi.advanceTimersByTimeAsync(50_000);
+    const waiting = await first;
+    const id = 'id' in waiting ? waiting.id : '';
+    queue.run({ type: 'answer', id, answer: { text: 'Yes' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    // Still within the 30 s grace: a resume would take it, so the tab gets nothing yet.
+    expect(typed).toEqual([]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(typed).toEqual([['orch', 'answer: Q-2 → Yes (by you)']]);
+    expect(item(queue, id)).toMatchObject({ state: 'answered', delivered: { via: 'tab' } });
+  });
+
+  it('a close between resume rounds reaches the tab too', async () => {
+    const queue = queueWith();
+    const first = queue.ask({ question: ask('Q-2: ship?'), source: orchestrator, returnAfterMs: 50_000 });
+    await vi.advanceTimersByTimeAsync(50_000);
+    const waiting = await first;
+    const id = 'id' in waiting ? waiting.id : '';
+    queue.run({ type: 'close', id });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed).toEqual([['orch', 'closed: Q-2 (by you)']]);
   });
 
   it('J17: the sweep closes what its asker left, without telling the asker', async () => {
@@ -449,7 +511,7 @@ describe('NotifyQueue with its store', () => {
   it('an Autopilot close keeps its receipt when the asker stops waiting straight after', async () => {
     const queue = queueWith();
     const controller = new AbortController();
-    void queue.ask({ question: ask('Q-2: x?'), source: orchestrator }, controller.signal);
+    void queue.ask({ question: ask('Q-2: x?'), source: outside }, controller.signal);
     const [{ id }] = queue.snapshot().items;
     queue.agentAct({ type: 'agent-close', id, reason: 'no build behind it' });
     controller.abort();
@@ -461,7 +523,7 @@ describe('NotifyQueue with its store', () => {
   it('an Autopilot close just after the asker stopped still reads as Autopilot\'s, and nothing is typed', async () => {
     const queue = queueWith();
     const controller = new AbortController();
-    void queue.ask({ question: ask('Q-2: x?'), source: orchestrator }, controller.signal);
+    void queue.ask({ question: ask('Q-2: x?'), source: outside }, controller.signal);
     const [{ id }] = queue.snapshot().items;
     controller.abort();
     queue.agentAct({ type: 'agent-close', id, reason: 'no build behind it' });
