@@ -40,9 +40,9 @@ else holds a certificate for `<id>.<D>`.
 | `p<port>.<id>.<D>` | same | the computer's dev server on `localhost:<port>` |
 | `files.<id>.<D>` | same | the computer's preview files |
 | `l<a>-<b>-<c>-<d>.<id>.<D>` | `a.b.c.d` (private ranges only) | the computer's local https listener |
-| `_acme-challenge.<id>.<D>` TXT | values the computer set | Let's Encrypt DNS-01 |
-| `<D>` CAA | `issue` the CA, `issuewild ;` | no certificate for all of `*.<D>` |
-| `<id>.<D>` CAA | `issue` and `issuewild` the CA, `validationmethods=dns-01` | the computer's certificate only |
+| `_acme-challenge.<id>.<D>` TXT | values the computer set | DNS-01 at Let's Encrypt or Google Trust Services |
+| `<D>` CAA | `issue` each CA, `issuewild ;` | no certificate for all of `*.<D>` |
+| `<id>.<D>` CAA | `issue` and `issuewild` each CA, `validationmethods=dns-01` | the computer's certificate only |
 
 The computer's certificate covers `<id>.<D>` and `*.<id>.<D>`.
 
@@ -103,6 +103,7 @@ A second control connection for the same id replaces the first, which gets
 | relay | `{"t":"open","conn":"<base64url 16 bytes>","peer":"<ip>"}` | A client connected for one of this computer's names. Open a data connection for `conn` within 10 s. |
 | computer | `{"t":"txt","req":"<n>","values":["..."]}` | Set the TXT values of `_acme-challenge.<id>.<D>` (empty list clears): at most 2 values of at most 64 bytes, what ACME needs for the name and its wildcard. More gets `bad-request`. |
 | relay | `{"t":"ok","req":"<n>"}` / `{"t":"error","req":"<n>","code","message"}` | Answer to a request frame carrying `req`. |
+| computer | `{"t":"eab","req":"<n>","staging":true\|false}` | A one-time EAB key for Google Trust Services; see [EAB keys](#eab-keys). |
 | computer | `{"t":"local","local":["..."]}` | The computer's private addresses changed. |
 | computer | `{"t":"sleep"}` | The computer is about to sleep; the relay reports it as asleep until it reconnects. |
 | computer | `{"t":"grant","req":"<n>","platform":"ios"\|"android","token":"<device token>","hostProfileId":"<id>"}` | Push the phone a grant for this computer; see [Alerts](#alerts). |
@@ -187,6 +188,23 @@ each device token may get 30 an hour from all computers together
 (`--limit-alerts-per-token-per-hour`). Past either, the relay answers
 `throttled` and logs one line per computer or device per hour. Payloads,
 device tokens and grants are never logged.
+
+## EAB keys
+
+A computer orders its certificate from Let's Encrypt. When Let's Encrypt
+refuses for its rate limits, it orders from Google Trust Services, which
+registers an ACME account only with an External Account Binding (EAB) key,
+one key per account. The computer asks its relay for one with an `eab` frame
+only when it registers a new account there; later orders reuse the account.
+
+The relay mints the key through Google's Public CA API with its VM's service
+account (`--eab-project`), from the staging endpoint when `staging` is true,
+and answers `{"t":"ok","req":"<n>","keyId":"...","hmacKey":"<base64>"}`.
+The key goes only to the computer that asked; the relay never logs it.
+Errors: `unconfigured` (no `--eab-project`), `throttled` (past
+`--limit-eab-per-day`), `provider` (the API refused; the message says why).
+A computer counts `unconfigured` and `throttled` as Google Trust Services
+refusing.
 
 ## Data connection
 
@@ -323,6 +341,8 @@ Open connections stay open.
   home or small site, so a sender cannot spread over its /64s.
 - Per computer address, computers new to the relay: 20 an hour
   (`--limit-new-ids-per-hour`); past it they get `over-limit`.
+- Per computer, Google Trust Services EAB keys: 3 a day
+  (`--limit-eab-per-day`); past it `eab` frames get `throttled`.
 - Computers in the registry: 250,000 (`--max-computers`). A new computer in
   a full registry takes the place of the one offline longest. Only when
   every computer is online does it get `full` (a helper skips the new ids it

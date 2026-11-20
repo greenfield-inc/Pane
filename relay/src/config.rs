@@ -275,7 +275,6 @@ pub struct Config {
     #[arg(
         long,
         hide = true,
-        alias = "fcm-metadata-url",
         env = "PANE_RELAY_METADATA_URL",
         default_value = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
     )]

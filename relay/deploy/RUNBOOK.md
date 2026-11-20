@@ -7,8 +7,10 @@ Google Compute Engine in the project `pane-pwa-preview`: `us` (us-central1),
 To add one, add a line to `RELAYS` in `deploy.sh` and its region to
 `PANE_RELAYS` in `main/src/daemon/relay/relayService.ts`. `us` and `eu` also answer DNS
 for `runpane.net` (`ns1`, `ns2`). Each relay gets and renews its own Let's
-Encrypt certificate, and sends Android alerts as the service account
-`pane-push-sender` with no key file.
+Encrypt certificate, sends Android alerts as the service account
+`pane-push-sender` with no key file, and with the same account mints the
+one-time Google Trust Services EAB keys computers use when Let's Encrypt turns
+them away.
 
 The desktop app connects to these relays as soon as a release with QR pairing
 ships. **Deploy and verify the relays before tagging that desktop release.**
@@ -29,6 +31,7 @@ Merging the PR to `main` does not release the desktop app.
 | Android app links (`assetlinks.json`) | The SHA-256 of the Play app signing certificate (Play Console › App integrity) |
 | iOS universal links | Team id and bundle id `com.dcouple.pane.mobile` |
 | Android alerts | `pane-push-sender` with Firebase Cloud Messaging send rights, and `roles/artifactregistry.reader` on the `pane-preview` repository so the VMs can pull the relay image |
+| Google Trust Services EAB keys | `publicca.googleapis.com` enabled (`deploy.sh` enables it) and `pane-push-sender` granted `roles/publicca.externalAccountKeyCreator` on the project (once, by hand: done 2026-11-20). The VMs already have the `cloud-platform` scope |
 
 ## Steps
 
@@ -68,8 +71,10 @@ Merging the PR to `main` does not release the desktop app.
    with a `_psl.runpane.net` TXT record pointing at it). Until it is listed,
    all computers share Let's Encrypt's weekly limit of 50 new certificates
    per registered domain; ask Let's Encrypt for a rate limit increase if
-   sign-ups outpace it. A computer that Let's Encrypt turns away says so in
-   **Add a device** and asks again at the time Let's Encrypt gives.
+   sign-ups outpace it. A computer that Let's Encrypt turns away orders from
+   Google Trust Services instead (100 orders an hour for the project, renewals
+   included). Only when both refuse does **Add a device** say so and ask again
+   at the time Let's Encrypt gives.
 8. **Release the desktop app** through the normal [stable release](../../RUNBOOK.md#stable-release),
    then pair a phone with a QR code against production
    ([QR pairing](../../docs/QR_PAIRING.md)).
@@ -81,6 +86,9 @@ Rerun the workflow with `apply` on from the commit to deploy: it pushes
 own within 30 seconds. To roll back, run it from the earlier commit.
 
 ## Watch
+
+- Google Trust Services keys: `docker logs pane-relay | grep 'EAB key'` shows
+  each key minted or failed, by computer id; never the key itself.
 
 - Uptime checks `pane-relay-us`, `-eu`, `-asia`, `-west` in Cloud Monitoring.
 - Logs: `gcloud compute ssh pane-relay-us --zone us-central1-a -- docker logs pane-relay`.

@@ -61,7 +61,7 @@ Every flag also reads the environment variable in brackets.
 | `--acme-cache` [`PANE_RELAY_ACME_CACHE`] | | Get the certificate from an ACME CA with DNS-01 and keep the account, key and certificate in this folder (mode 0600); renewed with a third of its lifetime left, without a restart |
 | `--acme-email` [`PANE_RELAY_ACME_EMAIL`] | | Contact email for the ACME account |
 | `--acme-directory` [`PANE_RELAY_ACME_DIRECTORY`] | Let's Encrypt production | ACME directory URL; staging is `https://acme-staging-v02.api.letsencrypt.org/directory` |
-| `--caa-issuer` [`PANE_RELAY_CAA_ISSUER`] | `letsencrypt.org` | Helper role: the CA named in CAA records. `<D>` allows it and no wildcard; each `<id>.<D>` allows it, wildcard included, through DNS-01 only. Set it to your CA's domain with `--acme-directory`, or empty to serve no CAA |
+| `--caa-issuer` [`PANE_RELAY_CAA_ISSUER`] | `letsencrypt.org,pki.goog` | Helper role: the CAs named in CAA records, comma-separated (Let's Encrypt and Google Trust Services). `<D>` allows them and no wildcard; each `<id>.<D>` allows them, wildcard included, through DNS-01 only. Set it to your CA's domain with `--acme-directory`, or empty to serve no CAA |
 | `--dev` [`PANE_RELAY_DEV`] | off | Generate a self-signed certificate when `--cert`/`--key` are absent |
 | `--relays` [`PANE_RELAY_RELAYS`] | this region | `us=us.relay.D,eu=eu.relay.D` for `GET /v1/relays` |
 | `--public-ip` [`PANE_RELAY_PUBLIC_IP`] | | IPv4 that DNS returns for `<D>` and for regions without `--region-ip` |
@@ -88,6 +88,8 @@ Every flag also reads the environment variable in brackets.
 | `--apns-topic` [`PANE_RELAY_APNS_TOPIC`] | `com.dcouple.pane.mobile` | The app's bundle id, sent as `apns-topic` |
 | `--fcm-service-account` [`PANE_RELAY_FCM_SERVICE_ACCOUNT`] | | Firebase service account JSON key |
 | `--fcm-project` [`PANE_RELAY_FCM_PROJECT`] | | Firebase project id. Alone, Android alerts use the access token of the service account attached to the Google Compute Engine VM, from the metadata server, with no key file. With `--fcm-service-account`, overrides that key's project. With neither flag, Android alerts answer `unconfigured` |
+| `--eab-project` [`PANE_RELAY_EAB_PROJECT`] | | Google Cloud project whose Public CA API mints computers' one-time EAB keys for Google Trust Services, the CA computers fall back to when Let's Encrypt refuses. Uses the VM's service account through the metadata server, which needs `roles/publicca.externalAccountKeyCreator` and the `cloud-platform` scope. Without it, `eab` frames answer `unconfigured` |
+| `--limit-eab-per-day` [`PANE_RELAY_LIMIT_EAB_PER_DAY`] | 3 | EAB keys per computer a day; then `throttled` |
 | `--limit-alerts-per-hour` | 60 | Per computer, over a sliding hour; then `throttled` |
 | `--limit-alerts-per-token-per-hour` | 30 | Per device token across all computers, over a sliding hour; then `throttled` |
 
