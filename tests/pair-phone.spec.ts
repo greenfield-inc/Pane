@@ -90,7 +90,7 @@ test('an expired code is replaced by a new one', async ({ page }) => {
 test('waits while this computer gets ready, then shows the code', async ({ page }) => {
   await openHome(page, { relay: { phaseWhenOn: 'certificate' } });
   const dialog = await openPairDialog(page);
-  await expect(dialog.getByRole('status').filter({ hasText: 'Getting this computer ready…' })).toBeVisible();
+  await expect(dialog.getByRole('status').filter({ hasText: 'Getting a certificate…' })).toBeVisible();
   await shot(page, 'dialog-preparing-dark');
   // SAFETY: installElectronApiMock installs __paneTestElectronMock before navigation.
   await page.evaluate(() => (window as PairTestWindow).__paneTestElectronMock.emitRelayStatus({ phase: 'ready' }));

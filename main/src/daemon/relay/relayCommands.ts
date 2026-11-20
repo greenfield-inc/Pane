@@ -51,7 +51,7 @@ const RELAY_ERROR_GRACE_MS = 15_000;
 
 export function registerRelayCommands(
   registry: PaneCommandRegistry,
-  relay: Pick<RelayService, 'getStatus' | 'createPairingCode' | 'computerInfo'>,
+  relay: Pick<RelayService, 'getStatus' | 'createPairingCode' | 'computerInfo' | 'retryNow'>,
   previews: RelayPreviews,
   links: RelayLinks,
   linking: ComputerLinking,
@@ -72,7 +72,10 @@ export function registerRelayCommands(
     });
   registry.register(RELAY_COMMANDS.setEnabled, async (enabled: PaneCommandValue) => {
     onThisComputerOnly();
-    await setEnabled(decodeBoundary(enabled, boundary.boolean));
+    const on = decodeBoundary(enabled, boundary.boolean);
+    await setEnabled(on);
+    // Turning it on again is Try again: a missing certificate is asked for now.
+    if (on) relay.retryNow();
     return relay.getStatus();
   });
 

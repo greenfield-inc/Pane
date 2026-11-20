@@ -23,6 +23,7 @@ function headless(phases: Array<Pick<RelayStatus, 'phase' | 'lastError'>>) {
   const relay: Pick<RelayService, 'getStatus' | 'createPairingCode' | 'computerInfo'> = {
     getStatus: status,
     createPairingCode: () => { throw new Error('not used'); },
+    retryNow: () => {},
     computerInfo: () => (last === 'ready' ? computer : undefined),
   };
   const redeem = vi.fn(async () => ({ linked: ['Mac'] }));

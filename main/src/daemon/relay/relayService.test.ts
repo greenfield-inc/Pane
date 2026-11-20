@@ -4,10 +4,58 @@ import net from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { RelayService, privateAddresses } from './relayService';
+import { RELAY_HOST, startFakeRelay } from './__fixtures__/fakeRelay';
+import { letsEncryptLimit, startRefusingCa } from './__fixtures__/refusingCa';
 
 afterEach(() => { vi.useRealTimers(); });
 
 describe('relay service', () => {
+  it('a computer Let\'s Encrypt turns away says until when, asks again only then, and Try again asks at once', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    const relay = await startFakeRelay();
+    const ca = await startRefusingCa(letsEncryptLimit(new Date(Date.now() + 30 * 60_000)));
+    const service = new RelayService({
+      settings: () => ({ enabled: true, relayAddress: `${RELAY_HOST}:${relay.controlPort}` }),
+      onSettingsChanged: () => () => {},
+      secrets: { read: async () => null, write: async () => {} },
+      dataDir: mkdtempSync(join(tmpdir(), 'pane-relay-service-')),
+      pairingListener: () => ({ port: 1 }),
+      previewPort: () => null,
+      displayName: () => 'Studio Mac',
+      addClient: async () => {},
+      // No pane-direct, even where CI built one: it would first ask the fake relay for its direct relays.
+      env: {
+        PANE_RELAY_CONNECT_HOST: '127.0.0.1', PANE_RELAY_CA: join(__dirname, '__fixtures__', 'ca.pem'), PANE_ACME_DIRECTORY: ca.directoryUrl,
+        PANE_DIRECT_BIN: join(tmpdir(), 'no-pane-direct-here'),
+      },
+    });
+    try {
+      service.start();
+      await vi.waitFor(() => expect(service.getStatus().lastError).toMatch(/Let's Encrypt, which issues them, is turning away new computers until .+\. Keep Add a device open/u), { timeout: 10_000 });
+      expect(service.getStatus().phase).toBe('error');
+      expect(ca.orders()).toBe(1);
+
+      // Waking the computer doesn't order before the CA's time.
+      service.resume();
+      await vi.advanceTimersByTimeAsync(29 * 60_000);
+      expect(ca.orders()).toBe(1);
+
+      // Pane asks again within 5 minutes after the CA's time.
+      await vi.advanceTimersByTimeAsync(7 * 60_000);
+      await vi.waitFor(() => expect(ca.orders()).toBe(2), { timeout: 10_000 });
+
+      // Try again clears the old reason while it asks.
+      await vi.waitFor(() => expect(service.getStatus().lastError).toMatch(/turning away/u), { timeout: 10_000 });
+      service.retryNow();
+      expect(service.getStatus()).toMatchObject({ phase: 'certificate', lastError: null });
+      await vi.waitFor(() => expect(ca.orders()).toBe(3), { timeout: 10_000 });
+    } finally {
+      await service.stop();
+      relay.close();
+      await ca.close();
+    }
+  }, 30_000);
+
   it('starts phone access again after it failed at launch, as with a locked keychain', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval'] });
     let locked = true;
@@ -30,7 +78,7 @@ describe('relay service', () => {
       env: {},
     });
     service.start();
-    await vi.waitFor(() => expect(service.getStatus()).toMatchObject({ phase: 'error', lastError: 'The keychain is locked.', id: null }));
+    await vi.waitFor(() => expect(service.getStatus()).toMatchObject({ phase: 'error', lastError: 'The keychain is locked. Pane tries again by itself; choose Try again to try now.', id: null }));
 
     locked = false;
     await vi.advanceTimersByTimeAsync(5_000);

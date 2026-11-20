@@ -88,6 +88,13 @@ app:
   `Pane (<data directory>)`, so it never reads or deletes the installed app's
   secrets, but its items (several for a value over 1 KB) stay in your keychain
   until you delete them.
+- **Phone access certificates**: every new data directory is a new computer
+  with its own `<id>.runpane.net` certificate, and all computers share Let's
+  Encrypt's weekly limit for runpane.net. A dev (unpackaged) build orders from
+  Let's Encrypt staging, so phones and browsers don't trust it and pairing a real
+  phone fails at the TLS step. To test real pairing, launch with
+  `PANE_ACME_DIRECTORY=https://acme-v02.api.letsencrypt.org/directory` and reuse
+  one data directory, so its certificate is ordered once.
 - **Electron's browser profile** (localStorage, cache, cookies) is not covered
   by `PANE_DIR`. An unpackaged build uses the same profile folder as the
   installed app (`~/Library/Application Support/Pane` on macOS). `pnpm dev`

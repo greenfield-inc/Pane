@@ -128,6 +128,7 @@ function network() {
     const registry = new PaneCommandRegistry();
     registerRelayCommands(registry, {
       getStatus: () => { throw new Error('not used'); },
+      retryNow: () => {},
       computerInfo: () => info,
       // The URL the relay service builds: the maker's domain, the secret, its id and its name.
       createPairingCode: (lifetime) => {

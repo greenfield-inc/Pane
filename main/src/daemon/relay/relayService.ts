@@ -9,7 +9,7 @@ import type { RemoteDaemonClientRecord, RemoteRelaySettings } from '../../../../
 import type { RelayComputer, RelayDirectEndpoint, RelayLinkLifetime, RelayPairingInfo, RelayStatus } from '../../../../shared/types/relay';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { loadComputerKey, type ComputerKey, type KeyStore } from './computerKey';
-import { ComputerCertificate, LETS_ENCRYPT_DIRECTORY } from './computerCertificate';
+import { CertificateRateLimited, ComputerCertificate, LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY } from './computerCertificate';
 import { createComputerTlsServer, type ComputerTlsServer } from './computerTlsServer';
 import { computerHost, localAddressHost } from './computerNames';
 import { PairingExchange, type PairingExchangeRequest, type PairingExchangeResult, type PairingRefusal } from './pairingExchange';
@@ -25,6 +25,8 @@ const RENEW_CHECK_MS = 12 * 60 * 60_000;
 /** Without a valid certificate every connection is refused, so a failed order retries from 1 minute, doubling up to 30. */
 const CERTIFICATE_RETRY_FIRST_MS = 60_000;
 const CERTIFICATE_RETRY_MAX_MS = 30 * 60_000;
+/** Computers a CA turned away all ask again when it said to; up to this much later spreads them out. */
+const RATE_LIMIT_SPREAD_MS = 5 * 60_000;
 /** A failed start (a locked keychain at launch) retries from 5 seconds, doubling up to 5 minutes. */
 const START_RETRY_FIRST_MS = 5_000;
 const START_RETRY_MAX_MS = 5 * 60_000;
@@ -48,6 +50,8 @@ export interface RelayServiceDeps {
   addClient(record: RemoteDaemonClientRecord): Promise<void>;
   /** Environment overrides for development and self-tests; `process.env` by default. */
   env?: NodeJS.ProcessEnv;
+  /** A development build orders from Let's Encrypt's staging CA, so test computers never spend the real one's limits. */
+  developmentBuild?: boolean;
   log?(line: string): void;
 }
 
@@ -59,6 +63,8 @@ export class RelayService {
   private key: ComputerKey | null = null;
   private agent: RelayAgent | null = null;
   private certificate: ComputerCertificate | null = null;
+  /** The domain `certificate` was made for. */
+  private certificateDomain: string | null = null;
   private terminator: ComputerTlsServer | null = null;
   private localPort: number | null = null;
   private domain: string | null = null;
@@ -151,6 +157,17 @@ export class RelayService {
 
   resume(): void {
     this.agent?.reconnectNow();
+    void this.renewIfDue();
+  }
+
+  /** Try again: asks for a missing certificate now instead of at the next scheduled retry. */
+  retryNow(): void {
+    if (!this.certificateRetry) return;
+    clearTimeout(this.certificateRetry);
+    this.certificateRetry = null;
+    // The old reason clears at once, so Add a device shows the order running.
+    this.lastError = null;
+    this.emit();
     void this.renewIfDue();
   }
 
@@ -255,7 +272,7 @@ export class RelayService {
       this.startFailures = 0;
       this.emit();
     }).catch((cause: unknown) => {
-      this.lastError = cause instanceof Error ? cause.message : String(cause);
+      this.lastError = `${reasonOf(cause)}. Pane tries again by itself; choose Try again to try now.`;
       this.deps.log?.(`[relay] ${this.lastError}`);
       this.emit();
       this.retryStart();
@@ -313,13 +330,13 @@ export class RelayService {
           if (this.domain !== state.domain) this.domain = state.domain;
           if (cameOnline) {
             this.onOnline().catch((cause: unknown) => {
-              this.lastError = `Could not set up this computer's certificate: ${reasonOf(cause)}`;
+              this.lastError = `Could not set up this computer's certificate: ${reasonOf(cause)}. Quit and reopen Pane to try again.`;
               this.deps.log?.(`[relay] ${this.lastError}`);
               this.emit();
             });
           }
         } else if (state.status === 'connecting' && state.lastError) {
-          this.lastError = `Can't reach ${host}: ${state.lastError}`;
+          this.lastError = `Can't reach ${host}: ${reasonOf(state.lastError)}. Check this computer's internet connection; Pane keeps trying.`;
         }
         this.emit();
       },
@@ -333,17 +350,22 @@ export class RelayService {
     const key = this.key;
     const domain = this.domain;
     if (!key || !domain) return;
-    if (!this.certificate || this.certificate.getStatus() === null) {
+    // One certificate per domain: a reconnect while the first order is in flight shares that order.
+    if (!this.certificate || this.certificateDomain !== domain) {
+      this.certificateDomain = domain;
+      const directoryUrl = this.env.PANE_ACME_DIRECTORY ?? (this.deps.developmentBuild ? LETS_ENCRYPT_STAGING_DIRECTORY : LETS_ENCRYPT_DIRECTORY);
+      // A staging certificate is kept apart, so switching to a trusted CA orders a new one instead of loading it.
+      const staging = directoryUrl === LETS_ENCRYPT_STAGING_DIRECTORY ? '.staging' : '';
       this.certificate = new ComputerCertificate({
         key,
         domain,
-        certificateStore: fileStore(path.join(this.deps.dataDir, 'relay', `${domain}.certificate.pem`)),
+        certificateStore: fileStore(path.join(this.deps.dataDir, 'relay', `${domain}${staging}.certificate.pem`)),
         accountStore: {
           read: () => this.deps.secrets.read('relay/acme-account'),
           write: (value) => this.deps.secrets.write('relay/acme-account', value),
         },
         setTxt: (values) => this.agent?.setAcmeTxt(values) ?? Promise.reject(new Error('The relay is not connected.')),
-        directoryUrl: this.env.PANE_ACME_DIRECTORY ?? LETS_ENCRYPT_DIRECTORY,
+        directoryUrl,
         acmeCa: readOptionalFile(this.env.PANE_ACME_CA)?.toString(),
         log: this.deps.log,
       });
@@ -376,29 +398,40 @@ export class RelayService {
   }
 
   private async renewIfDue(): Promise<void> {
-    if (!this.certificate || this.agentState.status !== 'online') return;
+    // A scheduled retry waits for the CA's time; a reconnect or wake doesn't order early.
+    if (!this.certificate || this.agentState.status !== 'online' || this.certificateRetry) return;
     try {
       await this.certificate.ensure();
       this.lastError = null;
       this.certificateFailures = 0;
     } catch (error) {
       // A valid certificate keeps serving; Remote Access shows the reason days before it matters.
-      this.lastError = `Could not renew this computer's certificate: ${error instanceof Error ? error.message : String(error)}`;
+      if (this.certificate.isValid()) {
+        this.lastError = `Could not renew this computer's certificate: ${reasonOf(error)}`;
+      } else {
+        const caTime = error instanceof CertificateRateLimited ? error.retryAt : null;
+        const retryAt = this.retryCertificate(caTime);
+        this.lastError = error instanceof CertificateRateLimited ? certificateRefused(caTime ?? retryAt) : certificateFailed(reasonOf(error), retryAt);
+      }
       this.deps.log?.(`[relay] ${this.lastError}`);
-      if (!this.certificate.isValid()) this.retryCertificate();
     }
     this.emit();
   }
 
-  private retryCertificate(): void {
-    if (this.certificateRetry) return;
-    const delay = Math.min(CERTIFICATE_RETRY_MAX_MS, CERTIFICATE_RETRY_FIRST_MS * 2 ** this.certificateFailures);
+  /** Schedules the next order for a missing certificate, at `at` when the CA named a time; returns when it runs. */
+  private retryCertificate(at: number | null): number {
+    if (this.certificateRetry) clearTimeout(this.certificateRetry);
+    const backoff = Math.min(CERTIFICATE_RETRY_MAX_MS, CERTIFICATE_RETRY_FIRST_MS * 2 ** this.certificateFailures);
     this.certificateFailures += 1;
+    const delay = at === null
+      ? backoff * (0.5 + Math.random() * 0.5)
+      : Math.max(CERTIFICATE_RETRY_FIRST_MS, at - Date.now()) + Math.random() * RATE_LIMIT_SPREAD_MS;
     this.certificateRetry = setTimeout(() => {
       this.certificateRetry = null;
       void this.renewIfDue();
-    }, delay * (0.5 + Math.random() * 0.5));
+    }, delay);
     this.certificateRetry.unref();
+    return Date.now() + delay;
   }
 
   private localUrls(): string[] {
@@ -499,6 +532,21 @@ export class RelayService {
 const relayListSchema = boundary.object({
   relays: boundary.array(boundary.object({ region: boundary.string, directRelay: boundary.optional(boundary.string) })),
 });
+
+/** A clock time in this computer's locale, such as 2:16 PM. */
+function clockTime(at: number): string {
+  return new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+/** The CA turned this computer away for its rate limits until `at`. */
+function certificateRefused(at: number): string {
+  return `Phones can't reach this computer yet: it needs a security certificate, and Let's Encrypt, which issues them, is turning away new computers until ${clockTime(at)}. Keep Add a device open and Pane asks again then, or open it again after that time.`;
+}
+
+/** The order failed for another reason; Pane asks again at `at`. */
+function certificateFailed(reason: string, at: number): string {
+  return `Phones can't reach this computer yet: it could not get its security certificate (${reason}). Pane asks again at ${clockTime(at)} while Add a device is open, or choose Try again.`;
+}
 
 function parseHostPort(value: string) {
   const match = /^(.+?)(?::(\d+))?$/u.exec(value.trim());

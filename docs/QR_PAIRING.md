@@ -223,6 +223,15 @@ every computer it reached through yours.
   Awake.
 - **A browser on a Wi-Fi with no internet** can't reach the computer: a
   browser needs internet DNS. Open the Pane app instead.
+- **"Phones can't reach this computer yet: it needs a security certificate":**
+  each computer gets its own certificate, and Let's Encrypt, which issues them,
+  limits how many new computers it serves per week. Keep Add a device open and
+  Pane asks again at the time it shows, or open Add a device again after then.
+  A computer that already has its certificate is not affected.
+- **"Can't reach &lt;computer&gt;" on the phone right after scanning:** that
+  computer didn't answer within 10 seconds. Check that the phone is online,
+  then open **Add a device** on the computer: it shows a code once phones can
+  reach it, or says why not.
 - **"Phones can't connect: this computer's phone listener isn't running":**
   another app (often a second Pane) holds the listener's port. Quit that app,
   or give the listener a free port in **Settings › Remote Access › Tailscale ›

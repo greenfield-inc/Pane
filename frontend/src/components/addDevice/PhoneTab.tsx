@@ -41,7 +41,7 @@ function CodeBox({ view, onRetry }: { view: PairingView; onRetry: () => void }) 
   return (
     <SkeletonSwap loading={view.step === 'preparing'} skeleton={
       <>
-        <LoadingStatus label="Getting this computer ready…" />
+        <LoadingStatus label={view.step === 'preparing' ? view.label : 'Getting this computer ready…'} />
         <Skeleton className={cn(CODE_BOX, 'rounded-xl border border-border-secondary p-2')}>
           <Bone className="h-full w-full" />
         </Skeleton>
@@ -53,6 +53,7 @@ function CodeBox({ view, onRetry }: { view: PairingView; onRetry: () => void }) 
 }
 
 function caption(view: PairingView, renewed: boolean): string {
+  if (view.step === 'preparing') return view.label;
   if (view.step !== 'code') return 'Codes last 10 minutes';
   return renewed ? `New code · ${countdown(view.secondsLeft)}` : `Works once · ${countdown(view.secondsLeft)}`;
 }
@@ -65,7 +66,6 @@ export function PhoneTab({ view, paired, renewed, onRetry }: { view: PairingView
       <div role="alert" className="space-y-1">
         <p className="text-sm font-medium text-text-primary">This computer can&apos;t be paired right now</p>
         <p className="text-sm text-text-secondary">{view.message}</p>
-        <p className="text-xs text-text-tertiary">Check this computer&apos;s internet connection, then choose Try again.</p>
       </div>
     );
   } else {

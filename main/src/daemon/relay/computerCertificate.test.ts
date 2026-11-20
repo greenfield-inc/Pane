@@ -6,8 +6,9 @@ import net from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { loadComputerKey, type KeyStore } from './computerKey';
-import { ComputerCertificate } from './computerCertificate';
+import { CertificateRateLimited, ComputerCertificate } from './computerCertificate';
 import { integrationEnvSet } from './__fixtures__/integrationEnv';
+import { letsEncryptLimit, startRefusingCa } from './__fixtures__/refusingCa';
 
 /**
  * Runs against Pebble, Let's Encrypt's ACME test server, with validation switched off: the
@@ -42,6 +43,28 @@ describe('computer certificate', () => {
 
     expect(certificate.getStatus()).toBeNull();
     expect(certificate.needsRenewal()).toBe(true);
+  });
+});
+
+describe('a certificate authority that refuses for its rate limits', () => {
+  it('fails the order at once, saying when the CA takes new orders again, instead of waiting for it', async () => {
+    const ca = await startRefusingCa(letsEncryptLimit(new Date('2026-11-20T22:16:39Z')));
+    try {
+      const certificate = new ComputerCertificate({
+        key: await loadComputerKey(memory()), domain: 'runpane.net', certificateStore: memory(), accountStore: memory(),
+        setTxt: async () => undefined, directoryUrl: ca.directoryUrl,
+      });
+
+      const started = Date.now();
+      const failure = await certificate.ensure().then(() => null, (error: Error) => error);
+
+      expect(failure).toBeInstanceOf(CertificateRateLimited);
+      expect(failure).toMatchObject({ retryAt: Date.parse('2026-11-20T22:16:39Z') });
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(certificate.isValid()).toBe(false);
+    } finally {
+      await ca.close();
+    }
   });
 });
 

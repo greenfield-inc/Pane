@@ -4,6 +4,10 @@ import tls from 'tls';
 import type { ComputerKey, KeyStore } from './computerKey';
 
 export const LETS_ENCRYPT_DIRECTORY = 'https://acme-v02.api.letsencrypt.org/directory';
+/** Let's Encrypt's test CA: its certificates are not trusted, and its limits are separate from the real one's. */
+export const LETS_ENCRYPT_STAGING_DIRECTORY = 'https://acme-staging-v02.api.letsencrypt.org/directory';
+/** Each request to the CA gives up after this long, so an order never hangs. */
+const ACME_REQUEST_TIMEOUT_MS = 30_000;
 
 /** Renew once a third of the lifetime is left: 30 days of 90 today, about 21 of 64 from 2027. */
 const RENEW_FRACTION_LEFT = 1 / 3;
@@ -12,6 +16,14 @@ export interface CertificateStatus {
   notBefore: string;
   notAfter: string;
   renewAt: string;
+}
+
+/** The CA refused for now because of its rate limits; `retryAt` is when it said to ask again, if it said. */
+export class CertificateRateLimited extends Error {
+  constructor(message: string, readonly retryAt: number | null) {
+    super(message);
+    this.name = 'CertificateRateLimited';
+  }
 }
 
 export interface ComputerCertificateOptions {
@@ -91,6 +103,12 @@ export class ComputerCertificate {
     const accountKey = savedAccountKey ?? (await acme.crypto.createPrivateEcdsaKey('P-256')).toString();
     if (!savedAccountKey) await this.options.accountStore.write(accountKey);
     if (this.options.acmeCa) acme.axios.defaults.httpsAgent = new https.Agent({ ca: this.options.acmeCa });
+    // A refused or slow request fails the order instead of waiting: acme-client otherwise sleeps
+    // through a rate limit's Retry-After, hours with nothing on screen. The caller retries.
+    // acme-client keeps its retry settings on its axios defaults, which axios's types don't name.
+    const defaults: { timeout?: number; acmeSettings?: { retryMaxAttempts: number } } = acme.axios.defaults;
+    defaults.timeout = ACME_REQUEST_TIMEOUT_MS;
+    if (defaults.acmeSettings) defaults.acmeSettings.retryMaxAttempts = 0;
     const client = new acme.Client({ directoryUrl: this.options.directoryUrl ?? LETS_ENCRYPT_DIRECTORY, accountKey });
     if (savedAccountKey) {
       // Looks the saved account up, so `auto` reuses it: registering a known key again makes
@@ -115,7 +133,7 @@ export class ComputerCertificate {
         values.delete(keyAuthorization);
         await this.options.setTxt([...values]).catch(() => undefined);
       },
-    });
+    }).catch((error: Error) => { throw rateLimitOf(error.message) ?? error; });
     this.use(pem);
     await this.options.certificateStore.write(pem);
     this.options.log?.(`[relay] certificate for ${base} valid until ${this.status?.notAfter}`);
@@ -137,4 +155,15 @@ export class ComputerCertificate {
       renewAt: new Date(renewAt).toISOString(),
     };
   }
+}
+
+/**
+ * A CA's refusal for its rate limits (RFC 8555 `rateLimited`), from the problem text acme-client
+ * throws, with the time Let's Encrypt says to ask again ("retry after 2026-11-20 22:16:39 UTC").
+ */
+function rateLimitOf(message: string): CertificateRateLimited | null {
+  if (!/rate.?limit|too many (?:certificates|new orders|failed authorizations)/iu.test(message)) return null;
+  const when = /retry after (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) UTC/iu.exec(message);
+  const retryAt = when ? Date.parse(`${when[1]}T${when[2]}Z`) : Number.NaN;
+  return new CertificateRateLimited(message, Number.isNaN(retryAt) ? null : retryAt);
 }
