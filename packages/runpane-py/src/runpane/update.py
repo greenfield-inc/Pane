@@ -46,6 +46,27 @@ def run_update(parsed) -> int:
     return subprocess.call(args, env=environment)
 
 
+UPDATE_HOST_UNSUPPORTED = "ERR_UPDATE_HOST_UNSUPPORTED"
+
+
+def update_host_unsupported() -> PaneDaemonClientError:
+    """A Pane without runpane:update:host predates runpane update; its daemon's generic next step would loop back here."""
+    return PaneDaemonClientError(
+        "The running Pane is older than runpane update: it has no update command (runpane:update:host), so runpane cannot update it in place. Nothing was changed.",
+        code=UPDATE_HOST_UNSUPPORTED,
+        next="Update Pane once with its own updater (open Pane, go to Settings, and check for updates there), or quit Pane and run runpane install client. After that, runpane update works directly.",
+    )
+
+
+def assert_update_host(pane_dir: Path) -> None:
+    """Raise update_host_unsupported for a Pane too old to report its update host; any other answer passes."""
+    try:
+        invoke_daemon("runpane:update:host", [], pane_dir=str(pane_dir), timeout_ms=10_000)
+    except PaneDaemonClientError as error:
+        if error.code == "ERR_UNKNOWN_CHANNEL":
+            raise update_host_unsupported() from error
+
+
 NATIVE_UPDATE_FORMAT = {"darwin": "zip", "win32": "exe"}.get(sys.platform, "appimage")
 RELAUNCH_TIMEOUT_SECONDS = 10 * 60
 
@@ -90,6 +111,9 @@ def update_in_app(parsed, pane_dir: Path, refusal: PaneDaemonClientError) -> int
                 code=error.code,
                 next=error.next,
             ) from error
+        # The refusal came before any host lookup, so ask now: a Pane that predates
+        # runpane update entirely gets the same error as the npm CLI's preflight.
+        assert_update_host(pane_dir)
         raise PaneDaemonClientError(
             f"Updating from runpane is unsupported by this Pane: it is older than the in-app update handoff, and the independent update refused this host ({refusal}).",
             code="ERR_UPDATE_IN_APP_UNAVAILABLE",

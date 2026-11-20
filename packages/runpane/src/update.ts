@@ -7,7 +7,7 @@ import type { ParsedArgs } from './commands';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { invokeDaemon, PaneDaemonClientError, resolvePaneDirectory } from './daemonClient';
 import { describeFailure, RunpaneError, type RunpaneFailure } from './errors';
-import { assertUpdateOptions, preflightUpdate, updateHostSchema, type UpdatePreflight } from './updatePreflight';
+import { assertUpdateOptions, preflightUpdate, readUpdateHost, UPDATE_HOST_UNSUPPORTED, updateHostSchema, type UpdatePreflight } from './updatePreflight';
 import { stageUpdateRuntime } from './updateRuntime';
 import { checkUpdateSupervisor, startUpdateSupervisor, removeUpdateSupervisor } from './updateSupervisor';
 import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpdate, readUpdateJournal, updateEnded, updateLockReleasable, UPDATE_ID_PATTERN, waitForUpdateCaller, writeUpdateJson } from './updateOperation';
@@ -54,6 +54,8 @@ export async function runUpdate(parsed: ParsedArgs): Promise<number> {
   } catch (error) {
     // A pinned release or a named --pane-path is the caller's request; the in-app updater installs only the latest release into the running Pane.
     if (parsed.dryRun || parsed.updateScope === 'cli' || parsed.paneVersion !== 'latest' || parsed.panePath) throw error;
+    // The in-app handoff is newer than runpane:update:host, so a Pane without one has neither.
+    if (error instanceof RunpaneError && error.code === UPDATE_HOST_UNSUPPORTED) throw error;
     return updateInApp(parsed, paneDir, describeFailure(error));
   }
   if (parsed.dryRun) { console.log(JSON.stringify({ preflight, changed: false }, null, 2)); return 0; }
@@ -121,6 +123,12 @@ async function updateInApp(parsed: ParsedArgs, paneDir: string, refusal: Runpane
     if (error instanceof PaneDaemonClientError && error.connectionFailure) throw error;
     const failure = describeFailure(error);
     if (failure.code !== 'ERR_UNKNOWN_CHANNEL') throw new RunpaneError(failure.code, `${failure.message} The independent update had already refused this host: ${refusal.message}`, failure.next);
+    // Preflight can refuse before it asks for the host (no standalone Node), so ask now:
+    // a Pane that predates runpane update entirely gets the same error as from preflight.
+    try { await readUpdateHost(paneDir, 10_000); } catch (probe) {
+      if (probe instanceof RunpaneError && probe.code === UPDATE_HOST_UNSUPPORTED) throw probe;
+      // Any other answer means only the handoff is missing.
+    }
     throw new RunpaneError('ERR_UPDATE_IN_APP_UNAVAILABLE', `Updating from runpane is unsupported by this Pane: it is older than the in-app update handoff, and the independent update refused this host (${refusal.message}).`, 'Open Pane, go to Settings, and click Update. Then runpane update works directly next time.');
   }
   // Pane rewrites its managed copy of the CLI at startup, so the new app brings
