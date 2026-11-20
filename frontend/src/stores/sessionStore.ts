@@ -229,6 +229,17 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   }),
   
   setActiveSession: async (sessionId) => {
+    const current = get();
+    // Selecting the Pane that is already open and loaded (a sidebar click on
+    // it) changes nothing. A new revision would make SessionView reload its
+    // panels and remount the chat, dropping the focus a relaunch just gave its
+    // message box (#1384). A pending fetch or a failed one still starts over.
+    if (sessionId && current.activeSessionId === sessionId && !current.selectionError
+      && pendingSelectionFetch?.sessionId !== sessionId
+      && current.sessions.some(session => session.id === sessionId
+        && (!session.isMainRepo || current.activeMainRepoSession?.id === sessionId))) {
+      return;
+    }
     const version = ++selectionVersion;
     set({ selectionRevision: version, selectionError: null });
     const state = get();
