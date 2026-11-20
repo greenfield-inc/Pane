@@ -102,6 +102,12 @@ export function defaultAppDirectory(electronApp: ElectronAppLike | null, home: s
   return join(home, '.pane');
 }
 
+/** True for Pane run from source (Electron, not packaged); false for the installed app and plain Node. */
+export function isDevelopmentBuild(): boolean {
+  const electronApp = getElectronApp();
+  return electronApp !== null && !electronApp.isPackaged;
+}
+
 let announcedDevDirectory = false;
 
 /**

@@ -16,6 +16,7 @@ import { disconnectActiveRemoteHostClients } from '../remoteTransportController'
 import { remoteHostRuntimeStateStore } from '../remoteHostRuntimeState';
 import { readFileSync } from 'fs';
 import { setRelayPushChannel } from '../mobilePushSender';
+import { isDevelopmentBuild } from '../../utils/appDirectory';
 
 export interface RelayHost {
   service: RelayService;
@@ -96,6 +97,7 @@ export async function createRelayHost(deps: {
     },
     secrets: relaySecrets(deps.dataDir),
     dataDir: deps.dataDir,
+    developmentBuild: isDevelopmentBuild(),
     // The port the listener bound, never the configured one: another app may hold that.
     pairingListener: () => {
       const listener = remoteHostRuntimeStateStore.getState();

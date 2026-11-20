@@ -4,13 +4,14 @@ import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 
 /** What Add a device › Phone shows in its code box. */
 export type PairingView =
-  | { step: 'preparing' }
+  /** `label` says what this computer is waiting for. */
+  | { step: 'preparing'; label: string }
   | { step: 'error'; message: string }
   | { step: 'code'; url: string; secondsLeft: number }
   /** The last code ran out; a new one is on its way. */
   | { step: 'renewing' };
 
-const SETUP_FAILED = "Pane's servers didn't answer";
+const SETUP_FAILED = "Pane's servers didn't answer. Check this computer's internet connection, then choose Try again.";
 
 /**
  * Pairing while `open`: turns phone access on if it is off and waits for this computer to be ready.
@@ -95,7 +96,7 @@ export function useRelayPairing(open: boolean, showCode = true) {
       (cause: Error) => {
         if (asked !== generation.current) return;
         requesting.current = false;
-        setFailure(ipcErrorMessage(cause, "Pane couldn't make a pairing code"));
+        setFailure(ipcErrorMessage(cause, "Pane couldn't make a pairing code. Choose Try again."));
       },
     );
   }, [ready, showCode, code, failure]);
@@ -127,7 +128,8 @@ export function useRelayPairing(open: boolean, showCode = true) {
   else if (status?.phase === 'error') view = { step: 'error', message: status.lastError ?? SETUP_FAILED };
   else if (code && expiresAt !== null) view = { step: 'code', url: code.url, secondsLeft: Math.max(0, Math.ceil((expiresAt - now) / 1000)) };
   else if (renewal === 'expired' && status?.phase === 'ready') view = { step: 'renewing' };
-  else view = { step: 'preparing' };
+  else if (status?.phase === 'certificate') view = { step: 'preparing', label: 'Getting a certificate…' };
+  else view = { step: 'preparing', label: 'Connecting to Pane…' };
 
   return { view, ready, paired, renewal, retry, relay: status?.relay ?? null };
 }

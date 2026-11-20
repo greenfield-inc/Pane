@@ -4,6 +4,7 @@ import type { LinkPreview, LinkRedeemResult, RelayLinkOpenedEvent, RelayPairedEv
 import { startAddDeviceListeners, useAddDeviceStore } from './addDeviceStore';
 import { ComputerTab, MakerResultView } from './ComputerTab';
 import { LinkFlowView } from './LinkConfirm';
+import { PhoneTab } from './PhoneTab';
 
 const LINK = 'https://runpane.net/pair#s=k3x9q2secret&c=studio-mac&n=Studio%20Mac';
 
@@ -207,5 +208,22 @@ describe('Add a device › Computer when phone access can\'t start', () => {
     expect(text(html)).toContain('The relay did not answer.');
     expect(buttons(html)).toContain('Try again');
     expect(text(html)).not.toContain('Getting this computer ready');
+  });
+});
+
+describe('Add a device › Phone without a code', () => {
+  const noCertificate = "Phones can't reach this computer yet: it needs a security certificate, and the service that issues them is turning away new computers for now. Pane asks again at 2:16 PM by itself; keep Pane open and the code appears then.";
+
+  it('says why there is no code and what happens next, with "Try again"', () => {
+    const html = renderToStaticMarkup(<PhoneTab view={{ step: 'error', message: noCertificate }} paired={null} renewed={false} onRetry={() => undefined} />);
+    expect(text(html)).toContain('be paired right now');
+    expect(text(html)).toContain('Pane asks again at 2:16 PM by itself');
+    expect(text(html)).not.toContain('internet connection');
+    expect(buttons(html)).toContain('Try again');
+  });
+
+  it('says what this computer is waiting for while the code is on its way', () => {
+    const html = renderToStaticMarkup(<PhoneTab view={{ step: 'preparing', label: 'Getting a certificate…' }} paired={null} renewed={false} onRetry={() => undefined} />);
+    expect(text(html)).toContain('Getting a certificate…');
   });
 });
