@@ -735,6 +735,16 @@ describe('browser tabs: streaming a page to another screen', () => {
     expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'persons')?.state.customState)).not.toContain('pageSize');
   });
 
+  it('gives the page its own size back once the screen that sized it is gone, even after Pane restarted', async () => {
+    // Pane restarted with a size a screen gave the tab before: no screen controls it now.
+    const sized = browserTab('persons', 'pane-a', 'claude-a');
+    sized.state.customState = { currentUrl: 'http://localhost:4173/', pageSize: { width: 344, height: 720, mobile: false, scale: 2 } };
+    const fixture = setup([sized], { holds });
+    expect(await call(fixture, 'screenshot', {})).toMatchObject({ ok: true });
+    expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'persons')?.state.customState)).not.toContain('pageSize');
+    expect(fixture.pages.get('persons')?.sent).not.toContain('Emulation.setDeviceMetricsOverride');
+  });
+
   it('moves the pointer over the page on the read channel, taking nothing over and waking no state read', async () => {
     const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
     await call(fixture, 'snapshot', {});

@@ -264,10 +264,6 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       host.setHeld(holds.held(), remotelyWatched());
     }
     for (const tabId of holds.held()) applyWatch(tabId);
-    // A screen in control that stopped reporting has left: the page gets its own size back.
-    for (const [tabId, viewerId] of controllers) {
-      if (!holds.viewers(tabId).some(viewer => viewer.id === viewerId)) void setPageSize(tabId, undefined).catch(cause => console.warn(`[browser] Could not give tab ${tabId} its size back:`, cause));
-    }
     // Nobody read a page's frames for a while (the phone went to the background): stop encoding it.
     for (const [pageId, stream] of streams) {
       if (Date.now() - stream.lastRead < STREAM_IDLE_MS) continue;
@@ -488,6 +484,10 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
    * A page that woke from sleep gets back the size a viewer gave it.
    */
   function applyWatch(tabId: string): void {
+    if (sizeOutlivedItsScreen(tabId)) {
+      void setPageSize(tabId, undefined).catch(cause => console.warn(`[browser] Could not give tab ${tabId} its size back:`, cause));
+      return;
+    }
     const page = host.page(tabId);
     if (!page || page.isDestroyed()) return;
     const viewers = holds.viewers(tabId);
@@ -504,6 +504,17 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const size = tabOf(tabId)?.pageSize;
     const driver = size || pages.has(page.id) ? driverFor(tabId, page) : undefined;
     void driver?.setPageSize(size).catch(cause => console.warn(`[browser] Could not size tab ${tabId}'s page:`, cause));
+  }
+
+  /**
+   * A size only lasts while the screen that gave it still shows the tab: once that screen left (it
+   * went back to its own copy, closed, stopped reporting, or Pane restarted and forgot it), the page
+   * fills its tab here again, so it never stays shrunk under the agent.
+   */
+  function sizeOutlivedItsScreen(tabId: string): boolean {
+    if (!tabOf(tabId)?.pageSize) return false;
+    const controller = controllers.get(tabId);
+    return !controller || !holds.viewers(tabId).some(viewer => viewer.id === controller && viewer.kind !== 'host');
   }
 
   /** Sets (or clears) the size a viewer in control gave the tab's page, and keeps it in the tab. */
@@ -613,6 +624,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       throw new PaneError('ERR_BROWSER_DEVTOOLS_OPEN', `DevTools is open on tab ${tab.id}, and agents don't act on a page while the person inspects it. Nothing ran.`, 'Ask the person to close DevTools on that tab, then try again.');
     }
     if (!loadsUrl(request)) refuseNonWebPage(contents, 'shows');
+    // A size whose screen left goes back before the call, so the agent works on (and captures) the page at its own size.
+    if (sizeOutlivedItsScreen(tab.id)) await setPageSize(tab.id, undefined);
     host.setBusy(tab.id, true);
     let outcome: VerbOutcome;
     try {
@@ -820,8 +833,6 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     }
     if (!decoded) {
       holds.unwatch(id, viewerId);
-      // The screen in control left (it went back to its own copy, or closed): the page fills its tab here again.
-      if (controllers.get(id) === viewerId) await setPageSize(id, undefined).catch(cause => console.warn(`[browser] Could not give tab ${id} its size back:`, cause));
     } else {
       // This computer's own window is the host's screen, whatever it calls itself.
       const kind: ViewerKind = isRemotePaneCommand() ? decoded.kind : 'host';
