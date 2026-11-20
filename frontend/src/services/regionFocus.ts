@@ -177,6 +177,39 @@ function focusInside(container: HTMLElement): boolean {
   return document.activeElement === container;
 }
 
+// --- Tiled Sessions (T-45) ---
+
+/**
+ * The focused tile of the Session layout, if Sessions are shown. Focus that
+ * enters any other tile selects that tile's Session, so whatever Enter or a
+ * tab key moves focus to is looked for only inside this one. A Session shown
+ * beside something else (an approval's origin, `data-session-inline`) is not
+ * a layout tile.
+ */
+const LAYOUT_TILE = '[data-session-tile]:not([data-session-inline])';
+
+function focusedSessionTile(): HTMLElement | null {
+  return queryShown(`${LAYOUT_TILE}[data-session-focused="true"]`)[0] ?? null;
+}
+
+/** Whether `element` belongs to `tile` itself, not to a Session shown inside it. */
+function ownedBy(tile: HTMLElement, element: Element): boolean {
+  return element.closest('[data-session-tile]') === tile;
+}
+
+/** A main-area split that holds the focus of its view (relative to the main region). */
+const FOCUSED_SPLIT = '[data-panel-group-id][data-group-focused="true"]';
+
+/**
+ * The shown elements of the main area matching `selector` (relative to the
+ * main region): within the focused Session tile when Sessions are tiled.
+ */
+function inMainArea(selector: string): HTMLElement[] {
+  const tile = focusedSessionTile();
+  const found = queryShown(`[data-focus-region="main"] ${selector}`);
+  return tile ? found.filter(element => ownedBy(tile, element)) : found;
+}
+
 function sidebarItems(): HTMLElement[] {
   return sortedByDocument(queryShown('[data-sidebar-item]'));
 }
@@ -248,8 +281,8 @@ export function stepFocus(delta: 1 | -1): void {
  * going to the first group on screen, which is another Session's.
  */
 function focusMainArea(): void {
-  const tile = queryShown('[data-session-tile][data-session-focused="true"]')[0];
-  const stops = collectFocusStops().filter(stop => !tile || tile.contains(stop.ref));
+  const tile = focusedSessionTile();
+  const stops = collectFocusStops().filter(stop => !tile || ownedBy(tile, stop.ref));
   const target = stops.find(stop => stop.kind === 'group' && stop.preferred)
     ?? stops.find(stop => stop.kind === 'group' || stop.kind === 'main' || stop.kind === 'approvals');
   if (target) {
@@ -268,7 +301,7 @@ export function focusActiveTabSoon(): void {
   const from = document.activeElement;
   if (from && from !== document.body && regionOf(from) !== 'main') return;
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    const group = queryShown('[data-focus-region="main"] [data-panel-group-id][data-group-focused="true"]')[0];
+    const group = inMainArea(FOCUSED_SPLIT)[0];
     if (group) focusInside(group);
   }));
 }
@@ -541,8 +574,6 @@ const OWNS_ENTER = [
 const DIALOG = 'dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
 const OVERLAY = `${DIALOG}, [role="menu"], [role="listbox"], [role="tree"], [role="grid"]`;
 
-const FOCUSED_SPLIT = '[data-focus-region="main"] [data-panel-group-id][data-group-focused="true"]';
-
 /** The message box of one chat tab, by its panel id. */
 function composerOf(panelId: string): HTMLElement | null {
   return queryShown(`[data-focus-region="main"] [data-chat-composer="${CSS.escape(panelId)}"]`)[0] ?? null;
@@ -554,8 +585,8 @@ function composerOf(panelId: string): HTMLElement | null {
  * back to the first chat in the main area.
  */
 function chatComposerOnScreen(): HTMLElement | null {
-  if (queryShown(FOCUSED_SPLIT).length > 0) return queryShown(`${FOCUSED_SPLIT} ${CHAT_COMPOSER}`)[0] ?? null;
-  return queryShown(`[data-focus-region="main"] ${CHAT_COMPOSER}`)[0] ?? null;
+  if (inMainArea(FOCUSED_SPLIT).length > 0) return inMainArea(`${FOCUSED_SPLIT} ${CHAT_COMPOSER}`)[0] ?? null;
+  return inMainArea(CHAT_COMPOSER)[0] ?? null;
 }
 
 /**
@@ -563,7 +594,7 @@ function chatComposerOnScreen(): HTMLElement | null {
  * null when it is something else, undefined when the tabs are not shown yet.
  */
 function chatShownInFocusedSplit(): string | null | undefined {
-  const tab = queryShown(`${FOCUSED_SPLIT} [role="tab"][aria-selected="true"][data-panel-id]`)[0];
+  const tab = inMainArea(`${FOCUSED_SPLIT} [role="tab"][aria-selected="true"][data-panel-id]`)[0];
   if (!tab) return undefined;
   return tab.getAttribute('data-panel-type') === 'chat' ? tab.getAttribute('data-panel-id') : null;
 }
