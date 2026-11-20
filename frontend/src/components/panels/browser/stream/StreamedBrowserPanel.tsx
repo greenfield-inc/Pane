@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Check, Copy, Loader2, RotateCw } from 'lucide-react';
 import type { ToolPanel } from '../../../../../../shared/types/panels';
+import type { BrowserInput } from '../../../../../../shared/types/browserStream';
 import type { JsonValue } from '../../../../../../shared/validation/boundaryDecoder';
 import { cn } from '../../../../utils/cn';
 import { normalizeUrl } from '../browserUrl';
@@ -58,6 +59,15 @@ export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: Tool
     );
   }
 
+  // While the host can't be reached nothing is sent; a refusal or a missed deadline shows under the address bar.
+  const act = (input: BrowserInput) => {
+    if (stream.stop === 'unreachable' || stream.stop === 'gone') return;
+    if (stream.stop === 'asleep') stream.wake();
+    void client.input(panel.id, [input]).then(
+      result => { if (!result.success && result.error) setError(result.error); },
+      (cause: unknown) => setError(`${host} didn't take that: ${cause instanceof Error ? cause.message : String(cause)}`),
+    );
+  };
   const go = (event: FormEvent) => {
     event.preventDefault();
     const url = normalizeUrl(typed ?? view?.url ?? '');
@@ -70,9 +80,9 @@ export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: Tool
     }
     setError('');
     setTyped(null);
-    void client.input(panel.id, [{ kind: 'navigate', url }]);
+    act({ kind: 'navigate', url });
   };
-  const history = (to: 'back' | 'forward' | 'reload') => void client.input(panel.id, [{ kind: 'history', go: to }]);
+  const history = (to: 'back' | 'forward' | 'reload') => act({ kind: 'history', go: to });
   const button = 'p-1 rounded enabled:hover:bg-surface-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed';
 
   return (

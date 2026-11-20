@@ -11,6 +11,8 @@ import type { BrowserStreamClient } from './streamClient';
 const CURSOR_SHOWN_MS = 1_200;
 /** How long "The page reloaded on <host>" stays. */
 const RELOADED_SHOWN_MS = 8_000;
+/** How long a failed Take over or Hand back stays on screen. */
+const NOTE_SHOWN_MS = 5_000;
 /** The pointer's position goes to the host at most this often while it hovers. */
 const HOVER_MS = 60;
 /** A touch held this long without moving is a right click. */
@@ -266,7 +268,8 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     }
     // One printable character goes as a key press, so the page sees keydown (Space, site shortcuts);
     // IME and dictation text still arrive through the input event.
-    if ([...event.key].length === 1 || PAGE_KEYS.has(event.key)) {
+    // Option/Alt characters (@, [, ], € on many layouts) arrive as text through the input event.
+    if ((!event.altKey && [...event.key].length === 1) || PAGE_KEYS.has(event.key)) {
       event.preventDefault();
       send({ kind: 'key', key: event.key, modifiers: modifiersOf(event) });
     }
@@ -290,6 +293,18 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     if (!files || files.length === 0) { send({ kind: 'files-cancel' }); return; }
     const read = await Promise.all([...files].map(async file => ({ name: file.name, data: await toBase64(file) })));
     send({ kind: 'files', files: read });
+  };
+
+  // Take over and Hand back: nothing is sent while the host can't be reached; a failure shows for a few seconds.
+  const [driveFailed, setDriveFailed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!driveFailed) return;
+    const timer = window.setTimeout(() => setDriveFailed(null), NOTE_SHOWN_MS);
+    return () => window.clearTimeout(timer);
+  }, [driveFailed]);
+  const drive = (who: 'person' | 'agent') => {
+    if (stopRef.current) return;
+    void client.driver(panelId, who).catch((cause: unknown) => setDriveFailed(`${who === 'person' ? 'Take over' : 'Hand back'} didn't reach ${host}: ${cause instanceof Error ? cause.message : String(cause)}`));
   };
 
   const [, rerender] = useState(0);
@@ -360,7 +375,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       <div className={cn('pointer-events-none absolute inset-0 border-2 transition-colors duration-200', agentDriving ? 'border-interactive' : 'border-transparent')} data-testid="browser-agent-overlay" data-driving={agentDriving ? 'agent' : view?.driver?.by ?? 'none'}>
         {view?.driver && (
           <div className="pointer-events-auto absolute left-1/2 top-2 max-w-[calc(100%-16px)] -translate-x-1/2 whitespace-nowrap rounded-full bg-surface-primary text-xs shadow-md" data-testid="browser-driver-chip" onPointerDown={event => event.stopPropagation()}>
-            <DriverChip driver={view.driver} agentName={lastAgent} onTakeOver={() => void client.driver(panelId, 'person')} onHandBack={() => void client.driver(panelId, 'agent')} />
+            <DriverChip driver={view.driver} agentName={lastAgent} onTakeOver={() => drive('person')} onHandBack={() => drive('agent')} />
           </div>
         )}
         {cursor && page && (
@@ -378,6 +393,11 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       )}
       {!frame && !stop && (
         <div role="status" className="absolute inset-0 flex items-center justify-center text-xs text-text-tertiary">Loading the page on {host}…</div>
+      )}
+      {driveFailed && !stop && (
+        <div role="status" className="absolute inset-x-0 bottom-0 flex justify-center p-3">
+          <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-status-error shadow-md">{driveFailed}</p>
+        </div>
       )}
       {stream.reloadedAt !== undefined && Date.now() - stream.reloadedAt < RELOADED_SHOWN_MS && !stop && (
         <div role="status" className="absolute inset-x-0 bottom-0 flex justify-center p-3">
