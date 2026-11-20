@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetPaneRuntimeForTests, setPaneRuntime, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
 import type { PtyHostSpawnOpts } from '../ptyHost/types';
 import type { ToolPanel } from '../../../shared/types/panels';
+import { ArchiveProcessTracker } from './archiveProcessTracker';
 import { ConfigManager } from './configManager';
 import { databaseService } from './database';
 import { panelManager as panelManagerMock } from '../test/setup';
@@ -62,6 +63,8 @@ describe('terminal panels and project environment variables', () => {
   let projectEnv: ProjectEnvService;
 
   beforeEach(async () => {
+    // The fake PTY pid may belong to a real process here: never snapshot or reap it when a terminal closes.
+    vi.spyOn(ArchiveProcessTracker.prototype, 'capture').mockResolvedValue();
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-terminal-project-env-'));
     ptyHost = new FakePtyHost();
     managers = [];

@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigManager } from './configManager';
 import { sharedCredentialsSchema, sharedNotifySwitchSchema } from './sharedCredentials';
 import { SharedCredentialSync } from './sharedCredentialSync';
@@ -243,9 +243,27 @@ function machine(id: string, initial: SharedNotifySwitch | 'older', credentials:
 describe('SharedCredentialSync and the Approvals switch', () => {
   const dirs: string[] = [];
   const running: SharedCredentialSync[] = [];
+  /** Every sync the debounce has started and not yet been waited for. */
+  const runs: Array<Promise<void>> = [];
+
+  /** Records every sync the debounce starts, so a test waits for syncs to end instead of for wall time. */
+  class TrackedSync extends SharedCredentialSync {
+    protected override run(): Promise<void> {
+      const started = super.run();
+      runs.push(started);
+      return started;
+    }
+  }
+
+  beforeEach(() => {
+    // The 500 ms debounce runs on a fake clock; config files, keys and peers stay real.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
 
   afterEach(async () => {
     await Promise.all(running.splice(0).map(sync => sync.stop()));
+    await Promise.all(runs.splice(0));
+    vi.useRealTimers();
     resetPaneRuntimeForTests();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -267,7 +285,7 @@ describe('SharedCredentialSync and the Approvals switch', () => {
       getWebviewContextMap: () => new Map(),
     });
     const listeners = new Set<(event: MachineConnectionsEvent) => void>();
-    const sync = new SharedCredentialSync(configManager, {
+    const sync = new TrackedSync(configManager, {
       subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
       remotes: () => peers,
     });
@@ -277,8 +295,19 @@ describe('SharedCredentialSync and the Approvals switch', () => {
     return { configManager, report };
   }
 
-  /** Long enough for the debounce and any sync it sets off, so a loop would show. */
-  const settled = () => new Promise(resolve => setTimeout(resolve, 1_300));
+  /**
+   * Runs out the debounce and every sync it sets off, until a debounce passes with no sync. Machines
+   * that trade values back and forth never get there, so a loop fails here.
+   */
+  const settled = async () => {
+    for (let round = 0; round < 10; round += 1) {
+      await vi.advanceTimersByTimeAsync(1_300);
+      const started = runs.splice(0);
+      if (started.length === 0) return;
+      await Promise.all(started);
+    }
+    throw new Error('Each sync set off another for 10 rounds: the machines keep trading values.');
+  };
 
   it('keeps two real machines on one switch and one "Show cards on", in both directions, and settles', async () => {
     const hostFor = async () => {
@@ -305,25 +334,29 @@ describe('SharedCredentialSync and the Approvals switch', () => {
         },
       }],
     });
-    const syncs = [new SharedCredentialSync(a.configManager, reaching(b)), new SharedCredentialSync(b.configManager, reaching(a))];
+    const syncs = [new TrackedSync(a.configManager, reaching(b)), new TrackedSync(b.configManager, reaching(a))];
     running.push(...syncs);
     syncs.forEach(sync => sync.start());
     await settled();
 
     await a.configManager.updateConfig({ notify: { enabled: false, position: 'top-right' } });
-    await vi.waitFor(() => expect(b.configManager.getConfig().notify?.enabled).toBe(false), { timeout: 5_000 });
+    await settled();
+    expect(b.configManager.getConfig().notify?.enabled).toBe(false);
     expect(b.configManager.getConfig().notifyEnabledChangedAt).toBe(a.configManager.getConfig().notifyEnabledChangedAt);
     expect(b.configManager.getConfig().notify?.position).toBeUndefined();
 
     await b.configManager.updateConfig({ notify: { enabled: true } });
-    await vi.waitFor(() => expect(a.configManager.getConfig().notify?.enabled).toBe(true), { timeout: 5_000 });
+    await settled();
+    expect(a.configManager.getConfig().notify?.enabled).toBe(true);
     await settled();
 
     await a.configManager.updateConfig({ notify: { cardsOn: MAC } });
-    await vi.waitFor(() => expect(b.configManager.getConfig().notify?.cardsOn).toEqual(MAC), { timeout: 5_000 });
+    await settled();
+    expect(b.configManager.getConfig().notify?.cardsOn).toEqual(MAC);
     expect(b.configManager.getConfig().notify?.enabled).toBe(true);
     await b.configManager.updateConfig({ notify: { cardsOn: null } });
-    await vi.waitFor(() => expect(a.configManager.getConfig().notify?.cardsOn).toBeNull(), { timeout: 5_000 });
+    await settled();
+    expect(a.configManager.getConfig().notify?.cardsOn).toBeNull();
     await settled();
 
     const stamp = a.configManager.getConfig().notifyEnabledChangedAt;
@@ -357,7 +390,8 @@ describe('SharedCredentialSync and the Approvals switch', () => {
 
     peer.set({ enabled: false, changedAt: 5_000 });
     report({ type: 'event', machineId: 'build-box', channel: 'remote:settings-changed', args: [] });
-    await vi.waitFor(() => expect(configManager.getConfig().notify?.enabled).toBe(false), { timeout: 5_000 });
+    await settled();
+    expect(configManager.getConfig().notify?.enabled).toBe(false);
 
     // NotifyService turns off on this same event, as it does for a local toggle.
     expect(updates.at(-1)?.notify?.enabled).toBe(false);
@@ -380,9 +414,9 @@ describe('SharedCredentialSync and the Approvals switch', () => {
   it('does not trade values back and forth once machines agree', async () => {
     const peer = machine('build-box', { enabled: false, changedAt: 5_000 });
     const { configManager } = await start([peer]);
-    await vi.waitFor(() => expect(configManager.getConfig().notify?.enabled).toBe(false), { timeout: 5_000 });
-
     await settled();
+    expect(configManager.getConfig().notify?.enabled).toBe(false);
+
     const reads = peer.calls('notify:switch:get').length;
     await settled();
 

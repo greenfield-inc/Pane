@@ -158,13 +158,15 @@ describe('PaneMcpEndpoint', () => {
     const grantA = grantOf(server.grant(first));
     const grantB = grantOf(server.grant(second));
 
-    const ranA = await ranAs(await callRepos(grantA));
-    const ranB = await ranAs(await callRepos(grantB));
+    // The two tabs' calls are independent: run them side by side.
+    const [ranA, ranB] = await Promise.all([callRepos(grantA).then(ranAs), callRepos(grantB).then(ranAs)]);
 
     expect(ranA).toMatchObject({ panel: 'panel-a', argv: ['repos', 'list', '--json'], paneDir: appDir });
     expect(ranA.cwd).toBe(realpathSync(first.cwd));
     expect(ranB).toMatchObject({ panel: 'panel-b' });
-  });
+    // The first call builds the endpoint's handler, about 1 s of synchronous CPU here (runpane's
+    // buildMcpTools), then each call starts one Node process; a busy 4-vCPU runner stretches both.
+  }, 15_000);
 
   it("names a client that didn't name itself on the request after the tab's agent, so notify keeps its long wait", async () => {
     const ran = await ranAs(await callRepos(grantOf(start().grant(tab('panel-a')))));
