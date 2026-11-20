@@ -2507,6 +2507,7 @@ const CONTRACT_SECTION_11 = [
     "usage": [
       "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--json] [--pane-dir <path>]",
       "runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
+      "runpane notify --close <id|Q-n> [--json] [--pane-dir <path>]",
       "runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
       "runpane notify --resume <id> [--json] [--pane-dir <path>]"
     ],
@@ -4062,6 +4063,11 @@ const CONTRACT_SECTION_12 = {
       "description": "notify only: say how you took the person's reply to this approval; answer or question follows the id."
     },
     {
+      "name": "--close",
+      "value": "<id|Q-n>",
+      "description": "notify only: withdraw a card you asked that still waits; it closes and nothing is sent."
+    },
+    {
       "name": "--took-as",
       "value": "<answer|question>",
       "description": "notify --took: the word after the id, as a flag (the MCP tool's tookAs)."
@@ -4513,7 +4519,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
       "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
       "  runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
-      "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--json]",
+      "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--close <id|Q-n>] [--json]",
       "  runpane inbox [--session <id|name>] [--json]",
       "  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]",
       "  runpane autopilot status|waiting|stack [--json]",
@@ -5851,6 +5857,7 @@ const CONTRACT_SECTION_13 = {
       "Usage:",
       "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--json] [--pane-dir <path>]",
       "  runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
+      "  runpane notify --close <id|Q-n> [--json] [--pane-dir <path>]",
       "  runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
       "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
       "",
@@ -5860,6 +5867,8 @@ const CONTRACT_SECTION_13 = {
       "When Pane is not running it prints an unavailable result: ask in the terminal instead.",
       "A typed reply comes back as a reply result (or a `reply:` line in your tab), recorded as the",
       "answer. If it asks something instead, run --took question, find out, then --update.",
+      "A card asked from a Pane tab stays open if this call ends first (killed, timed out, the agent",
+      "restarted): its answer is typed into the tab as an answer: line. Withdraw your own card with --close.",
       "",
       "Options:",
       "  --ui <ui>                      options, approve, ask, or info",
@@ -5880,6 +5889,7 @@ const CONTRACT_SECTION_13 = {
       "                                 The person's reply was a question: question reopens the approval and shows",
       "                                 you are getting more context. answer only confirms the recorded answer",
       "  --status <text>                With --took question: what you are doing (default Getting more context…)",
+      "  --close <id|Q-n>               Withdraw your own waiting card: it closes, and nothing is sent to anyone",
       "  --update <id|Q-n>              Save a new version of the approval after the person's question, and wait on it;",
       "                                 pass only what changed, and mark a reworded choice with \"was\" (its old label)",
       "  --asked <text>                 With --update: the person's question, as they typed it; leave out",
@@ -5893,6 +5903,7 @@ const CONTRACT_SECTION_13 = {
       "Examples:",
       "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'",
       "  runpane notify --took Q-20 question",
+      "  runpane notify --close Q-20",
       "  runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: it can be undone from Settings\" --context \"...\""
     ],
     "panels resume": [
@@ -7455,7 +7466,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
       "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
       "  runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
-      "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--json]",
+      "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--close <id|Q-n>] [--json]",
       "  runpane inbox [--session <id|name>] [--json]",
       "  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]",
       "  runpane autopilot status|waiting|stack [--json]",
@@ -8749,6 +8760,7 @@ const CONTRACT_SECTION_13 = {
       "Usage:",
       "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--json] [--pane-dir <path>]",
       "  runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
+      "  runpane notify --close <id|Q-n> [--json] [--pane-dir <path>]",
       "  runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
       "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
       "",
@@ -8758,6 +8770,8 @@ const CONTRACT_SECTION_13 = {
       "When Pane is not running it prints an unavailable result: ask in the terminal instead.",
       "A typed reply comes back as a reply result (or a `reply:` line in your tab), recorded as the",
       "answer. If it asks something instead, run --took question, find out, then --update.",
+      "A card asked from a Pane tab stays open if this call ends first (killed, timed out, the agent",
+      "restarted): its answer is typed into the tab as an answer: line. Withdraw your own card with --close.",
       "",
       "Options:",
       "  --ui <ui>                      options, approve, ask, or info",
@@ -8778,6 +8792,7 @@ const CONTRACT_SECTION_13 = {
       "                                 The person's reply was a question: question reopens the approval and shows",
       "                                 you are getting more context. answer only confirms the recorded answer",
       "  --status <text>                With --took question: what you are doing (default Getting more context…)",
+      "  --close <id|Q-n>               Withdraw your own waiting card: it closes, and nothing is sent to anyone",
       "  --update <id|Q-n>              Save a new version of the approval after the person's question, and wait on it;",
       "                                 pass only what changed, and mark a reworded choice with \"was\" (its old label)",
       "  --asked <text>                 With --update: the person's question, as they typed it; leave out",
@@ -8791,6 +8806,7 @@ const CONTRACT_SECTION_13 = {
       "Examples:",
       "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'",
       "  runpane notify --took Q-20 question",
+      "  runpane notify --close Q-20",
       "  runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: it can be undone from Settings\" --context \"...\""
     ],
     "panels resume": [
@@ -10279,7 +10295,7 @@ const CONTRACT_SECTION_14 = {
     "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
     "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered, with its buttons as `--choices` or `--questions` in notify's JSON), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
     "`runpane report --outcome <name>` ends one step of a Pane profile workflow: it names which of the step's declared outcomes happened (`runpane report --outcome \"plan ready\" --summary-file status.json`) and sends `state: done` with `outcome`. `--state` is then optional and may only be `done` (otherwise `ERR_REPORT_OUTCOME_STATE`), and `--question` is refused (`ERR_REPORT_OUTCOME_QUESTION`): an outcome ends the step, a question would block it. Pane checks the outcome against the step the panel runs and refuses an undeclared one with an error that lists the allowed outcomes.",
-    "`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab), and Pane records the reply as the answer once it is delivered. If the reply asks something instead, `--took <id|Q-n> question [--status <text>]` reopens the approval and shows that the agent is getting more context (`--took <id|Q-n> answer` confirms it, and changes nothing), and `runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A question asked from a Pane tab outlives its call: if the call ends first (killed, timed out, the agent restarted), the card stays open and its answer is typed into the asking tab as `answer: Q-n → <answer> (by you)`. A `{waiting: true, id, next}` result means the wait can continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
+    "`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab), and Pane records the reply as the answer once it is delivered. If the reply asks something instead, `--took <id|Q-n> question [--status <text>]` reopens the approval and shows that the agent is getting more context (`--took <id|Q-n> answer` confirms it, and changes nothing), and `runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. `runpane notify --close <id|Q-n>` withdraws a waiting card the calling tab asked and prints `{closed: true, id}`; nothing is sent to anyone. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A question asked from a Pane tab outlives its call: if the call ends first (killed, timed out, the agent restarted), the card stays open and its answer is typed into the asking tab as `answer: Q-n → <answer> (by you)`. A `{waiting: true, id, next}` result means the wait can continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
     "Work sent to an agent through `runpane panels create`, `panes create` (with a prompt), or `panels submit` records that the sender waits for a `runpane report`, unless the request says `--source user` (Pane's own UI does) or `--no-expect-report`; `--expect-report` asks for one anyway. Typing into a tab never does. If the agent then goes ready or its panel exits without a report, Pane journals one opt-in `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id> panel <panel-id> ready|exited`) whose `lastOutput` is the agent's last transcript reply or last screen lines; it skips the `--min-interval` batch and reaches only watchers that list it in `--kinds`. While the agent's screen shows background work (Claude's `· 1 shell` footer or a running background subagent row, Codex's `background terminal running` line), Pane waits and looks again every 10 seconds instead. `agent.blocked` entries carry `screenLines`, the prompt the agent waits on, and are journalled once a panel has stayed blocked for 2 seconds.",
     "The orchestrator guide prescribes submit without `--wait`, followed by its named watch; use one completion consumer. As an optional CLI route, `--wait` on `runpane panels submit`, `panels create`, and `panes create` turns the expected report on and blocks on that panel until the first `agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or `pane.gone`, then prints one line of JSON (`dispatchWaitResult`): the outcome, ids, the report's state, summary, `summaryPath`, PR and head, `screenLines` for a prompt, or `lastOutput` for a missing report, never the transcript. It exits 0 for a report, 3 missing, 4 blocked, 5 exited or gone, and 124 when `--timeout <duration>` passes. It follows the journal from the position the daemon took before delivering the work, so nothing that happens right after delivery is missed. It reuses watch --until-event and returns indeterminate (exit 6) if the journal epoch changes or retained history is lost; inspect the panel and inbox before retrying. Report-expected dispatches are serialized per panel and refused before writing while a result or missing-output collection is outstanding. A send with --no-expect-report is a reply (an answer, or an addition to the current work): it is delivered while a report is outstanding and leaves that expectation in place. Then watch for the original result.",
     "`runpane inbox [--session <id|name>] [--json]` lists what a Session's orchestrator has not acknowledged: reports, missing reports, and on-screen questions (a question clears itself once its panel moves on), plus `answers`, what its workers were told, kept 7 days; an answer with no `decision` still needs its D-n. `runpane inbox ack <item-id>...` or `--all --session <id|name>` clears items, and `runpane inbox ack <item-id>... --decision <D-n>` records the D-n, even on an item already cleared. An orchestrator runs it when it starts or resumes, to catch anything that finished while it was down; Pane never injects the inbox into its turns.",
@@ -11846,6 +11862,12 @@ const CONTRACT_SECTION_15 = {
       "--took",
       "Q-20",
       "answer",
+      "--json"
+    ],
+    [
+      "notify",
+      "--close",
+      "Q-20",
       "--json"
     ],
     [
@@ -19650,7 +19672,7 @@ const CONTRACT_SECTION_16 = {
     "additionalProperties": false
   },
   "notifyRequest": {
-    "description": "What `runpane notify` and `runpane secrets request` send on the runpane:notify daemon channel: the question fields, with relays or aboutSession when they apply; resume alone; took with tookAs (and status); or update with whatChanged, asked when it answers the person's typed question, and the changed fields. Only `secrets request` sends ui secret; only `secrets lease` sends lease, with ui approve.",
+    "description": "What `runpane notify` and `runpane secrets request` send on the runpane:notify daemon channel: the question fields, with relays or aboutSession when they apply; resume alone; took with tookAs (and status); close alone; or update with whatChanged, asked when it answers the person's typed question, and the changed fields. Only `secrets request` sends ui secret; only `secrets lease` sends lease, with ui approve.",
     "type": "object",
     "required": [
       "caller"
@@ -19763,6 +19785,11 @@ const CONTRACT_SECTION_16 = {
         "type": "string",
         "minLength": 1,
         "description": "The approval (id or Q-n) whose reply the reader took; sent with tookAs and nothing but status."
+      },
+      "close": {
+        "type": "string",
+        "minLength": 1,
+        "description": "A waiting approval (id or Q-n) the calling tab asked, to withdraw; sent alone."
       },
       "tookAs": {
         "enum": [
@@ -19885,6 +19912,24 @@ const CONTRACT_SECTION_16 = {
           },
           "next": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "description": "--close: the approval closed, and nothing was sent.",
+        "required": [
+          "closed",
+          "id"
+        ],
+        "properties": {
+          "closed": {
+            "const": true
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "additionalProperties": false
@@ -30360,6 +30405,12 @@ const CONTRACT_SECTION_17 = {
           "description": "After a reply result or a `reply:` line: the approval's id or Q-n, with tookAs question when the reply asked something (it reopens the approval; find out, then call update). The reply is already recorded as the answer, so tookAs answer changes nothing. Pass no question fields."
         },
         {
+          "name": "--close",
+          "value": "<id|Q-n>",
+          "required": false,
+          "description": "Withdraw a card you asked that still waits, by its id or Q-n, when you no longer need the answer: it closes and nothing is sent. Pass no other fields. Ending your call does not close it."
+        },
+        {
           "name": "--took-as",
           "value": "<answer|question>",
           "required": false,
@@ -30430,7 +30481,8 @@ const CONTRACT_SECTION_17 = {
         "runpane notify --ui options --title \"Ship 2.5 today: which parts go out?\" --questions '[{\"title\":\"Release notes\",\"choices\":[{\"label\":\"Ship as written\",\"recommended\":true},{\"label\":\"Hold\"}]},{\"title\":\"Intel Mac build\",\"choices\":[{\"label\":\"Include it\"},{\"label\":\"Skip it\"}]}]' --json",
         "runpane notify --took Q-20 question --status \"Checking whether it can be undone\" --json",
         "runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: Settings > Search turns it off again\" --context \"Search takes 4 s; the index brings it under 100 ms. It can be undone from Settings.\" --json",
-        "runpane notify --resume n-4f2a --json"
+        "runpane notify --resume n-4f2a --json",
+        "runpane notify --close Q-20 --json"
       ],
       "jsonSchemas": [
         "notifyRequest",
@@ -30443,7 +30495,7 @@ const CONTRACT_SECTION_17 = {
         "Results: options returns {answer: <chosen label>, note?}, with questions also answers (one label per question); approve returns {approved: true|false, note?}; ask returns {answer}; info returns {delivered: \"screen\"|\"inbox\"}.",
         "A result of {reply, picks?, id, replyId, next} means the person typed a reply instead of only picking: Pane records it as the answer, so the approval is done. If it asks something instead, call `runpane notify --took <replyId> question` and find out, then `runpane notify --update <replyId> --asked \"<their question>\" --what-changed \"<one line per change>\"` with whatever changed, instead of asking again. With no open call the reply reaches your tab as a `reply:` line, recorded the same way; `correction:` lines fix how it was taken. --took returns {took, id, next?}. Use its replyId rather than the Q-n: only this call was given it, so it works from outside a Pane tab too.",
         "Only the reply's reader may run took and update: the asker, the orchestrator that relayed it, or Autopilot. Anyone else gets ERR_NOTIFY_NOT_READER.",
-        "A result of {waiting: true, id} means the question is still on screen and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting. Asked from outside Pane, Pane gives up after 15 minutes on this loop and returns unavailable; asked from a Pane tab, the card stays open with no limit, and if you stop resuming, its answer is typed into your tab as an answer: line.",
+        "A result of {waiting: true, id} means the question is still on screen and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting. Asked from outside Pane, Pane gives up after 15 minutes on this loop and returns unavailable; asked from a Pane tab, the card stays open with no limit, and if you stop resuming, its answer is typed into your tab as an answer: line. To withdraw a card you no longer need, call `runpane notify --close <id|Q-n>`; it returns {closed: true, id}.",
         "A result of {unavailable, next} means nobody can answer through Pane right now (Pane is not running, Notify is off, or the wait ended): ask in the terminal instead. It is a result, not an error.",
         "Inside a Pane terminal the question names its Pane and panel (PANE_SESSION_ID and PANE_PANEL_ID); elsewhere it names the working directory.",
         "An older Pane ignores links and shows the card without them.",

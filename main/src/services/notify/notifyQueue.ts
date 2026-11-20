@@ -78,6 +78,8 @@ function forSecret(result: NotifyResult): NotifyResult {
 const ASKER_STOPPED = 'the asker stopped waiting';
 /** Why an item's asker is gone when only its tab closed: a relaying orchestrator or Autopilot can still read for it. */
 export const ASKING_TAB_CLOSED = 'the asking tab was closed';
+/** Why a card closed when its asker ran `runpane notify --close`. */
+const ASKER_WITHDREW = 'its asker withdrew it';
 /** What a reader that took a reply as a question is doing, until it says otherwise. */
 const ASKING_STATUS = 'Getting more context…';
 
@@ -1140,6 +1142,32 @@ export class NotifyQueue extends EventEmitter {
     if (item.originKind === 'worker' && relay && item.reply && item.reply.reader?.kind !== 'orchestrator') {
       this.enqueueTabMessage(item, `reopened: ${askerRef(item)} → ${askerName(item)} took "${item.reply.text}" as a question and is updating the card${idTag(item)} (by ${askerName(item)})`, false, { panelId: relay.panelId });
     }
+  }
+
+  /**
+   * `runpane notify --close <id|Q-n>`: the asking tab withdraws a card it no longer needs. Ending
+   * its call no longer closes a tab's card, so this is how an asker takes one back. Only the tab
+   * that asked may: a relayed worker's card stays the worker's.
+   */
+  withdraw(caller: NotifyReaderCaller, ref: string): NotifyResult {
+    const wanted = ref.trim();
+    const open = [...this.entries.values()].filter(entry => isOpen(entry.item) && (entry.item.id === wanted || leadingQn(entry.item.title) === wanted));
+    if (open.length === 0) {
+      throw new PaneError('ERR_NOTIFY_GONE', `There's no waiting approval ${wanted} on ${this.machine()}: it was answered or closed. Nothing was changed.`, 'Nothing to withdraw. If it was answered, act on the answer you got.');
+    }
+    const own = open.filter(entry => caller.panelId !== undefined && entry.item.source.panelId === caller.panelId).sort((a, b) => b.item.createdAt - a.item.createdAt);
+    if (own.length === 0) {
+      throw new PaneError('ERR_NOTIFY_NOT_READER', `Only the tab that asked ${wanted} (${open[0].item.source.name}) can withdraw it, and this tab isn't it. Nothing was changed.`, 'Leave it open, or ask the person to close it.');
+    }
+    const [entry] = own;
+    if (entry.item.agentPrompt) {
+      throw new PaneError('ERR_NOTIFY_IN_TERMINAL', `"${entry.item.title}" is a permission prompt, so it can't be withdrawn. Nothing was changed.`, 'Answer it, on its card or in its terminal.');
+    }
+    if (entry.item.state === 'sent') {
+      throw new PaneError('ERR_NOTIFY_ANSWERED', `${refOf(entry.item)} was just answered; the answer reaches you in a moment. Nothing was changed.`, 'Act on the answer when it comes.');
+    }
+    this.closeOpen(entry, { by: 'pane', reason: ASKER_WITHDREW }, closedResult('You withdrew this question.'));
+    return { closed: true, id: entry.item.id };
   }
 
   /**

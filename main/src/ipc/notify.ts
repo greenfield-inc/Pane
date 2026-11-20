@@ -91,6 +91,7 @@ const notifyRequestSchema = boundary.object({
   resume: boundary.optional(boundary.nonEmptyString),
   took: boundary.optional(boundary.string),
   tookAs: boundary.optional(boundary.enumeration('answer', 'question')),
+  close: boundary.optional(boundary.string),
   status: boundary.optional(boundary.string),
   update: boundary.optional(boundary.string),
   asked: boundary.optional(boundary.string),
@@ -849,7 +850,7 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
  * calls that ask nothing (resume, --took), aren't cards to check.
  */
 function admitNotifyCard(request: NotifyRequest): string[] {
-  if (request.resume || request.took !== undefined) return [];
+  if (request.resume || request.took !== undefined || request.close !== undefined) return [];
   if (request.update !== undefined) {
     if (request.title === undefined && !request.choices && !request.questions) return [];
     // An update changes only what it passes; the rest is the approval's, checked when it was asked.
@@ -889,6 +890,12 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   const { links, ...rest } = decoded;
   const request: NotifyRequest = rest;
   if (request.resume) return request;
+  if (request.close !== undefined) {
+    if (!request.close.trim()) throw invalid('close needs the approval\'s id or Q-n.');
+    const { caller: _caller, close: _close, ...others } = request;
+    if (Object.values(others).some(value => value !== undefined)) throw invalid('close goes on its own: pass only the approval\'s id or Q-n.');
+    return request;
+  }
   if (request.took !== undefined) {
     if (!request.took.trim()) throw invalid('took needs the approval\'s id or Q-n.');
     if (!request.tookAs) throw invalid('took needs answer or question: --took <id|Q-n> question.');
@@ -1022,7 +1029,7 @@ function checkQuestions(questions: NonNullable<NotifyRequest['questions']>): voi
 
 /** Autopilot's rewrite takes the same checks as any notify call. */
 export function parseRewriteQuestion(value: PaneCommandValue, cwd?: string): NotifyQuestion {
-  const { caller: _caller, resume: _resume, relays: _relays, aboutSession: _about, returnAfterMs: _after, took: _took, tookAs: _tookAs, status: _status, update: _update, asked: _asked, whatChanged: _changed, ...question } = parseNotifyRequest({ ...decodeBoundary(value, boundary.jsonObject), caller: { cwd } });
+  const { caller: _caller, resume: _resume, relays: _relays, aboutSession: _about, returnAfterMs: _after, took: _took, tookAs: _tookAs, close: _close, status: _status, update: _update, asked: _asked, whatChanged: _changed, ...question } = parseNotifyRequest({ ...decodeBoundary(value, boundary.jsonObject), caller: { cwd } });
   if (!question.ui || !question.title) throw invalid('ui and title are required.');
   return { ...question, ui: question.ui, title: question.title };
 }

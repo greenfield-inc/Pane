@@ -7041,6 +7041,7 @@ async function checkNotifyParity() {
       'Reply r-2 on n-1: "Only the train" (picked: — · One train). Run `runpane notify --took r-2 answer` if this answers it.'],
     [{ answer: 'Yes · One train', answers: ['Yes', 'One train'] }, 'Answer: Yes · One train'],
     [{ took: 'question', id: 'n-1' }, 'Taken as a question (id n-1).'],
+    [{ closed: true, id: 'n-1' }, 'Closed n-1. Nothing was sent.'],
   ];
   const links = [{ label: 'Notes', path: 'docs/RELEASE.md' }, { label: 'PR #812', url: 'https://github.com/org/repo/pull/812' }];
   const notifyLinks = JSON.stringify(links);
@@ -7103,6 +7104,12 @@ async function checkNotifyParity() {
         frames[runtime].push(frame);
         return { result: { answer: 'Ship · Skip', answers: ['Ship', 'Skip'] } };
       }, () => runCliOnce(runtime, ['notify', '--ui', 'options', '--title', 'Ship 2.5?', '--questions', notifyQuestions, '--json'], paneDir, 20_000, outsidePane));
+      // --close withdraws the caller's own card and sends nothing else.
+      const closed = await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { closed: true, id: 'n-1' } };
+      }, () => runCliOnce(runtime, ['notify', '--close', 'Q-20', '--json'], paneDir, 20_000, outsidePane));
+      assert.deepStrictEqual(JSON.parse(closed.stdout), { closed: true, id: 'n-1' }, `${runtime} notify --close: ${closed.stderr}`);
 
       // No Pane is listening: an unavailable result, not an error, so the agent asks in its terminal.
       const offline = await runCliOnce(runtime, [...ask, '--json'], paneDir, 20_000, insidePane);
@@ -7118,21 +7125,22 @@ async function checkNotifyParity() {
     returnAfterMs: 50000,
     caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir, agent: 'Cursor' },
   };
-  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 7).fill('runpane:notify'));
+  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 8).fill('runpane:notify'));
   assert.deepStrictEqual(frames.npm[0].args, [question]);
-  assert.deepStrictEqual(frames.npm.at(-7).args, [{ ui: 'info', title: 'Notes are ready', links, caller: { cwd: rootDir } }]);
-  assert.deepStrictEqual(frames.npm.at(-6).args, [{
+  assert.deepStrictEqual(frames.npm.at(-8).args, [{ ui: 'info', title: 'Notes are ready', links, caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-7).args, [{
     ui: 'approve', title: 'Drop the table?', detail: 'DROP TABLE t;', detailLabel: 'Show the SQL', caller: { cwd: rootDir },
   }]);
-  assert.deepStrictEqual(frames.npm.at(-5).args, [{ resume: 'n-1', caller: { cwd: rootDir } }]);
-  assert.deepStrictEqual(frames.npm.at(-4).args, [{ took: 'Q-20', tookAs: 'answer', caller: { cwd: rootDir } }]);
-  assert.deepStrictEqual(frames.npm.at(-3).args, [{ took: 'Q-20', tookAs: 'question', status: 'Checking the logs', caller: { cwd: rootDir } }]);
-  assert.deepStrictEqual(frames.npm.at(-2).args, [{
+  assert.deepStrictEqual(frames.npm.at(-6).args, [{ resume: 'n-1', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-5).args, [{ took: 'Q-20', tookAs: 'answer', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-4).args, [{ took: 'Q-20', tookAs: 'question', status: 'Checking the logs', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-3).args, [{
     update: 'Q-20', asked: 'Can it be undone?', whatChanged: 'Added: Settings turns it off', context: 'It can be undone.',
     choices: [{ label: 'Turn it on', was: 'Yes' }, { label: 'Wait' }], links: [{ label: 'Q-19', approval: 'Q-19' }],
     returnAfterMs: 50000, caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir, agent: 'Cursor' },
   }]);
-  assert.deepStrictEqual(frames.npm.at(-1).args, [{ ui: 'options', title: 'Ship 2.5?', questions, caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-2).args, [{ ui: 'options', title: 'Ship 2.5?', questions, caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-1).args, [{ close: 'Q-20', caller: { cwd: rootDir } }]);
   const Ajv = require(require.resolve('ajv', { paths: [rootDir] }));
   const ajv = new Ajv({ allErrors: true });
   const { $schema: _metaSchema, ...contractDocument } = contract;
@@ -7198,6 +7206,8 @@ async function checkNotifyParity() {
     ['took', ['--took', 'Q-20', 'answer', '--ui', 'ask', '--title', 'x'], 'took records how a reply was taken, so it takes no other fields; remove ui, title.'],
     ['took', ['--took', 'Q-20', 'answer', '--update', 'Q-20'], 'took records how a reply was taken, so it takes no other fields; remove update.'],
     ['tookAs', ['--took-as', 'answer'], 'tookAs goes with took: --took <id|Q-n> answer|question.'],
+    ['close', ['--close', ' '], "close must be the approval's id or Q-n, such as --close Q-20."],
+    ['close', ['--close', 'Q-20', '--ui', 'ask', '--title', 'x'], 'close withdraws a card you asked, so it takes no other fields; remove ui, title.'],
     ['status', ['--took', 'Q-20', 'answer', '--status', 'Checking'], 'status says what you are doing about a question, so it goes with --took <id> question.'],
     ['status', ['--took', 'Q-20', 'question', '--status', ' '], 'status must be non-empty text, such as "Checking the logs".'],
     ['status', ['--ui', 'ask', '--title', 'x', '--status', 'Checking'], 'status goes with --took <id|Q-n> question.'],
