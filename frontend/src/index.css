@@ -363,8 +363,27 @@ body.understory {
   scroll-padding-block: calc(2 * var(--sidebar-section-height) + 0.25rem) calc(var(--sidebar-section-height) + 0.25rem);
 }
 
+/* A short window can leave the compact rail less room than its two pinned
+   headers and one 36px item (8rem). Pinned headers would then cover every row
+   under them, so below 8rem they scroll with the rows instead, and the reserved
+   scroll padding drops to zero with them: padding taller than the rail stops
+   scrollIntoView from moving at all (#1561). A container query cannot style
+   the container itself, so the padding steps on its own scrollport height
+   (100%): clamp gives 0 below 8rem and the full reservation above it. */
 .pane-sidebar-shell-collapsed .pane-sidebar-list {
   --sidebar-section-height: 2.5rem;
+  --compact-rail-pinned: clamp(0%, (100% - 8rem) * 1000, 100%);
+  container: compact-rail / size;
+  scroll-padding-block:
+    min(var(--compact-rail-pinned), calc(2 * var(--sidebar-section-height) + 0.25rem))
+    min(var(--compact-rail-pinned), calc(var(--sidebar-section-height) + 0.25rem));
+}
+
+@container compact-rail (max-height: 8rem) {
+  .pane-sidebar-projects-header,
+  .pane-sidebar-sessions-header {
+    position: static;
+  }
 }
 
 .pane-sidebar-projects-header {

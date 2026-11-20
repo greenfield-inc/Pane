@@ -1,4 +1,4 @@
-// Shared by sidebar-compact.spec.ts and sidebar-compact.known-bug.spec.ts.
+// Shared helpers for sidebar-compact.spec.ts.
 import { expect, type Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 
