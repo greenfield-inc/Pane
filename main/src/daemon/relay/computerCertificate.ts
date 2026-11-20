@@ -31,6 +31,8 @@ export class CertificateRateLimited extends Error {
   }
 }
 
+export interface ExternalAccountKey { keyId: string; hmacKey: string; email?: string }
+
 /** An ACME CA the computer may order from. */
 export interface CertificateAuthority {
   /** The organization its certificates name as issuer: a renewal goes first to the CA that issued the current certificate. */
@@ -38,8 +40,11 @@ export interface CertificateAuthority {
   directoryUrl: string;
   /** The ACME account key PEM for this CA. */
   accountStore: KeyStore;
-  /** A one-time EAB key for registering a new account, for a CA that requires one; throws `CertificateRateLimited` when none is to be had. */
-  externalAccountKey?(): Promise<{ keyId: string; hmacKey: string }>;
+  /**
+   * A one-time EAB key for registering a new account, for a CA that requires one, with the contact
+   * email to register it with; throws `CertificateRateLimited` when none is to be had.
+   */
+  externalAccountKey?(): Promise<ExternalAccountKey>;
 }
 
 export interface ComputerCertificateOptions {
@@ -152,16 +157,19 @@ export class ComputerCertificate {
     // acme-client send an empty account update, which ACME servers refuse. An account this server
     // never saw (another directory) is registered by `auto`, which also reports any other failure.
     const registered = savedAccountKey !== null && await client.createAccount({ onlyReturnExisting: true }).then(() => true, () => false);
+    let email: string | undefined;
     if (!registered && authority.externalAccountKey) {
       // Each EAB key registers one account, so one is asked for only when registering.
-      const { keyId, hmacKey } = await authority.externalAccountKey();
-      client = new acme.Client({ directoryUrl: authority.directoryUrl, accountKey, externalAccountBinding: { kid: keyId, hmacKey } });
+      const eab = await authority.externalAccountKey();
+      email = eab.email;
+      client = new acme.Client({ directoryUrl: authority.directoryUrl, accountKey, externalAccountBinding: { kid: eab.keyId, hmacKey: eab.hmacKey } });
     }
     // The wildcard and the base name share one TXT name, so both values are published together.
     const values = new Set<string>();
     this.options.log?.(`[relay] requesting a certificate for ${base} from ${authority.name}`);
     const pem = await client.auto({
       csr,
+      email,
       termsOfServiceAgreed: true,
       challengePriority: ['dns-01'],
       // The relay confirmed the record; the ACME server checks it anyway.

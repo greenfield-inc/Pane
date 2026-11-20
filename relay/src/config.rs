@@ -252,8 +252,9 @@ pub struct Config {
     pub fcm_url: String,
 
     /// Google Cloud project whose Public CA API mints computers' one-time EAB keys for Google
-    /// Trust Services, with the VM's attached service account (GCE metadata server). Unset,
-    /// computers asking for one get `unconfigured`.
+    /// Trust Services, with the VM's attached service account (GCE metadata server). Needs
+    /// --acme-email, which computers register their accounts with. Unset, computers asking for one
+    /// get `unconfigured`.
     #[arg(long, env = "PANE_RELAY_EAB_PROJECT")]
     pub eab_project: Option<String>,
 

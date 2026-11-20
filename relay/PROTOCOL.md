@@ -199,9 +199,11 @@ only when it registers a new account there; later orders reuse the account.
 
 The relay mints the key through Google's Public CA API with its VM's service
 account (`--eab-project`), from the staging endpoint when `staging` is true,
-and answers `{"t":"ok","req":"<n>","keyId":"...","hmacKey":"<base64>"}`.
+and answers `{"t":"ok","req":"<n>","keyId":"...","hmacKey":"<base64>","email":"..."}`:
+`email` is the relay's `--acme-email`, the contact Google Trust Services
+requires on every account, so no computer sends its own.
 The key goes only to the computer that asked; the relay never logs it.
-Errors: `unconfigured` (no `--eab-project`), `throttled` (past
+Errors: `unconfigured` (no `--eab-project` or `--acme-email`), `throttled` (past
 `--limit-eab-per-day`), `provider` (the API refused; the message says why).
 A computer counts `unconfigured` and `throttled` as Google Trust Services
 refusing.

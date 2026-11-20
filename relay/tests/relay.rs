@@ -2452,6 +2452,8 @@ async fn computers_get_one_time_google_trust_services_keys_minted_with_the_vm_ac
     let env = Env::start(&[
         "--eab-project",
         "pane-eab",
+        "--acme-email",
+        "certificates@pane.example",
         "--limit-eab-per-day",
         "2",
         "--metadata-url",
@@ -2469,7 +2471,8 @@ async fn computers_get_one_time_google_trust_services_keys_minted_with_the_vm_ac
     agent.send(json!({"t": "eab", "req": "1"})).await;
     assert_eq!(
         agent.next().await,
-        json!({"t": "ok", "req": "1", "keyId": "kid-production", "hmacKey": "c2VjcmV0LXByb2R1Y3Rpb24="})
+        json!({"t": "ok", "req": "1", "keyId": "kid-production", "hmacKey": "c2VjcmV0LXByb2R1Y3Rpb24=",
+            "email": "certificates@pane.example"})
     );
     let mint = publicca.next().await;
     assert_eq!(header(&mint, "authorization"), Some("Bearer ya29.keyless"));
@@ -2479,7 +2482,8 @@ async fn computers_get_one_time_google_trust_services_keys_minted_with_the_vm_ac
         .await;
     assert_eq!(
         agent.next().await,
-        json!({"t": "ok", "req": "2", "keyId": "kid-staging", "hmacKey": "c2VjcmV0LXN0YWdpbmc="})
+        json!({"t": "ok", "req": "2", "keyId": "kid-staging", "hmacKey": "c2VjcmV0LXN0YWdpbmc=",
+            "email": "certificates@pane.example"})
     );
     assert_eq!(
         publicca.next().await.path,
@@ -2502,8 +2506,9 @@ async fn computers_get_one_time_google_trust_services_keys_minted_with_the_vm_ac
 }
 
 #[tokio::test]
-async fn a_relay_without_an_eab_project_says_it_has_no_keys() {
-    let env = Env::start(&[]).await;
+async fn a_relay_without_an_eab_project_and_email_says_it_has_no_keys() {
+    // Google Trust Services refuses accounts without a contact, so the project alone is not enough.
+    let env = Env::start(&["--eab-project", "pane-eab"]).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
     agent.send(json!({"t": "eab", "req": "1"})).await;
     let answer = agent.next().await;
@@ -2526,6 +2531,8 @@ async fn a_public_ca_refusal_reaches_the_computer_without_a_key() {
     let env = Env::start(&[
         "--eab-project",
         "pane-eab",
+        "--acme-email",
+        "certificates@pane.example",
         "--metadata-url",
         &metadata_url,
         "--publicca-url",

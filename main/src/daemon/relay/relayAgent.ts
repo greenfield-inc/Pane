@@ -44,6 +44,7 @@ const relayFrameSchema = boundary.object({
   body: text,
   keyId: text,
   hmacKey: text,
+  email: text,
 });
 type RelayFrame = ReturnType<typeof relayFrameSchema.decode>;
 
@@ -154,12 +155,13 @@ export class RelayAgent {
 
   /**
    * A one-time Google Trust Services EAB key, minted by the relay for this computer (relay/PROTOCOL.md,
-   * EAB keys): for its staging CA when `staging`. The key is a secret: it is never logged.
+   * EAB keys): for its staging CA when `staging`, with the relay's contact email for the account.
+   * The key is a secret: it is never logged.
    */
-  async externalAccountKey(staging: boolean): Promise<{ keyId: string; hmacKey: string }> {
+  async externalAccountKey(staging: boolean): Promise<{ keyId: string; hmacKey: string; email?: string }> {
     const answer = await this.request({ t: 'eab', staging });
     if (!answer.keyId || !answer.hmacKey) throw new Error('The relay answered without a Google Trust Services key.');
-    return { keyId: answer.keyId, hmacKey: answer.hmacKey };
+    return { keyId: answer.keyId, hmacKey: answer.hmacKey, email: answer.email };
   }
 
   /** Delivers a push alert with the Pane app's keys held by the relay (relay/PROTOCOL.md, Alerts). */

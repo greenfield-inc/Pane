@@ -16,6 +16,8 @@ const TOKEN_MARGIN: Duration = Duration::from_secs(5 * 60);
 
 pub struct Eab {
     project: Option<String>,
+    /// The contact the computer registers its account with: Google Trust Services requires one.
+    email: Option<String>,
     production_url: String,
     staging_url: String,
     metadata_url: String,
@@ -33,6 +35,7 @@ impl Eab {
     pub fn load(cfg: &Config) -> Result<Eab, Error> {
         Ok(Eab {
             project: cfg.eab_project.clone(),
+            email: cfg.acme_email.clone(),
             production_url: cfg.publicca_url.trim_end_matches('/').to_string(),
             staging_url: cfg.publicca_staging_url.trim_end_matches('/').to_string(),
             metadata_url: cfg.metadata_url.clone(),
@@ -41,8 +44,9 @@ impl Eab {
         })
     }
 
-    pub fn configured(&self) -> bool {
-        self.project.is_some()
+    /// The account contact to hand out with each key, when the relay has a project and an email.
+    pub fn contact(&self) -> Option<&str> {
+        self.project.as_ref().and(self.email.as_deref())
     }
 
     /// Mints a key for Google Trust Services' production CA, or its staging CA when `staging`.

@@ -15,7 +15,7 @@ export const RELAY_HOST = `us.relay.${DOMAIN}`;
  * signature, announces each raw client connection with `open`, and splices it to the computer's
  * data connection. Clients connect to it as plain TCP standing in for the relay's port 443.
  */
-export async function startFakeRelay(options: { refuse?: string; externalAccountKey?: { keyId: string; hmacKey: string } } = {}) {
+export async function startFakeRelay(options: { refuse?: string; externalAccountKey?: { keyId: string; hmacKey: string; email: string } } = {}) {
   const agents: tls.TLSSocket[] = [];
   const waiting = new Map<string, net.Socket>();
   const hellos: JsonObject[] = [];

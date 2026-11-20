@@ -62,7 +62,7 @@ describe('relay service', () => {
   it('gets a Google Trust Services certificate with a staging key from the relay when Let\'s Encrypt turns the computer away', async () => {
     const fixture = (name: string) => readFileSync(join(__dirname, '__fixtures__', name), 'utf8');
     const key = { keyId: 'kid-1', hmacKey: 'c2VjcmV0LTE=' };
-    const relay = await startFakeRelay({ externalAccountKey: key });
+    const relay = await startFakeRelay({ externalAccountKey: { ...key, email: 'certificates@pane.example' } });
     const letsEncrypt = await startRefusingCa(letsEncryptLimit(new Date(Date.now() + 30 * 60_000)));
     const gts = await startIssuingCa({ certificate: fixture('gts-computer.pem'), externalAccountKeys: [key] });
     // The computer key the fake CA's certificate names.

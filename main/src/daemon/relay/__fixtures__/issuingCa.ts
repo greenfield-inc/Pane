@@ -20,6 +20,7 @@ const jwsSchema = boundary.object({ protected: optionalString, payload: optional
 const headerSchema = boundary.object({ jwk: boundary.optional(boundary.json), kid: optionalString });
 const payloadSchema = boundary.object({
   onlyReturnExisting: boundary.optional(boundary.boolean),
+  contact: boundary.optional(boundary.array(boundary.string)),
   externalAccountBinding: boundary.optional(jwsSchema),
   identifiers: boundary.optional(boundary.array(boundary.object({ value: boundary.string }))),
 });
@@ -30,8 +31,8 @@ function decode<Value>(part: string | undefined, schema: BoundarySchema<Value>):
 }
 
 /**
- * A small ACME server, as Google Trust Services works: it registers an account only with a valid,
- * unused EAB key from `externalAccountKeys`, passes DNS-01 challenges without looking, and answers
+ * A small ACME server, as Google Trust Services works: it registers an account only with a contact
+ * and a valid, unused EAB key from `externalAccountKeys`, passes DNS-01 challenges without looking, and answers
  * every finalized order with `certificate`. It checks no JWS signatures besides the EAB's.
  */
 export async function startIssuingCa(options: { certificate: string; externalAccountKeys: ExternalAccountKey[] }): Promise<IssuingCa> {
@@ -77,6 +78,10 @@ export async function startIssuingCa(options: { certificate: string; externalAcc
         }
         if (payload.onlyReturnExisting) {
           problem(400, 'accountDoesNotExist', 'No account exists with the provided key');
+          return;
+        }
+        if (!payload.contact?.length) {
+          problem(400, 'invalidContact', 'Accounts must have at least one contact.');
           return;
         }
         const binding = payload.externalAccountBinding ?? { protected: undefined, payload: undefined, signature: undefined };

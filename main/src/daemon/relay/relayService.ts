@@ -11,7 +11,7 @@ import { boundary, decodeBoundary } from '../../../../shared/validation/boundary
 import { loadComputerKey, type ComputerKey, type KeyStore } from './computerKey';
 import {
   CertificateRateLimited, ComputerCertificate, GOOGLE_TRUST_SERVICES_DIRECTORY, GOOGLE_TRUST_SERVICES_STAGING_DIRECTORY,
-  LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY, type CertificateAuthority,
+  LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY, type CertificateAuthority, type ExternalAccountKey,
 } from './computerCertificate';
 import { createComputerTlsServer, type ComputerTlsServer } from './computerTlsServer';
 import { computerHost, localAddressHost } from './computerNames';
@@ -430,7 +430,7 @@ export class RelayService {
   }
 
   /** A relay that has no keys to give, or none left for this computer today, counts as Google Trust Services refusing. */
-  private async externalAccountKey(staging: boolean): Promise<{ keyId: string; hmacKey: string }> {
+  private async externalAccountKey(staging: boolean): Promise<ExternalAccountKey> {
     const agent = this.agent;
     if (!agent) throw new Error('The relay is not connected.');
     try {

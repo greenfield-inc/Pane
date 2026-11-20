@@ -6,7 +6,7 @@ import net from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { loadComputerKey, type KeyStore } from './computerKey';
-import { CertificateRateLimited, ComputerCertificate, type CertificateAuthority } from './computerCertificate';
+import { CertificateRateLimited, ComputerCertificate, type CertificateAuthority, type ExternalAccountKey } from './computerCertificate';
 import { integrationEnvSet } from './__fixtures__/integrationEnv';
 import { startIssuingCa } from './__fixtures__/issuingCa';
 import { letsEncryptLimit, startRefusingCa } from './__fixtures__/refusingCa';
@@ -80,7 +80,7 @@ describe('falling back to Google Trust Services', () => {
   const refusedUntil = new Date('2099-11-20T22:16:39Z');
 
   /** Google Trust Services as Pane asks it: a separate account, registered with a one-time key from the relay. */
-  function googleTrustServices(directoryUrl: string, keys: (() => Promise<{ keyId: string; hmacKey: string }>)[], accountStore = memory()) {
+  function googleTrustServices(directoryUrl: string, keys: (() => Promise<ExternalAccountKey>)[], accountStore = memory()) {
     let asked = 0;
     const authority: CertificateAuthority = {
       name: 'Google Trust Services',
@@ -101,7 +101,7 @@ describe('falling back to Google Trust Services', () => {
     try {
       const key = await computerKey();
       const certificateStore = memory();
-      const gts = googleTrustServices(gtsCa.directoryUrl, [async () => ({ keyId: 'kid-1', hmacKey: 'c2VjcmV0LTE=' })]);
+      const gts = googleTrustServices(gtsCa.directoryUrl, [async () => ({ keyId: 'kid-1', hmacKey: 'c2VjcmV0LTE=', email: 'certificates@pane.example' })]);
       const txt: string[][] = [];
       const options = { key, domain: 'relay.test', certificateStore, setTxt: async (values: string[]) => { txt.push(values); } };
       const certificate = new ComputerCertificate({ ...options, authorities: [letsEncrypt(letsEncryptCa.directoryUrl), gts.authority] });

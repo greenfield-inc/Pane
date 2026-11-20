@@ -245,7 +245,7 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
             }
             "eab" => {
                 let staging = v["staging"].as_bool().unwrap_or(false);
-                let refusal = if !state.eab.configured() {
+                let refusal = if state.eab.contact().is_none() {
                     Some(json!({"t": "error", "req": req, "code": "unconfigured",
                         "message": "This relay does not hand out Google Trust Services keys."}))
                 } else if state.charge(Charge::Eab(&id), 1) != Level::Ok {
@@ -264,7 +264,8 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
                     let answer = match state.eab.mint(staging).await {
                         Ok(key) => {
                             tracing::info!(id, staging, "EAB key minted");
-                            json!({"t": "ok", "req": req, "keyId": key.key_id, "hmacKey": key.hmac_key})
+                            json!({"t": "ok", "req": req, "keyId": key.key_id, "hmacKey": key.hmac_key,
+                                "email": state.eab.contact()})
                         }
                         Err(e) => {
                             tracing::warn!(id, staging, error = %e, "EAB key failed");
