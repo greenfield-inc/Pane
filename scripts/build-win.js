@@ -280,7 +280,7 @@ function downloadBetterSqlitePrebuiltForArch(targetArch) {
  * electron-builder includes them in the packaged app.
  */
 function installNodePtyForArch(targetArch) {
-  const nodePtyVersion = '1.2.0-beta.3';
+  const nodePtyVersion = require('../package.json').dependencies['@lydell/node-pty'];
   const pkgName = `@lydell/node-pty-win32-${targetArch}`;
   const hoistedLink = path.join(NODE_MODULES, '@lydell', `node-pty-win32-${targetArch}`);
 

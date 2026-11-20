@@ -34,6 +34,7 @@
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
+import { waitForSpawnedPid } from './spawnedPid';
 
 const loadHostModule = createRequire(__filename);
 
@@ -190,7 +191,7 @@ function handleInboundFrame(frame: JsonValue): void {
 async function handleRequest(request: PtyHostRequest): Promise<void> {
   switch (request.method) {
     case 'spawn':
-      handleSpawn(request.id, request.args);
+      await handleSpawn(request.id, request.args);
       return;
     case 'write':
       handleWrite(request.id, request.args.ptyId, request.args.data);
@@ -222,7 +223,7 @@ async function handleRequest(request: PtyHostRequest): Promise<void> {
   }
 }
 
-function handleSpawn(id: number, opts: PtyHostSpawnOpts): void {
+async function handleSpawn(id: number, opts: PtyHostSpawnOpts): Promise<void> {
   const ptyId = randomUUID();
   let ptyProcess: HostPty;
   try {
@@ -253,30 +254,40 @@ function handleSpawn(id: number, opts: PtyHostSpawnOpts): void {
 
   ptyMap.set(ptyId, ptyProcess);
 
+  // Main drops data and exit frames for a ptyId it has not been told about,
+  // so hold this pty's frames until the spawn response is sent.
+  let heldFrames: PtyHostEvent[] | null = [];
+  let exited = false;
+  const post = (frame: PtyHostEvent) => {
+    if (heldFrames) heldFrames.push(frame);
+    else rpcPort?.postMessage(frame);
+  };
+
   ptyProcess.onData((data) => {
-    if (!rpcPort) {
-      return;
-    }
-    rpcPort.postMessage({ type: 'data', ptyId, data });
+    post({ type: 'data', ptyId, data });
   });
 
   ptyProcess.onExit(({ exitCode, signal }) => {
-    if (rpcPort) {
-      // Forward `{exitCode, signal}` verbatim including undefined → null.
-      // `AbstractCliManager.ts:781-795` branches on the raw signal number so
-      // we must not normalize to a string name.
-      rpcPort.postMessage({
-        type: 'exit',
-        ptyId,
-        exitCode: exitCode ?? null,
-        signal: signal ?? null,
-      });
-    }
+    exited = true;
+    // Forward `{exitCode, signal}` verbatim including undefined → null.
+    // `AbstractCliManager.ts:781-795` branches on the raw signal number so
+    // we must not normalize to a string name.
+    post({
+      type: 'exit',
+      ptyId,
+      exitCode: exitCode ?? null,
+      signal: signal ?? null,
+    });
     ptyMap.delete(ptyId);
   });
 
-  console.log(`[ptyHost] spawned ptyId=${ptyId} pid=${ptyProcess.pid} shell=${opts.shell}`);
-  respondOk(id, { ptyId, pid: ptyProcess.pid });
+  // Main keeps this pid for process-tree cleanup and port attribution.
+  const pid = await waitForSpawnedPid(ptyProcess, () => exited);
+  console.log(`[ptyHost] spawned ptyId=${ptyId} pid=${pid} shell=${opts.shell}`);
+  respondOk(id, { ptyId, pid });
+  const frames = heldFrames;
+  heldFrames = null;
+  for (const frame of frames) rpcPort?.postMessage(frame);
 }
 
 function handleWrite(id: number, ptyId: string, data: string): void {
