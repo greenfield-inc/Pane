@@ -127,10 +127,10 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'notifications',
     label: 'Notifications',
-    description: 'Desktop alerts, permissions, and sound.',
+    description: 'Desktop alerts, permissions, sound, and the Dock badge.',
     icon: Bell,
-    settingIds: ['notification-permission', 'notification-sound', 'desktop-notifications'],
-    aliases: ['alerts', 'sound', 'desktop'],
+    settingIds: ['notification-permission', 'notification-sound', 'desktop-notifications', 'dock-badge'],
+    aliases: ['alerts', 'sound', 'desktop', 'badge', 'dock', 'taskbar'],
   },
   {
     id: 'remote-access',

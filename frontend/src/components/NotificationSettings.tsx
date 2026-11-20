@@ -7,6 +7,7 @@ import { SettingRow, SettingsPage } from './settings/SettingRow';
 import { ImmediateToggle } from './settings/SettingsControls';
 import type { SettingsPersistence } from './settings/useSettingsPersistence';
 import type { TestNotificationResult } from '../../../shared/types/notifications';
+import { isWindows } from '../utils/platformUtils';
 
 export function NotificationSettings({ persistence }: { persistence: SettingsPersistence }) {
   const config = persistence.config!;
@@ -123,6 +124,20 @@ export function NotificationSettings({ persistence }: { persistence: SettingsPer
             onSave={(playSound) => persistence.saveConfig('notification-sound', {
               notifications: { ...notifications, playSound },
             })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="dock-badge"
+          label="Badge for agents waiting on you"
+          description={isWindows()
+            ? 'Windows has no app badge, so this setting does nothing here.'
+            : 'Show how many agents need your input on the Dock or taskbar icon.'}
+          saveState={persistence.saveStates['dock-badge']}
+        >
+          <ImmediateToggle
+            label="Badge for agents waiting on you"
+            value={config.dockBadge !== false}
+            onSave={(dockBadge) => persistence.saveConfig('dock-badge', { dockBadge })}
           />
         </SettingRow>
       </SettingsSection>
