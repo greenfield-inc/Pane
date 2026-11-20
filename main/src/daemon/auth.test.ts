@@ -78,7 +78,7 @@ describe('isWorkspaceRequestAdmitted', () => {
   it('counts a password only once a check proved it, and never runs a check itself', () => {
     let checks = 0;
     const verifySecret = {
-      check: () => { checks += 1; return 'valid' as const; },
+      check: async () => { checks += 1; return 'valid' as const; },
       isProved: (secret: string) => secret === 'proved',
     };
     expect(isWorkspaceRequestAdmitted('owner@example.com', 'Bearer proved', policy({ verifySecret }))).toBe(true);

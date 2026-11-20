@@ -1500,7 +1500,7 @@ describe('workspace identity mode', () => {
     return headers;
   };
   const passwordIs = (expected: string): WorkspaceSecretVerifier => ({
-    check: (secret) => (secret === expected ? 'valid' : 'invalid'),
+    check: async (secret) => (secret === expected ? 'valid' : 'invalid'),
     isProved: (secret) => secret === expected,
   });
 
@@ -1574,7 +1574,7 @@ describe('workspace identity mode', () => {
   });
 
   it('answers 429 once the password check is throttled for a login', async () => {
-    const server = await startWorkspaceServer(() => ownerOnly({ verifySecret: { check: () => 'throttled', isProved: () => false } }));
+    const server = await startWorkspaceServer(() => ownerOnly({ verifySecret: { check: async () => 'throttled', isProved: () => false } }));
     const response = await requestJson(server, 'POST', invokePath, invoke, undefined, as(owner, 'any guess'));
     expect(response.statusCode).toBe(429);
     expect(JSON.stringify(response.body)).toContain('ERR_WORKSPACE_PASSWORD_THROTTLED');

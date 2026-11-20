@@ -148,12 +148,14 @@ function admitWorkspaceLogin(
  *
  * Tailscale Serve (proxy mode) sets `Tailscale-User-Login` for user-owned devices, including
  * users a device was shared with, and strips any copy the caller sent; tagged devices get none.
+ *
+ * Async because a password not yet proved or refuted is hashed off the main thread.
  */
-export function authenticateWorkspaceRequest(
+export async function authenticateWorkspaceRequest(
   loginHeader: string | string[] | undefined,
   authorizationHeader: string | string[] | undefined,
   policy: WorkspaceAccessPolicy | null,
-): WorkspaceAuthResult {
+): Promise<WorkspaceAuthResult> {
   const login = workspaceLogin(loginHeader);
   const admitted = admitWorkspaceLogin(login, policy);
   if (!admitted.ok) return admitted;
@@ -163,7 +165,7 @@ export function authenticateWorkspaceRequest(
     if (!secret) {
       return workspaceAuthFailure(401, 'ERR_WORKSPACE_PASSWORD_REQUIRED', 'This machine is password protected; enter its password to connect.');
     }
-    const check = verifySecret.check(secret, login);
+    const check = await verifySecret.check(secret, login);
     if (check === 'throttled') {
       return workspaceAuthFailure(429, 'ERR_WORKSPACE_PASSWORD_THROTTLED', 'Too many wrong passwords for this machine; try again in a minute.');
     }
