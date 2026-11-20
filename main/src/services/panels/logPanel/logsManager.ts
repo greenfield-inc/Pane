@@ -254,7 +254,7 @@ export class LogsManager {
     try {
       if (platform === 'win32') {
         // On Windows, use wmic to get process tree
-        const output = execSync(`wmic process where (ParentProcessId=${parentPid}) get ProcessId`, { encoding: 'utf8' });
+        const output = execSync(`wmic process where (ParentProcessId=${parentPid}) get ProcessId`, { encoding: 'utf8', windowsHide: true });
         const lines = output.split('\n').filter(line => line.trim());
         for (let i = 1; i < lines.length; i++) { // Skip header
           const pid = parseInt(lines[i].trim());
@@ -333,7 +333,7 @@ export class LogsManager {
       if (platform === 'win32') {
         // On Windows, use taskkill to terminate the process tree
         await new Promise<void>((resolve) => {
-          exec(`taskkill /F /T /PID ${pid}`, (error) => {
+          exec(`taskkill /F /T /PID ${pid}`, { windowsHide: true }, (error) => {
             if (error) {
               console.warn(`Error killing Windows process tree: ${error.message}`);
               
@@ -354,7 +354,7 @@ export class LogsManager {
               }
               
               descendantPids.forEach(descPid => {
-                exec(`taskkill /F /PID ${descPid}`, () => {
+                exec(`taskkill /F /PID ${descPid}`, { windowsHide: true }, () => {
                   processedCount++;
                   if (processedCount === totalDescendants) {
                     resolve();

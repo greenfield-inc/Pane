@@ -97,7 +97,7 @@ function parseWindowsProcessTable(stdout: string): ProcessRow[] {
  * The start-time text matches archiveProcessTracker's, so a stop can re-check identity.
  */
 export async function readProcessRows(): Promise<ProcessRow[]> {
-  const options = { encoding: 'utf8' as const, timeout: 10_000, maxBuffer: 16 * 1024 * 1024 };
+  const options = { encoding: 'utf8' as const, timeout: 10_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true };
   if (process.platform === 'win32') {
     const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
       'Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { [long]$t = $_.CreationDate.ToUniversalTime().Ticks; $b = ($t - ($t % [long]10)).ToString(); $c = [string]$_.CommandLine -replace "\\s+", " "; if ($c.Length -gt 200) { $c = $c.Substring(0, 200) }; "$($_.ProcessId)`t$($_.ParentProcessId)`t$b`t$($_.WorkingSetSize)`t$([long]$_.KernelModeTime + [long]$_.UserModeTime)`t$($_.Name)`t$c" } }'], options);

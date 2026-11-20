@@ -288,7 +288,7 @@ export function parseAppProcessTable(stdout: string, uid: number): AppProcessRow
 
 /** Every process on this machine with its owner and executable, in one call. */
 export async function readAppProcesses(): Promise<AppProcessRow[]> {
-  const options = { encoding: 'utf8' as const, timeout: 10_000, maxBuffer: 16 * 1024 * 1024 };
+  const options = { encoding: 'utf8' as const, timeout: 10_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true };
   if (process.platform === 'win32') {
     // Session 0 holds services; a path this user cannot read belongs to another user or the system.
     const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command',

@@ -15,7 +15,7 @@ function windowsTool(name: string): string {
 }
 
 function run(file: string, args: string[]): string {
-  try { return execFileSync(file, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 }).trim(); }
+  try { return execFileSync(file, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000, windowsHide: true }).trim(); }
   catch (error) { throw new RunpaneError('ERR_UPDATE_SUPERVISOR', `The current-user supervisor command failed: ${error instanceof Error ? error.message : String(error)}`, 'Inspect the operation status. Before shutdown Pane remains running; enable the current-user OS supervisor or use the installer manually.'); }
 }
 
