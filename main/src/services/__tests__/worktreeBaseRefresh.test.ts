@@ -39,10 +39,22 @@ afterAll(async () => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Let the reserve a create starts in the background finish here, so its git
+  // processes do not run inside the next test's timed body.
+  await worktreePoolManager.idle();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
+
+// These tests drive real git end to end: each create runs about 20 git processes
+// one after another (base lookup, fetch, worktree add, reset), with the fixture's
+// pushes and the next reserve on top. A busy Windows runner has been seen to take
+// ~250 ms per git start, so the budget is set from the process count, not a latency promise.
+/** One create: about 25 sequential git starts. */
+const ONE_CREATE_TIMEOUT_MS = 15_000;
+/** Three creates, or a reserve, a push and a create: about 50 sequential git starts. */
+const SEVERAL_CREATES_TIMEOUT_MS = 30_000;
 
 function temporaryDirectory(): string {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'pane-base-refresh-')));
@@ -106,7 +118,7 @@ describe('creating a worktree Pane on a remote-tracking base', () => {
     expect(git(result.worktreePath, 'rev-parse', 'HEAD')).toBe(tipB);
     expect(result.baseCommit).toBe(tipB);
     expect(result.base).toEqual({ ref: 'origin/main', commit: tipB, refresh: 'fetched' });
-  });
+  }, ONE_CREATE_TIMEOUT_MS);
 
   it('creates from the local ref with a four-part notice when the remote is missing', async () => {
     const fixture = remoteFixture();
@@ -163,7 +175,7 @@ describe('creating a worktree Pane on a remote-tracking base', () => {
     for (const result of results) {
       expect(git(result.worktreePath, 'rev-parse', 'HEAD')).toBe(tipB);
     }
-  });
+  }, SEVERAL_CREATES_TIMEOUT_MS);
 
   it.each([
     ['a local branch', () => 'main'],
@@ -197,7 +209,7 @@ describe('the reserve worktree pool', () => {
 
     expect(git(result.worktreePath, 'rev-parse', 'HEAD')).toBe(tipB);
     expect(claimedFromReserve(fixture.project, 'moved')).toBe(false);
-  });
+  }, SEVERAL_CREATES_TIMEOUT_MS);
 
   it('hands out a reserve that is still on the remote tip', async () => {
     const fixture = remoteFixture();

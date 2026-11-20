@@ -91,13 +91,21 @@ describe('GitDiffManager asynchronous history and execution capture', { timeout:
 describe('GitDiffManager manifests', { timeout: 15000 }, () => {
   it('lists the complete net session diff across 60 commits plus staged, unstaged, and untracked work', async () => {
     const cwd = repository();
-    const committedPaths: string[] = [];
-    for (let index = 1; index <= 60; index += 1) {
-      const path = `ahead-${String(index).padStart(2, '0')}.txt`;
-      committedPaths.push(path);
-      write(cwd, path, `commit ${index}\n`);
-      commitPaths(cwd, `ahead ${index}`, [path]);
-    }
+    const committedPaths = Array.from({ length: 60 }, (_, index) => `ahead-${String(index + 1).padStart(2, '0')}.txt`);
+    // One git fast-import writes the 60 commits, each adding one file, on top of the
+    // feature branch: 180 separate add/commit/rev-parse starts took ~10 s on Windows.
+    const data = (text: string): string => `data ${Buffer.byteLength(text)}\n${text}`;
+    const stream = committedPaths.map((path, index) => [
+      'commit refs/heads/feature',
+      `committer Pane Test <pane@example.test> ${1_700_000_000 + index} +0000`,
+      data(`ahead ${index + 1}\n`),
+      ...(index === 0 ? [`from ${head(cwd)}`] : []),
+      `M 100644 inline ${path}`,
+      data(`commit ${index + 1}\n`),
+    ].join('\n')).join('\n');
+    execFileSync('git', ['fast-import', '--quiet'], { cwd, input: `${stream}\n` });
+    git(cwd, 'reset', '--hard', '--quiet');
+    expect(git(cwd, 'rev-list', '--count', 'main..feature').trim()).toBe('60');
     write(cwd, 'staged.txt', 'staged\n');
     git(cwd, 'add', '--', 'staged.txt');
     write(cwd, 'tracked.txt', 'unstaged\n');

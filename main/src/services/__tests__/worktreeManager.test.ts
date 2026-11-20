@@ -432,16 +432,35 @@ describe('WorktreeManager.getSessionLocalBaseBranch', () => {
 });
 
 describe('WorktreeManager.initializeProject', () => {
+  const commands: Array<Promise<unknown>> = [];
+
   async function initRepo(): Promise<{ repo: string; runner: CommandRunner }> {
     const repo = await mkdtemp(join(tmpdir(), 'pane-worktree-exclude-'));
     const runner = new CommandRunner({ path: repo });
+    // initializeProject starts git in the background (fast config, trash sweep)
+    // without awaiting it. Record every command so cleanup can wait for them.
+    const execFile = runner.execFile.bind(runner);
+    vi.spyOn(runner, 'execFile').mockImplementation((...args) => {
+      const command = execFile(...args);
+      commands.push(command);
+      return command;
+    });
     await runner.execFile('git', ['init', '--initial-branch=main'], repo);
     await runner.execFile('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'init'], repo);
     return { repo, runner };
   }
 
-  // Windows briefly keeps files locked after git exits.
+  // On Windows a folder a running git sits in cannot be deleted, and files stay
+  // locked briefly after git exits. Wait for every command, including ones a
+  // finished command started, then remove.
   async function removeRepo(repo: string): Promise<void> {
+    let settled: number;
+    do {
+      settled = commands.length;
+      await Promise.allSettled(commands);
+      await new Promise(resolve => setImmediate(resolve));
+    } while (settled !== commands.length);
+    commands.length = 0;
     await rm(repo, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 5 : 0, retryDelay: 100 });
   }
 

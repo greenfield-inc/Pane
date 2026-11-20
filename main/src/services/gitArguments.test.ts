@@ -44,6 +44,8 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
+// Git status starts about 11 git processes one after another. A busy Windows runner has
+// been seen to take ~250 ms per git start, so this is a process-count budget.
 it('counts commits relative to a literal dollar-bearing branch', async () => {
   git('branch', 'base$PANE_AUDIT_LITERAL;branch&literal');
   writeFileSync(join(directory, 'change.txt'), 'one line\n');
@@ -57,7 +59,7 @@ it('counts commits relative to a literal dollar-bearing branch', async () => {
   } as SessionManager;
   const status = await new GitStatusManager(sessions, new WorktreeManager(), new GitDiffManager()).getGitStatus('pane');
   expect(status).toMatchObject({ ahead: 1, totalCommits: 1, commitAdditions: 1, commitFilesChanged: 1 });
-});
+}, 15000);
 
 it('creates a worktree from a non-origin remote without inheriting its upstream', async () => {
   git('remote', 'add', 'upstream', directory);
