@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import type { NotifyResult } from '../../../../shared/types/notify';
 import type { CleanupRun, HealthLevel, HealthProcess, LeakWarning, MachineHealthSnapshot, StorageInventory } from '../../../../shared/types/machineHealth';
 import type { FinishedPane } from './finishedPanes';
 import type { IdleOffer } from './memoryRelief';
-import { CardGate, CLEAN_UP, diskCard, finishedCard, IGNORE_PROCESS, KEEP_IT, KEEP_THEM, leakCard, leftoversCard, memoryCard, NOT_NOW, PAUSE_IDLE, RESTART_IT, STOP_IT, STOP_THEM, type CardQuestion, type Leftover } from './healthCards';
+import { CardGate, CLEAN_UP, diskCard, finishedCard, IGNORE_PROCESS, KEEP_IT, KEEP_THEM, leakCard, leftoversCard, memoryCard, NOT_NOW, PAUSE_IDLE, RANK, RESTART_IT, STOP_IT, STOP_THEM, type CardQuestion, type Leftover } from './healthCards';
 
 /** Clean up on the disk card covers at most this many tier 1 and 2 items, largest first, each listed on the card. */
 const DISK_CARD_ITEMS = 5;
@@ -12,8 +13,10 @@ export interface HealthCardDeps {
   now: () => number;
   /** Settings › Machine health › Cards and notifications. Off: only critical disk and memory raise a card or a notification. */
   notificationsOn: () => boolean;
-  /** Raises a Pane-sourced options card and resolves with the answer. */
-  ask: (question: CardQuestion) => Promise<NotifyResult>;
+  /** Raises a Pane-sourced options card under `id` and resolves with the answer. */
+  ask: (question: CardQuestion, id: string) => Promise<NotifyResult>;
+  /** Takes back a waiting card Pane raised, as when the condition it asks about cleared. */
+  withdraw: (id: string, reason: string) => void;
   inventory: () => StorageInventory | null;
   idleOffer: () => IdleOffer;
   pauseIdleHours: () => number;
@@ -40,6 +43,7 @@ export interface HealthCardDeps {
 }
 
 const identity = (proc: HealthProcess) => `${proc.pid}:${proc.started}`;
+const RECOVERED = { disk: 'free disk is back above the warning line', memory: 'memory pressure is back to normal' } as const;
 
 /**
  * Raises the machine health cards from samples and checks, each through
@@ -54,6 +58,8 @@ export class HealthCardController {
   private readonly urgentCard = new Set<'disk' | 'memory'>();
   /** Leftover processes the person chose to keep, by pid and start time. */
   private readonly kept: Set<string>;
+  /** The card waiting for each open key, so its answer or withdrawal touches only that card. */
+  private readonly waiting = new Map<string, { id: string; level: HealthLevel }>();
 
   constructor(private readonly deps: HealthCardDeps) {
     this.gate = new CardGate(deps.now);
@@ -65,6 +71,8 @@ export class HealthCardController {
     const items = (inventory?.items ?? []).filter(item => item.tier !== 3).sort((a, b) => b.sizeBytes - a.sizeBytes).slice(0, DISK_CARD_ITEMS);
     this.alertOnCritical('disk', snapshot.disk.level, () => diskCard(snapshot, items));
     this.alertOnCritical('memory', snapshot.memory.level, () => memoryCard(snapshot, this.deps.idleOffer(), this.deps.pauseIdleHours()));
+    this.withdrawOutdated('disk', snapshot.disk.level);
+    this.withdrawOutdated('memory', snapshot.memory.level);
     // Without a scan the card could offer only Not now; the warning level starts one, and the next sample raises the card.
     if (inventory && this.mayRaise('disk', snapshot.disk.level)) {
       this.raise('disk', snapshot.disk.level, diskCard(snapshot, items), async answer => {
@@ -136,6 +144,18 @@ export class HealthCardController {
     }, LEFTOVERS_OPEN);
   }
 
+  /**
+   * A disk or memory card waits only while it matches the level: back to ok resolves it, and turning
+   * critical replaces a warning card with the critical one. A dip from critical to warning keeps it.
+   */
+  private withdrawOutdated(kind: 'disk' | 'memory', level: HealthLevel): void {
+    const card = this.waiting.get(kind);
+    if (!card || (level !== 'ok' && RANK[level] <= RANK[card.level])) return;
+    this.waiting.delete(kind);
+    this.gate.closed(kind);
+    this.deps.withdraw(card.id, level === 'ok' ? RECOVERED[kind] : 'it turned critical, and a new card replaces it');
+  }
+
   /** One desktop alert when a level turns critical, whatever card is already waiting. */
   private alertOnCritical(kind: 'disk' | 'memory', level: HealthLevel, question: () => CardQuestion): void {
     if (level !== 'critical') {
@@ -150,9 +170,14 @@ export class HealthCardController {
   }
 
   private raise(key: string, level: HealthLevel, question: CardQuestion, act: (answer: string) => Promise<void>, openKey = key): void {
+    const id = randomUUID();
     this.gate.shown(key, level);
     this.gate.open(openKey);
-    void this.deps.ask(question).then(async result => {
+    this.waiting.set(openKey, { id, level });
+    // A withdrawn card's end is already settled; a newer card may hold its key.
+    const current = () => this.waiting.get(openKey)?.id === id;
+    void this.deps.ask(question, id).then(async result => {
+      if (!current()) return;
       if ('unavailable' in result) {
         // Not delivered (Approvals off): the next sample may ask again.
         this.gate.forget(key);
@@ -167,6 +192,10 @@ export class HealthCardController {
       await act(result.answer);
     }).catch(error => {
       this.deps.log(`[MachineHealth] card "${question.title}" failed: ${error instanceof Error ? error.message : String(error)}`);
-    }).finally(() => this.gate.closed(openKey));
+    }).finally(() => {
+      if (!current()) return;
+      this.waiting.delete(openKey);
+      this.gate.closed(openKey);
+    });
   }
 }

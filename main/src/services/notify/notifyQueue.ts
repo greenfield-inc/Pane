@@ -1677,6 +1677,11 @@ export class NotifyQueue extends EventEmitter {
     if (withdrawn) this.changed();
   }
 
+  /** Pane takes back a card it raised itself, as when the condition it asked about cleared: it moves to Earlier today, closed with `reason`. */
+  withdraw(id: string, reason: string): void {
+    this.close(id, { state: 'expired', closed: { by: 'pane', reason, at: Date.now() } }, unavailable(reason), false);
+  }
+
   /** Whether a move holds this card: by its id, or because its asking tab is one a move is stopping. */
   private heldForMove(entry: Entry): boolean {
     if (entry.moveHold) return true;

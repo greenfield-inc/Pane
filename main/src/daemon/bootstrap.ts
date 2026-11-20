@@ -1010,14 +1010,16 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const healthCards = new HealthCardController({
     now: () => Date.now(),
     notificationsOn: () => configManager.getConfig().machineHealth?.notifications !== false,
-    ask: question => {
+    ask: (question, id) => {
       const queue = services.notifyService?.queue;
       if (!queue) return Promise.resolve({ unavailable: 'Approvals are not running.', next: 'Turn on Approvals in Settings.' });
       return queue.ask({
         question: { ui: 'options', title: question.title, context: question.context, choices: question.choices.map((label, index) => ({ label, recommended: index === 0 })), machineHealth: question.card },
         source: { name: 'Pane', agent: 'Pane' },
+        id,
       });
     },
+    withdraw: (id, reason) => services.notifyService?.queue.withdraw(id, reason),
     inventory: () => machineHealth.cachedInventory(),
     idleOffer: () => memoryRelief.idleOffer(),
     pauseIdleHours: () => configManager.getConfig().machineHealth?.pauseIdleHours ?? 2,
