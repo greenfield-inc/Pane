@@ -30,7 +30,7 @@ A host that is offline keeps its own copy and catches up on the next sync. Hosts
 
 ## The Approvals switch
 
-Settings → Approvals' on/off switch (`notify.enabled`) travels the same way, on the same syncs: read every reachable host, write the newest to those behind. A change here also tells hosts that saved this one, so they sync within seconds. It has its own commands (`notify:switch:get`, `notify:switch:apply`), only desktops carry it (not the iPhone app), and only on/off and Show cards on are shared: position, sound, shortcut and the rest stay on each machine.
+Settings → Approvals' on/off switch (`notify.enabled`) travels the same way, on the same syncs: read every reachable host, write the newest to those behind. A change here also tells hosts that saved this one, so they sync within seconds. It has its own commands (`notify:switch:get`, `notify:switch:apply`), only desktops carry it (not the iPhone app), and only on/off and Show cards on are shared (plus Machine health's switch, below): position, sound, shortcut and the rest stay on each machine.
 
 The most recent change wins, by `notifyEnabledChangedAt` in `config.json`. A host applying another host's value keeps that host's time, so two hosts never trade values. A value with no time counts as time 0 and a missing value means on; at equal times off wins, so a machine turned off before sharing existed turns the others off when they first sync. A change made by hand in `config.json` while Pane runs counts as a change; one made while it's quit doesn't get a new time.
 

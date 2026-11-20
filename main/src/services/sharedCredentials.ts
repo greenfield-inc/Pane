@@ -122,7 +122,7 @@ function isApplicable(id: SharedCredentialId, credential: SharedCredential | und
 
 const cardsOnSchema = boundary.object({ id: boundary.nonEmptyString, name: boundary.nonEmptyString });
 
-/** A host from before "Show cards on" sends neither of its fields; an older host drops them. */
+/** A host from before "Show cards on" or the machine health switch sends none of that part's fields; an older host drops them. */
 export const sharedNotifySwitchSchema: BoundarySchema<SharedNotifySwitch> = boundary.object({
   enabled: boundary.boolean,
   changedAt: boundary.number,

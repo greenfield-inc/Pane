@@ -43,9 +43,11 @@ describe('readMemoryPressure', () => {
     expect((await at(2)).level).toBe('critical');
   });
 
-  it('calls under 1 GB available critical even when that is more than 5% of memory', async () => {
-    const reading = await readMemoryPressure('win32', { sysctl: async () => '', readFile: async () => '', freemem: () => 0.9 * GB, totalmem: () => 8 * GB });
-    expect(reading.level).toBe('critical');
+  it('on a small machine, warns under 2 GB available and calls under 1 GB critical', async () => {
+    const at = (free: number) => readMemoryPressure('win32', { sysctl: async () => '', readFile: async () => '', freemem: () => free * GB, totalmem: () => 8 * GB });
+    expect((await at(2.5)).level).toBe('ok');
+    expect((await at(1.5)).level).toBe('warning');
+    expect((await at(0.9)).level).toBe('critical');
   });
 });
 

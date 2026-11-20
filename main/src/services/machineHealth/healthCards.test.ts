@@ -54,7 +54,7 @@ describe('HealthCardController', () => {
   // A one-process leftovers card offers 'Stop it' / 'Keep it'.
   const singular = (answer: string) => (answer === 'Stop them' ? 'Stop it' : answer === 'Keep them' ? 'Keep it' : answer);
 
-  function controller(answer: string | null, options: { inventory?: StorageInventory | null; paneState?: 'archived' | 'paused' | 'open'; kept?: string[]; awayFor?: number; notifications?: boolean } = {}) {
+  function controller(answer: string | null, options: { inventory?: StorageInventory | null; paneState?: 'archived' | 'paused' | 'open'; kept?: string[]; awayFor?: number; notifications?: boolean; unavailable?: boolean } = {}) {
     const asked: CardQuestion[] = [];
     const cleaned: string[][] = [];
     const stopped: number[][] = [];
@@ -67,10 +67,12 @@ describe('HealthCardController', () => {
       return false;
     };
     let now = 0;
+    let notifications = options.notifications ?? true;
+    let unavailable = options.unavailable ?? false;
     let inventory = options.inventory === undefined ? scanned : options.inventory;
     const c = new HealthCardController({
       // A null answer leaves the card waiting.
-      now: () => now, notificationsOn: () => options.notifications ?? true, ask: question => { asked.push(question); return answer === null ? new Promise(() => {}) : Promise.resolve({ answer: question.choices.includes(answer) ? answer : singular(answer) }); },
+      now: () => now, notificationsOn: () => notifications, ask: question => { asked.push(question); if (unavailable) return Promise.resolve({ unavailable: 'Approvals are not running.', next: 'Turn on Approvals in Settings.' }); return answer === null ? new Promise(() => {}) : Promise.resolve({ answer: question.choices.includes(answer) ? answer : singular(answer) }); },
       inventory: () => inventory, idleOffer: () => ({ paneIds: [], memoryMB: 0 }), pauseIdleHours: () => 2, paneName: id => id,
       paneState: () => options.paneState ?? 'archived', tabName: () => null,
       canRestart: async () => false, cleanUp: async ids => { cleaned.push(ids); }, pauseIdle: async () => {}, stopProcess: async () => {},
@@ -78,7 +80,8 @@ describe('HealthCardController', () => {
       restartProcess: async () => {}, ignoreLeak: () => {}, archive: async () => {}, alert: title => { alerts.push(title); return delivered(); }, log: () => {},
       readKept: () => [...(options.kept ?? [])], writeKept: ids => { if (options.kept) options.kept.splice(0, options.kept.length, ...ids); },
     });
-    return { c, asked, cleaned, stopped, alerts, setNow: (value: number) => { now = value; }, setInventory: (value: StorageInventory | null) => { inventory = value; } };
+    return { c, asked, cleaned, stopped, alerts, setNow: (value: number) => { now = value; }, setInventory: (value: StorageInventory | null) => { inventory = value; },
+      setNotifications: (value: boolean) => { notifications = value; }, setUnavailable: (value: boolean) => { unavailable = value; } };
   }
   const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
@@ -203,7 +206,7 @@ describe('HealthCardController', () => {
       await settle();
       expect(asked.map(question => question.title)).toEqual(['Disk is almost full', 'Memory is almost out']);
       expect(alerts).toEqual(['Disk is almost full', 'Memory is almost out']);
-      expect(asked[0].context).toBe('13 GB free. Pane can free about 9.0 GB of its own leftovers and finished work. Choose Clean up, then open Resources to see what else uses the disk.');
+      expect(asked[0].context).toBe('13 GB free. Pane can free about 9.0 GB of its own leftovers and finished work. Open Resources to see what uses the disk and clean up.');
       expect(asked[1].context).toContain("Quit apps you don't need");
 
       // Still critical a day later: the episode already notified.
@@ -218,6 +221,39 @@ describe('HealthCardController', () => {
       c.onSnapshot(snapshot('critical'));
       await settle();
       expect(alerts).toEqual(['Disk is almost full', 'Memory is almost out', 'Disk is almost full']);
+    });
+
+    it('keeps a critical card snoozed with Not now when the switch is turned off after it', async () => {
+      const { c, asked, alerts, setNotifications } = controller('Not now');
+      c.onSnapshot(snapshot('critical'));
+      await settle();
+      setNotifications(false);
+      c.onSnapshot(snapshot('critical'));
+      await settle();
+      expect(asked).toHaveLength(1);
+      expect(alerts).toHaveLength(1);
+    });
+
+    it('raises one critical card in an hour of the level crossing the line, as with the switch on', async () => {
+      const { c, asked, setNow } = controller('Not now', { notifications: false });
+      for (let minute = 0; minute < 60; minute += 2) {
+        setNow(minute * 60_000);
+        c.onSnapshot(snapshot('critical'));
+        await settle();
+        c.onSnapshot(snapshot('warning'));
+        await settle();
+      }
+      expect(asked).toHaveLength(1);
+    });
+
+    it('asks again in the same episode once Approvals can show the card', async () => {
+      const { c, asked, setUnavailable } = controller(null, { notifications: false, unavailable: true });
+      c.onSnapshot(snapshot('critical'));
+      await settle();
+      setUnavailable(false);
+      c.onSnapshot(snapshot('critical'));
+      await settle();
+      expect(asked).toHaveLength(2);
     });
   });
 });

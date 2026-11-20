@@ -10,7 +10,7 @@ const LEFTOVERS_OPEN = 'leftovers';
 
 export interface HealthCardDeps {
   now: () => number;
-  /** Settings › Machine health › Notifications. Off: only critical disk and memory raise a card or a notification. */
+  /** Settings › Machine health › Cards and notifications. Off: only critical disk and memory raise a card or a notification. */
   notificationsOn: () => boolean;
   /** Raises a Pane-sourced options card and resolves with the answer. */
   ask: (question: CardQuestion) => Promise<NotifyResult>;
@@ -79,12 +79,12 @@ export class HealthCardController {
     if (this.deps.notificationsOn()) this.askAboutLeftovers(snapshot);
   }
 
-  /** On: the gate decides. Off: only a critical level, once per critical episode. */
+  /** The gate decides in both modes; off, only a critical level passes, once per critical episode. */
   private mayRaise(kind: 'disk' | 'memory', level: HealthLevel): boolean {
     if (level === 'ok') return false;
-    if (this.deps.notificationsOn()) return this.gate.shouldShow(kind, level);
-    if (level !== 'critical' || this.urgentCard.has(kind) || this.gate.isOpen(kind)) return false;
-    this.urgentCard.add(kind);
+    if (!this.deps.notificationsOn() && (level !== 'critical' || this.urgentCard.has(kind))) return false;
+    if (!this.gate.shouldShow(kind, level)) return false;
+    if (level === 'critical') this.urgentCard.add(kind);
     return true;
   }
 
@@ -153,6 +153,12 @@ export class HealthCardController {
     this.gate.shown(key, level);
     this.gate.open(openKey);
     void this.deps.ask(question).then(async result => {
+      if ('unavailable' in result) {
+        // Not delivered (Approvals off): the next sample may ask again.
+        this.gate.forget(key);
+        if (key === 'disk' || key === 'memory') this.urgentCard.delete(key);
+        return;
+      }
       if (!('answer' in result)) return;
       if (result.answer === NOT_NOW) {
         this.gate.snooze(key, level);

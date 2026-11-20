@@ -107,7 +107,7 @@ export interface MachineHealthSettings {
    */
   holdTodoAgents?: boolean;
   /**
-   * Settings › Machine health › Notifications. On unless set to false; off quiets every card and
+   * Settings › Machine health › Cards and notifications. On unless set to false; off quiets every card and
    * notification except critical disk and critical memory. Shared with the person's other computers.
    */
   notifications?: boolean;

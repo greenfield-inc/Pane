@@ -24,6 +24,11 @@ export class CardGate {
     return now >= last.snoozedUntil && now - last.at >= REPEAT_AFTER_MS;
   }
 
+  /** Forgets a card that was never delivered. */
+  forget(key: string): void {
+    this.last.delete(key);
+  }
+
   shown(key: string, level: HealthLevel): void {
     const previous = this.last.get(key);
     this.last.set(key, { at: this.now(), level, snoozedUntil: previous?.snoozedUntil ?? 0 });
@@ -97,7 +102,7 @@ export function diskCard(snapshot: MachineHealthSnapshot, items: readonly Reclai
   const critical = snapshot.disk.level === 'critical';
   const canFree = frees > 0 ? ` Pane can free about ${formatBytes(frees)} of its own leftovers and finished work.` : '';
   // Critical always notifies, so it says what to do.
-  const todo = critical ? ` ${frees > 0 ? 'Choose Clean up, then open' : 'Open'} Resources to see what else uses the disk.` : '';
+  const todo = critical ? ` Open Resources to see what uses the disk${frees > 0 ? ' and clean up' : ''}.` : '';
   return {
     title: critical ? 'Disk is almost full' : 'Disk almost full',
     context: `${formatBytes(free)} free.${canFree}${todo}`,

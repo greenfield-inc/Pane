@@ -122,7 +122,7 @@ export interface SharedNotifySwitch {
   cardsOn?: NotifyCardsOn | null;
   /** Epoch ms `cardsOn` last changed, on the host where the person changed it; 0 if never. Hosts from before it omit it. */
   cardsOnChangedAt?: number;
-  /** Settings › Machine health › Notifications; a host from before it omits it. */
+  /** Settings › Machine health › Cards and notifications; a host from before it omits it. */
   healthNotifications?: boolean;
   /** Epoch ms `healthNotifications` last changed, on the host where the person changed it; 0 if never. Hosts from before it omit it. */
   healthNotificationsChangedAt?: number;
