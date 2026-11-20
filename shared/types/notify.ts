@@ -182,6 +182,8 @@ export interface NotifyRequest extends Partial<NotifyQuestion> {
    */
   took?: string;
   tookAs?: 'answer' | 'question';
+  /** `runpane notify --close <id|Q-n>`: the asker withdraws a card it asked that still waits. */
+  close?: string;
   /** --took question: what the reader is doing, shown on the approval. Default "Getting more context…". */
   status?: string;
   /**
@@ -230,6 +232,8 @@ export type NotifyResultBody =
   | { reply: string; picks?: string[]; id: string; replyId: string; next: string }
   /** --took: how the reply was recorded. */
   | { took: 'answer' | 'question'; id: string; next?: string }
+  /** --close: the asker withdrew its own card; nothing was sent. */
+  | { closed: true; id: string }
   | { approved: boolean; note?: string }
   | { delivered: 'screen' | 'inbox' }
   /** secret: the value was saved as `project/name`; it is never returned. */

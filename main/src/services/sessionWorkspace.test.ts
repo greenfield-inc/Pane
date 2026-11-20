@@ -229,8 +229,10 @@ describe('Session workspace instructions', () => {
     expect(agents).toContain('never post a second approval for it');
     expect(agents).toContain('## Asking the person in Pane');
     expect(agents).toContain('about 80 to 100 characters on one line');
-    expect(agents).toContain('Stop the background call of an item that went stale.');
-    expect(agents).toContain('Approvals survive a restart');
+    expect(agents).toContain('Withdraw an item that went stale with runpane notify --close <id|Q-n>; stopping its background command no longer closes the card.');
+    expect(agents).toContain('Approvals survive a restart and their commands ending; an item closes by itself only when its asking tab, Pane or Session is gone.');
+    expect(agents).toContain("The card doesn't depend on that command staying alive");
+    expect(agents).toContain('never keep it alive with nohup');
     expect(agents).not.toContain('Pane keeps no approvals');
     expect(agents).toContain('If notify returns unavailable because Approvals is off, ask in this tab as before.');
   });

@@ -78,6 +78,8 @@ function forSecret(result: NotifyResult): NotifyResult {
 const ASKER_STOPPED = 'the asker stopped waiting';
 /** Why an item's asker is gone when only its tab closed: a relaying orchestrator or Autopilot can still read for it. */
 export const ASKING_TAB_CLOSED = 'the asking tab was closed';
+/** Why a card closed when its asker ran `runpane notify --close`. */
+const ASKER_WITHDREW = 'its asker withdrew it';
 /** What a reader that took a reply as a question is doing, until it says otherwise. */
 const ASKING_STATUS = 'Getting more context…';
 
@@ -950,7 +952,8 @@ export class NotifyQueue extends EventEmitter {
   /** The reader order (D-258): the asker (its call, else its tab), the orchestrator that relayed it, then Autopilot. */
   private firstReader(entry: Entry, tried: Set<string>): NotifyReplyReader | undefined {
     const { item } = entry;
-    const openCall = (entry.waiter !== undefined || entry.resumeLoop) && !tried.has('call');
+    // Between resume rounds a tab's asker may never call again (F-1), so its tab reads the reply instead.
+    const openCall = (entry.waiter !== undefined || (entry.resumeLoop && !outlivesCall(item))) && !tried.has('call');
     // A worker's open call is its orchestrator's relay: the worker's own tab reads first.
     if (openCall && item.originKind !== 'worker') return { kind: 'asker', name: askerName(item) };
     const asker = item.source.panelId;
@@ -1057,7 +1060,8 @@ export class NotifyQueue extends EventEmitter {
     // A call between resume rounds gets it on its next --resume, unless that call read the reply itself.
     const callRead = reply.reader !== undefined && !reply.reader.panelId;
     if (entry.waiter) entry.waiter.resolve(result);
-    else if (entry.resumeLoop && !callRead) entry.pending = result;
+    // A tab's card keeps it for a later --resume too, as it does a picked answer (F-1).
+    else if ((entry.resumeLoop || outlivesCall(item)) && !callRead) entry.pending = result;
     if (reply.reader?.kind !== 'orchestrator') this.correctRelay(item);
     if (reply.reader?.kind !== 'asker' && item.source.panelId && !this.env.askerGone?.(item)) this.enqueueTabMessage(item, answerLine(item), true);
     this.save(entry);
@@ -1173,6 +1177,32 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /**
+   * `runpane notify --close <id|Q-n>`: the asking tab withdraws a card it no longer needs. Ending
+   * its call no longer closes a tab's card, so this is how an asker takes one back. Only the tab
+   * that asked may: a relayed worker's card stays the worker's.
+   */
+  withdraw(caller: NotifyReaderCaller, ref: string): NotifyResult {
+    const wanted = ref.trim();
+    const open = [...this.entries.values()].filter(entry => isOpen(entry.item) && (entry.item.id === wanted || leadingQn(entry.item.title) === wanted));
+    if (open.length === 0) {
+      throw new PaneError('ERR_NOTIFY_GONE', `There's no waiting approval ${wanted} on ${this.machine()}: it was answered or closed. Nothing was changed.`, 'Nothing to withdraw. If it was answered, act on the answer you got.');
+    }
+    const own = open.filter(entry => caller.panelId !== undefined && entry.item.source.panelId === caller.panelId).sort((a, b) => b.item.createdAt - a.item.createdAt);
+    if (own.length === 0) {
+      throw new PaneError('ERR_NOTIFY_NOT_READER', `Only the tab that asked ${wanted} (${open[0].item.source.name}) can withdraw it, and this tab isn't it. Nothing was changed.`, 'Leave it open, or ask the person to close it.');
+    }
+    const [entry] = own;
+    if (entry.item.agentPrompt) {
+      throw new PaneError('ERR_NOTIFY_IN_TERMINAL', `"${entry.item.title}" is a permission prompt, so it can't be withdrawn. Nothing was changed.`, 'Answer it, on its card or in its terminal.');
+    }
+    if (entry.item.state === 'sent') {
+      throw new PaneError('ERR_NOTIFY_ANSWERED', `${refOf(entry.item)} was just answered; the answer reaches you in a moment. Nothing was changed.`, 'Act on the answer when it comes.');
+    }
+    this.closeOpen(entry, { by: 'pane', reason: ASKER_WITHDREW }, closedResult('You withdrew this question.'));
+    return { closed: true, id: entry.item.id };
+  }
+
+  /**
    * The item `ref` (an id or Q-n) names, for a reader's `--took` or `--update`. Only its reader may:
    * the asker, the orchestrator that relayed it, or Autopilot (D-258).
    */
@@ -1235,7 +1265,8 @@ export class NotifyQueue extends EventEmitter {
     }
     entry.item.answeredOn = device;
     const who = by === 'autopilot' ? 'Autopilot' : 'The person';
-    const heardOnCall = entry.waiter !== undefined || entry.resumeLoop;
+    // Between resume rounds a tab's asker may never call again, so its tab hears it too.
+    const heardOnCall = entry.waiter !== undefined || (entry.resumeLoop && !outlivesCall(entry.item));
     this.closeOpen(entry, { by, reason }, closedResult(`${who} closed this question${reason ? `: ${reason}` : ''}.`));
     if (!heardOnCall && entry.item.source.panelId) {
       const tail = `(by ${by === 'autopilot' ? 'Autopilot' : 'you'})${reason ? `: ${reason}` : ''}`;
@@ -1655,7 +1686,7 @@ export class NotifyQueue extends EventEmitter {
       // Only an open call can be abandoned: a saved item with no call is waiting on its tab's answer.
       if (entry.item.source.panelId !== panelId || !isOpen(entry.item) || !entry.waiter || this.heldForMove(entry)) continue;
       clearTimeout(entry.idleTimer);
-      entry.idleTimer = idle ? setTimeout(() => this.expire(entry.item.id), NOTIFY_IDLE_BACKSTOP_MS) : undefined;
+      entry.idleTimer = idle ? setTimeout(() => this.callEnded(entry), NOTIFY_IDLE_BACKSTOP_MS) : undefined;
     }
   }
 
@@ -1923,7 +1954,7 @@ export class NotifyQueue extends EventEmitter {
           return;
         }
         // Pane stopping its server ends every call; that isn't the asker leaving (J6).
-        if (!this.quitting) this.expire(entry.item.id);
+        if (!this.quitting) this.callEnded(entry);
       };
       const waiter: Waiter = {
         resolve: (result) => {
@@ -1946,23 +1977,21 @@ export class NotifyQueue extends EventEmitter {
         // Each round has its own 15 minutes: an updated version counts from when it was posted. A
         // worker's question has no such limit, so each of its relay calls waits a full round.
         const remaining = (entry.item.revision?.at ?? entry.item.createdAt) + NOTIFY_RESUME_CAP_MS - Date.now();
+        // A worker's question, and one asked from a tab, outlive their calls: neither has the cap.
+        const uncapped = entry.item.originKind === 'worker' || outlivesCall(entry.item);
         returnTimer = setTimeout(() => {
           const worker = entry.item.originKind === 'worker';
-          if (remaining <= returnAfterMs && !worker) {
+          if (remaining <= returnAfterMs && !uncapped) {
             // An answer in its Undo hold reaches this call when the hold ends.
             if (entry.item.state === 'sent') return;
             this.expire(entry.item.id, unavailable('Nobody answered within 15 minutes.'));
             return;
           }
           entry.resumeLoop = true;
-          waiter.resolve({
-            waiting: true,
-            id: entry.item.id,
-            next: `Call \`runpane notify --resume ${entry.item.id}\` now to keep waiting for the answer.`,
-          });
+          waiter.resolve(waitingResult(entry.item));
           // A relayed worker question keeps waiting for its worker even if the relay never resumes.
-          if (!worker) entry.graceTimer = setTimeout(() => this.expire(entry.item.id), NOTIFY_RESUME_GRACE_MS);
-        }, entry.item.originKind === 'worker' ? returnAfterMs : Math.min(returnAfterMs, Math.max(remaining, 0)));
+          if (!worker) entry.graceTimer = setTimeout(() => this.callEnded(entry), NOTIFY_RESUME_GRACE_MS);
+        }, uncapped ? returnAfterMs : Math.min(returnAfterMs, Math.max(remaining, 0)));
       }
     });
   }
@@ -2109,6 +2138,30 @@ export class NotifyQueue extends EventEmitter {
     this.save(entry);
     this.queue = [id, ...this.queue];
     if (this.transient?.view.itemId === id) this.clearTransient();
+  }
+
+  /**
+   * Its call ended (killed, cancelled, idle, or never resumed). A card asked from a Pane tab keeps
+   * waiting: the tab takes its answer, so only an answer, a close, or the tab, Pane or Session going
+   * ends it. A call from outside Pane, or a permission prompt's hook, can't be told later, so it expires.
+   */
+  private callEnded(entry: Entry): void {
+    const { item } = entry;
+    if (!outlivesCall(item)) {
+      this.expire(item.id);
+      return;
+    }
+    clearTimeout(entry.graceTimer);
+    clearTimeout(entry.idleTimer);
+    entry.graceTimer = undefined;
+    entry.idleTimer = undefined;
+    entry.resumeLoop = false;
+    // A call still holding on (an idle Codex tab's) returns now; a dropped one is let go.
+    entry.waiter?.resolve(waitingResult(item));
+    // Answered between resume rounds and never collected: the tab gets it after all (a later --resume still does).
+    if (entry.pending && item.state === 'answered' && item.delivered?.via !== 'tab' && !this.env.askerGone?.(item)) {
+      this.enqueueTabMessage(item, answerLine(item), true);
+    }
   }
 
   /** The caller stopped waiting: the card says so, then moves to Earlier today as Expired. */
@@ -2341,6 +2394,24 @@ function withDeviceLabels(item: NotifyItem, label: (device: string | undefined) 
 /** A machine's items under its current name, after a rename. */
 function withMachine(items: Map<string, NotifyItem>, machine: string): Map<string, NotifyItem> {
   return new Map([...items].map(([key, item]) => [key, item.machine === machine ? item : { ...item, machine }]));
+}
+
+/**
+ * A card asked from a Pane tab outlives the call waiting on it: the answer can still be typed into
+ * that tab. A permission prompt belongs to its hook, which has its own way to end.
+ */
+function outlivesCall(item: NotifyItem): boolean {
+  return item.source.panelId !== undefined && !item.agentPrompt;
+}
+
+/** A call that returns before the answer: `--resume` keeps waiting; a tab's card can also be left to its tab. */
+function waitingResult(item: NotifyItem): NotifyResult {
+  const resume = `Call \`runpane notify --resume ${item.id}\` now to keep waiting for the answer`;
+  return {
+    waiting: true,
+    id: item.id,
+    next: outlivesCall(item) ? `${resume}, or stop waiting: the card stays open, and its answer is typed into this tab as an answer: line.` : `${resume}.`,
+  };
 }
 
 function isOpen(item: NotifyItem): boolean {

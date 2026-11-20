@@ -408,6 +408,13 @@ approval, a PR ready to merge, and a next step only they can take.
 
   The CLI call waits until the person answers. The MCP `notify` tool returns
   `waiting` after a while instead, so don't use it for this.
+  The card doesn't depend on that command staying alive. When it ends before
+  the answer (its time limit, a restart, or you stopping it), the card stays
+  open and the answer is typed into this tab as
+  `answer: Q-n → <answer> (by you)`, the way a worker's answer reaches the
+  worker. So never keep it alive with `nohup`, never post a card again because
+  its command ended, and act on each answer once, from the call's result or
+  the line, whichever comes first.
 - **When a relayed call returns, record the decision**:
   `runpane inbox ack <item> --decision <D-n>`. The card then reads "Recorded as
   D-n". An answer to your own item comes back as the call's result: record it
@@ -442,15 +449,18 @@ approval, a PR ready to merge, and a next step only they can take.
     "…" (by you)` means it is recorded as the answer: act on it.
 
   Only the reply's reader may run `--took` and `--update`.
-- **Stop waiting on an item** that is superseded or no longer needed: stop its
-  background command (TaskStop in Claude Code). Never leave a stale card up.
-- **When you start, resume or wake, reconcile** your open background calls
+- **Withdraw an item** that is superseded or no longer needed with
+  `runpane notify --close <id|Q-n>`: stopping its background command no longer
+  closes the card. Never leave a stale card up.
+- **When you start, resume or wake, reconcile** your posted items
   against the status files, your ledger and `runpane inbox`: relay or post what
-  is missing, stop what is stale, and record each answer that has no `decision`
+  is missing, withdraw what is stale, and record each answer that has no `decision`
   (`runpane inbox ack <item> --decision <D-n>`): workers keep getting answers
-  while you are down. Approvals survive a restart, and an item whose asker is
-  gone closes by itself. A call that a restart ended can post the same question
-  again from the same tab, which joins the waiting card instead of adding one.
+  while you are down. Approvals survive a restart and their commands ending:
+  an item closes by itself only when its asking tab, Pane or Session is gone,
+  and an answer that came while you were down is typed into your tab once you
+  are back at your prompt. Posting the same question again from the same tab
+  joins the waiting card instead of adding one.
 - **If notify returns `unavailable`** because Approvals is off ("Approvals
   are off in Pane."), ask in this tab as before.
 

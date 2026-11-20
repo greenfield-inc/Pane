@@ -163,6 +163,13 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
 
   The CLI call waits until the person answers. The MCP \`notify\` tool returns
   \`waiting\` after a while instead, so don't use it for this.
+  The card doesn't depend on that command staying alive. When it ends before
+  the answer (its time limit, a restart, or you stopping it), the card stays
+  open and the answer is typed into this tab as
+  \`answer: Q-n → <answer> (by you)\`, the way a worker's answer reaches the
+  worker. So never keep it alive with \`nohup\`, never post a card again because
+  its command ended, and act on each answer once, from the call's result or
+  the line, whichever comes first.
 - A worker's blocked question already has a card: relay into it with
   \`runpane notify --relays <item> ...\` (the id from \`runpane inbox\`), which
   improves that card and rings it.
@@ -196,12 +203,13 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
   approval; \`correction: Q-n → that was your answer: "…" (by you)\` means it is
   recorded as the answer: act on it. Only the reply's reader may run
   \`--took\` and \`--update\`.
-- Stop waiting on an item that is superseded or no longer needed: stop its
-  background command (TaskStop in Claude Code). Never leave a stale card up.
-- When you start, resume or wake, reconcile your open background calls
+- Withdraw an item that is superseded or no longer needed with
+  \`runpane notify --close <id|Q-n>\`: stopping its background command no
+  longer closes the card. Never leave a stale card up.
+- When you start, resume or wake, reconcile your posted items
   against the status files, your ledger and \`runpane inbox\`: relay or post
-  what is missing, stop what is stale, and record each answer with no
-  \`decision\`. Approvals survive a restart.
+  what is missing, withdraw what is stale, and record each answer with no
+  \`decision\`. Approvals survive a restart and their commands ending.
 - If notify returns \`unavailable\` because Approvals is off ("Approvals are
   off in Pane."), ask in this tab as before.
 

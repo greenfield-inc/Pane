@@ -97,7 +97,7 @@ describe('Pane Chat skill bundle', () => {
     expect(guide).toContain('`correction: Q-n → that was a question: "…" (by you)`');
     expect(guide).toContain('about 80 to 100 characters on one line');
     expect(guide).toContain('{"label":"Q-12","approval":"<id|Q-n>"}');
-    expect(guide).toContain('stop its background command (TaskStop in Claude Code)');
+    expect(guide).toContain('`runpane notify --close <id|Q-n>`: stopping its background command no longer');
     expect(guide).toContain('Approvals survive a restart');
     expect(guide).not.toContain('Pane keeps no approvals');
     expect(guide).toContain('ask in this tab as before');
