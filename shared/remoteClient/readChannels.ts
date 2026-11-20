@@ -112,6 +112,13 @@ export const REMOTE_READ_CHANNELS = new Set([
 ]);
 
 
+/**
+ * Writes the person makes live on a streamed browser page. Each is sent once, with no request id,
+ * and never resent after a drop: a click or key that arrives minutes late could land on a page
+ * that changed. The screen shows the stream as stopped and the person acts again.
+ */
+export const REMOTE_SEND_ONCE_CHANNELS = new Set(['browser:input', 'browser:driver']);
+
 /** Mutations the host de-duplicates by the operation ID they carry, so a retry cannot apply twice. */
 export const REMOTE_DEDUPLICATED_CHANNELS = new Set(['agent-chat:send', 'chat-tab:send']);
 
