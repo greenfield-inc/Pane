@@ -9,6 +9,7 @@ import { PaneCommandRegistry } from '../../daemon/commandRegistry';
 import { sessionWorkspacePath } from '../sessionWorkspace';
 import { createBundle, createSnapshot } from './gitSnapshot';
 import { MoveImporter, type ImporterTabs, type TargetStatus } from './importer';
+import { gitSteps } from '../../test/gitBudget';
 import { settleAfterFreeze, type FreezeTarget } from './afterFreeze';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PaneCommandValue } from '../../daemon/commandRegistry';
@@ -25,11 +26,9 @@ const gitEnv = (home: string) => ({ ...process.env, GIT_CONFIG_NOSYSTEM: '1', HO
 const gitAt = (home: string, cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: gitEnv(home) }).toString().trim();
 const git = (cwd: string, ...args: string[]) => gitAt(root, cwd, ...args);
 
-// A git process start takes about 30-60 ms on Windows, more on a busy CI runner; each git-backed test states its bound from this.
-const GIT_START_BUDGET_MS = 250;
-// Building one Pane from a real bundle, then starting or rolling it back, runs about 30 git commands one after another
-// (remote lookup, fetch, bundle verify and fetch, worktree add, the snapshot's apply and check, then the undo steps).
-const BUILD_TIMEOUT_MS = 30 * GIT_START_BUDGET_MS;
+// Counted git starts in a test body (see test/gitBudget.ts): at most 41 for any test here, plus 78 for the shared
+// template (repo, clone, bundle), which the first test that needs it builds inside its body.
+const BUILD_TIMEOUT_MS = gitSteps(41 + 78);
 
 /** Pane's panels, in memory, as PanelManager keeps them: a permanent tab refuses delete, and creating an existing ID returns it. */
 function memoryTabs(panels = new Map<string, ToolPanel>()): ImporterTabs & { panels: Map<string, ToolPanel> } {

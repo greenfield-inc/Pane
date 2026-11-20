@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, promises as fsPromises, readdirSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { gitSteps } from '../../test/gitBudget';
 import { CommandRunner } from '../../utils/commandRunner';
 import { PathResolver } from '../../utils/pathResolver';
 import { terminateProcessTrees } from '../../utils/processTree';
@@ -62,12 +63,9 @@ afterEach(async () => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-// The removal starts about 5 git processes one after another (two rev-parse,
-// version, prune, and fsmonitor stop when a daemon runs) and the test checks the
-// result with 2 more. A busy Windows runner has been seen to take ~250 ms per git
-// start, and a held worktree adds up to the product's 2 s busy-retry budget, so the
-// budget is set from that count, not from a latency promise.
-const REAL_GIT_TIMEOUT_MS = 15_000;
+// Timeouts are the git starts counted in each test body (see test/gitBudget.ts). A
+// held worktree adds up to the product's 2 s busy-retry budget on top.
+const BUSY_RETRY_BUDGET_MS = 2_000;
 
 describe('removeWorktreeViaTrash', () => {
   it('moves the worktree into the trash, prunes it, deletes it, and keeps the branch', async () => {
@@ -80,7 +78,7 @@ describe('removeWorktreeViaTrash', () => {
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     expect(git(repo, 'branch', '--list', 'feature')).toContain('feature');
     expect(readdirSync(join(repo, '.git', 'pane-trash'))).toEqual([]);
-  }, REAL_GIT_TIMEOUT_MS);
+  }, gitSteps(13));
 
   it('reports pending after a delete failure and retries on the next sweep', async () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();
@@ -133,7 +131,7 @@ describe('removeWorktreeViaTrash', () => {
     expect(existsSync(worktree)).toBe(false);
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     expect(execFile.mock.calls.some(([file, args]) => file === 'git' && args[0] === 'worktree' && args[1] === 'remove')).toBe(false);
-  }, REAL_GIT_TIMEOUT_MS);
+  }, gitSteps(12) + BUSY_RETRY_BUDGET_MS);
 
   it('removes a worktree a live process is still sitting in', async () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();
@@ -163,7 +161,7 @@ describe('removeWorktreeViaTrash', () => {
     expect(existsSync(worktree)).toBe(false);
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     expect(git(repo, 'branch', '--list', 'feature')).toContain('feature');
-  }, REAL_GIT_TIMEOUT_MS);
+  }, gitSteps(13) + BUSY_RETRY_BUDGET_MS);
 
   it('trashes the empty directory git leaves behind when it cannot unlink the worktree root', async () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();

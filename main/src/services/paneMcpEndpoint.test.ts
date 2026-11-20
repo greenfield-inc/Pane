@@ -10,6 +10,7 @@ import { tokenizeShellCommand } from './agents/agentIdentity';
 import { withClaudePromptHooks } from './claudePrompts';
 import { PaneMcpEndpoint, paneMcpTabSettings, setPaneMcpEndpoint, withPaneMcpConfig, type PaneMcpTab, paneMcpConfigEnv } from './paneMcpEndpoint';
 import { PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from './paneMcpNames';
+import { PROCESS_START_BUDGET_MS } from '../test/gitBudget';
 import { TabListener } from './tabListener';
 import { syncNotifyInstructions } from './notify/notifyInstructions';
 
@@ -150,6 +151,11 @@ function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
+// Building the handler is synchronous CPU, not a process start: 1 to 1.6 s on a 32-thread
+// Windows devbox (#1624). This whole test took at most 2.9 s on Windows CI before this budget,
+// so the build gets the default test timeout, and the counted Node starts go on top.
+const HANDLER_BUILD_BUDGET_MS = 5_000;
+
 describe('PaneMcpEndpoint', () => {
   it("runs a tool as the tab its token belongs to, in that tab's folder, against this Pane's data folder", async () => {
     const server = start();
@@ -164,9 +170,9 @@ describe('PaneMcpEndpoint', () => {
     expect(ranA).toMatchObject({ panel: 'panel-a', argv: ['repos', 'list', '--json'], paneDir: appDir });
     expect(ranA.cwd).toBe(realpathSync(first.cwd));
     expect(ranB).toMatchObject({ panel: 'panel-b' });
-    // The first call builds the endpoint's handler, about 1 s of synchronous CPU here (runpane's
-    // buildMcpTools), then each call starts one Node process; a busy 4-vCPU runner stretches both.
-  }, 15_000);
+    // Counted: the body builds the endpoint's handler once (runpane's buildMcpTools, #1624), then
+    // starts two Node processes (one per call; counted as if in sequence).
+  }, HANDLER_BUILD_BUDGET_MS + 2 * PROCESS_START_BUDGET_MS);
 
   it("names a client that didn't name itself on the request after the tab's agent, so notify keeps its long wait", async () => {
     const ran = await ranAs(await callRepos(grantOf(start().grant(tab('panel-a')))));

@@ -6,6 +6,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PaneError } from '../../../../shared/paneError';
+import { gitSteps } from '../../test/gitBudget';
 import {
   addWorktree,
   applySnapshot,
@@ -23,12 +24,7 @@ import {
 const SNAPSHOT_REF = 'refs/pane-move/test/snapshot';
 const PREFIX = 'refs/pane-move/test/incoming';
 
-// A git process start takes about 30-60 ms on Windows, more on a busy CI runner. Each test that runs a
-// move's git steps states its bound from this and the number of git commands it runs one after another.
-const GIT_START_BUDGET_MS = 250;
 const execFileAsync = promisify(execFile);
-/** A test's timeout from the number of git commands it runs one after another. */
-const gitSteps = (count: number) => ({ timeout: count * GIT_START_BUDGET_MS });
 
 let root = '';
 const savedEnv: Record<string, string | undefined> = {};
@@ -206,8 +202,8 @@ afterAll(() => {
 });
 
 describe('gitSnapshot', () => {
-  // About 60 git commands in sequence: snapshot (11), bundle, import, branch, worktree, apply, match check (6), plus four fingerprints.
-  it('J1: moves commits and all uncommitted work to another clone byte for byte', gitSteps(60), async () => {
+  // 79 git starts in the body (counted, see test/gitBudget.ts).
+  it('J1: moves commits and all uncommitted work to another clone byte for byte', { timeout: gitSteps(79) }, async () => {
     const { a, b } = setupRepos();
     makeMess(a);
     const before = await fingerprint(a);
@@ -256,8 +252,8 @@ describe('gitSnapshot', () => {
     expect(await ignoredPaths(a)).toEqual(['build/', 'ignored.log']);
   });
 
-  // About 45 git commands in sequence: snapshot (11), bundle, import, branch, worktree, apply, then two match checks (6 each).
-  it('snapshotMatches is false once the reapplied work changes', gitSteps(45), async () => {
+  // Up to 162 git starts in the body (counted, see test/gitBudget.ts; 59 in two of three counts).
+  it('snapshotMatches is false once the reapplied work changes', { timeout: gitSteps(162) }, async () => {
     const { a, b } = setupRepos();
     makeMess(a);
     const snap = await createSnapshot(a, SNAPSHOT_REF);
@@ -275,8 +271,8 @@ describe('gitSnapshot', () => {
     expect(await snapshotMatches(target, snap.commit)).toBe(false);
   });
 
-  // About 25 git commands in sequence: snapshot (11), bundle, import with the branch recovered, branch.
-  it('carries the branch when its tip is already on origin, which git bundle leaves out', gitSteps(25), async () => {
+  // 45 git starts in the body (counted, see test/gitBudget.ts).
+  it('carries the branch when its tip is already on origin, which git bundle leaves out', { timeout: gitSteps(45) }, async () => {
     const { a, b } = setupRepos();
     git(a, ['push', '-q', 'origin', 'spike-x']);
     git(b, ['fetch', '-q', 'origin']);
@@ -289,8 +285,8 @@ describe('gitSnapshot', () => {
     expect(await placeBranch(b, 'spike-x', `${PREFIX}/branch`)).toBe('created');
   });
 
-  // About 25 git commands in sequence: snapshot (11), bundle, import, then the branch checks.
-  it('refuses a branch that diverged there, counting its extra commits', gitSteps(25), async () => {
+  // 42 git starts in the body (counted, see test/gitBudget.ts).
+  it('refuses a branch that diverged there, counting its extra commits', { timeout: gitSteps(42) }, async () => {
     const { a, b } = setupRepos();
     git(b, ['checkout', '-q', 'spike-x']);
     write(path.join(b, 'b1.txt'), '1\n');
@@ -313,8 +309,8 @@ describe('gitSnapshot', () => {
     expect(git(b, ['rev-parse', 'spike-x']).trim()).toBe(localBefore);
   });
 
-  // About 30 git commands in sequence: snapshot (11), bundle, import, then placing the branch twice.
-  it('fast-forwards a branch that is behind, and reports same when equal', gitSteps(30), async () => {
+  // 38 git starts in the body (counted, see test/gitBudget.ts).
+  it('fast-forwards a branch that is behind, and reports same when equal', { timeout: gitSteps(38) }, async () => {
     const { a, b } = setupRepos();
     git(b, ['branch', '-q', 'spike-x', 'origin/spike-x']);
     const snap = await createSnapshot(a, SNAPSHOT_REF);
@@ -326,8 +322,8 @@ describe('gitSnapshot', () => {
     expect(await placeBranch(b, 'spike-x', `${PREFIX}/branch`)).toBe('same');
   });
 
-  // About 25 git commands in sequence: snapshot (11), bundle, import, then the branch checks.
-  it('refuses to fast-forward a branch checked out in a worktree there', gitSteps(25), async () => {
+  // 33 git starts in the body (counted, see test/gitBudget.ts).
+  it('refuses to fast-forward a branch checked out in a worktree there', { timeout: gitSteps(33) }, async () => {
     const { a, b } = setupRepos();
     git(b, ['checkout', '-q', '-b', 'spike-x', 'origin/spike-x']);
     await createSnapshot(a, SNAPSHOT_REF);
@@ -340,8 +336,8 @@ describe('gitSnapshot', () => {
     expect(error.message).toContain(`branch spike-x is checked out at ${b.replace(/\\/g, '/')} there`);
   });
 
-  // About 35 git commands in sequence: two fingerprints, snapshot (11), bundle, import, worktree, apply, match check (6).
-  it('moves a detached HEAD', gitSteps(35), async () => {
+  // 54 git starts in the body (counted, see test/gitBudget.ts).
+  it('moves a detached HEAD', { timeout: gitSteps(54) }, async () => {
     const { a, b } = setupRepos();
     git(a, ['checkout', '-q', '--detach']);
     makeMess(a);

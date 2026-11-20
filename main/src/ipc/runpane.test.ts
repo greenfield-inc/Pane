@@ -37,6 +37,7 @@ import { getChatTabManager } from '../services/chatTabs';
 import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
 import { usageManager } from '../services/usage/usageManager';
+import { gitSteps } from '../test/gitBudget';
 import { CommandRunner } from '../utils/commandRunner';
 import { PathResolver } from '../utils/pathResolver';
 import { agentTranscripts } from '../services/agentTranscript';
@@ -9291,14 +9292,10 @@ describe('runpane IPC handlers', () => {
        * the test past vitest's 5 s default.
        */
       const REAL_GH_TIMEOUT_MS = 30_000;
-      /**
-       * For archives that check several Panes: each check runs about seven `git` processes one
-       * after another (upstream, remotes, a fetch from the local bare remote, ref and ahead checks,
-       * status), and the Panes are checked one at a time. Up to six checks per test is ~40
-       * sequential process starts; with its fixture, the slowest of these took 4.8 s on a busy
-       * Windows runner.
-       */
-      const MULTI_PANE_CHECK_TIMEOUT_MS = 15_000;
+      // Archives that check several Panes: each check runs about seven git processes one after
+      // another (upstream, remotes, a fetch from the local bare remote, ref and ahead checks,
+      // status), one Pane at a time. Each timeout is the git starts counted in that test's body
+      // (see test/gitBudget.ts).
 
       function createBulkServices(panes: Session[], associations: string[], lookupPr: (paneId: string) => Promise<PrLookup> = async () => merged) {
         const byId = new Map(panes.map(pane => [pane.id, pane]));
@@ -9467,7 +9464,7 @@ describe('runpane IPC handlers', () => {
           ],
         });
         expect(result).toEqual(expect.not.objectContaining({ closed: true }));
-      }, MULTI_PANE_CHECK_TIMEOUT_MS);
+      }, gitSteps(88));
 
       it('dry-runs the Session archive, says what it would do, and reports a reason for every skipped Pane', async () => {
         const { pane } = createRemoteRepo();
@@ -9640,7 +9637,7 @@ describe('runpane IPC handlers', () => {
               failedPanes: [],
             },
           });
-        }, MULTI_PANE_CHECK_TIMEOUT_MS);
+        }, gitSteps(80));
 
         it('archives the other Panes when checking one fails, and previews that one as unsafe', async () => {
           const { services, registry, sessionsDelete } = createSessionPanes();
@@ -9663,7 +9660,7 @@ describe('runpane IPC handlers', () => {
             keptPanes: [],
             failedPanes: [{ paneId: 'pane-busy', name: 'pane-busy', error: 'panel store unavailable' }],
           });
-        }, MULTI_PANE_CHECK_TIMEOUT_MS);
+        }, gitSteps(80));
 
         it('archives the unsafe Panes the person chose to archive anyway', async () => {
           const { services, registry, sessionsDelete } = createSessionPanes();
@@ -9675,7 +9672,7 @@ describe('runpane IPC handlers', () => {
 
           expect(sessionsDelete.mock.calls.map(([paneId]) => paneId)).toEqual(['pane-clean', 'pane-busy', 'pane-dirty']);
           expect(panes?.archivedPaneIds).toEqual(['pane-clean', 'pane-busy', 'pane-dirty']);
-        }, MULTI_PANE_CHECK_TIMEOUT_MS);
+        }, gitSteps(40));
 
         it('keeps a Pane the person chose to keep even after its agent goes idle, and one that became busy after the check', async () => {
           const { services, registry, sessionsDelete } = createSessionPanes();
