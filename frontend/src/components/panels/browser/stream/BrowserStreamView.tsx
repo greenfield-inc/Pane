@@ -380,6 +380,12 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
     if (firstDownload.current === null) { firstDownload.current = download?.at; return; }
     if (download && download.at !== firstDownload.current) setDownloadSeenAt(Date.now());
   }, [download?.at]);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const noticeSeen = dismissed === host || readNoticeSeen(host);
+  const dismissNotice = () => {
+    setDismissed(host);
+    try { localStorage.setItem(noticeKey(host), 'seen'); } catch { /* storage blocked: the note shows again next time */ }
+  };
 
   return (
     <div
@@ -437,6 +443,12 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
           />
         )}
       </div>
+      {view && !noticeSeen && (
+        <div role="note" className="absolute left-3 top-12 z-10 flex max-w-[min(32rem,calc(100%-24px))] items-start gap-3 rounded-md bg-surface-primary px-3 py-2 text-xs text-text-secondary shadow-md" onPointerDown={event => event.stopPropagation()} data-testid="browser-sign-in-notice">
+          <span>This page runs on {host}, signed in as {host}. Sign in here once and every device sees it.</span>
+          <button type="button" className="flex-shrink-0 text-interactive hover:text-interactive-hover" onClick={dismissNotice}>Got it</button>
+        </div>
+      )}
       {stop && stop !== 'older' && (
         <div role="status" className="absolute inset-x-0 bottom-0 flex justify-center p-3">
           <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">{stopLine(stop, host, phone)}</p>
@@ -497,6 +509,15 @@ function jpegBlob(dataUrl: string): Blob {
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return new Blob([bytes], { type: dataUrl.slice(5, dataUrl.indexOf(';')) || 'image/jpeg' });
+}
+
+/** Each host's one-time note about whose sign-ins its tabs use is remembered per screen. */
+function noticeKey(host: string): string {
+  return `pane.browserSignInNotice.${host}`;
+}
+
+function readNoticeSeen(host: string): boolean {
+  try { return localStorage.getItem(noticeKey(host)) === 'seen'; } catch { return false; }
 }
 
 function toBase64(file: File): Promise<string> {

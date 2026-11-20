@@ -84,7 +84,7 @@ Password protection is off by default. When it is on, every client must send the
 - A teammate's `exec` commands and terminals run as you and can reach every Pane secret, and each synced host keeps a copy, so "Everyone on tailnet" on any one host exposes them all. Pane refuses only their direct secret requests (secret cards, secret variables, shared key sync). See [Who can read a secret](PANE_SECRETS.md#who-can-read-a-secret).
 - Any device signed in as you, your phone included, is trusted. `runpane workspace list` shows only Macs, Windows PCs, and Linux machines, but that is a listing choice, not a block.
 - Removing a device from Tailscale revokes it everywhere.
-- The same setting decides who opens the host's dev servers and HTML pages in the Remote Pane app's browser tabs, at their `https://<host>.ts.net:<n>` addresses. A page in a frame cannot send the password, so those pages are off while password protection is on. See [Browser tabs on the phone](SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone).
+- For a host on an older Pane, the same setting decides who opens its dev servers and HTML pages in the Remote Pane app's browser tabs, at their `https://<host>.ts.net:<n>` addresses; a current host's tabs stream over the app's own connection instead. A page in a frame cannot send the password, so those pages are off while password protection is on. See [Browser tabs on the phone](SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone).
 
 ## What `write` and `exec` can do
 
