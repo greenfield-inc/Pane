@@ -6,7 +6,7 @@ import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remote-s
 import { randomBytes } from 'crypto';
 import type { PaneEventSink } from '../core/eventSink';
 import type { WorkspaceAccessPolicy } from './auth';
-import { createWorkspacePasswordVerifier, type SecretCheck } from './workspacePassword';
+import { createWorkspacePasswordVerifier, type WorkspaceSecretVerifier } from './workspacePassword';
 import { GlassesAccess } from './glassesAccess';
 import {
   TAILNET_HTTPS_OFF_REASON,
@@ -167,7 +167,7 @@ export class PaneWorkspaceHostController {
   private tailnet: WorkspaceTailnet | null = null;
   private readonly syncListeners = new Set<() => void>();
   private tailnetLogins: ReadonlySet<string> = new Set();
-  private passwordVerifier: { stored: WorkspacePasswordHash; verify: (secret: string, login: string) => SecretCheck } | null = null;
+  private passwordVerifier: { stored: WorkspacePasswordHash; verify: WorkspaceSecretVerifier } | null = null;
   private status: WorkspaceHostStatus = { state: 'off', reason: 'starting' };
   private syncQueue: Promise<void> = Promise.resolve();
   private checkTimer: NodeJS.Timeout | null = null;
@@ -244,7 +244,7 @@ export class PaneWorkspaceHostController {
     };
   }
 
-  private verifierFor(stored: WorkspacePasswordHash): (secret: string, login: string) => SecretCheck {
+  private verifierFor(stored: WorkspacePasswordHash): WorkspaceSecretVerifier {
     // Compare the hash, not the object: a config reload that rebuilds the same password keeps
     // what the verifier already proved, so connected clients are not checked from scratch.
     let current = this.passwordVerifier;

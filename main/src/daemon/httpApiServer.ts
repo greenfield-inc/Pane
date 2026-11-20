@@ -16,7 +16,7 @@ import { terminalPanelManager } from '../services/terminalPanelManager';
 import type { PaneCommandRegistry } from './commandRegistry';
 import { buildRoutesReport } from './computerCommands';
 import type { ComputerRoutesReport } from '../../../shared/types/remoteComputers';
-import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, type WorkspaceAccessPolicy } from './auth';
+import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, isWorkspaceRequestAdmitted, type WorkspaceAccessPolicy } from './auth';
 
 export type { WorkspaceAccessPolicy } from './auth';
 import { isPaneDaemonEventChannel } from './server';
@@ -1650,11 +1650,12 @@ export class PaneRemoteHttpApiServer {
     }
     if (this.workspace) {
       // Narrower visibility or a new password applies to clients that are already connected.
-      return workspaceCredentials !== null && authenticateWorkspaceRequest(
+      // Runs on every event and heartbeat, so it never hashes: a password counts once a check proved it.
+      return workspaceCredentials !== null && isWorkspaceRequestAdmitted(
         workspaceCredentials.login,
         workspaceCredentials.authorization,
         this.workspace.access(),
-      ).ok;
+      );
     }
     const remoteConfig = this.getRemoteConfig();
     if (!remoteConfig.host.config.enabled) {

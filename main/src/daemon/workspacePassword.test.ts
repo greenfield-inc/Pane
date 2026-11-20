@@ -5,14 +5,14 @@ describe('createWorkspacePasswordVerifier', () => {
   const stored = hashWorkspacePassword('correct horse');
 
   it('accepts the password and rejects anything else', () => {
-    const verify = createWorkspacePasswordVerifier(stored);
+    const verify = createWorkspacePasswordVerifier(stored).check;
     expect(verify('correct horse', 'me@example.com')).toBe('valid');
     expect(verify('wrong', 'me@example.com')).toBe('invalid');
   });
 
   it('stops checking a login that keeps guessing, without blocking anyone else', () => {
     let now = 0;
-    const verify = createWorkspacePasswordVerifier(stored, () => now);
+    const verify = createWorkspacePasswordVerifier(stored, () => now).check;
     for (let attempt = 0; attempt < 10; attempt += 1) {
       expect(verify(`guess-${attempt}`, 'guesser@example.com')).toBe('invalid');
     }
@@ -27,12 +27,21 @@ describe('createWorkspacePasswordVerifier', () => {
 
   it('keeps letting a client in with the password it already proved, however busy it gets', () => {
     let now = 0;
-    const verify = createWorkspacePasswordVerifier(stored, () => now);
+    const verify = createWorkspacePasswordVerifier(stored, () => now).check;
     expect(verify('correct horse', 'me@example.com')).toBe('valid');
     for (let login = 0; login < 70; login += 1) verify(`guess-${login}`, `stranger-${login}@example.com`);
     expect(verify('another guess', 'someone@example.com')).toBe('throttled');
     expect(verify('correct horse', 'me@example.com')).toBe('valid');
     now += 61_000;
     expect(verify('another guess', 'someone@example.com')).toBe('invalid');
+  });
+
+  it('remembers the proved password however many wrong guesses follow, and proves nothing by itself', () => {
+    const verifier = createWorkspacePasswordVerifier(stored);
+    expect(verifier.isProved('correct horse')).toBe(false);
+    expect(verifier.check('correct horse', 'me@example.com')).toBe('valid');
+    for (let guess = 0; guess < 70; guess += 1) verifier.check(`guess-${guess}`, `stranger-${guess}@example.com`);
+    expect(verifier.isProved('correct horse')).toBe(true);
+    expect(verifier.isProved('guess-0')).toBe(false);
   });
 });

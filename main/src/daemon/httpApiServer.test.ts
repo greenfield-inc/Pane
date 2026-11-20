@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRemoteDaemonConfig, NATIVE_APP_WEBSOCKET_ORIGIN, type RemoteDaemonClientRecord, type RemoteDaemonConfig, type RemoteInvokeRequest } from '../../../shared/types/remoteDaemon';
 import { PaneCommandRegistry, teammatePaneCaller } from './commandRegistry';
 import { hashRemoteDaemonToken } from './auth';
+import type { WorkspaceSecretVerifier } from './workspacePassword';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
@@ -1498,7 +1499,10 @@ describe('workspace identity mode', () => {
     if (password !== undefined) headers.Authorization = `Bearer ${password}`;
     return headers;
   };
-  const passwordIs = (expected: string) => (secret: string) => (secret === expected ? 'valid' as const : 'invalid' as const);
+  const passwordIs = (expected: string): WorkspaceSecretVerifier => ({
+    check: (secret) => (secret === expected ? 'valid' : 'invalid'),
+    isProved: (secret) => secret === expected,
+  });
 
   it('takes a linked computer\'s or phone\'s token from any login (D-51), and only the linked computer runs machine commands', async () => {
     const registry = new PaneCommandRegistry();
@@ -1570,7 +1574,7 @@ describe('workspace identity mode', () => {
   });
 
   it('answers 429 once the password check is throttled for a login', async () => {
-    const server = await startWorkspaceServer(() => ownerOnly({ verifySecret: () => 'throttled' }));
+    const server = await startWorkspaceServer(() => ownerOnly({ verifySecret: { check: () => 'throttled', isProved: () => false } }));
     const response = await requestJson(server, 'POST', invokePath, invoke, undefined, as(owner, 'any guess'));
     expect(response.statusCode).toBe(429);
     expect(JSON.stringify(response.body)).toContain('ERR_WORKSPACE_PASSWORD_THROTTLED');
@@ -1591,6 +1595,22 @@ describe('workspace identity mode', () => {
     expect(noPassword.statusCode).toBe(401);
     const stream = await openEventStream(server, 'correct horse', as(owner), '/serve-secret/events');
     await expect(stream.nextEvent()).resolves.toMatchObject({ event: 'ready' });
+    stream.close();
+  });
+
+  it('keeps sending events to a client whose password was proved, without checking the password again', async () => {
+    let checks = 0;
+    const verifier = passwordIs('correct horse');
+    const counted: WorkspaceSecretVerifier = { ...verifier, check: (secret, login) => { checks += 1; return verifier.check(secret, login); } };
+    const server = await startWorkspaceServer(() => ownerOnly({ verifySecret: counted }));
+    const stream = await openEventStream(server, 'correct horse', as(owner), '/serve-secret/events');
+    await stream.nextEvent();
+    await stream.nextEvent();
+    const before = checks;
+
+    server.getEventSink().send('session:created', { id: 'session-1' });
+    await expect(stream.nextEvent()).resolves.toMatchObject({ event: 'daemon-event' });
+    expect(checks).toBe(before);
     stream.close();
   });
 
