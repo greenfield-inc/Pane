@@ -1,147 +1,307 @@
-import type { BrowserPanelState, ToolPanel } from '@shared/types/panels';
-import { isRelayProfile, RemoteUnconfirmedResultError } from '@shared/remoteClient';
-import { RELAY_CLIENT_COMMANDS } from '@shared/types/relay';
-import { relayPreview } from '@shared/utils/phonePage';
+import type { BrowserFrame, BrowserInput, BrowserTabView } from '@shared/types/browserStream';
+import type { ToolPanel } from '@shared/types/panels';
 import { normalizeUrl } from '@shared/utils/browserUrl';
-import { useQueryClient } from '@tanstack/react-query';
-import * as Linking from 'expo-linking';
-import { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { WebView } from 'react-native-webview';
+import { browserInputQueue, fitFrame, keyboardField, movesFocus, pagePoint, PhoneControl, type FrameBox } from '@shared/utils/browserStreamInput';
+import * as Clipboard from 'expo-clipboard';
+import { useIsFocused } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, AppState, Image, Keyboard, Modal, PixelRatio, Platform, Pressable, StyleSheet, TextInput, View, type LayoutChangeEvent } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
-import { useDaemon, useDaemonQueryKey, useInvokeMutation, useInvokeQuery } from '@/daemon';
+import { useDaemon } from '@/daemon';
 import { useTheme } from '@/theme';
-import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
+import { Button, Icon, Text } from '@/ui';
+import type { IconProps } from '@/ui/Icon';
 
 import { isDemoProfile } from '../demo/demoHost';
-import { useConnectionPresence } from '../hosts/useConnectionPresence';
-import { AddressAsker, type AddressFailure } from './addressAsker';
-import { browserPage, htmlFromBase64, relayBrowserPage, reloadFile, splitAddress, type BrowserPage } from './browserPage';
-import { StateScreen } from '../tabs/StateScreen';
-import { usePorts } from './usePorts';
+import { pickFiles, type AttachSource } from '../upload/pickFiles';
+import { splitAddress } from './browserPage';
+import { driverChip, KEYBOARD_EMPTY, keyboardEdit, stopLine } from './browserStream';
+import { OwnCopyBrowserTab } from './OwnCopyBrowserTab';
+import { markSignInNoticeSeen, signInNotice, signInNoticeSeen } from './signInNotice';
+import { browserChannels, useBrowserStream } from './useBrowserStream';
 
-const TAILSCALE_APP_URL = 'tailscale://';
-const TAILSCALE_DOWNLOAD_URL = Platform.OS === 'android' ? 'https://tailscale.com/download/android' : 'https://tailscale.com/download/ios';
+/** How long the agent's cursor stays at a click before it fades (as on the host's own tab). */
+const CURSOR_SHOWN_MS = 1_200;
+/** A touch held this long without moving is a right click. */
+const LONG_PRESS_MS = 550;
+/** A touch that moves this far is a scroll, not a tap. */
+const TAP_SLOP_PX = 8;
+const NOTICE_MS = 4_000;
 
 /**
- * A page tab: the address row (back, forward, address, reload, Safari) over the live page. Pages
- * on the computer load through the phone addresses it creates over Tailscale; HTML files fall
- * back to reading the file through the computer. Each case that can't load has its own screen.
+ * A page tab: the page runs on the computer that owns the Pane, with its sign-ins, and the phone
+ * shows its frames and sends touch and typing back (docs/BROWSER_AGENTS.md). The address field and
+ * who drives sit on top, Back, Forward, Reload and the keyboard at the bottom. A computer on an
+ * older Pane streams nothing: the phone then loads its own copy of the page.
  */
+/** The most a page takes from the phone's file picker in one go (the host's limit). */
+const UPLOAD_LIMIT_BYTES = 10 * 1_048_576;
+
 export function BrowserTab({ panel }: { panel: ToolPanel }) {
+  const { profile } = useDaemon();
+  // The demo's pages are sample files on the phone.
+  if (isDemoProfile(profile)) return <OwnCopyBrowserTab panel={panel} />;
+  return <StreamedBrowserTab panel={panel} />;
+}
+
+function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
   const theme = useTheme();
   const { colors } = theme;
-  const { profile } = useDaemon();
-  const { presence, retry } = useConnectionPresence();
-  const read = usePorts();
-  const url = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl ?? '';
-  const webView = useRef<WebView>(null);
-  const [draft, setDraft] = useState<string | null>(null);
-  const [inputError, setInputError] = useState<string | null>(null);
-  const [nav, setNav] = useState({ back: false, forward: false });
-  const [progress, setProgress] = useState(1);
-  // The load that last finished, so the opening screen covers only a page's first load.
-  const [loadedKey, setLoadedKey] = useState<string | null>(null);
-  // The page view failed to load: an unreachable phone address, or a page that refused.
-  const [loadError, setLoadError] = useState<{ src: string; message: string } | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  // A computer reached through a relay hands out a one-time address for each page on it.
-  const relayAsk = isRelayProfile(profile) ? relayAskFor(url, panel.id) : null;
-  const ticket = useInvokeQuery<{ url: string }>(RELAY_CLIENT_COMMANDS.previewAddress, [relayAsk], {
-    enabled: relayAsk !== null,
-    staleTime: Infinity,
-    gcTime: 0,
-    retry: false,
-  });
-  let page: BrowserPage = relayAsk !== null
-    ? relayBrowserPage(url, read, panel.id, profile.label, ticket.data?.url ?? null)
-    : browserPage(url, read, panel.id);
-  // The demo's pages are sample files on the phone.
-  if (isDemoProfile(profile) && page.kind !== 'web' && page.kind !== 'empty' && page.kind !== 'invalid') page = { kind: 'file', url, address: page.address };
-  // A files address the phone can't reach (not on Tailscale): read the file through the computer instead.
-  if (page.kind === 'web' && url.startsWith('file:') && loadError?.src === page.src) page = { kind: 'file', url, address: page.address };
-
-  const requestAddress = useInvokeMutation<[number]>('ports:phone-address');
-  const requested = page.kind === 'loading' ? page.request : undefined;
-  const [askFailure, setAskFailure] = useState<AddressFailure | null>(null);
-  const [asker] = useState(() => new AddressAsker(port => requestAddress.mutateAsync([port]), failure => {
-    setAskFailure(failure);
-    // The computer may have made the address anyway: read its ports to see.
-    if (failure?.error instanceof RemoteUnconfirmedResultError) read.refetch();
-  }));
+  const { client, profile } = useDaemon();
+  const focused = useIsFocused();
+  const [active, setActive] = useState(AppState.currentState === 'active');
   useEffect(() => {
-    if (requested !== undefined) asker.ask(requested);
-  }, [requested, asker]);
-  const addressError = relayAsk !== null ? ticket.error : requested !== undefined && askFailure?.port === requested ? askFailure.error : null;
+    const subscription = AppState.addEventListener('change', state => setActive(state === 'active'));
+    return () => subscription.remove();
+  }, []);
+  const [box, setBox] = useState<{ width: number; height: number }>();
+  // The page keeps the size the stage has without the keyboard: opening or closing it never resizes the host's page.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    // iOS moves the layout on keyboardWill*, so the guard must be set by then (as TerminalScreen does).
+    const shown = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setKeyboardOpen(true));
+    const hidden = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKeyboardOpen(false));
+    return () => { shown.remove(); hidden.remove(); };
+  }, []);
+  const [space, setSpace] = useState(box);
+  useEffect(() => { if (box && !keyboardOpen) setSpace(box); }, [box, keyboardOpen]);
+  const stream = useBrowserStream(panel.id, focused && active, space && { ...space, scale: PixelRatio.get() });
+  const { frame, view, stop } = stream;
+  const host = view?.host || profile.label;
+  // The first streamed tab from each host says whose sign-ins it uses, once per phone.
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const noticeSeen = dismissed === host || signInNoticeSeen(host);
 
-  const save = useInvokeMutation<[string, Partial<ToolPanel>]>('panels:update', { invalidates: ['panels:list'] });
-  const submit = () => {
+  // Input goes to the host in order through one queue for the tab's life.
+  const clientRef = useRef(client);
+  useEffect(() => { clientRef.current = client; }, [client]);
+  const keysRef = useRef<TextInput>(null);
+  const [field, setField] = useState<'text' | 'password' | null>(null);
+  const [keyboardText, setKeyboardText] = useState(KEYBOARD_EMPTY);
+  // What the field holds after the last edit: changes can arrive faster than a render, so each one
+  // is compared with this, never with the last rendered text.
+  const keyboardTextRef = useRef(KEYBOARD_EMPTY);
+  const [notice, setNotice] = useState<string>();
+  const fieldRef = useRef<'text' | 'password' | null>(null);
+  const [queue] = useState(() => browserInputQueue(async batch => {
+    const result = await browserChannels(clientRef.current).input(panel.id, batch);
+    if (result.copied) void Clipboard.setStringAsync(result.copied).catch(() => undefined);
+    const tapped = batch.some(input => input.kind === 'mouse' && input.action === 'up' && input.button === 'left');
+    const field = keyboardField(batch, result.field);
+    // Every tap into a field starts the keyboard's text afresh, so the last field's text never edits this one.
+    if (field !== undefined && (field !== fieldRef.current || tapped)) {
+      fieldRef.current = field;
+      setField(field);
+      keyboardTextRef.current = KEYBOARD_EMPTY;
+      setKeyboardText(KEYBOARD_EMPTY);
+    }
+    // A tap on a text field opens the keyboard; a tap anywhere else closes it.
+    if (tapped && field) keysRef.current?.focus();
+    else if (tapped && field === null) keysRef.current?.blur();
+    return result;
+  }));
+  // Input made while the host can't be reached is dropped, never replayed late onto a page that may have changed.
+  const stopRef = useRef(stop);
+  useEffect(() => { stopRef.current = stop; }, [stop]);
+  const send = useCallback((input: BrowserInput | null) => {
+    if (stopRef.current && stopRef.current !== 'older') return;
+    // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
+    if (movesFocus(input)) {
+      fieldRef.current = 'password';
+      setField('password');
+    }
+    queue(input);
+  }, [queue]);
+  const [control] = useState(() => new PhoneControl());
+  useEffect(() => { if (view) control.view(view); }, [control, view]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(undefined), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const page = frame ? { width: frame.width, height: frame.height } : undefined;
+  const drawn = box && page ? fitFrame(box, page) : undefined;
+  const toPage = (x: number, y: number) => (box && page ? pagePoint(x, y, box, page) : undefined);
+
+  // Touch: a tap is a touch tap, a drag scrolls, a long press is a right click. The first touch
+  // while another screen or an agent has the page only takes control.
+  const takesControl = () => {
+    if (!control.touch()) return false;
+    send(null);
+    return true;
+  };
+  const onTap = (x: number, y: number) => {
+    if (stop === 'asleep') { stream.wake(); return; }
+    const point = toPage(x, y);
+    if (!point || takesControl()) return;
+    // A tap goes as a mouse click: Chromium makes no click (or one in the wrong place) from a
+    // synthetic touch on a page shown at another size.
+    send({ kind: 'mouse', action: 'down', ...point, button: 'left', clicks: 1, modifiers: 0 });
+    send({ kind: 'mouse', action: 'up', ...point, button: 'left', clicks: 1, modifiers: 0 });
+  };
+  const onLongPress = (x: number, y: number) => {
+    const point = toPage(x, y);
+    if (!point || takesControl()) return;
+    send({ kind: 'mouse', action: 'down', ...point, button: 'right', clicks: 1, modifiers: 0 });
+    send({ kind: 'mouse', action: 'up', ...point, button: 'right', clicks: 1, modifiers: 0 });
+  };
+  const dragTookControl = useRef(false);
+  const onDragStart = () => { dragTookControl.current = takesControl(); };
+  const onDrag = (x: number, y: number, dx: number, dy: number) => {
+    const point = toPage(x, y);
+    if (!point || !page || !drawn || dragTookControl.current) return;
+    const scale = page.width / drawn.width;
+    send({ kind: 'wheel', ...point, dx: -dx * scale, dy: -dy * scale });
+  };
+  const lastX = useSharedValue(0);
+  const lastY = useSharedValue(0);
+  const tap = Gesture.Tap()
+    .maxDistance(TAP_SLOP_PX)
+    .onEnd((event, success) => { if (success) scheduleOnRN(onTap, event.x, event.y); });
+  const longPress = Gesture.LongPress()
+    .minDuration(LONG_PRESS_MS)
+    .maxDistance(TAP_SLOP_PX)
+    .onStart(event => scheduleOnRN(onLongPress, event.x, event.y));
+  // Vertical drags scroll; one that starts sideways fails here, so the screen's swipe-back still works.
+  const pan = Gesture.Pan()
+    .activeOffsetY([-TAP_SLOP_PX, TAP_SLOP_PX])
+    .failOffsetX([-12, 12])
+    .onStart(() => {
+      lastX.value = 0;
+      lastY.value = 0;
+      scheduleOnRN(onDragStart);
+    })
+    .onUpdate(event => {
+      scheduleOnRN(onDrag, event.x, event.y, event.translationX - lastX.value, event.translationY - lastY.value);
+      lastX.value = event.translationX;
+      lastY.value = event.translationY;
+    });
+
+  // Typing: a hidden field carries the phone's keyboard into the page's focused field.
+  const onType = (after: string) => {
+    const edit = keyboardEdit(keyboardTextRef.current, after, fieldRef.current === 'password');
+    keyboardTextRef.current = edit.next;
+    for (const input of edit.input) send(input);
+    setKeyboardText(edit.next);
+  };
+
+  // The address field: Go navigates on the host.
+  const [draft, setDraft] = useState<string | null>(null);
+  const [addressError, setAddressError] = useState<string | null>(null);
+  const go = () => {
     const text = draft?.trim();
     setDraft(null);
     if (!text) return;
-    const next = normalizeUrl(text);
-    if (!/^https?:\/\//i.test(next)) {
-      setInputError('Enter a web address, like localhost:5173 or example.com.');
+    const url = normalizeUrl(text);
+    if (!/^https?:\/\//i.test(url)) {
+      setAddressError('Enter a web address, like localhost:5173 or example.com.');
       return;
     }
-    setInputError(null);
-    setLoadError(null);
-    if (next === url) {
-      reload();
-      return;
-    }
-    // Saved on the tab, so the computer's tab moves to it too.
-    save.mutate([panel.id, { state: { ...panel.state, customState: { ...panel.state.customState, currentUrl: next } } }], {
-      onError: error => setInputError(`Couldn’t open ${next}: ${error.message}`),
-    });
+    setAddressError(null);
+    send({ kind: 'navigate', url });
   };
+  const [addressHost, addressPath] = splitAddress(view?.url ?? '');
 
-  const queryClient = useQueryClient();
-  const fileKey = useDaemonQueryKey('panels:read-browser-file', [panel.id, url]);
-  const reload = () => {
-    setLoadError(null);
-    if (page.kind === 'web') webView.current?.reload();
-    else if (page.kind === 'file') void reloadFile(queryClient, fileKey);
-    else read.refetch();
-    if (requested !== undefined && addressError) asker.retry(requested);
-    if (relayAsk !== null && page.kind !== 'web') void ticket.refetch();
-    setReloadKey(key => key + 1);
-  };
-  const src = page.kind === 'web' ? page.src : null;
-  const loadKey = `${src}#${reloadKey}`;
-  const openOutside = () => { if (src) void Linking.openURL(src); };
-  const openTailscale = () => {
-    Linking.openURL(TAILSCALE_APP_URL).catch(() => void Linking.openURL(TAILSCALE_DOWNLOAD_URL));
-  };
+  // Who drives: the agent's cursor fades after a moment; the last agent names "Hand to".
+  const [lastAgent, setLastAgent] = useState<string>();
+  const agentName = view?.driver?.by === 'agent' ? view.driver.agent : lastAgent;
+  if (agentName !== lastAgent) setLastAgent(agentName);
+  const agentDriving = view?.driver?.by === 'agent';
+  const chip = view?.driver ? driverChip(view.driver, agentName) : undefined;
 
-  const [host, path] = splitAddress(page.address);
-  const offline = presence === 'unreachable';
-  const failed = page.kind === 'web' && loadError?.src === page.src;
-  // A page's first load, and the wait for its phone address, draw a page skeleton over the body.
-  const opening = !offline && (
-    (page.kind === 'web' && loadedKey !== loadKey && !failed)
-    || (page.kind === 'loading' && !read.error && !addressError)
-  );
+  // The page's dialogs, file pickers and downloads.
+  const dialog = view?.dialog;
+  const [prompt, setPrompt] = useState<{ message: string; text: string } | null>(null);
+  const shownDialog = useRef<string | null>(null);
+  useEffect(() => {
+    if (!dialog) { shownDialog.current = null; setPrompt(null); return; }
+    const key = `${dialog.type}\n${dialog.message}`;
+    if (shownDialog.current === key) return;
+    shownDialog.current = key;
+    const answer = (accept: boolean) => send({ kind: 'dialog', accept });
+    if (dialog.type === 'prompt') setPrompt({ message: dialog.message, text: dialog.defaultPrompt ?? '' });
+    else if (dialog.type === 'alert') Alert.alert(host, dialog.message, [{ text: 'OK', onPress: () => answer(true) }], { cancelable: false });
+    else Alert.alert(host, dialog.message || 'Leave this page?', [{ text: 'Cancel', style: 'cancel', onPress: () => answer(false) }, { text: 'OK', onPress: () => answer(true) }], { cancelable: false });
+  }, [dialog, host, send]);
+
+  const fileChooser = view?.fileChooser;
+  const choosing = useRef(false);
+  useEffect(() => {
+    if (!fileChooser) { choosing.current = false; return; }
+    if (choosing.current) return;
+    choosing.current = true;
+    const choose = async (source: AttachSource) => {
+      try {
+        const picked = await pickFiles(source);
+        if (picked.length === 0) { send({ kind: 'files-cancel' }); return; }
+        const chosen = fileChooser.multiple ? picked : picked.slice(0, 1);
+        const bytes = chosen.reduce((sum, file) => sum + file.size, 0);
+        if (bytes > UPLOAD_LIMIT_BYTES) {
+          send({ kind: 'files-cancel' });
+          setNotice(`The files come to ${(bytes / 1_048_576).toFixed(1)} MB; a page takes up to ${UPLOAD_LIMIT_BYTES / 1_048_576} MB from the phone at once.`);
+          return;
+        }
+        const files = await Promise.all(chosen.map(async file => ({ name: file.name, data: await file.read(0, file.size) })));
+        send({ kind: 'files', files });
+      } catch (cause) {
+        send({ kind: 'files-cancel' });
+        setNotice(`The file was not sent: ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
+    };
+    Alert.alert(`The page asks for ${fileChooser.multiple ? 'files' : 'a file'}`, `It goes to ${host}.`, [
+      { text: 'Files', onPress: () => void choose('files') },
+      { text: 'Photos', onPress: () => void choose('photos') },
+      { text: 'Cancel', style: 'cancel', onPress: () => send({ kind: 'files-cancel' }) },
+    ], { cancelable: false });
+  }, [fileChooser, host, send]);
+
+  const download = view?.downloads.at(-1);
+  const seenDownload = useRef<number | null>(null);
+  useEffect(() => {
+    if (!view) return;
+    // Downloads from before the tab opened here stay quiet.
+    if (seenDownload.current === null) { seenDownload.current = download?.at ?? 0; return; }
+    if (!download || download.at <= seenDownload.current) return;
+    seenDownload.current = download.at;
+    setNotice(`Downloaded ${download.name} on ${host}`);
+  }, [view, download, host]);
+  useEffect(() => {
+    if (stream.reloadedAt !== undefined) setNotice(`The page reloaded on ${host}.`);
+  }, [stream.reloadedAt, host]);
+
+  if (stop === 'older') {
+    return (
+      <View style={[styles.fill, { backgroundColor: colors.background }]}>
+        <Text testID="browser-older-host" variant="footnote" tone="secondary" style={[styles.olderLine, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>{stopLine('older', profile.label)}</Text>
+        <OwnCopyBrowserTab panel={panel} />
+      </View>
+    );
+  }
+
+  const history = (to: 'back' | 'forward' | 'reload') => send({ kind: 'history', go: to });
+  const line = stop ? stopLine(stop, host) : notice;
 
   return (
     <View testID="browser-tab" style={[styles.fill, { backgroundColor: colors.background }]}>
-      <View style={[styles.bar, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
-        <ToolButton testID="browser-back" label="Back" ios="chevron.left" android="arrow_back" disabled={!nav.back} onPress={() => webView.current?.goBack()} />
-        <ToolButton testID="browser-forward" label="Forward" ios="chevron.right" android="arrow_forward" disabled={!nav.forward} onPress={() => webView.current?.goForward()} />
+      <View style={[styles.top, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
         <View style={[styles.address, { borderRadius: theme.radius.md, backgroundColor: colors.surfaceRaised }]}>
           {draft === null ? (
             <Pressable
               testID="browser-address"
               accessibilityRole="button"
-              accessibilityLabel={`Address, ${page.address || 'empty'}`}
+              accessibilityLabel={`Address, ${view?.url || 'empty'}`}
               accessibilityHint="Edit the address"
-              onPress={() => setDraft(page.address)}
+              onPress={() => setDraft(view?.url ?? '')}
               style={styles.addressText}
             >
-              <Text variant="subhead" numberOfLines={1} style={styles.shrink}>
-                <Text variant="subhead" style={styles.semibold}>{host || 'Enter an address'}</Text>
-                {path ? <Text variant="subhead" tone="muted">{` ${path}`}</Text> : null}
+              <Text variant="subhead" numberOfLines={1}>
+                <Text variant="subhead" style={styles.semibold}>{addressHost || 'Enter an address'}</Text>
+                {addressPath ? <Text variant="subhead" tone="muted">{` ${addressPath}`}</Text> : null}
               </Text>
             </Pressable>
           ) : (
@@ -151,7 +311,7 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
               autoFocus
               value={draft}
               onChangeText={setDraft}
-              onSubmitEditing={submit}
+              onSubmitEditing={go}
               onBlur={() => setDraft(null)}
               selectTextOnFocus
               autoCapitalize="none"
@@ -164,194 +324,152 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
             />
           )}
         </View>
-        <ToolButton testID="browser-reload" label="Reload" ios="arrow.clockwise" android="refresh" onPress={reload} />
-        <ToolButton testID="browser-safari" label="Open in Safari" ios="safari" android="open_in_browser" disabled={!src} onPress={openOutside} />
+        {/* One fixed-height row, so the page never shifts as drivers come and go. */}
+        <View style={styles.chipRow}>
+          {chip ? (
+            <View testID="browser-driver" style={[styles.chip, { borderColor: agentDriving ? colors.accent : colors.border }]}>
+              <Text variant="footnote" numberOfLines={1} style={styles.shrink}>{chip.label}</Text>
+              <Pressable testID="browser-driver-action" accessibilityRole="button" hitSlop={6} onPress={() => {
+                if (stopRef.current && stopRef.current !== 'older') return;
+                void browserChannels(client).driver(panel.id, chip.to).catch(() => setNotice(`That didn't reach ${host}. Try again.`));
+              }}>
+                <Text variant="footnote" style={{ color: colors.accentText }}>{chip.action}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
       </View>
-      {/* One fixed-height track, so the page never shifts when loading starts or ends. */}
-      <View style={styles.track}>
-        {src && progress < 1 && !failed ? <View style={[styles.progress, { width: `${Math.max(progress, 0.05) * 100}%`, backgroundColor: colors.accent }]} /> : null}
-      </View>
-      {inputError ? (
-        <Pressable testID="browser-input-error" onPress={() => setInputError(null)} accessibilityHint="Dismiss" style={styles.notice}>
-          <Text variant="footnote" tone="danger">{inputError}</Text>
+      {view && !noticeSeen ? (
+        <Pressable testID="browser-sign-in-notice" accessibilityRole="button" accessibilityHint="Dismiss" onPress={() => { markSignInNoticeSeen(host); setDismissed(host); }} style={[styles.notice, { backgroundColor: colors.surface, borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+          <Text variant="footnote" tone="secondary">{signInNotice(host)} <Text variant="footnote" style={{ color: colors.accentText }}>Got it</Text></Text>
         </Pressable>
       ) : null}
-      <View style={styles.fill}>
-        {offline ? (
-          <StateScreen
-            testID="browser-offline"
-            icon={{ ios: 'icloud.slash', android: 'cloud_off' }}
-            title={`${profile.label} is offline`}
-            message="The page opens again when it is back."
-            actions={<Button title="Try again" variant="secondary" onPress={retry} />}
-          />
-        ) : page.kind === 'web' ? (
-          <>
-            <WebView
-              key={loadKey}
-              ref={webView}
-              testID="browser-webview"
-              source={{ uri: page.src }}
-              originWhitelist={['*']}
-              allowsBackForwardNavigationGestures
-              allowsInlineMediaPlayback
-              setSupportMultipleWindows={false}
-              onNavigationStateChange={state => setNav({ back: state.canGoBack, forward: state.canGoForward })}
-              onLoadProgress={event => setProgress(event.nativeEvent.progress)}
-              onLoadStart={() => setProgress(0)}
-              onLoadEnd={() => {
-                setProgress(1);
-                setLoadedKey(loadKey);
-              }}
-              onError={event => setLoadError({ src: page.src, message: event.nativeEvent.description })}
-              onHttpError={event => { if (event.nativeEvent.url === page.src) setLoadError({ src: page.src, message: `The page answered HTTP ${event.nativeEvent.statusCode}.` }); }}
-              style={[styles.fill, { backgroundColor: colors.background }]}
-              webviewDebuggingEnabled={__DEV__}
-            />
-            {failed ? (
-              <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background }]}>
-                {page.src.includes('.ts.net') ? (
-                  <StateScreen
-                    testID="browser-tailscale"
-                    icon={{ ios: 'shield', android: 'shield' }}
-                    title={`Pages from ${profile.label} open over Tailscale`}
-                    message="Turn on Tailscale on this phone to see this page. Pages from the internet still open here."
-                    actions={<>
-                      <Button title="Open Tailscale" onPress={openTailscale} />
-                      <Button title="Safari" variant="secondary" icon={<Icon ios="safari" android="open_in_browser" size={16} color={colors.text} />} onPress={openOutside} />
-                    </>}
-                  />
-                ) : (
-                  <StateScreen
-                    testID="browser-load-error"
-                    icon={{ ios: 'exclamationmark.triangle', android: 'warning' }}
-                    title={`Couldn’t open ${host}`}
-                    message={loadError?.message ?? ''}
-                    actions={<Button title="Reload" onPress={reload} />}
-                  />
-                )}
-              </View>
-            ) : null}
-          </>
-        ) : page.kind === 'file' ? (
-          <FileView key={reloadKey} panelId={panel.id} page={page} onNavigate={setNav} webView={webView} />
-        ) : page.kind === 'loading' ? (
-          read.error ? <ErrorState title="Couldn’t read the computer’s pages" error={read.error} onRetry={read.refetch} />
-            : addressError ? <ErrorState title={`Couldn’t open ${host} on this phone`} error={addressError} onRetry={reload} testID="browser-address-error" />
-            : null
-        ) : page.kind === 'refused' ? (
-          <StateScreen
-            testID="browser-refused"
-            icon={{ ios: 'powerplug', android: 'power' }}
-            title={`Nothing on ${page.host} listens on port ${page.port}`}
-            message="Start the dev server there, then reload."
-            actions={<Button title="Reload" icon={<Icon ios="arrow.clockwise" android="refresh" size={16} color={colors.onAccent} />} onPress={reload} />}
-          />
-        ) : page.kind === 'not-web' ? (
-          <StateScreen
-            testID="browser-not-web"
-            icon={{ ios: 'powerplug', android: 'power' }}
-            title={`localhost:${page.port} isn’t a web page`}
-            message={`It doesn’t answer HTTP, so it opens only on ${page.host}.`}
-          />
-        ) : page.kind === 'pages-off' ? (
-          <StateScreen
-            testID="browser-pages-off"
-            icon={{ ios: 'shield', android: 'shield' }}
-            title={`Pages from ${page.host} don’t open on phones right now`}
-            message={`${page.host} says: ${page.reason}. Pane checks again every minute. Pages from the internet still open here.`}
-            actions={<Button title="Reload" variant="secondary" onPress={reload} />}
-          />
-        ) : page.kind === 'update' ? (
-          <StateScreen
-            testID="browser-update"
-            icon={{ ios: 'arrow.down.circle', android: 'system_update' }}
-            title={`Update Pane on ${profile.label}`}
-            message={`Its Pane is too old to show its pages on phones. HTML files and pages from the internet still open here.`}
-          />
-        ) : (
-          <StateScreen
-            testID={page.kind === 'invalid' ? 'browser-invalid' : 'browser-empty'}
-            icon={{ ios: 'globe', android: 'language' }}
-            title={page.kind === 'invalid' ? 'This address isn’t a web address' : 'No page open'}
-            message="Tap the address above and enter one, like localhost:5173."
-          />
-        )}
-        <SkeletonSwap loading={opening} skeleton={<PageSkeleton overlay />}>{null}</SkeletonSwap>
+      {addressError ? (
+        <Pressable testID="browser-input-error" onPress={() => setAddressError(null)} accessibilityHint="Dismiss" style={styles.notice}>
+          <Text variant="footnote" tone="danger">{addressError}</Text>
+        </Pressable>
+      ) : null}
+      <View style={styles.track}>
+        {view?.loading ? <View style={[styles.track, { backgroundColor: colors.accent }]} /> : null}
       </View>
+      <GestureDetector gesture={Gesture.Race(pan, longPress, tap)}>
+        <View
+          testID="browser-stream"
+          accessibilityLabel={view?.title || 'Page'}
+          style={[styles.fill, styles.stage, { backgroundColor: colors.surfaceRaised }]}
+          onLayout={(event: LayoutChangeEvent) => setBox({ width: event.nativeEvent.layout.width, height: event.nativeEvent.layout.height })}
+        >
+          {frame && drawn ? <FrameView frame={frame} drawn={drawn} dim={stop !== undefined} /> : null}
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.outline, { borderColor: agentDriving ? colors.accent : 'transparent' }]} />
+          {view?.agentCursor && page && drawn && agentDriving ? <AgentCursor cursor={view.agentCursor} page={page} drawn={drawn} /> : null}
+          {!frame && !stop ? (
+            <View pointerEvents="none" style={styles.center}><Text variant="footnote" tone="muted">{`Loading the page on ${host}…`}</Text></View>
+          ) : null}
+          {line ? (
+            <View pointerEvents="none" style={styles.lineRow}>
+              <Text testID="browser-stream-line" variant="footnote" tone="secondary" style={[styles.line, { backgroundColor: colors.surface, borderColor: colors.border }]}>{line}</Text>
+            </View>
+          ) : null}
+          <TextInput
+            ref={keysRef}
+            testID="browser-keys"
+            accessibilityLabel="Type into the page"
+            value={keyboardText}
+            onChangeText={onType}
+            onSubmitEditing={() => { send({ kind: 'key', key: 'Enter', modifiers: 0 }); keyboardTextRef.current = KEYBOARD_EMPTY; setKeyboardText(KEYBOARD_EMPTY); }}
+            submitBehavior="submit"
+            secureTextEntry={field === 'password'}
+            autoCapitalize="none"
+            autoComplete="off"
+            autoCorrect={field !== 'password'}
+            caretHidden
+            style={styles.keys}
+          />
+        </View>
+      </GestureDetector>
+      <View testID="browser-bar" style={[styles.bar, { borderTopColor: colors.border, backgroundColor: colors.surface }]}>
+        <ToolButton testID="browser-back" label="Back" ios="chevron.left" android="arrow_back" disabled={!view?.canGoBack} onPress={() => history('back')} />
+        <ToolButton testID="browser-forward" label="Forward" ios="chevron.right" android="arrow_forward" disabled={!view?.canGoForward} onPress={() => history('forward')} />
+        <ToolButton testID="browser-reload" label="Reload" ios="arrow.clockwise" android="refresh" disabled={!view?.url} onPress={() => history('reload')} />
+        <ToolButton testID="browser-keyboard" label="Keyboard" ios="keyboard" android="keyboard" onPress={() => (keysRef.current?.isFocused() ? keysRef.current.blur() : keysRef.current?.focus())} />
+        <Text variant="footnote" tone="muted" numberOfLines={1} style={styles.host}>{`on ${host}`}</Text>
+      </View>
+      <Modal visible={prompt !== null} transparent animationType="fade" onRequestClose={() => { setPrompt(null); send({ kind: 'dialog', accept: false }); }} statusBarTranslucent>
+        <View style={[styles.scrim, { backgroundColor: colors.scrim }]}>
+          <View testID="browser-prompt" style={[styles.card, { backgroundColor: colors.surface, borderRadius: theme.radius.md }]}>
+            <Text variant="body">{prompt?.message ?? ''}</Text>
+            <TextInput
+              testID="browser-prompt-input"
+              autoFocus
+              value={prompt?.text ?? ''}
+              onChangeText={text => setPrompt(current => (current ? { ...current, text } : current))}
+              placeholderTextColor={colors.textMuted}
+              style={[theme.typography.body, styles.promptInput, { color: colors.text, borderColor: colors.border, borderRadius: theme.radius.md }]}
+            />
+            <View style={styles.cardButtons}>
+              <Button title="Cancel" variant="secondary" onPress={() => { setPrompt(null); send({ kind: 'dialog', accept: false }); }} />
+              <Button title="OK" onPress={() => { send({ kind: 'dialog', accept: true, text: prompt?.text ?? '' }); setPrompt(null); }} />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
-/** An HTML file read through the computer, for when its files address is out of reach. Only self-contained pages load fully. */
-function FileView({ panelId, page, onNavigate, webView }: {
-  panelId: string;
-  page: Extract<BrowserPage, { kind: 'file' }>;
-  onNavigate: (nav: { back: boolean; forward: boolean }) => void;
-  webView: React.RefObject<WebView | null>;
-}) {
-  const { colors } = useTheme();
-  const file = useInvokeQuery<{ data: string }>('panels:read-browser-file', [panelId, page.url], { retry: false });
-  let html: string | null = null;
-  let problem: unknown = file.error;
-  if (file.data) {
-    try {
-      html = htmlFromBase64(file.data.data);
-    } catch {
-      problem = new Error(`${page.address} isn’t a UTF-8 text file, so it can’t show here.`);
-    }
-  }
+/**
+ * The page's newest frame, letterboxed in its box. Two images take turns: a new frame loads in
+ * the hidden one and shows once decoded, so the page never blanks between frames.
+ */
+function FrameView({ frame, drawn, dim }: { frame: BrowserFrame; drawn: FrameBox; dim: boolean }) {
+  const [shown, setShown] = useState<{ slot: 'a' | 'b'; uri?: string }>({ slot: 'a' });
+  const place = { left: drawn.left, top: drawn.top, width: drawn.width, height: drawn.height };
   return (
-    <SkeletonSwap loading={file.isPending} skeleton={<PageSkeleton />} style={styles.fill}>
-      {file.isPending ? null : html === null ? (
-        <ErrorState title={`Couldn’t open ${page.address}`} error={problem} onRetry={() => void file.refetch()} testID="browser-file-error" />
-      ) : (
-        <WebView
-          ref={webView}
-          testID="browser-webview"
-          source={{ html }}
-          originWhitelist={['*']}
-          setSupportMultipleWindows={false}
-          onNavigationStateChange={state => onNavigate({ back: state.canGoBack, forward: state.canGoForward })}
-          style={[styles.fill, { backgroundColor: colors.background }]}
-          webviewDebuggingEnabled={__DEV__}
-        />
-      )}
-    </SkeletonSwap>
+    <View pointerEvents="none" style={[StyleSheet.absoluteFill, dim && styles.dim]}>
+      {(['a', 'b'] as const).map(slot => {
+        const uri = slot === shown.slot ? shown.uri : frame.data !== shown.uri ? frame.data : undefined;
+        if (!uri) return null;
+        return (
+          <Image
+            key={slot}
+            testID={slot === shown.slot ? 'browser-frame' : undefined}
+            source={{ uri }}
+            resizeMode="contain"
+            fadeDuration={0}
+            onLoad={() => { if (slot !== shown.slot) setShown({ slot, uri }); }}
+            style={[styles.frame, place, { opacity: slot === shown.slot ? 1 : 0 }]}
+          />
+        );
+      })}
+    </View>
   );
 }
 
-/** A page not drawn yet: a heading and paragraphs in the body's footprint. `overlay` covers a page view that loads underneath. */
-function PageSkeleton({ overlay = false }: { overlay?: boolean }) {
+/** Where the agent last clicked, shown for a moment and then faded out. */
+function AgentCursor({ cursor, page, drawn }: { cursor: NonNullable<BrowserTabView['agentCursor']>; page: { width: number; height: number }; drawn: FrameBox }) {
   const { colors } = useTheme();
+  const opacity = useSharedValue(0);
+  useEffect(() => {
+    opacity.value = 1;
+    opacity.value = withDelay(CURSOR_SHOWN_MS, withTiming(0, { duration: 200 }));
+  }, [opacity, cursor.x, cursor.y, cursor.at]);
+  const fade = useAnimatedStyle(() => ({ opacity: opacity.value }));
   return (
-    <View
-      testID="browser-skeleton"
-      accessible
-      accessibilityLabel="Loading page"
-      style={[overlay ? StyleSheet.absoluteFill : styles.fill, styles.page, { backgroundColor: colors.background }]}
+    <Animated.View
+      testID="browser-agent-cursor"
+      pointerEvents="none"
+      style={[styles.cursor, { left: drawn.left + (cursor.x / page.width) * drawn.width, top: drawn.top + (cursor.y / page.height) * drawn.height }, fade]}
     >
-      <Skeleton width="55%" height={22} />
-      <Skeleton height={120} />
-      {(['100%', '92%', '96%', '64%'] as const).map(width => <Skeleton key={width} width={width} height={14} />)}
-    </View>
+      <Icon ios="cursorarrow" android="arrow_selector_tool" size={20} color={colors.accent} />
+    </Animated.View>
   );
-}
-
-/** What to ask the computer for, or null for a page that isn't on it. */
-function relayAskFor(url: string, panelId: string): { port: number } | { files: string } | null {
-  try {
-    return url ? relayPreview(url, panelId)?.ask ?? null : null;
-  } catch {
-    return null;
-  }
 }
 
 function ToolButton({ testID, label, ios, android, disabled, onPress }: {
   testID: string;
   label: string;
-  ios: React.ComponentProps<typeof Icon>['ios'];
-  android: React.ComponentProps<typeof Icon>['android'];
+  ios: IconProps['ios'];
+  android: IconProps['android'];
   disabled?: boolean;
   onPress: () => void;
 }) {
@@ -368,23 +486,39 @@ function ToolButton({ testID, label, ios, android, disabled, onPress }: {
       onPress={onPress}
       style={({ pressed }) => [styles.tool, disabled && styles.disabled, { borderRadius: theme.radius.md, backgroundColor: pressed ? colors.surfacePressed : 'transparent' }]}
     >
-      <Icon ios={ios} android={android} size={18} color={colors.textSecondary} />
+      <Icon ios={ios} android={android} size={20} color={colors.textSecondary} />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  bar: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 6, paddingVertical: 6, borderBottomWidth: 1 },
-  tool: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  disabled: { opacity: 0.35 },
-  address: { flex: 1, minWidth: 0, height: 36, marginHorizontal: 4, justifyContent: 'center', paddingHorizontal: 10 },
+  top: { paddingHorizontal: 8, paddingTop: 6, borderBottomWidth: 1 },
+  address: { height: 36, justifyContent: 'center', paddingHorizontal: 10 },
   addressText: { flex: 1, justifyContent: 'center' },
   input: { flex: 1, padding: 0 },
   semibold: { fontWeight: '600' },
   shrink: { flexShrink: 1 },
-  track: { height: 2 },
-  progress: { height: 2 },
+  chipRow: { height: 36, alignItems: 'center', justifyContent: 'center' },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, borderWidth: 1 },
   notice: { paddingHorizontal: 12, paddingVertical: 6 },
-  page: { padding: 16, gap: 12 },
+  track: { height: 2 },
+  stage: { overflow: 'hidden' },
+  frame: { position: 'absolute' },
+  dim: { opacity: 0.4 },
+  outline: { borderWidth: 2 },
+  center: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
+  lineRow: { position: 'absolute', left: 12, right: 12, bottom: 12, alignItems: 'center' },
+  line: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, overflow: 'hidden', textAlign: 'center' },
+  cursor: { position: 'absolute' },
+  keys: { position: 'absolute', left: 0, top: 0, width: 1, height: 1, opacity: 0 },
+  bar: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 6, borderTopWidth: 1 },
+  tool: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  disabled: { opacity: 0.35 },
+  host: { flex: 1, textAlign: 'right' },
+  olderLine: { paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 1 },
+  scrim: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  card: { alignSelf: 'stretch', padding: 20, gap: 16 },
+  promptInput: { borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8 },
+  cardButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
 });

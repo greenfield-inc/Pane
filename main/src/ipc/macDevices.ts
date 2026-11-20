@@ -19,9 +19,9 @@ const tasks = new Map<string, { key: string; outcome: Promise<Outcome>; expires:
 
 /**
  * `work`'s result if it settles within the answer window, else `{ pending: <task> }` to await.
- * Linked computers answer every call this way, under their 15 s idle limit (devices and browser tabs).
+ * Linked computers answer every device call this way, under their 15 s idle limit.
  */
-export async function answerWithin(key: string, work: Promise<PaneCommandValue>): Promise<PaneCommandValue> {
+async function answerWithin(key: string, work: Promise<PaneCommandValue>): Promise<PaneCommandValue> {
   const now = Date.now();
   for (const [id, task] of tasks) if (task.expires < now) tasks.delete(id);
   const outcome = work.then((value): Outcome => ({ value }), (cause): Outcome => ({ error: cause instanceof Error ? cause : new Error(String(cause)) }));
@@ -33,9 +33,9 @@ export async function answerWithin(key: string, work: Promise<PaneCommandValue>)
 }
 
 /** The task's result once it settles within the answer window, else `{ pending }` again. */
-export async function awaitTask(key: string, id: string | undefined, gone: () => PaneError = deviceTaskGone): Promise<PaneCommandValue> {
+async function awaitTask(key: string, id: string | undefined): Promise<PaneCommandValue> {
   const task = id ? tasks.get(id) : undefined;
-  if (!id || !task || task.key !== key) throw gone();
+  if (!id || !task || task.key !== key) throw deviceTaskGone();
   const settled = await settledWithin(task.outcome);
   if (!settled) return { pending: id };
   tasks.delete(id);

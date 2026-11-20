@@ -341,6 +341,20 @@ export interface BrowserPanelState {
    * the page or press Take over. Only main writes it (main/src/ipc/browser.ts).
    */
   driver?: DeviceDriver;
+  /**
+   * The page's size while a person viewing from another device controls it (their screen's size),
+   * so the page keeps it through a sleep. Unset while the page fills its own tab. Only main writes it.
+   */
+  pageSize?: BrowserPageSize;
+}
+
+/** A browser tab page's size in CSS pixels; `mobile` gives it a phone's layout and touch. */
+export interface BrowserPageSize {
+  width: number;
+  height: number;
+  mobile: boolean;
+  /** The controlling screen's device pixels per CSS pixel, so the page renders sharp there (a phone's 3). */
+  scale?: number;
 }
 
 export interface ToolPanelMetadata {

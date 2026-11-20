@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -8,21 +8,39 @@ import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { BrowserPanelState, ToolPanel } from '../../../shared/types/panels';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { BrowserPageContents } from '../services/browser/pageDriver';
-import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHoldSettings, type BrowserHost, type BrowserServices, type LinkedComputers, type TabDownload } from './browser';
+import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHoldSettings, type BrowserHost, type BrowserServices, type TabDownload } from './browser';
 import { readFileSync } from 'fs';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
-import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
+import { decodeBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
+import { browserFrameAnswerSchema, browserTabViewSchema } from '../../../shared/validation/browserStreamSchemas';
+
+/** The start of a PNG of `width` by `height` pixels: its signature and IHDR chunk, which hold its size. */
+function pngOf(width: number, height: number): Buffer {
+  const header = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header, 0);
+  header.writeUInt32BE(13, 8);
+  header.write('IHDR', 12, 'ascii');
+  header.writeUInt32BE(width, 16);
+  header.writeUInt32BE(height, 20);
+  return header;
+}
 
 /** A page that answers the page script and the debugger the way a simple form page would. */
-function fakePage(id: number, url: string): BrowserPageContents & EventEmitter & { sent: string[]; files: string[] } {
+function fakePage(id: number, url: string): BrowserPageContents & EventEmitter & { sent: string[]; files: string[]; params: Map<string, unknown>; throttled: boolean; muted: boolean } {
   const events = new EventEmitter();
   const sent: string[] = [];
   const files: string[] = [];
+  const params = new Map<string, unknown>();
   let attached = false;
   const page = Object.assign(events, {
     id,
     sent,
     files,
+    params,
+    throttled: true,
+    muted: false,
+    setBackgroundThrottling: (allowed: boolean) => { page.throttled = allowed; },
+    setAudioMuted: (muted: boolean) => { page.muted = muted; },
     isDestroyed: () => false,
     getURL: () => url,
     getTitle: () => 'Sign up',
@@ -46,9 +64,13 @@ function fakePage(id: number, url: string): BrowserPageContents & EventEmitter &
       attach: () => { attached = true; },
       isAttached: () => attached,
       detach: () => { attached = false; },
-      sendCommand: async (method: string, params?: { files?: string[] }) => {
+      sendCommand: async (method: string, given?: { files?: string[]; expression?: string }) => {
         sent.push(method);
-        if (method === 'DOM.setFileInputFiles') files.push(...(params?.files ?? []));
+        params.set(method, given);
+        if (method === 'DOM.setFileInputFiles') files.push(...(given?.files ?? []));
+        if (method === 'Page.captureScreenshot') return { data: pngOf(780, 1688).toString('base64') };
+        if (method === 'Runtime.evaluate' && JSON.stringify(given).includes('innerWidth')) return { result: { value: { width: 800, height: 600, x: 0, y: 120, ratio: 2 } } };
+        if (method === 'Page.getLayoutMetrics') return { cssContentSize: { width: 800, height: 600 }, cssLayoutViewport: { clientWidth: 800, clientHeight: 600 } };
         if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
         if (method === 'DOM.querySelector') return { nodeId: 7 };
         return {};
@@ -83,8 +105,7 @@ function agentTab(id: string, paneId: string, agent: string): ToolPanel {
   return { id, sessionId: paneId, type: 'terminal', title: agent, state: { isActive: false, customState: { agent } }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
 }
 
-/** `pagesHere: false` leaves this computer without pages, as when only a linked computer shows the tabs. */
-function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; pagesHere?: boolean; cursors?: string[]; held?: string[]; holds?: BrowserHoldSettings; loading?: boolean } = {}): Fixture {
+function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: string[]; painting?: string[]; holds?: Partial<BrowserHoldSettings>; loading?: boolean; window?: { open: boolean } } = {}): Fixture {
   const archived = new Set<string>();
   const goneListeners: Array<() => void> = [];
   const worktree = mkdtempSync(path.join(os.tmpdir(), 'pane-browser-tools-'));
@@ -94,12 +115,11 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
   let nextPage = 1;
   let downloadListener: ((download: TabDownload) => void) | undefined;
   const shownDownloads: Array<[string, string]> = [];
-  if (options.pagesHere !== false) {
-    for (const tab of initial) {
-      // SAFETY: browserTab builds every initial tab's customState as a BrowserPanelState.
-      const state = tab.state.customState as BrowserPanelState | undefined;
-      pages.set(tab.id, fakePage(nextPage++, state?.currentUrl ?? 'http://localhost:4173/'));
-    }
+  for (const tab of initial) {
+    if (tab.type !== 'browser') continue;
+    // SAFETY: browserTab builds every initial tab's customState as a BrowserPanelState.
+    const state = tab.state.customState as BrowserPanelState | undefined;
+    pages.set(tab.id, fakePage(nextPage++, state?.currentUrl ?? 'http://localhost:4173/'));
   }
   const host: BrowserHost = {
     tabs: (paneId) => tabs.filter(tab => tab.sessionId === paneId && tab.type === 'browser'),
@@ -115,25 +135,27 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
     close: async (tab) => { tabs.splice(tabs.indexOf(tab), 1); },
     update: async (tab, state) => { tab.state = { ...tab.state, customState: state }; },
     page: (id) => pages.get(id),
-    tunnels: () => new Map(),
-    hasWindow: () => true,
+    hasWindow: () => options.window?.open ?? true,
     shotsDirectory: async () => path.join(worktree, '.shots'),
     showCursor: (panelId) => { options.cursors?.push(panelId); },
+    name: () => 'studio-mac',
+    uploadsFor: async () => { const folder = path.join(worktree, '.uploads'); mkdirSync(folder, { recursive: true }); return folder; },
+    sizeHidden: () => undefined,
     // As the window does: a tab whose hold ends loses its page; a newly held tab gets one.
-    setHeld: (tabIds) => {
+    setHeld: (tabIds, painting) => {
       for (const id of options.held ?? []) if (!tabIds.includes(id)) pages.delete(id);
       for (const id of tabIds) {
         const tab = tabs.find(candidate => candidate.id === id);
-        if (!tab || pages.has(id) || options.pagesHere === false) continue;
+        if (!tab || pages.has(id)) continue;
         // SAFETY: browserTab builds every tab's customState as a BrowserPanelState.
         const state = tab.state.customState as BrowserPanelState | undefined;
         pages.set(id, fakePage(nextPage++, state?.currentUrl ?? 'http://localhost:4173/'));
       }
       options.held?.splice(0, Infinity, ...tabIds);
+      options.painting?.splice(0, Infinity, ...painting);
     },
     onGone: (listener) => { goneListeners.push(listener); },
     setBusy: () => undefined,
-    linked: () => options.linked,
     onDownload: (listener) => { downloadListener = listener; },
     personDownloads: () => path.join(worktree, 'Downloads'),
     agentDownloads: async () => path.join(worktree, '.scratch', 'browser-downloads'),
@@ -320,157 +342,6 @@ describe('browser tabs: downloads', () => {
   });
 });
 
-describe('browser tools: a tab a linked computer shows (P2)', () => {
-  /** The agent's computer, whose tab only the linked desktop shows, wired to that desktop's real channel. */
-  function linkedPair(duringRun?: () => Promise<void>, held?: string[]) {
-    const viewerCursors: string[] = [];
-    const viewer = setup([], { cursors: viewerCursors });
-    viewer.pages.set('shown-there', fakePage(9, 'http://localhost:4173/'));
-    const linked: LinkedComputers = {
-      self: { id: 'devbox', name: 'DEVBOX' },
-      online: () => [{ id: 'mac', name: 'Mac' }],
-      invoke: async (_machine, request, _timeout) => {
-        if (duringRun && JSON.parse(JSON.stringify(request)).op === 'run') await duringRun();
-        return viewer.registry.invokeRemote('runpane:machine:browser', [request], { caller: { paneId: 'remote' } });
-      },
-    };
-    const agentSide = setup([browserTab('shown-there', 'pane-a', 'claude-a')], { linked, pagesHere: false, held });
-    return { agentSide, viewer, viewerCursors };
-  }
-
-  it('holds nothing on the agent\'s computer for a call that runs on the linked computer', async () => {
-    const held: string[] = [];
-    const { agentSide } = linkedPair(undefined, held);
-    expect(await call(agentSide, 'snapshot', {})).toMatchObject({ ok: true });
-    expect(held).toEqual([]);
-  });
-
-  it('runs the call on the linked computer\'s copy and brings a screenshot home', async () => {
-    const { agentSide, viewer, viewerCursors } = linkedPair();
-    expect(await call(agentSide, 'snapshot', {})).toMatchObject({ ok: true, tab: 'shown-there', snapshot: expect.stringContaining('[ref=e2]') });
-    const clicked = await call(agentSide, 'click', { ref: 'e2' });
-    expect(clicked).toMatchObject({ ok: true });
-    expect(viewerCursors).toEqual(['shown-there']);
-    const shot = await call(agentSide, 'screenshot', {});
-    expect(shot).toMatchObject({ ok: true, mimeType: 'image/png' });
-    // Results carry only what the published output schemas allow (MCP clients reject the rest).
-    const schemas = RUNPANE_CONTRACT.jsonSchemas;
-    expect(Object.keys(JSON.parse(JSON.stringify(clicked))).filter(key => !(key in schemas.browserActionResult.properties))).toEqual([]);
-    expect(Object.keys(JSON.parse(JSON.stringify(shot))).filter(key => !(key in schemas.browserScreenshotResult.properties))).toEqual([]);
-    expect(readFileSync(JSON.parse(JSON.stringify(shot)).path, 'utf8')).toBe('png');
-    expect(viewer.pages.get('shown-there')?.sent).toContain('Input.dispatchMouseEvent');
-  });
-
-  it('makes the agent wait after Take over on the linked computer, and stales its refs there', async () => {
-    const { agentSide } = linkedPair();
-    await call(agentSide, 'snapshot', {});
-    // The viewing desktop's chip reaches the agent's computer as a host channel.
-    expect(await agentSide.registry.invokeRemote('browser:driver', ['shown-there', 'person'], { caller: undefined })).toEqual({ success: true });
-    const waiting = code(call(agentSide, 'click', { ref: 'e2' }));
-    await new Promise(resolve => setTimeout(resolve, 300));
-    expect(JSON.stringify(agentSide.tabs.find(tab => tab.id === 'shown-there')?.state.customState)).toContain('"agentWaiting":"Claude"');
-    await agentSide.registry.invokeRemote('browser:driver', ['shown-there', 'agent'], { caller: undefined });
-    expect(await waiting).toBe('ERR_BROWSER_STALE_REF');
-  });
-
-  it('waits while the person uses the page on the linked computer', async () => {
-    const { agentSide, viewer } = linkedPair();
-    await call(agentSide, 'snapshot', {});
-    await call(agentSide, 'click', { ref: 'e2' });
-    await new Promise(resolve => setTimeout(resolve, 400));
-    viewer.pages.get('shown-there')?.emit('input-event', {}, { type: 'mouseDown' });
-    const started = Date.now();
-    expect(await code(call(agentSide, 'click', { ref: 'e2' }))).toBe('ERR_BROWSER_STALE_REF');
-    expect(Date.now() - started).toBeGreaterThanOrEqual(TOUCH_HOLD_MS - 300);
-    // The touch ended, so the tab is the agent's again: the next call runs at once.
-    expect(JSON.stringify(agentSide.tabs.find(tab => tab.id === 'shown-there')?.state.customState)).not.toContain('"by":"person"');
-    await call(agentSide, 'snapshot', {});
-    const again = Date.now();
-    expect(await call(agentSide, 'click', { ref: 'e2' })).toMatchObject({ ok: true });
-    expect(Date.now() - again).toBeLessThan(TOUCH_HOLD_MS);
-  });
-
-  it('keeps the person driving when they press Take over during a call on the linked computer', async () => {
-    let holdRun = false;
-    let running = () => {};
-    let release = () => {};
-    const { agentSide } = linkedPair(async () => {
-      if (!holdRun) return;
-      running();
-      await new Promise<void>(resolve => { release = resolve; });
-    });
-    await call(agentSide, 'snapshot', {});
-    holdRun = true;
-    const inside = new Promise<void>(resolve => { running = resolve; });
-    const clicking = call(agentSide, 'click', { ref: 'e2' });
-    await inside;
-    // The person presses Take over while the click runs on the linked computer.
-    expect(await agentSide.registry.invokeRemote('browser:driver', ['shown-there', 'person'], { caller: undefined })).toEqual({ success: true });
-    release();
-    await clicking.catch(() => undefined);
-    expect(JSON.stringify(agentSide.tabs.find(tab => tab.id === 'shown-there')?.state.customState)).toContain('"by":"person"');
-  });
-
-  it('keeps an uploaded file on the linked computer until the page goes, so the form can still send it', async () => {
-    const { agentSide, viewer } = linkedPair();
-    writeFileSync(path.join(agentSide.worktree, 'report.pdf'), 'pdf');
-    await call(agentSide, 'snapshot', {});
-    expect(await call(agentSide, 'upload', { ref: 'e1', paths: ['report.pdf'] })).toMatchObject({ ok: true });
-    const page = viewer.pages.get('shown-there');
-    const [copy] = page?.files ?? [];
-    expect(readFileSync(copy ?? '', 'utf8')).toBe('pdf');
-    page?.emit('destroyed');
-    await vi.waitFor(() => expect(existsSync(copy ?? '')).toBe(false));
-  });
-
-  it('refuses a localhost port the viewing computer has no tunnel for, rather than load its own', async () => {
-    const { agentSide } = linkedPair();
-    expect(await code(call(agentSide, 'navigate', { url: 'http://localhost:3000/' }))).toBe('ERR_BROWSER_URL_REFUSED');
-  });
-
-  it('stops using a linked computer that dropped off, and asks again on the next call', async () => {
-    let offline = false;
-    const { agentSide } = linkedPair(async () => {
-      if (offline) throw new PaneError('ERR_REMOTE_OFFLINE', 'Mac is not connected.', 'Reconnect.');
-    });
-    await call(agentSide, 'snapshot', {});
-    offline = true;
-    // The call never reached the Mac, so it runs on this computer's copy, which here has no page.
-    expect(await code(call(agentSide, 'click', { ref: 'e2' }))).toMatch(/ERR_BROWSER_NOT_(LINKED|SHOWING)/);
-    offline = false;
-    expect(await call(agentSide, 'snapshot', {})).toMatchObject({ ok: true });
-  }, 15_000);
-
-  it('keeps the person driving after they touch the page and then press Take over during one call', async () => {
-    const { agentSide, viewer } = linkedPair();
-    await call(agentSide, 'snapshot', {});
-    await call(agentSide, 'click', { ref: 'e2' });
-    await new Promise(resolve => setTimeout(resolve, 400));
-    viewer.pages.get('shown-there')?.emit('input-event', {}, { type: 'mouseDown' });
-    let settled = false;
-    const clicking = code(call(agentSide, 'click', { ref: 'e2' })).finally(() => { settled = true; });
-    await new Promise(resolve => setTimeout(resolve, 200));
-    await agentSide.registry.invokeRemote('browser:driver', ['shown-there', 'person'], { caller: undefined });
-    // The touch ends; the Take over still holds the tab.
-    await new Promise(resolve => setTimeout(resolve, TOUCH_HOLD_MS + 500));
-    expect(settled).toBe(false);
-    expect(JSON.stringify(agentSide.tabs.find(tab => tab.id === 'shown-there')?.state.customState)).toContain('"by":"person"');
-    await agentSide.registry.invokeRemote('browser:driver', ['shown-there', 'agent'], { caller: undefined });
-    expect(await clicking).toBe('ERR_BROWSER_STALE_REF');
-  });
-
-  it('asks the linked computers again on calls right after open, so a tab that reaches them late runs there', async () => {
-    const { agentSide, viewer, viewerCursors } = linkedPair();
-    const opened = JSON.parse(JSON.stringify(await call(agentSide, 'open', { url: 'http://site.test/new' })));
-    expect(opened).toMatchObject({ ok: true });
-    // The new tab now reaches the linked computer's window.
-    viewer.pages.set(opened.tab, fakePage(99, 'http://site.test/new'));
-    await call(agentSide, 'snapshot', { tab: opened.tab });
-    await call(agentSide, 'click', { tab: opened.tab, ref: 'e2' });
-    expect(viewerCursors).toEqual([opened.tab]);
-  });
-});
-
 describe('browser tools: opening a slow page', () => {
   it('returns once the page registered, even when it is still loading', async () => {
     const fixture = setup([], { loading: true });
@@ -545,5 +416,425 @@ describe('browser tools: tabs an agent holds (P4)', () => {
     const listed = JSON.parse(JSON.stringify(await call(fixture, 'tabs', {}))).tabs;
     expect(listed[0]).toMatchObject({ asleep: false });
     expect(JSON.parse(JSON.stringify(await call(fixture, 'snapshot', {}))).note ?? '').not.toContain('was asleep');
+  });
+});
+
+describe('browser tabs: the screens that watch them', () => {
+  const holds: BrowserHoldSettings = { limit: 4, idleMs: 60_000, sweepMs: 40, watch: { limit: 2, graceMs: 300, silentMs: 150 } };
+  const phone = { kind: 'phone', onScreen: true, width: 390, height: 844, scale: 3 };
+  /** A screen on another device (the phone, another desktop) reports over the host channel. */
+  const fromAfar = (fixture: Fixture, tab: string, viewer: string, report: JsonObject | null) => fixture.registry.invokeRemote('browser:watch', [tab, viewer, report], { caller: undefined });
+  /** This computer's own window reports over local IPC. */
+  const fromHere = (fixture: Fixture, tab: string, report: JsonObject | null) => fixture.registry.invoke('browser:watch', [tab, 'host-window', report]);
+  type Listed = { asleep?: boolean; watching?: string[]; size?: { width: number; height: number; mobile: boolean } };
+  // SAFETY: browser_tabs answers { ok, tabs } with one browserTab object per tab.
+  const listed = async (fixture: Fixture) => JSON.parse(JSON.stringify(await call(fixture, 'tabs', {}))).tabs as Listed[];
+
+  it('keeps a page alive while a screen shows it and for the grace time after it leaves, then sleeps it', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { held, holds });
+    await fromAfar(fixture, 'persons', 'phone-1', phone);
+    expect(held).toEqual(['persons']);
+    await fromAfar(fixture, 'persons', 'phone-1', null);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(held).toEqual(['persons']);
+    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
+    expect((await listed(fixture))[0]).toMatchObject({ asleep: true, watching: [] });
+  });
+
+  it('counts a screen that stopped reporting as gone', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { held, holds });
+    await fromAfar(fixture, 'persons', 'phone-1', phone);
+    expect((await listed(fixture))[0]).toMatchObject({ watching: ['phone'] });
+    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
+  });
+
+  it('keeps at most the limit of watched pages, sleeping the one longest off screen, and agent holds do not count', async () => {
+    const held: string[] = [];
+    const fixture = setup(['t1', 't2', 't3'].map(id => browserTab(id, 'pane-a')).concat(browserTab('mine', 'pane-a', 'claude-a')), { held, holds });
+    await call(fixture, 'snapshot', { tab: 'mine' });
+    await fromAfar(fixture, 't1', 'phone-1', phone);
+    await fromAfar(fixture, 't1', 'phone-1', { ...phone, onScreen: false });
+    await fromAfar(fixture, 't2', 'phone-1', phone);
+    await fromAfar(fixture, 'mine', 'phone-1', phone);
+    expect([...held].sort()).toEqual(['mine', 't1', 't2']);
+    await fromAfar(fixture, 't3', 'phone-1', phone);
+    expect([...held].sort()).toEqual(['mine', 't2', 't3']);
+  });
+
+  it('gives the page the size of the screen that took control; agent calls keep it, and the person here gives it back', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000 } } });
+    const page = fixture.pages.get('mine');
+    await fromHere(fixture, 'mine', { kind: 'desktop', onScreen: true, width: 1200, height: 700 });
+    await fromAfar(fixture, 'mine', 'phone-1', phone);
+    // Watching alone never resizes the page.
+    expect(page?.sent).not.toContain('Emulation.setDeviceMetricsOverride');
+    expect(await fixture.registry.invokeRemote('browser:driver', ['mine', 'person', 'phone-1'], { caller: undefined })).toEqual({ success: true });
+    // A phone's own pixel ratio, so the page is sharp on its screen.
+    await vi.waitFor(() => expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 390, height: 844, mobile: true, deviceScaleFactor: 3 }));
+    const [shown] = await listed(fixture);
+    expect(shown).toMatchObject({ size: { width: 390, height: 844, mobile: true }, watching: ['host', 'phone'] });
+    // Results carry only what the published output schema allows (MCP clients reject the rest).
+    expect(Object.keys(shown).filter(key => !(key in RUNPANE_CONTRACT.jsonSchemas.browserTab.properties))).toEqual([]);
+    await fixture.registry.invokeRemote('browser:driver', ['mine', 'agent', 'phone-1'], { caller: undefined });
+    await call(fixture, 'snapshot', {});
+    await call(fixture, 'click', { ref: 'e2' });
+    // A 390x844 page captured at the host's 2x scale: the result names the PNG's own size.
+    expect(await call(fixture, 'screenshot', {})).toMatchObject({ width: 780, height: 1688 });
+    expect(page?.sent).not.toContain('Emulation.clearDeviceMetricsOverride');
+    // The person at this computer clicks into the tab.
+    await new Promise(resolve => setTimeout(resolve, 400));
+    page?.emit('input-event', {}, { type: 'mouseDown' });
+    await vi.waitFor(() => expect(page?.sent).toContain('Emulation.clearDeviceMetricsOverride'));
+    expect((await listed(fixture))[0].size).toBeUndefined();
+  });
+
+  it('keeps the page at the size of the screen in control as that screen changes size', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000 } } });
+    const page = fixture.pages.get('mine');
+    await fromAfar(fixture, 'mine', 'phone-1', phone);
+    await fixture.registry.invokeRemote('browser:driver', ['mine', 'person', 'phone-1'], { caller: undefined });
+    await vi.waitFor(() => expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 390, height: 844 }));
+    // Another screen resizing changes nothing; the one in control resizing moves the page with it.
+    await fromAfar(fixture, 'mine', 'desktop-1', { kind: 'desktop', onScreen: true, width: 1000, height: 700 });
+    await fromAfar(fixture, 'mine', 'phone-1', { ...phone, height: 600 });
+    await vi.waitFor(() => expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 390, height: 600 }));
+    expect((await listed(fixture))[0].size).toEqual({ width: 390, height: 600, mobile: true });
+  });
+
+  it('runs a page only another device shows unthrottled and silent here, with sound back while this window shows it', async () => {
+    const painting: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { painting, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000 } } });
+    const page = fixture.pages.get('persons');
+    await fromAfar(fixture, 'persons', 'phone-1', phone);
+    expect(page).toMatchObject({ throttled: false, muted: true });
+    expect(painting).toEqual(['persons']);
+    await fromHere(fixture, 'persons', { kind: 'desktop', onScreen: true, width: 1200, height: 700 });
+    expect(page).toMatchObject({ throttled: false, muted: false });
+    await fromAfar(fixture, 'persons', 'phone-1', null);
+    await vi.waitFor(() => expect(page).toMatchObject({ throttled: true, muted: false }));
+  });
+
+  it('keeps a page painting for a phone that joins a tab this computer\'s window already shows', async () => {
+    const painting: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { painting, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000 } } });
+    await fromHere(fixture, 'persons', { kind: 'desktop', onScreen: true, width: 1200, height: 700 });
+    expect(painting).toEqual([]);
+    await fromAfar(fixture, 'persons', 'phone-1', phone);
+    expect(painting).toEqual(['persons']);
+    await fromAfar(fixture, 'persons', 'phone-1', null);
+    expect(painting).toEqual([]);
+  });
+
+  it('lets a screen that has the tab off screen neither keep the page running here nor hold it past the grace time', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { held, holds });
+    const page = fixture.pages.get('persons');
+    await fromAfar(fixture, 'persons', 'phone-1', phone);
+    expect(page).toMatchObject({ throttled: false });
+    // The phone's app goes to the background but keeps reporting, off screen.
+    const keepReporting = setInterval(() => void fromAfar(fixture, 'persons', 'phone-1', { ...phone, onScreen: false }), 50);
+    onTestFinished(() => clearInterval(keepReporting));
+    await vi.waitFor(() => expect(page).toMatchObject({ throttled: true }));
+    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
+  });
+
+  it('paints the page again when a screen comes back to a tab it had off screen', async () => {
+    const painting: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { painting, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000, graceMs: 60_000 } } });
+    await fromAfar(fixture, 'persons', 'web-1', phone);
+    expect(painting).toEqual(['persons']);
+    await fromAfar(fixture, 'persons', 'web-1', { ...phone, onScreen: false });
+    expect(painting).toEqual([]);
+    await fromAfar(fixture, 'persons', 'web-1', phone);
+    expect(painting).toEqual(['persons']);
+    expect(fixture.pages.get('persons')).toMatchObject({ throttled: false });
+  });
+
+  it('lets the tabs only this window showed go when it closes, and keeps those another device watches', async () => {
+    const held: string[] = [];
+    const window = { open: true };
+    const fixture = setup([browserTab('mine', 'pane-a'), browserTab('streamed', 'pane-a')], { held, window, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000, graceMs: 60_000 } } });
+    await fromHere(fixture, 'mine', { kind: 'desktop', onScreen: true, width: 1200, height: 700 });
+    await fromHere(fixture, 'streamed', { kind: 'desktop', onScreen: false, width: 1200, height: 700 });
+    await fromAfar(fixture, 'streamed', 'phone-1', phone);
+    expect([...held].sort()).toEqual(['mine', 'streamed']);
+    window.open = false;
+    await vi.waitFor(() => expect(held).toEqual(['streamed']));
+  });
+
+  it('lets a watched tab go at once when its Pane is archived', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { held, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000, graceMs: 60_000 } } });
+    await fromAfar(fixture, 'persons', 'phone-1', phone);
+    expect(held).toEqual(['persons']);
+    fixture.archive('pane-a');
+    expect(held).toEqual([]);
+  });
+
+  it('takes reports only from Pane\'s own screens, never from an agent', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')]);
+    expect(await fixture.registry.invokeConnected('browser:watch', ['persons', 'v', phone], signal, claudeInA)).toMatchObject({ success: false });
+  });
+});
+
+describe('browser tabs: streaming a page to another screen', () => {
+  const holds: BrowserHoldSettings = { limit: 4, idleMs: 60_000, sweepMs: 40, watch: { limit: 8, graceMs: 60_000, silentMs: 60_000 } };
+  const phone = { kind: 'phone', onScreen: true, width: 390, height: 844, scale: 3 };
+  type FrameAnswer = { frame?: { seq: number; data: string; width: number }; unchanged?: boolean; seq?: number; stopped?: string };
+  // SAFETY: browser:frame answers a BrowserFrameAnswer.
+  const frame = async (fixture: Fixture, tab: string, after: number) => (await fixture.registry.invokeRemote('browser:frame', [tab, 'phone-1', after], { caller: undefined })) as FrameAnswer;
+  const input = (fixture: Fixture, tab: string, batch: JsonObject[]) => fixture.registry.invokeRemote('browser:input', [tab, 'phone-1', batch], { caller: undefined });
+  /** Chromium paints: the screencast sends a frame. */
+  const paint = (fixture: Fixture, tab: string, data: string) => fixture.pages.get(tab)?.debugger.emit('message', {}, 'Page.screencastFrame', { data, sessionId: 1, metadata: { deviceWidth: 390, deviceHeight: 844 } });
+
+  it('starts a new screen with a still, then waits on the host for the next frame, or answers unchanged', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    const first = await frame(fixture, 'persons', 0);
+    expect(decodeBoundary(first, browserFrameAnswerSchema)).toEqual(first);
+    expect(first.frame).toMatchObject({ data: `data:image/jpeg;base64,${pngOf(780, 1688).toString('base64')}`, width: 800 });
+    const page = fixture.pages.get('persons');
+    expect(page?.params.get('Page.startScreencast')).toMatchObject({ format: 'jpeg', maxWidth: 1170, maxHeight: 2532 });
+    const seq = first.frame?.seq ?? 0;
+    // A still page sends nothing: the read waits about a second, then says so.
+    const started = Date.now();
+    expect(await frame(fixture, 'persons', seq)).toEqual({ unchanged: true, seq });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    // A paint during the wait answers at once with the new frame, and acks it so Chromium paints on.
+    const waiting = frame(fixture, 'persons', seq);
+    setTimeout(() => paint(fixture, 'persons', 'bmV3'), 100);
+    expect((await waiting).frame).toMatchObject({ data: 'data:image/jpeg;base64,bmV3', width: 390 });
+    expect(page?.sent).toContain('Page.screencastFrameAck');
+  });
+
+  it('gives a screen that holds a frame number from before a host restart the newest frame at once', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    const first = await frame(fixture, 'persons', 0);
+    const started = Date.now();
+    const again = await frame(fixture, 'persons', (first.frame?.seq ?? 0) + 1_000_000_000);
+    expect(again.frame?.seq).toBe(first.frame?.seq);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('captures a new screen\'s still no larger than the frames, where the page is scrolled to', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    await frame(fixture, 'persons', 0);
+    // An 800x600 page at 2x is 1600 px wide; the phone needs 1170.
+    expect(fixture.pages.get('persons')?.params.get('Page.captureScreenshot')).toMatchObject({ format: 'jpeg', clip: { x: 0, y: 120, width: 800, height: 600, scale: 1170 / 1600 } });
+  });
+
+  it('refuses the screen channels to agents', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    for (const channel of ['browser:frame', 'browser:view']) {
+      expect(await code(fixture.registry.invokeConnected(channel, ['persons', 'v', 0], signal, claudeInA))).toBe('ERR_BROWSER_SCREENS_ONLY');
+    }
+    expect(await code(fixture.registry.invokeConnected('browser:input', ['persons', 'v', []], signal, claudeInA))).toBe('ERR_BROWSER_SCREENS_ONLY');
+  });
+
+  it('acks each frame a screen reads, so Chromium keeps painting between reads', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    let seq = (await frame(fixture, 'persons', 0)).frame?.seq ?? 0;
+    const acks = () => (fixture.pages.get('persons')?.sent ?? []).filter(method => method === 'Page.screencastFrameAck').length;
+    // Each frame paints while no read waits; the next read takes it and acks it.
+    for (const data of ['b25l', 'dHdv']) {
+      paint(fixture, 'persons', data);
+      const read = await frame(fixture, 'persons', seq);
+      expect(read.frame?.data).toBe(`data:image/jpeg;base64,${data}`);
+      seq = read.frame?.seq ?? seq;
+    }
+    expect(acks()).toBe(2);
+  });
+
+  it('sends a fresh still after the page loads, when the screencast stays quiet', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    const seq = (await frame(fixture, 'persons', 0)).frame?.seq ?? 0;
+    const waiting = frame(fixture, 'persons', seq);
+    fixture.pages.get('persons')?.emit('did-stop-loading');
+    expect((await waiting).frame?.seq).toBeGreaterThan(seq);
+  });
+
+  it('pauses the screencast while an agent takes a screenshot, never capturing twice at once', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['mine', 'phone-1', phone], { caller: undefined });
+    await frame(fixture, 'mine', 0);
+    const page = fixture.pages.get('mine');
+    page?.sent.splice(0, Infinity);
+    // The agent's screenshot uses the page's own capture once the size is set.
+    await fixture.registry.invokeRemote('browser:driver', ['mine', 'person', 'phone-1'], { caller: undefined });
+    await fixture.registry.invokeRemote('browser:driver', ['mine', 'agent', 'phone-1'], { caller: undefined });
+    await call(fixture, 'screenshot', {});
+    const sent = page?.sent ?? [];
+    const shot = sent.lastIndexOf('Page.captureScreenshot');
+    expect(sent.lastIndexOf('Page.stopScreencast')).toBeLessThan(shot);
+    expect(sent.lastIndexOf('Page.startScreencast')).toBeGreaterThan(shot);
+  });
+
+  it('applies a screen\'s input in order, as the person\'s: the agent waits and its refs go stale', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['mine', 'phone-1', phone], { caller: undefined });
+    await call(fixture, 'snapshot', {});
+    await call(fixture, 'click', { ref: 'e2' });
+    const page = fixture.pages.get('mine');
+    page?.sent.splice(0, Infinity);
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(await input(fixture, 'mine', [
+      { kind: 'touch', action: 'start', x: 10, y: 20 },
+      { kind: 'touch', action: 'end', x: 10, y: 20 },
+      { kind: 'wheel', x: 10, y: 20, dx: 0, dy: 300 },
+    ])).toEqual({ field: null });
+    const sent = page?.sent ?? [];
+    const inputs = sent.filter(method => method.startsWith('Input.'));
+    expect(inputs).toEqual(['Input.dispatchTouchEvent', 'Input.dispatchTouchEvent', 'Input.dispatchMouseEvent']);
+    // The page keeps its focus (a typeahead list stays open), and takes the screen's size only after the input landed.
+    expect(page?.params.get('Emulation.setFocusEmulationEnabled')).toEqual({ enabled: true });
+    expect(sent.indexOf('Emulation.setDeviceMetricsOverride')).toBeGreaterThan(sent.lastIndexOf('Input.dispatchMouseEvent'));
+    expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"by":"person"');
+    // Taking control gave the page the phone's size.
+    expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 390, height: 844, mobile: true });
+    const started = Date.now();
+    expect(await code(call(fixture, 'click', { ref: 'e2' }))).toBe('ERR_BROWSER_STALE_REF');
+    expect(Date.now() - started).toBeGreaterThanOrEqual(TOUCH_HOLD_MS - 300);
+  });
+
+  it('answers a page\'s dialog from a screen with the browser-side command alone, as the page stays blocked until then', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    await fixture.registry.invokeRemote('browser:view', ['persons', 0], { caller: undefined });
+    const page = fixture.pages.get('persons');
+    page?.debugger.emit('message', {}, 'Page.javascriptDialogOpening', { type: 'confirm', message: 'Delete it?' });
+    page?.sent.splice(0, Infinity);
+    expect(await input(fixture, 'persons', [{ kind: 'dialog', accept: true }])).toMatchObject({ field: null });
+    expect(page?.sent).toEqual(['Page.handleJavaScriptDialog']);
+    expect(page?.params.get('Page.handleJavaScriptDialog')).toEqual({ accept: true });
+  });
+
+  it('sizes the page to the screen whose click takes control, and follows that screen as it resizes', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000 } } });
+    const page = fixture.pages.get('persons');
+    const desktop = { kind: 'desktop', onScreen: true, width: 344, height: 748, scale: 2 };
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', desktop], { caller: undefined });
+    await input(fixture, 'persons', [{ kind: 'mouse', action: 'down', x: 5, y: 5, button: 'left', clicks: 1, modifiers: 0 }, { kind: 'mouse', action: 'up', x: 5, y: 5, button: 'left', clicks: 1, modifiers: 0 }]);
+    expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 344, height: 748, mobile: false });
+    // The viewer's sidebar closes: its box grows, and the page grows with it.
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', { ...desktop, width: 524 }], { caller: undefined });
+    await vi.waitFor(() => expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 524, height: 748 }));
+  });
+
+  it('moves the pointer over the page on the read channel, taking nothing over and waking no state read', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
+    await call(fixture, 'snapshot', {});
+    await call(fixture, 'click', { ref: 'e2' });
+    const page = fixture.pages.get('mine');
+    page?.sent.splice(0, Infinity);
+    // SAFETY: browser:view answers a BrowserTabView.
+    const before = (await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined })) as { version: number };
+    expect(await fixture.registry.invokeRemote('browser:pointer', ['mine', 'phone-1', 12, 34], { caller: undefined })).toBeNull();
+    expect(page?.params.get('Input.dispatchMouseEvent')).toEqual({ type: 'mouseMoved', x: 12, y: 34, button: 'none' });
+    expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).not.toContain('"by":"person"');
+    // SAFETY: browser:view answers a BrowserTabView.
+    expect(((await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined })) as { version: number }).version).toBe(before.version);
+  });
+
+  it('lets a pointer pass over the stream without taking the page from the agent', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['mine', 'phone-1', phone], { caller: undefined });
+    await call(fixture, 'snapshot', {});
+    await call(fixture, 'click', { ref: 'e2' });
+    await input(fixture, 'mine', [{ kind: 'mouse', action: 'move', x: 5, y: 5, button: 'none', clicks: 0, modifiers: 0 }]);
+    expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).not.toContain('"by":"person"');
+    expect(fixture.pages.get('mine')?.sent).not.toContain('Emulation.setDeviceMetricsOverride');
+    expect(await call(fixture, 'click', { ref: 'e2' })).toMatchObject({ ok: true });
+  });
+
+  it('gives the screen the tab\'s state, and wakes a waiting read when it changes', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
+    // SAFETY: browser:view answers a BrowserTabView.
+    const first = (await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined })) as { version: number; url: string; host: string };
+    expect(first).toMatchObject({ url: 'http://localhost:4173/', host: 'studio-mac' });
+    const started = Date.now();
+    const waiting = fixture.registry.invokeRemote('browser:view', ['mine', first.version], { caller: undefined });
+    await call(fixture, 'snapshot', {});
+    await call(fixture, 'click', { ref: 'e2' });
+    expect(await waiting).toMatchObject({ version: expect.any(Number) });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    // What screens decode (shared/validation/browserStreamSchemas.ts) is what the host sends.
+    expect(decodeBoundary(await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined }), browserTabViewSchema)).toMatchObject({ driver: { by: 'agent' }, agentCursor: { x: 40, y: 80 } });
+    expect(decodeBoundary(await fixture.registry.invokeRemote('browser:view', ['closed', 0], { caller: undefined }), browserTabViewSchema)).toMatchObject({ stopped: 'gone' });
+  });
+
+  it('says a tab is asleep, so the screen offers to wake it', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { held: [], holds: { ...holds, idleMs: 50 } });
+    await call(fixture, 'snapshot', {});
+    await vi.waitFor(() => expect(fixture.pages.has('mine')).toBe(false), { timeout: 2_000 });
+    expect(await frame(fixture, 'mine', 0)).toEqual({ stopped: 'asleep' });
+  });
+});
+
+describe('browser tools: every call answers by a deadline', () => {
+  it('fails a screenshot of a page that gives no picture (a minimized window) quickly, saying why', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds: { screenshotMs: 200 } });
+    const page = fixture.pages.get('mine');
+    const paints = page?.capturePage;
+    Object.assign(page ?? {}, { capturePage: () => new Promise(() => undefined) });
+    const started = Date.now();
+    await expect(call(fixture, 'screenshot', {})).rejects.toMatchObject({ code: 'ERR_BROWSER_SCREENSHOT_TIMEOUT', message: expect.stringContaining('minimized or covered') });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    // Other calls go on, and once the window is back the next screenshot isn't stuck behind the lost one.
+    expect(await call(fixture, 'snapshot', {})).toMatchObject({ ok: true });
+    Object.assign(page ?? {}, { capturePage: paints });
+    expect(await call(fixture, 'screenshot', {})).toMatchObject({ ok: true, mimeType: 'image/png' });
+  });
+
+  it('fails any other call that stops answering, saying it may still finish', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds: { callMs: 200 } });
+    Object.assign(fixture.pages.get('mine') ?? {}, { executeJavaScriptInIsolatedWorld: () => new Promise(() => undefined) });
+    await expect(call(fixture, 'snapshot', {})).rejects.toMatchObject({ code: 'ERR_BROWSER_CALL_TIMEOUT' });
+  });
+});
+
+describe('browser tools: a dialog open on the page', () => {
+  it('refuses a screenshot at once instead of waiting on the blocked page', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')]);
+    await call(fixture, 'snapshot', {});
+    fixture.pages.get('mine')?.debugger.emit('message', {}, 'Page.javascriptDialogOpening', { type: 'alert', message: 'Saved' });
+    await expect(call(fixture, 'screenshot', {})).rejects.toMatchObject({ code: 'ERR_BROWSER_DIALOG_PENDING', message: expect.stringContaining('an alert dialog') });
+  });
+});
+
+describe('browser tools: Take over pressed during a call', () => {
+  it('keeps the person driving after the call ends, shows it, and holds the agent\'s next call until Hand to', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')]);
+    const page = fixture.pages.get('mine');
+    await call(fixture, 'snapshot', {});
+    // A slow click: the person presses Take over while it runs.
+    let finish = () => {};
+    const sendCommand = page?.debugger.sendCommand;
+    if (!page || !sendCommand) throw new Error('no page');
+    page.debugger.sendCommand = async (method, params) => {
+      if (method === 'Input.dispatchMouseEvent') await new Promise<void>(resolve => { finish = resolve; });
+      return sendCommand(method, params);
+    };
+    const clicking = call(fixture, 'click', { x: 5, y: 5 });
+    await vi.waitFor(() => expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"by":"agent"'));
+    expect(await fixture.registry.invokeRemote('browser:driver', ['mine', 'person', 'phone-1'], { caller: undefined })).toEqual({ success: true });
+    page.debugger.sendCommand = sendCommand;
+    finish();
+    await clicking;
+    // The chip still says the person drives, after the agent's chip would have lingered out.
+    await new Promise(resolve => setTimeout(resolve, 2_300));
+    expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"by":"person"');
+    let settled = false;
+    const next = call(fixture, 'click', { x: 5, y: 5 }).finally(() => { settled = true; });
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(settled).toBe(false);
+    expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"agentWaiting"');
+    await fixture.registry.invokeRemote('browser:driver', ['mine', 'agent', 'phone-1'], { caller: undefined });
+    expect(await next).toMatchObject({ ok: true });
   });
 });

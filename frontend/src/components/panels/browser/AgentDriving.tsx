@@ -3,6 +3,7 @@ import { MousePointer2 } from 'lucide-react';
 import type { DeviceDriver } from '../../../../../shared/types/devices';
 import { cn } from '../../../utils/cn';
 import { DriverChip } from '../device/DeviceToolViews';
+import { VIEWER_ID } from './browserWatch';
 
 /** Main's event with where an agent clicked in a tab (main/src/services/browser/browserHost.ts). */
 const AGENT_CURSOR_EVENT = 'browser-panel:agent-cursor';
@@ -11,7 +12,8 @@ const CURSOR_SHOWN_MS = 1_200;
 
 /** Who drives a browser tab, floating over the top of its page, with Take over and Hand to agent (D-100's chip). */
 function BrowserDriverChip({ panelId, driver, agentName }: { panelId: string; driver: DeviceDriver; agentName: string | undefined }) {
-  const set = (who: 'person' | 'agent') => { void window.electronAPI?.invoke('browser:driver', panelId, who); };
+  // Taking over from a screen gives the page that screen's size.
+  const set = (who: 'person' | 'agent') => { void window.electronAPI?.invoke('browser:driver', panelId, who, VIEWER_ID); };
   return (
     <div className="pointer-events-auto absolute left-1/2 top-2 max-w-[calc(100%-16px)] -translate-x-1/2 whitespace-nowrap rounded-full bg-surface-primary text-xs shadow-md" data-testid="browser-driver-chip">
       <DriverChip driver={driver} agentName={agentName} onTakeOver={() => set('person')} onHandBack={() => set('agent')} />

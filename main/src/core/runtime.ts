@@ -5,8 +5,6 @@ import { noopPaneEventSink, type PaneEventSink } from './eventSink';
 export interface PaneWebviewContext {
   panelId: string;
   sessionId: string;
-  /** On a desktop showing another computer's Pane: each local tunnel port and the host port it reaches. */
-  ports?: ReadonlyArray<readonly [number, number]>;
 }
 
 export interface PtyHandleLike {

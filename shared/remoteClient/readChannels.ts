@@ -32,6 +32,14 @@ export const REMOTE_READ_CHANNELS = new Set([
   'devices:controls',
   'devices:logs',
   'devices:frame-rate',
+  // A screen saying it shows a browser tab, every 5 s: repeating a report changes nothing more.
+  'browser:watch',
+  // A browser tab's newest frame and state for another screen: nothing on the host changes, and a
+  // frame is too large to keep as a write's answer.
+  'browser:frame',
+  'browser:view',
+  // The person's pointer passing over a streamed page: a repeated move changes nothing.
+  'browser:pointer',
   'config:get',
   'config:get-session-preferences',
   'ui-state:get-expanded',
@@ -103,6 +111,13 @@ export const REMOTE_READ_CHANNELS = new Set([
   'sessions:get-git-status',
 ]);
 
+
+/**
+ * Writes the person makes live on a streamed browser page. Each is sent once, with no request id,
+ * and never resent after a drop: a click or key that arrives minutes late could land on a page
+ * that changed. The screen shows the stream as stopped and the person acts again.
+ */
+export const REMOTE_SEND_ONCE_CHANNELS = new Set(['browser:input', 'browser:driver']);
 
 /** Mutations the host de-duplicates by the operation ID they carry, so a retry cannot apply twice. */
 export const REMOTE_DEDUPLICATED_CHANNELS = new Set(['agent-chat:send', 'chat-tab:send']);

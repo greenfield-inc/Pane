@@ -76,13 +76,6 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   }, [remoteMode, ports]);
   const toHostUrl = useCallback((localUrl: string) => remapLoopbackPort(localUrl, localToHost), [localToHost]);
   const toHostUrlRef = useRef(toHostUrl);
-  const localToHostRef = useRef(localToHost);
-  useEffect(() => { localToHostRef.current = localToHost; }, [localToHost]);
-  // Main maps an agent's localhost URLs through this desktop's tunnels (docs/BROWSER_AGENTS.md).
-  useEffect(() => {
-    const wcId = pageWcIdRef.current;
-    if (wcId) void window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId, [...localToHost]);
-  }, [localToHost, panel.id, panel.sessionId]);
   // Navigation reads the current mapping without depending on it: a ports or
   // remote-mode update recomputes where a URL loads but never navigates the tab.
   const targetOfRef = useRef(targetOf);
@@ -105,6 +98,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const reopenedAt = (panel.state.customState as BrowserPanelState | undefined)?.reopenedAt;
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const driver = (panel.state.customState as BrowserPanelState | undefined)?.driver;
+  // Only the computer that runs the page gives its view a screen's size; another desktop's copy fills its tab.
+  // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
+  const pageSize = onHost ? (panel.state.customState as BrowserPanelState | undefined)?.pageSize : undefined;
 
   const webviewRef = useRef<Electron.WebviewTag>(null);
   // The mounted <webview>, as state so its listeners attach whenever it mounts:
@@ -115,6 +111,38 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     setWebview(element);
   }, []);
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
+  // While a screen on another device controls the page's size, the page's own view takes that size
+  // (so frames streamed to it are exactly the page) and shows here scaled to fit, letterboxed.
+  const [pageArea, setPageArea] = useState<{ width: number; height: number } | null>(null);
+  // The tab's page area, whose size never depends on the webview's (the webview's own parent shrinks with it).
+  const pageAreaRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const area = pageAreaRef.current;
+    if (!area || !pageSize) return;
+    const measure = () => setPageArea({ width: area.clientWidth, height: area.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(area);
+    return () => observer.disconnect();
+  }, [webview, pageSize]);
+  const webviewStyle = useMemo((): React.CSSProperties => {
+    if (!pageSize || !pageArea) return { display: 'inline-flex' };
+    const scale = Math.min(1, pageArea.width / pageSize.width, pageArea.height / pageSize.height);
+    const shown = { width: pageSize.width * scale, height: pageSize.height * scale };
+    return {
+      display: 'inline-flex',
+      flex: '0 0 auto',
+      width: pageSize.width,
+      height: pageSize.height,
+      transform: `scale(${scale})`,
+      transformOrigin: '0 0',
+      // The element keeps its full size in layout; these margins make it take only the scaled box, centred.
+      marginLeft: (pageArea.width - shown.width) / 2,
+      marginTop: (pageArea.height - shown.height) / 2,
+      marginRight: (pageArea.width - shown.width) / 2 - (pageSize.width - shown.width),
+      marginBottom: -(pageSize.height - shown.height),
+    };
+  }, [pageSize, pageArea]);
   const persistTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const panelIdRef = useRef(panel.id);
   const remoteFileRef = useRef<boolean | null>(null);
@@ -467,7 +495,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     const register = () => {
       const wcId = webview.getWebContentsId();
       pageWcIdRef.current = wcId;
-      window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId, [...localToHostRef.current]);
+      window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId);
     };
     const onDomReady = () => {
       register();
@@ -843,7 +871,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           </div>
         </div>
       ) : (
-        <div className="relative flex-1 flex flex-row min-h-0">
+        <div ref={pageAreaRef} className="relative flex-1 flex flex-row min-h-0">
           {/* Pane find bar, top right of the page and clear of docked DevTools
               (a native view drawn above everything in its bounds). */}
           <div
@@ -884,8 +912,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             src={nextWebviewSrc.src}
             partition={webviewPartition(fileSession)}
             {...WEBVIEW_ALLOW_POPUPS}
-            className="flex-1 border-0"
-            style={{ display: 'inline-flex' }}
+            className={pageSize ? 'border-0' : 'flex-1 border-0'}
+            style={webviewStyle}
           />}
           </SkeletonSwap>
 

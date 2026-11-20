@@ -1,11 +1,7 @@
-import { boundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
+import { type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { BrowserPageContents, FileChooser, PageDriver, PendingDialog } from './pageDriver';
 
-/**
- * One browser tool's work on a page, after the caller, tab and arguments are checked. The same
- * request runs on this computer's page or, over `runpane:machine:browser`, on the copy of the tab
- * a linked computer shows (docs/BROWSER_AGENTS.md), so it is plain JSON.
- */
+/** One browser tool's work on a tab's page, after the caller, tab and arguments are checked. */
 export type VerbRequest =
   | { verb: 'snapshot' }
   | { verb: 'screenshot'; fullPage: boolean }
@@ -22,22 +18,6 @@ export type VerbRequest =
 
 /** Reads never wait for the person and may run on any tab of the Pane. */
 export const READ_VERBS: ReadonlySet<VerbRequest['verb']> = new Set(['snapshot', 'screenshot', 'wait']);
-
-const optionalString = boundary.optional(boundary.string);
-export const verbRequestSchema: BoundarySchema<VerbRequest> = boundary.union(
-  boundary.object({ verb: boundary.literal('snapshot') }),
-  boundary.object({ verb: boundary.literal('screenshot'), fullPage: boundary.boolean }),
-  boundary.object({ verb: boundary.literal('click'), ref: optionalString, x: boundary.optional(boundary.number), y: boundary.optional(boundary.number), button: boundary.enumeration('left', 'right', 'middle'), double: boundary.boolean }),
-  boundary.object({ verb: boundary.literal('type'), ref: boundary.string, text: boundary.string, clear: boundary.boolean, submit: boundary.boolean }),
-  boundary.object({ verb: boundary.literal('press'), key: boundary.string, ref: optionalString }),
-  boundary.object({ verb: boundary.literal('select'), ref: boundary.string, values: boundary.array(boundary.string) }),
-  boundary.object({ verb: boundary.literal('scroll'), ref: optionalString, dx: boundary.number, dy: boundary.number }),
-  boundary.object({ verb: boundary.literal('navigate'), url: optionalString, history: boundary.optional(boundary.enumeration('back', 'forward', 'reload')) }),
-  boundary.object({ verb: boundary.literal('wait'), text: optionalString, url: optionalString, ref: optionalString, timeoutMs: boundary.number }),
-  boundary.object({ verb: boundary.literal('dialog'), accept: boundary.boolean, text: optionalString }),
-  boundary.object({ verb: boundary.literal('evaluate'), expression: boundary.string, ref: optionalString }),
-  boundary.object({ verb: boundary.literal('upload'), ref: optionalString, paths: boundary.array(boundary.string) }),
-);
 
 /** What a verb did, as plain JSON, plus a screenshot's PNG when it took one. */
 export interface VerbOutcome {
