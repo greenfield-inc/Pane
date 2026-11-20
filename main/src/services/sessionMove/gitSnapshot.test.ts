@@ -1,10 +1,12 @@
-import { execFileSync } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { promisify } from 'util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PaneError } from '../../../../shared/paneError';
+import { gitSteps } from '../../test/gitBudget';
 import {
   addWorktree,
   applySnapshot,
@@ -22,18 +24,33 @@ import {
 const SNAPSHOT_REF = 'refs/pane-move/test/snapshot';
 const PREFIX = 'refs/pane-move/test/incoming';
 
+const execFileAsync = promisify(execFile);
+
 let root = '';
 const savedEnv: Record<string, string | undefined> = {};
 const isolatedEnv: Record<string, string> = {};
 
+const GIT_IDENTITY = ['-c', 'user.name=Pane Test', '-c', 'user.email=test@example.com', '-c', 'init.defaultBranch=main'];
+
 function git(cwd: string, args: string[]): string {
-  return execFileSync('git', ['-c', 'user.name=Pane Test', '-c', 'user.email=test@example.com', '-c', 'init.defaultBranch=main', ...args], {
+  return execFileSync('git', [...GIT_IDENTITY, ...args], {
     cwd,
     encoding: 'utf8',
     env: { ...process.env, ...isolatedEnv },
     maxBuffer: 64 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+}
+
+/** git without blocking the event loop, so read-only checks can run side by side. */
+async function gitAsync(cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync('git', [...GIT_IDENTITY, ...args], {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, ...isolatedEnv },
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return stdout;
 }
 
 function write(file: string, content: string): void {
@@ -47,11 +64,15 @@ function dir(name: string): string {
   return path.join(root, `${counter}-${name}`);
 }
 
-/** A bare origin, a source clone A on `branch` with one pushed and one unpushed commit, and clone B of origin. */
-function setupRepos(branch = 'spike-x') {
-  const origin = dir('origin.git');
+/**
+ * A bare origin, a source clone A on spike-x with one pushed and one unpushed commit, and clone B of
+ * origin. Built once (ten git commands, two pushes among them) into `into`; each test gets its own copy.
+ */
+function buildTemplateRepos(into: string): void {
+  const branch = 'spike-x';
+  const origin = path.join(into, 'origin.git');
   git(root, ['init', '-q', '--bare', origin]);
-  const a = dir('a');
+  const a = path.join(into, 'a');
   git(root, ['clone', '-q', origin, a]);
   write(path.join(a, '.gitignore'), 'ignored.log\nbuild/\n');
   write(path.join(a, 'file.txt'), 'line 1\nline 2\nline 3\n');
@@ -70,8 +91,28 @@ function setupRepos(branch = 'spike-x') {
   git(a, ['push', '-q', '-u', 'origin', branch]);
   write(path.join(a, 'other.txt'), 'other unpushed\n');
   git(a, ['commit', '-qam', 'unpushed']);
-  const b = dir('b');
-  git(root, ['clone', '-q', origin, b]);
+  git(root, ['clone', '-q', origin, path.join(into, 'b')]);
+}
+
+let template = '';
+
+/** This test's copy of the template repositories, with A's and B's origin pointing at its own copy of origin. */
+function setupRepos() {
+  const copy = dir('repos');
+  // verbatimSymlinks keeps A's relative `link` as it is; kept timestamps leave most of git's index entries fresh.
+  fs.cpSync(template, copy, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true });
+  const origin = path.join(copy, 'origin.git');
+  const a = path.join(copy, 'a');
+  const b = path.join(copy, 'b');
+  // Forward slashes need no escaping in git config, and git accepts them for a Windows path.
+  const url = origin.split(path.sep).join('/');
+  for (const clone of [a, b]) {
+    const config = path.join(clone, '.git', 'config');
+    const lines = fs.readFileSync(config, 'utf8').split('\n');
+    const urlLines = lines.filter((line) => line.trim().startsWith('url = '));
+    if (urlLines.length !== 1) throw new Error(`expected one remote url in ${config}, found ${urlLines.length}`);
+    fs.writeFileSync(config, lines.map((line) => (line.trim().startsWith('url = ') ? `\turl = ${url}` : line)).join('\n'));
+  }
   return { origin, a, b };
 }
 
@@ -89,8 +130,16 @@ function makeMess(a: string): void {
   write(path.join(a, 'ünïcode name.txt'), 'unicode changed\n');
 }
 
-function fingerprint(worktree: string) {
-  const files = git(worktree, ['ls-files', '-z', '--cached', '--others']).split('\0').filter(Boolean);
+async function fingerprint(worktree: string) {
+  // status and diff may rewrite the index's cached stat data, so they run first, one at a time; the rest only read.
+  const status = await gitAsync(worktree, ['status', '--porcelain=v2', '-z', '--untracked-files=all']);
+  const diff = await gitAsync(worktree, ['diff']);
+  const [listed, cached, untracked] = await Promise.all([
+    gitAsync(worktree, ['ls-files', '-z', '--cached', '--others']),
+    gitAsync(worktree, ['diff', '--cached']),
+    gitAsync(worktree, ['ls-files', '--others', '--exclude-standard']),
+  ]);
+  const files = listed.split('\0').filter(Boolean);
   const hashes = files.sort().map((file) => {
     const full = path.join(worktree, file);
     if (!fs.existsSync(full) && !isSymlink(full)) return `${file}:missing`;
@@ -98,13 +147,7 @@ function fingerprint(worktree: string) {
     const content = stat.isSymbolicLink() ? fs.readlinkSync(full) : fs.readFileSync(full);
     return `${file}:${stat.mode.toString(8)}:${createHash('sha1').update(content).digest('hex')}`;
   });
-  return {
-    status: git(worktree, ['status', '--porcelain=v2', '-z', '--untracked-files=all']),
-    diff: git(worktree, ['diff']),
-    cached: git(worktree, ['diff', '--cached']),
-    untracked: git(worktree, ['ls-files', '--others', '--exclude-standard']),
-    files: hashes.join('\n'),
-  };
+  return { status, diff, cached, untracked, files: hashes.join('\n') };
 }
 
 function isSymlink(file: string): boolean {
@@ -146,6 +189,8 @@ beforeAll(() => {
     savedEnv[key] = process.env[key];
     process.env[key] = value;
   }
+  template = path.join(root, 'template');
+  buildTemplateRepos(template);
 });
 
 afterAll(() => {
@@ -157,15 +202,16 @@ afterAll(() => {
 });
 
 describe('gitSnapshot', () => {
-  it('J1: moves commits and all uncommitted work to another clone byte for byte', async () => {
+  // 79 git starts in the body (counted, see test/gitBudget.ts).
+  it('J1: moves commits and all uncommitted work to another clone byte for byte', { timeout: gitSteps(79) }, async () => {
     const { a, b } = setupRepos();
     makeMess(a);
-    const before = fingerprint(a);
+    const before = await fingerprint(a);
     const indexBefore = indexBytes(a);
 
     const snap = await createSnapshot(a, SNAPSHOT_REF);
     expect(indexBytes(a)).toBe(indexBefore);
-    expect(fingerprint(a)).toEqual(before);
+    expect(await fingerprint(a)).toEqual(before);
     expect(snap.branch).toBe('spike-x');
     expect(snap.head).toBe(git(a, ['rev-parse', 'HEAD']).trim());
     expect(git(a, ['rev-parse', SNAPSHOT_REF]).trim()).toBe(snap.commit);
@@ -186,7 +232,7 @@ describe('gitSnapshot', () => {
     expect(git(target, ['rev-parse', '--abbrev-ref', '@{upstream}']).trim()).toBe('origin/spike-x');
     await applySnapshot(target, snap.commit);
 
-    const after = fingerprint(target);
+    const after = await fingerprint(target);
     expect(after.diff).toBe(before.diff);
     expect(after.cached).toBe(before.cached);
     expect(after.untracked).toBe(before.untracked);
@@ -202,11 +248,12 @@ describe('gitSnapshot', () => {
     if (process.platform !== 'win32') expect(fs.readlinkSync(path.join(target, 'link'))).toBe('other.txt');
     expect(await snapshotMatches(target, snap.commit)).toBe(true);
 
-    expect(fingerprint(a)).toEqual(before);
+    expect(await fingerprint(a)).toEqual(before);
     expect(await ignoredPaths(a)).toEqual(['build/', 'ignored.log']);
   });
 
-  it('snapshotMatches is false once the reapplied work changes', async () => {
+  // Up to 162 git starts in the body (counted, see test/gitBudget.ts; 59 in two of three counts).
+  it('snapshotMatches is false once the reapplied work changes', { timeout: gitSteps(162) }, async () => {
     const { a, b } = setupRepos();
     makeMess(a);
     const snap = await createSnapshot(a, SNAPSHOT_REF);
@@ -224,7 +271,8 @@ describe('gitSnapshot', () => {
     expect(await snapshotMatches(target, snap.commit)).toBe(false);
   });
 
-  it('carries the branch when its tip is already on origin, which git bundle leaves out', async () => {
+  // 45 git starts in the body (counted, see test/gitBudget.ts).
+  it('carries the branch when its tip is already on origin, which git bundle leaves out', { timeout: gitSteps(45) }, async () => {
     const { a, b } = setupRepos();
     git(a, ['push', '-q', 'origin', 'spike-x']);
     git(b, ['fetch', '-q', 'origin']);
@@ -237,7 +285,8 @@ describe('gitSnapshot', () => {
     expect(await placeBranch(b, 'spike-x', `${PREFIX}/branch`)).toBe('created');
   });
 
-  it('refuses a branch that diverged there, counting its extra commits', async () => {
+  // 42 git starts in the body (counted, see test/gitBudget.ts).
+  it('refuses a branch that diverged there, counting its extra commits', { timeout: gitSteps(42) }, async () => {
     const { a, b } = setupRepos();
     git(b, ['checkout', '-q', 'spike-x']);
     write(path.join(b, 'b1.txt'), '1\n');
@@ -260,7 +309,8 @@ describe('gitSnapshot', () => {
     expect(git(b, ['rev-parse', 'spike-x']).trim()).toBe(localBefore);
   });
 
-  it('fast-forwards a branch that is behind, and reports same when equal', async () => {
+  // 38 git starts in the body (counted, see test/gitBudget.ts).
+  it('fast-forwards a branch that is behind, and reports same when equal', { timeout: gitSteps(38) }, async () => {
     const { a, b } = setupRepos();
     git(b, ['branch', '-q', 'spike-x', 'origin/spike-x']);
     const snap = await createSnapshot(a, SNAPSHOT_REF);
@@ -272,7 +322,8 @@ describe('gitSnapshot', () => {
     expect(await placeBranch(b, 'spike-x', `${PREFIX}/branch`)).toBe('same');
   });
 
-  it('refuses to fast-forward a branch checked out in a worktree there', async () => {
+  // 33 git starts in the body (counted, see test/gitBudget.ts).
+  it('refuses to fast-forward a branch checked out in a worktree there', { timeout: gitSteps(33) }, async () => {
     const { a, b } = setupRepos();
     git(b, ['checkout', '-q', '-b', 'spike-x', 'origin/spike-x']);
     await createSnapshot(a, SNAPSHOT_REF);
@@ -285,11 +336,12 @@ describe('gitSnapshot', () => {
     expect(error.message).toContain(`branch spike-x is checked out at ${b.replace(/\\/g, '/')} there`);
   });
 
-  it('moves a detached HEAD', async () => {
+  // 54 git starts in the body (counted, see test/gitBudget.ts).
+  it('moves a detached HEAD', { timeout: gitSteps(54) }, async () => {
     const { a, b } = setupRepos();
     git(a, ['checkout', '-q', '--detach']);
     makeMess(a);
-    const before = fingerprint(a);
+    const before = await fingerprint(a);
     const snap = await createSnapshot(a, SNAPSHOT_REF);
     expect(snap.branch).toBeNull();
     const bundle = path.join(root, 'detached.bundle');
@@ -299,7 +351,7 @@ describe('gitSnapshot', () => {
     const target = dir('detached');
     expect(await addWorktree(b, target, null, snap.head)).toEqual({ upstream: null });
     await applySnapshot(target, snap.commit);
-    const after = fingerprint(target);
+    const after = await fingerprint(target);
     expect(after.diff).toBe(before.diff);
     expect(after.cached).toBe(before.cached);
     expect(after.untracked).toBe(before.untracked);

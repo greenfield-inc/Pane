@@ -76,7 +76,8 @@ export class SharedCredentialSync {
     }, SYNC_DEBOUNCE_MS);
   }
 
-  private async run(): Promise<void> {
+  /** Protected so a test can wait for each sync to end. */
+  protected async run(): Promise<void> {
     if (this.running) {
       this.pending = true;
       return;

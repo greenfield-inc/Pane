@@ -1,8 +1,10 @@
 import { type ChildProcess, execFileSync, spawn } from 'child_process';
+import { once } from 'events';
 import { existsSync, mkdirSync, mkdtempSync, promises as fsPromises, readdirSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { gitSteps } from '../../test/gitBudget';
 import { CommandRunner } from '../../utils/commandRunner';
 import { PathResolver } from '../../utils/pathResolver';
 import { terminateProcessTrees } from '../../utils/processTree';
@@ -15,11 +17,13 @@ const holders: ChildProcess[] = [];
 /**
  * A process sitting in `cwd` and doing nothing else, like the panel shell and
  * the agent CLI a Pane leaves in its worktree. Windows will not let the
- * directory be renamed or removed while it is a live process's cwd.
+ * directory be renamed or removed while it is a live process's cwd. Resolves
+ * once the process exists, so it already holds `cwd`.
  */
-function processHolding(cwd: string): ChildProcess {
+async function processHolding(cwd: string): Promise<ChildProcess> {
   const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd, stdio: 'ignore' });
   holders.push(holder);
+  await once(holder, 'spawn');
   return holder;
 }
 
@@ -49,11 +53,19 @@ function repositoryWithWorktree() {
 afterEach(async () => {
   vi.restoreAllMocks();
   for (const holder of holders.splice(0)) {
-    if (holder.pid) await terminateProcessTrees([holder.pid], { timeoutMs: 5000 });
+    // A holder the test already saw exit needs no process-tree kill, which on
+    // Windows starts PowerShell and costs seconds.
+    if (holder.pid && holder.exitCode === null && holder.signalCode === null) {
+      await terminateProcessTrees([holder.pid], { timeoutMs: 5000 });
+    }
   }
   await waitForPendingWorktreeTrash();
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
+
+// Timeouts are the git starts counted in each test body (see test/gitBudget.ts). A
+// held worktree adds up to the product's 2 s busy-retry budget on top.
+const BUSY_RETRY_BUDGET_MS = 2_000;
 
 describe('removeWorktreeViaTrash', () => {
   it('moves the worktree into the trash, prunes it, deletes it, and keeps the branch', async () => {
@@ -66,7 +78,7 @@ describe('removeWorktreeViaTrash', () => {
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     expect(git(repo, 'branch', '--list', 'feature')).toContain('feature');
     expect(readdirSync(join(repo, '.git', 'pane-trash'))).toEqual([]);
-  });
+  }, gitSteps(13));
 
   it('reports pending after a delete failure and retries on the next sweep', async () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();
@@ -119,22 +131,37 @@ describe('removeWorktreeViaTrash', () => {
     expect(existsSync(worktree)).toBe(false);
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     expect(execFile.mock.calls.some(([file, args]) => file === 'git' && args[0] === 'worktree' && args[1] === 'remove')).toBe(false);
-  });
+  }, gitSteps(12) + BUSY_RETRY_BUDGET_MS);
 
   it('removes a worktree a live process is still sitting in', async () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();
-    const holder = processHolding(worktree);
+    const holder = await processHolding(worktree);
+    const exited = once(holder, 'exit');
     // Mirrors the archive ordering bug: the panel process has been asked to
-    // stop but is still alive when the worktree removal starts.
-    setTimeout(() => holder.kill(), 1200);
+    // stop but is still alive when the worktree removal starts. Stop it once
+    // the first move has been refused (Windows), rather than after a fixed delay.
+    const realRename = fsPromises.rename.bind(fsPromises);
+    let refusedRenames = 0;
+    vi.spyOn(fsPromises, 'rename').mockImplementation(async (from, to) => {
+      try {
+        return await realRename(from, to);
+      } catch (error) {
+        if (++refusedRenames === 1) holder.kill();
+        throw error;
+      }
+    });
 
     const outcome = await removeWorktreeViaTrash(worktree, repo, resolver, runner, { label: 'pane-held' });
 
     expect(outcome).toBe('done');
+    if (process.platform === 'win32') {
+      expect(refusedRenames).toBeGreaterThan(0);
+      await exited;
+    }
     expect(existsSync(worktree)).toBe(false);
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain(worktree.replaceAll('\\', '/'));
     expect(git(repo, 'branch', '--list', 'feature')).toContain('feature');
-  });
+  }, gitSteps(13) + BUSY_RETRY_BUDGET_MS);
 
   it('trashes the empty directory git leaves behind when it cannot unlink the worktree root', async () => {
     const { repo, worktree, runner, resolver } = repositoryWithWorktree();

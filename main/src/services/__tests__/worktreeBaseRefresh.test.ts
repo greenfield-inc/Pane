@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { gitSteps } from '../../test/gitBudget';
 import { CommandRunner } from '../../utils/commandRunner';
 import { PathResolver } from '../../utils/pathResolver';
 import { withArchiveRepositoryLock } from '../archiveRepositoryLock';
@@ -39,10 +40,17 @@ afterAll(async () => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Let the reserve a create starts in the background finish here, so its git
+  // processes do not run inside the next test's timed body.
+  await worktreePoolManager.idle();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
+
+// These tests drive real git end to end: each create runs about 20 git processes
+// one after another (base lookup, fetch, worktree add, reset). Each timeout is the git
+// starts counted in that test's body (see test/gitBudget.ts).
 
 function temporaryDirectory(): string {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'pane-base-refresh-')));
@@ -106,7 +114,7 @@ describe('creating a worktree Pane on a remote-tracking base', () => {
     expect(git(result.worktreePath, 'rev-parse', 'HEAD')).toBe(tipB);
     expect(result.baseCommit).toBe(tipB);
     expect(result.base).toEqual({ ref: 'origin/main', commit: tipB, refresh: 'fetched' });
-  });
+  }, gitSteps(52));
 
   it('creates from the local ref with a four-part notice when the remote is missing', async () => {
     const fixture = remoteFixture();
@@ -163,7 +171,7 @@ describe('creating a worktree Pane on a remote-tracking base', () => {
     for (const result of results) {
       expect(git(result.worktreePath, 'rev-parse', 'HEAD')).toBe(tipB);
     }
-  });
+  }, gitSteps(92));
 
   it.each([
     ['a local branch', () => 'main'],
@@ -197,7 +205,7 @@ describe('the reserve worktree pool', () => {
 
     expect(git(result.worktreePath, 'rev-parse', 'HEAD')).toBe(tipB);
     expect(claimedFromReserve(fixture.project, 'moved')).toBe(false);
-  });
+  }, gitSteps(67));
 
   it('hands out a reserve that is still on the remote tip', async () => {
     const fixture = remoteFixture();

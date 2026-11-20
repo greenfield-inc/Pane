@@ -60,7 +60,13 @@ describe('ClaudePromptBridge', () => {
 
     const item = await ctx.waiting();
     expect(item).toMatchObject({ title: 'Run pnpm vitest run src/http?', source, agentPrompt: { yes: 'Yes' } });
+    // Notify's 3-second Undo hold runs on a fake clock; the hook call and the server stay real.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     ctx.queue.runRemote({ type: 'answer', id: item.id, answer: { choice: 'No', note: 'Only unit tests' } }, 'iPhone', null);
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(ctx.queue.snapshot().items[0].state).toBe('sent');
+    await vi.advanceTimersByTimeAsync(1);
+    vi.useRealTimers();
 
     // After Notify's 3-second Undo hold.
     expect(await (await response).json()).toEqual({
@@ -198,6 +204,8 @@ describe('ClaudePromptBridge', () => {
     const response = ctx.call({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: input }, { signal: timeout.signal }).catch(() => 'cancelled');
     const item = await ctx.waiting();
 
+    // Notify's 3-second Undo hold runs on a fake clock; the hook call and the server stay real.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     ctx.queue.runRemote({ type: 'answer', id: item.id, answer: { choice: 'Yes' } }, 'iPhone', null);
     expect(ctx.queue.snapshot().items[0].state).toBe('sent');
     timeout.abort();
@@ -210,8 +218,9 @@ describe('ClaudePromptBridge', () => {
     expect(ctx.queue.snapshot().queue).toEqual([item.id]);
     // Undo has nothing left to restore, and the hold never delivers.
     expect(() => ctx.queue.runRemote({ type: 'undo', id: item.id }, 'iPhone', null)).toThrow();
-    await new Promise(resolve => setTimeout(resolve, 3_300));
+    await vi.advanceTimersByTimeAsync(3_300);
     expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'waiting', agentPrompt: { inTerminal: true } });
+    vi.useRealTimers();
 
     await ctx.call({ hook_event_name: 'Stop' });
     expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: ANSWERED_IN_TERMINAL });

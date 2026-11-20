@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
+import { gitSteps } from '../test/gitBudget';
 import { CommandRunner } from '../utils/commandRunner';
 import { PathResolver } from '../utils/pathResolver';
 import { WorktreeManager } from './worktreeManager';
@@ -41,6 +42,10 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
+// Each test runs a real merge, rebase or conflict check. Its timeout is the git
+// starts counted in its body (see test/gitBudget.ts); a parametrized test takes the
+// larger count of its variants.
+
 it('reports a real conflict against the literal comparison ref without modifying either checkout', async () => {
   commit(project, 'shared.txt', 'base edit\n', 'Base change');
   commit(worktree, 'shared.txt', 'feature edit\n', 'Feature change');
@@ -49,7 +54,7 @@ it('reports a real conflict against the literal comparison ref without modifying
   expect(readFileSync(join(worktree, 'shared.txt'), 'utf8')).toBe('feature edit\n');
   expect(git(worktree, 'status', '--porcelain')).toBe('');
   expect(readFileSync(join(project, 'shared.txt'), 'utf8')).toBe('base edit\n');
-});
+}, gitSteps(12));
 
 it('reports no conflict when both branches edit separate lines of the same file', async () => {
   commit(project, 'shared.txt', 'one\ntwo\nthree\nfour\nfive\n', 'Lines');
@@ -58,7 +63,7 @@ it('reports no conflict when both branches edit separate lines of the same file'
   commit(worktree, 'shared.txt', 'one\ntwo\nthree\nfour\nfive feature\n', 'Feature change');
   expect(await manager.checkForRebaseConflicts(worktree, base, runner))
     .toEqual({ hasConflicts: false, canAutoMerge: true });
-});
+}, gitSteps(13));
 
 it('reports a conflict when both branches change the same binary file', async () => {
   commit(project, 'image.bin', 'header\0base\n', 'Binary');
@@ -67,7 +72,7 @@ it('reports a conflict when both branches change the same binary file', async ()
   commit(worktree, 'image.bin', 'header\0feature edit\n', 'Feature change');
   expect(await manager.checkForRebaseConflicts(worktree, base, runner))
     .toMatchObject({ hasConflicts: true, canAutoMerge: false, conflictingFiles: ['image.bin'] });
-});
+}, gitSteps(15));
 
 it('rebases onto the literal base while preserving both branches changes', async () => {
   commit(project, 'base.txt', 'base content\n', 'Base change');
@@ -77,7 +82,7 @@ it('rebases onto the literal base while preserving both branches changes', async
   expect(readFileSync(join(worktree, 'feature.txt'), 'utf8')).toBe('feature content\n');
   expect(git(worktree, 'branch', '--show-current')).toBe(feature);
   expect(git(worktree, 'log', '-3', '--format=%s')).toBe('Feature change\nBase change\nInitial');
-});
+}, gitSteps(12));
 
 for (const savedResolution of [false, true]) {
   it(`aborts a rebase that conflicts mid-replay${savedResolution ? ' even when rerere stages a saved resolution' : ''}, leaving the worktree untouched`, async () => {
@@ -102,7 +107,7 @@ for (const savedResolution of [false, true]) {
     expect(git(worktree, 'rev-parse', 'HEAD')).toBe(head);
     expect(git(worktree, 'status', '--porcelain')).toBe('');
     expect(readFileSync(join(worktree, 'shared.txt'), 'utf8')).toBe('C\n');
-  });
+  }, gitSteps(35));
 }
 
 it('fast-forwards the literal target after rebasing the literal feature branch', async () => {
@@ -113,7 +118,7 @@ it('fast-forwards the literal target after rebasing the literal feature branch',
   expect(git(project, 'log', '-3', '--format=%s')).toBe('Feature change\nBase change\nInitial');
   expect(readFileSync(join(project, 'base.txt'), 'utf8')).toBe('base content\n');
   expect(readFileSync(join(project, 'feature.txt'), 'utf8')).toBe('feature content\n');
-});
+}, gitSteps(16));
 
 it('squashes the literal feature branch with an unchanged literal message and attribution footer', async () => {
   commit(worktree, 'feature.txt', 'first content\n', 'First feature change');
@@ -124,7 +129,7 @@ it('squashes the literal feature branch with an unchanged literal message and at
   expect(readFileSync(join(project, 'feature.txt'), 'utf8')).toBe('final content\n');
   expect(git(project, 'log', '-1', '--format=%B')).toBe(message + '\n\nCo-Authored-By: Pane <runpane@users.noreply.github.com>');
   expect(git(project, 'branch', '--show-current')).toBe(base);
-});
+}, gitSteps(21));
 
 for (const squash of [false, true]) {
   it(`aborts a conflicting ${squash ? 'squash' : 'regular'} merge without changing either branch`, async () => {
@@ -139,5 +144,5 @@ for (const squash of [false, true]) {
     expect(git(project, 'log', '-1', '--format=%s')).toBe('Base change');
     expect(readFileSync(join(worktree, 'shared.txt'), 'utf8')).toBe('feature edit\n');
     expect(readFileSync(join(project, 'shared.txt'), 'utf8')).toBe('base edit\n');
-  });
+  }, gitSteps(16));
 }
