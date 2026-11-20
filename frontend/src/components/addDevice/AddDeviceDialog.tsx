@@ -77,8 +77,9 @@ export function AddDeviceDialog({ isOpen, tab, onTabChange, onClose }: {
               onClick={() => onTabChange(id)}
               className={cn(
                 'flex items-center gap-2 rounded-md px-4 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle',
-                tab === id ? 'bg-surface-hover font-medium' : 'hover:text-text-primary',
-                paused ? 'text-text-disabled' : tab === id ? 'text-text-primary' : 'text-text-secondary',
+                tab === id && 'bg-surface-hover font-medium',
+                // A paused tab stays gray on hover too.
+                paused ? 'text-text-disabled' : tab === id ? 'text-text-primary' : 'text-text-secondary hover:text-text-primary',
               )}
             >
               <Icon className="h-4 w-4" aria-hidden="true" />
