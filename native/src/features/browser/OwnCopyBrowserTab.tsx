@@ -24,8 +24,9 @@ const TAILSCALE_APP_URL = 'tailscale://';
 const TAILSCALE_DOWNLOAD_URL = Platform.OS === 'android' ? 'https://tailscale.com/download/android' : 'https://tailscale.com/download/ios';
 
 /**
- * This phone's own copy of a page tab, for a host on an older Pane that streams nothing: the
- * address row (back, forward, address, reload, Safari) over the live page. Pages on the computer
+ * This phone's own copy of a page tab, shown unless an agent is acting on the page (or the host
+ * is on an older Pane, which streams nothing): the address row (back, forward, address, reload,
+ * Safari) over the live page. Pages on the computer
  * load through the phone addresses it creates over Tailscale; HTML files fall back to reading the
  * file through the computer. Each case that can't load has its own screen.
  */

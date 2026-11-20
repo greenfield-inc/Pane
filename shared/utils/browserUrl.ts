@@ -12,15 +12,21 @@ export function hasFileProtocol(value: string | undefined): boolean {
 
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
 
-/** The port an http(s) URL points at on loopback, if it does. */
+/** The port an http(s) URL points at on loopback (localhost, 127.0.0.1, [::1], *.localhost), if it does. */
 export function loopbackPortOf(url: string): number | null {
   try {
     const parsed = new URL(url);
-    if (!['http:', 'https:'].includes(parsed.protocol) || !LOOPBACK_HOSTNAMES.has(parsed.hostname)) return null;
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+    if (!LOOPBACK_HOSTNAMES.has(parsed.hostname) && !parsed.hostname.endsWith('.localhost')) return null;
     return Number.parseInt(parsed.port || (parsed.protocol === 'https:' ? '443' : '80'), 10);
   } catch {
     return null;
   }
+}
+
+/** A page on the host itself: a file, or a dev server on its loopback. */
+export function isHostLocalUrl(url: string | undefined): boolean {
+  return url !== undefined && (hasFileProtocol(url) || loopbackPortOf(url) !== null);
 }
 
 /**

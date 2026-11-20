@@ -1,6 +1,6 @@
 import type { BrowserFrame, BrowserInput, BrowserTabView } from '@shared/types/browserStream';
-import type { ToolPanel } from '@shared/types/panels';
-import { normalizeUrl } from '@shared/utils/browserUrl';
+import type { BrowserPanelState, ToolPanel } from '@shared/types/panels';
+import { isHostLocalUrl, normalizeUrl } from '@shared/utils/browserUrl';
 import { browserInputQueue, fitFrame, keyboardField, movesFocus, pagePoint, PhoneControl, type FrameBox } from '@shared/utils/browserStreamInput';
 import * as Clipboard from 'expo-clipboard';
 import { useIsFocused } from 'expo-router';
@@ -20,8 +20,8 @@ import { pickFiles, type AttachSource } from '../upload/pickFiles';
 import { splitAddress } from './browserPage';
 import { driverChip, KEYBOARD_EMPTY, keyboardEdit, stopLine } from './browserStream';
 import { OwnCopyBrowserTab } from './OwnCopyBrowserTab';
-import { markSignInNoticeSeen, signInNotice, signInNoticeSeen } from './signInNotice';
 import { browserChannels, useBrowserStream } from './useBrowserStream';
+import { useStreamChoice } from './useStreamChoice';
 
 /** How long the agent's cursor stays at a click before it fades (as on the host's own tab). */
 const CURSOR_SHOWN_MS = 1_200;
@@ -32,22 +32,26 @@ const TAP_SLOP_PX = 8;
 const NOTICE_MS = 4_000;
 
 /**
- * A page tab: the page runs on the computer that owns the Pane, with its sign-ins, and the phone
- * shows its frames and sends touch and typing back (docs/BROWSER_AGENTS.md). The address field and
- * who drives sit on top, Back, Forward, Reload and the keyboard at the bottom. A computer on an
- * older Pane streams nothing: the phone then loads its own copy of the page.
+ * A page tab. It shows the phone's own copy of the page until an agent acts on it; then it streams
+ * the page from the computer that owns the Pane, where the agent works, and the phone sends touch
+ * and typing back, until 30 s after the agent's last action or Back to my copy
+ * (docs/BROWSER_AGENTS.md). Host files and dev servers always stay a copy. The address field and who
+ * drives sit on top, Back, Forward, Reload and the keyboard at the bottom. A computer on an older
+ * Pane streams nothing: the phone then keeps its own copy.
  */
 /** The most a page takes from the phone's file picker in one go (the host's limit). */
 const UPLOAD_LIMIT_BYTES = 10 * 1_048_576;
 
 export function BrowserTab({ panel }: { panel: ToolPanel }) {
   const { profile } = useDaemon();
+  const state = panel.state.customState as BrowserPanelState | undefined;
+  const choice = useStreamChoice(state?.driver?.by === 'agent');
   // The demo's pages are sample files on the phone.
-  if (isDemoProfile(profile)) return <OwnCopyBrowserTab panel={panel} />;
-  return <StreamedBrowserTab panel={panel} />;
+  if (isDemoProfile(profile) || isHostLocalUrl(state?.currentUrl) || !choice.stream) return <OwnCopyBrowserTab panel={panel} />;
+  return <StreamedBrowserTab panel={panel} driving={choice.driving} onBack={choice.back} />;
 }
 
-function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
+function StreamedBrowserTab({ panel, driving, onBack }: { panel: ToolPanel; driving: boolean; onBack(): void }) {
   const theme = useTheme();
   const { colors } = theme;
   const { client, profile } = useDaemon();
@@ -71,9 +75,6 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
   const stream = useBrowserStream(panel.id, focused && active, space && { ...space, scale: PixelRatio.get() });
   const { frame, view, stop } = stream;
   const host = view?.host || profile.label;
-  // The first streamed tab from each host says whose sign-ins it uses, once per phone.
-  const [dismissed, setDismissed] = useState<string | null>(null);
-  const noticeSeen = dismissed === host || signInNoticeSeen(host);
 
   // Input goes to the host in order through one queue for the tab's life.
   const clientRef = useRef(client);
@@ -339,11 +340,12 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
           ) : null}
         </View>
       </View>
-      {view && !noticeSeen ? (
-        <Pressable testID="browser-sign-in-notice" accessibilityRole="button" accessibilityHint="Dismiss" onPress={() => { markSignInNoticeSeen(host); setDismissed(host); }} style={[styles.notice, { backgroundColor: colors.surface, borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }]}>
-          <Text variant="footnote" tone="secondary">{signInNotice(host)} <Text variant="footnote" style={{ color: colors.accentText }}>Got it</Text></Text>
+      <View testID="browser-live" style={[styles.live, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
+        <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.shrink}>{driving ? `Agent driving · live from ${host}` : `Live from ${host}`}</Text>
+        <Pressable testID="browser-back-to-copy" accessibilityRole="button" hitSlop={6} onPress={onBack}>
+          <Text variant="footnote" style={{ color: colors.accentText }}>Back to my copy</Text>
         </Pressable>
-      ) : null}
+      </View>
       {addressError ? (
         <Pressable testID="browser-input-error" onPress={() => setAddressError(null)} accessibilityHint="Dismiss" style={styles.notice}>
           <Text variant="footnote" tone="danger">{addressError}</Text>
@@ -516,6 +518,7 @@ const styles = StyleSheet.create({
   tool: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   disabled: { opacity: 0.35 },
   host: { flex: 1, textAlign: 'right' },
+  live: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth },
   olderLine: { paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 1 },
   scrim: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   card: { alignSelf: 'stretch', padding: 20, gap: 16 },
