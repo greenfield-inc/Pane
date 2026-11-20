@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PaneError } from '@shared/paneError';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import type { OrchestrationSessionView } from '@shared/types/orchestrationSession';
-import { pausedMarkOf, type EditorPanelState, type ToolPanel } from '@shared/types/panels';
+import { pausedMarkOf, type EditorPanelState, type TerminalPanelState, type ToolPanel } from '@shared/types/panels';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
 import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
@@ -49,7 +49,7 @@ import { followsHost, pickPanel, sessionWorkspacePanels, stripPanels, tabView } 
 import { offerClose, PanelTabs, type LeadingTab } from './PanelTabs';
 import { PausedTerminal } from './PausedTerminal';
 import { TerminalInputBar } from './TerminalInputBar';
-import { PanelTabsSkeleton, TerminalSkeleton } from './TerminalSkeletons';
+import { KeptScreen, PanelTabsSkeleton, TerminalSkeleton } from './TerminalSkeletons';
 import { TerminalTopBar } from './TerminalTopBar';
 import { TerminalTouchSurface } from './TerminalTouchSurface';
 import { TerminalWebView } from './TerminalWebView';
@@ -340,6 +340,11 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   const [drawn, setDrawn] = useState(false);
   if (terminal.hasContent && !drawn) setDrawn(true);
   const blank = terminal.status === 'loading' && !terminal.hasContent;
+  // A tab this screen just started keeps the mask until its agent draws, not a bare prompt.
+  const starting = terminal.agentStarting && (panel.state.customState as TerminalPanelState | undefined)?.isCliPanel === true;
+  // A revisit paints the rows this tab showed last time until its screen is read again.
+  const kept = blank && !drawn && !starting ? terminal.keptScreen : null;
+  useJourneyMark('terminal', 'last-screen', kept !== null);
   useJourneyMark('terminal', 'content', terminal.hasContent);
   useJourneyMark('terminal', 'live', !disabled);
   useLiveMarks('terminal', !disabled);
@@ -427,10 +432,12 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
         </Dimmed>
         {/*
           Only a failure while connected replaces the screen; a mask covers a blank one, hiding the
-          page's load and refit. A first open masks with skeleton lines, opaque from the first frame.
+          page's load and refit. A revisit masks with the rows it showed last time; a first open, or
+          an agent this screen is starting, with skeleton lines, opaque from the first frame.
         */}
+        {kept !== null ? <KeptScreen text={kept} rows={terminal.rows} height={terminalHeight} /> : null}
         <SkeletonSwap
-          loading={blank && !drawn}
+          loading={(blank && !drawn && kept === null) || starting}
           skeleton={<TerminalSkeleton testID="terminal-skeleton" label="Loading terminal" style={StyleSheet.absoluteFill} />}
         >
           {null}
