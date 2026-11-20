@@ -241,18 +241,17 @@ SSH tunnel mode is mainly useful from desktop clients. For mobile browser access
 
 ### Browser tabs on the phone
 
-A browser tab's page runs on the host, signed in with the host's sign-ins, and the phone shows a live stream of it ([Where a tab's page runs](BROWSER_AGENTS.md#where-a-tabs-page-runs)). The PWA and the Pane phone app show the same layout: the address on top (tap to edit; Go loads it on the host), the tab's driver chip ("Claude Code is driving · Take over"), the page, and at the bottom Back, Forward, Reload, a keyboard button and **on &lt;host&gt;**.
+A browser tab's page runs on the host. The phone shows its own copy of the page until an agent acts on it, then a live stream of the host's page with the chip **Agent driving · live from &lt;host&gt;** and **Back to my copy**, and its own copy again 30 seconds after the agent's last action ([On another screen](BROWSER_AGENTS.md#on-another-screen)). Host files and dev servers always load as a copy. While it streams, the PWA and the Pane phone app show the same layout: the address on top (tap to edit; Go loads it on the host), the tab's driver chip ("Claude Code is driving · Take over"), the page, and at the bottom Back, Forward, Reload and a keyboard button.
 
 - **Watch.** While an agent drives, the page streams live with the agent's cursor and outline. Take over in the chip makes you the driver until Hand to.
 - **Drive.** Your first tap only takes control: the page resizes to the phone and gets its phone layout. After that a tap clicks, a drag scrolls and a long press is a right click.
 - **Type.** Tapping a text field opens the phone's keyboard; letters, autocorrect, dictation, Backspace and Enter reach the page. A password field uses the keyboard's secure mode, and nothing typed shows outside the page.
 - **Dialogs, files, downloads.** A page's alert, confirm or prompt opens as a sheet on the phone. A file picker opens the phone's own picker and sends the file to the host. A download saves on the host: "Downloaded report.pdf on &lt;host&gt;".
 - **When it stops.** The last frame stays, dimmed, with the reason: the host can't be reached (it resumes when back), the tab is asleep (tap to wake it, which reloads it from its URL), or the tab closed.
-- **First time.** The first streamed tab from each host says once: "This page runs on &lt;host&gt;, signed in as &lt;host&gt;. Sign in here once and every device sees it."
 
 Streaming uses the PWA's or app's own connection to the host, so it works over every connection they support: the relay, Tailscale or the same network.
 
-A host on an older Pane streams nothing, so the phone shows the tab's own copy as before, with the line "&lt;host&gt; is on an older Pane. Showing your own copy." That copy loads through phone addresses: when a phone first opens a `web` port, Pane gives that port its own HTTPS address on the host's tailnet name, `https://<host>.ts.net:<n>` (from 44300 up), with a `tailscale serve` handler and a loopback preview proxy that checks the visitor's Tailscale login. HTML files open in a browser tab load from one more Serve address, with the files beside them. A handler goes when its port stops listening, when Pane quits, and at the next launch after a crash, and Pane changes only handlers it created. These pages need **Who can connect** (see [Who is trusted](RUNPANE_WORKSPACES.md#who-is-trusted)) on, Tailscale on the host and the phone on the same tailnet, and are off while password protection is on.
+The phone's own copy loads through phone addresses (a host on an older Pane streams nothing, so the phone keeps its copy with the line "&lt;host&gt; is on an older Pane. Showing your own copy."): when a phone first opens a `web` port, Pane gives that port its own HTTPS address on the host's tailnet name, `https://<host>.ts.net:<n>` (from 44300 up), with a `tailscale serve` handler and a loopback preview proxy that checks the visitor's Tailscale login. HTML files open in a browser tab load from one more Serve address, with the files beside them. A handler goes when its port stops listening, when Pane quits, and at the next launch after a crash, and Pane changes only handlers it created. These pages need **Who can connect** (see [Who is trusted](RUNPANE_WORKSPACES.md#who-is-trusted)) on, Tailscale on the host and the phone on the same tailnet, and are off while password protection is on.
 
 ### Files on the phone
 
@@ -268,11 +267,11 @@ The Remote Pane PWA is a browser runtime. It does not have `window.electronAPI`,
 
 ## Forwarded ports
 
-A desktop connected to a remote host reaches every port listening on the host as if it were local: terminal links, live reload, and an older host's browser tabs use it. The desktop opens a matching listener on its own `127.0.0.1` and `::1` for each port the host lists. Only the desktop app sets up these listeners; the browser app and phones don't yet.
+A desktop connected to a remote host reaches every port listening on the host as if it were local: terminal links, live reload and its own copy of each browser tab use it. The desktop opens a matching listener on its own `127.0.0.1` and `::1` for each port the host lists. Only the desktop app sets up these listeners; the browser app and phones don't yet.
 
-A browser tab from a host on a current Pane streams the host's own page instead (see [Where a tab's page runs](BROWSER_AGENTS.md#where-a-tabs-page-runs)): `localhost:5173` there is the host's dev server with no forwarding. Its address bar has back, forward, reload and **Copy URL** (the host's address), and none of the Ports list, Find, DevTools or **Open in your browser**. The rest of this section describes an older host's tabs.
+While an agent acts on a browser tab, the desktop streams the host's own page instead, unless the tab shows a host file or dev server (see [On another screen](BROWSER_AGENTS.md#on-another-screen)). The stream's address bar has back, forward, reload and **Copy URL** (the host's address), and none of the Ports list, Find, DevTools or **Open in your browser**. The rest of this section describes the desktop's own copy.
 
-- An older host's tab is the desktop's own copy, loading through these forwarded ports. Its address bar reads `localhost:5173` with **on &lt;host name&gt;**.
+- A tab's own copy loads through these forwarded ports. Its address bar reads `localhost:5173` with **on &lt;host name&gt;**.
 - When something on the desktop already answers on 5173, the desktop uses the next free port, or any free port when the next 19 are taken too. The tab still reads `localhost:5173`, and the Ports list shows the local number as **here :5174**.
 - A tab never loads the desktop's own service in the host's place. While the host's Ports list is loading it waits, and when a port stops listening on the host it says the port isn't reachable, then loads once the port is back.
 - **Copy URL** copies the address that works on the desktop, for its system browser.

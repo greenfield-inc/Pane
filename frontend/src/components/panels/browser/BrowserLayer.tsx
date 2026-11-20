@@ -88,11 +88,21 @@ export const BrowserLayer = memo(function BrowserLayer() {
       changed();
     };
     window.addEventListener(BUSY_EVENT, onBusy);
+    // A page stays here while its Pane is out of view, and its tab's state keeps changing (the size
+    // another screen gives it, its URL, who drives): take every browser tab's update, not only the
+    // shown Pane's, or its view keeps a stale size and frames streamed from it come out cut off.
+    const stopUpdates = window.electronAPI?.events?.onPanelUpdated(panel => {
+      if (panel.type !== 'browser') return;
+      usePanelStore.getState().updatePanelState(panel);
+      if (lastPanels.has(panel.id)) lastPanels.set(panel.id, panel);
+      changed();
+    });
     const onResize = () => relayout(count => count + 1);
     window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener(HELD_EVENT, onHeld);
       window.removeEventListener(BUSY_EVENT, onBusy);
+      stopUpdates?.();
       window.removeEventListener('resize', onResize);
     };
   }, []);

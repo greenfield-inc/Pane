@@ -103,13 +103,8 @@ and fails with `ERR_BROWSER_PERSON_DRIVING` after 4 minutes. With DevTools open 
 ## Where a tab's page runs
 
 A tab's page lives on the computer that owns its Pane (the host), signed in with the host's
-sign-ins, and every agent call runs on that page. Every other screen (another desktop, the web app,
-the phone app) shows a live stream of that one page, so the tab is signed in as the host wherever
-you look, a half-filled form follows you between devices, and `localhost` means the host's. Sign in
-to a site once in any screen's stream and every device sees it. The first streamed tab from each
-host says so once: "This page runs on studio-mac, signed in as studio-mac. Sign in here once and
-every device sees it." Each computer's own Panes keep that computer's sign-ins; nothing is copied
-between computers. When the tab is not in view, its page loads in the
+sign-ins, and every agent call runs on that page. Each computer's own Panes keep that computer's
+sign-ins; nothing is copied between computers. When the tab is not in view, its page loads in the
 background and the tab never comes forward. With no Pane window (a headless host), Pane loads the
 page in a hidden window, where it can't open popups or hand links to other apps, since nobody is
 there to approve them. When the window closes or comes back, each live page moves between it and
@@ -118,15 +113,29 @@ a hidden window and reloads once from its URL.
 When the page doesn't load within 5 seconds, the call fails with `ERR_BROWSER_NOT_SHOWING`. A call
 from an agent on another computer through `runpane workspace` fails with `ERR_BROWSER_LOCAL_ONLY`.
 
-Another desktop showing this Pane (switched to this computer, or in All machines) draws the
-tab as a live stream of that one page, over whichever route it reaches this computer (relay,
-Tailscale or the same network). You drive it there with the mouse, wheel and keyboard: the pointer
-changes shape over links, text you copy lands on that desktop's clipboard, and paste sends that
-desktop's clipboard. Keys with Cmd or Ctrl stay Pane's shortcuts, except select all, copy, cut and
-undo. The page's dialogs and file pickers open on that desktop, and downloads save on this
-computer with a notice there. When this computer can't be reached, the last frame stays dimmed
-until it is back. A desktop showing a computer on an older Pane draws its own copy, as before, and
-says so.
+### On another screen
+
+Another desktop showing this Pane (switched to this computer, or in All machines), the web app and
+the phone app show each tab as their own copy of the page, with their own sign-ins. A host file
+page or dev server (`file://`, `localhost`, `127.0.0.1`, `[::1]`, `*.localhost`) loads through the
+host's file and port routes and reloads when its files change.
+
+When an agent acts on the tab (a click, typing, navigation or any other action; `browser_snapshot`,
+`browser_screenshot` and `browser_wait` don't count), the screen switches to a live stream of the
+host's page, where the agent works, with the chip **Agent driving · live from studio-mac**. Thirty
+seconds after the agent's last action the screen goes back to its own copy at the agent's current
+URL; **Back to my copy** in the chip goes back sooner, and the agent's next action streams again.
+Anything on the page that its URL doesn't hold (a half-filled form, the scroll position) stays on
+the host. Host files and dev servers never stream: the copy shows the agent's edits as it reloads.
+
+The stream works over whichever route the screen reaches this computer (relay, Tailscale or the
+same network). On a desktop you drive it with the mouse, wheel and keyboard: the pointer changes
+shape over links, text you copy lands on that desktop's clipboard, and paste sends that desktop's
+clipboard. Keys with Cmd or Ctrl stay Pane's shortcuts, except select all, copy, cut and undo. On a
+phone, a tap clicks, a drag scrolls and a tap into a field opens the keyboard. The page's dialogs
+and file pickers open on that screen, and downloads save on this computer with a notice there.
+When this computer can't be reached, the last frame stays dimmed until it is back. A screen showing
+a computer on an older Pane keeps its own copy and says so.
 
 ### Streaming to other screens
 
