@@ -432,6 +432,22 @@ export async function emitRemoteHostEvent(page: Page, channel: string, ...args: 
   }, { channel, args });
 }
 
+/** Sets the driver in the host's browser tab state, as an agent's call or a Take over does, and tells the web app. */
+export async function setRemoteBrowserDriver(page: Page, driver: { by: 'agent'; agent: string } | { by: 'person'; agentWaiting?: string } | undefined): Promise<void> {
+  const host = pageHosts.get(page);
+  const fixtures = host ? hostFixtures.get(host) : undefined;
+  const panel = fixtures && Object.values(fixtures.panelsByPane).flat().find(candidate => candidate.type === 'browser');
+  if (!panel) throw new Error('The mock host has no browser tab.');
+  // SAFETY: A browser panel's custom state is its BrowserPanelState, a plain JSON object.
+  const { driver: _old, ...rest } = (panel.state.customState ?? {}) as Record<string, JsonValue>;
+  panel.state = { ...panel.state, customState: driver ? { ...rest, driver } : rest };
+  if (host?.browserStream) {
+    host.browserStream.driver = driver?.by === 'agent' ? driver : driver ? { by: 'person' } : undefined;
+    host.browserStream.version += 1;
+  }
+  await emitRemoteHostEvent(page, 'panel:updated', JSON.parse(JSON.stringify(panel)));
+}
+
 /** Brings the held host back, settling the status to `connected`. */
 export async function restoreRemoteConnection(page: Page): Promise<void> {
   await page.evaluate(() => {

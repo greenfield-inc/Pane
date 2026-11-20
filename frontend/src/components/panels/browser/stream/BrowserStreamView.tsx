@@ -51,6 +51,8 @@ interface BrowserStreamViewProps {
   phone?: boolean;
   /** Set by the view: focuses its text field, opening a phone's keyboard (the keyboard button). */
   keyboardRef?: { current: (() => void) | null };
+  /** Hears each click, key, scroll or chip press the person sends (not hover), which keeps the stream shown. */
+  onPersonInput?: () => void;
 }
 
 /**
@@ -59,7 +61,7 @@ interface BrowserStreamViewProps {
  * and goes to the host in order. Shows who drives, the agent's cursor, the page's dialogs and file
  * pickers, downloads and why the stream stopped.
  */
-export function BrowserStreamView({ client, panelId, stream, hostName, phone = false, keyboardRef }: BrowserStreamViewProps) {
+export function BrowserStreamView({ client, panelId, stream, hostName, phone = false, keyboardRef, onPersonInput }: BrowserStreamViewProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keysRef = useRef<HTMLInputElement>(null);
@@ -90,8 +92,11 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   // Input made while the host can't be reached is dropped, never replayed late onto a page that may have changed.
   const stopRef = useRef(stop);
   useEffect(() => { stopRef.current = stop; }, [stop]);
+  const onPersonInputRef = useRef(onPersonInput);
+  useEffect(() => { onPersonInputRef.current = onPersonInput; }, [onPersonInput]);
   const send = useCallback((input: BrowserInput | null) => {
     if (stopRef.current && stopRef.current !== 'older') return;
+    onPersonInputRef.current?.();
     // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
     if (movesFocus(input)) setField('password');
     queue(input);
@@ -350,6 +355,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   }, [driveFailed]);
   const drive = (who: 'person' | 'agent') => {
     if (stopRef.current) return;
+    onPersonInputRef.current?.();
     void client.driver(panelId, who).catch((cause: unknown) => setDriveFailed(`${who === 'person' ? 'Take over' : 'Hand back'} didn't reach ${host}: ${cause instanceof Error ? cause.message : String(cause)}`));
   };
 

@@ -10,14 +10,18 @@ export function hasFileProtocol(value: string | undefined): boolean {
   }
 }
 
-const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0']);
 
-/** The port an http(s) URL points at on loopback (localhost, 127.0.0.1, [::1], *.localhost), if it does. */
+/** Whether a URL's hostname means "this computer": localhost, 127.0.0.1, [::1], 0.0.0.0 or *.localhost. */
+export function isLoopbackHostname(hostname: string): boolean {
+  return LOOPBACK_HOSTNAMES.has(hostname) || hostname.endsWith('.localhost');
+}
+
+/** The port an http(s) URL points at on loopback (isLoopbackHostname), if it does. */
 export function loopbackPortOf(url: string): number | null {
   try {
     const parsed = new URL(url);
-    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
-    if (!LOOPBACK_HOSTNAMES.has(parsed.hostname) && !parsed.hostname.endsWith('.localhost')) return null;
+    if (!['http:', 'https:'].includes(parsed.protocol) || !isLoopbackHostname(parsed.hostname)) return null;
     return Number.parseInt(parsed.port || (parsed.protocol === 'https:' ? '443' : '80'), 10);
   } catch {
     return null;

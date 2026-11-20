@@ -21,7 +21,7 @@ const invokeHost = (channel: string, ...args: Parameters<Parameters<typeof useSt
  * A browser tab on a desktop showing another computer's Pane. It shows this desktop's own copy
  * (`ownCopy`, loaded through the host's file and port routes for host files and dev servers) until
  * an agent acts on the page; then it streams the host's page, where the agent works, until 30 s after
- * the agent's last action or Back to my copy (docs/BROWSER_AGENTS.md). Host files and dev servers
+ * the last input by anyone (the agent's, or the person's after a Take over) or Back to my copy (docs/BROWSER_AGENTS.md). Host files and dev servers
  * always stay a copy, which live-reloads with the agent's edits.
  */
 export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: ToolPanel; isActive: boolean; ownCopy: () => ReactNode }) {
@@ -29,14 +29,14 @@ export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: Tool
   const state = panel.state.customState as BrowserPanelState | undefined;
   const choice = useStreamChoice(state?.driver?.by === 'agent');
   if (isHostLocalUrl(state?.currentUrl) || !choice.stream) return <>{ownCopy()}</>;
-  return <HostStreamPanel panel={panel} isActive={isActive} ownCopy={ownCopy} driving={choice.driving} onBack={choice.back} />;
+  return <HostStreamPanel panel={panel} isActive={isActive} ownCopy={ownCopy} onBack={choice.back} onInput={choice.input} />;
 }
 
 /**
  * The host's page as a stream: this desktop draws its frames and sends input back. A host on an
  * older Pane streams nothing: `ownCopy` then renders this desktop's own copy.
  */
-function HostStreamPanel({ panel, isActive, ownCopy, driving, onBack }: { panel: ToolPanel; isActive: boolean; ownCopy: () => ReactNode; driving: boolean; onBack(): void }) {
+function HostStreamPanel({ panel, isActive, ownCopy, onBack, onInput }: { panel: ToolPanel; isActive: boolean; ownCopy: () => ReactNode; onBack(): void; onInput(): void }) {
   const client = useMemo(() => streamClient((channel, ...args) => window.electronAPI.invoke(channel, ...args)), []);
   const stream = useBrowserStream(client, panel.id, isActive);
   // This desktop reports the stream's own box (below the address bar), so a Take over sizes the page to it.
@@ -79,6 +79,7 @@ function HostStreamPanel({ panel, isActive, ownCopy, driving, onBack }: { panel:
   // While the host can't be reached nothing is sent; a refusal or a missed deadline shows under the address bar.
   const act = (input: BrowserInput) => {
     if (stream.stop === 'unreachable' || stream.stop === 'gone') return;
+    onInput();
     if (stream.stop === 'asleep') stream.wake();
     void client.input(panel.id, [input]).catch((cause: unknown) => setError(`${host} didn't take that: ${cause instanceof Error ? cause.message : String(cause)}`));
   };
@@ -121,9 +122,9 @@ function HostStreamPanel({ panel, isActive, ownCopy, driving, onBack }: { panel:
           {copied ? <Check className="h-3.5 w-3.5 text-status-success" /> : <Copy className="h-3.5 w-3.5" />}
         </button>
       </div>
-      <LiveChip host={host} driving={driving} onBack={onBack} />
+      <LiveChip host={host} onBack={onBack} />
       {error && <div className="border-b border-border-primary bg-bg-primary px-2 py-1 text-xs text-status-error">{error}</div>}
-      <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} />
+      <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} onPersonInput={onInput} />
     </div>
   );
 }

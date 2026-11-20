@@ -18,7 +18,7 @@ import type { IconProps } from '@/ui/Icon';
 import { isDemoProfile } from '../demo/demoHost';
 import { pickFiles, type AttachSource } from '../upload/pickFiles';
 import { splitAddress } from './browserPage';
-import { driverChip, KEYBOARD_EMPTY, keyboardEdit, stopLine } from './browserStream';
+import { driverChip, KEYBOARD_EMPTY, keyboardEdit, liveLine, stopLine } from './browserStream';
 import { OwnCopyBrowserTab } from './OwnCopyBrowserTab';
 import { browserChannels, useBrowserStream } from './useBrowserStream';
 import { useStreamChoice } from './useStreamChoice';
@@ -34,7 +34,7 @@ const NOTICE_MS = 4_000;
 /**
  * A page tab. It shows the phone's own copy of the page until an agent acts on it; then it streams
  * the page from the computer that owns the Pane, where the agent works, and the phone sends touch
- * and typing back, until 30 s after the agent's last action or Back to my copy
+ * and typing back, until 30 s after its driver clears or Back to my copy
  * (docs/BROWSER_AGENTS.md). Host files and dev servers always stay a copy. The address field and who
  * drives sit on top, Back, Forward, Reload and the keyboard at the bottom. A computer on an older
  * Pane streams nothing: the phone then keeps its own copy.
@@ -47,11 +47,35 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
   const state = panel.state.customState as BrowserPanelState | undefined;
   const choice = useStreamChoice(state?.driver?.by === 'agent');
   // The demo's pages are sample files on the phone.
-  if (isDemoProfile(profile) || isHostLocalUrl(state?.currentUrl) || !choice.stream) return <OwnCopyBrowserTab panel={panel} />;
-  return <StreamedBrowserTab panel={panel} driving={choice.driving} onBack={choice.back} />;
+  if (isDemoProfile(profile)) return <OwnCopyBrowserTab panel={panel} />;
+  if (isHostLocalUrl(state?.currentUrl) || !choice.stream) {
+    const driver = state?.driver;
+    return (
+      <View style={styles.fill}>
+        {driver?.by === 'person' ? <HandBackRow panelId={panel.id} agent={driver.agentWaiting} /> : null}
+        <OwnCopyBrowserTab panel={panel} />
+      </View>
+    );
+  }
+  return <StreamedBrowserTab panel={panel} onBack={choice.back} onInput={choice.input} />;
 }
 
-function StreamedBrowserTab({ panel, driving, onBack }: { panel: ToolPanel; driving: boolean; onBack(): void }) {
+/** On the own copy while the person drives the tab (they took over): hand it back to the agent from here. */
+function HandBackRow({ panelId, agent }: { panelId: string; agent: string | undefined }) {
+  const { colors } = useTheme();
+  const { client } = useDaemon();
+  const [failed, setFailed] = useState(false);
+  return (
+    <View testID="browser-hand-back" style={[styles.live, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
+      <Text variant="footnote" tone={failed ? 'danger' : 'secondary'} numberOfLines={1} style={styles.shrink}>{failed ? "That didn't reach the computer. Try again." : agent ? `You're driving · ${agent} is waiting` : "You're driving"}</Text>
+      <Pressable accessibilityRole="button" hitSlop={6} onPress={() => { setFailed(false); void browserChannels(client).driver(panelId, 'agent').catch(() => setFailed(true)); }}>
+        <Text variant="footnote" style={{ color: colors.accentText }}>{`Hand to ${agent ?? 'agent'}`}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBack(): void; onInput(): void }) {
   const theme = useTheme();
   const { colors } = theme;
   const { client, profile } = useDaemon();
@@ -107,8 +131,12 @@ function StreamedBrowserTab({ panel, driving, onBack }: { panel: ToolPanel; driv
   // Input made while the host can't be reached is dropped, never replayed late onto a page that may have changed.
   const stopRef = useRef(stop);
   useEffect(() => { stopRef.current = stop; }, [stop]);
+  // The person's clicks, keys and scrolls keep the stream shown (useStreamChoice).
+  const onInputRef = useRef(onInput);
+  useEffect(() => { onInputRef.current = onInput; }, [onInput]);
   const send = useCallback((input: BrowserInput | null) => {
     if (stopRef.current && stopRef.current !== 'older') return;
+    onInputRef.current();
     // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
     if (movesFocus(input)) {
       fieldRef.current = 'password';
@@ -332,6 +360,7 @@ function StreamedBrowserTab({ panel, driving, onBack }: { panel: ToolPanel; driv
               <Text variant="footnote" numberOfLines={1} style={styles.shrink}>{chip.label}</Text>
               <Pressable testID="browser-driver-action" accessibilityRole="button" hitSlop={6} onPress={() => {
                 if (stopRef.current && stopRef.current !== 'older') return;
+                onInput();
                 void browserChannels(client).driver(panel.id, chip.to).catch(() => setNotice(`That didn't reach ${host}. Try again.`));
               }}>
                 <Text variant="footnote" style={{ color: colors.accentText }}>{chip.action}</Text>
@@ -341,7 +370,7 @@ function StreamedBrowserTab({ panel, driving, onBack }: { panel: ToolPanel; driv
         </View>
       </View>
       <View testID="browser-live" style={[styles.live, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
-        <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.shrink}>{driving ? `Agent driving · live from ${host}` : `Live from ${host}`}</Text>
+        <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.shrink}>{liveLine(host)}</Text>
         <Pressable testID="browser-back-to-copy" accessibilityRole="button" hitSlop={6} onPress={onBack}>
           <Text variant="footnote" style={{ color: colors.accentText }}>Back to my copy</Text>
         </Pressable>
@@ -394,7 +423,6 @@ function StreamedBrowserTab({ panel, driving, onBack }: { panel: ToolPanel; driv
         <ToolButton testID="browser-forward" label="Forward" ios="chevron.right" android="arrow_forward" disabled={!view?.canGoForward} onPress={() => history('forward')} />
         <ToolButton testID="browser-reload" label="Reload" ios="arrow.clockwise" android="refresh" disabled={!view?.url} onPress={() => history('reload')} />
         <ToolButton testID="browser-keyboard" label="Keyboard" ios="keyboard" android="keyboard" onPress={() => (keysRef.current?.isFocused() ? keysRef.current.blur() : keysRef.current?.focus())} />
-        <Text variant="footnote" tone="muted" numberOfLines={1} style={styles.host}>{`on ${host}`}</Text>
       </View>
       <Modal visible={prompt !== null} transparent animationType="fade" onRequestClose={() => { setPrompt(null); send({ kind: 'dialog', accept: false }); }} statusBarTranslucent>
         <View style={[styles.scrim, { backgroundColor: colors.scrim }]}>
@@ -517,7 +545,6 @@ const styles = StyleSheet.create({
   bar: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 6, borderTopWidth: 1 },
   tool: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   disabled: { opacity: 0.35 },
-  host: { flex: 1, textAlign: 'right' },
   live: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth },
   olderLine: { paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 1 },
   scrim: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },

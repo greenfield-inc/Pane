@@ -264,6 +264,10 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       host.setHeld(holds.held(), remotelyWatched());
     }
     for (const tabId of holds.held()) applyWatch(tabId);
+    // A screen in control that stopped reporting has left: the page gets its own size back.
+    for (const [tabId, viewerId] of controllers) {
+      if (!holds.viewers(tabId).some(viewer => viewer.id === viewerId)) void setPageSize(tabId, undefined).catch(cause => console.warn(`[browser] Could not give tab ${tabId} its size back:`, cause));
+    }
     // Nobody read a page's frames for a while (the phone went to the background): stop encoding it.
     for (const [pageId, stream] of streams) {
       if (Date.now() - stream.lastRead < STREAM_IDLE_MS) continue;
@@ -816,6 +820,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     }
     if (!decoded) {
       holds.unwatch(id, viewerId);
+      // The screen in control left (it went back to its own copy, or closed): the page fills its tab here again.
+      if (controllers.get(id) === viewerId) await setPageSize(id, undefined).catch(cause => console.warn(`[browser] Could not give tab ${id} its size back:`, cause));
     } else {
       // This computer's own window is the host's screen, whatever it calls itself.
       const kind: ViewerKind = isRemotePaneCommand() ? decoded.kind : 'host';

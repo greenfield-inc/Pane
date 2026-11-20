@@ -729,6 +729,10 @@ describe('browser tabs: streaming a page to another screen', () => {
     // The viewer's sidebar closes: its box grows, and the page grows with it.
     await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', { ...desktop, width: 524 }], { caller: undefined });
     await vi.waitFor(() => expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 524, height: 748 }));
+    // The screen goes back to its own copy: the page fills its tab on the host again.
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', null], { caller: undefined });
+    await vi.waitFor(() => expect(page?.sent).toContain('Emulation.clearDeviceMetricsOverride'));
+    expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'persons')?.state.customState)).not.toContain('pageSize');
   });
 
   it('moves the pointer over the page on the read channel, taking nothing over and waking no state read', async () => {

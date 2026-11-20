@@ -118,15 +118,19 @@ from an agent on another computer through `runpane workspace` fails with `ERR_BR
 Another desktop showing this Pane (switched to this computer, or in All machines), the web app and
 the phone app show each tab as their own copy of the page, with their own sign-ins. A host file
 page or dev server (`file://`, `localhost`, `127.0.0.1`, `[::1]`, `*.localhost`) loads through the
-host's file and port routes and reloads when its files change.
+host's file and port routes, and loads again when an agent reopens it (`runpane panels open` on the
+same page).
 
 When an agent acts on the tab (a click, typing, navigation or any other action; `browser_snapshot`,
 `browser_screenshot` and `browser_wait` don't count), the screen switches to a live stream of the
-host's page, where the agent works, with the chip **Agent driving · live from studio-mac**. Thirty
-seconds after the agent's last action the screen goes back to its own copy at the agent's current
-URL; **Back to my copy** in the chip goes back sooner, and the agent's next action streams again.
-Anything on the page that its URL doesn't hold (a half-filled form, the scroll position) stays on
-the host. Host files and dev servers never stream: the copy shows the agent's edits as it reloads.
+host's page, where the agent works, with the line **Live from studio-mac** under the address bar.
+The stream stays while the agent drives and while you use it (after **Take over**, your clicks, keys
+and scrolls keep it). Thirty seconds after the last input by anyone, the screen goes back to its own
+copy at the page's current URL; **Back to my copy** goes back sooner, and the agent's next action
+streams again. Anything on the page that its URL doesn't hold (a half-filled form, the scroll
+position) stays on the host. While you are the driver, the copy shows "You're driving" with **Hand
+to** the agent. Links and redirects you follow in your own copy stay in it: only an address you
+enter moves the host's page. Host files and dev servers never stream.
 
 The stream works over whichever route the screen reaches this computer (relay, Tailscale or the
 same network). On a desktop you drive it with the mouse, wheel and keyboard: the pointer changes
@@ -161,7 +165,9 @@ tab's route), with no new port:
 The page fills its tab on the computer that owns it. When you take over a tab from a screen on
 another device (**Take over** in the chip there), the page takes that screen's size, with a phone's
 layout on a phone, follows it as that screen changes size, and keeps it, through a sleep too, until
-you click into the tab on the owning computer, which shows the page letterboxed meanwhile. Watching from another screen, and agent calls, never change the size. `browser_tabs`
+you click into the tab on the owning computer, or that screen stops showing the stream (it went back
+to its own copy). The owning computer shows the page letterboxed meanwhile. Watching from another
+screen, and agent calls, never change the size. `browser_tabs`
 reports it as `size`, and `browser_screenshot` captures the page at that size.
 
 ## Background tabs
