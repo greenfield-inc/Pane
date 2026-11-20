@@ -168,6 +168,17 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
+for (const theme of ['light', 'dark'] as const) {
+  test(`Remote Access names the service that issued this computer's certificate (${theme})`, async ({ page }) => {
+    const certificate = { notBefore: '2026-11-20T00:00:00Z', notAfter: '2027-02-18T00:00:00Z', renewAt: '2027-01-19T00:00:00Z', issuer: 'Google Trust Services' };
+    await openRemoteAccess(page, { relay: { certificate } }, theme);
+    await openPhonesTab(page);
+    await expect(page.getByText(/^Issued by Google Trust Services\. Pane renews it on /u)).toBeVisible();
+    await expect(page.getByText(/^Valid until /u)).toBeVisible();
+    await shot(page, `settings-relay-certificate-${theme}`);
+  });
+}
+
 test('Remote Access follows changes made from another computer or a phone without reopening Settings', async ({ page }) => {
   await openRemoteAccess(page);
   await expect(page.getByTestId('linked-Travel Laptop')).toBeVisible();

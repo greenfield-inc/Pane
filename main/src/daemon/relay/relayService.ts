@@ -9,11 +9,14 @@ import type { RemoteDaemonClientRecord, RemoteRelaySettings } from '../../../../
 import type { RelayComputer, RelayDirectEndpoint, RelayLinkLifetime, RelayPairingInfo, RelayStatus } from '../../../../shared/types/relay';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { loadComputerKey, type ComputerKey, type KeyStore } from './computerKey';
-import { CertificateRateLimited, ComputerCertificate, LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY } from './computerCertificate';
+import {
+  CertificateRateLimited, ComputerCertificate, GOOGLE_TRUST_SERVICES_DIRECTORY, GOOGLE_TRUST_SERVICES_STAGING_DIRECTORY,
+  LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY, type CertificateAuthority,
+} from './computerCertificate';
 import { createComputerTlsServer, type ComputerTlsServer } from './computerTlsServer';
 import { computerHost, localAddressHost } from './computerNames';
 import { PairingExchange, type PairingExchangeRequest, type PairingExchangeResult, type PairingRefusal } from './pairingExchange';
-import { RelayAgent, type RelayAgentState, type RelayAlert, type RelayGrantRequest } from './relayAgent';
+import { RelayAgent, RelayRequestError, type RelayAgentState, type RelayAlert, type RelayGrantRequest } from './relayAgent';
 import { findPaneDirect, PaneDirectProcess } from './paneDirect';
 import { DEFAULT_RELAY_DOMAIN } from '../../../../shared/remoteClient/relay';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
@@ -50,7 +53,7 @@ export interface RelayServiceDeps {
   addClient(record: RemoteDaemonClientRecord): Promise<void>;
   /** Environment overrides for development and self-tests; `process.env` by default. */
   env?: NodeJS.ProcessEnv;
-  /** A development build orders from Let's Encrypt's staging CA, so test computers never spend the real one's limits. */
+  /** A development build orders from Let's Encrypt's and Google Trust Services' staging CAs, so test computers never spend the real ones' limits. */
   developmentBuild?: boolean;
   log?(line: string): void;
 }
@@ -357,19 +360,15 @@ export class RelayService {
     // One certificate per domain: a reconnect while the first order is in flight shares that order.
     if (!this.certificate || this.certificateDomain !== domain) {
       this.certificateDomain = domain;
-      const directoryUrl = this.env.PANE_ACME_DIRECTORY ?? (this.deps.developmentBuild ? LETS_ENCRYPT_STAGING_DIRECTORY : LETS_ENCRYPT_DIRECTORY);
+      const authorities = this.certificateAuthorities();
       // A staging certificate is kept apart, so switching to a trusted CA orders a new one instead of loading it.
-      const staging = directoryUrl === LETS_ENCRYPT_STAGING_DIRECTORY ? '.staging' : '';
+      const staging = authorities[0]?.directoryUrl === LETS_ENCRYPT_STAGING_DIRECTORY ? '.staging' : '';
       this.certificate = new ComputerCertificate({
         key,
         domain,
         certificateStore: fileStore(path.join(this.deps.dataDir, 'relay', `${domain}${staging}.certificate.pem`)),
-        accountStore: {
-          read: () => this.deps.secrets.read('relay/acme-account'),
-          write: (value) => this.deps.secrets.write('relay/acme-account', value),
-        },
+        authorities,
         setTxt: (values) => this.agent?.setAcmeTxt(values) ?? Promise.reject(new Error('The relay is not connected.')),
-        directoryUrl,
         acmeCa: readOptionalFile(this.env.PANE_ACME_CA)?.toString(),
         log: this.deps.log,
       });
@@ -401,6 +400,47 @@ export class RelayService {
     }
   }
 
+  /**
+   * Let's Encrypt, then Google Trust Services when Let's Encrypt refuses for its rate limits, with a
+   * one-time EAB key from the relay. Development builds use both staging CAs. `PANE_ACME_DIRECTORY`
+   * pins one CA (tests, self-tests); `PANE_ACME_FALLBACK_DIRECTORY` adds a fallback to it.
+   */
+  private certificateAuthorities(): CertificateAuthority[] {
+    const secretStore = (name: string) => ({
+      read: () => this.deps.secrets.read(name),
+      write: (value: string) => this.deps.secrets.write(name, value),
+    });
+    const pinned = this.env.PANE_ACME_DIRECTORY;
+    const development = this.deps.developmentBuild === true;
+    const primary: CertificateAuthority = {
+      name: "Let's Encrypt",
+      directoryUrl: pinned ?? (development ? LETS_ENCRYPT_STAGING_DIRECTORY : LETS_ENCRYPT_DIRECTORY),
+      accountStore: secretStore('relay/acme-account'),
+    };
+    const fallbackUrl = this.env.PANE_ACME_FALLBACK_DIRECTORY
+      ?? (pinned ? undefined : development ? GOOGLE_TRUST_SERVICES_STAGING_DIRECTORY : GOOGLE_TRUST_SERVICES_DIRECTORY);
+    if (!fallbackUrl) return [primary];
+    return [primary, {
+      name: 'Google Trust Services',
+      directoryUrl: fallbackUrl,
+      accountStore: secretStore('relay/acme-account-gts'),
+      // Anything but the trusted CA gets a staging key, so a test never spends a production one.
+      externalAccountKey: () => this.externalAccountKey(fallbackUrl !== GOOGLE_TRUST_SERVICES_DIRECTORY),
+    }];
+  }
+
+  /** A relay that has no keys to give, or none left for this computer today, counts as Google Trust Services refusing. */
+  private async externalAccountKey(staging: boolean): Promise<{ keyId: string; hmacKey: string }> {
+    const agent = this.agent;
+    if (!agent) throw new Error('The relay is not connected.');
+    return agent.externalAccountKey(staging).catch((error: unknown) => {
+      if (error instanceof RelayRequestError && (error.code === 'unconfigured' || error.code === 'throttled')) {
+        throw new CertificateRateLimited(error.message, null);
+      }
+      throw error;
+    });
+  }
+
   private async renewIfDue(): Promise<void> {
     // A scheduled retry waits for the CA's time; a reconnect or wake doesn't order early.
     if (!this.certificate || this.agentState.status !== 'online' || this.certificateRetry) return;
@@ -417,7 +457,7 @@ export class RelayService {
         const caTime = error instanceof CertificateRateLimited ? error.retryAt : null;
         const retryAt = this.retryCertificate(caTime);
         this.certificateLimitUntil = error instanceof CertificateRateLimited ? caTime ?? retryAt : null;
-        this.lastError = this.certificateLimitUntil !== null ? certificateRefused(this.certificateLimitUntil) : certificateFailed(reasonOf(error), retryAt);
+        this.lastError = this.certificateLimitUntil !== null ? certificateRefused(this.certificateLimitUntil, this.certificateAuthorities().map((authority) => authority.name)) : certificateFailed(reasonOf(error), retryAt);
       }
       this.deps.log?.(`[relay] ${this.lastError}`);
     }
@@ -546,8 +586,9 @@ function clockTime(at: number): string {
 }
 
 /** The CA turned this computer away for its rate limits until `at`. */
-function certificateRefused(at: number): string {
-  return `Phones can't reach this computer yet: it needs a security certificate, and Let's Encrypt, which issues them, is turning away new computers until ${clockTime(at)}. Keep Add a device open and Pane asks again then, or open it again after that time.`;
+function certificateRefused(at: number, authorities: string[]): string {
+  const issuers = authorities.length > 1 ? `${authorities.join(' and ')}, which issue them, are` : `${authorities[0] ?? 'the service'}, which issues them, is`;
+  return `Phones can't reach this computer yet: it needs a security certificate, and ${issuers} turning away new computers until ${clockTime(at)}. Keep Add a device open and Pane asks again then, or open it again after that time.`;
 }
 
 /** The order failed for another reason; Pane asks again at `at`. */

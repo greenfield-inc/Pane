@@ -22,6 +22,7 @@ import { Bone, Skeleton, LoadingStatus, useSkeletonHold } from '../../ui/Skeleto
 import { computerRelayId } from '../../../../../shared/types/remoteComputers';
 import { relayCarrier } from '../../../utils/relayCarrier';
 import type { RemoteDaemonClientRecord } from '../../../../../shared/types/remoteDaemon';
+import type { RelayStatus } from '../../../../../shared/types/relay';
 import type { RemoteAccessSubviewId, SettingSaveState, SettingsSettingId } from '../../../types/settings';
 import type { RemoteAccessController } from '../useRemoteAccessSettings';
 
@@ -290,6 +291,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
             </RemoteGroup>
             <RemoteGroup title="Pane relay">
               <RelayAddressRow controller={controller} />
+              <RelayCertificateRow />
             </RemoteGroup>
           </>
         )}
@@ -611,6 +613,31 @@ function LinkedComputerRow({ computer, controller, onOutcome }: { computer: Remo
         )}
       </div>
     </div>
+  );
+}
+
+/** Which CA issued this computer's relay certificate, and until when; nothing until it has one. */
+function RelayCertificateRow() {
+  const [certificate, setCertificate] = useState<RelayStatus['certificate']>(null);
+  useEffect(() => {
+    let current = true;
+    window.electronAPI.invoke('relay:status').then(
+      (status: RelayStatus) => { if (current) setCertificate(status.certificate); },
+      () => undefined,
+    );
+    const off = window.electronAPI.events.onRelayStatusChanged((status) => setCertificate(status.certificate));
+    return () => { current = false; off(); };
+  }, []);
+  if (!certificate) return null;
+  const date = (iso: string) => new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  return (
+    <SettingRow
+      label="Certificate"
+      description={`Issued by ${certificate.issuer}. Pane renews it on ${date(certificate.renewAt)}.`}
+      className={CARD_ROW}
+    >
+      <span className="text-sm text-text-secondary sm:text-right">Valid until {date(certificate.notAfter)}</span>
+    </SettingRow>
   );
 }
 

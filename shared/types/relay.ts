@@ -15,7 +15,8 @@ export interface RelayStatus {
   region: string | null;
   /** Same-network addresses phones try first. */
   localAddresses: string[];
-  certificate: { notBefore: string; notAfter: string; renewAt: string } | null;
+  /** `issuer`: the issuing CA's organization, such as Let's Encrypt or Google Trust Services. */
+  certificate: { notBefore: string; notAfter: string; renewAt: string; issuer: string } | null;
   lastError: string | null;
   /**
    * Set while this computer has no certificate because the CA is turning away new computers

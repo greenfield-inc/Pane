@@ -42,6 +42,8 @@ const relayFrameSchema = boundary.object({
   message: text,
   status: { decode: (current) => decodeOptionalBoundary(current.value, boundary.number) } satisfies BoundarySchema<number | undefined>,
   body: text,
+  keyId: text,
+  hmacKey: text,
 });
 type RelayFrame = ReturnType<typeof relayFrameSchema.decode>;
 
@@ -64,7 +66,7 @@ export type RelayAlert = RelayAlertPayload & { grant: string };
 export interface RelayGrantRequest { platform: 'ios' | 'android'; token: string; hostProfileId: string }
 
 /** A request to the relay; its answer is an `ok` or `error` frame with the same `req`. */
-type RelayRequest = { t: 'txt'; values: string[] } | ({ t: 'alert' } & RelayAlert) | ({ t: 'grant' } & RelayGrantRequest);
+type RelayRequest = { t: 'txt'; values: string[] } | { t: 'eab'; staging: boolean } | ({ t: 'alert' } & RelayAlert) | ({ t: 'grant' } & RelayGrantRequest);
 
 /** A frame the computer sends to the relay (relay/PROTOCOL.md). */
 type ComputerFrame =
@@ -148,6 +150,16 @@ export class RelayAgent {
   /** Sets the `_acme-challenge` TXT values for this computer's name. */
   async setAcmeTxt(values: string[]): Promise<void> {
     await this.request({ t: 'txt', values });
+  }
+
+  /**
+   * A one-time Google Trust Services EAB key, minted by the relay for this computer (relay/PROTOCOL.md,
+   * EAB keys): for its staging CA when `staging`. The key is a secret: it is never logged.
+   */
+  async externalAccountKey(staging: boolean): Promise<{ keyId: string; hmacKey: string }> {
+    const answer = await this.request({ t: 'eab', staging });
+    if (!answer.keyId || !answer.hmacKey) throw new Error('The relay answered without a Google Trust Services key.');
+    return { keyId: answer.keyId, hmacKey: answer.hmacKey };
   }
 
   /** Delivers a push alert with the Pane app's keys held by the relay (relay/PROTOCOL.md, Alerts). */

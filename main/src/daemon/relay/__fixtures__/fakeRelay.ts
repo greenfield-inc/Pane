@@ -15,13 +15,15 @@ export const RELAY_HOST = `us.relay.${DOMAIN}`;
  * signature, announces each raw client connection with `open`, and splices it to the computer's
  * data connection. Clients connect to it as plain TCP standing in for the relay's port 443.
  */
-export async function startFakeRelay(options: { refuse?: string } = {}) {
+export async function startFakeRelay(options: { refuse?: string; externalAccountKey?: { keyId: string; hmacKey: string } } = {}) {
   const agents: tls.TLSSocket[] = [];
   const waiting = new Map<string, net.Socket>();
   const hellos: JsonObject[] = [];
   const link = { answerPings: true, pings: 0 };
   const dataSockets: tls.TLSSocket[] = [];
   const verified: boolean[] = [];
+  /** The `staging` flag of each `eab` frame. */
+  const eabRequests: boolean[] = [];
   const control = tls.createServer({ key: fixture('relay.key'), cert: fixture('relay.pem') }, (socket) => {
     let head = '';
     const onHead = (chunk: Buffer) => {
@@ -57,6 +59,10 @@ export async function startFakeRelay(options: { refuse?: string } = {}) {
               if (link.answerPings) socket.write(`${JSON.stringify({ t: 'pong' })}\n`);
             } else if (frame.t === 'txt') {
               socket.write(`${JSON.stringify({ t: 'ok', req: frame.req })}\n`);
+            } else if (frame.t === 'eab') {
+              eabRequests.push(frame.staging === true);
+              const key = options.externalAccountKey;
+              socket.write(`${JSON.stringify(key ? { t: 'ok', req: frame.req, ...key } : { t: 'error', req: frame.req, code: 'unconfigured', message: 'This relay does not hand out Google Trust Services keys.' })}\n`);
             }
           }
         });
@@ -92,6 +98,7 @@ export async function startFakeRelay(options: { refuse?: string } = {}) {
     frontPort: (front.address() as AddressInfo).port,
     hellos,
     verified,
+    eabRequests,
     /** Whether the relay answers pings, and how many it got. */
     link,
     agentsConnected: () => agents.length,
