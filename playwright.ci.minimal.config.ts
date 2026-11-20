@@ -64,6 +64,7 @@ const BROWSER_SPECS = [
   'remote-host-switcher.spec.ts',
   'remote-network-rejection.spec.ts',
   'remote-pwa-browser.spec.ts',
+  'remote-pwa-browser-stream.spec.ts',
   'remote-pwa-explorer.spec.ts',
   'remote-pwa-sidebar.spec.ts',
   'remote-pwa-todos-snooze.spec.ts',

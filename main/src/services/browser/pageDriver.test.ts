@@ -74,6 +74,19 @@ describe('page driver', () => {
     const clicked = await driver.click({ ref: 'e1' }, 'left', false);
     expect(clicked.dialog).toEqual({ type: 'confirm', message: 'Delete it?' });
     await driver.answerDialog(true, undefined);
+    // Streaming to another screen: its size, its frames, and its person's input.
+    await driver.setPageSize({ width: 390, height: 844, mobile: true });
+    await driver.startScreencast({ maxWidth: 1170, maxHeight: 2532, quality: 70 }, () => undefined);
+    await driver.still(70).catch(() => undefined);
+    await driver.personInput([
+      { kind: 'mouse', action: 'down', x: 1, y: 2, button: 'left', clicks: 1, modifiers: 0 },
+      { kind: 'mouse', action: 'up', x: 1, y: 2, button: 'left', clicks: 1, modifiers: 0 },
+      { kind: 'touch', action: 'start', x: 1, y: 2 },
+      { kind: 'wheel', x: 1, y: 2, dx: 0, dy: 10 },
+      { kind: 'key', key: 'c', modifiers: 4 },
+    ]);
+    await driver.stopScreencast();
+    await driver.setPageSize(undefined);
 
     expect(sent.length).toBeGreaterThan(10);
     expect(sent.filter(method => !ALLOWED_CDP_METHODS.has(method))).toEqual([]);

@@ -4,6 +4,8 @@ import { usePanelStore } from '../../../stores/panelStore';
 import { panelApi } from '../../../services/panelApi';
 import { PanelErrorBoundary } from '../PanelErrorBoundary';
 import { reportShownTabs, type WatchedTab } from './browserWatch';
+import { StreamedBrowserPanel } from './stream/StreamedBrowserPanel';
+import { useRemoteRuntimeState } from '../../../hooks/useRemoteRuntimeState';
 
 const BrowserPanel = lazy(() => import('./BrowserPanel'));
 
@@ -67,6 +69,8 @@ export const BrowserLayer = memo(function BrowserLayer() {
   useSyncExternalStore(subscribe, () => version);
   const panelsBySession = usePanelStore(state => state.panels);
   const [, relayout] = useState(0);
+  // On a desktop showing another computer's Pane, tabs stream from that computer (S3).
+  const remote = useRemoteRuntimeState().connectionState.mode === 'remote';
 
   useEffect(() => {
     const onHeld = (event: Event) => {
@@ -127,7 +131,10 @@ export const BrowserLayer = memo(function BrowserLayer() {
         const visible = measured !== undefined && measured.width > 0 && measured.height > 0;
         const rect = visible ? { left: measured.left, top: measured.top, width: measured.width, height: measured.height } : lastRects.get(id) ?? { left: 0, top: 0, width: 1280, height: 800 };
         lastRects.set(id, rect);
-        if (visible) shown.set(id, { width: rect.width, height: rect.height });
+        // A desktop showing another computer's Pane reports from the stream itself (StreamedBrowserPanel).
+        // A tab this computer's own agents hold is this computer's page, even while it shows another computer.
+        const fromHost = remote && !held.some(tab => tab.panelId === id);
+        if (visible && !fromHost) shown.set(id, { width: rect.width, height: rect.height });
         // A hidden page is not drawn, and Chromium throttles it. While a call runs on it, or another
         // device streams it, it is drawn fully transparent under the tab in view, so its frames are current.
         const painting = visible || busy.has(id) || streamed.has(id);
@@ -144,7 +151,9 @@ export const BrowserLayer = memo(function BrowserLayer() {
           <div key={id} style={style} aria-hidden={!visible} inert={!visible ? true : undefined} data-browser-page={id} data-browser-page-visible={visible}>
             <PanelErrorBoundary panelId={panel.id}>
               <Suspense fallback={null}>
-                <BrowserPanel panel={panel} isActive={visible} />
+                {fromHost
+                  ? <StreamedBrowserPanel panel={panel} isActive={visible} ownCopy={() => <BrowserPanel panel={panel} isActive={visible} />} />
+                  : <BrowserPanel panel={panel} isActive={visible} />}
               </Suspense>
             </PanelErrorBoundary>
           </div>

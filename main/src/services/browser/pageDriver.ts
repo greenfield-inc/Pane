@@ -3,6 +3,7 @@ import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type
 import { attachDebugger, type DebuggableContents } from '../debuggerLifetime';
 import { PANE_WORLD_ID, pageCall } from './pageScript';
 import type { BrowserPageSize } from '../../../../shared/types/panels';
+import type { BrowserInput, BrowserInputResult } from '../../../../shared/types/browserStream';
 
 /**
  * The debugger methods the page driver may send, and nothing else: no Target, Browser, Storage or
@@ -25,6 +26,10 @@ export const ALLOWED_CDP_METHODS: ReadonlySet<string> = new Set([
   'Emulation.setDeviceMetricsOverride',
   'Emulation.clearDeviceMetricsOverride',
   'Emulation.setTouchEmulationEnabled',
+  'Page.startScreencast',
+  'Page.stopScreencast',
+  'Page.screencastFrameAck',
+  'Input.dispatchTouchEvent',
 ]);
 
 /** The parts of a browser tab's WebContents the driver uses (Electron's WebContents fits). */
@@ -48,7 +53,9 @@ export interface BrowserPageContents extends DebuggableContents {
   /** Sends a key to the page, whether or not it has the window's focus. */
   sendInputEvent(event: KeyInput): void;
   executeJavaScriptInIsolatedWorld(worldId: number, scripts: { code: string }[], userGesture?: boolean): Promise<JsonValue>;
-  on(event: 'did-stop-loading' | 'did-navigate', listener: () => void): void;
+  /** Loading and navigation; viewers on other screens also redraw the address, title and pointer from these. */
+  on(event: 'did-stop-loading' | 'did-navigate' | 'did-navigate-in-page' | 'page-title-updated' | 'did-start-loading', listener: () => void): void;
+  on(event: 'cursor-changed', listener: (event: Electron.Event, type: string) => void): void;
   /** Every input event the page gets, the person's and the agent's alike. */
   on(event: 'input-event', listener: (event: Electron.Event, input: { type: string }) => void): void;
   removeListener(event: 'did-stop-loading' | 'did-navigate', listener: () => void): void;
@@ -78,6 +85,7 @@ const refusalSchema = boundary.object({ stale: boundary.optional(boundary.string
 const pointSchema = boundary.object({ x: boundary.number, y: boundary.number });
 const checkSchema = boundary.object({ met: boundary.boolean, stale: boundary.optional(boundary.string) });
 const sizeSchema = boundary.object({ width: boundary.number, height: boundary.number });
+const stillViewSchema = boundary.object({ width: boundary.number, height: boundary.number, x: boundary.number, y: boundary.number, ratio: boundary.number });
 const layoutSchema = boundary.object({ cssContentSize: sizeSchema, cssLayoutViewport: boundary.object({ clientWidth: boundary.number, clientHeight: boundary.number }) });
 const screenshotSchema = boundary.object({ data: boundary.string });
 const nodeSchema = boundary.object({ nodeId: boundary.number });
@@ -89,6 +97,13 @@ const evaluateSchema = boundary.object({
 const dialogEventSchema = boundary.object({ type: boundary.string, message: boundary.string, defaultPrompt: boundary.optional(boundary.string) });
 const chooserEventSchema = boundary.object({ backendNodeId: boundary.number, mode: boundary.string });
 const frameEventSchema = boundary.object({ frame: boundary.object({ parentId: boundary.optional(boundary.string) }) });
+const screencastFrameSchema = boundary.object({ data: boundary.string, sessionId: boundary.number, metadata: boundary.object({ deviceWidth: boundary.number, deviceHeight: boundary.number }) });
+const fieldSchema = boundary.optional(boundary.union(boundary.literal('text'), boundary.literal('password'), boundary.literal(null)));
+
+/** One encoded frame of the page: JPEG base64, and the page's CSS size it shows. */
+export interface ScreencastFrame { data: string; width: number; height: number }
+/** How the page is encoded for viewers: the largest frame size in device pixels, and JPEG quality. */
+export interface ScreencastSettings { maxWidth: number; maxHeight: number; quality: number }
 
 /** How long an action waits for its element to become visible, enabled and uncovered. */
 const ACTIONABLE_WAIT_MS = 5_000;
@@ -146,6 +161,15 @@ export function agentInputInFlight(webContentsId: number): boolean {
 }
 
 /**
+ * Whether input arriving at this page now is synthetic: an agent's, or a person's sent from
+ * another screen. Neither may raise the host's own menus or run Pane's shortcuts on the host.
+ */
+export function syntheticInputInFlight(webContentsId: number): boolean {
+  const driver = drivers.get(webContentsId);
+  return driver !== undefined && (driver.isAgentInput() || driver.isForwardedInput());
+}
+
+/**
  * Drives one browser tab's page for agents. It is the only module that sends debugger commands,
  * and it sends only ALLOWED_CDP_METHODS, attached through attachDebugger. Reading the page and
  * resolving refs runs in an isolated world (pageScript.ts); input goes through the debugger as
@@ -163,8 +187,14 @@ export class PageDriver {
   private screenshots: Promise<void> = Promise.resolve();
   private actions: Promise<void> = Promise.resolve();
   private readonly dialogWaiters = new Set<() => void>();
+  /** Hear each debugger event the page sends (a dialog or file picker opening), for viewers' state. */
+  private readonly eventListeners = new Set<(method: string) => void>();
   /** The size a viewer in control gave the page; undefined while it fills its own view. */
   private size: BrowserPageSize | undefined;
+  /** The screencast while viewers watch: its settings, who hears frames, and the frame waiting for its ack. */
+  private cast: { settings: ScreencastSettings; onFrame: (frame: ScreencastFrame) => void; unacked?: number } | undefined;
+  private forwarding = 0;
+  private lastForwardEnd = 0;
 
   /** `captureMs`: how long a screenshot may wait for the page to paint before the queue gives up on it. */
   constructor(private readonly contents: BrowserPageContents, private readonly captureMs = CAPTURE_MS) {
@@ -180,18 +210,34 @@ export class PageDriver {
     return this.dialog;
   }
 
+  /** Calls `listener` with each debugger event's method once the driver listens; returns the unsubscribe. */
+  onEvent(listener: (method: string) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
+  }
+
+  /** Starts listening for the page's dialogs and file pickers now, before any call needs it. */
+  listen(): Promise<void> {
+    return this.attach();
+  }
+
   /** Whether input the page sees now came from the agent (so it never reads as the person's). */
   isAgentInput(now = Date.now()): boolean {
     return this.dispatching > 0 || now - this.lastDispatchEnd < SETTLE_MS * 2;
+  }
+
+  /** Whether input the page sees now is the person's, sent from another screen (personInput). */
+  isForwardedInput(now = Date.now()): boolean {
+    return this.forwarding > 0 || now - this.lastForwardEnd < SETTLE_MS * 2;
   }
 
   /**
    * The person used the page: refs from before stop working, since the page may have changed.
    * On a linked computer this is also how the agent's computer learns the person is driving.
    */
-  notePersonInput(now = Date.now()): void {
+  notePersonInput(now = Date.now(), keepFocus = false): void {
     this.lastPersonInput = now;
-    this.revokeRefs();
+    this.revokeRefs(keepFocus);
   }
 
   /** Whether the person used the page in the last `holdMs` (they drive until they stop). */
@@ -200,9 +246,10 @@ export class PageDriver {
   }
 
   /** Refs from before now stop working until the next snapshot (the person took over). */
-  revokeRefs(): void {
+  revokeRefs(keepFocus = false): void {
     this.refsRevoked = true;
-    this.unfocusNow();
+    // A person typing from another screen keeps the page's focus: blurring it per batch would close a typeahead list.
+    if (!keepFocus) this.unfocusNow();
     void this.page('revoke').catch(() => undefined);
   }
 
@@ -299,22 +346,216 @@ export class PageDriver {
     // An open dialog blocks the page's renderer, so no capture would answer.
     await this.attach();
     this.refuseWhileDialog();
-    const run = this.screenshots.then(() => this.withinCapture(this.screenshotNow(fullPage)));
+    return this.capture(() => this.screenshotNow(fullPage));
+  }
+
+  /**
+   * A JPEG of the page now, for a viewer that starts watching: an idle page paints nothing, so the
+   * screencast alone would leave it blank.
+   */
+  still(quality: number, settings?: ScreencastSettings): Promise<ScreencastFrame> {
+    if (this.dialog) return Promise.reject(new PaneError('ERR_BROWSER_DIALOG_PENDING', 'The page has a dialog open, so it can give no picture now.', 'Answer the dialog.'));
+    return this.capture(async () => {
+      await this.attach();
+      // The size screencast frames report (the view, scrollbars included, or a viewer's size), so
+      // input on this still maps the same way as on frames.
+      const view = decodeBoundary(await this.send('Runtime.evaluate', { expression: '({ width: innerWidth, height: innerHeight, x: scrollX, y: scrollY, ratio: devicePixelRatio })', returnByValue: true }), boundary.object({ result: boundary.object({ value: stillViewSchema }) })).result.value;
+      const size = this.size ?? view;
+      // No larger than the frames: a Retina host would otherwise send a 2560 px still on every load.
+      const scale = settings ? Math.min(1, settings.maxWidth / (size.width * view.ratio), settings.maxHeight / (size.height * view.ratio)) : 1;
+      const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'jpeg', quality, clip: { x: view.x, y: view.y, width: size.width, height: size.height, scale } }), screenshotSchema);
+      return { data: shot.data, width: size.width, height: size.height };
+    });
+  }
+
+  /**
+   * One capture per tab at a time (Chromium 150 can crash on overlapping ones): screenshots queue,
+   * and the screencast pauses while one runs.
+   */
+  private capture<Result>(work: () => Promise<Result>): Promise<Result> {
+    const run = this.screenshots.then(async () => {
+      const cast = this.cast;
+      if (cast) await this.send('Page.stopScreencast').catch(() => undefined);
+      let timer: NodeJS.Timeout | undefined;
+      // A page that never paints never answers a capture: give up, so the queue never jams.
+      const late = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new PaneError('ERR_BROWSER_SCREENSHOT_TIMEOUT', `The page gave no picture within ${this.captureMs / 1000} seconds. Pane's window on this computer may be minimized or covered, and the page doesn't paint then. Nothing was saved.`, 'Read the page with browser_snapshot instead, or ask the person to bring Pane\'s window forward and try again.')), this.captureMs);
+      });
+      try {
+        return await Promise.race([work(), late]);
+      } finally {
+        clearTimeout(timer);
+        if (cast && this.cast === cast && !this.contents.isDestroyed()) await this.send('Page.startScreencast', { format: 'jpeg', ...cast.settings, everyNthFrame: 1 }).catch(() => undefined);
+      }
+    });
     this.screenshots = run.then(() => undefined, () => undefined);
     return run;
   }
 
   /**
-   * A page that doesn't paint (Pane's window minimized or covered, on some systems) never answers
-   * a capture: give up, so the agent hears why and the next screenshot isn't stuck behind it.
+   * Encodes the page while viewers watch (CDP screencast): `onFrame` hears each frame, and Chromium
+   * sends the next only after `ackFrame`, so the rate follows the viewers' reads. Restarts with new
+   * settings when they change.
    */
-  private withinCapture<Result>(work: Promise<Result>): Promise<Result> {
-    work.catch(() => undefined);
-    let timer: NodeJS.Timeout | undefined;
-    const late = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new PaneError('ERR_BROWSER_SCREENSHOT_TIMEOUT', `The page gave no picture within ${this.captureMs / 1000} seconds. Pane's window on this computer may be minimized or covered, and the page doesn't paint then. Nothing was saved.`, 'Read the page with browser_snapshot instead, or ask the person to bring Pane\'s window forward and try again.')), this.captureMs);
-    });
-    return Promise.race([work, late]).finally(() => clearTimeout(timer));
+  async startScreencast(settings: ScreencastSettings, onFrame: (frame: ScreencastFrame) => void): Promise<void> {
+    if (this.cast && JSON.stringify(this.cast.settings) === JSON.stringify(settings)) {
+      // Still running: keep the frame waiting for its ack, or Chromium never sends the next.
+      this.cast.onFrame = onFrame;
+      return;
+    }
+    this.cast = { settings, onFrame };
+    await this.attach();
+    // In the capture queue, so it never starts while a screenshot or still is being taken.
+    const start = this.screenshots.then(() => (this.cast?.settings === settings ? this.send('Page.startScreencast', { format: 'jpeg', ...settings, everyNthFrame: 1 }) : undefined));
+    this.screenshots = start.then(() => undefined, () => undefined);
+    await start;
+  }
+
+  async stopScreencast(): Promise<void> {
+    if (!this.cast) return;
+    this.cast = undefined;
+    if (!this.contents.isDestroyed() && this.contents.debugger.isAttached()) await this.send('Page.stopScreencast').catch(() => undefined);
+  }
+
+  /** A viewer took the newest frame: Chromium may send the next one. */
+  ackFrame(): void {
+    const id = this.cast?.unacked;
+    if (id === undefined || !this.cast) return;
+    this.cast.unacked = undefined;
+    void this.send('Page.screencastFrameAck', { sessionId: id }).catch(() => undefined);
+  }
+
+  /**
+   * The person's input from another screen, in order. It counts as the person's, never the
+   * agent's (isForwardedInput), and reaches only this page. Returns the field that has focus after
+   * it, and the text a copy or cut took.
+   */
+  async personInput(batch: readonly BrowserInput[]): Promise<BrowserInputResult> {
+    // While a dialog is open, every command that reaches the page waits behind it (the input that
+    // opened it has not returned): answer it with the browser-side command alone, and send nothing else.
+    if (this.dialog) {
+      const answer = batch.find(input => input.kind === 'dialog');
+      if (answer?.kind === 'dialog') {
+        await this.send('Page.handleJavaScriptDialog', answer.text === undefined ? { accept: answer.accept } : { accept: answer.accept, promptText: answer.text });
+        this.dialog = undefined;
+      }
+      return { field: null };
+    }
+    await this.attach();
+    // A pointer only passing over the page (hover) gives it no focus.
+    const hoverOnly = batch.every(input => input.kind === 'mouse' && input.action === 'move');
+    if (!hoverOnly) await this.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    // A click, tap or Enter may open a file picker: it comes to Pane, so the screen offers its own
+    // (the host's dialog would open where nobody sits).
+    const mayOpenPicker = batch.some(input => (input.kind === 'mouse' && input.action === 'up') || (input.kind === 'touch' && input.action === 'end') || (input.kind === 'key' && (input.key === 'Enter' || input.key === ' ')));
+    if (mayOpenPicker) await this.send('Page.setInterceptFileChooserDialog', { enabled: true }).catch(() => undefined);
+    this.forwarding += 1;
+    let copied: string | undefined;
+    // An alert the input opens blocks the page, and the input's own reply waits for its answer:
+    // the batch ends there, and the screen shows the dialog.
+    let dialogOpened = false;
+    let waiter: (() => void) | undefined;
+    const opened = new Promise<'dialog'>(resolve => { waiter = () => { dialogOpened = true; resolve('dialog'); }; this.dialogWaiters.add(waiter); });
+    try {
+      for (const input of batch) {
+        if (dialogOpened || (this.dialog && input.kind !== 'dialog')) break;
+        const applying = this.personOne(input);
+        applying.catch(() => undefined);
+        const took = await Promise.race([applying, opened]);
+        if (took !== undefined && took !== 'dialog') copied = took;
+      }
+      if (mayOpenPicker && !dialogOpened) await Promise.race([sleep(SETTLE_MS), opened]);
+    } finally {
+      // Only this batch's waiter: an agent's input or another screen's may be waiting too.
+      if (waiter) this.dialogWaiters.delete(waiter);
+      this.forwarding -= 1;
+      this.lastForwardEnd = Date.now();
+      if (mayOpenPicker) void this.send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => undefined);
+      if (!hoverOnly) this.unfocusLater();
+    }
+    const field = this.dialog ? null : decodeOptionalBoundary(await this.page('focusedField').catch(() => null), fieldSchema) ?? null;
+    const result: BrowserInputResult = { field };
+    if (copied !== undefined) result.copied = copied;
+    return result;
+  }
+
+  /**
+   * The person's pointer passing over the page from another screen (hover, for menus and the
+   * pointer's shape). It changes nothing a repeat would undo, so it needs no focus, takeover or answer.
+   */
+  async hover(x: number, y: number): Promise<void> {
+    if (this.dialog) return;
+    await this.attach();
+    this.forwarding += 1;
+    try {
+      await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' });
+    } finally {
+      this.forwarding -= 1;
+      this.lastForwardEnd = Date.now();
+    }
+  }
+
+  /** Applies one input; returns the copied text for a copy or cut chord. */
+  private async personOne(input: BrowserInput): Promise<string | undefined> {
+    switch (input.kind) {
+      case 'mouse': {
+        const type = input.action === 'move' ? 'mouseMoved' : input.action === 'down' ? 'mousePressed' : 'mouseReleased';
+        await this.send('Input.dispatchMouseEvent', { type, x: input.x, y: input.y, button: input.button, clickCount: input.clicks, modifiers: input.modifiers });
+        return undefined;
+      }
+      case 'wheel':
+        await this.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: input.x, y: input.y, deltaX: input.dx, deltaY: input.dy });
+        return undefined;
+      case 'touch': {
+        const type = input.action === 'start' ? 'touchStart' : input.action === 'move' ? 'touchMove' : 'touchEnd';
+        await this.send('Input.dispatchTouchEvent', { type, touchPoints: input.action === 'end' ? [] : [{ x: input.x, y: input.y }] });
+        return undefined;
+      }
+      case 'key': {
+        // A lone modifier, or a key Pane has no name for (F5, media keys), changes nothing in the page.
+        if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Dead', 'Unidentified', 'Process'].includes(input.key)) return undefined;
+        if (!NAMED_KEYS.has(input.key) && [...input.key].length !== 1) return undefined;
+        const takes = (input.modifiers & 6) !== 0 && ['c', 'x'].includes(input.key.toLowerCase());
+        const before = takes ? decodeOptionalBoundary(await this.page('selection').catch(() => null), boundary.string) : undefined;
+        await this.key(input.key, input.modifiers);
+        return takes ? before ?? '' : undefined;
+      }
+      case 'text':
+        if (input.text) await this.contents.insertText(input.text);
+        return undefined;
+      case 'navigate':
+        // Only web pages, as for agents: a screen never makes the host open a file: or app link.
+        if (/^https?:\/\//i.test(input.url)) await this.contents.loadURL(input.url).catch(() => undefined);
+        return undefined;
+      case 'history': {
+        const history = this.contents.navigationHistory;
+        if (input.go === 'back' && history.canGoBack()) history.goBack();
+        else if (input.go === 'forward' && history.canGoForward()) history.goForward();
+        else if (input.go === 'reload') this.contents.reload();
+        return undefined;
+      }
+      case 'dialog':
+        if (this.dialog) await this.answerDialogNow(input.accept, input.text);
+        return undefined;
+      case 'files':
+      case 'files-cancel':
+        // The caller writes the files and sets them (setChooserFiles); a cancel just forgets the picker.
+        if (input.kind === 'files-cancel') this.chooser = undefined;
+        return undefined;
+    }
+  }
+
+  /** The file picker the page opened for the person, if any. */
+  get pendingChooser(): FileChooser | undefined {
+    return this.chooser ? { multiple: this.chooser.multiple } : undefined;
+  }
+
+  /** Puts files (already on this computer) into the file picker the page opened for the person. */
+  async setChooserFiles(paths: string[]): Promise<void> {
+    const chooser = this.chooser;
+    if (!chooser) return;
+    await this.send('DOM.setFileInputFiles', { files: chooser.multiple ? paths : paths.slice(0, 1), backendNodeId: chooser.backendNodeId });
+    this.chooser = undefined;
   }
 
   private async screenshotNow(fullPage: boolean): Promise<PageScreenshot> {
@@ -577,14 +818,15 @@ export class PageDriver {
     this.chooser = undefined;
     if (interceptChooser) await this.send('Page.setInterceptFileChooserDialog', { enabled: true }).catch(() => undefined);
     this.dispatching += 1;
-    const dialogOpened = new Promise<'dialog'>(resolve => { const done = () => resolve('dialog'); this.dialogWaiters.add(done); });
+    let waiter: (() => void) | undefined;
+    const dialogOpened = new Promise<'dialog'>(resolve => { waiter = () => resolve('dialog'); this.dialogWaiters.add(waiter); });
     try {
       const sent = work().then(() => 'sent' as const);
       // An alert blocks the page, so the input's own reply waits for the answer; don't.
       sent.catch(() => undefined);
       if (await Promise.race([sent, dialogOpened]) === 'sent') await Promise.race([sleep(SETTLE_MS), dialogOpened]);
     } finally {
-      this.dialogWaiters.clear();
+      if (waiter) this.dialogWaiters.delete(waiter);
       this.dispatching -= 1;
       this.lastDispatchEnd = Date.now();
       // While a dialog blocks the page this reply waits for the answer, so it is never awaited.
@@ -610,7 +852,8 @@ export class PageDriver {
     const { code, keyCode } = named;
     const chordOnly = (modifiers & ~8) !== 0;
     const text = chordOnly ? undefined : named.text;
-    const command = chordOnly ? CHORD_COMMANDS.get(key.toLowerCase()) : undefined;
+    // Shift+Cmd/Ctrl+Z redoes; the plain chord undoes.
+    const command = chordOnly ? ((modifiers & 8) !== 0 && key.toLowerCase() === 'z' ? 'redo' : CHORD_COMMANDS.get(key.toLowerCase())) : undefined;
     if (!command) {
       // Electron's input reaches a page without focus; the debugger's keys are dropped there.
       const held = MODIFIER_NAMES.filter(([bit]) => (modifiers & bit) !== 0).map(([, name]) => name);
@@ -643,7 +886,7 @@ export class PageDriver {
     if (this.listening) return;
     this.listening = true;
     // Chromium drops emulation with the session, so the size is set again on the next attach.
-    this.contents.debugger.on('detach', () => { this.listening = false; this.dialog = undefined; this.chooser = undefined; this.size = undefined; });
+    this.contents.debugger.on('detach', () => { this.listening = false; this.dialog = undefined; this.chooser = undefined; this.size = undefined; this.cast = undefined; });
     this.contents.debugger.on('message', (_event, method, params) => {
       if (method === 'Page.javascriptDialogOpening') {
         const opened = decodeOptionalBoundary(params, dialogEventSchema);
@@ -660,7 +903,16 @@ export class PageDriver {
         if (chooser) this.chooser = { backendNodeId: chooser.backendNodeId, multiple: chooser.mode === 'selectMultiple' };
       } else if (method === 'Page.frameNavigated' && decodeOptionalBoundary(params, frameEventSchema)?.frame.parentId === undefined) {
         this.chooser = undefined;
+      } else if (method === 'Page.screencastFrame') {
+        const frame = decodeOptionalBoundary(params, screencastFrameSchema);
+        const cast = this.cast;
+        if (!frame) return;
+        // Frames still arriving after the screencast stopped are acked and dropped.
+        if (!cast) { void this.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => undefined); return; }
+        cast.unacked = frame.sessionId;
+        cast.onFrame({ data: frame.data, width: frame.metadata.deviceWidth, height: frame.metadata.deviceHeight });
       }
+      for (const listener of this.eventListeners) listener(method);
     });
     await this.send('Page.enable');
   }

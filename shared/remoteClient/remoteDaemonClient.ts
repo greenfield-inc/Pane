@@ -1,5 +1,5 @@
 import { decodeUpdateIntent, type RemoteUpdateIntent } from './updateIntent';
-import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_STREAMLESS_CHANNELS, REMOTE_WRITES_BUSY_CODE } from './readChannels';
+import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_SEND_ONCE_CHANNELS, REMOTE_STREAMLESS_CHANNELS, REMOTE_WRITES_BUSY_CODE } from './readChannels';
 import { RecoveryCycle, STALE_STREAM_TIMEOUT_MS, backoffDelayMs, relayRecoveryCycle } from './recoveryCycle';
 import type { ParsedSseEvent } from '../sseParser';
 import {
@@ -452,7 +452,8 @@ export class RemoteDaemonClient {
     const mutation = !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel) && !REMOTE_STREAMLESS_CHANNELS.has(channel) && !deduplicated;
     // A host that runs each id once makes every write safe to resend, so a write waits out a drop.
     // One issued while restoring is still refused: restore steps rely on that.
-    const requestId = (mutation || deduplicated) && this.hostDeduplicates && this.state.status !== 'restoring'
+    // Live browser input is sent once and never waits out a drop (REMOTE_SEND_ONCE_CHANNELS).
+    const requestId = ((mutation && !REMOTE_SEND_ONCE_CHANNELS.has(channel)) || deduplicated) && this.hostDeduplicates && this.state.status !== 'restoring'
       ? `${this.requestIdPrefix}:${(this.nextRequestNumber++).toString(36)}`
       : undefined;
     if (this.state.status !== 'connected' && (mutation || deduplicated) && !requestId) {

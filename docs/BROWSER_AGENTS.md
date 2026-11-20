@@ -102,8 +102,14 @@ and fails with `ERR_BROWSER_PERSON_DRIVING` after 4 minutes. With DevTools open 
 
 ## Where a tab's page runs
 
-A tab's page lives on the computer that owns its Pane, signed in with that computer's sign-ins,
-and every agent call runs on that page. When the tab is not in view, its page loads in the
+A tab's page lives on the computer that owns its Pane (the host), signed in with the host's
+sign-ins, and every agent call runs on that page. Every other screen (another desktop, the web app,
+the phone app) shows a live stream of that one page, so the tab is signed in as the host wherever
+you look, a half-filled form follows you between devices, and `localhost` means the host's. Sign in
+to a site once in any screen's stream and every device sees it. The first streamed tab from each
+host says so once: "This page runs on studio-mac, signed in as studio-mac. Sign in here once and
+every device sees it." Each computer's own Panes keep that computer's sign-ins; nothing is copied
+between computers. When the tab is not in view, its page loads in the
 background and the tab never comes forward. With no Pane window (a headless host), Pane loads the
 page in a hidden window, where it can't open popups or hand links to other apps, since nobody is
 there to approve them. When the window closes or comes back, each live page moves between it and
@@ -112,8 +118,34 @@ a hidden window and reloads once from its URL.
 When the page doesn't load within 5 seconds, the call fails with `ERR_BROWSER_NOT_SHOWING`. A call
 from an agent on another computer through `runpane workspace` fails with `ERR_BROWSER_LOCAL_ONLY`.
 
-Another computer showing this Pane still draws its own copy of the tab, with its own sign-ins.
-Agent calls never run on that copy, so it doesn't show what an agent does.
+Another desktop showing this Pane (switched to this computer, or in All machines) draws the
+tab as a live stream of that one page, over whichever route it reaches this computer (relay,
+Tailscale or the same network). You drive it there with the mouse, wheel and keyboard: the pointer
+changes shape over links, text you copy lands on that desktop's clipboard, and paste sends that
+desktop's clipboard. Keys with Cmd or Ctrl stay Pane's shortcuts, except select all, copy, cut and
+undo. The page's dialogs and file pickers open on that desktop, and downloads save on this
+computer with a notice there. When this computer can't be reached, the last frame stays dimmed
+until it is back. A desktop showing a computer on an older Pane draws its own copy, as before, and
+says so.
+
+### Streaming to other screens
+
+The host serves each tab's page to other screens on its existing `/invoke` route (the device
+tab's route), with no new port:
+
+- **Frames** (`browser:frame`). While a screen reads frames, the host encodes the page with
+  Chromium's screencast as JPEG, sized for the largest watching screen. A read names the last
+  frame it has; the host answers at once when a newer one exists, and otherwise waits for the
+  next paint, or answers "unchanged" after about a second. So the frame rate follows the link,
+  and a still page sends nothing. A screen's first read gets a still capture. The screencast
+  pauses while an agent's `browser_screenshot` runs, and stops 10 seconds after the last read.
+- **Input** (`browser:input`). Mouse, wheel, touch, keys, text, navigation, dialog answers and
+  files for the page's file picker, applied in order. It counts as yours: it takes over from an
+  agent by the 750 ms rule and revokes its refs, and the page takes that screen's size. A click
+  that opens a file picker sends it to that screen's own picker, never a dialog on the host.
+- **State** (`browser:view`). The address, title, loading, back and forward, who drives, the
+  agent's last click, the pointer shape, an open dialog or file picker, downloads and whether the
+  tab is asleep. A read waits until something changes.
 
 ### Page size
 
@@ -159,19 +191,22 @@ small pages and 100 MB for the GitHub page, 320 MB in all, with no CPU use and a
   palette's **Open pull request**, or a page in the docs dialog opens in a browser tab of that
   Pane, in the split beside the conversation. A tab already showing that page comes forward instead. Pane's own links
   (release notes, downloads, Discord, feedback, Tailscale) open in your system browser.
-- **Command-line tools too, on macOS and Linux.** Pane's terminals and chat tabs set `BROWSER`
-  to its `pane-browser` command, so `gh pr view --web`, `gh auth login` and
-  `python3 -m webbrowser <url>` open a tab beside that terminal. A tool that runs macOS `open`
-  itself, or ignores `BROWSER`, still uses your system browser. On Windows, and in WSL
-  terminals, Pane leaves `BROWSER` alone, so these tools open your system browser: Windows tools
-  pass the URL to `BROWSER` unquoted, and a `.cmd` file would cut it at `&`.
+- **Command-line tools too.** Pane's terminals and chat tabs set `BROWSER` to its `pane-browser`
+  command, so `gh pr view --web` and `gh auth login` open a tab beside that terminal, on the
+  computer that runs it; any screen you watch from shows it. On macOS and Linux
+  `python3 -m webbrowser <url>` does too. On Windows `pane-browser` is a PowerShell script
+  (`powershell.exe -File …/pane-browser.ps1`), so a URL with `&` arrives whole; Python's
+  `webbrowser` there treats `BROWSER` as one program name and opens your system browser. A tool
+  that runs macOS `open` or Windows `start` itself, or ignores `BROWSER`, still uses your system
+  browser. WSL terminals leave `BROWSER` alone.
 - **Settings › Links › Open links in** chooses **Pane's browser** (the default) or **System
   browser**. With System browser, links from terminals, chats, cards, the command palette, the
   docs dialog and command-line tools all open in your system browser, at once, in terminals
   already open too.
-- **Leave any page.** Each tab's **Open in your browser** button sends its page to your
-  system browser, and right-clicking a link, in a tab or in a chat, offers **Open in System
-  Browser**.
+- **Leave any page.** On the computer that runs the tab, its **Open in your browser** button
+  sends the page to your system browser, and right-clicking a link, in a tab or in a chat,
+  offers **Open in System Browser**. A tab streamed to another screen has neither: its address
+  bar has **Copy URL** (the host's address).
 
 ## Apps, sign-ins and downloads
 

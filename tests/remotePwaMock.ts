@@ -32,6 +32,8 @@ export interface RemotePwaMockOptions {
   agentStatuses?: RemotePwaMockHost['agentStatuses'];
   /** Each Session's activity the host reports; null for a host too old to have it. */
   sessionActivity?: RemotePwaMockHost['sessionActivity'];
+  /** The host streams its browser tabs (S2); without it the host is older and the PWA loads its own copy. */
+  browserStream?: { driver?: { by: 'agent'; agent: string } | { by: 'person' } };
 }
 
 /**
@@ -54,7 +56,12 @@ export interface RemotePwaMockHost {
   agentStatuses: Array<{ sessionId: string; panelId: string; state: 'blocked' | 'working' | 'idle' | 'unknown' }>;
   /** The `orchestration-sessions:activity-list` baseline; null for a host without it. */
   sessionActivity: Array<{ sessionId: string; state: 'working' | 'idle'; workingPanes: number }> | null;
+  /** A streaming host's tab state, and every browser:input, browser:watch and browser:driver call it got. */
+  browserStream: (RemotePwaMockOptions['browserStream'] & { calls: Array<{ channel: string; args: JsonValue[] }>; version: number }) | null;
 }
+
+/** A small JPEG the streaming mock host sends as every frame. */
+const MOCK_STREAM_FRAME = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZgAATU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAUKADAAQAAAABAAAAPAAAAAD/7QA4UGhvdG9zaG9wIDMuMAA4QklNBAQAAAAAAAA4QklNBCUAAAAAABDUHYzZjwCyBOmACZjs+EJ+/8AAEQgAPABQAwEiAAIRAQMRAf/EAB8AAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/EAB8BAAMBAQEBAQEBAQEAAAAAAAABAgMEBQYHCAkKC//EALURAAIBAgQEAwQHBQQEAAECdwABAgMRBAUhMQYSQVEHYXETIjKBCBRCkaGxwQkjM1LwFWJy0QoWJDThJfEXGBkaJicoKSo1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoKDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uLj5OXm5+jp6vLz9PX29/j5+v/bAEMAAgICAgICAwICAwUDAwMFBgUFBQUGCAYGBgYGCAoICAgICAgKCgoKCgoKCgwMDAwMDA4ODg4ODw8PDw8PDw8PD//bAEMBAgICBAQEBwQEBxALCQsQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEP/dAAQABf/aAAwDAQACEQMRAD8A+X6KKK/vw/ncKKKKACiiigAooooAKKKKAP/Q+X6KKK/vw/ncKKKKACiiigAooooAKKKKAP/R+X6KKK/vw/ncKKKKACiiigAooooAKKKKAP/S+X6KKK/vw/ncKKKKACiiigAooooAKKKKAP/Z';
 
 const PROFILE = {
   id: 'anim-host',
@@ -187,6 +194,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
     held: {},
     agentStatuses: options.agentStatuses ?? [],
     sessionActivity: options.sessionActivity === undefined ? [] : options.sessionActivity,
+    browserStream: options.browserStream ? { ...options.browserStream, calls: [], version: 1 } : null,
   };
 
   const ports = options.ports ?? { host: 'MacBook Pro', ports: [] };
@@ -589,6 +597,13 @@ async function installRemoteHostRoute(
       case 'terminal:getState':
         result = { scrollbackBuffer: TERMINAL_SCROLLBACK };
         break;
+      case 'browser:frame':
+      case 'browser:view':
+      case 'browser:input':
+      case 'browser:watch':
+      case 'browser:driver':
+        result = await answerBrowser(host, body.channel, args);
+        break;
       default:
         // Panel mutations and terminal writes acknowledge without doing work;
         // no clip depends on the host acting on them.
@@ -602,6 +617,35 @@ async function installRemoteHostRoute(
       body: JSON.stringify({ ok: true, result }),
     });
   });
+}
+
+/**
+ * The browser stream channels (shared/types/browserStream.ts): one still frame, a tab state whose
+ * driver Take over and Hand back change, and every call recorded. A host without the stream
+ * answers as an older one does, for any unknown command.
+ */
+async function answerBrowser(host: RemotePwaMockHost, channel: string, args: JsonValue[]): Promise<JsonValue> {
+  const stream = host.browserStream;
+  if (!stream) return { success: false, error: `No handler registered for ${channel}` };
+  const wait = () => new Promise(resolve => setTimeout(resolve, 1_000));
+  if (channel === 'browser:frame') {
+    if (Number(args[2]) >= 1) {
+      await wait();
+      return { unchanged: true, seq: 1 };
+    }
+    return { frame: { seq: 1, data: MOCK_STREAM_FRAME, width: 800, height: 600 } };
+  }
+  if (channel === 'browser:view') {
+    if (Number(args[1]) >= stream.version) await wait();
+    const view: JsonValue = { version: stream.version, url: 'http://localhost:5173/signup', title: 'Sign up', loading: false, canGoBack: true, canGoForward: false, pointer: 'default', downloads: [], host: 'MacBook Pro' };
+    return stream.driver ? { ...view, driver: stream.driver } : view;
+  }
+  stream.calls.push({ channel, args });
+  if (channel === 'browser:driver') {
+    stream.driver = args[1] === 'person' ? { by: 'person' } : { by: 'agent', agent: 'Claude Code' };
+    stream.version += 1;
+  }
+  return channel === 'browser:input' ? { field: null } : { success: true };
 }
 
 /** The branch's changes, the way `sessions:get-diff-manifest` and `sessions:get-file-diff` answer. */

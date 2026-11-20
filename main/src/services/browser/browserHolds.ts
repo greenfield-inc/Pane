@@ -31,7 +31,7 @@ export interface ViewerReport {
   /** The space the screen gives the page, in CSS pixels; a viewer that takes control resizes the page to it. */
   width: number;
   height: number;
-  /** The screen's device pixels per CSS pixel, so the page renders sharp there. */
+  /** The screen's device pixels per CSS pixel, so frames are sharp there. */
   scale?: number;
 }
 
