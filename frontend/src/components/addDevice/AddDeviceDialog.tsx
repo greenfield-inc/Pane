@@ -14,7 +14,7 @@ import { WearablesTab } from './WearablesTab';
 import { LinkConfirmPage } from './LinkConfirm';
 import { Tooltip } from '../ui/Tooltip';
 import { requestOpenSettings } from '../../utils/openSettings';
-import { relayLimitTip } from './RelayLimitNotice';
+import { RelayLimitTip } from './RelayLimitNotice';
 
 const TABS: Array<{ id: AddDeviceTab; label: string; icon: typeof Smartphone }> = [
   { id: 'phone', label: 'Phone', icon: Smartphone },
@@ -85,7 +85,7 @@ export function AddDeviceDialog({ isOpen, tab, onTabChange, onClose }: {
               {label}
             </button>
             );
-            return paused ? <Tooltip key={id} content={relayLimitTip(limitUntil)}>{button}</Tooltip> : button;
+            return paused ? <Tooltip key={id} content={<RelayLimitTip until={limitUntil} />}>{button}</Tooltip> : button;
           })}
         </div>
         <div role="tabpanel" id="add-device-panel" aria-labelledby={`add-device-tab-${tab}`}>

@@ -6,7 +6,8 @@ import { cn } from '../../utils/cn';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { Tooltip } from '../ui/Tooltip';
 import { QR_PAPER, QrCode, TestFlightLine } from './QrCode';
-import { RelayLimitNotice, relayLimitSentence, relayLimitTime, relayLimitTip } from './RelayLimitNotice';
+import { RelayLimitNotice, RelayLimitTip } from './RelayLimitNotice';
+import { relayLimitSentence, relayLimitTime } from './relayLimit';
 
 /** The code box and its caption keep this footprint in every state. */
 const CODE_BOX = 'h-[200px] w-[200px]';
@@ -24,7 +25,7 @@ function countdown(seconds: number): string {
 function CodeBox({ view, onRetry }: { view: PairingView; onRetry: () => void }) {
   if (view.step === 'limited') {
     return (
-      <Tooltip content={relayLimitTip(view.until)} side="bottom">
+      <Tooltip content={<RelayLimitTip until={view.until} />} side="bottom">
         <div
           role="img"
           aria-label={relayLimitSentence(view.until)}

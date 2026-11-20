@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomInt } from 'crypto';
 import { existsSync, mkdirSync, promises as fs, readFileSync, writeFileSync } from 'fs';
 import https from 'https';
 import net from 'net';
@@ -430,8 +430,8 @@ export class RelayService {
     const backoff = Math.min(CERTIFICATE_RETRY_MAX_MS, CERTIFICATE_RETRY_FIRST_MS * 2 ** this.certificateFailures);
     this.certificateFailures += 1;
     const delay = at === null
-      ? backoff * (0.5 + Math.random() * 0.5)
-      : Math.max(CERTIFICATE_RETRY_FIRST_MS, at - Date.now()) + Math.random() * RATE_LIMIT_SPREAD_MS;
+      ? backoff / 2 + randomInt(Math.ceil(backoff / 2))
+      : Math.max(CERTIFICATE_RETRY_FIRST_MS, at - Date.now()) + randomInt(RATE_LIMIT_SPREAD_MS);
     this.certificateRetry = setTimeout(() => {
       this.certificateRetry = null;
       void this.renewIfDue();

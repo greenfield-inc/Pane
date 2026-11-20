@@ -6,7 +6,7 @@ import { LINK_EXPIRY_LABELS, useAddDeviceStore, type LinkExpiry, type MakerResul
 import { LinkFlowView } from './LinkConfirm';
 import { TabFooter } from './SshTab';
 import { Tooltip } from '../ui/Tooltip';
-import { RelayLimitNotice, relayLimitTip } from './RelayLimitNotice';
+import { RelayLimitNotice, RelayLimitTip } from './RelayLimitNotice';
 
 const EXPIRIES: LinkExpiry[] = ['10m', '1h', '24h'];
 const CARD = 'flex min-w-0 flex-1 flex-col gap-3 rounded-lg border border-border-primary p-5';
@@ -87,7 +87,7 @@ export function ComputerTab({ ready, error = null, onRetry, limitUntil = null, o
         {limitUntil ? (
           <>
             {/* A disabled button gets no hover, so the tooltip sits on its wrapper. */}
-            <Tooltip content={relayLimitTip(limitUntil)}>
+            <Tooltip content={<RelayLimitTip until={limitUntil} />}>
               <span className="block w-full" tabIndex={0}>
                 <Button type="button" fullWidth icon={<Clipboard className="h-4 w-4" />} disabled>Copy link</Button>
               </span>
