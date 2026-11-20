@@ -3,6 +3,8 @@ import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-na
 import { monoFontFamily, useTheme, withAlpha } from '@/theme';
 import { Skeleton } from '@/ui';
 
+import { TERMINAL_FONT_SIZE } from './terminalSize';
+
 const LINE_WIDTHS = ['62%', '38%', '84%', '50%', '72%', '28%'] as const;
 
 /**
@@ -74,7 +76,7 @@ export function KeptScreen({ text, rows, height }: { text: string; rows: number;
           numberOfLines={1}
           ellipsizeMode="clip"
           allowFontScaling={false}
-          style={{ fontFamily: monoFontFamily, fontSize: 12, lineHeight, height: lineHeight, color: terminal.foreground }}
+          style={{ fontFamily: monoFontFamily, fontSize: TERMINAL_FONT_SIZE, lineHeight, height: lineHeight, color: terminal.foreground }}
         >
           {line}
         </Text>

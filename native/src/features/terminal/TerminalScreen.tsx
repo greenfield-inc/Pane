@@ -435,7 +435,12 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
           page's load and refit. A revisit masks with the rows it showed last time; a first open, or
           an agent this screen is starting, with skeleton lines, opaque from the first frame.
         */}
-        {kept !== null ? <KeptScreen text={kept} rows={terminal.rows} height={terminalHeight} /> : null}
+        {kept !== null ? (
+          // An old screen dims like the live one once the computer is unreachable, so it never looks live.
+          <Dimmed dimmed={!live} style={StyleSheet.absoluteFill}>
+            <KeptScreen text={kept} rows={terminal.rows} height={terminalHeight} />
+          </Dimmed>
+        ) : null}
         <SkeletonSwap
           loading={(blank && !drawn && kept === null) || starting}
           skeleton={<TerminalSkeleton testID="terminal-skeleton" label="Loading terminal" style={StyleSheet.absoluteFill} />}

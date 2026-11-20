@@ -11,29 +11,15 @@ import { connectionMark, perfMark } from '../perf/perfMarks';
 
 import { parsePageEvent, type TerminalCommand } from './bridge';
 import { TerminalSession, type TerminalSize } from './terminalSession';
-import { lastTerminalSize, rememberTerminalSize } from './terminalSize';
+import { keepScreen, keptScreen as keptScreenOf } from './keptScreens';
+import { lastTerminalSize, rememberTerminalSize, TERMINAL_FONT_SIZE } from './terminalSize';
 
-const FONT_SIZE = 12;
 /** The host forgets viewers after a few minutes; the web app re-announces every minute too. */
 const VISIBILITY_REFRESH_MS = 60_000;
 /** Keyboard and rotation animations resize the view every frame; tell the PTY once it settles. */
 const RESIZE_SETTLE_MS = 150;
 /** The computer says an agent is ready when it first draws, or after 10 s regardless. */
 const AGENT_READY_LIMIT_MS = 12_000;
-/** How many terminals keep their last screen for a revisit. */
-const KEPT_SCREENS = 20;
-
-/** Each terminal's last visible rows this run, by computer and panel, the most recently seen last. */
-const keptScreens = new Map<string, string>();
-
-function keepScreen(key: string, text: string): void {
-  keptScreens.delete(key);
-  keptScreens.set(key, text);
-  for (const oldest of keptScreens.keys()) {
-    if (keptScreens.size <= KEPT_SCREENS) break;
-    keptScreens.delete(oldest);
-  }
-}
 
 export type TerminalStatus = 'loading' | 'ready' | 'error';
 
@@ -43,9 +29,8 @@ export type TerminalStatus = 'loading' | 'ready' | 'error';
  */
 export function useTerminal(panelId: string, sessionId: string) {
   const { client, connection, profile } = useDaemon();
-  const screenKey = `${profile.id}:${panelId}`;
   // The rows this terminal showed last time it was open, painted until its screen is read again.
-  const [keptScreen] = useState(() => keptScreens.get(screenKey) ?? null);
+  const [keptScreen] = useState(() => keptScreenOf(profile.id, panelId));
   // Set when this screen starts the panel: its agent is launching until the computer says it's ready.
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [agentReady, setAgentReady] = useState(false);
@@ -56,6 +41,8 @@ export function useTerminal(panelId: string, sessionId: string) {
   // Whether the page shows a screen from the host, which stays up while it reloads.
   const [hasContent, setHasContent] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
+  // Read by the page's messages: a screen scrolled back is not kept, since a revisit opens at the bottom.
+  const scrolledBack = useRef(false);
   const [screenText, setScreenText] = useState('');
   // Starts from the size the last page measured, so the screen is read while this page loads.
   const [size, setSize] = useState<TerminalSize | null>(lastTerminalSize);
@@ -177,7 +164,7 @@ export function useTerminal(panelId: string, sessionId: string) {
     return () => clearTimeout(timer);
   }, [session, size, status]);
 
-  const themeCommand: TerminalCommand = { type: 'theme', theme: theme.terminal, fontSize: FONT_SIZE };
+  const themeCommand: TerminalCommand = { type: 'theme', theme: theme.terminal, fontSize: TERMINAL_FONT_SIZE };
   const themeJson = JSON.stringify(themeCommand);
   useEffect(() => {
     webView.current?.injectJavaScript(`window.paneTerminal&&window.paneTerminal.receive(${themeJson});true;`);
@@ -225,10 +212,12 @@ export function useTerminal(panelId: string, sessionId: string) {
         break;
       case 'scrolled':
         setAtBottom(message.atBottom);
+        scrolledBack.current = !message.atBottom;
+        if (scrolledBack.current) keepScreen(profile.id, panelId, null);
         break;
       case 'screen':
         setScreenText(message.text);
-        keepScreen(screenKey, message.text);
+        keepScreen(profile.id, panelId, scrolledBack.current ? null : message.text);
         break;
     }
   };
