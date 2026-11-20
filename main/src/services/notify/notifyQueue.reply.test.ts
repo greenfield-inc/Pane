@@ -106,6 +106,31 @@ describe('NotifyQueue replies (the reply contract)', () => {
     expect(typed).toHaveLength(1);
   });
 
+  it('F-1: a reply typed between resume rounds goes to the tab, since the call may never resume, and a late --resume still gets it', async () => {
+    const queue = queueWith();
+    const first = queue.ask({ question: q20, source: orchestrator, id: 'q20', returnAfterMs: 50_000 });
+    await vi.advanceTimersByTimeAsync(50_000);
+    expect(await first).toMatchObject({ waiting: true, id: 'q20' });
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: ['Yes, turn it on', 'One train'], text: 'Only if it can be undone' } });
+    await vi.advanceTimersByTimeAsync(120_000);
+    queue.sweep();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed).toEqual([['orch', 'reply: Q-20 → "Only if it can be undone" (picked: Yes, turn it on · One train) (by you)']]);
+    expect(item(queue, 'q20')).toMatchObject({ state: 'answered', delivered: { via: 'tab' }, reply: { state: 'answer', reader: { kind: 'asker', panelId: 'orch' } } });
+    expect(await queue.ask({ resume: 'q20', source: orchestrator })).toMatchObject({ answer: 'Yes, turn it on · One train', note: 'Only if it can be undone' });
+  });
+
+  it('F-1: a reply to a card whose call was killed reaches the tab, and a later --resume still gets it', async () => {
+    const queue = queueWith();
+    const controller = new AbortController();
+    void queue.ask({ question: q20, source: orchestrator, id: 'q20' }, controller.signal);
+    controller.abort();
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: ['Yes, turn it on', 'One train'], text: 'Only if it can be undone' } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed).toEqual([['orch', 'reply: Q-20 → "Only if it can be undone" (picked: Yes, turn it on · One train) (by you)']]);
+    expect(await queue.ask({ resume: 'q20', source: orchestrator })).toMatchObject({ answer: 'Yes, turn it on · One train', note: 'Only if it can be undone' });
+  });
+
   it('J6: a busy tab gets the reply when it is next idle, still once', async () => {
     const queue = restoredQ20();
     tabs.set('orch', 'busy');
