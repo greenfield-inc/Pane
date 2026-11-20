@@ -31,10 +31,13 @@ const PSI_CRITICAL = 30;
 /** Available physical memory, as a share of the total. */
 const AVAILABLE_WARNING = 0.10;
 const AVAILABLE_CRITICAL = 0.05;
+/** Critical also below this much available, whichever is larger: 5% of a small machine leaves too little. */
+const AVAILABLE_CRITICAL_FLOOR_BYTES = 1024 ** 3;
 
 function fromAvailable(available: number, total: number): MemoryPressureReading {
   const share = total > 0 ? available / total : 1;
-  const level: HealthLevel = share < AVAILABLE_CRITICAL ? 'critical' : share < AVAILABLE_WARNING ? 'warning' : 'ok';
+  const critical = total > 0 && available < Math.max(total * AVAILABLE_CRITICAL, AVAILABLE_CRITICAL_FLOOR_BYTES);
+  const level: HealthLevel = critical ? 'critical' : share < AVAILABLE_WARNING ? 'warning' : 'ok';
   return { level, source: 'available', detail: `${Math.round(share * 100)}% available` };
 }
 

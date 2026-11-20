@@ -29,7 +29,7 @@ the last scan right away and never wait for a new one.
 | Free disk | under 20 GB | under 5 GB |
 | Memory, macOS | kernel pressure level 2 (`kern.memorystatus_vm_pressure_level`) | level 4 |
 | Memory, Linux | PSI `some avg60` of 10% (`/proc/pressure/memory`) | 30% |
-| Memory, Linux without PSI, and Windows | under 10% of memory available | under 5% |
+| Memory, Linux without PSI, and Windows | under 10% of memory available | under 5% or 1 GB available, whichever is larger |
 
 A memory level counts after two samples in a row, so a moment's spike raises
 nothing. Change the disk figures in Settings › Machine health.
@@ -103,7 +103,19 @@ item by item.
 
 A card shows once and again only after 6 hours or when it gets worse; Not now
 holds it for 24 hours. When disk or memory turns critical, a desktop
-notification also fires, following your notification settings. Ask an agent,
+notification also fires, following your notification settings, and says what
+to do.
+
+### Turning notifications off
+
+Settings › Machine health › Cards and notifications turns the cards and notifications
+off. It is on by default and shared with your other computers the way the
+Approvals switch is ([Shared integration keys](SHARED_CREDENTIALS.md#the-approvals-switch)),
+so turning it off once quiets all of them. Off, Pane still raises the card
+and the desktop notification once per episode when free disk drops below the
+alert figure (5 GB by default) or memory turns critical (the table above).
+Resources keeps showing everything, and the switches under Do it
+automatically keep working. Ask an agent,
 on a card or on Resources, hands the items to the agent of a Session named
 "Clean up <machine>", starting that Session when none is open, and shows it.
 The agent runs on the machine the window is on when the items are about that

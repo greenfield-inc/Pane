@@ -110,7 +110,7 @@ export async function syncSharedCredentials(hosts: readonly SharedCredentialHost
 }
 
 /**
- * The Approvals on/off switch and "Show cards on", as a host holds them. They travel on their own
+ * The Approvals on/off switch, "Show cards on" and the machine health Notifications switch, as a host holds them. They travel on their own
  * commands, not with the keys: a phone relays keys and has no business relaying these, and a host
  * too old for them refuses the commands instead of silently dropping them.
  */
@@ -122,6 +122,10 @@ export interface SharedNotifySwitch {
   cardsOn?: NotifyCardsOn | null;
   /** Epoch ms `cardsOn` last changed, on the host where the person changed it; 0 if never. Hosts from before it omit it. */
   cardsOnChangedAt?: number;
+  /** Settings › Machine health › Notifications; a host from before it omits it. */
+  healthNotifications?: boolean;
+  /** Epoch ms `healthNotifications` last changed, on the host where the person changed it; 0 if never. Hosts from before it omit it. */
+  healthNotificationsChangedAt?: number;
 }
 
 /**
@@ -146,23 +150,33 @@ function isNewerCardsOn(candidate: SharedNotifySwitch, current: SharedNotifySwit
   return (candidate.cardsOn?.id ?? '') < (current.cardsOn?.id ?? '');
 }
 
+/** The later machine health switch wins, on its own time; a host from before it never wins. Equal times settle on off, as the Approvals switch does. */
+function isNewerHealthNotifications(candidate: SharedNotifySwitch, current: SharedNotifySwitch): boolean {
+  if (candidate.healthNotificationsChangedAt === undefined) return false;
+  if (current.healthNotificationsChangedAt === undefined) return true;
+  if (candidate.healthNotificationsChangedAt !== current.healthNotificationsChangedAt) return candidate.healthNotificationsChangedAt > current.healthNotificationsChangedAt;
+  return candidate.healthNotifications === false && current.healthNotifications !== false;
+}
+
 export interface NotifySwitchMerge {
   notifySwitch: SharedNotifySwitch;
   changed: boolean;
 }
 
-/** `current` with each part of `incoming` that is newer: the switch and "Show cards on" each by their own time. */
+/** `current` with each part of `incoming` that is newer: the switch, "Show cards on" and the machine health switch each by their own time. */
 export function mergeNotifySwitch(current: SharedNotifySwitch, incoming: SharedNotifySwitch): NotifySwitchMerge {
   let notifySwitch = current;
   if (isNewerNotifySwitch(incoming, current)) notifySwitch = { ...notifySwitch, enabled: incoming.enabled, changedAt: incoming.changedAt };
   if (isNewerCardsOn(incoming, current)) notifySwitch = { ...notifySwitch, cardsOn: incoming.cardsOn ?? null, cardsOnChangedAt: incoming.cardsOnChangedAt };
+  if (isNewerHealthNotifications(incoming, current)) notifySwitch = { ...notifySwitch, healthNotifications: incoming.healthNotifications ?? true, healthNotificationsChangedAt: incoming.healthNotificationsChangedAt };
   return { notifySwitch, changed: notifySwitch !== current };
 }
 
-/** Whether `host` is missing a part of `newest` it can hold: a host from before "Show cards on" only takes on/off. */
+/** Whether `host` is missing a part of `newest` it can hold: a host from before a part never takes it. */
 function isBehind(host: SharedNotifySwitch, newest: SharedNotifySwitch): boolean {
   if (isNewerNotifySwitch(newest, host)) return true;
-  return host.cardsOnChangedAt !== undefined && isNewerCardsOn(newest, host);
+  if (host.cardsOnChangedAt !== undefined && isNewerCardsOn(newest, host)) return true;
+  return host.healthNotificationsChangedAt !== undefined && isNewerHealthNotifications(newest, host);
 }
 
 export interface SharedNotifySwitchHost {

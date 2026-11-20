@@ -319,7 +319,7 @@ describe('the Approvals switch on a host', () => {
     expect(picked.cardsOnChangedAt).toBeGreaterThanOrEqual(before);
 
     await applySwitch({ enabled: false, changedAt: before + 60_000 });
-    expect(await readSwitch()).toEqual({ enabled: false, changedAt: before + 60_000, cardsOn: book, cardsOnChangedAt: picked.cardsOnChangedAt });
+    expect(await readSwitch()).toMatchObject({ enabled: false, changedAt: before + 60_000, cardsOn: book, cardsOnChangedAt: picked.cardsOnChangedAt });
   });
 
   it('takes a newer "Show cards on" with that host\'s time and leaves the switch alone', async () => {
@@ -327,7 +327,7 @@ describe('the Approvals switch on a host', () => {
 
     await applySwitch({ enabled: true, changedAt: 4_000, cardsOn: { id: 'a1b2-mini', name: 'mini' }, cardsOnChangedAt: 6_000 });
 
-    expect(await readSwitch()).toEqual({ enabled: false, changedAt: 5_000, cardsOn: { id: 'a1b2-mini', name: 'mini' }, cardsOnChangedAt: 6_000 });
+    expect(await readSwitch()).toMatchObject({ enabled: false, changedAt: 5_000, cardsOn: { id: 'a1b2-mini', name: 'mini' }, cardsOnChangedAt: 6_000 });
     expect(configManager.getConfig().notifyCardsOnChangedAt).toBe(6_000);
   });
 

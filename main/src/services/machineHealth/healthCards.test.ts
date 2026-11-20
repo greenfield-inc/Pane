@@ -42,10 +42,10 @@ describe('CardGate', () => {
 
 describe('HealthCardController', () => {
   const GB = 1024 ** 3;
-  const snapshot = (disk: 'ok' | 'warning' | 'critical', panes: PaneUsage[] = []): MachineHealthSnapshot => ({
+  const snapshot = (disk: 'ok' | 'warning' | 'critical', panes: PaneUsage[] = [], memory: 'ok' | 'warning' | 'critical' = 'ok'): MachineHealthSnapshot => ({
     sampledAt: 0, platform: 'darwin', hostname: 'mac', cpuPercent: 0, app: { rssMB: 100, cpuPercent: 0 }, panes, leaks: [],
     disk: { level: disk, volumes: [{ path: '/', roles: ['pane-data'], totalBytes: 500 * GB, freeBytes: 13 * GB, level: disk }] },
-    memory: { level: 'ok', source: 'macos-pressure', detail: '', totalBytes: 32 * GB, freeBytes: 2 * GB, swapUsedBytes: null },
+    memory: { level: memory, source: 'macos-pressure', detail: '', totalBytes: 32 * GB, freeBytes: 2 * GB, swapUsedBytes: null },
   });
   const scanned: StorageInventory = { scannedAt: 0, durationMs: 0, panes: [], buckets: { paneWorktrees: 0, dependencies: 0, qaAndScratch: 0, agentTemp: 0, paneData: 0 },
     items: [{ id: 'update-snapshot:/u', kind: 'update-snapshot', tier: 1, path: '/u', sizeBytes: 9 * GB, modifiedAt: 0, sessionId: null, reason: 'old update' }] };
@@ -54,7 +54,7 @@ describe('HealthCardController', () => {
   // A one-process leftovers card offers 'Stop it' / 'Keep it'.
   const singular = (answer: string) => (answer === 'Stop them' ? 'Stop it' : answer === 'Keep them' ? 'Keep it' : answer);
 
-  function controller(answer: string | null, options: { inventory?: StorageInventory | null; paneState?: 'archived' | 'paused' | 'open'; kept?: string[]; awayFor?: number } = {}) {
+  function controller(answer: string | null, options: { inventory?: StorageInventory | null; paneState?: 'archived' | 'paused' | 'open'; kept?: string[]; awayFor?: number; notifications?: boolean } = {}) {
     const asked: CardQuestion[] = [];
     const cleaned: string[][] = [];
     const stopped: number[][] = [];
@@ -70,7 +70,7 @@ describe('HealthCardController', () => {
     let inventory = options.inventory === undefined ? scanned : options.inventory;
     const c = new HealthCardController({
       // A null answer leaves the card waiting.
-      now: () => now, ask: question => { asked.push(question); return answer === null ? new Promise(() => {}) : Promise.resolve({ answer: question.choices.includes(answer) ? answer : singular(answer) }); },
+      now: () => now, notificationsOn: () => options.notifications ?? true, ask: question => { asked.push(question); return answer === null ? new Promise(() => {}) : Promise.resolve({ answer: question.choices.includes(answer) ? answer : singular(answer) }); },
       inventory: () => inventory, idleOffer: () => ({ paneIds: [], memoryMB: 0 }), pauseIdleHours: () => 2, paneName: id => id,
       paneState: () => options.paneState ?? 'archived', tabName: () => null,
       canRestart: async () => false, cleanUp: async ids => { cleaned.push(ids); }, pauseIdle: async () => {}, stopProcess: async () => {},
@@ -184,5 +184,40 @@ describe('HealthCardController', () => {
     c.onSnapshot(snapshot('ok', [pane([escaped(10)])]));
     await settle();
     expect(asked).toHaveLength(0);
+  });
+
+  describe('with Notifications off', () => {
+    it('raises no card or notification for a warning, a left-behind process, finished Panes or a leak', async () => {
+      const { c, asked, alerts } = controller('Not now', { notifications: false });
+      c.onSnapshot(snapshot('warning', [pane([escaped(10)])], 'warning'));
+      c.onFinished([{ sessionId: 'p1', name: 'done', projectName: 'repo', reason: 'pr-merged', prNumber: 1, idleDays: 0, sizeBytes: GB, protection: null }], snapshot('ok'));
+      await c.onLeak({ pid: 10, started: 'start-10', name: 'node', sessionId: 'p1', panelId: null, memoryMB: 3000, growthMB: 1500, windowMs: 30 * 60_000, series: [] }, snapshot('ok'));
+      await settle();
+      expect(asked).toEqual([]);
+      expect(alerts).toEqual([]);
+    });
+
+    it('still raises critical disk and memory, once per episode, saying what to do', async () => {
+      const { c, asked, alerts, setNow } = controller(null, { notifications: false });
+      c.onSnapshot(snapshot('critical', [], 'critical'));
+      await settle();
+      expect(asked.map(question => question.title)).toEqual(['Disk is almost full', 'Memory is almost out']);
+      expect(alerts).toEqual(['Disk is almost full', 'Memory is almost out']);
+      expect(asked[0].context).toBe('13 GB free. Pane can free about 9.0 GB of its own leftovers and finished work. Choose Clean up, then open Resources to see what else uses the disk.');
+      expect(asked[1].context).toContain("Quit apps you don't need");
+
+      // Still critical a day later: the episode already notified.
+      setNow(24 * HOUR);
+      c.onSnapshot(snapshot('critical', [], 'critical'));
+      await settle();
+      expect(asked).toHaveLength(2);
+      expect(alerts).toHaveLength(2);
+
+      // A new episode notifies again.
+      c.onSnapshot(snapshot('ok'));
+      c.onSnapshot(snapshot('critical'));
+      await settle();
+      expect(alerts).toEqual(['Disk is almost full', 'Memory is almost out', 'Disk is almost full']);
+    });
   });
 });

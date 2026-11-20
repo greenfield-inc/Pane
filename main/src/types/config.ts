@@ -121,6 +121,8 @@ export interface AppConfig {
   resumePausedOnOpen?: boolean;
   // Machine health thresholds and switches (defaults in MACHINE_HEALTH_DEFAULTS, shared/types/machineHealth.ts)
   machineHealth?: MachineHealthSettings;
+  /** Epoch ms `machineHealth.notifications` last changed, on the machine where the person changed it; shared with it. Absent: 0. */
+  machineHealthNotificationsChangedAt?: number;
   // Pause Panes nobody has used for autoPauseAfterHours (default on, 48 hours; whole hours 1 to 720)
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;

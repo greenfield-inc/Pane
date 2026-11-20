@@ -38,6 +38,8 @@ Hosts running a Pane version from before this are skipped without error; their k
 
 Settings → Approvals' Show cards on (`notify.cardsOn`: the picked machine's install id and name, or null for whichever computer is in use) rides the same commands with its own time, `notifyCardsOnChangedAt`. Each part merges on its own time, so changing one never overwrites the other; at equal times "whichever computer is in use" wins. A host from before Show cards on still syncs on/off: its answers carry no Show cards on, which never clears a pick, and it isn't written for Show cards on alone.
 
+Settings → Machine health's Cards and notifications switch (`machineHealth.notifications`) rides the same commands with its own time, `machineHealthNotificationsChangedAt`, and the same rules: the later change wins, a missing value means on, and at equal times off wins. The thresholds and the other machine health settings stay on each machine. A host from before it is skipped for this switch and still syncs the rest.
+
 ## Who can read the keys
 
 Only your own devices. Over Tailscale, a host answers a request for its keys only from its owner's Tailscale login, even when its workspace lets other people on the tailnet in, so a teammate's computer neither receives nor replaces your keys. With a connection code, the caller must present a valid pairing token, and the host refuses the request when it does not require pairing. Either device can already open terminals on that host, so sharing keys with it exposes nothing new.

@@ -55,6 +55,11 @@ export function MachineHealthSettings({ persistence }: { persistence: SettingsPe
 
   return (
     <SettingsPage title="Machine health" description="Pane watches free disk, memory pressure and every process it started. It removes its own leftovers by itself and asks before anything else; each kind below can be switched to automatic.">
+      <SettingsSection title="Notifications">
+        <SettingRow settingId="machine-health-notifications" label="Cards and notifications" description={`About low disk, tight memory, finished Panes, processes left behind and leaks, on all your computers. When off, Pane still notifies when free disk drops below ${health.diskCriticalGB ?? 5} GB or memory runs critically low. Resources always shows everything.`} saveState={persistence.saveStates['machine-health-notifications']}>
+          <ImmediateToggle label="Cards and notifications" value={health.notifications !== false} onSave={value => save('machine-health-notifications', { notifications: value })} />
+        </SettingRow>
+      </SettingsSection>
       <SettingsSection title="Thresholds">
         <SettingRow settingId="machine-health-disk" label="Disk warning" description="Pane warns below the first figure and alerts below the second, on any volume holding its data, your worktrees or the temp folder. Files sent to this computer (from the phone, a terminal or a chat) must leave the second figure free." saveState={persistence.saveStates['machine-health-disk']}>
           <div className="flex items-center gap-4">
