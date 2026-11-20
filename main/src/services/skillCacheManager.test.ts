@@ -1,5 +1,5 @@
 import fs from 'fs/promises';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync, type SpawnOptions } from 'child_process';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -57,6 +57,45 @@ const pythonExecutable = pythonProbe.status === 0
   ? pythonProbe.stdout.trim()
   : 'python3';
 
+interface ProcessResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+// Every process a test starts, so cleanup can wait for each one to exit
+// before it removes the directory they run in. On Windows a directory a
+// running process still uses cannot be removed (ENOTEMPTY / EBUSY).
+const startedProcesses = new Set<Promise<ProcessResult>>();
+
+// Runs a process without blocking the event loop (so Vitest's timeout fires
+// on time) and resolves when it exits.
+function runProcess(command: string, args: string[], options: SpawnOptions = {}): Promise<ProcessResult> {
+  const run = new Promise<ProcessResult>((resolve) => {
+    const child = spawn(command, args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.setEncoding('utf8').on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr?.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk; });
+    child.on('error', (error) => resolve({ status: null, stdout, stderr: stderr + String(error) }));
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+  startedProcesses.add(run);
+  void run.finally(() => startedProcesses.delete(run));
+  return run;
+}
+
+async function waitForStartedProcesses(): Promise<void> {
+  while (startedProcesses.size > 0) {
+    await Promise.allSettled([...startedProcesses]);
+  }
+}
+
+// A test that starts Python, which starts Node, waits on real process
+// startup: about 0.3-0.5 s each on an idle Windows machine and several times
+// that on a busy CI runner. Each such test states its own bound from this.
+const PROCESS_START_BUDGET_MS = 2_500;
+
 async function writeLocalRunpaneStub(root: string, source: string): Promise<string | undefined> {
   const cliPath = path.join(root, 'packages', 'runpane', 'dist', 'cli.js');
   await fs.mkdir(path.dirname(cliPath), { recursive: true });
@@ -94,6 +133,7 @@ describe('SkillCacheManager Pane Chat guide', () => {
       process.env.PANE_DIR = originalPaneDir;
     }
 
+    await waitForStartedProcesses();
     if (tempDir) {
       await fs.rm(tempDir, { recursive: true, force: true });
       tempDir = undefined;
@@ -180,8 +220,7 @@ describe('SkillCacheManager Pane Chat guide', () => {
         "process.stderr.write('daemon-stderr\\n');",
         'process.exit(3);',
       ].join('\n'));
-      const result = spawnSync(pythonExecutable, [manager.paneWatchScriptPath, '--once'], {
-        encoding: 'utf8',
+      const result = await runProcess(pythonExecutable, [manager.paneWatchScriptPath, '--once'], {
         cwd: tempDir,
         env: localCliEnvironment(shimDirectory),
       });
@@ -201,8 +240,7 @@ describe('SkillCacheManager Pane Chat guide', () => {
       const shimDirectory = path.join(tempDir, 'unsafe-shim-bin');
       await fs.mkdir(shimDirectory, { recursive: true });
       await fs.writeFile(path.join(shimDirectory, 'runpane.cmd'), '@echo off\r\nexit /b 99\r\n', 'utf8');
-      const result = spawnSync(pythonExecutable, [manager.paneWatchScriptPath, '--once'], {
-        encoding: 'utf8',
+      const result = await runProcess(pythonExecutable, [manager.paneWatchScriptPath, '--once'], {
         cwd: tempDir,
         env: { ...process.env, PATH: shimDirectory },
       });
@@ -212,7 +250,10 @@ describe('SkillCacheManager Pane Chat guide', () => {
     },
   );
 
-  it('writes an executable, daemon-dependent fallback watcher', async () => {
+  // Starts real processes: py_compile, then seven watcher runs side by side,
+  // each one Python that starts up to three Node processes in turn. That is at
+  // most five process starts in sequence, so the bound is six start budgets.
+  it('writes an executable, daemon-dependent fallback watcher', { timeout: 6 * PROCESS_START_BUDGET_MS }, async () => {
     const manager = new SkillCacheManager();
     await manager.ensurePaneChatGuide();
     const watcher = await fs.readFile(manager.paneIdleWatchScriptPath, 'utf8');
@@ -233,8 +274,8 @@ describe('SkillCacheManager Pane Chat guide', () => {
     expect(watcher).toContain('sys.stdout.reconfigure(encoding="utf-8", errors="replace")');
     expect(watcher).toContain('installed_cli = Path(executable).parent / "node_modules"');
     expect(watcher).not.toContain('panels submit');
-    const compiled = spawnSync(pythonExecutable, ['-m', 'py_compile', manager.paneWatchScriptPath, manager.paneIdleWatchScriptPath]);
-    expect(compiled.status).toBe(0);
+    const compiled = await runProcess(pythonExecutable, ['-m', 'py_compile', manager.paneWatchScriptPath, manager.paneIdleWatchScriptPath]);
+    expect(compiled.status, compiled.stderr).toBe(0);
     if (!tempDir) throw new Error('expected test temp directory');
     const shimDirectory = await writeLocalRunpaneStub(tempDir, `
 const args = process.argv.slice(2);
@@ -253,53 +294,33 @@ const payload = payloads[panel] ?? ${JSON.stringify({ ok: true, paneId: 'pane-re
 process.stdout.write(JSON.stringify(payload) + '\\n');
 `);
     const env = localCliEnvironment(shimDirectory);
-    const options = { encoding: 'utf8' as const, cwd: tempDir, env };
-    const success = spawnSync(pythonExecutable, [manager.paneIdleWatchScriptPath, '--once', 'panel-1:Démo雪'], options);
+    const options = { cwd: tempDir, env };
+    const watch = (targets: string[], runEnv: NodeJS.ProcessEnv = env) =>
+      runProcess(pythonExecutable, [manager.paneIdleWatchScriptPath, '--once', ...targets], { ...options, env: runEnv });
+    // Each run is its own process with its own arguments, so they run side by side.
+    const [success, working, classifiedError, failure, invalidJson, malformedTarget, malformedInterval] = await Promise.all([
+      watch(['panel-1:Démo雪']),
+      watch(['working:Working']),
+      watch(['error:Broken']),
+      watch(['panel-1:Demo', 'bad:Broken']),
+      watch(['array:Broken']),
+      watch(['missing-separator']),
+      watch(['panel-1:Demo'], { ...env, IDLE_INTERVAL: 'not-a-number' }),
+    ]);
     expect(success.status).toBe(0);
     expect(success.stdout).toContain('IDLE Démo雪 3m pane pane-real panel panel-1');
     expect(success.stdout).not.toContain('pane Démo雪');
-    const working = spawnSync(pythonExecutable, [
-      manager.paneIdleWatchScriptPath,
-      '--once',
-      'working:Working',
-    ], options);
     expect(working.status).toBe(0);
     expect(working.stdout).not.toContain('IDLE Working');
-    const classifiedError = spawnSync(pythonExecutable, [
-      manager.paneIdleWatchScriptPath,
-      '--once',
-      'error:Broken',
-    ], options);
     expect(classifiedError.status).toBe(2);
     expect(classifiedError.stdout).toContain('WATCH ERROR fallback-panel Broken pane pane-real panel error');
-    const failure = spawnSync(pythonExecutable, [
-      manager.paneIdleWatchScriptPath,
-      '--once',
-      'panel-1:Demo',
-      'bad:Broken',
-    ], options);
     expect(failure.status).toBe(2);
     expect(failure.stdout).toContain('WATCH ERROR RuntimeError: screen-failed panel bad');
-    const invalidJson = spawnSync(pythonExecutable, [
-      manager.paneIdleWatchScriptPath,
-      '--once',
-      'array:Broken',
-    ], options);
     expect(invalidJson.status).toBe(2);
     expect(invalidJson.stdout).toContain('WATCH ERROR RuntimeError: screen-invalid panel array');
-    const malformedTarget = spawnSync(pythonExecutable, [
-      manager.paneIdleWatchScriptPath,
-      '--once',
-      'missing-separator',
-    ], options);
     expect(malformedTarget.status).toBe(2);
     expect(malformedTarget.stdout).toContain('WATCH ERROR ValueError: targets must use PANEL_ID:NAME');
     expect(malformedTarget.stderr).toBe('');
-    const malformedInterval = spawnSync(pythonExecutable, [
-      manager.paneIdleWatchScriptPath,
-      '--once',
-      'panel-1:Demo',
-    ], { ...options, env: { ...env, IDLE_INTERVAL: 'not-a-number' } });
     expect(malformedInterval.status).toBe(2);
     expect(malformedInterval.stdout).toContain('WATCH ERROR ValueError: invalid literal for int()');
     expect(malformedInterval.stderr).toBe('');
