@@ -1,10 +1,17 @@
-import { useState, useEffect, useCallback, memo } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo, type KeyboardEvent, type MouseEvent } from 'react';
 import { API } from '../utils/api';
 import { subscribeToSessionGitChanges } from '../utils/session-git-events';
 import { GitCommitHorizontal, FileText, Plus, Minus, User, Clock, Hash, GitFork } from 'lucide-react';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from './ui/Skeleton';
 import { Tooltip } from './ui/Tooltip';
 import { CopyableField } from './ui/CopyableField';
+import {
+  isHistoryRowSelected,
+  recallHistorySelection,
+  rememberHistorySelection,
+  selectHistoryRow,
+  type HistorySelection,
+} from './gitHistorySelection';
 
 interface GitGraphCommitData {
   hash: string;
@@ -28,7 +35,11 @@ interface GitHistoryGraphProps {
   sessionId: string;
   baseBranch: string;
   layout?: 'compact' | 'wide';
-  onCommitClick?: (hash: string) => void;
+  /**
+   * A row was chosen. A plain click passes its hash; a shift-click passes the newer end of the range
+   * from the last plain click, with olderHash as its older end ('index' is the uncommitted row).
+   */
+  onCommitClick?: (hash: string, olderHash?: string) => void;
 }
 
 function CommitTooltipContent({ entry }: { entry: GitGraphCommitData }) {
@@ -93,24 +104,42 @@ const CommitRow = memo(function CommitRow({
   entry,
   isLast,
   layout = 'compact',
+  selected = false,
   onClick,
 }: {
   entry: GitGraphCommitData;
   isLast: boolean;
   layout?: 'compact' | 'wide';
-  onClick?: (hash: string) => void;
+  selected?: boolean;
+  /** extend is true for a shift-click or Shift+Enter/Space: a range from the anchor. */
+  onClick?: (hash: string, extend: boolean) => void;
 }) {
   const isIndex = entry.hash === 'index';
   const date = new Date(entry.committerDate);
   const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   const hasStats = entry.filesChanged != null && entry.filesChanged > 0;
   const Row = onClick ? 'button' : 'div';
+  const hover = 'hover:bg-surface-secondary cursor-default transition-colors';
+  const interaction = layout === 'wide' && !onClick ? '' : hover;
+  const handleClick = onClick
+    ? (event: MouseEvent<HTMLElement>) => onClick(entry.hash, event.shiftKey)
+    : undefined;
+  // A button's own Enter/Space activation does not reliably carry Shift, so the range keys are handled here.
+  const handleKeyDown = onClick
+    ? (event: KeyboardEvent<HTMLElement>) => {
+        if (!event.shiftKey || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        onClick(entry.hash, true);
+      }
+    : undefined;
 
   const row = (
       <Row
-        {...(onClick ? { type: 'button' as const } : {})}
-        className={`flex items-stretch gap-1.5 w-full text-left rounded-sm min-w-0 ${layout === 'wide' ? (onClick ? 'hover:bg-surface-secondary cursor-default transition-colors' : '') : `hover:bg-surface-secondary cursor-default transition-colors`}`}
-        onClick={onClick ? () => onClick(entry.hash) : undefined}
+        {...(onClick ? { type: 'button' as const, 'aria-pressed': selected } : {})}
+        data-selected={selected || undefined}
+        className={`flex items-stretch gap-1.5 w-full text-left rounded-sm min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus ${selected ? 'bg-surface-selected' : interaction}`}
+        onClick={handleClick}
+        onKeyDown={handleKeyDown}
       >
         {/* Graph rail: vertical line with commit node */}
         <div className="flex flex-col items-center flex-shrink-0 w-3 ml-1">
@@ -199,6 +228,21 @@ export function GitHistoryGraph({ sessionId, baseBranch, layout = 'compact', onC
   const [currentBranch, setCurrentBranch] = useState(baseBranch);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selection, setSelection] = useState<HistorySelection | null>(() => recallHistorySelection(sessionId));
+  const [selectionSessionId, setSelectionSessionId] = useState(sessionId);
+  if (selectionSessionId !== sessionId) {
+    setSelectionSessionId(sessionId);
+    setSelection(recallHistorySelection(sessionId));
+  }
+  const hashes = useMemo(() => rawEntries.map(entry => entry.hash), [rawEntries]);
+
+  const handleRowClick = useCallback((hash: string, extend: boolean) => {
+    const next = selectHistoryRow(hashes, selection, hash, extend);
+    rememberHistorySelection(sessionId, next);
+    setSelection(next);
+    if (next.olderHash === next.newerHash) onCommitClick?.(hash);
+    else onCommitClick?.(next.newerHash, next.olderHash);
+  }, [hashes, onCommitClick, selection, sessionId]);
 
   const fetchGraph = useCallback(async () => {
     try {
@@ -271,7 +315,8 @@ export function GitHistoryGraph({ sessionId, baseBranch, layout = 'compact', onC
             entry={entry}
             isLast={i === rawEntries.length - 1}
             layout={layout}
-            onClick={onCommitClick}
+            selected={isHistoryRowSelected(hashes, selection, i)}
+            onClick={onCommitClick ? handleRowClick : undefined}
           />
         ))}
       </div>
