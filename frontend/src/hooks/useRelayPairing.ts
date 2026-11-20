@@ -7,6 +7,8 @@ export type PairingView =
   /** `label` says what this computer is waiting for. */
   | { step: 'preparing'; label: string }
   | { step: 'error'; message: string }
+  /** The CA is turning this computer away until `until`: the relay pairs no new devices; Tailscale still works. */
+  | { step: 'limited'; until: string }
   | { step: 'code'; url: string; secondsLeft: number }
   /** The last code ran out; a new one is on its way. */
   | { step: 'renewing' };
@@ -124,7 +126,8 @@ export function useRelayPairing(open: boolean, showCode = true) {
   }, [prepare]);
 
   let view: PairingView;
-  if (failure) view = { step: 'error', message: failure };
+  if (status?.certificateLimit) view = { step: 'limited', until: status.certificateLimit.until };
+  else if (failure) view = { step: 'error', message: failure };
   else if (status?.phase === 'error') view = { step: 'error', message: status.lastError ?? SETUP_FAILED };
   else if (code && expiresAt !== null) view = { step: 'code', url: code.url, secondsLeft: Math.max(0, Math.ceil((expiresAt - now) / 1000)) };
   else if (renewal === 'expired' && status?.phase === 'ready') view = { step: 'renewing' };
@@ -142,4 +145,19 @@ async function turnOff(hostWasOn: boolean): Promise<void> {
   } catch (cause) {
     console.warn('[relay] Could not turn phone access back off:', cause);
   }
+}
+
+/** When Pane relay pairs no new devices because of the CA's limit, until when; read without turning phone access on. */
+export function useRelayCertificateLimit(): string | null {
+  const [until, setUntil] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    window.electronAPI.invoke('relay:status').then(
+      (status: RelayStatus) => { if (live) setUntil(status.certificateLimit?.until ?? null); },
+      () => undefined,
+    );
+    const off = window.electronAPI.events.onRelayStatusChanged((status) => setUntil(status.certificateLimit?.until ?? null));
+    return () => { live = false; off(); };
+  }, []);
+  return until;
 }

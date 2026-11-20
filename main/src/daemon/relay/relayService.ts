@@ -73,6 +73,8 @@ export class RelayService {
   private relayTarget: string | null = null;
   private agentState: RelayAgentState = { status: 'stopped' };
   private lastError: string | null = null;
+  /** When the CA takes new computers again, while it turns this one away for its rate limits. */
+  private certificateLimitUntil: number | null = null;
   private renewTimer: NodeJS.Timeout | null = null;
   private certificateRetry: NodeJS.Timeout | null = null;
   private certificateFailures = 0;
@@ -167,6 +169,7 @@ export class RelayService {
     this.certificateRetry = null;
     // The old reason clears at once, so Add a device shows the order running.
     this.lastError = null;
+    this.certificateLimitUntil = null;
     this.emit();
     void this.renewIfDue();
   }
@@ -196,6 +199,7 @@ export class RelayService {
       localAddresses: this.localUrls(),
       certificate,
       lastError,
+      certificateLimit: enabled && this.certificateLimitUntil !== null ? { until: new Date(this.certificateLimitUntil).toISOString() } : null,
     };
   }
 
@@ -403,6 +407,7 @@ export class RelayService {
     try {
       await this.certificate.ensure();
       this.lastError = null;
+      this.certificateLimitUntil = null;
       this.certificateFailures = 0;
     } catch (error) {
       // A valid certificate keeps serving; Remote Access shows the reason days before it matters.
@@ -411,7 +416,8 @@ export class RelayService {
       } else {
         const caTime = error instanceof CertificateRateLimited ? error.retryAt : null;
         const retryAt = this.retryCertificate(caTime);
-        this.lastError = error instanceof CertificateRateLimited ? certificateRefused(caTime ?? retryAt) : certificateFailed(reasonOf(error), retryAt);
+        this.certificateLimitUntil = error instanceof CertificateRateLimited ? caTime ?? retryAt : null;
+        this.lastError = this.certificateLimitUntil !== null ? certificateRefused(this.certificateLimitUntil) : certificateFailed(reasonOf(error), retryAt);
       }
       this.deps.log?.(`[relay] ${this.lastError}`);
     }
@@ -516,6 +522,7 @@ export class RelayService {
     if (this.certificateRetry) clearTimeout(this.certificateRetry);
     this.certificateRetry = null;
     this.certificateFailures = 0;
+    this.certificateLimitUntil = null;
     this.agent?.stop();
     this.agent = null;
     this.agentState = { status: 'stopped' };

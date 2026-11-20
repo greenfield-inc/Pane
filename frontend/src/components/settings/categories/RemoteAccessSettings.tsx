@@ -10,6 +10,8 @@ import { GlassesRows } from '../GlassesSettings';
 import { ComputerRow } from '../computers/ComputerRow';
 import { PublicUrlField } from '../computers/PublicUrlField';
 import { useAddDeviceStore } from '../../addDevice/addDeviceStore';
+import { RelayLimitNotice } from '../../addDevice/RelayLimitNotice';
+import { useRelayCertificateLimit } from '../../../hooks/useRelayPairing';
 import { useMachines } from '../../../hooks/useMachines';
 import { useConfigStore } from '../../../stores/configStore';
 import { THIS_COMPUTER, type MachineEntry } from '../../../utils/machineList';
@@ -69,6 +71,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
     wrapConnect: controller.showChecklist,
   });
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
+  const relayLimitUntil = useRelayCertificateLimit();
   const openAddDevice = useAddDeviceStore((state) => state.open);
   const requestedTab = settingRequest && tabHolding(settingRequest.setting);
   const [tab, setShownTab] = useState<RemoteAccessTab>(requestedTab ?? shownTab);
@@ -272,6 +275,11 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
 
         {tab === 'devices' && (
           <>
+            {relayLimitUntil && (
+              <div className="rounded-lg border border-border-secondary bg-surface-secondary p-4">
+                <RelayLimitNotice until={relayLimitUntil} onSetUpTailscale={() => setTab('tailscale')} />
+              </div>
+            )}
             <RemoteGroup
               title="Devices"
               scope={scope}

@@ -5,6 +5,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { LINK_EXPIRY_LABELS, useAddDeviceStore, type LinkExpiry, type MakerResult } from './addDeviceStore';
 import { LinkFlowView } from './LinkConfirm';
 import { TabFooter } from './SshTab';
+import { Tooltip } from '../ui/Tooltip';
+import { RelayLimitNotice, relayLimitTip } from './RelayLimitNotice';
 
 const EXPIRIES: LinkExpiry[] = ['10m', '1h', '24h'];
 const CARD = 'flex min-w-0 flex-1 flex-col gap-3 rounded-lg border border-border-primary p-5';
@@ -50,7 +52,14 @@ export function MakerResultView({ maker }: { maker: MakerResult }) {
  * Add a device › Computer: copy a one-time link with a chosen lifetime, or paste one made on the
  * other computer. When phone access can't start, it says why, with "Try again".
  */
-export function ComputerTab({ ready, error = null, onRetry }: { ready: boolean; error?: string | null; onRetry?: () => void }) {
+export function ComputerTab({ ready, error = null, onRetry, limitUntil = null, onSetUpTailscale }: {
+  ready: boolean;
+  error?: string | null;
+  onRetry?: () => void;
+  /** Set while Pane relay pairs no new devices (`RelayStatus.certificateLimit.until`). */
+  limitUntil?: string | null;
+  onSetUpTailscale?: () => void;
+}) {
   const { expiresIn, setExpiresIn, copied, copyError, copyLink, flow, startLink, cancelLink, maker } = useAddDeviceStore();
   const [pasted, setPasted] = useState('');
   const [copying, setCopying] = useState(false);
@@ -75,7 +84,17 @@ export function ComputerTab({ ready, error = null, onRetry }: { ready: boolean; 
           <h3 id="add-device-start" className="text-sm font-semibold text-text-primary">Start here</h3>
           <p className="text-sm text-text-secondary">Send this link to your other computer and open it there. It also works on a phone or in a browser.</p>
         </div>
-        {error ? (
+        {limitUntil ? (
+          <>
+            {/* A disabled button gets no hover, so the tooltip sits on its wrapper. */}
+            <Tooltip content={relayLimitTip(limitUntil)}>
+              <span className="block w-full" tabIndex={0}>
+                <Button type="button" fullWidth icon={<Clipboard className="h-4 w-4" />} disabled>Copy link</Button>
+              </span>
+            </Tooltip>
+            <RelayLimitNotice until={limitUntil} onSetUpTailscale={() => onSetUpTailscale?.()} />
+          </>
+        ) : error ? (
           <div role="alert" className="space-y-2">
             <p className="text-sm font-medium text-text-primary">This computer can&apos;t make a link right now</p>
             <p className="text-sm text-text-secondary">{error}</p>

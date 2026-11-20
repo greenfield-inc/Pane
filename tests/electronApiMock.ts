@@ -212,6 +212,8 @@ export type ElectronApiMockOptions = {
     /** The phase turning it on reaches, with this lastError for `error`. */
     phaseWhenOn?: RelayStatus['phase'];
     lastError?: string;
+    /** Turning it on meets the CA's certificate limit until this time (ISO), as `RelayStatus.certificateLimit`. */
+    certificateLimitUntil?: string;
     /** How long each pairing code lasts. */
     codeTtlMs?: number;
     /** What the "everywhere" commands report. */
@@ -353,11 +355,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const relayOptions = mockOptions.relay ?? {};
     const relayStatus: RelayStatus = {
       enabled: false, phase: 'off', id: null, domain: null, address: null, relay: null, region: null,
-      localAddresses: [], certificate: null, lastError: null,
+      localAddresses: [], certificate: null, lastError: null, certificateLimit: null,
     };
     let relayCodes = 0;
     const turnRelayOn = () => {
-      const phase = relayOptions.phaseWhenOn ?? 'ready';
+      const limitUntil = relayOptions.certificateLimitUntil;
+      const phase = limitUntil ? 'error' : relayOptions.phaseWhenOn ?? 'ready';
       Object.assign(relayStatus, {
         enabled: true,
         phase,
@@ -365,7 +368,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         domain: 'pane.example',
         address: 'https://k7q2m9.pane.example',
         relay: 'us.relay.pane.example',
-        lastError: phase === 'error' ? relayOptions.lastError ?? null : null,
+        lastError: phase === 'error' ? relayOptions.lastError ?? (limitUntil ? "Let's Encrypt is turning away new computers" : null) : null,
+        certificateLimit: limitUntil ? { until: limitUntil } : null,
       });
       remoteDaemonConfig.relay = { ...remoteDaemonConfig.relay, enabled: true };
     };
