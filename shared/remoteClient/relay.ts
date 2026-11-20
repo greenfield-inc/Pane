@@ -152,7 +152,7 @@ export async function exchangeRelayPairing(
       cache: 'no-store',
     });
   } catch {
-    throw new RelayPairingError(`Can’t reach ${name}`, `${name} didn’t answer. On ${name}, open Pane › Add a device: it shows a code once ${name} is ready for phones, or says why not. Then try again.`, 'unreachable', false);
+    throw new RelayPairingError(`Can’t reach ${name}`, `${name} didn’t answer. Check that this device is online, then open Pane › Add a device on ${name}: it shows a code once ${name} is ready for phones, or says why not. Then try again.`, 'unreachable', false);
   }
   const body = response.body;
   const result = decodeOptionalBoundary(body, exchangeSchema);

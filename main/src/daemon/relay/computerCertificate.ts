@@ -6,7 +6,7 @@ import type { ComputerKey, KeyStore } from './computerKey';
 export const LETS_ENCRYPT_DIRECTORY = 'https://acme-v02.api.letsencrypt.org/directory';
 /** Let's Encrypt's test CA: its certificates are not trusted, and its limits are separate from the real one's. */
 export const LETS_ENCRYPT_STAGING_DIRECTORY = 'https://acme-staging-v02.api.letsencrypt.org/directory';
-/** Each request to a CA gives up after this long, so an order never hangs. */
+/** Each request to the CA gives up after this long, so an order never hangs. */
 const ACME_REQUEST_TIMEOUT_MS = 30_000;
 
 /** Renew once a third of the lifetime is left: 30 days of 90 today, about 21 of 64 from 2027. */
@@ -18,13 +18,7 @@ export interface CertificateStatus {
   renewAt: string;
 }
 
-/** An ACME CA to order from; one that needs external account binding names its key id and HMAC key. */
-export interface AcmeAuthority {
-  directoryUrl: string;
-  eab?: { kid: string; hmacKey: string };
-}
-
-/** Every CA refused for now because of its rate limits; `retryAt` is when the earliest one said to ask again, if it said. */
+/** The CA refused for now because of its rate limits; `retryAt` is when it said to ask again, if it said. */
 export class CertificateRateLimited extends Error {
   constructor(message: string, readonly retryAt: number | null) {
     super(message);
@@ -41,8 +35,7 @@ export interface ComputerCertificateOptions {
   accountStore: KeyStore;
   /** Sets the `_acme-challenge.<id>.<domain>` TXT values through the relay. */
   setTxt(values: string[]): Promise<void>;
-  /** The CAs to order from, in order: the next is asked when one refuses for its rate limits. Let's Encrypt by default. */
-  authorities?: AcmeAuthority[];
+  directoryUrl?: string;
   /** Extra CA for the ACME server (a test server's own CA). */
   acmeCa?: string;
   now?: () => number;
@@ -116,28 +109,8 @@ export class ComputerCertificate {
     const defaults: { timeout?: number; acmeSettings?: { retryMaxAttempts: number } } = acme.axios.defaults;
     defaults.timeout = ACME_REQUEST_TIMEOUT_MS;
     if (defaults.acmeSettings) defaults.acmeSettings.retryMaxAttempts = 0;
-    this.options.log?.(`[relay] requesting a certificate for ${base}`);
-    let limited: CertificateRateLimited | null = null;
-    for (const authority of this.options.authorities ?? [{ directoryUrl: LETS_ENCRYPT_DIRECTORY }]) {
-      try {
-        const pem = await this.order(acme, authority, accountKey, Boolean(savedAccountKey), csr);
-        this.use(pem);
-        await this.options.certificateStore.write(pem);
-        this.options.log?.(`[relay] certificate for ${base} valid until ${this.status?.notAfter}`);
-        return;
-      } catch (error) {
-        const refusal = error instanceof Error ? rateLimitOf(error.message) : null;
-        if (!refusal) throw error;
-        this.options.log?.(`[relay] ${new URL(authority.directoryUrl).host} refused a certificate for now: ${refusal.message}`);
-        if (!limited || (refusal.retryAt !== null && (limited.retryAt === null || refusal.retryAt < limited.retryAt))) limited = refusal;
-      }
-    }
-    throw limited ?? new Error('No certificate authority is set up.');
-  }
-
-  private async order(acme: typeof import('acme-client'), authority: AcmeAuthority, accountKey: string, known: boolean, csr: Buffer): Promise<string> {
-    const client = new acme.Client({ directoryUrl: authority.directoryUrl, accountKey, externalAccountBinding: authority.eab });
-    if (known) {
+    const client = new acme.Client({ directoryUrl: this.options.directoryUrl ?? LETS_ENCRYPT_DIRECTORY, accountKey });
+    if (savedAccountKey) {
       // Looks the saved account up, so `auto` reuses it: registering a known key again makes
       // acme-client send an empty account update, which ACME servers refuse. An account this server
       // never saw (another directory) is registered by `auto`, which also reports any other failure.
@@ -145,7 +118,8 @@ export class ComputerCertificate {
     }
     // The wildcard and the base name share one TXT name, so both values are published together.
     const values = new Set<string>();
-    return client.auto({
+    this.options.log?.(`[relay] requesting a certificate for ${base}`);
+    const pem = await client.auto({
       csr,
       termsOfServiceAgreed: true,
       challengePriority: ['dns-01'],
@@ -159,7 +133,10 @@ export class ComputerCertificate {
         values.delete(keyAuthorization);
         await this.options.setTxt([...values]).catch(() => undefined);
       },
-    });
+    }).catch((error: Error) => { throw rateLimitOf(error.message) ?? error; });
+    this.use(pem);
+    await this.options.certificateStore.write(pem);
+    this.options.log?.(`[relay] certificate for ${base} valid until ${this.status?.notAfter}`);
   }
 
   private use(pem: string): void {

@@ -69,12 +69,7 @@ Merging the PR to `main` does not release the desktop app.
    all computers share Let's Encrypt's weekly limit of 50 new certificates
    per registered domain; ask Let's Encrypt for a rate limit increase if
    sign-ups outpace it. A computer that Let's Encrypt turns away says so in
-   **Add a device** and asks again at the time Let's Encrypt gives. A second
-   ACME CA is tried next when the computer's environment names one:
-   `PANE_ACME_FALLBACK_DIRECTORY`, with `PANE_ACME_FALLBACK_EAB_KID` and
-   `PANE_ACME_FALLBACK_EAB_HMAC_KEY` when it needs external account binding.
-   Its domain must also be in the relay's CAA records (`--caa-issuer`), which
-   allow only Let's Encrypt today.
+   **Add a device** and asks again at the time Let's Encrypt gives.
 8. **Release the desktop app** through the normal [stable release](../../RUNBOOK.md#stable-release),
    then pair a phone with a QR code against production
    ([QR pairing](../../docs/QR_PAIRING.md)).
