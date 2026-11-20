@@ -122,6 +122,21 @@ function pairingFailure(code: string, name: string): RelayPairingError {
  * for each computer linked with it. Throws `RelayPairingError`, also when a different computer
  * answers. Linked computers outside `<id>.<domain>` are dropped.
  */
+/** A pairing request that has no answer after this long fails, so the phone says why instead of loading. */
+const RELAY_PAIRING_TIMEOUT_MS = 10_000;
+
+/** A pairing request's answer: its status and JSON body, read within RELAY_PAIRING_TIMEOUT_MS or thrown. */
+export async function fetchWithin(fetch: RemoteFetch, url: string, init: Parameters<RemoteFetch>[1]): Promise<{ ok: boolean; status: number; body: unknown }> {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), RELAY_PAIRING_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { ...init, signal: abort.signal });
+    return { ok: response.ok, status: response.status, body: await response.json() };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function exchangeRelayPairing(
   fetch: RemoteFetch,
   scanned: Pick<RelayPairingLink, 'computerId' | 'domain' | 'name'>,
@@ -129,18 +144,17 @@ export async function exchangeRelayPairing(
 ): Promise<RelayConnectionProfile[]> {
   const { name } = scanned;
   let response;
-  let body: unknown;
   try {
-    response = await fetch(`${relayComputerAddress(scanned)}/pair/exchange`, {
+    response = await fetchWithin(fetch, `${relayComputerAddress(scanned)}/pair/exchange`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
       cache: 'no-store',
     });
-    body = await response.json();
   } catch {
-    throw new RelayPairingError(`Can’t reach ${name}`, `Pane’s servers didn’t answer, so ${name} can’t be reached from this network. Try again in a minute.`, 'unreachable', false);
+    throw new RelayPairingError(`Can’t reach ${name}`, `${name} didn’t answer. On ${name}, open Pane › Add a device: it shows a code once ${name} is ready for phones, or says why not. Then try again.`, 'unreachable', false);
   }
+  const body = response.body;
   const result = decodeOptionalBoundary(body, exchangeSchema);
   if (!response.ok || !result) {
     const failure = decodeOptionalBoundary(body, failureSchema);

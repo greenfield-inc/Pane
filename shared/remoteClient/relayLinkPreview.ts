@@ -1,6 +1,6 @@
 import type { RemotePaneConnectionProfile } from '../types/remoteDaemon';
 import { boundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
-import { isRelayProfile, relayComputerAddress, type RelayPairingLink } from './relay';
+import { fetchWithin, isRelayProfile, relayComputerAddress, type RelayPairingLink } from './relay';
 import type { RemoteFetch } from './remoteDaemonClient';
 
 /** Both sides of a pairing link that would join two groups of computers, as the confirm names them. */
@@ -41,13 +41,13 @@ export async function relayLinkJoin(
 
 async function readPreview(fetch: RemoteFetch, link: Pick<RelayPairingLink, 'secret' | 'computerId' | 'domain'>) {
   try {
-    const response = await fetch(`${relayComputerAddress(link)}/pair/preview`, {
+    const response = await fetchWithin(fetch, `${relayComputerAddress(link)}/pair/preview`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ secret: link.secret }),
       cache: 'no-store',
     });
-    return response.ok ? decodeOptionalBoundary(await response.json(), previewSchema) ?? null : null;
+    return response.ok ? decodeOptionalBoundary(response.body, previewSchema) ?? null : null;
   } catch {
     return null;
   }

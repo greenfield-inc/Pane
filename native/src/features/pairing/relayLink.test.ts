@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeRelayPairing, parseRelayPairingLink, RelayPairingError, relayComputerAddress } from '@shared/remoteClient';
 
@@ -99,5 +99,20 @@ describe('the pairing exchange', () => {
     const failure = exchangeRelayPairing(offline, scanned, { secret: 's', label: 'Phone' });
     await expect(failure).rejects.toThrow(RelayPairingError);
     await expect(failure).rejects.toMatchObject({ message: 'Can’t reach Studio Mac' });
+  });
+
+  it('gives up after 10 seconds when the computer never answers, instead of loading forever', async () => {
+    vi.useFakeTimers();
+    try {
+      const silent = (_url: string, init?: { signal?: AbortSignal }) => new Promise<never>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+      const failure = exchangeRelayPairing(silent, scanned, { secret: 's', label: 'Phone' });
+      const settled = expect(failure).rejects.toMatchObject({ message: 'Can’t reach Studio Mac', code: 'unreachable' });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
