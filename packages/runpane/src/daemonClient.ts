@@ -352,7 +352,7 @@ export async function invokeRemoteDaemon<T>(
   throw new PaneDaemonClientError(
     routes.length > 1
       ? `Could not reach Pane on ${target.machine} by any route: ${missed.join('; ')}. Pane must be running there. Nothing was changed.`
-      : `Could not reach Pane on ${target.machine} (${routes[0].baseUrl}): ${missed[0]}. Pane must be running there with workspaces on. Nothing was changed.`,
+      : `Could not reach Pane on ${target.machine} (${routes[0].baseUrl}): ${missed[0]}. Pane must be running there${routes[0].kind === 'relay' ? '; its Add a device screen says why phones and computers can\'t reach it' : ' with workspaces on'}. Nothing was changed.`,
     'ERR_WORKSPACE_UNREACHABLE',
     false,
     'Check the machine with `runpane workspace list`.',
@@ -410,8 +410,11 @@ function readRouteOutcome(
   throw failure;
 }
 
+/** The underlying reason; a refusal on every address of a name (an AggregateError) has no message, only a code. */
 function errorDetail(error: Error): string {
-  return error.cause instanceof Error ? error.cause.message : error.message;
+  const cause = error.cause instanceof Error ? error.cause : error;
+  if (cause.message) return cause.message;
+  return 'code' in cause ? String(cause.code) : cause.name;
 }
 
 export async function invokeDaemon<T>(

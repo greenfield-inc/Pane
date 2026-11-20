@@ -1,4 +1,4 @@
-import os from 'os';
+import { computerName } from '../utils/computerName';
 import type { PaneCommandRegistry, PaneCommandValue } from './commandRegistry';
 import { isRemotePaneCommand } from './commandRegistry';
 import { PaneError } from '../../../shared/paneError';
@@ -37,9 +37,9 @@ function thisOs(): ComputerOs | undefined {
   return undefined;
 }
 
-/** This computer's name as the relay gives it: the host name without `.local`. */
+/** This computer's name as the relay gives it. */
 function thisName(): string {
-  return os.hostname().replace(/\.local$/u, '') || 'This computer';
+  return computerName() || 'This computer';
 }
 
 /** What this computer says about itself on every `ready` event and in a link's answer. Undefined before it has an install id. */

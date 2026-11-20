@@ -262,9 +262,10 @@ const UNKNOWN_CHANNEL = { error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'No Pan
  * Another computer with Tailscale signed out on this one: a real TLS server on localhost (trusted
  * through NODE_EXTRA_CA_CERTS, as a CA-issued certificate would be), a route that accepts TCP and
  * never answers (Tailscale signed out on the computer), and this machine's Pane listing what
- * `computers(addresses)` returns. `tailnet` is a `tailscale status` to report, or none.
+ * `computers(addresses)` returns. `tailnet` is a `tailscale status` to report, or none; `relay` is
+ * this machine's phone access (`relay:status`), or none.
  */
-async function withComputer({ computers, tailnet = null }, check) {
+async function withComputer({ computers, tailnet = null, relay = null }, check) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-computer-'));
   // Signed out unless `tailnet` is given; this fake comes first, so a real Tailscale app is never asked.
   const status = tailnet ?? { BackendState: 'NeedsLogin' };
@@ -314,6 +315,7 @@ async function withComputer({ computers, tailnet = null }, check) {
   const pane = await fakeLocalPane(home, (channel) => {
     if (channel === 'computers:list') return listed.computers ?? UNKNOWN_CHANNEL;
     if (channel === 'relay:linked-computers') return listed.linkedComputers ?? UNKNOWN_CHANNEL;
+    if (channel === 'relay:status') return relay ?? UNKNOWN_CHANNEL;
     return { enabled: false, state: 'off', reason: 'Tailscale is signed out' };
   });
   const run = (...args) => new Promise((resolve) => {
@@ -386,6 +388,30 @@ test('two saved computers with one name are told apart by relay id, and an unkno
     assert.match(read.output, /matches several machines: studio-mac \(relay-k7xq2m4n8p3r5t6v\), studio-mac \(relay-m2r9w4c6t8b1n3q5\)/);
     const unknown = await run('workspace', 'nope', 'read', '~/notes.md');
     assert.match(unknown.output, /studio-mac \(OS unknown, offline\)/);
+  });
+});
+
+test('list says why a saved computer cannot be reached instead of only "offline"', posixOnly, async () => {
+  // Nothing listens on port 1: the relay route is refused, as when the computer has no certificate yet.
+  const studio = { id: 'relay-k7xq2m4n8p3r5t6v', label: 'Studio Mac', routes: [{
+    id: 'relay:https://localhost:1/k7xq', kind: 'relay', source: 'link', baseUrl: 'https://localhost:1/k7xq', token: 'link-token',
+    relay: { computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'unused' },
+  }] };
+  await withComputer({ computers: () => ({ computers: [studio] }) }, async (run) => {
+    const list = await run('workspace', 'list');
+    assert.equal(list.status, 0, list.output);
+    const line = list.output.split('\n').find((text) => text.startsWith('studio-mac'));
+    assert.match(line, /: not reachable: Could not reach Pane on studio-mac \(https:\/\/localhost:1\/k7xq\): .*ECONNREFUSED/);
+    assert.doesNotMatch(line, /workspaces on/);
+  });
+});
+
+test('this machine says other computers reach it through Pane relay while Tailscale is signed out', posixOnly, async () => {
+  const relay = { enabled: true, phase: 'ready', address: 'https://k3x9linked0000aa.runpane.net', lastError: null };
+  await withComputer({ relay, computers: ({ laptop, keys }) => ({ computers: [travelLaptop([relayRoute(laptop, keys.laptop)])] }) }, async (run) => {
+    const list = await run('workspace', 'list');
+    assert.equal(list.status, 0, list.output);
+    assert.match(list.output.split('\n')[0], /\(this machine, \w+\): reachable through Pane relay \(https:\/\/k3x9linked0000aa\.runpane\.net\)\. Tailscale: off \(Tailscale is signed out\)/);
   });
 });
 

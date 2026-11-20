@@ -1,4 +1,4 @@
-import os from 'os';
+import { computerName } from '../../utils/computerName';
 import { getPaneEventSink } from '../../core/runtime';
 import { systemSecretBackend } from '../../services/paneSecrets';
 import { KeychainItemMissing } from '../../services/keychain';
@@ -44,9 +44,6 @@ function relaySecrets(dataDir: string): RelaySecretStore {
   };
 }
 
-function computerDisplayName(): string {
-  return os.hostname().replace(/\.local$/iu, '');
-}
 
 /** Phone access through the relay: the service, previews under the computer's names, and its commands. */
 export async function createRelayHost(deps: {
@@ -104,7 +101,7 @@ export async function createRelayHost(deps: {
       return { error: remote()?.host.config.enabled ? 'it is still starting' : 'it is turned off' };
     },
     previewPort: () => proxy?.port ?? null,
-    displayName: computerDisplayName,
+    displayName: computerName,
     // Pairing the same phone or computer again replaces its earlier token here.
     addClient: (record) => links.addClient(record),
     log: deps.log,
