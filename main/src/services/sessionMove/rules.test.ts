@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
-import { agentFarmProfileOf, movedLine, heldBackChecks, sessionOpenApprovals } from './rules';
+import { agentFarmProfileOf, movedLine, heldBackChecks, sessionApprovals } from './rules';
 import { buildPathMap } from './pathMap';
 
 describe('agentFarmProfileOf', () => {
@@ -23,42 +23,60 @@ describe('movedLine', () => {
 
 describe('heldBackChecks', () => {
   const tab = (queued: number, running: boolean) => ({ panelId: 'p1', title: 'Chat', running, queued });
+  const none = { carried: [], held: [] };
 
-  it('blocks a Session with open approvals, which the target\'s Notify would not show (F-9)', () => {
-    expect(heldBackChecks(2, [], false)).toEqual([expect.objectContaining({ id: 'approvals', level: 'block', title: '2 open approvals in this Session' })]);
+  it('lets open approvals move with the Session, and says so (T-44)', () => {
+    expect(heldBackChecks({ carried: [item('1'), item('2')], held: [] }, [], false)).toEqual([expect.objectContaining({ id: 'approvals', level: 'ok', title: '2 open approvals move with the Session' })]);
+  });
+
+  it('blocks only an approval that can\'t move yet: an answer in its Undo hold, or a secret request', () => {
+    expect(heldBackChecks({ carried: [item('1')], held: [item('2', { state: 'sent' })] }, [], false)).toEqual([
+      expect.objectContaining({ id: 'approvals', level: 'block', title: '1 approval in this Session can\'t move yet' }),
+    ]);
   });
 
   it('blocks queued chat messages that would not send before the tab stops (F-5)', () => {
-    expect(heldBackChecks(0, [tab(1, true)], false)).toEqual([]);
-    expect(heldBackChecks(0, [tab(1, false)], false)).toEqual([expect.objectContaining({ id: 'queue:p1', level: 'block' })]);
+    expect(heldBackChecks(none, [tab(1, true)], false)).toEqual([]);
+    expect(heldBackChecks(none, [tab(1, false)], false)).toEqual([expect.objectContaining({ id: 'queue:p1', level: 'block' })]);
     // Once every tab stopped (Stop now), even a running tab's queue stays behind.
-    expect(heldBackChecks(0, [tab(3, true)], true)).toEqual([expect.objectContaining({ title: '3 messages waiting in Chat' })]);
-    expect(heldBackChecks(0, [tab(0, false)], true)).toEqual([]);
+    expect(heldBackChecks(none, [tab(3, true)], true)).toEqual([expect.objectContaining({ title: '3 messages waiting in Chat' })]);
+    expect(heldBackChecks(none, [tab(0, false)], true)).toEqual([]);
   });
 });
 
-describe('sessionOpenApprovals', () => {
-  const item = (id: string, extra: Partial<NotifyItem> = {}): NotifyItem => ({
+function item(id: string, extra: Partial<NotifyItem> = {}): NotifyItem {
+  return {
     id, ui: 'approve', title: `Q-${id}: Ship it?`, state: 'waiting', createdAt: 1,
     source: { name: 'worker', agent: 'Claude', paneId: 'member-pane', panelId: 'tab-1', session: { id: 'session-1', name: 'Doozy', paneId: 'orch-pane' } },
     ...extra,
-  });
-  const ids = ['session-1', 'orch-pane', 'member-pane'];
+  };
+}
 
-  it('lets a Session whose only approvals were dismissed pass the move check', () => {
-    const open = sessionOpenApprovals([item('1', { dismissedAt: 5 }), item('2', { dismissedAt: 6 })], ids);
-    expect(open).toEqual([]);
-    expect(heldBackChecks(open.length, [], false)).toEqual([]);
+describe('sessionApprovals', () => {
+  // The moving Session's tabs, and the card fields that file a card under it.
+  const ids = {
+    askedHere: (card: NotifyItem) => ['tab-1', 'orch-tab'].includes(card.source.panelId ?? ''),
+    filedHere: (card: NotifyItem) => card.source.session?.id === 'session-1' || card.connected?.id === 'session-1',
+  };
+
+  it('carries waiting approvals, dismissed ones too, and holds none of them (T-3, T-44)', () => {
+    const found = sessionApprovals([item('1', { dismissedAt: 5 }), item('2')], ids);
+    expect(found.carried.map(approval => approval.id)).toEqual(['1', '2']);
+    expect(found.held).toEqual([]);
   });
 
-  it('still blocks a Session with a dismissed and a genuinely open approval', () => {
-    const open = sessionOpenApprovals([item('1', { dismissedAt: 5 }), item('2')], ids);
-    expect(open.map(approval => approval.id)).toEqual(['2']);
-    expect(heldBackChecks(open.length, [], false)).toEqual([expect.objectContaining({ id: 'approvals', level: 'block', title: '1 open approval in this Session' })]);
-  });
-
-  it('holds the move for an answer in its Undo hold, and ignores other Sessions\' approvals', () => {
+  it('holds an answer in its Undo hold, and an open card that can\'t move; ignores other Sessions\' and ended ones', () => {
     const elsewhere = item('3', { source: { name: 'w', agent: 'Claude', paneId: 'other-pane', panelId: 't', session: { id: 'session-2', name: 'X', paneId: 'x' } } });
-    expect(sessionOpenApprovals([item('1', { state: 'sent' }), elsewhere, item('4', { state: 'answered' })], ids).map(approval => approval.id)).toEqual(['1']);
+    // Another Session's card that only mentions this Session (say, a link into its folder) is never this move's.
+    const mentions = item('8', { links: [{ label: 'x', path: '/p/.pane/sessions/session-1/plan.html' }], source: { name: 'w', agent: 'Claude', panelId: 't9', session: { id: 'session-2', name: 'X', paneId: 'x' } } });
+    // Filed under this Session but asked from a tab that isn't moving: it can't reach its asker there, so it holds the move.
+    const outside = item('9', { source: { name: 'w', agent: 'Claude', panelId: 'elsewhere-tab', session: { id: 'session-1', name: 'Doozy', paneId: 'orch-pane' } } });
+    // SAFETY: sessionApprovals reads only whether these fields are present, never their contents.
+    const secret = item('5', { secret: { project: 'p', name: 'TOKEN' } as NotifyItem['secret'] });
+    // SAFETY: as above, only its presence counts.
+    const prompt = item('6', { agentPrompt: {} as NotifyItem['agentPrompt'] });
+    const found = sessionApprovals([item('1', { state: 'sent' }), elsewhere, mentions, item('4', { state: 'answered' }), secret, prompt, item('7', { dismissedAt: 1, secret: secret.secret }), outside], ids);
+    expect(found.held.map(approval => approval.id)).toEqual(['1', '5', '6', '9']);
+    expect(found.carried).toEqual([]);
   });
 });

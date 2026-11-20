@@ -115,3 +115,30 @@ describe('MoveCoordinator.start', () => {
     expect((await coordinator.status({ sessionId: 'session' }))?.moveId).toBe(first.moveId);
   });
 });
+
+describe('MoveCoordinator.resume (T-44)', () => {
+  const card = (id: string) => ({ item: { id, ui: 'ask', title: `Q-${id}: go?`, state: 'waiting', createdAt: 1, source: { name: 'S', agent: 'Claude', panelId: 'orch' } } });
+  const handoff = (moveId: string, ids: string[]) => {
+    const dir = path.join(root, 'pane', 'moves-out', moveId);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'approvals.json'), JSON.stringify(ids.map(card)));
+    return path.join(dir, 'approvals.json');
+  };
+
+  it('puts back the cards of a move that never froze, and keeps those of a finished one away', async () => {
+    const lost = handoff('move-never-froze', ['1', '2']);
+    const done = handoff('move-finished', ['3']);
+    const adopted: string[] = [];
+    const servicesFixture = {
+      configManager: { getConfig: () => ({}) },
+      orchestrationSessionManager: { list: async () => ({ sessions: [{ id: 'gone', name: 'Moved away', move: { state: 'moved', machine: 'B', moveId: 'move-finished', at: '' } }] }) },
+      notifyService: { adoptMovedApprovals: (approvals: Array<{ item: { id: string } }>) => adopted.push(...approvals.map(approval => approval.item.id)) },
+    };
+    // SAFETY: the fixture supplies the exact AppServices members resume reads, with their call shapes.
+    const coordinator = new MoveCoordinator(servicesFixture as AppServices, new PaneCommandRegistry());
+    await coordinator.resume();
+    expect(adopted).toEqual(['1', '2']);
+    expect(fs.existsSync(lost)).toBe(false);
+    expect(fs.existsSync(done)).toBe(false);
+  });
+});

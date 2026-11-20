@@ -11,9 +11,11 @@ import { createBundle, createSnapshot } from './gitSnapshot';
 import { MoveImporter, type ImporterTabs, type TargetStatus } from './importer';
 import { gitSteps } from '../../test/gitBudget';
 import { settleAfterFreeze, type FreezeTarget } from './afterFreeze';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import type { PaneCommandValue } from '../../daemon/commandRegistry';
-import type { MoveManifest, MovePane } from './manifest';
+import type { MoveManifest, MovePane, MoveTab } from './manifest';
+import { assertHostBrowserFileNavigation } from '../browserPanelFiles';
+import { SESSION_MOVE_TARGET_CHANNELS } from '../../../../shared/types/sessionMove';
 
 /**
  * The target's build, start and abort against real git repositories and a scratch PANE_DIR, with
@@ -36,7 +38,9 @@ function memoryTabs(panels = new Map<string, ToolPanel>()): ImporterTabs & { pan
     panels,
     getPanel: id => panels.get(id),
     getPanelsForSession: paneId => [...panels.values()].filter(panel => panel.sessionId === paneId),
-    createPanel: async request => {
+    createPanel: async (request, options = {}) => {
+      // As PanelManager does: a remote call may not point a browser tab at a file unless host code granted it.
+      if (!options.hostFileGrant) assertHostBrowserFileNavigation(request.type, { isActive: false, customState: request.initialState?.customState });
       const existing = request.id ? panels.get(request.id) : undefined;
       if (existing) return existing;
       const panel: ToolPanel = {
@@ -82,6 +86,8 @@ function fakeServices(repo: string, setupGate?: Promise<void>, panels = new Map<
   });
   // Pane notices the importer shows the person.
   const notices: Array<{ title?: string; context?: string }> = [];
+  // Approvals that arrived with a move, as Notify took them in here.
+  const adopted: Array<{ item: JsonObject; report?: JsonObject }> = [];
   const rekey = (from: string, to: string, panelIds: Record<string, string>) => {
     const row = rows.get(from);
     if (row) { rows.delete(from); rows.set(to, { ...row, id: to }); }
@@ -126,11 +132,14 @@ function fakeServices(repo: string, setupGate?: Promise<void>, panels = new Map<
     worktreeManager: { getWorktreePath: (_project: string, name: string) => path.join(root, 'worktrees', name) },
     taskQueue: { runWorktreeSetup: async () => { await setupGate; } },
     orchestrationSessionManager: { list: async () => ({ sessions }), importArriving, removeArriving, setMoveMark },
-    notifyService: { queue: { ask: async (request: { question: { title?: string; context?: string } }) => { notices.push(request.question); return { answer: 'ok' }; } } },
+    notifyService: {
+      queue: { ask: async (request: { question: { title?: string; context?: string } }) => { notices.push(request.question); return { answer: 'ok' }; } },
+      adoptMovedApprovals: (approvals: typeof adopted) => { adopted.push(...approvals); },
+    },
   };
   // SAFETY: the fixture supplies the exact AppServices members the importer reads, with their call shapes.
   const services = fixture as AppServices;
-  return { services, rows, replaced, active, setMoveMark, importArriving, removeArriving, sessions, notices };
+  return { services, rows, replaced, active, setMoveMark, importArriving, removeArriving, sessions, notices, adopted };
 }
 
 let moveCount = 0;
@@ -244,16 +253,53 @@ describe('MoveImporter', { timeout: BUILD_TIMEOUT_MS }, () => {
     expect(fs.readFileSync(path.join(folder, 'notes.md'), 'utf8')).toBe(`see ${folder}/x`);
   });
 
-  it('refuses a package that carries open approvals, and keeps nothing (F-9)', async () => {
-    const { services, importArriving } = fakeServices(target);
+  it('carries open approvals: Notify here takes them in when the move starts, never before, with paths for this machine (T-44)', async () => {
+    const { services, adopted } = fakeServices(target);
     const importer = new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
     const moveId = newMoveId();
-    await stage(importer, manifest(moveId, [], { approvals: [{ id: 'n-1' }] }), {});
+    const card = {
+      id: 'in-7', ui: 'options', title: 'Q-7: Ship it?', state: 'waiting', createdAt: 1, originKind: 'worker', machine: 'A',
+      source: { name: 'Orchestrator', agent: 'Claude', paneId: '__owner__', panelId: 't-agent', session: { id: 'sess-1', name: 'S', paneId: '__owner__' } },
+      links: [{ label: 'plan', path: '/a/.pane/sessions/sess-1/plan.html' }, { label: 'elsewhere', path: '/a/secrets.txt' }],
+      relayedBy: { panelId: 'some-other-tab', name: 'x' },
+    };
+    const report = { id: 'in-7', sessionId: 'sess-1', kind: 'report', at: '2026-11-20T18:00:00.000Z', paneId: '__owner__', paneName: 'S', panelId: 't-agent' };
+    await stage(importer, manifest(moveId, [ownerWithAgent()], { approvals: [{ item: card, report }] }), {});
+    importer.build(moveId);
+    const built = await waitStage(importer, moveId, ['built', 'failed']);
+    expect(built.error?.message ?? built.stage).toBe('built');
+    expect(built.approvals).toBe(1);
+    // Built is not committed: the source can still roll back, so nothing shows here yet.
+    expect(adopted).toEqual([]);
+    importer.start(moveId);
+    expect((await waitStage(importer, moveId, ['started', 'failed'])).stage).toBe('started');
+    expect(adopted).toHaveLength(1);
+    expect(adopted[0].report).toEqual(report);
+    expect(adopted[0].item).toMatchObject({ id: 'in-7', title: 'Q-7: Ship it?', connected: { kind: 'session', id: 'sess-1', paneId: '__owner__' } });
+    // This machine's path for the Session folder's file; a path outside what moved, and the source's relay, are dropped.
+    expect(adopted[0].item.links).toEqual([{ label: 'plan', path: `${sessionWorkspacePath('sess-1')}/plan.html` }]);
+    expect(adopted[0].item.relayedBy).toBeUndefined();
+
+    // A commit resumed after a restart (the ledger still says committed) never takes them in again.
+    const entry = JSON.parse(fs.readFileSync(ledgerFile(moveId), 'utf8'));
+    fs.writeFileSync(ledgerFile(moveId), JSON.stringify({ ...entry, decision: 'committed', done: {} }));
+    const restarted = new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
+    await restarted.status(moveId);
+    expect((await waitStage(restarted, moveId, ['started', 'failed'])).stage).toBe('started');
+    expect(adopted).toHaveLength(1);
+  });
+
+  it('refuses approvals for a tab the move didn\'t bring, before anything shows here (T-44)', async () => {
+    const { services, adopted } = fakeServices(target);
+    const importer = new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
+    const moveId = newMoveId();
+    const card = { id: 'n-1', ui: 'ask', title: 'Q-8: go?', state: 'waiting', createdAt: 1, source: { name: 'x', agent: 'Claude', panelId: 'a-tab-already-here' } };
+    await stage(importer, manifest(moveId, [ownerWithAgent()], { approvals: [{ item: card }] }), {});
     importer.build(moveId);
     const status = await waitStage(importer, moveId, ['built', 'failed']);
     expect(status.stage).toBe('failed');
-    expect(status.error?.message).toMatch(/approval/);
-    expect(importArriving).not.toHaveBeenCalled();
+    expect(status.error?.message).toMatch(/a tab that didn't come with it/);
+    expect(adopted).toEqual([]);
   });
 
   it('a failed move back puts back the archived Pane, its tabs and its snapshot ref, and deletes nothing it saved (F-6)', async () => {
@@ -356,6 +402,123 @@ describe('MoveImporter', { timeout: BUILD_TIMEOUT_MS }, () => {
     await expect(importer.abort(moveId)).rejects.toThrow(/already started/);
     importer.start(moveId);
     expect((await waitStage(importer, moveId, ['started', 'failed'])).stage).toBe('started');
+  });
+});
+
+/** A browser tab showing `currentUrl`, as `runpane panels open --file` leaves it. */
+function previewTab(id: string, currentUrl: string): MoveTab {
+  return { id, type: 'browser', title: `${id}.html`, metadata: { createdAt: '', lastActiveAt: '', position: 0 }, state: { currentUrl }, working: false, interrupted: false, running: false };
+}
+
+describe('MoveImporter with file preview tabs (T-42)', { timeout: BUILD_TIMEOUT_MS }, () => {
+  let target: string;
+  let bundle: Buffer;
+
+  beforeEach(async () => {
+    ({ target, bundle } = await gitFixture('pane-importer-preview-'));
+  });
+  afterEach(() => {
+    if (previousPaneDir === undefined) delete process.env.PANE_DIR;
+    else process.env.PANE_DIR = previousPaneDir;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  /** The build as the source starts it: a call over the Pane-to-Pane connection, so a remote command here. */
+  async function buildRemotely(importer: MoveImporter, moveId: string): Promise<TargetStatus> {
+    const registry = new PaneCommandRegistry();
+    registry.register(SESSION_MOVE_TARGET_CHANNELS.build, () => importer.build(moveId));
+    await registry.invokeRemote(SESSION_MOVE_TARGET_CHANNELS.build, []);
+    return waitStage(importer, moveId, ['built', 'failed']);
+  }
+
+  // A Session moves only between macOS and Linux (the target's preflight refuses Windows): this test's POSIX file URLs aren't run there.
+  it.skipIf(process.platform === 'win32')('carries previews of files that moved, at their new path, and reports the ones it could not carry', async () => {
+    const tabs = memoryTabs();
+    const { services } = fakeServices(target, undefined, tabs.panels);
+    const importer = new MoveImporter(services, new PaneCommandRegistry(), path.join(root, 'moves'), tabs);
+    const moveId = newMoveId();
+    const owner: MovePane = { ...ownerWithAgent(), tabs: [
+      previewTab('in-folder', 'file:///a/.pane/sessions/sess-1/report%20v2.html#top'),
+      previewTab('outside', 'file:///a/Downloads/elsewhere.html'),
+      previewTab('missing', 'file:///a/.pane/sessions/sess-1/gone.html'),
+      previewTab('web', 'https://example.invalid/'),
+    ] };
+    const pane = member('p1');
+    pane.tabs = [previewTab('in-worktree', 'file:///a/worktrees/p1/a.txt')];
+    await stage(importer, manifest(moveId, [owner, pane], { sessionFolder: { root: '/a/.pane/sessions/sess-1', files: ['report v2.html'] } }), {
+      'panes/p1.bundle': bundle, 'session/report v2.html': '<h1>report</h1>',
+    });
+
+    const status = await buildRemotely(importer, moveId);
+
+    expect(status.error?.message ?? status.stage).toBe('built');
+    const folder = sessionWorkspacePath('sess-1');
+    const urlOf = (id: string) => decodeBoundary(tabs.panels.get(id)?.state.customState ?? {}, boundary.object({ currentUrl: boundary.optional(boundary.string) })).currentUrl;
+    expect(urlOf('in-folder')).toBe(`file://${folder}/report%20v2.html#top`);
+    expect(urlOf('in-worktree')).toBe(`file://${path.join(root, 'worktrees', 'p1')}/a.txt`);
+    expect(urlOf('web')).toBe('https://example.invalid/');
+    expect(tabs.panels.has('outside')).toBe(false);
+    expect(tabs.panels.has('missing')).toBe(false);
+    expect(status.previewsNotCarried).toEqual([
+      'outside.html (/a/Downloads/elsewhere.html): not carried, the file is outside the Session\'s worktrees and folder, so it stayed on A',
+      'missing.html (/a/.pane/sessions/sess-1/gone.html): not carried, the file didn\'t come with the move (ignored, or gone from A)',
+    ]);
+  });
+
+  // A Session moves only between macOS and Linux (the target's preflight refuses Windows): this test's POSIX file URLs aren't run there.
+  it.skipIf(process.platform === 'win32')('never grants a file the move did not place: a worktree it skipped, or one setup wrote or replaced', async () => {
+    let release!: () => void;
+    const tabs = memoryTabs();
+    const { services } = fakeServices(target, new Promise(resolve => { release = resolve; }), tabs.panels);
+    const importer = new MoveImporter(services, new PaneCommandRegistry(), path.join(root, 'moves'), tabs);
+    const moveId = newMoveId();
+    // A target file in a worktree a Pane without a bundle names, which the build never places.
+    fs.mkdirSync(path.join(root, 'worktrees', 'p9'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'worktrees', 'p9', 'private.html'), 'target only');
+    const skipped: MovePane = { ...member('p9'), bundle: null, snapshot: null };
+    const owner: MovePane = { ...ownerWithAgent(), tabs: [
+      previewTab('skipped', 'file:///a/worktrees/p9/private.html'),
+      previewTab('setup-output', 'file:///a/worktrees/p1/generated.html'),
+      previewTab('moved-json', 'file:///a/.pane/sessions/sess-1/moved.json'),
+      previewTab('replaced', 'file:///a/worktrees/p1/a.txt'),
+    ] };
+    await stage(importer, manifest(moveId, [owner, member('p1'), skipped]), { 'panes/p1.bundle': bundle });
+    const building = buildRemotely(importer, moveId);
+    // Setup runs: it writes the file the source previewed, here.
+    const generated = path.join(root, 'worktrees', 'p1', 'generated.html');
+    for (let attempt = 0; attempt < 300 && (await importer.status(moveId)).detail !== 'Pane p1: setup'; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+    fs.writeFileSync(generated, 'made by setup');
+    // Setup also rewrites a file the move did bring: what is there now isn't what moved.
+    fs.writeFileSync(path.join(root, 'worktrees', 'p1', 'a.txt'), 'rewritten by setup\n');
+    release();
+    const status = await building;
+    expect(status.error?.message ?? status.stage).toBe('built');
+    expect(['skipped', 'setup-output', 'moved-json', 'replaced'].filter(id => tabs.panels.has(id))).toEqual([]);
+    expect(status.previewsNotCarried).toHaveLength(4);
+  });
+
+  it('a cancelled move puts back this machine\'s own file preview it set aside, though the source asked remotely', async () => {
+    const tabs = memoryTabs();
+    const { services } = fakeServices(target, undefined, tabs.panels);
+    // This machine's own preview, opened here (a host grant), with the ID of a tab that arrives.
+    const own = `file://${path.join(root, 'here.html')}`;
+    fs.writeFileSync(path.join(root, 'here.html'), '<p>here</p>');
+    await tabs.createPanel({ id: 'web', sessionId: 'elsewhere', type: 'browser', title: 'here.html', initialState: { customState: { currentUrl: own } } });
+    const importer = new MoveImporter(services, new PaneCommandRegistry(), path.join(root, 'moves'), tabs);
+    const moveId = newMoveId();
+    await stage(importer, manifest(moveId, [{ ...ownerWithAgent(), tabs: [previewTab('web', 'https://example.invalid/')] }]), {});
+    expect((await buildRemotely(importer, moveId)).stage).toBe('built');
+
+    const registry = new PaneCommandRegistry();
+    registry.register(SESSION_MOVE_TARGET_CHANNELS.abort, () => importer.abort(moveId));
+    expect(await registry.invokeRemote(SESSION_MOVE_TARGET_CHANNELS.abort, [])).toMatchObject({ stage: 'aborted' });
+    expect(tabs.panels.get('web')?.state.customState).toEqual({ currentUrl: own });
+  });
+
+  it('a remote edit still cannot point a browser tab at a file', () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('panels:create', () => memoryTabs().createPanel({ sessionId: 'p1', type: 'browser', initialState: { customState: { currentUrl: 'file:///etc/passwd' } } }));
+    return expect(registry.invokeRemote('panels:create', [])).rejects.toThrow(/file preview on the host/);
   });
 });
 

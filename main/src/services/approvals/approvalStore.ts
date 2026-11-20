@@ -124,6 +124,11 @@ export class ApprovalStore {
     this.ackStatement.run({ id, at, decision: decision ?? null });
   }
 
+  /** A report back in the inbox (it arrived with a moved Session): not acknowledged, whatever an earlier stay here recorded. */
+  reopenInboxItem(id: string): void {
+    this.db.prepare('UPDATE approvals SET acked_at = NULL WHERE id = ?').run(id);
+  }
+
   /** A report the inbox no longer holds because the worker moved on, or for space. */
   dropInboxItem(id: string, at: number): void {
     this.ackStatement.run({ id, at, decision: null });

@@ -23,16 +23,27 @@ export interface HeldBackTab {
   queued: number;
 }
 
+/** A Session's approvals as a move sees them: the waiting cards it carries, and those it can't carry yet. */
+export interface SessionApprovals {
+  carried: NotifyItem[];
+  held: NotifyItem[];
+}
+
 /**
- * What can't travel yet and would be lost or stuck on the other machine: open approvals (the
- * target's Notify wouldn't show them until Pane restarts there) and chat messages waiting in a tab
- * that won't send them before it stops (their full text stays in this machine's chat spool).
- * `stopped`: asked once every tab stopped, when no queue drains any more.
+ * What can't travel yet and would be lost or stuck on the other machine: approvals the move can't
+ * carry (an answer in its Undo hold, a secret, lease or permission prompt), and chat messages waiting
+ * in a tab that won't send them before it stops (their full text stays in this machine's chat spool).
+ * Waiting approvals move with the Session (T-44). `stopped`: asked once every tab stopped, when no queue drains any more.
  */
-export function heldBackChecks(approvals: number, tabs: readonly HeldBackTab[], stopped: boolean): SessionMoveCheck[] {
+export function heldBackChecks(approvals: SessionApprovals, tabs: readonly HeldBackTab[], stopped: boolean): SessionMoveCheck[] {
   const checks: SessionMoveCheck[] = [];
-  if (approvals) {
-    checks.push({ id: 'approvals', level: 'block', title: `${approvals} open approval${approvals === 1 ? '' : 's'} in this Session`, detail: `Approvals can't move yet. Answer or dismiss ${approvals === 1 ? 'it' : 'them'} in Notify, then check again.` });
+  const held = approvals.held.length;
+  if (held) {
+    const titles = approvals.held.map(item => `“${item.title}”`).join(', ');
+    checks.push({ id: 'approvals', level: 'block', title: `${held} approval${held === 1 ? '' : 's'} in this Session can't move yet`, detail: `${titles}: an answer still in its Undo hold, or a secret, lease or permission prompt, which stays on this machine. Wait a few seconds, or answer or dismiss ${held === 1 ? 'it' : 'them'} in Approvals, then check again.` });
+  } else if (approvals.carried.length) {
+    const carried = approvals.carried.length;
+    checks.push({ id: 'approvals', level: 'ok', title: `${carried} open approval${carried === 1 ? '' : 's'} move${carried === 1 ? 's' : ''} with the Session`, detail: 'Answer them in Approvals on the other machine; each answer goes to its tab there.' });
   }
   for (const tab of tabs) {
     // A running chat sends its queue before its turn ends; a stopped one keeps it.
@@ -43,14 +54,34 @@ export function heldBackChecks(approvals: number, tabs: readonly HeldBackTab[], 
   return checks;
 }
 
+/** Whether the move can carry this waiting card: one whose answer is typed into its tab on the other machine. */
+function carriable(item: NotifyItem): boolean {
+  return !item.secret && !item.lease && !item.agentPrompt && !!item.source.panelId;
+}
+
+/** How a move tells a card is its Session's, from the card's structured references. */
+export interface ApprovalOwnership {
+  /** Its asking tab is one of the moving Session's tabs. */
+  askedHere(item: NotifyItem): boolean;
+  /** It is filed under the moving Session (connected to it, or asked in it). */
+  filedHere(item: NotifyItem): boolean;
+}
+
 /**
- * The approvals that hold a move back: open for the Session (a dismissed one doesn't count), or an
- * answer still in its Undo hold, which has to reach its tab first. `ids` are the Session's and its Panes'.
+ * A Session's approvals: waiting ones it carries (asked by one of its tabs; dismissed ones too), and
+ * those that hold it back: an answer still in its Undo hold, which has to reach its tab first, and an
+ * open card of the Session that can't move (a secret, lease or prompt, or asked from outside its tabs).
+ * A dismissed card that can't move doesn't count (T-3).
  */
-export function sessionOpenApprovals(items: readonly NotifyItem[], ids: readonly string[]): NotifyItem[] {
-  return items.filter(item => {
-    if (item.state !== 'sent' && !isOpenForSession(item)) return false;
-    const text = JSON.stringify(item);
-    return ids.some(id => text.includes(id));
-  });
+export function sessionApprovals(items: readonly NotifyItem[], owner: ApprovalOwnership): SessionApprovals {
+  const found: SessionApprovals = { carried: [], held: [] };
+  for (const item of items) {
+    if (item.state !== 'waiting' && item.state !== 'sent') continue;
+    const askedHere = owner.askedHere(item);
+    if (!askedHere && !owner.filedHere(item)) continue;
+    if (item.state === 'sent') found.held.push(item);
+    else if (askedHere && carriable(item)) found.carried.push(item);
+    else if (isOpenForSession(item)) found.held.push(item);
+  }
+  return found;
 }

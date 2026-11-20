@@ -47,6 +47,30 @@ describe('SessionInbox', () => {
     expect(reopened.list('session-b')).toEqual([]);
   });
 
+  it('a moved Session\'s question leaves one inbox without ending it, and the other machine acks it with its decision (T-44)', () => {
+    const inbox = open();
+    const ended: string[] = [];
+    inbox.subscribeEnded(item => ended.push(item.id));
+    journal.append(entry('agent.report', 'pane-1', { report: { state: 'blocked', question: 'Q-4: which region?', reportedAt: '2026-10-15T10:00:00.000Z' } }));
+    const [question] = inbox.list('session-a');
+    expect(inbox.release([question.id])).toEqual([question]);
+    expect(inbox.list('session-a')).toEqual([]);
+    expect(ended).toEqual([]);
+
+    // The other machine, which had this question acknowledged from an earlier stay there.
+    const otherDb = new Database(':memory:');
+    const otherStore = new ApprovalStore(otherDb, 'studio');
+    otherStore.saveInboxItem(question, 'S');
+    otherStore.ackInboxItem(question.id, 1);
+    const other = new SessionInbox(otherStore, { sessionIdsFor: () => [], itemsPerSession: () => 3 });
+    other.takeIn([question]);
+    other.takeIn([question]);
+    expect(other.list('session-a').map(item => item.id)).toEqual([question.id]);
+    expect(new SessionInbox(otherStore, { sessionIdsFor: () => [], itemsPerSession: () => 3 }).list('session-a').map(item => item.id)).toEqual([question.id]);
+    expect(other.ack([question.id], 'session-a', 'D-9').acknowledged).toEqual([question.id]);
+    otherDb.close();
+  });
+
   it('lists every Session’s items and tells listeners when a report arrives or is acknowledged', () => {
     const inbox = open();
     let heard = 0;

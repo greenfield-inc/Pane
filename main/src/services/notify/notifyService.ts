@@ -29,7 +29,7 @@ import {
   type NotifyWindowSize,
   type NotifyTodoLink,
 } from '../../../../shared/types/notify';
-import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed } from './notifyQueue';
+import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed, type MoveStayed } from './notifyQueue';
 import { PaneError, paneErrorText } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
@@ -45,6 +45,18 @@ import { agentConfig } from '../../../../shared/agents';
 import { todosEnabled } from '../todos/todosFeature';
 
 const agentName = (agentType: string | undefined): string => (agentType ? agentConfig(agentType)?.label : undefined) ?? 'Agent';
+
+/** An approval moving with its Session: the card, and for a worker's question its inbox item. */
+export interface MovedApproval {
+  item: NotifyItem;
+  report?: RunpaneInboxItem;
+}
+
+/** What a move took from this machine, and the cards answered meanwhile, which stayed. */
+export interface MovedApprovalsTaken {
+  carried: MovedApproval[];
+  stayed: MoveStayed[];
+}
 
 export interface NotifyServiceDependencies {
   configManager: ConfigManager;
@@ -101,7 +113,12 @@ export interface NotifyServiceDependencies {
   /** Hears Session changes, which can end their items. */
   onSessionsChanged?: (listener: () => void) => () => void;
   /** Every Session's unacknowledged worker reports; a blocked one's question is a card. */
-  inbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void; subscribeEnded(listener: (ended: SessionInboxEnded) => void): () => void; ack?(ids: readonly string[]): void };
+  inbox?: {
+    all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void; subscribeEnded(listener: (ended: SessionInboxEnded) => void): () => void; ack?(ids: readonly string[]): void;
+    /** A moved Session's items leave, or arrive (T-44). */
+    release?(ids: readonly string[]): RunpaneInboxItem[];
+    takeIn?(items: readonly RunpaneInboxItem[]): void;
+  };
   /** This machine's approvals table. */
   store?: ApprovalStore;
   /** How moving the saved inbox into the table went on this start. */
@@ -323,6 +340,56 @@ export class NotifyService {
         ...summaryFiles(entry.report?.summaryPath, card.summaryPage),
       });
     }
+  }
+
+  // ── A Session moving to another machine (T-44) ─────────────────────────
+
+  /**
+   * Before the move stops the Session's tabs: its waiting cards are held, and any its tabs post
+   * until the pack, so stopping them doesn't end them.
+   */
+  holdMovingApprovals(moveId: string, ids: readonly string[], panelIds: readonly string[]): string[] {
+    return this.queue.holdForMove(moveId, ids, panelIds);
+  }
+
+  /** The move ended before it took them: they are this machine's again. */
+  releaseMovingApprovals(moveId: string, ids: readonly string[]): void {
+    this.queue.releaseMoveHold(moveId, ids);
+  }
+
+  /** What the move would take, changing nothing: each waiting card, with a worker question's inbox item. Saved before anything is taken. */
+  movingApprovals(ids: readonly string[]): MovedApproval[] {
+    const wanted = new Set(ids);
+    const reports = new Map((this.deps.inbox?.all() ?? []).map(report => [report.id, report]));
+    return this.queue.snapshot().items.filter(item => wanted.has(item.id) && item.state === 'waiting' && (item.machineId ?? 'local') === 'local').map(item => {
+      const approval: MovedApproval = { item: JSON.parse(JSON.stringify(item)) };
+      const report = item.originKind === 'worker' ? reports.get(item.id) : undefined;
+      if (report) approval.report = report;
+      return approval;
+    });
+  }
+
+  /**
+   * The move packs: the held cards leave this machine, each worker question with its inbox item
+   * (which the orchestrator acks), and those answered meanwhile stay here with their answer.
+   */
+  takeMovingApprovals(moveId: string, ids: readonly string[], target: string): MovedApprovalsTaken {
+    const { carried, stayed } = this.queue.takeForMove(moveId, ids, target);
+    const reports = new Map((this.deps.inbox?.release?.(carried.filter(item => item.originKind === 'worker').map(item => item.id)) ?? []).map(report => [report.id, report]));
+    const approvals = carried.map(item => {
+      const approval: MovedApproval = { item };
+      const report = reports.get(item.id);
+      if (report) approval.report = report;
+      return approval;
+    });
+    return { carried: approvals, stayed };
+  }
+
+  /** Approvals that arrived with a moved Session, or came back from a move that didn't happen: each card first, so its worker question isn't carded twice. */
+  adoptMovedApprovals(approvals: readonly MovedApproval[]): void {
+    this.queue.takeIn(approvals.map(approval => approval.item));
+    const reports = approvals.flatMap(approval => approval.report ? [approval.report] : []);
+    if (reports.length) this.deps.inbox?.takeIn?.(reports);
   }
 
   private workerQuestionEnded({ id, how, decision }: SessionInboxEnded): void {

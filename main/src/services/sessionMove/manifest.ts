@@ -1,6 +1,7 @@
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { SESSION_MOVE_MANIFEST_VERSION } from '../../../../shared/types/sessionMove';
 import { FILE_STORE_AGENTS, type FileStoreAgent } from '../../../../packages/runpane/src/nativeSession';
+import type { MovedApproval } from '../notify/notifyService';
 
 /**
  * The package a source sends: one manifest naming every file it carries with its size and
@@ -105,6 +106,7 @@ export interface MoveManifest {
   session: JsonObject;
   sessionFolder: { root: string; files: string[] };
   panes: MovePane[];
+  /** Waiting approvals the move carries (T-44): each a MovedApproval, read with `movedApprovals`. */
   approvals: JsonObject[];
   files: PackageFile[];
 }
@@ -245,3 +247,26 @@ export const sessionMoveCheckSchema = boundary.object({
   detail: boundary.optional(boundary.string),
   fix: boundary.optional(sessionMoveFixSchema),
 });
+
+const movedApprovalSchema = boundary.object({
+  item: boundary.object({
+    id: boundary.nonEmptyString, title: boundary.string, state: boundary.literal('waiting'),
+    source: boundary.object({ panelId: boundary.nonEmptyString }),
+  }),
+  report: boundary.optional(boundary.object({ id: boundary.nonEmptyString, sessionId: boundary.nonEmptyString, panelId: boundary.nonEmptyString })),
+});
+
+/**
+ * A manifest's approvals, checked: each a waiting card with the tab its answer goes to, and never a
+ * secret, lease or permission prompt, which stay on the machine that asked (rules.ts `sessionApprovals`).
+ */
+export function movedApprovals(values: readonly JsonObject[]): MovedApproval[] {
+  return values.map(value => {
+    const checked = decodeBoundary(value, movedApprovalSchema);
+    const item = decodeBoundary(value.item, boundary.jsonObject);
+    if ('secret' in item || 'lease' in item || 'agentPrompt' in item) throw new Error(`Approval ${checked.item.id} is a kind that can't move.`);
+    if (checked.report && checked.report.id !== checked.item.id) throw new Error(`Approval ${checked.item.id} came with another question's inbox item.`);
+    // SAFETY: checked above, and written by the source's Pane from its own NotifyItem and RunpaneInboxItem; the queue and inbox save them as they would their own.
+    return JSON.parse(JSON.stringify(value)) as MovedApproval;
+  });
+}

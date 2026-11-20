@@ -92,7 +92,7 @@ export interface SessionInboxEnded {
 }
 
 /** What the inbox keeps in the table: its rows and its place in the journal. */
-export type SessionInboxStore = Pick<ApprovalStore, 'unackedInboxItems' | 'saveInboxItem' | 'ackInboxItem' | 'dropInboxItem' | 'meta' | 'setMeta' | 'recordDecision' | 'transaction'>;
+export type SessionInboxStore = Pick<ApprovalStore, 'unackedInboxItems' | 'saveInboxItem' | 'ackInboxItem' | 'dropInboxItem' | 'meta' | 'setMeta' | 'recordDecision' | 'transaction' | 'reopenInboxItem'>;
 
 /** One-time import of session-inbox.json (see importJsonStoreOnce): writes its rows and its place in the journal. */
 export function importSessionInboxFile(parsed: JsonValue, store: Pick<SessionInboxStore, 'saveInboxItem' | 'setMeta'>, sessionName: (sessionId: string) => string): number {
@@ -197,6 +197,29 @@ export class SessionInbox {
     const recorded = decision ? [...wanted].filter(id => !cleared.has(id) && this.store.recordDecision(id, decision)) : [];
     for (const id of recorded) this.emitEnded({ id, how: 'acked', decision });
     return { acknowledged: [...acknowledged, ...recorded], unknown: [...wanted].filter(id => !cleared.has(id) && !recorded.includes(id)) };
+  }
+
+  /**
+   * Its Session moved to another machine (T-44): these items leave this inbox without ending their
+   * cards, which moved with them. Returns the items taken.
+   */
+  release(ids: readonly string[]): RunpaneInboxItem[] {
+    this.ensureLoaded();
+    const wanted = new Set(ids);
+    const taken = this.items.filter(item => wanted.has(item.id));
+    if (taken.length) this.replace(this.items.filter(item => !wanted.has(item.id)));
+    return taken;
+  }
+
+  /** Items that arrived with a moved Session, or came back from a move that didn't happen; one already here is left as it is. */
+  takeIn(items: readonly RunpaneInboxItem[]): void {
+    this.ensureLoaded();
+    const have = new Set(this.items.map(item => item.id));
+    const arriving = items.filter(item => !have.has(item.id));
+    if (!arriving.length) return;
+    this.replace([...this.items, ...arriving]);
+    // Saved above; a row an earlier stay here acknowledged is open again.
+    for (const item of arriving) this.store.reopenInboxItem(item.id);
   }
 
   /** Clears every item of a Session. */

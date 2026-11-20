@@ -506,11 +506,22 @@ Pane then packs, sends and rebuilds the Session:
 - the Session folder is copied with its text files rewritten for that machine's
   paths. `moved.json` in the folder records the path map, for anything that
   still names the old paths (conversation history keeps them);
-- terminal tabs keep their scrollback. Open approvals don't move yet: the
-  check asks you to answer them first. One you dismissed doesn't count as open
-  and doesn't hold the move back. When the move stops the tab that asked it,
-  it ends like any question whose asker stopped: the agent hears it went
-  unanswered, and the card leaves Approvals. Answer it first if it matters.
+- a browser tab previewing a file (`runpane panels open --file`) moves when
+  the file moved with the Session: in one of its worktrees or its Session
+  folder, and there on the other machine. It opens the file at its new path
+  there. Any other preview (a file elsewhere, an ignored file, one that's
+  gone) stays behind, and the done screen names each and why. A preview
+  never stops the move;
+- terminal tabs keep their scrollback;
+- waiting approvals move with the Session, dismissed ones too. Stopping the
+  tab that asked doesn't end them; they leave this machine's Approvals when the
+  move packs and show in Approvals on the other machine once it starts there.
+  An answer there is typed into the asking tab (`answer: Q-n → …`), and a
+  worker's question moves with its inbox item, so `runpane inbox ack` and its
+  decision work there. A card answered while the move stops the tabs stays here
+  with its answer, and the done screen names it so you can tell the agent. The
+  check holds the move for an answer still in its few-second Undo hold, and for
+  a secret, lease or permission prompt, which can't move.
 
 Until it starts, the Session shows as "Arriving from <machine>" there. Once
 this machine has frozen its copy (shown as "Moving to <machine>"), the other

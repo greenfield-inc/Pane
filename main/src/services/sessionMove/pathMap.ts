@@ -1,5 +1,6 @@
 import { claudeProjectDirName } from '../agentTranscript/claude';
 import type { SessionMovePathEntry } from '../../../../shared/types/sessionMove';
+import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 /**
  * Turns any source path into the target's: each worktree, each repository, the Pane folder, and
@@ -57,4 +58,29 @@ export function rewriteText(map: PathMap, text: string): string {
   const encodedFroms = [...encoded.keys()].sort((a, b) => b.length - a.length);
   const encodedPattern = new RegExp(`(?<![A-Za-z0-9._-])(${encodedFroms.map(escape).join('|')})(?![A-Za-z0-9])`, 'g');
   return rewritten.replace(encodedPattern, (match: string) => encoded.get(match) ?? match);
+}
+
+/**
+ * Rewrites every source path in a JSON value (tab state, a Session record, a card), one string at a
+ * time: never the serialised text, where a target path with `\\` or `"` (every Windows path, and
+ * legal in macOS and Linux names) would come out as broken or different JSON.
+ */
+export function rewriteJson(map: PathMap, value: JsonValue): JsonValue {
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Branches on the kind of a JsonValue its caller already holds typed; nothing here is parsed.
+  if (typeof value === 'string') return rewriteText(map, value);
+  if (Array.isArray(value)) return value.map(item => rewriteJson(map, item));
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- As above: a JsonValue object, walked key by key.
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, rewriteJson(map, item)]));
+  return value;
+}
+
+/** A layout as Pane saves it (JSON text), with this machine's paths; text that isn't JSON is rewritten as text. */
+export function rewriteJsonText(map: PathMap, text: string): string {
+  let parsed: JsonValue;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return rewriteText(map, text);
+  }
+  return JSON.stringify(rewriteJson(map, parsed));
 }

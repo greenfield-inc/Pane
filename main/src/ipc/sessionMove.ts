@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron';
-import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import { isRemotePaneCommand, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import { SESSION_MOVE_CHANNELS, SESSION_MOVE_TARGET_CHANNELS } from '../../../shared/types/sessionMove';
 import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -36,13 +36,22 @@ export function registerSessionMoveHandlers(ipcMain: IpcMain, services: AppServi
   register(SESSION_MOVE_CHANNELS.cancel, (request: PaneCommandValue) => coordinator.cancel(decodeBoundary(request, sessionRequestSchema)));
   register(SESSION_MOVE_CHANNELS.peers, async () => ({ peers: testPeers().map(peer => peer.name) }));
 
-  register(SESSION_MOVE_TARGET_CHANNELS.preflight, (request: PaneCommandValue) => importer.preflight(decodeBoundary(request, preflightRequestSchema).manifest));
-  register(SESSION_MOVE_TARGET_CHANNELS.fix, (request: PaneCommandValue) => importer.fix(decodeBoundary(request, fixRequestSchema).fix));
-  register(SESSION_MOVE_TARGET_CHANNELS.write, (request: PaneCommandValue) => importer.write(decodeBoundary(request, writeRequestSchema)));
-  register(SESSION_MOVE_TARGET_CHANNELS.build, async (request: PaneCommandValue) => importer.build(moveId(request)));
-  register(SESSION_MOVE_TARGET_CHANNELS.start, async (request: PaneCommandValue) => importer.start(moveId(request)));
-  register(SESSION_MOVE_TARGET_CHANNELS.abort, (request: PaneCommandValue) => importer.abort(moveId(request)));
-  register(SESSION_MOVE_TARGET_CHANNELS.status, async (request: PaneCommandValue) => importer.status(moveId(request)));
+  // Over the tailnet the source's calls arrive here as remote commands. A loopback test peer's come
+  // over the local socket instead, so a dev build that has test peers runs them as remote too, and a
+  // move between two dev instances meets the same checks a real one does (T-42).
+  const remoteInTests = testPeers().length > 0;
+  const target = (channel: string, handler: (request: PaneCommandValue) => PaneCommandValue | Promise<PaneCommandValue>) =>
+    register(channel, (request: PaneCommandValue) => remoteInTests && !isRemotePaneCommand()
+      ? commandRegistry.invokeRemote(channel, [request])
+      : handler(request));
+
+  target(SESSION_MOVE_TARGET_CHANNELS.preflight, (request: PaneCommandValue) => importer.preflight(decodeBoundary(request, preflightRequestSchema).manifest));
+  target(SESSION_MOVE_TARGET_CHANNELS.fix, (request: PaneCommandValue) => importer.fix(decodeBoundary(request, fixRequestSchema).fix));
+  target(SESSION_MOVE_TARGET_CHANNELS.write, (request: PaneCommandValue) => importer.write(decodeBoundary(request, writeRequestSchema)));
+  target(SESSION_MOVE_TARGET_CHANNELS.build, async (request: PaneCommandValue) => importer.build(moveId(request)));
+  target(SESSION_MOVE_TARGET_CHANNELS.start, async (request: PaneCommandValue) => importer.start(moveId(request)));
+  target(SESSION_MOVE_TARGET_CHANNELS.abort, (request: PaneCommandValue) => importer.abort(moveId(request)));
+  target(SESSION_MOVE_TARGET_CHANNELS.status, async (request: PaneCommandValue) => importer.status(moveId(request)));
 
   commandRegistry.bindChannels(ipcMain, SOURCE_CHANNELS);
 
