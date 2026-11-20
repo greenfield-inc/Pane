@@ -3007,8 +3007,9 @@ export class TerminalPanelManager extends EventEmitter {
         if (detection.matchedRuleId === 'bypass_permissions_warning') this.answerBypassWarning(terminal);
         if (
           terminal.agentType === 'opencode'
-          && detection.matchedRuleId === 'idle_composer'
           && detection.visibleIdle
+          // OpenCode answers the OSC 7501 query with its own idle report, which outranks its screen.
+          && (detection.matchedRuleId === 'idle_composer' || detection.reported)
         ) {
           terminal.onOpenCodeReady?.();
         }

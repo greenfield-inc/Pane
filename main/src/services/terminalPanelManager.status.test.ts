@@ -13,7 +13,7 @@ import { formatWaitResult } from '../../../packages/runpane/src/watchLines';
 import { databaseService } from './database';
 import { getPaneChatPanelId, ONBOARDING_HANDOFF_PREFERENCE } from '../../../shared/types/paneChat';
 
-function createTerminal(agentType: 'claude' | 'codex' | undefined = 'codex', panelId = 'p') {
+function createTerminal(agentType: 'claude' | 'codex' | 'opencode' | undefined = 'codex', panelId = 'p') {
   let onData: (data: string) => void = () => undefined;
   let onExit: (exit: { exitCode: number; signal?: number }) => void = () => undefined;
   const terminal = {
@@ -33,6 +33,8 @@ function createTerminal(agentType: 'claude' | 'codex' | undefined = 'codex', pan
     outputFlushTimer: null as ReturnType<typeof setTimeout> | null,
     isVisible: true, isAlternateScreen: false, inSyncBlock: false,
     filterInAltScreen: false, agentSessionScrapeBuffer: '',
+    // SAFETY: OpenCode tests assign the ready callback; fixtures start without one.
+    onOpenCodeReady: undefined as (() => void) | undefined,
   };
   return { terminal, data: (data: string) => onData(data), exit: (exit: { exitCode: number; signal?: number } = { exitCode: 0 }) => onExit(exit) };
 }
@@ -54,7 +56,7 @@ let journal: WorkspaceJournal;
 let fixtures: TerminalFixture[];
 let events: Array<{ channel: string; payload: PaneEventArgument }>;
 
-function attach(agentType?: 'claude' | 'codex', startedAt = 0, panelId = 'p') {
+function attach(agentType?: 'claude' | 'codex' | 'opencode', startedAt = 0, panelId = 'p') {
   const fixture = createTerminal(agentType, panelId);
   fixtures.push(fixture);
   access.terminals.set(panelId, fixture.terminal);
@@ -726,6 +728,33 @@ describe('program status reports (OSC 7501)', () => {
     fixture.data(`${BREW_DONE}==> Upgraded 12 packages\r\n`);
     await pollAgentStatus();
     expect(statuses().at(-1)).toMatchObject({ state: 'idle', reason: 'program_status:done', workedVisibly: true });
+  });
+
+  describe('OpenCode readiness', () => {
+    const composer = ['┃  Build auto · Claude Sonnet 5.5', '╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀', '/repo:main  shift+tab agents  ctrl+p commands', '⊙ 8 MCP /mcps   2.3.0'].join('\r\n');
+
+    it.each([
+      ['its screen alone', composer],
+      ['its own idle report outranking the screen', `\x1b]7501;state=idle:app=opencode\x1b\\${composer}`],
+    ])('is ready from %s', async (_name, output) => {
+      const fixture = attach();
+      fixture.terminal.agentType = 'opencode';
+      const ready = vi.fn();
+      fixture.terminal.onOpenCodeReady = ready;
+      fixture.data(output);
+      await pollAgentStatus();
+      expect(ready).toHaveBeenCalled();
+    });
+
+    it('is not ready while OpenCode reports working', async () => {
+      const fixture = attach();
+      fixture.terminal.agentType = 'opencode';
+      const ready = vi.fn();
+      fixture.terminal.onOpenCodeReady = ready;
+      fixture.data(`\x1b]7501;state=working:app=opencode\x1b\\${composer}`);
+      await pollAgentStatus();
+      expect(ready).not.toHaveBeenCalled();
+    });
   });
 
   it("never hides a prompt the agent's screen shows behind a report that isn't blocked", async () => {
