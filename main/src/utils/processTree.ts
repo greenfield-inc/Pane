@@ -169,7 +169,7 @@ async function waitForWindowsExit(pids: readonly number[], killedAt: number, tim
     '}',
   ].join('\n');
   try {
-    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: timeoutMs + SNAPSHOT_TIMEOUT_MS });
+    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: timeoutMs + SNAPSHOT_TIMEOUT_MS, windowsHide: true });
     return stdout.split(/\r?\n/u).filter(line => /^\d+$/u.test(line.trim())).map(line => Number.parseInt(line, 10));
   } catch (error) {
     console.warn('[ProcessTree] exit_wait_failed:', error);
@@ -187,7 +187,7 @@ async function killProcesses(pids: readonly number[]): Promise<void> {
     // clears, so it would also kill whatever outlived a dead process whose pid
     // one of these now holds. The list already holds the verified descendants.
     const args = ['/F', ...pids.flatMap(pid => ['/PID', String(pid)])];
-    await execFileAsync('taskkill', args, { timeout: SNAPSHOT_TIMEOUT_MS }).catch(() => undefined);
+    await execFileAsync('taskkill', args, { timeout: SNAPSHOT_TIMEOUT_MS, windowsHide: true }).catch(() => undefined);
     return;
   }
   for (const pid of pids) {
@@ -224,7 +224,7 @@ export async function readProcessTable(): Promise<ProcessTableRow[]> {
         '-NonInteractive',
         '-Command',
         'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$(if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().Ticks })`t$(if ($_.ExecutablePath) { $_.ExecutablePath } else { $_.Name })" }',
-      ], { encoding: 'utf8', timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 })).stdout
+      ], { encoding: 'utf8', timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, windowsHide: true })).stdout
       // `comm` goes last: on macOS it is the full executable path, which may contain spaces.
       : (await execFileAsync('ps', ['-Ao', 'pid=,ppid=,uid=,comm='], { encoding: 'utf8', timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 })).stdout;
   } catch (error) {
