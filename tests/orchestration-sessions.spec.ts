@@ -2261,6 +2261,51 @@ test('a tab dragged over a tiled neighbour Session is refused there and moves no
   await expect(tiles).toHaveCount(2);
 });
 
+test('Enter on a highlighted sidebar Session opens that Session, not the top tile\'s, while Sessions are tiled (T-45)', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installSessionsFixture(page, [
+    sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
+    sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
+    sessionFixture('gamma', 'Gamma', 'Gamma goal.', 'Gamma context.', '2026-09-16T12:02:00.000Z'),
+  ]);
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+  await page.getByTestId('orchestration-session-alpha').click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached();
+  // Beta tiled beside Alpha, and focused: the right-hand tile is the one a new Session takes over.
+  const tileLayout = await layoutBox(page.getByTestId('session-tile-layout'));
+  await dragSessionOntoTile(page, 'orchestration-session-beta', { x: tileLayout.x + tileLayout.width - 20, y: tileLayout.y + tileLayout.height / 2 });
+  await expect(page.getByTestId('session-tile-header')).toHaveCount(2);
+  await page.locator('[data-session-tile="beta"]').click({ position: { x: 40, y: 10 } });
+  await expect(page.locator('[data-session-tile="beta"]')).toHaveAttribute('data-session-focused', 'true');
+
+  // A real host answers over IPC: Gamma's workspace is still loading when Enter moves focus on.
+  await page.evaluate(() => {
+    const api = window.electronAPI.orchestrationSessions;
+    const get = api.get.bind(api);
+    api.get = async (selector) => {
+      if (selector.sessionId === 'gamma') await new Promise(resolve => setTimeout(resolve, 500));
+      return get(selector);
+    };
+  });
+
+  // The cursor walks to Gamma with the keyboard, and Enter opens it.
+  // A terminal that finishes opening focuses itself, so retry until the cursor is on the row.
+  await expect(async () => {
+    await page.getByTestId('orchestration-session-beta').focus();
+    await page.keyboard.press('j');
+    await expect(page.getByTestId('orchestration-session-gamma')).toBeFocused({ timeout: 500 });
+  }).toPass();
+  await page.keyboard.press('Enter');
+
+  // Gamma takes over the focused tile and stays the selected Session; focus moves into Gamma's
+  // tile, never into the first tile on screen, which would select Alpha instead.
+  await expect(page.locator('[data-session-tile="gamma"]')).toHaveAttribute('data-session-focused', 'true');
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[data-session-tile]')?.getAttribute('data-session-tile') ?? null)).toBe('gamma');
+  await expect(page.getByTestId('orchestration-session-gamma')).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('orchestration-session-alpha')).not.toHaveAttribute('aria-current', 'page');
+});
+
 test('New offers Session and Pane in one dialog and restores keyboard focus', async ({ page }) => {
   await installSessionsFixture(page, []);
   await gotoApp(page);
