@@ -24,6 +24,7 @@ import { placeConversation, undoConversationPlacement, type PlacedConversation }
 import { addWorktree, applySnapshot, deleteRefs, importBundle, MoveGitError, placeBranch, snapshotMatches } from './gitSnapshot';
 import { moveManifestSchema, panelBuffersSchema, readTabFields, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveRepo, type MoveTab } from './manifest';
 import { buildPathMap, mapPath, rewriteText, type PathMap } from './pathMap';
+import { arrivingPreview } from './filePreviews';
 import { MoveReceiver, type WriteRequest, type WriteResult } from './transfer';
 import { isRegeneratedSessionFile, isTextFile } from './sessionFolder';
 import { agentFarmProfileOf, movedLine } from './rules';
@@ -64,6 +65,8 @@ export interface TargetStatus {
   approvals?: number;
   leftBehind?: string[];
   missingEnv?: string[];
+  /** File preview tabs the build didn't carry, each with why (T-42). */
+  previewsNotCarried?: string[];
   /** A failed start the source may ask for again. */
   retryable?: boolean;
   /** Durable proof the move was rolled back here (or never committed) and can never start: the source may release its copy. */
@@ -98,7 +101,8 @@ interface Job {
 export interface ImporterTabs {
   getPanel(panelId: string): ToolPanel | undefined;
   getPanelsForSession(paneId: string): ToolPanel[];
-  createPanel(request: Parameters<typeof panelManager.createPanel>[0]): Promise<ToolPanel>;
+  /** `hostFileGrant` only for a file:// preview this Pane checked itself (see filePreviews.ts). */
+  createPanel(request: Parameters<typeof panelManager.createPanel>[0], options?: { hostFileGrant?: boolean }): Promise<ToolPanel>;
   deletePanel(panelId: string): Promise<void>;
   isTerminalInitialized(panelId: string): boolean;
   destroyTerminal(panelId: string): Promise<void>;
@@ -113,7 +117,7 @@ export interface ImporterTabs {
 const liveTabs: ImporterTabs = {
   getPanel: panelId => panelManager.getPanel(panelId),
   getPanelsForSession: paneId => panelManager.getPanelsForSession(paneId),
-  createPanel: request => panelManager.createPanel(request),
+  createPanel: (request, options) => panelManager.createPanel(request, options),
   deletePanel: async panelId => { await panelManager.deletePanel(panelId); },
   isTerminalInitialized: panelId => terminalPanelManager.isTerminalInitialized(panelId),
   destroyTerminal: async panelId => { await terminalPanelManager.destroyTerminal(panelId); },
@@ -481,7 +485,7 @@ export class MoveImporter {
       case 'building':
         return { ...base, stage: 'building' };
       case 'built':
-        return { ...base, stage: 'built', approvals: plan?.approvals ?? 0, leftBehind: plan?.leftBehind ?? [], missingEnv: plan?.missingEnv ?? [] };
+        return { ...base, stage: 'built', approvals: plan?.approvals ?? 0, leftBehind: plan?.leftBehind ?? [], missingEnv: plan?.missingEnv ?? [], previewsNotCarried: plan?.previewsNotCarried ?? [] };
       case 'committed':
         // A start cut short by the restart finishes on its own; the source sees it starting meanwhile.
         void this.resumeCommitted(entry.moveId);
@@ -489,7 +493,7 @@ export class MoveImporter {
       case 'started': {
         const results = Object.entries(entry.done);
         const failedTabs = results.filter(([, result]) => result === 'failed').map(([id]) => plan?.tabs.find(tab => tab.id === id)?.title ?? id);
-        return { ...base, stage: 'started', resumed: results.filter(([, result]) => result === 'resumed').length, failedTabs, approvals: plan?.approvals ?? 0, leftBehind: plan?.leftBehind ?? [], missingEnv: plan?.missingEnv ?? [] };
+        return { ...base, stage: 'started', resumed: results.filter(([, result]) => result === 'resumed').length, failedTabs, approvals: plan?.approvals ?? 0, leftBehind: plan?.leftBehind ?? [], missingEnv: plan?.missingEnv ?? [], previewsNotCarried: plan?.previewsNotCarried ?? [] };
       }
       case 'rolledBack':
         return { ...base, stage: 'aborted', rolledBack: true, error: { message: `The move was rolled back on ${thisMachineName()}; it never started there.`, next: 'Start the move again.' } };
@@ -676,12 +680,22 @@ export class MoveImporter {
     // Tabs: the same IDs, titles, order and split, stopped and marked arriving; conversations filed here.
     job.status.detail = 'Filing conversations';
     const arrivingPause: TerminalPausedMark = { at: new Date().toISOString(), by: 'move', machine: manifest.source.machine, arriving: true };
+    // What the move placed here: a file preview carries only when its file is in one of these.
+    const movedRoots = [targetFolder, ...[...placements.values()].map(placement => placement.worktreePath)];
+    const previewsNotCarried: string[] = [];
     for (const pane of manifest.panes) {
       const paneId = pane.role === 'owner' ? arriving.internalSessionId : pane.id;
       const cwd = pane.role === 'owner' ? targetFolder : placements.get(pane.id)?.worktreePath;
       if (!cwd) continue;
       for (const tab of pane.tabs) {
         const state = decodeBoundary(JSON.parse(rewriteText(map, JSON.stringify(tab.state))), boundary.jsonObject);
+        // A file preview is never left to the remote-edit guard: the build checks and grants it here, or leaves it behind.
+        const preview = await arrivingPreview(tab, map, movedRoots, manifest.source.machine);
+        if (preview?.kind === 'notCarried') {
+          previewsNotCarried.push(preview.note);
+          continue;
+        }
+        if (preview) state.currentUrl = preview.currentUrl;
         const paused: JsonObject = { at: arrivingPause.at, by: 'move', machine: manifest.source.machine, arriving: true };
         if (tab.type === 'terminal') {
           state.cwd = cwd;
@@ -721,7 +735,7 @@ export class MoveImporter {
           initialState: { customState: state },
           metadata: tab.metadata,
           activate: false,
-        });
+        }, { hostFileGrant: preview?.kind === 'carried' });
         job.tabs.push({ paneId, tab, cwd });
       }
     }
@@ -736,12 +750,12 @@ export class MoveImporter {
     }
     const missingEnv = manifest.source.envNames.filter(name => !this.envNamesHere().has(name));
     // Built: the plan goes on disk before the source hears it, so the start survives a restart here.
-    this.ledger.built(moveId, this.commitPlan(job, { leftBehind, missingEnv }));
-    job.status = { ...job.status, stage: 'built', detail: undefined, approvals: 0, leftBehind, missingEnv };
+    this.ledger.built(moveId, this.commitPlan(job, { leftBehind, missingEnv, previewsNotCarried }));
+    job.status = { ...job.status, stage: 'built', detail: undefined, approvals: 0, leftBehind, missingEnv, previewsNotCarried };
   }
 
   /** What the start does, from the build's results, in a form that survives a restart. */
-  private commitPlan(job: Job, { leftBehind, missingEnv }: { leftBehind: string[]; missingEnv: string[] }): CommitPlan {
+  private commitPlan(job: Job, { leftBehind, missingEnv, previewsNotCarried }: Pick<CommitPlan, 'leftBehind' | 'missingEnv' | 'previewsNotCarried'>): CommitPlan {
     const manifest = job.manifest!;
     const orchestratorPanels = new Set(Object.values(decodeBoundary(manifest.session.panelIds ?? {}, boundary.jsonObject)));
     const tabs = job.tabs.map(({ tab }) => {
@@ -758,7 +772,7 @@ export class MoveImporter {
       told: tabs.filter(tab => orchestratorPanels.has(tab.id) || tab.working).map(tab => tab.id),
       movedLine: movedLine(manifest.source.machine, thisMachineName(), job.map!),
       setAside: [...job.setAside], leftovers: job.conversations.flatMap(placed => placed.leftovers),
-      approvals: 0, leftBehind, missingEnv,
+      approvals: 0, leftBehind, missingEnv, previewsNotCarried,
     };
   }
 
@@ -926,7 +940,9 @@ export class MoveImporter {
           title: panel.title, initialState: { customState: panel.customState },
           // SAFETY: the saved panel's own metadata, written by this Pane when it set the tab aside.
           metadata: JSON.parse(JSON.stringify(panel.metadata)) as ToolPanel['metadata'], activate: false,
-        });
+          // This machine's own tab, as this Pane saved it beside its own ledger: a file preview it
+          // showed was granted here, so putting it back is no remote grant, even when a remote abort runs it.
+        }, { hostFileGrant: panel.type === 'browser' });
         return;
       }
       case 'deletePanel':

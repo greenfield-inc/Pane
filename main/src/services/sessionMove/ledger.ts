@@ -53,6 +53,8 @@ export interface CommitPlan {
   approvals: number;
   leftBehind: string[];
   missingEnv: string[];
+  /** File preview tabs the build didn't carry, each with why; absent in a ledger from before T-42. */
+  previewsNotCarried?: string[];
 }
 
 /** A conversation filed here, as its undo needs it: each file's target, staged and previous copy. */
@@ -137,6 +139,7 @@ const entrySchema = boundary.object({
     sessionId: boundary.string, source: boundary.string, tabs: boundary.array(tabSchema), told: boundary.array(boundary.string),
     movedLine: boundary.string, setAside: boundary.array(boundary.string), leftovers: boundary.array(boundary.string),
     approvals: boundary.number, leftBehind: boundary.array(boundary.string), missingEnv: boundary.array(boundary.string),
+    previewsNotCarried: boundary.optional(boundary.array(boundary.string)),
   })),
   done: boundary.record(boundary.enumeration('resumed', 'failed', 'skipped')),
   journal: boundary.array(boundary.object({

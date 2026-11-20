@@ -166,4 +166,10 @@ describe('doneView', () => {
     expect(view.lines).toContainEqual({ level: 'warning', title: '1 Pane stayed here, paused', detail: stayed });
     expect(view.lines).toContainEqual(expect.objectContaining({ title: 'Left behind: 1 ignored file' }));
   });
+
+  it('says which file previews weren’t carried, and why (T-42)', () => {
+    const note = 'notes.html (/a/Downloads/notes.html): not carried, the file is outside the Session\'s worktrees and folder, so it stayed on mini';
+    const view = doneView({ panes: 1, tabs: 1, resumed: 1, failedTabs: [], approvals: 0, leftBehind: [], missingEnv: [], previewsNotCarried: [note] }, 'studio');
+    expect(view.lines).toContainEqual({ level: 'warning', title: '1 file preview tab wasn’t carried', detail: `${note}. Open the file again on studio if you still need it.` });
+  });
 });

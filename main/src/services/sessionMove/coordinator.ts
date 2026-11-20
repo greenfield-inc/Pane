@@ -74,6 +74,7 @@ const targetStatusSchema = boundary.object({
   approvals: boundary.optional(boundary.number),
   leftBehind: boundary.optional(boundary.array(boundary.string)),
   missingEnv: boundary.optional(boundary.array(boundary.string)),
+  previewsNotCarried: boundary.optional(boundary.array(boundary.string)),
   retryable: boundary.optional(boundary.boolean),
   rolledBack: boundary.optional(boundary.boolean),
   durable: boundary.optional(boundary.boolean),
@@ -595,7 +596,8 @@ export class MoveCoordinator {
       phase: 'done', error: undefined,
       summary: {
         panes: job.paneIds.length - 1, tabs: job.tabs.filter(tab => tab.kind === 'chat' || !!readTabFields(toJsonObject(tab.panel.state.customState ?? {})).agentId).length, resumed: status.resumed ?? 0, failedTabs: status.failedTabs ?? [],
-        approvals: status.approvals ?? built?.approvals ?? 0, leftBehind: status.leftBehind ?? built?.leftBehind ?? [], missingEnv: status.missingEnv ?? built?.missingEnv ?? [], stayedHere: kept,
+        approvals: status.approvals ?? built?.approvals ?? 0, leftBehind: status.leftBehind ?? built?.leftBehind ?? [], missingEnv: status.missingEnv ?? built?.missingEnv ?? [],
+        previewsNotCarried: status.previewsNotCarried ?? built?.previewsNotCarried ?? [], stayedHere: kept,
       },
     });
     await fs.promises.rm(job.outDir, { recursive: true, force: true }).catch(() => undefined);

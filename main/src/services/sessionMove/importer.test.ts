@@ -13,7 +13,9 @@ import { gitSteps } from '../../test/gitBudget';
 import { settleAfterFreeze, type FreezeTarget } from './afterFreeze';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PaneCommandValue } from '../../daemon/commandRegistry';
-import type { MoveManifest, MovePane } from './manifest';
+import type { MoveManifest, MovePane, MoveTab } from './manifest';
+import { assertHostBrowserFileNavigation } from '../browserPanelFiles';
+import { SESSION_MOVE_TARGET_CHANNELS } from '../../../../shared/types/sessionMove';
 
 /**
  * The target's build, start and abort against real git repositories and a scratch PANE_DIR, with
@@ -36,7 +38,9 @@ function memoryTabs(panels = new Map<string, ToolPanel>()): ImporterTabs & { pan
     panels,
     getPanel: id => panels.get(id),
     getPanelsForSession: paneId => [...panels.values()].filter(panel => panel.sessionId === paneId),
-    createPanel: async request => {
+    createPanel: async (request, options = {}) => {
+      // As PanelManager does: a remote call may not point a browser tab at a file unless host code granted it.
+      if (!options.hostFileGrant) assertHostBrowserFileNavigation(request.type, { isActive: false, customState: request.initialState?.customState });
       const existing = request.id ? panels.get(request.id) : undefined;
       if (existing) return existing;
       const panel: ToolPanel = {
@@ -356,6 +360,90 @@ describe('MoveImporter', { timeout: BUILD_TIMEOUT_MS }, () => {
     await expect(importer.abort(moveId)).rejects.toThrow(/already started/);
     importer.start(moveId);
     expect((await waitStage(importer, moveId, ['started', 'failed'])).stage).toBe('started');
+  });
+});
+
+/** A browser tab showing `currentUrl`, as `runpane panels open --file` leaves it. */
+function previewTab(id: string, currentUrl: string): MoveTab {
+  return { id, type: 'browser', title: `${id}.html`, metadata: { createdAt: '', lastActiveAt: '', position: 0 }, state: { currentUrl }, working: false, interrupted: false, running: false };
+}
+
+describe('MoveImporter with file preview tabs (T-42)', { timeout: BUILD_TIMEOUT_MS }, () => {
+  let target: string;
+  let bundle: Buffer;
+
+  beforeEach(async () => {
+    ({ target, bundle } = await gitFixture('pane-importer-preview-'));
+  });
+  afterEach(() => {
+    if (previousPaneDir === undefined) delete process.env.PANE_DIR;
+    else process.env.PANE_DIR = previousPaneDir;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  /** The build as the source starts it: a call over the Pane-to-Pane connection, so a remote command here. */
+  async function buildRemotely(importer: MoveImporter, moveId: string): Promise<TargetStatus> {
+    const registry = new PaneCommandRegistry();
+    registry.register(SESSION_MOVE_TARGET_CHANNELS.build, () => importer.build(moveId));
+    await registry.invokeRemote(SESSION_MOVE_TARGET_CHANNELS.build, []);
+    return waitStage(importer, moveId, ['built', 'failed']);
+  }
+
+  it('carries previews of files that moved, at their new path, and reports the ones it could not carry', async () => {
+    const tabs = memoryTabs();
+    const { services } = fakeServices(target, undefined, tabs.panels);
+    const importer = new MoveImporter(services, new PaneCommandRegistry(), path.join(root, 'moves'), tabs);
+    const moveId = newMoveId();
+    const owner: MovePane = { ...ownerWithAgent(), tabs: [
+      previewTab('in-folder', 'file:///a/.pane/sessions/sess-1/report%20v2.html#top'),
+      previewTab('outside', 'file:///a/Downloads/elsewhere.html'),
+      previewTab('missing', 'file:///a/.pane/sessions/sess-1/gone.html'),
+      previewTab('web', 'https://example.invalid/'),
+    ] };
+    const pane = member('p1');
+    pane.tabs = [previewTab('in-worktree', 'file:///a/worktrees/p1/a.txt')];
+    await stage(importer, manifest(moveId, [owner, pane], { sessionFolder: { root: '/a/.pane/sessions/sess-1', files: ['report v2.html'] } }), {
+      'panes/p1.bundle': bundle, 'session/report v2.html': '<h1>report</h1>',
+    });
+
+    const status = await buildRemotely(importer, moveId);
+
+    expect(status.error?.message ?? status.stage).toBe('built');
+    const folder = sessionWorkspacePath('sess-1');
+    const urlOf = (id: string) => decodeBoundary(tabs.panels.get(id)?.state.customState ?? {}, boundary.object({ currentUrl: boundary.optional(boundary.string) })).currentUrl;
+    expect(urlOf('in-folder')).toBe(`file://${folder}/report%20v2.html#top`);
+    expect(urlOf('in-worktree')).toBe(`file://${path.join(root, 'worktrees', 'p1')}/a.txt`);
+    expect(urlOf('web')).toBe('https://example.invalid/');
+    expect(tabs.panels.has('outside')).toBe(false);
+    expect(tabs.panels.has('missing')).toBe(false);
+    expect(status.previewsNotCarried).toEqual([
+      'outside.html (/a/Downloads/elsewhere.html): not carried, the file is outside the Session\'s worktrees and folder, so it stayed on A',
+      'missing.html (/a/.pane/sessions/sess-1/gone.html): not carried, the file didn\'t come with the move (ignored, or gone from A)',
+    ]);
+  });
+
+  it('a cancelled move puts back this machine\'s own file preview it set aside, though the source asked remotely', async () => {
+    const tabs = memoryTabs();
+    const { services } = fakeServices(target, undefined, tabs.panels);
+    // This machine's own preview, opened here (a host grant), with the ID of a tab that arrives.
+    const own = `file://${path.join(root, 'here.html')}`;
+    fs.writeFileSync(path.join(root, 'here.html'), '<p>here</p>');
+    await tabs.createPanel({ id: 'web', sessionId: 'elsewhere', type: 'browser', title: 'here.html', initialState: { customState: { currentUrl: own } } });
+    const importer = new MoveImporter(services, new PaneCommandRegistry(), path.join(root, 'moves'), tabs);
+    const moveId = newMoveId();
+    await stage(importer, manifest(moveId, [{ ...ownerWithAgent(), tabs: [previewTab('web', 'https://example.invalid/')] }]), {});
+    expect((await buildRemotely(importer, moveId)).stage).toBe('built');
+
+    const registry = new PaneCommandRegistry();
+    registry.register(SESSION_MOVE_TARGET_CHANNELS.abort, () => importer.abort(moveId));
+    expect(await registry.invokeRemote(SESSION_MOVE_TARGET_CHANNELS.abort, [])).toMatchObject({ stage: 'aborted' });
+    expect(tabs.panels.get('web')?.state.customState).toEqual({ currentUrl: own });
+  });
+
+  it('a remote edit still cannot point a browser tab at a file', () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('panels:create', () => memoryTabs().createPanel({ sessionId: 'p1', type: 'browser', initialState: { customState: { currentUrl: 'file:///etc/passwd' } } }));
+    return expect(registry.invokeRemote('panels:create', [])).rejects.toThrow(/file preview on the host/);
   });
 });
 

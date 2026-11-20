@@ -121,6 +121,8 @@ export interface SessionMoveSummary {
   leftBehind: string[];
   /** Env var names set here and not on the target. */
   missingEnv: string[];
+  /** File preview tabs the target didn't carry (the file didn't move with the Session), each with why. */
+  previewsNotCarried?: string[];
   /** Panes that stayed on the source, paused with their worktree, each with why and what to do. */
   stayedHere?: string[];
 }

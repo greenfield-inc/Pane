@@ -150,6 +150,10 @@ export function doneView(summary: SessionMoveSummary | undefined, target: string
   if (summary.leftBehind.length > 0) {
     lines.push({ level: 'warning', title: `Left behind: ${plural(summary.leftBehind.length, 'ignored file')}`, detail: `${summary.leftBehind.join(', ')}. Listed in the Session folder’s moved.json.` });
   }
+  if (summary.previewsNotCarried?.length) {
+    const count = summary.previewsNotCarried.length;
+    lines.push({ level: 'warning', title: `${plural(count, 'file preview tab')} ${count === 1 ? 'wasn’t' : 'weren’t'} carried`, detail: `${summary.previewsNotCarried.join('; ')}. Open the file again on ${target} if you still need it.` });
+  }
   if (summary.stayedHere?.length) {
     lines.push({ level: 'warning', title: `${plural(summary.stayedHere.length, 'Pane')} stayed here, paused`, detail: summary.stayedHere.join(' ') });
   }
