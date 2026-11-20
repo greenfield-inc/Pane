@@ -116,7 +116,7 @@
       ],
       "project": ["src/**/*.ts", "scripts/**/*.js"],
       "ignoreBinaries": ["ditto"],
-      "ignoreUnresolved": ["/usr/bin/codesign", "/usr/bin/ditto", "/usr/sbin/spctl", "/usr/libexec/PlistBuddy", "/usr/bin/otool"]
+      "ignoreUnresolved": ["/usr/bin/codesign", "/usr/bin/ditto", "/usr/sbin/spctl", "/usr/libexec/PlistBuddy", "/usr/bin/otool", "/usr/sbin/scutil"]
     },
     "mobile": {
       "entry": ["capacitor.config.ts", "src/**/*.test.ts", "scripts/**/*.mjs"],
