@@ -12,6 +12,7 @@ import { htmlFileOpenModeOf } from '../../../stores/configStore';
 import { DEFAULT_BACKGROUND_ACTIVITY, type BackgroundActivityProfile } from '../../../../../shared/types/backgroundActivity';
 import { KeepAwakeSetting } from './KeepAwakeSetting';
 import { PauseSettings } from './PauseSettings';
+import { PortProbeSettings } from './PortProbeSettings';
 
 interface GeneralSettingsProps {
   persistence: SettingsPersistence;
@@ -138,6 +139,10 @@ export function GeneralSettings({ persistence, onUpdate, onSendFeedback }: Gener
             onChange={(value) => void persistence.saveConfig('background-activity', { backgroundActivity: value })}
           />
         </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Ports" description="How the Ports list learns what each listening port serves.">
+        <PortProbeSettings persistence={persistence} />
       </SettingsSection>
 
       <SettingsSection title="Pause" description="Paused Panes stop their processes and keep their conversations until you resume them.">
