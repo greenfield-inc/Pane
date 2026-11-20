@@ -913,6 +913,21 @@ describe('RemoteDaemonClient against a host that runs each request id once', () 
     client.disconnect();
   });
 
+  it('sends a streamed page\'s input once, and refuses it at once while the link is down', async () => {
+    const { host, client, drop } = await connectToDeduplicatingHost();
+    const attempts: Array<string | undefined> = [];
+    host.onInvoke(body => { attempts.push(body.requestId); return Response.json({ ok: true, result: { success: true, field: null } }); });
+    await client.invoke('browser:input', ['tab-1', 'viewer-1', []]);
+    expect(attempts).toEqual([undefined]);
+
+    drop();
+    await flush();
+    await expect(client.invoke('browser:input', ['tab-1', 'viewer-1', []])).rejects.toMatchObject({ code: 'ERR_REMOTE_OFFLINE' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(attempts).toHaveLength(1);
+    client.disconnect();
+  });
+
   it('says a held write was not sent when reconnecting gives up', async () => {
     const { client, drop } = await connectToDeduplicatingHost();
     drop();

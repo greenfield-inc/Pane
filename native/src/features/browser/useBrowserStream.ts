@@ -40,9 +40,10 @@ export interface BrowserStream {
 /** The host's browser channels, called as this phone. */
 export function browserChannels(client: DaemonClient) {
   return {
+    // The host answers input within 15 s and a driver change at once; past these the screen gives up.
     input: async (panelId: string, batch: BrowserInput[]): Promise<BrowserInputResult> =>
-      decodeBoundary(await invokeChannel(client, 'browser:input', [panelId, VIEWER_ID, batch]), browserInputResultSchema),
-    driver: (panelId: string, who: 'person' | 'agent') => invokeChannel(client, 'browser:driver', [panelId, who, VIEWER_ID]),
+      decodeBoundary(await within(invokeChannel(client, 'browser:input', [panelId, VIEWER_ID, batch]), 20_000), browserInputResultSchema),
+    driver: (panelId: string, who: 'person' | 'agent') => within(invokeChannel(client, 'browser:driver', [panelId, who, VIEWER_ID]), 10_000),
   };
 }
 

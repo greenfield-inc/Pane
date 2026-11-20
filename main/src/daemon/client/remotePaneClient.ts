@@ -33,7 +33,7 @@ import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
 import { decodeListeningPortsSnapshot, type ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
 import { localTargetOf } from '../../../../shared/utils/browserUrl';
 import { createPortTunnel, type PortTunnel } from './portTunnel';
-import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_WRITES_BUSY_CODE } from '../../../../shared/remoteClient/readChannels';
+import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_SEND_ONCE_CHANNELS, REMOTE_WRITES_BUSY_CODE } from '../../../../shared/remoteClient/readChannels';
 import {
   RecoveryCycle,
   RELAY_MAX_RECONNECT_DELAY_MS,
@@ -769,7 +769,7 @@ export class RemotePaneClient {
   }
 
   private resendsWrite(channel: string): boolean {
-    return this.deduplicatesRequestIds && !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel);
+    return this.deduplicatesRequestIds && !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel) && !REMOTE_SEND_ONCE_CHANNELS.has(channel);
   }
 
   /**

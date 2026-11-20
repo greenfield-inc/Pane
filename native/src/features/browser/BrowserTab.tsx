@@ -5,7 +5,7 @@ import { browserInputQueue, fitFrame, pagePoint, PhoneControl, type FrameBox } f
 import * as Clipboard from 'expo-clipboard';
 import { useIsFocused } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Image, Keyboard, Modal, PixelRatio, Pressable, StyleSheet, TextInput, View, type LayoutChangeEvent } from 'react-native';
+import { Alert, AppState, Image, Keyboard, Modal, PixelRatio, Platform, Pressable, StyleSheet, TextInput, View, type LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -61,8 +61,9 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
   // The page keeps the size the stage has without the keyboard: opening or closing it never resizes the host's page.
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   useEffect(() => {
-    const shown = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
-    const hidden = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
+    // iOS moves the layout on keyboardWill*, so the guard must be set by then (as TerminalScreen does).
+    const shown = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setKeyboardOpen(true));
+    const hidden = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKeyboardOpen(false));
     return () => { shown.remove(); hidden.remove(); };
   }, []);
   const [space, setSpace] = useState(box);
@@ -85,10 +86,15 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
   const keyboardTextRef = useRef(KEYBOARD_EMPTY);
   const [notice, setNotice] = useState<string>();
   const fieldRef = useRef<'text' | 'password' | null>(null);
+  // After Enter, Tab or a navigation the keyboard is secure until a tap's answer names the field: a
+  // two-step sign-in answers Enter with the email field, then focuses the password field by itself.
+  const securedRef = useRef(false);
   const [queue] = useState(() => browserInputQueue(async batch => {
     const result = await browserChannels(clientRef.current).input(panel.id, batch);
     if (result.copied) void Clipboard.setStringAsync(result.copied).catch(() => undefined);
     const tapped = batch.some(input => input.kind === 'mouse' && input.action === 'up' && input.button === 'left');
+    if (tapped) securedRef.current = false;
+    if (securedRef.current && result.field !== 'password') return result;
     // Every tap into a field starts the keyboard's text afresh, so the last field's text never edits this one.
     if (result.field !== undefined && (result.field !== fieldRef.current || tapped)) {
       fieldRef.current = result.field;
@@ -108,6 +114,7 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
     if (stopRef.current && stopRef.current !== 'older') return;
     // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
     if ((input?.kind === 'key' && (input.key === 'Enter' || input.key === 'Tab')) || input?.kind === 'navigate' || input?.kind === 'history') {
+      securedRef.current = true;
       fieldRef.current = 'password';
       setField('password');
     }
@@ -327,7 +334,10 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
           {chip ? (
             <View testID="browser-driver" style={[styles.chip, { borderColor: agentDriving ? colors.accent : colors.border }]}>
               <Text variant="footnote" numberOfLines={1} style={styles.shrink}>{chip.label}</Text>
-              <Pressable testID="browser-driver-action" accessibilityRole="button" hitSlop={6} onPress={() => { void browserChannels(client).driver(panel.id, chip.to).catch(() => undefined); }}>
+              <Pressable testID="browser-driver-action" accessibilityRole="button" hitSlop={6} onPress={() => {
+                if (stopRef.current && stopRef.current !== 'older') return;
+                void browserChannels(client).driver(panel.id, chip.to).catch(() => setNotice(`That didn't reach ${host}. Try again.`));
+              }}>
                 <Text variant="footnote" style={{ color: colors.accentText }}>{chip.action}</Text>
               </Pressable>
             </View>

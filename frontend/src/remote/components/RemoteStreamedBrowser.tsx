@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Keyboard, Loader2, RotateCw } from 'lucide-react';
 import type { ToolPanel } from '../../../../shared/types/panels';
+import type { BrowserInput } from '../../../../shared/types/browserStream';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { normalizeUrl } from '../../components/panels/browser/browserUrl';
 import { BrowserStreamView, stopLine } from '../../components/panels/browser/stream/BrowserStreamView';
@@ -55,6 +56,12 @@ export function RemoteStreamedBrowser({ adapter, panel, hostName, ownCopy }: { a
     );
   }
 
+  // While the host can't be reached nothing is sent; a refusal or a missed deadline shows under the address bar.
+  const act = (input: BrowserInput) => {
+    if (stream.stop === 'unreachable' || stream.stop === 'gone') return;
+    if (stream.stop === 'asleep') stream.wake();
+    void client.input(panel.id, [input]).catch((cause: unknown) => setError(`${host} didn't take that: ${cause instanceof Error ? cause.message : String(cause)}`));
+  };
   const go = (event: FormEvent) => {
     event.preventDefault();
     const url = normalizeUrl(typed ?? view?.url ?? '');
@@ -66,9 +73,9 @@ export function RemoteStreamedBrowser({ adapter, panel, hostName, ownCopy }: { a
     setTyped(null);
     // Closes the phone's keyboard once the address goes.
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    void client.input(panel.id, [{ kind: 'navigate', url }]);
+    act({ kind: 'navigate', url });
   };
-  const history = (to: 'back' | 'forward' | 'reload') => void client.input(panel.id, [{ kind: 'history', go: to }]);
+  const history = (to: 'back' | 'forward' | 'reload') => act({ kind: 'history', go: to });
   const controls = (
     <>
       <button type="button" className={TOOL_BUTTON} disabled={!view?.canGoBack} onClick={() => history('back')} aria-label="Back"><ArrowLeft className="h-4 w-4" /></button>
