@@ -116,12 +116,6 @@ function pairingFailure(code: string, name: string): RelayPairingError {
   }
 }
 
-/**
- * Trades a pairing secret for this device's token at `POST https://<id>.<domain>/pair/exchange`
- * (the browser app's own origin) and returns the scanned computer's profile first, then a profile
- * for each computer linked with it. Throws `RelayPairingError`, also when a different computer
- * answers. Linked computers outside `<id>.<domain>` are dropped.
- */
 /** A pairing request that has no answer after this long fails, so the phone says why instead of loading. */
 const RELAY_PAIRING_TIMEOUT_MS = 10_000;
 
@@ -137,6 +131,12 @@ export async function fetchWithin(fetch: RemoteFetch, url: string, init: Paramet
   }
 }
 
+/**
+ * Trades a pairing secret for this device's token at `POST https://<id>.<domain>/pair/exchange`
+ * (the browser app's own origin) and returns the scanned computer's profile first, then a profile
+ * for each computer linked with it. Throws `RelayPairingError`, also when a different computer
+ * answers. Linked computers outside `<id>.<domain>` are dropped.
+ */
 export async function exchangeRelayPairing(
   fetch: RemoteFetch,
   scanned: Pick<RelayPairingLink, 'computerId' | 'domain' | 'name'>,
