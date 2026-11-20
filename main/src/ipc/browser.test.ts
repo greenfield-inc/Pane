@@ -539,6 +539,18 @@ describe('browser tabs: the screens that watch them', () => {
     await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
   });
 
+  it('paints the page again when a screen comes back to a tab it had off screen', async () => {
+    const painting: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { painting, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000, graceMs: 60_000 } } });
+    await fromAfar(fixture, 'persons', 'web-1', phone);
+    expect(painting).toEqual(['persons']);
+    await fromAfar(fixture, 'persons', 'web-1', { ...phone, onScreen: false });
+    expect(painting).toEqual([]);
+    await fromAfar(fixture, 'persons', 'web-1', phone);
+    expect(painting).toEqual(['persons']);
+    expect(fixture.pages.get('persons')).toMatchObject({ throttled: false });
+  });
+
   it('lets the tabs only this window showed go when it closes, and keeps those another device watches', async () => {
     const held: string[] = [];
     const window = { open: true };
