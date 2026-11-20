@@ -118,7 +118,22 @@ const CONFIRM_DESCRIPTION = 'Confirm this change (the CLI\'s --yes). Pane refuse
 
 type ContractFlag = McpToolContract['flags'][string][number];
 
-export function buildMcpTools(contract: McpToolContract = RUNPANE_CONTRACT): McpTool[] {
+/** The tools of this build's own contract, built on first use; see `buildMcpTools`. */
+let bundledTools: readonly McpTool[] | undefined;
+
+/**
+ * The contract's commands as MCP tools. The bundled contract is fixed for a build, so its tools are
+ * built once per process and every caller shares them: Pane's endpoint builds a handler on its main
+ * thread for each toolsets setting. The shared tools are frozen, so a caller that changes one fails
+ * instead of changing every other caller's.
+ */
+export function buildMcpTools(contract: McpToolContract = RUNPANE_CONTRACT): readonly McpTool[] {
+  if (contract !== RUNPANE_CONTRACT) return buildTools(contract);
+  bundledTools ??= Object.freeze(buildTools(contract).map(freezeTool));
+  return bundledTools;
+}
+
+function buildTools(contract: McpToolContract): McpTool[] {
   const globalFlags = new Map(Object.values(contract.flags).flat().map((flag) => [flag.name, flag]));
   const schemas = decodeBoundary(JSON.parse(JSON.stringify(contract.jsonSchemas)), boundary.jsonObject);
   return contract.commands
@@ -263,6 +278,33 @@ function buildOutputSchema(names: readonly string[], schemas: JsonObject): JsonO
   const outputSchema: JsonObject = variants.length === 1 ? { ...variants[0], type: 'object' } : { type: 'object', oneOf: variants };
   if (Object.keys(defs).length > 0) outputSchema.$defs = defs;
   return outputSchema;
+}
+
+/** Freezes a tool and everything it holds, so the tools callers share can't be changed. */
+function freezeTool(tool: McpTool): McpTool {
+  Object.freeze(tool.words);
+  Object.freeze(tool.toolsets);
+  for (const parameter of tool.parameters) Object.freeze(parameter);
+  Object.freeze(tool.parameters);
+  for (const property of Object.values(tool.inputSchema.properties)) freezeJson(property);
+  Object.freeze(tool.inputSchema.properties);
+  if (tool.inputSchema.required) Object.freeze(tool.inputSchema.required);
+  Object.freeze(tool.inputSchema);
+  freezeJson(tool.outputSchema);
+  Object.freeze(tool.annotations);
+  return Object.freeze(tool);
+}
+
+function freezeJson(value: JsonValue): void {
+  if (Array.isArray(value)) {
+    for (const item of value) freezeJson(item);
+    Object.freeze(value);
+    return;
+  }
+  const object = asJsonObject(value);
+  if (!object) return;
+  for (const item of Object.values(object)) freezeJson(item);
+  Object.freeze(object);
 }
 
 const CONTRACT_REF_PREFIX = '#/jsonSchemas/';
