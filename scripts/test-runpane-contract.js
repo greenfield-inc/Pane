@@ -643,6 +643,57 @@ async function checkWatchStreamParity() {
       assert.ok(followRequests[0].as.startsWith('follow-'));
       assert.strictEqual(followRequests[1].idleWindowStartMs, undefined, 'follow cadence uses a named cursor');
 
+      // A retry from this same process replaces its own wait: no WATCH ERROR for it, and every
+      // request, across the reconnect too, carries the one owner token.
+      const ownerRequests = [];
+      const ownRetry = await withFakeDaemon(
+        paneDir,
+        (frame) => {
+          ownerRequests.push(frame.args[0]);
+          if (ownerRequests.length === 1) {
+            return { error: { code: 'ERR_WORKSPACE_WATCH_REPLACED', message: 'Workspace watch replaced by a retry from the same watcher for this cursor' } };
+          }
+          if (ownerRequests.length === 2) return { destroy: true };
+          return { result: watchResult(30), delayMs: ownerRequests.length >= 4 ? 1_100 : 0 };
+        },
+        () => runWatchCli(
+          runtime,
+          ['watch', '--follow', '--as', 'owner-check', '--idle-after', '0', '--no-held-input', '--timeout-ms', '1000'],
+          paneDir,
+          stdout => stdout.includes('WATCH OK gen 30'),
+        ),
+      );
+      const ownRetryLines = ownRetry.stdout.split(/\r?\n/).filter(Boolean);
+      assert.strictEqual(ownRetryLines.filter(line => line.startsWith('WATCH ERROR')).length, 1, `${runtime} must report only the dropped connection. stdout=${ownRetry.stdout}`);
+      assert.ok(!ownRetry.stdout.includes('replaced'), `${runtime} must re-arm silently after its own retry replaced its wait`);
+      assert.ok(ownerRequests.length >= 3, `${runtime} must re-arm after a replacement and after a reconnect`);
+      assert.match(String(ownerRequests[0].owner), /^watch-\d+-[0-9a-f-]+$/u, `${runtime} must send an owner token with a named watch`);
+      for (const ownerRequest of ownerRequests) {
+        assert.strictEqual(ownerRequest.as, 'owner-check');
+        assert.strictEqual(ownerRequest.owner, ownerRequests[0].owner, `${runtime} must reuse its owner token across retries and reconnects`);
+      }
+
+      // A different watcher taking the cursor still ends this one with a WATCH ERROR.
+      const superseded = await withFakeDaemon(
+        paneDir,
+        () => ({ error: { code: 'ERR_WORKSPACE_WATCH_SUPERSEDED', message: 'Workspace watch superseded by a new request for this cursor' } }),
+        () => runWatchToExit(runtime, ['watch', '--follow', '--as', 'owner-check', '--idle-after', '0', '--no-held-input', '--timeout-ms', '1000'], paneDir),
+      );
+      assert.strictEqual(superseded.code, 2, `${runtime} superseded watch must exit 2. stdout=${superseded.stdout}`);
+      assertIncludes(superseded.stdout, 'WATCH ERROR');
+      assertIncludes(superseded.stdout, 'superseded');
+
+      const anonymousRequests = [];
+      await withFakeDaemon(
+        paneDir,
+        (frame) => {
+          anonymousRequests.push(frame.args[0]);
+          return { result: watchResult(31) };
+        },
+        () => runWatchToExit(runtime, ['watch', '--json', '--timeout-ms', '0'], paneDir),
+      );
+      assert.strictEqual(anonymousRequests[0].owner, undefined, `${runtime} must not send an owner without a named cursor`);
+
       const cadenceRequests = [];
       await withFakeDaemon(
         paneDir,
