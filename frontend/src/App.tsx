@@ -12,6 +12,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useIPCEvents } from './hooks/useIPCEvents';
 import { useNotifications } from './hooks/useNotifications';
 import { useResizable } from './hooks/useResizable';
+import { SidebarResizeHandle } from './components/SidebarResizeHandle';
 import { useHotkey } from './hooks/useHotkey';
 import { useTerminalShortcuts } from './hooks/useTerminalShortcuts';
 import { useShortcutHintsOverlay } from './hooks/useShortcutHintsOverlay';
@@ -1067,7 +1068,6 @@ function App() {
             onMachinePasswordRequest={(machine) => openSettings({ category: 'remote-access', setting: 'remote-machines', machine })}
             width={sidebarWidth}
             maximized={sidebarMaximized}
-            onResize={startResize}
             collapsed={sidebarCollapsed}
             onToggleCollapse={handleToggleSidebar}
             titleBarControlsSlot={titleBarControlsSlot}
@@ -1082,6 +1082,7 @@ function App() {
             onUpdateAvailableClick={() => void openAvailableUpdate()}
           />
         </div>
+        {!sidebarCollapsed && !sidebarMaximized && <SidebarResizeHandle onResize={startResize} />}
         {/* The checklist carries its own fix buttons, so it never dims. */}
         <RemoteWorkspace dimmed={connectionPresence !== 'connected' && !shownConnectionCheck} covered={sidebarMaximized}>
           {shownConnectionCheck
