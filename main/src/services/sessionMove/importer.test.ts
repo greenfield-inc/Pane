@@ -431,7 +431,8 @@ describe('MoveImporter with file preview tabs (T-42)', { timeout: BUILD_TIMEOUT_
     return waitStage(importer, moveId, ['built', 'failed']);
   }
 
-  it('carries previews of files that moved, at their new path, and reports the ones it could not carry', async () => {
+  // A Session moves only between macOS and Linux (the target's preflight refuses Windows): this test's POSIX file URLs aren't run there.
+  it.skipIf(process.platform === 'win32')('carries previews of files that moved, at their new path, and reports the ones it could not carry', async () => {
     const tabs = memoryTabs();
     const { services } = fakeServices(target, undefined, tabs.panels);
     const importer = new MoveImporter(services, new PaneCommandRegistry(), path.join(root, 'moves'), tabs);
@@ -464,7 +465,8 @@ describe('MoveImporter with file preview tabs (T-42)', { timeout: BUILD_TIMEOUT_
     ]);
   });
 
-  it('never grants a file the move did not place: a worktree it skipped, or one setup wrote or replaced', async () => {
+  // A Session moves only between macOS and Linux (the target's preflight refuses Windows): this test's POSIX file URLs aren't run there.
+  it.skipIf(process.platform === 'win32')('never grants a file the move did not place: a worktree it skipped, or one setup wrote or replaced', async () => {
     let release!: () => void;
     const tabs = memoryTabs();
     const { services } = fakeServices(target, new Promise(resolve => { release = resolve; }), tabs.panels);

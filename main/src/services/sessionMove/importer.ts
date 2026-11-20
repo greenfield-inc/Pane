@@ -23,7 +23,7 @@ import { isBinaryFile } from '../../utils/binaryFile';
 import { placeConversation, undoConversationPlacement, type PlacedConversation } from './conversations';
 import { addWorktree, applySnapshot, deleteRefs, importBundle, MoveGitError, placeBranch, snapshotMatches } from './gitSnapshot';
 import { moveManifestSchema, movedApprovals, panelBuffersSchema, readTabFields, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveRepo, type MoveTab } from './manifest';
-import { buildPathMap, mapPath, rewriteText, type PathMap } from './pathMap';
+import { buildPathMap, mapPath, rewriteJson, rewriteJsonText, rewriteText, type PathMap } from './pathMap';
 import { arrivingPreview, previewSourcePath, relativeInside, type MovedRoot } from './filePreviews';
 import { bindMovedApprovals } from './approvals';
 import type { MovedApproval } from '../notify/notifyService';
@@ -657,7 +657,7 @@ export class MoveImporter {
       this.journal(job, `Pane “${pane.name}”`, { kind: 'removePane', paneId: created.id });
       // Shown at once, the way a new Pane is (no reload), without taking focus; its own tabs follow.
       this.services.sessionManager.emitSessionCreated(created, { activateOnCreate: false, createDefaultTerminalOnCreate: false });
-      if (pane.layout) sessionsDb.setSessionPanelLayout(pane.id, rewriteText(map, pane.layout));
+      if (pane.layout) sessionsDb.setSessionPanelLayout(pane.id, rewriteJsonText(map, pane.layout));
       const ctx = this.services.sessionManager.getProjectContextByProjectId(placement.projectId);
       const project = this.projects().find(item => item.id === placement.projectId);
       if (ctx && project && this.services.taskQueue) {
@@ -703,7 +703,7 @@ export class MoveImporter {
     if (existing?.move?.state === 'moved') job.replacedSession = existing;
     const arrivingMark: SessionMoveMark = { state: 'arriving', machine: manifest.source.machine, moveId, at: new Date().toISOString() };
     // SAFETY: the source's own OrchestrationSessionRecord with only its path strings rewritten; the store sanitises every field when it reads it back.
-    const arriving = JSON.parse(rewriteText(map, JSON.stringify(record))) as OrchestrationSessionRecord;
+    const arriving = JSON.parse(JSON.stringify(rewriteJson(map, record))) as OrchestrationSessionRecord;
     arriving.move = arrivingMark;
     arriving.associations = arriving.associations.filter(association => !association.machine);
     // Moving back: the copy that moved away keeps its owner Pane (archiving and recreating a live
@@ -726,7 +726,7 @@ export class MoveImporter {
       const cwd = pane.role === 'owner' ? targetFolder : placements.get(pane.id)?.worktreePath;
       if (!cwd) continue;
       for (const tab of pane.tabs) {
-        const state = decodeBoundary(JSON.parse(rewriteText(map, JSON.stringify(tab.state))), boundary.jsonObject);
+        const state = decodeBoundary(rewriteJson(map, tab.state), boundary.jsonObject);
         // A file preview is never left to the remote-edit guard: the build checks and grants it here, or leaves it behind.
         const preview = await arrivingPreview(tab, movedRoots, manifest.source.machine);
         if (preview?.kind === 'notCarried') {
@@ -778,7 +778,7 @@ export class MoveImporter {
       }
     }
     const owner = manifest.panes.find(pane => pane.role === 'owner');
-    if (owner?.layout) sessionsDb.setSessionPanelLayout(arriving.internalSessionId, rewriteText(map, owner.layout));
+    if (owner?.layout) sessionsDb.setSessionPanelLayout(arriving.internalSessionId, rewriteJsonText(map, owner.layout));
 
     step();
     // The incoming refs did their job once the branches are placed; the snapshot refs stay for Restore.
@@ -821,7 +821,7 @@ export class MoveImporter {
   private boundApprovals(job: Job): MovedApproval[] {
     const manifest = job.manifest!;
     if (!manifest.approvals.length) return [];
-    const rewritten = manifest.approvals.map(approval => decodeBoundary(JSON.parse(rewriteText(job.map!, JSON.stringify(approval))), boundary.jsonObject));
+    const rewritten = manifest.approvals.map(approval => decodeBoundary(rewriteJson(job.map!, approval), boundary.jsonObject));
     const ownerPaneId = decodeBoundary(manifest.session.internalSessionId, boundary.nonEmptyString);
     const tabs = new Map(job.tabs.filter(({ tab }) => tab.type === 'terminal' || tab.type === 'chat').map(({ paneId, tab }) => [tab.id, paneId]));
     return bindMovedApprovals(movedApprovals(rewritten), {

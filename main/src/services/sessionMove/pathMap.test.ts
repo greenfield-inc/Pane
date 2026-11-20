@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { claudeProjectDirName } from '../agentTranscript/claude';
-import { buildPathMap, mapPath, rewriteText } from './pathMap';
+import { buildPathMap, rewriteJson, mapPath, rewriteText } from './pathMap';
 
 const map = buildPathMap({
   sourceHome: '/Users/tylerbrown',
@@ -69,5 +69,11 @@ describe('rewriteText', () => {
     expect(claudeProjectDirName('/work/🚀')).toBe('-work--');
     expect(rewriteText(rocket, `~/.claude/projects/${claudeProjectDirName('/work/🚀')}/abc.jsonl`))
       .toBe(`~/.claude/projects/${claudeProjectDirName('/Users/tbrownio/work/🚀')}/abc.jsonl`);
+  });
+
+  it('rewrites JSON value by value, so a target path with a backslash or quote stays valid JSON', () => {
+    const odd = buildPathMap({ sourceHome: '/a', targetHome: 'C:\\Users\\b "q"', entries: [] });
+    const state = { cwd: '/a/repo', url: 'file:///a/repo/x.html', nested: [{ path: '/a/y' }], n: 2, flag: true, none: null };
+    expect(rewriteJson(odd, state)).toEqual({ cwd: 'C:\\Users\\b "q"/repo', url: 'file://C:\\Users\\b "q"/repo/x.html', nested: [{ path: 'C:\\Users\\b "q"/y' }], n: 2, flag: true, none: null });
   });
 });

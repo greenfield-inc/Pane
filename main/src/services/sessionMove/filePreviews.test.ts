@@ -26,7 +26,8 @@ describe('arrivingPreview', () => {
     expect(await arrivingPreview(tab('file:///a/worktrees/p1/x', 'terminal'), roots(['x']), 'A')).toBeNull();
   });
 
-  it('never carries a moved file that links outside what moved', async () => {
+  // Symlinks need extra rights on Windows, and a Session moves only between macOS and Linux.
+  it.skipIf(process.platform === 'win32')('never carries a moved file that links outside what moved', async () => {
     fs.writeFileSync(path.join(root, 'secret.html'), 'x');
     fs.symlinkSync(path.join(root, 'secret.html'), path.join(worktree, 'page.html'));
     expect(await arrivingPreview(tab('file:///a/worktrees/p1/page.html'), roots(['page.html']), 'A')).toEqual({
