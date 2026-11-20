@@ -27,7 +27,7 @@ export class NotificationsByTag<T extends ReplaceableNotification> {
   }
 }
 
-/** One notification per Pane: a new alert from any of its tabs replaces the last one. */
-export function paneNotificationTag(paneId: string): string {
-  return `pane:pane:${paneId}`;
+/** One notification per tab: a newer status for the same tab replaces its last one, and other tabs keep theirs. */
+export function panelNotificationTag(panelId: string): string {
+  return `pane:panel:${panelId}`;
 }

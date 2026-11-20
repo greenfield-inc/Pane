@@ -8,7 +8,7 @@ import type { AgentState } from '../../../shared/types/agentStatus';
 import { isDesktopAlertHandedOff } from './desktopAlertHandoff';
 import { openPanelOnClick } from './notificationClick';
 import { notificationIconUrl } from './notificationIcon';
-import { NotificationsByTag, paneNotificationTag } from './notificationReplacement';
+import { NotificationsByTag, panelNotificationTag } from './notificationReplacement';
 
 // Extend window interface for webkit audio context compatibility
 declare global {
@@ -99,7 +99,7 @@ export function useNotifications() {
   // Track previous agentStatus per panelId to detect transitions.
   const prevAgentStatusRef = useRef<Record<string, AgentState>>({});
 
-  // The notification shown for each tag, so a newer one for the same Pane replaces it.
+  // The notification shown for each tag, so a newer one for the same tab replaces it.
   const shownNotificationsRef = useRef(new NotificationsByTag<Notification>());
 
   // Project name cache keyed by project id, refreshed on mount and on project changes.
@@ -232,7 +232,7 @@ export function useNotifications() {
 
     void isDesktopAlertHandedOff(window.electronAPI?.notifications?.isHandedOff).then((handedOff) => {
       if (handedOff) return;
-      fireNotification(`${context.panelName} finished`, context.body, undefined, paneNotificationTag(context.session.id), context.panelTarget);
+      fireNotification(`${context.panelName} finished`, context.body, undefined, panelNotificationTag(panelId), context.panelTarget);
     });
   }
 
@@ -248,7 +248,7 @@ export function useNotifications() {
 
     void isDesktopAlertHandedOff(window.electronAPI?.notifications?.isHandedOff).then((handedOff) => {
       if (handedOff) return;
-      fireNotification(`${context.panelName} needs your input`, context.body, undefined, paneNotificationTag(context.session.id), context.panelTarget);
+      fireNotification(`${context.panelName} needs your input`, context.body, undefined, panelNotificationTag(panelId), context.panelTarget);
     });
   }
 

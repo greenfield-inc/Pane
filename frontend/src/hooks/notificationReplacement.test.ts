@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, type Mock } from 'vitest';
-import { NotificationsByTag, paneNotificationTag, type ReplaceableNotification } from './notificationReplacement';
+import { NotificationsByTag, panelNotificationTag, type ReplaceableNotification } from './notificationReplacement';
 
 interface FakeNotification extends ReplaceableNotification {
   close: Mock<() => void>;
@@ -10,25 +10,25 @@ function fakeNotification(): FakeNotification {
 }
 
 describe('NotificationsByTag', () => {
-  it('closes the earlier notification of the same Pane when a new one is shown', () => {
+  it('closes the earlier notification of the same tab when a new one is shown', () => {
     const notifications = new NotificationsByTag();
     const first = fakeNotification();
     const second = fakeNotification();
 
-    notifications.replace(paneNotificationTag('pane-1'), first);
-    notifications.replace(paneNotificationTag('pane-1'), second);
+    notifications.replace(panelNotificationTag('panel-1'), first);
+    notifications.replace(panelNotificationTag('panel-1'), second);
 
     expect(first.close).toHaveBeenCalledTimes(1);
     expect(second.close).not.toHaveBeenCalled();
     expect(notifications.size()).toBe(1);
   });
 
-  it('leaves the notifications of other Panes alone', () => {
+  it('leaves the notifications of other tabs alone', () => {
     const notifications = new NotificationsByTag();
     const first = fakeNotification();
 
-    notifications.replace(paneNotificationTag('pane-1'), first);
-    notifications.replace(paneNotificationTag('pane-2'), fakeNotification());
+    notifications.replace(panelNotificationTag('panel-1'), first);
+    notifications.replace(panelNotificationTag('panel-2'), fakeNotification());
 
     expect(first.close).not.toHaveBeenCalled();
     expect(notifications.size()).toBe(2);
@@ -38,7 +38,7 @@ describe('NotificationsByTag', () => {
     const notifications = new NotificationsByTag();
     const first = fakeNotification();
 
-    notifications.replace(paneNotificationTag('pane-1'), first);
+    notifications.replace(panelNotificationTag('panel-1'), first);
     first.onclose?.(new Event('close'));
 
     expect(notifications.size()).toBe(0);
@@ -49,12 +49,12 @@ describe('NotificationsByTag', () => {
     const first = fakeNotification();
     const second = fakeNotification();
 
-    notifications.replace(paneNotificationTag('pane-1'), first);
-    notifications.replace(paneNotificationTag('pane-1'), second);
+    notifications.replace(panelNotificationTag('panel-1'), first);
+    notifications.replace(panelNotificationTag('panel-1'), second);
     first.onclose?.(new Event('close'));
 
     expect(notifications.size()).toBe(1);
-    notifications.replace(paneNotificationTag('pane-1'), fakeNotification());
+    notifications.replace(panelNotificationTag('panel-1'), fakeNotification());
     expect(second.close).toHaveBeenCalledTimes(1);
   });
 
