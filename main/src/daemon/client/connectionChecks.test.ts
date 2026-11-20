@@ -139,6 +139,8 @@ describe('connection checklist', () => {
     await expect(controller.activateProfile(profile(proxy))).rejects.toThrow('Pane daemon not running on devbox.');
   });
 
+  // The health check gives a silent host its full 5 s (CONNECTION_CHECK_TIMEOUT_MS) before calling it
+  // unreachable, so this test takes a constant 5 s; the bound is twice that.
   it('names a host that never answers as unreachable, with the address it tried', async () => {
     const { controller } = createController();
     const silent = await startServer(() => {});

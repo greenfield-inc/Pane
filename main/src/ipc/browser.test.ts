@@ -7,7 +7,7 @@ import { PaneError } from '../../../shared/paneError';
 import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { BrowserPanelState, ToolPanel } from '../../../shared/types/panels';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
-import type { BrowserPageContents } from '../services/browser/pageDriver';
+import { WAIT_DEFAULT_MS, type BrowserPageContents } from '../services/browser/pageDriver';
 import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHoldSettings, type BrowserHost, type BrowserServices, type TabDownload } from './browser';
 import { readFileSync } from 'fs';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
@@ -344,9 +344,14 @@ describe('browser tabs: downloads', () => {
 
 describe('browser tools: opening a slow page', () => {
   it('returns once the page registered, even when it is still loading', async () => {
+    // A page still loading gets WAIT_DEFAULT_MS (10 s) before browser_open answers with it as it is; a fake clock runs that wait.
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
     const fixture = setup([], { loading: true });
-    expect(await call(fixture, 'open', { url: 'http://localhost:4173/slow' })).toMatchObject({ ok: true, url: 'http://localhost:4173/slow' });
-  }, 20_000);
+    const opening = call(fixture, 'open', { url: 'http://localhost:4173/slow' });
+    await vi.advanceTimersByTimeAsync(WAIT_DEFAULT_MS + 1_000);
+    expect(await opening).toMatchObject({ ok: true, url: 'http://localhost:4173/slow' });
+  });
 });
 
 describe('browser tools: tabs an agent holds (P4)', () => {
@@ -809,6 +814,9 @@ describe('browser tools: a dialog open on the page', () => {
 
 describe('browser tools: Take over pressed during a call', () => {
   it('keeps the person driving after the call ends, shows it, and holds the agent\'s next call until Hand to', async () => {
+    // The chip's 2 s linger, the gate's 250 ms poll and each click's settle time run on a fake clock.
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
     const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')]);
     const page = fixture.pages.get('mine');
     await call(fixture, 'snapshot', {});
@@ -820,21 +828,26 @@ describe('browser tools: Take over pressed during a call', () => {
       if (method === 'Input.dispatchMouseEvent') await new Promise<void>(resolve => { finish = resolve; });
       return sendCommand(method, params);
     };
-    const clicking = call(fixture, 'click', { x: 5, y: 5 });
+    let clicked = false;
+    const clicking = call(fixture, 'click', { x: 5, y: 5 }).finally(() => { clicked = true; });
     await vi.waitFor(() => expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"by":"agent"'));
     expect(await fixture.registry.invokeRemote('browser:driver', ['mine', 'person', 'phone-1'], { caller: undefined })).toEqual({ success: true });
     page.debugger.sendCommand = sendCommand;
     finish();
+    // The click lets the page settle before it answers.
+    while (!clicked) await vi.advanceTimersByTimeAsync(50);
     await clicking;
     // The chip still says the person drives, after the agent's chip would have lingered out.
-    await new Promise(resolve => setTimeout(resolve, 2_300));
+    await vi.advanceTimersByTimeAsync(2_300);
     expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"by":"person"');
     let settled = false;
     const next = call(fixture, 'click', { x: 5, y: 5 }).finally(() => { settled = true; });
-    await new Promise(resolve => setTimeout(resolve, 600));
+    await vi.advanceTimersByTimeAsync(600);
     expect(settled).toBe(false);
     expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"agentWaiting"');
     await fixture.registry.invokeRemote('browser:driver', ['mine', 'agent', 'phone-1'], { caller: undefined });
+    // The held call sees the hand-back on its next poll, then clicks and lets the page settle.
+    while (!settled) await vi.advanceTimersByTimeAsync(50);
     expect(await next).toMatchObject({ ok: true });
   });
 });
