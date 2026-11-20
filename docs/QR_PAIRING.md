@@ -21,9 +21,13 @@ which opens on the **Phone** tab. It has four tabs:
 3. Tap the link. It opens the Pane app, or Pane in the phone's browser when
    the app is not installed.
 
-The iPhone app is in TestFlight. To get it, ask to join on
-[Discord](https://discord.gg/BdMyubeAZn); the dialog and the pairing page
-link there.
+The iPhone app is in public beta on TestFlight. Open
+<https://testflight.apple.com/join/eKJmnzXF> on the iPhone, install Apple's
+TestFlight app if asked, then tap **Accept** and **Install**. The dialog and
+the pairing page link there too. A TestFlight build expires after 90 days, and
+TestFlight installs each new one for you. Send feedback from TestFlight (take a
+screenshot, then **Send Beta Feedback**) or on
+[Discord](https://discord.gg/BdMyubeAZn).
 
 The phone shows the computer's sessions a few seconds later. A QR code works
 once and expires after 10 minutes; the dialog shows a new one after each use.

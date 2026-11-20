@@ -540,7 +540,10 @@ async fn the_phone_app_opens_pair_and_glasses_links() {
     for path in ["/pair", "/glasses"] {
         let (code, body) = env.http("GET", path, "", "").await;
         assert_eq!(code, 200, "{path}");
-        assert!(body.contains("It's in TestFlight."), "{path}");
+        assert!(
+            body.contains("https://testflight.apple.com/join/eKJmnzXF"),
+            "{path}"
+        );
     }
 }
 
