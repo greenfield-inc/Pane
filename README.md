@@ -166,7 +166,7 @@ The original setup path, with a `pane-remote://...` code over Tailscale or SSH:
 2. Open `Settings > Remote Access > Tailscale` on that host machine.
 3. Click **Set Up Host** and copy the generated `pane-remote://...` connection code.
 4. On another desktop, open Pane, go to `Settings > Remote Access > Tailscale`, paste the code under **Paste a connection code**, and connect.
-5. On a phone or tablet, open [runpane.com/app](https://runpane.com/app/), paste the same code, and connect.
+5. On a phone or tablet, open [runpane.com/app](https://runpane.com/app/), or the Pane iPhone app ([public beta in TestFlight](https://testflight.apple.com/join/eKJmnzXF)), paste the same code, and connect.
 
 A connected desktop reaches the host's dev servers at their usual `localhost` address: terminal links and live reload work as on the host. See [Forwarded ports](docs/SELF_HOSTED_REMOTE_DAEMON.md#forwarded-ports). Browser tabs run on the host, signed in as the host, and every other screen, the phone included, shows a live stream you can drive. See [Browser tools](docs/BROWSER_AGENTS.md#where-a-tabs-page-runs).
 
