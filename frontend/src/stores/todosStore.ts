@@ -8,7 +8,7 @@ import { approvalsByTodo, todoApprovalScope, type TodoApprovalScope } from '../c
 import { sessionTodoEntries } from '../components/todos/sessionTodosList';
 import type { TodoEntry } from '../components/todos/todoList';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
-import { useConfigStore } from './configStore';
+import { isTodosEnabled, useConfigStore } from './configStore';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { showActionError } from './errorStore';
 import { selectNotifyItems, sessionTodoApprovals, useNotifyStore } from './notifyStore';
@@ -60,6 +60,8 @@ export interface TodosApi {
 
 /** The desktop's to-do API: the preload's, unchanged. Null outside Electron until one is installed. */
 function electronTodosApi(): TodosApi | null {
+  // To-dos is off by default (T-39): the desktop reads none, and main refuses the channels anyway.
+  if (!isTodosEnabled(useConfigStore.getState().config)) return null;
   const api = window.electronAPI;
   if (!api?.todos) return null;
   return {
@@ -91,6 +93,27 @@ export function installTodosApi(api: TodosApi | null): void {
 /** The API the to-do screens use now: the installed one, else the desktop's, else none. */
 export function todosApi(): TodosApi | null {
   return installedApi ?? electronTodosApi();
+}
+
+/**
+ * Whether To-dos shows anywhere (T-39). The desktop follows its own switch (Settings › Advanced ›
+ * Experimental › To-dos); the web app shows To-dos once its host answers with them, so a host with
+ * To-dos off shows none.
+ */
+export function useTodosEnabled(): boolean {
+  const switchedOn = useConfigStore(state => isTodosEnabled(state.config));
+  const hostAnswered = useTodosStore(state => state.snapshot !== null);
+  return installedApi ? hostAnswered : switchedOn;
+}
+
+/** What `useTodosEnabled` says, read once outside React. */
+export function todosEnabledNow(): boolean {
+  return installedApi ? useTodosStore.getState().snapshot !== null : isTodosEnabled(useConfigStore.getState().config);
+}
+
+/** A host with To-dos off refuses its channels with this (main's TODOS_DISABLED). */
+function refusedAsOff(error: string | undefined): boolean {
+  return error?.includes('To-dos is turned off') === true;
 }
 
 interface RemoteTodoAnswer {
@@ -131,6 +154,8 @@ export interface RemoteTodos {
  */
 interface TodosState {
   snapshot: TodosSnapshot | null;
+  /** The host answered that To-dos is turned off (T-39), as opposed to not read yet: open To-dos screens close. */
+  hostTodosOff: boolean;
   /** Pages read so far, by to-do number; reread on every change. */
   details: ReadonlyMap<number, TodoDetail>;
   /** To-do pages on screen, so a change rereads only those. */
@@ -164,6 +189,7 @@ const detailGenerations = new Map<number, number>();
 
 export const useTodosStore = create<TodosState>((set, get) => ({
   snapshot: null,
+  hostTodosOff: false,
   details: new Map(),
   watched: new Map(),
   snoozeRequest: null,
@@ -174,8 +200,11 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     if (!api) return;
     const generation = ++refreshGeneration;
     const response = await api.snapshot().catch(() => null);
-    if (generation !== refreshGeneration || !response?.success || !response.data) return;
-    set({ snapshot: api.hostIsHere ? asThisMachine(response.data) : response.data });
+    if (generation !== refreshGeneration) return;
+    // The host turned To-dos off: forget what it showed, so every entry hides (T-39).
+    if (response && !response.success && refusedAsOff(response.error)) { set({ snapshot: null, details: new Map(), hostTodosOff: true }); return; }
+    if (!response?.success || !response.data) return;
+    set({ snapshot: api.hostIsHere ? asThisMachine(response.data) : response.data, hostTodosOff: false });
     await Promise.all([...get().watched.keys()].map(number => get().loadDetail(number)));
   },
 
@@ -257,7 +286,7 @@ export const useTodosStore = create<TodosState>((set, get) => ({
   },
   refreshRemote: async (machineId) => {
     const api = window.electronAPI?.machines;
-    if (!api) return;
+    if (!api || !isTodosEnabled(useConfigStore.getState().config)) return;
     const targets = get().machines.filter(machine => (machineId === undefined || machine.id === machineId) && machine.status === 'online');
     await Promise.all(targets.map(async machine => {
       const response = await api.read(machine.id, 'todos:snapshot').then(read => read.data, () => null);
@@ -396,7 +425,17 @@ export function useMachineTodoSessionKeys(): ReadonlySet<string> {
 /** Keeps the snapshot current while the app is mounted: on start and whenever main says it changed. */
 export function useTodosRefresh(): void {
   const refresh = useTodosStore(state => state.refresh);
-  useEffect(() => watchTodos(refresh), [refresh]);
+  const enabled = useConfigStore(state => isTodosEnabled(state.config));
+  useEffect(() => {
+    if (enabled) {
+      void useTodosStore.getState().refreshRemote();
+      return watchTodos(refresh);
+    }
+    // Turned off (T-39): forget every to-do read, here and from other machines; nothing is deleted.
+    resetTodos();
+    useTodosStore.setState(state => ({ remote: Object.fromEntries(Object.entries(state.remote).map(([id, machine]) => [id, { ...machine, snapshot: null }])) }));
+    return undefined;
+  }, [refresh, enabled]);
 }
 
 /**
@@ -414,7 +453,7 @@ export async function switchTodosHost(): Promise<void> {
 /** Forgets every to-do read so far: the web app does this when it leaves a host. */
 export function resetTodos(): void {
   refreshGeneration += 1;
-  useTodosStore.setState({ snapshot: null, details: new Map(), watched: new Map() });
+  useTodosStore.setState({ snapshot: null, details: new Map(), watched: new Map(), hostTodosOff: false });
 }
 
 /**

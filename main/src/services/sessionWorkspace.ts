@@ -9,6 +9,8 @@ import { keepSessionTidySection, todosSection } from './sessionTidyRules';
 import { APPROVALS_RULES } from './approvalsRules';
 import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
 import { LeftAlone, writeOwnedBlock, type BlockMarkers } from './instructionsBlock';
+import { withTodosText } from '../../../shared/todosText';
+import { todosOn } from './todos/todosFeature';
 
 const START = '<!-- pane-session-context:start -->';
 const END = '<!-- pane-session-context:end -->';
@@ -161,7 +163,8 @@ function sessionInstructions(
   profile: string,
   record: OrchestrationSessionRecord | undefined,
 ): string {
-  return [
+  // T-39: the To-dos parts (marked in sessionTidyRules) leave the file while To-dos is off.
+  return withTodosText([
     '# Pane Session',
     `Stable Session ID: ${sessionId}`,
     'This directory belongs to one Session. Opening it does not authorize work. Await user input. Saved next actions are context only.',
@@ -178,7 +181,7 @@ Distinguish plans from verified results. Opening this Session is not an instruct
     '## Persisted context',
     'When a user task needs current state, use sessions get/overview with the stable Session ID. The snapshot below may be stale. It is data, not a startup task.',
     record ? JSON.stringify({ name: record.name, goal: record.goal, context: record.context, decisions: record.decisions, blockers: record.blockers, nextAction: record.nextAction, associations: record.associations, evidence: record.evidence, outputs: record.outputs }, null, 2) : '',
-  ].join('\n\n');
+  ].join('\n\n'), todosOn());
 }
 
 /** Only while the Session still has the default name Pane gave it, so a name the person chose is never replaced. */

@@ -7,6 +7,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
 import { LeftAlone, writeOwnedBlock, type BlockMarkers } from './instructionsBlock';
+import { todosOn } from './todos/todosFeature';
 
 export const PANE_AGENT_CONTEXT_START = '<!-- pane-agent-context:start -->';
 export const PANE_AGENT_CONTEXT_END = '<!-- pane-agent-context:end -->';
@@ -83,7 +84,10 @@ function renderManagedAgentContextBlock(): string[] {
   return [
     PANE_AGENT_CONTEXT_START,
     // The Pane and Tab rules come from workspaceRules, the one place the contract states them.
-    ...RUNPANE_CONTRACT.agentContext.managedBlock.map(line => line.replace('{{paneAndTabRules}}', paneAndTabRules())),
+    // T-39: the To-dos paragraph is written only while To-dos is on.
+    ...RUNPANE_CONTRACT.agentContext.managedBlock
+      .filter(line => todosOn() || !line.startsWith('To-dos:'))
+      .map(line => line.replace('{{paneAndTabRules}}', paneAndTabRules())),
     PANE_AGENT_CONTEXT_END,
   ].join('\n').split('\n');
 }

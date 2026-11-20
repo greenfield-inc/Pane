@@ -577,6 +577,50 @@ describe('TodoService', () => {
     });
   });
 
+  describe('To-dos off and back on (T-39)', () => {
+    it('while off, no tick, wake, supervisor rung or message runs, and launch resume waits', async () => {
+      const todo = await service.create({ title: 'Quiet' }, person);
+      const typed = host.typed.length;
+      host.todosEnabled = false;
+      for (let minute = 0; minute < 45; minute += 1) {
+        now += 60_000;
+        await service.fastTick();
+        await service.wakeTick();
+        await service.loadTick();
+        await service.supervisorPass();
+      }
+      await service.comment(todo.number, 'are you there?', person);
+      await service.flush();
+      expect(host.typed.length).toBe(typed);
+      expect(host.restarted).toEqual([]);
+      expect(host.cards).toEqual([]);
+      expect(await service.resumeOnLaunch('launch')).toEqual({ restarted: 0, queued: 0 });
+      expect(service.launchHasResumed).toBe(false);
+    });
+
+    it('turned back on, a to-do already on the ladder starts its whole quiet episode again and its stuck card closes', async () => {
+      const todo = await service.create({ title: 'Quiet' }, person);
+      for (let minute = 0; minute <= 45 && host.cards.length === 0; minute += 1) {
+        now += 60_000;
+        await service.fastTick();
+        await service.supervisorPass();
+      }
+      expect(host.cards).toHaveLength(1);
+      expect(service.get(todo.number)).toMatchObject({ episodeReminders: expect.any(Number) });
+      expect(service.get(todo.number)?.stuckSince).not.toBeNull();
+
+      now += 80 * 60_000; // off for 80 minutes
+      service.restartClocksAfterTurnedOn();
+
+      expect(host.closed.map(card => card.id)).toEqual([host.cards[0].id]);
+      expect(service.get(todo.number)).toMatchObject({ lastProgressAt: now, stuckSince: null, episodeReminders: 0, episodeRestarts: 0, stuckCardId: null });
+      expect(service.detail(todo.number).activity.at(-1)?.body).toBe('To-dos was turned back on: its quiet time starts again now');
+      const restarts = host.restarted.length;
+      await service.supervisorPass();
+      expect(host.restarted.length).toBe(restarts);
+    });
+  });
+
   describe('launch resume', () => {
     it('at the 30-minute rung stops and starts a live quiet orchestrator again, not a Resume that does nothing (F-7)', async () => {
       const todo = await service.create({ title: 'Quiet' }, person);

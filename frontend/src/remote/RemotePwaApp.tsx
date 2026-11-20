@@ -172,6 +172,9 @@ export function RemotePwaApp() {
   /** The history views under each To-dos screen opened forward, so back can step out through the history. */
   const todosStackRef = useRef<string[]>([]);
   const todosAvailable = useTodosStore(state => state.snapshot !== null);
+  // T-39: the host turned To-dos off: a To-dos screen open (or restored from history) closes back to the workspace.
+  const hostTodosOff = useTodosStore(state => state.hostTodosOff);
+  useEffect(() => { if (hostTodosOff && todosRoute) setTodosRoute(null); }, [hostTodosOff, todosRoute]);
   /** To-dos opened from a Session's header (T-23): that Session's list, until To-dos closes. */
   const [todosSession, setTodosSession] = useState<PhoneTodosSession | null>(null);
   useEffect(() => { if (!todosRoute) setTodosSession(null); }, [todosRoute]);

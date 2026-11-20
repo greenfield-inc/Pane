@@ -380,6 +380,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       ...clone(mockOptions.initialConfig ?? {}),
       ...clone(mockOptions.appearance.seeded),
     };
+    // To-dos is off by default (T-39); a spec that serves to-dos has it on unless its initialConfig says otherwise.
+    if (mockOptions.todos && mockOptions.initialConfig?.todosEnabled === undefined) configState.todosEnabled = true;
     const paneChatSession = {
       id: '__pane_chat_session__',
       name: 'Pane Chat',

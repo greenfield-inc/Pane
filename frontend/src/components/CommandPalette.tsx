@@ -43,7 +43,7 @@ import {
   type SearchFilter, type SearchItem, type SearchSection, type TodoSearchRef,
 } from '../utils/spotlightSearch';
 import type { Project } from '../types/project';
-import { useTodosStore } from '../stores/todosStore';
+import { useTodosEnabled, useTodosStore } from '../stores/todosStore';
 import { openTodo } from './todos/todosNavigation';
 
 interface CommandPaletteProps {
@@ -378,12 +378,15 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
     }
     return bySession;
   }, [todoSnapshot]);
+  // To-dos off (T-39): a to-do's own Session stays out of search, as it stays out of the sidebar.
+  const todosOn = useTodosEnabled();
+  const searchedSessions = useMemo(() => (todosOn ? sessions : sessions.filter(session => session.todoNumber == null)), [todosOn, sessions]);
 
   // Rebuilt when the launcher opens or its sources change, never per keystroke.
   const localItems = useMemo(() => isOpen
     ? buildSearchItems({
       panes,
-      sessions,
+      sessions: searchedSessions,
       projects,
       commands: useHotkeyStore.getState().getAll({ paletteOnly: true }),
       activePaneId,
@@ -392,7 +395,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
     })
     : [],
   // eslint-disable-next-line react-hooks/exhaustive-deps -- getAll reads the hotkeys registry
-  [isOpen, panes, sessions, projects, hotkeys, activePaneId, selectedSessionId, todoSessions]);
+  [isOpen, panes, searchedSessions, projects, hotkeys, activePaneId, selectedSessionId, todoSessions]);
   const items = useMemo(() => isOpen && allMachines
     ? [...buildMachineSearchItems(machineViews), ...localItems.filter(item => item.kind === 'command')]
     : localItems,

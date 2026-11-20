@@ -1,7 +1,9 @@
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { useTheme, withAlpha } from '@/theme';
+import { monoFontFamily, useTheme, withAlpha } from '@/theme';
 import { Skeleton } from '@/ui';
+
+import { TERMINAL_FONT_SIZE } from './terminalSize';
 
 const LINE_WIDTHS = ['62%', '38%', '84%', '50%', '72%', '28%'] as const;
 
@@ -51,6 +53,40 @@ export function PanelTabsSkeleton() {
     </View>
   );
 }
+
+/**
+ * The rows a terminal showed when it was last open, in its font and colors, while its screen is
+ * read again. Plain text: the colors come back with the fresh screen. `height` is the terminal's
+ * area and `rows` the rows it fits, which set the row pitch.
+ */
+export function KeptScreen({ text, rows, height }: { text: string; rows: number; height: number }) {
+  const { terminal } = useTheme();
+  const lineHeight = rows > 0 && height > 0 ? (height - KEPT_INSET.paddingTop - 8) / rows : 14;
+  return (
+    <View
+      testID="terminal-kept-screen"
+      accessible
+      accessibilityLabel="Terminal, last screen"
+      accessibilityValue={{ text }}
+      style={[StyleSheet.absoluteFill, KEPT_INSET, { backgroundColor: terminal.background }]}
+    >
+      {text.split('\n').map((line, index) => (
+        <Text
+          key={index}
+          numberOfLines={1}
+          ellipsizeMode="clip"
+          allowFontScaling={false}
+          style={{ fontFamily: monoFontFamily, fontSize: TERMINAL_FONT_SIZE, lineHeight, height: lineHeight, color: terminal.foreground }}
+        >
+          {line}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+/** The terminal's padding (8) plus the page's own inset (4 top, 6 sides), where xterm's first row starts. */
+const KEPT_INSET = { paddingTop: 12, paddingHorizontal: 14 };
 
 const styles = StyleSheet.create({
   screen: { flex: 1, padding: 8 },

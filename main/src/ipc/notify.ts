@@ -43,6 +43,7 @@ import type { SecretLeaseStart } from '../services/secretLeaseService';
 import { agentLabel } from '../../../shared/agents';
 import { openExternalUrl } from '../utils/openExternalUrl';
 import { DEFAULT_BROWSER_SETTINGS } from '../../../shared/types/browser';
+import { activeTodoService } from '../services/todos/todosFeature';
 
 const MAX_CHOICES = 9;
 const MAX_TEXT = 4_000;
@@ -513,7 +514,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     sessionsById: () => services.orchestrationSessionManager?.approvalSessionsById() ?? new Map(),
     sessionRecord: services.orchestrationSessionManager ? (sessionId) => services.orchestrationSessionManager?.approvalSessionRecord(sessionId) : undefined,
     memberMachine: (paneId) => services.orchestrationSessionManager?.remoteMember?.(paneId)?.machine.label,
-    todoOf: (panelId, explicit) => services.todoService?.todoLinkFor(panelId, explicit),
+    todoOf: (panelId, explicit) => activeTodoService(services)?.todoLinkFor(panelId, explicit),
     onSessionsChanged: (listener) => {
       const sessions = services.orchestrationSessionManager;
       sessions?.on('changed', listener);

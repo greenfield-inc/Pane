@@ -4,6 +4,7 @@ import path from 'node:path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
 import { RUNPANE_CONTRACT } from './generated/contract';
+import { isTodoCommand, todosDisabledError, todosOn, withoutTodoArguments, withoutTodoLines } from './todosFeature';
 
 type DocKind = 'doc' | 'skill' | 'help' | 'command';
 
@@ -23,25 +24,29 @@ const EXCERPT_CHARS = 240;
  * runpane help topics and per-command context from the contract, and the Pane Chat
  * skills the Pane app installed in its data directory.
  */
-export function loadDocs(paneDir: string | undefined): DocEntry[] {
+export function loadDocs(paneDir: string | undefined, todos = todosOn(paneDir)): DocEntry[] {
   const entries: DocEntry[] = [];
   const indexFile = path.join(__dirname, 'docs-index.json');
   const bundledIndex = process.env.RUNPANE_BUNDLED_DOCS_INDEX;
   const indexJson = bundledIndex ?? (fs.existsSync(indexFile) ? fs.readFileSync(indexFile, 'utf8') : undefined);
   if (indexJson) {
     for (const doc of decodeBoundary(JSON.parse(indexJson), indexedDocSchema)) {
-      entries.push({ ...doc, kind: 'doc' });
+      if (!todos && isTodoDoc(doc.path)) continue;
+      entries.push({ ...doc, kind: 'doc', text: todos ? doc.text : withoutTodoLines(doc.text.split('\n')).join('\n') });
     }
   }
   for (const [topic, lines] of Object.entries(RUNPANE_CONTRACT.help.npm)) {
-    entries.push({ path: `help/${topic}`, title: `runpane help ${topic}`, kind: 'help', text: lines.join('\n') });
+    if (!todos && isTodoCommand(topic)) continue;
+    entries.push({ path: `help/${topic}`, title: `runpane help ${topic}`, kind: 'help', text: (todos ? lines : withoutTodoLines(lines)).join('\n') });
   }
-  for (const command of Object.values(RUNPANE_CONTRACT.agentContext.commands)) {
+  for (const contractCommand of Object.values(RUNPANE_CONTRACT.agentContext.commands)) {
+    if (!todos && isTodoCommand(contractCommand.name)) continue;
+    const command = todos ? contractCommand : withoutTodoArguments(contractCommand);
     const text = [
       command.summary,
       command.details,
       ...command.arguments.map((arg) => `${arg.name}${'value' in arg ? ` ${arg.value}` : ''}: ${arg.description}`),
-      ...('notes' in command ? command.notes : []),
+      ...(command.notes ?? []),
       ...command.examples,
     ].join('\n');
     entries.push({ path: `command/${command.name}`, title: `runpane ${command.name}`, kind: 'command', text });
@@ -85,7 +90,9 @@ export function runDocsSearch(parsed: ParsedArgs): number {
 export function runDocsRead(parsed: ParsedArgs): number {
   const wanted = parsed.doc?.trim().replace(/^\/+/, '');
   if (!wanted) throw new Error('runpane docs read requires --doc.');
-  const doc = loadDocs(parsed.paneDir).find((entry) => entry.path === wanted);
+  const todos = todosOn(parsed.paneDir);
+  if (!todos && (isTodoDoc(wanted) || /^(help|command)\/todos\b/.test(wanted))) throw todosDisabledError();
+  const doc = loadDocs(parsed.paneDir, todos).find((entry) => entry.path === wanted);
   if (!doc) {
     throw new Error(`No Pane doc at "${wanted}". Run \`runpane docs search --query <words>\` and use a path it returns.`);
   }
@@ -120,4 +127,9 @@ function excerpt(text: string, terms: string[]): string {
   const start = Math.max(0, at - EXCERPT_CHARS / 3);
   const slice = text.slice(start, start + EXCERPT_CHARS).replace(/\s+/g, ' ').trim();
   return `${start > 0 ? '…' : ''}${slice}${start + EXCERPT_CHARS < text.length ? '…' : ''}`;
+}
+
+/** docs/TODOS.md, the To-dos guide, which only reads while To-dos is on. */
+function isTodoDoc(docPath: string): boolean {
+  return /(^|\/)TODOS\.md$/i.test(docPath);
 }

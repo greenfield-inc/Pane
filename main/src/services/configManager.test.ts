@@ -4,6 +4,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_CONTEXT_DEFAULTS_VERSION, ConfigManager } from './configManager';
 import { collectActiveBindings, findChordConflicts } from '../../../shared/utils/keyboardBindings';
+import { todosEnabled } from './todos/todosFeature';
 
 describe('ConfigManager appearance persistence', () => {
   let paneDir: string;
@@ -57,6 +58,21 @@ describe('ConfigManager appearance persistence', () => {
     expect(manager.getConfig().customLinks).toEqual([jira]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('customLinks: ignored 1 malformed entries'));
     warn.mockRestore();
+  });
+
+  it('keeps To-dos off for a fresh install and for a config saved before the key existed (T-39)', async () => {
+    const fresh = new ConfigManager();
+    await fresh.initialize();
+    expect(fresh.getConfig().todosEnabled).toBe(false);
+    expect(todosEnabled(fresh.getConfig())).toBe(false);
+
+    await fs.writeFile(configPath, JSON.stringify({ theme: 'folio' }));
+    const existing = new ConfigManager();
+    await existing.initialize();
+    expect(todosEnabled(existing.getConfig())).toBe(false);
+
+    await existing.updateConfig({ todosEnabled: true });
+    expect(todosEnabled(existing.getConfig())).toBe(true);
   });
 
   it('turns chat tabs on for a fresh install, and leaves an existing config as it was (D-329)', async () => {

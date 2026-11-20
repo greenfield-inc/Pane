@@ -214,6 +214,7 @@ through review, QA, and required checks. When feedback needs only an
 authorized reply or resolution, post it, read it back, and continue. Keep
 working while a review is pending.
 
+<!-- pane:todos -->
 ## To-dos
 
 A to-do (T-n) is one piece of the person's agent work; a Session's work list
@@ -229,6 +230,7 @@ and link questions, reports and agent starts with `--todo T-n`.
   only after the person's Accept, or with `--person-said "<their words>"`.
 - `machine_busy` means wait: Pane types "Capacity is back" into your tab.
 
+<!-- /pane:todos -->
 ## Worker reports
 
 A worker's `runpane report` is its hand-back, like a background subagent's

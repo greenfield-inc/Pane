@@ -602,6 +602,7 @@ runpane lock list --json
   this or another machine: the agent fills in `runpane handoff --template`,
   then runs `runpane handoff "<destination>" --note-file <note> [--push]`.
 
+<!-- pane:todos -->
 ## To-dos
 
 In Pane, an orchestrator's work list is the to-do list (T-n). Every top-level
@@ -651,6 +652,7 @@ attachments first. `runpane docs read --doc docs/TODOS.md` has the whole model.
   and `[From To-dos T-n, asked by its orchestrator] …` is a question for you as
   its requester.
 
+<!-- /pane:todos -->
 ## Keep the Session tidy
 
 Clean up as you go, without asking. In your next message, say in one line what
@@ -700,9 +702,9 @@ its Pane right after the merge, in the same turn. Run
 busy agent or unsent input, keep the Pane and say why. Never pass `--force`. For several at
 once: `runpane panes archive --session <S> --merged --closed --dry-run --json`,
 then the same with `--yes`. The local branch stays, and `runpane panes restore`
-brings the worktree back. For a to-do's own Session, `runpane todos archive T-n` after the
+brings the worktree back.<!-- pane:todos --> For a to-do's own Session, `runpane todos archive T-n` after the
 person's Accept runs the same checks on its Panes, keeps any that aren't clean
-and says why, and archives the Session once all its Panes are archived.
+and says why, and archives the Session once all its Panes are archived.<!-- /pane:todos -->
 
 When: as each item closes, and when you start, resume or wake. Never touch
 Panes or tabs of another Session.

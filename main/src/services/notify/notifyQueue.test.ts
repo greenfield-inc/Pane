@@ -39,6 +39,28 @@ describe('NotifyQueue', () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it('while To-dos is off, hides To-dos\' own cards and refuses them, and drops a worker card\'s to-do link; on, both are back (T-39)', async () => {
+    let off = false;
+    const queue = new NotifyQueue({ settings: () => DEFAULT_NOTIFY_SETTINGS, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [], todosOff: () => off });
+    const review = ask(queue, { ui: 'options', title: 'T-1 is ready for review', choices: [{ label: 'Accept', recommended: true }, { label: 'Ask for changes' }], todo: { number: 1, title: 'Invoice PDFs', kind: 'review' } }, { name: 'T-1', agent: 'Pane' });
+    ask(queue, { ...sessionStore, todo: { number: 1, title: 'Invoice PDFs' } });
+    await vi.advanceTimersByTimeAsync(0);
+    const reviewId = queue.snapshot().items.find(item => item.todo?.kind === 'review')!.id;
+    off = true;
+
+    const shown = queue.snapshot().items;
+    expect(shown.map(item => item.title)).toEqual([sessionStore.title]);
+    expect(shown[0].todo).toBeUndefined();
+    expect(() => queue.run({ type: 'answer', id: reviewId, answer: { choice: 'Accept' } })).toThrow(expect.objectContaining({ code: 'TODOS_DISABLED' }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(review.result).toBeUndefined();
+
+    off = false;
+    const back = queue.snapshot().items;
+    expect(back.map(item => item.title).sort()).toEqual([sessionStore.title, 'T-1 is ready for review'].sort());
+    expect(back.find(item => item.title === sessionStore.title)?.todo).toEqual({ number: 1, title: 'Invoice PDFs' });
+  });
+
   it('withdraws the cards of paused tabs, leaving nothing in Notify and telling their agents', async () => {
     const { queue } = makeQueue();
     const paused = ask(queue, sessionStore, claude);

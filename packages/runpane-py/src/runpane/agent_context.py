@@ -9,14 +9,20 @@ from .generated_contract import RUNPANE_CONTRACT
 from .workspaces import read_workspace_summary
 from .daemon_client import resolve_pane_directory
 from .pane_intro import pane_intro, render_pane_intro
+from .todos_feature import is_todo_command, todos_disabled_error, todos_on, without_todo_arguments, without_todo_lines
 
 MAX_COMMAND_CANDIDATES = 5
 
 
 def run_agent_context(parsed: Any) -> int:
-    if parsed.context_command is not None and find_command_detail(parsed.context_command) is None:
-        return print_unknown_command(parsed.context_command, parsed.json)
-    result = build_agent_context_result(parsed.context_command, getattr(parsed, "pane_dir", None))
+    pane_dir = getattr(parsed, "pane_dir", None)
+    todos = todos_on(pane_dir)
+    found = None if parsed.context_command is None else find_command_detail(parsed.context_command)
+    if not todos and found is not None and is_todo_command(found["name"]):
+        raise todos_disabled_error()
+    if parsed.context_command is not None and found is None:
+        return print_unknown_command(parsed.context_command, parsed.json, todos)
+    result = build_agent_context_result(parsed.context_command, pane_dir, todos)
     if parsed.json:
         print(json.dumps(result, indent=2))
         return 0
@@ -28,13 +34,14 @@ def run_agent_context(parsed: Any) -> int:
     return 0
 
 
-def build_agent_context_result(command_name: Optional[str] = None, pane_dir: Optional[str] = None) -> Dict[str, Any]:
+def build_agent_context_result(command_name: Optional[str] = None, pane_dir: Optional[str] = None, todos: bool = True) -> Dict[str, Any]:
     if command_name:
+        command = get_command_detail(command_name)
         return {
             "ok": True,
             "mode": "command",
             "source": "runpane-contract",
-            "command": get_command_detail(command_name),
+            "command": command if todos else without_todo_arguments(command),
         }
 
     brief = RUNPANE_CONTRACT["agentContext"]["brief"]
@@ -43,9 +50,9 @@ def build_agent_context_result(command_name: Optional[str] = None, pane_dir: Opt
         "mode": "brief",
         "source": "runpane-contract",
         "intro": pane_intro(resolve_pane_directory(pane_dir)),
-        "workspaceRules": RUNPANE_CONTRACT["agentContext"]["workspaceRules"],
+        "workspaceRules": RUNPANE_CONTRACT["agentContext"]["workspaceRules"] if todos else without_todo_lines(RUNPANE_CONTRACT["agentContext"]["workspaceRules"]),
         "summary": brief["summary"],
-        "rules": brief["rules"],
+        "rules": brief["rules"] if todos else without_todo_lines(brief["rules"]),
         "tools": brief["tools"],
         "detailCommand": brief["detailCommand"],
         "workspaces": read_workspace_summary(pane_dir),
@@ -68,12 +75,12 @@ def get_command_detail(command_name: str) -> Dict[str, Any]:
     raise ValueError(f"Unknown runpane command: {command_name}. Expected one of: {', '.join(command_names())}")
 
 
-def print_unknown_command(command_name: str, as_json: bool) -> int:
+def print_unknown_command(command_name: str, as_json: bool, todos: bool = True) -> int:
     error = {
         "ok": False,
         "code": "unknown_command",
         "message": f"Unknown runpane command: {command_name}. Run `runpane agent-context --json` to list every command.",
-        "candidates": rank_command_candidates(command_name),
+        "candidates": rank_command_candidates(command_name, [name for name in command_names() if todos or not is_todo_command(name)]),
     }
     if as_json:
         print(json.dumps(error, indent=2))

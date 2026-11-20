@@ -192,6 +192,8 @@ export interface AppConfig {
   notesEnabled?: boolean;
   // Profiles (docs/PROFILES.md): the Profiles page, its nav entry, + menu › Profile… and `runpane profiles` (off by default).
   profilesEnabled?: boolean;
+  // Experimental: To-dos (docs/TODOS.md), every screen, `runpane todos`, the supervisor and the agents' To-dos instructions (off by default).
+  todosEnabled?: boolean;
   // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
   answerPromptsFromPane?: boolean;
   // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source
@@ -293,6 +295,8 @@ export interface UpdateConfigRequest {
   notesEnabled?: boolean;
   // Profiles (docs/PROFILES.md): the Profiles page, its nav entry, + menu › Profile… and `runpane profiles` (off by default).
   profilesEnabled?: boolean;
+  // Experimental: To-dos (docs/TODOS.md), every screen, `runpane todos`, the supervisor and the agents' To-dos instructions (off by default).
+  todosEnabled?: boolean;
   // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
   answerPromptsFromPane?: boolean;
   // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source

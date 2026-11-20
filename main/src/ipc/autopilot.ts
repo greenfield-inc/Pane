@@ -23,6 +23,7 @@ import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { AutopilotDocument, AutopilotSnapshot, AutopilotStackPushRequest } from '../../../shared/types/autopilot';
 import { DEFAULT_AGENT_ID, agentTerminalCommand } from '../../../shared/agents';
+import { activeTodoService } from '../services/todos/todosFeature';
 
 const stackCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('step'), direction: boundary.union(boundary.literal(1), boundary.literal(-1)) }),
@@ -189,7 +190,7 @@ export function registerAutopilotHandlers(services: AutopilotServices, commandRe
   commandRegistry.register('autopilot:read-doc', (file: PaneCommandValue, options?: PaneCommandValue) => readDocument(
     manager,
     decodeBoundary(file, boundary.nonEmptyString),
-    { inline: decodeBoundary(options ?? {}, readDocOptionsSchema).inline === true, links: () => [...itemLinkPaths(notify), ...(services.todoService?.attachedFiles() ?? [])] },
+    { inline: decodeBoundary(options ?? {}, readDocOptionsSchema).inline === true, links: () => [...itemLinkPaths(notify), ...(activeTodoService(services)?.attachedFiles() ?? [])] },
   ));
 
   // runpane and the pane MCP.

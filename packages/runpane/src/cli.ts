@@ -14,6 +14,7 @@ import { runAsk, runModels } from './ask';
 import { runLinksCreate } from './links';
 import { runNotify } from './notify';
 import { runTodos } from './todos';
+import { isTodoCommand, todosDisabledError, todosOn } from './todosFeature';
 import { runLink } from './pairingLink';
 import { runSecretsDelete, runSecretsExec, runSecretsLease, runSecretsLeaseEnd, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
 import { BROWSER_VERBS, runBrowser } from './browser';
@@ -23,7 +24,7 @@ import { runMachineCleanup, runMachineHealth } from './machine';
 import { runProfilesLaunch, runProfilesList, runProfilesRuns, runProfilesShow } from './profiles';
 import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
-import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo } from './daemonClient';
+import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo, routedOtherMachine } from './daemonClient';
 import { paneIntro, renderPaneIntro } from './paneIntro';
 import { describeFailure, printFailure, RunpaneError } from './errors';
 import { boundary, decodeBoundary } from './boundaryDecoder';
@@ -213,7 +214,7 @@ type CommandHandler = (parsed: ParsedArgs, telemetryContext: WrapperTelemetryCon
 const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'help': async (parsed, _telemetryContext) => {
     if (!parsed.helpTopic) console.log(`${renderPaneIntro(paneIntro(resolvePaneDirectory(parsed.paneDir)))}\n`);
-    console.log(helpText(parsed.helpTopic));
+    console.log(helpText(parsed.helpTopic, todosOn(parsed.paneDir)));
     if (!parsed.helpTopic || parsed.helpTopic === 'workspace') {
       console.log(['', ...(await readWorkspaceSummary(parsed.paneDir)).lines].join('\n'));
     }
@@ -508,6 +509,12 @@ if (unexpectedHandlers.length) throw new Error('Unexpected command handlers: '+u
 async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: WrapperTelemetryContext): Promise<number> {
   const handler = commandHandlers.get(parsed.command);
   if (!handler) throw new Error('Unsupported command: '+parsed.command);
+  // To-dos off (T-39): `todos …` refuses here; another machine's Pane, reached through `workspace <machine>`, decides for itself.
+  if (!routedOtherMachine() && !todosOn(parsed.paneDir)) {
+    if (isTodoCommand(parsed.command)) throw todosDisabledError();
+    // An older prompt's `--todo` still lets the report, card or agent through, unlinked.
+    delete parsed.todo;
+  }
   return handler(parsed, telemetryContext);
 }
 
@@ -598,7 +605,7 @@ async function runNoArgsEntrypoint(telemetryContext: WrapperTelemetryContext): P
   if (!isInteractiveShell()) {
     telemetryContext.resolvedCommand = 'help';
     console.log(`${renderPaneIntro(paneIntro(resolvePaneDirectory()))}\n`);
-    console.log(helpText());
+    console.log(helpText(undefined, todosOn()));
     return 0;
   }
 

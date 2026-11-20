@@ -100,7 +100,7 @@ export async function setup(prefix: string, extra: Record<string, string> = {}):
   const { app, page } = await launchIsolated(pane, undefined, { PANE_CHAT_TEST_AGENT: AGENT, PANE_TODOS_TIME_SCALE: String(SCALE), ...extra });
   await page.evaluate(async repoPath => {
     const api = window.electronAPI;
-    await api.config.update({ chatTabsEnabled: true, notify: { enabled: true, showOutsidePane: false } });
+    await api.config.update({ chatTabsEnabled: true, todosEnabled: true, notify: { enabled: true, showOutsidePane: false } });
     await api.projects.create({ name: 'demo', path: repoPath, active: true });
   }, repo);
   await dismissDialogs(page);

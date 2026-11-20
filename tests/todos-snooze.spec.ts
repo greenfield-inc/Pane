@@ -48,7 +48,7 @@ async function start(prefix: string, extra: Record<string, string>): Promise<{ p
   execFileSync('git', ['-c', 'user.email=qa@example.com', '-c', 'user.name=QA', 'commit', '-qm', 'init', '--allow-empty'], { cwd: repo });
   const { app, page } = await launchIsolated(pane, undefined, { PANE_CHAT_TEST_AGENT: AGENT, ...extra });
   await page.evaluate(async repoPath => {
-    await window.electronAPI.config.update({ chatTabsEnabled: true, notify: { enabled: true, showOutsidePane: false } });
+    await window.electronAPI.config.update({ chatTabsEnabled: true, todosEnabled: true, notify: { enabled: true, showOutsidePane: false } });
     await window.electronAPI.projects.create({ name: 'demo', path: repoPath, active: true });
   }, repo);
   await dismissDialogs(page);

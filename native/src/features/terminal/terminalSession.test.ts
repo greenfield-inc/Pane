@@ -110,6 +110,22 @@ describe('TerminalSession.restore', () => {
     expect(host.channels()).not.toContain('terminal:getState');
   });
 
+  it('says when this screen starts the panel, so the screen can wait for its agent', async () => {
+    const starts: string[] = [];
+    for (const initialized of [false, true]) {
+      const session = new TerminalSession({
+        invoke: async channel => (channel === 'panels:checkInitialized' ? initialized : null),
+        panelId: 'panel-1',
+        sessionId: 'pane-1',
+        viewerId: 'viewer-1',
+        sink: { reset: () => undefined, write: () => undefined },
+        onStart: () => starts.push(initialized ? 'running' : 'unstarted'),
+      });
+      await session.restore({ cols: 48, rows: 30 });
+    }
+    expect(starts).toEqual(['unstarted']);
+  });
+
   it('shows the serialized frame of a full-screen app and forces it to repaint', async () => {
     const host = fakeHost({
       'panels:checkInitialized': () => true,

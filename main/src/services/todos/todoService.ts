@@ -93,6 +93,8 @@ export interface TodoHost {
   restoreSession(sessionId: string): Promise<void>;
   sampleLoad(): Promise<Omit<LoadSample, 'at'>>;
   loadGateEnabled(): boolean;
+  /** T-39: Settings › Advanced › Experimental › To-dos. Off, nothing here acts. Absent: on. */
+  todosOn?(): boolean;
   /** The PR on any of these Panes: "#1390 · CI running". */
   prOf(paneIds: string[]): TodoListRow['pr'] | undefined;
   log(message: string, error?: Error | string): void;
@@ -231,6 +233,16 @@ export class TodoService extends EventEmitter {
 
   private changed(): void {
     this.emit('changed');
+  }
+
+  /** T-39: checked at every tick and again right before Pane types into, resumes or restarts a tab, so a switch flipped mid-tick stops it. */
+  private active(): boolean {
+    return this.host.todosOn?.() ?? true;
+  }
+
+  /** Whether launch resume has run since Pane started (it waits while To-dos is off). */
+  get launchHasResumed(): boolean {
+    return this.launchResumed;
   }
 
   // ── Reading ─────────────────────────────────────────────────────────────
@@ -1098,6 +1110,7 @@ export class TodoService extends EventEmitter {
   private async flushOnce(): Promise<void> {
     const tried = new Set<string>();
     for (const entry of [...this.outbox]) {
+      if (!this.active()) return;
       // A comment queued before a snooze waits for the wake message too (round 9).
       if (entry.activityId !== undefined && this.holdsComments(entry.todoNumber)) continue;
       if (tried.has(entry.panelId)) continue;
@@ -1118,13 +1131,14 @@ export class TodoService extends EventEmitter {
       return;
     }
     if (await this.host.isPanelDown(entry.panelId)) {
-      if (!entry.resumeIfDown || !this.gate.allowsStart()) return;
+      if (!entry.resumeIfDown || !this.gate.allowsStart() || !this.active()) return;
       // Resume before delivery: the asker's tab is down after a restart.
       if (await this.host.resumePanel(entry.panelId)) this.resumeFailures.delete(entry.panelId);
       else this.resumeFailed(entry, 'it would not restart');
       return;
     }
     if (this.host.isMidTurn(entry.panelId) || await this.host.hasUnsentText(entry.panelId)) return;
+    if (!this.active()) return;
     const result = await this.host.typeIntoTab(entry.panelId, entry.text);
     if (result === 'busy') return;
     if (result !== 'delivered') {
@@ -1177,6 +1191,7 @@ export class TodoService extends EventEmitter {
 
   /** Every 2 s: settle mid-turn into Working, count work time, deliver, and announce status changes. */
   async fastTick(): Promise<void> {
+    if (!this.active()) return;
     const now = this.now();
     const elapsed = this.lastFastTick === 0 ? 0 : Math.min(now - this.lastFastTick, 10_000);
     this.lastFastTick = now;
@@ -1213,6 +1228,7 @@ export class TodoService extends EventEmitter {
 
   /** Every 10 s while a to-do is in progress or queued: read load and act on the gate. */
   async loadTick(): Promise<void> {
+    if (!this.active()) return;
     const open = this.store.listOpen();
     const active = open.some(todo => MOVING_TODO_STATES.includes(todo.state) || todo.loadHold !== null);
     const now = this.now();
@@ -1364,6 +1380,7 @@ export class TodoService extends EventEmitter {
 
   /** Once a minute: keep every in-progress and accepted to-do moving (P6). */
   async supervisorPass(): Promise<void> {
+    if (!this.active()) return;
     const now = this.now();
     if (now - this.lastSupervisorPass < SUPERVISOR.passEveryMs - 1000) return;
     this.lastSupervisorPass = now;
@@ -1718,7 +1735,7 @@ export class TodoService extends EventEmitter {
    * At most three start agents per tick; the rest wake on later ticks. Reminder cards aren't limited.
    */
   async wakeTick(): Promise<void> {
-    if (!this.launchResumed) return;
+    if (!this.launchResumed || !this.active()) return;
     const now = this.now();
     const lastCheck = this.lastWakeCheck;
     this.lastWakeCheck = now;
@@ -1823,6 +1840,8 @@ export class TodoService extends EventEmitter {
    * Wake checks start only once this has run (round 9), so a to-do due at launch is restarted once.
    */
   async resumeOnLaunch(why: 'launch' | 'wake' = 'launch'): Promise<{ restarted: number; queued: number }> {
+    // Off, it waits for To-dos to be turned on, which runs it then (bootstrap).
+    if (!this.active()) return { restarted: 0, queued: 0 };
     try {
       return await this.resumeOnLaunchOnce(why);
     } finally {
@@ -1888,6 +1907,22 @@ export class TodoService extends EventEmitter {
   }
 
   /** Retention: closed to-dos go 30 days after closing. */
+  /**
+   * T-39: To-dos was off and is on again. The time it was off isn't time a to-do sat quiet, so every
+   * moving to-do's quiet clock starts now and the supervisor's ladder begins again from its first rung.
+   */
+  restartClocksAfterTurnedOn(): void {
+    const now = this.now();
+    for (const todo of this.store.listOpen()) {
+      if (!MOVING_TODO_STATES.includes(todo.state)) continue;
+      // The whole quiet episode starts over: its age, its reminders and restarts, and its stuck card.
+      if (todo.stuckCardId) this.host.closeCard(todo.stuckCardId, 'To-dos was turned back on, so its quiet time starts again');
+      this.store.update(todo.number, { lastProgressAt: now, stuckSince: null, episodeReminders: 0, episodeRestarts: 0, stuckCardId: null }, todo.updatedAt);
+      if (todo.parentNumber === null) this.event(todo, 'To-dos was turned back on: its quiet time starts again now');
+    }
+    this.changed();
+  }
+
   prune(): void {
     this.store.pruneClosed(this.now());
   }

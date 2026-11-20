@@ -95,6 +95,7 @@ from .local_control import (
 )
 from .machine import run_machine_cleanup, run_machine_health
 from .notify import RunpaneError, run_notify
+from .todos_feature import is_todo_command, todos_disabled_error, todos_on, without_todo_lines
 from .pairing_link import run_link
 from .todos import run_todos
 from .profiles import run_profiles_launch, run_profiles_list, run_profiles_runs, run_profiles_show
@@ -529,6 +530,12 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
     handler = COMMAND_HANDLERS.get(parsed.command)
     if handler is None:
         raise ValueError(f"Unsupported command: {parsed.command}")
+    # To-dos off (T-39): `todos ...` refuses here.
+    if not todos_on(parsed.pane_dir):
+        if is_todo_command(parsed.command):
+            raise todos_disabled_error()
+        # An older prompt's `--todo` still lets the report, card or agent through, unlinked.
+        parsed.todo = None
     return handler(parsed, telemetry_context)
 
 
@@ -561,7 +568,7 @@ def run_no_args_entrypoint(telemetry_context: WrapperTelemetryContext) -> int:
     if not is_interactive_shell():
         telemetry_context["resolved_command"] = "help"
         print(render_pane_intro(pane_intro(resolve_pane_directory())) + "\n")
-        print(help_text(None))
+        print(help_text(None, todos_on()))
         return 0
 
     return run_interactive_wizard(telemetry_context)
@@ -696,7 +703,7 @@ def parse_args(argv: List[str]) -> ParsedArgs:
 
     matched = match_command(args)
     if not matched:
-        raise ValueError(f"Unknown command: {first}\n\n{help_text(None)}")
+        raise ValueError(f"Unknown command: {first}\n\n{help_text(None, todos_on())}")
 
     command, tokens = matched
     del args[:len(tokens)]
@@ -1958,9 +1965,13 @@ def create_install_telemetry_context(parsed: ParsedArgs, target: str) -> Wrapper
     }
 
 
-def help_text(topic: Optional[str]) -> str:
+def help_text(topic: Optional[str], todos: bool = True) -> str:
+    """The help for a topic, or the overview. With To-dos off it carries no to-do text, and a `todos` topic refuses."""
+    if not todos and topic is not None and is_todo_command(topic):
+        raise todos_disabled_error()
     help_topics = RUNPANE_CONTRACT["help"]["pip"]
-    return "\n".join([*help_topics.get(topic or "default", help_topics["default"]), *help_notes(topic)])
+    lines = [*help_topics.get(topic or "default", help_topics["default"]), *help_notes(topic)]
+    return "\n".join(lines if todos else without_todo_lines(lines))
 
 
 def help_notes(topic: Optional[str]) -> List[str]:
@@ -1978,14 +1989,14 @@ def print_help(parsed: ParsedArgs) -> int:
         reconfigure(encoding="utf-8")
     if not parsed.help_topic:
         print(render_pane_intro(pane_intro(resolve_pane_directory(parsed.pane_dir))) + "\n")
-    print(help_text(parsed.help_topic))
+    print(help_text(parsed.help_topic, todos_on(parsed.pane_dir)))
     if not parsed.help_topic or parsed.help_topic == "workspace":
         print("\n".join(["", *read_workspace_summary(parsed.pane_dir)["lines"]]))
     return 0
 
 
 def run_unsupported_contract(parsed: ParsedArgs, context: WrapperTelemetryContext) -> int:
-    print(help_text(parsed.command), file=sys.stderr)
+    print(help_text(parsed.command, todos_on(parsed.pane_dir)), file=sys.stderr)
     return 2
 
 COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]] = {

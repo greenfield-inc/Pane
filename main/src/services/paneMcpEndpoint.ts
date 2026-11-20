@@ -11,6 +11,7 @@ import { quoteShellWord } from './agents/shellWord';
 import { PANE_MCP_SERVER_NAME, PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV, PANE_MCP_PLUGIN_DENY_SETTINGS } from './paneMcpNames';
 import { bundledRunpanePath } from './runpaneShim';
 import { readBody, sendError, tabListener, type TabListener } from './tabListener';
+import { todosOn } from './todos/todosFeature';
 
 /** The bundled runpane HTTP module (packages/runpane/src/mcpHttp.ts). */
 export type PaneMcpHttpModule = typeof import('../../../packages/runpane/src/mcpHttp');
@@ -129,6 +130,8 @@ export class PaneMcpEndpoint {
       built = this.loadModule().then(
         (module) => module.createPaneMcpHttpHandler({
           toolsets,
+          // T-39: the todos_* tools follow this Pane's switch on every list, not $PANE_DIR's config.
+          todosEnabled: todosOn,
           runCli: (argv, signal, env, auth) => this.runCli(argv, signal, env, auth),
           // Pane points only agents it measured holding a call open (Claude: 40 minutes over HTTP) at this endpoint.
           clientFor: (auth) => {

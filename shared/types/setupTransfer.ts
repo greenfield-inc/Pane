@@ -121,6 +121,7 @@ export interface SetupPreferenceConfig {
   missionControlEnabled?: boolean;
   notesEnabled?: boolean;
   profilesEnabled?: boolean;
+  todosEnabled?: boolean;
   sessionCreationPreferences?: SetupSessionCreationPreferences;
 }
 
