@@ -245,10 +245,14 @@ export class PaneWorkspaceHostController {
   }
 
   private verifierFor(stored: WorkspacePasswordHash): (secret: string, login: string) => SecretCheck {
-    if (this.passwordVerifier?.stored !== stored) {
-      this.passwordVerifier = { stored, verify: createWorkspacePasswordVerifier(stored) };
+    // Compare the hash, not the object: a config reload that rebuilds the same password keeps
+    // what the verifier already proved, so connected clients are not checked from scratch.
+    let current = this.passwordVerifier;
+    if (!current || current.stored.salt !== stored.salt || current.stored.hash !== stored.hash) {
+      current = { stored, verify: createWorkspacePasswordVerifier(stored) };
+      this.passwordVerifier = current;
     }
-    return this.passwordVerifier.verify;
+    return current.verify;
   }
 
   async start(): Promise<void> {

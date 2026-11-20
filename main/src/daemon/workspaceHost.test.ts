@@ -130,6 +130,19 @@ describe('PaneWorkspaceHostController', () => {
     await host.shutdown();
   });
 
+  it('keeps one password check across config reloads that rebuild the same password', async () => {
+    const password = hashWorkspacePassword('correct horse');
+    const { host, config } = setup({ enabled: true, visibility: 'tailnet', password });
+    await host.start();
+    const verifier = host.getAccessPolicy()?.verifySecret;
+    expect(verifier).toBeTruthy();
+    config.workspaces = { ...config.workspaces, password: { ...password } };
+    expect(host.getAccessPolicy()?.verifySecret).toBe(verifier);
+    config.workspaces = { ...config.workspaces, password: hashWorkspacePassword('new password') };
+    expect(host.getAccessPolicy()?.verifySecret).not.toBe(verifier);
+    await host.shutdown();
+  });
+
   it('applies a visibility change without restarting', async () => {
     const { host, config, request } = setup();
     await host.start();
