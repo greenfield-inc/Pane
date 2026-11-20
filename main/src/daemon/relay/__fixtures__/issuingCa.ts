@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 import http from 'http';
 import type { AddressInfo } from 'net';
+import { boundary, decodeBoundary, type BoundarySchema, type JsonObject } from '../../../../../shared/validation/boundaryDecoder';
 
 /** An EAB key as the relay hands it out: `hmacKey` in base64, as Google's Public CA API returns it. */
 export interface ExternalAccountKey { keyId: string; hmacKey: string }
@@ -14,8 +15,18 @@ export interface IssuingCa {
   close(): Promise<void>;
 }
 
-function decode(part: string): Record<string, unknown> {
-  return part ? JSON.parse(Buffer.from(part, 'base64url').toString('utf8')) as Record<string, unknown> : {};
+const optionalString = boundary.optional(boundary.string);
+const jwsSchema = boundary.object({ protected: optionalString, payload: optionalString, signature: optionalString });
+const headerSchema = boundary.object({ jwk: boundary.optional(boundary.json), kid: optionalString });
+const payloadSchema = boundary.object({
+  onlyReturnExisting: boundary.optional(boundary.boolean),
+  externalAccountBinding: boundary.optional(jwsSchema),
+  identifiers: boundary.optional(boundary.array(boundary.object({ value: boundary.string }))),
+});
+
+/** A JWS part (base64url JSON); the empty payload of a POST-as-GET decodes as `{}`. */
+function decode<Value>(part: string | undefined, schema: BoundarySchema<Value>): Value {
+  return decodeBoundary(part ? JSON.parse(Buffer.from(part, 'base64url').toString('utf8')) : {}, schema);
 }
 
 /**
@@ -37,7 +48,7 @@ export async function startIssuingCa(options: { certificate: string; externalAcc
       // SAFETY: a server listening on a host and port reports an AddressInfo.
       const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
       const url = request.url ?? '';
-      const json = (status: number, body: unknown, headers: Record<string, string> = {}) => {
+      const json = (status: number, body: JsonObject, headers: Record<string, string> = {}) => {
         response.writeHead(status, { 'Content-Type': 'application/json', ...headers });
         response.end(JSON.stringify(body));
       };
@@ -54,9 +65,9 @@ export async function startIssuingCa(options: { certificate: string; externalAcc
         response.end();
         return;
       }
-      const jws = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) as { protected: string; payload: string } : { protected: '', payload: '' };
-      const header = decode(jws.protected);
-      const payload = decode(jws.payload);
+      const jws = decodeBoundary(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}, jwsSchema);
+      const header = decode(jws.protected, headerSchema);
+      const payload = decode(jws.payload, payloadSchema);
       if (url === '/account') {
         const jwk = JSON.stringify(header.jwk);
         const known = accounts.findIndex((account) => account.jwk === jwk);
@@ -68,11 +79,11 @@ export async function startIssuingCa(options: { certificate: string; externalAcc
           problem(400, 'accountDoesNotExist', 'No account exists with the provided key');
           return;
         }
-        const binding = payload.externalAccountBinding as { protected: string; payload: string; signature: string } | undefined;
-        const keyId = binding ? String(decode(binding.protected).kid ?? '') : '';
+        const binding = payload.externalAccountBinding ?? { protected: undefined, payload: undefined, signature: undefined };
+        const keyId = decode(binding.protected, headerSchema).kid ?? '';
         const hmacKey = unused.get(keyId);
-        const expected = hmacKey && binding ? createHmac('sha256', Buffer.from(hmacKey, 'base64')).update(`${binding.protected}.${binding.payload}`).digest() : null;
-        const signature = binding ? Buffer.from(binding.signature, 'base64url') : Buffer.alloc(0);
+        const expected = hmacKey ? createHmac('sha256', Buffer.from(hmacKey, 'base64')).update(`${binding.protected ?? ''}.${binding.payload ?? ''}`).digest() : null;
+        const signature = Buffer.from(binding.signature ?? '', 'base64url');
         if (!expected || expected.length !== signature.length || !timingSafeEqual(expected, signature)) {
           problem(400, 'externalAccountRequired', 'A valid, unused external account binding is required');
           return;
@@ -88,7 +99,7 @@ export async function startIssuingCa(options: { certificate: string; externalAcc
       }
       if (url === '/order') {
         orders += 1;
-        const identifiers = (payload.identifiers as { value: string }[] | undefined) ?? [];
+        const identifiers = payload.identifiers ?? [];
         const urls = identifiers.map(({ value }, index) => {
           const id = `${orders}-${index}`;
           authorizations.set(id, { value: value.replace(/^\*\./u, ''), wildcard: value.startsWith('*.'), valid: false });
@@ -106,14 +117,15 @@ export async function startIssuingCa(options: { certificate: string; externalAcc
         }
         const challenge = (valid: boolean) => ({ type: 'dns-01', url: `${base}/challenge/${authz[2]}`, token: `token${authz[2]}`, status: valid ? 'valid' : 'pending' });
         if (authz[1] === 'challenge') {
-          if (payload && Object.keys(payload).length === 0 && jws.payload !== '') {
+          // completeChallenge posts `{}`; a POST-as-GET posts an empty payload.
+          if (jws.payload) {
             challenges += 1;
             entry.valid = true;
           }
           json(200, challenge(entry.valid));
           return;
         }
-        json(200, { status: entry.valid ? 'valid' : 'pending', identifier: { type: 'dns', value: entry.value }, wildcard: entry.wildcard || undefined, challenges: [challenge(entry.valid)] });
+        json(200, { status: entry.valid ? 'valid' : 'pending', identifier: { type: 'dns', value: entry.value }, wildcard: entry.wildcard, challenges: [challenge(entry.valid)] });
         return;
       }
       if (/^\/(finalize|orders)\/\d+$/u.test(url)) {

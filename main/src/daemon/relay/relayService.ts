@@ -433,12 +433,14 @@ export class RelayService {
   private async externalAccountKey(staging: boolean): Promise<{ keyId: string; hmacKey: string }> {
     const agent = this.agent;
     if (!agent) throw new Error('The relay is not connected.');
-    return agent.externalAccountKey(staging).catch((error: unknown) => {
+    try {
+      return await agent.externalAccountKey(staging);
+    } catch (error) {
       if (error instanceof RelayRequestError && (error.code === 'unconfigured' || error.code === 'throttled')) {
         throw new CertificateRateLimited(error.message, null);
       }
       throw error;
-    });
+    }
   }
 
   private async renewIfDue(): Promise<void> {
