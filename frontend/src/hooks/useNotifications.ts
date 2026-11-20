@@ -7,6 +7,8 @@ import { ToolPanel } from '../../../shared/types/panels';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { isDesktopAlertHandedOff } from './desktopAlertHandoff';
 import { openPanelOnClick } from './notificationClick';
+import { notificationIconUrl } from './notificationIcon';
+import { NotificationsByTag, panelNotificationTag } from './notificationReplacement';
 
 // Extend window interface for webkit audio context compatibility
 declare global {
@@ -97,6 +99,9 @@ export function useNotifications() {
   // Track previous agentStatus per panelId to detect transitions.
   const prevAgentStatusRef = useRef<Record<string, AgentState>>({});
 
+  // The notification shown for each tag, so a newer one for the same tab replaces it.
+  const shownNotificationsRef = useRef(new NotificationsByTag<Notification>());
+
   // Project name cache keyed by project id, refreshed on mount and on project changes.
   const projectNamesRef = useRef<Map<number, string>>(new Map());
   useEffect(() => {
@@ -140,8 +145,10 @@ export function useNotifications() {
   useEffect(() => window.electronAPI?.notify?.onChime(playBeep), []);
 
   // Fires unconditionally; activity gating lives in the maybeNotify* callers.
-  // A notification replaces an earlier one with the same tag. A panel target
-  // makes the notification open that tab when clicked.
+  // A notification replaces an earlier one with the same tag: the tag is also
+  // passed to Chromium, and the earlier one is closed here because not every OS
+  // notification center honours it. A panel target makes the notification open
+  // that tab when clicked.
   const fireNotification = useCallback((
     title: string,
     body: string,
@@ -151,13 +158,15 @@ export function useNotifications() {
   ) => {
     requestPermission().then((hasPermission) => {
       if (hasPermission) {
+        const defaultIcon = notificationIconUrl();
         const notification = new Notification(title, {
           body,
-          icon: icon || '/favicon.ico',
-          badge: '/favicon.ico',
+          icon: icon || defaultIcon,
+          badge: defaultIcon,
           tag,
           requireInteraction: false,
         });
+        shownNotificationsRef.current.replace(tag, notification);
         const openPaneLink = window.electronAPI?.window?.openPaneLink;
         if (panelTarget && openPaneLink) openPanelOnClick(notification, panelTarget, openPaneLink);
 
@@ -223,7 +232,7 @@ export function useNotifications() {
 
     void isDesktopAlertHandedOff(window.electronAPI?.notifications?.isHandedOff).then((handedOff) => {
       if (handedOff) return;
-      fireNotification(`${context.panelName} finished`, context.body, undefined, `pane:panel:${panelId}`, context.panelTarget);
+      fireNotification(`${context.panelName} finished`, context.body, undefined, panelNotificationTag(panelId), context.panelTarget);
     });
   }
 
@@ -239,7 +248,7 @@ export function useNotifications() {
 
     void isDesktopAlertHandedOff(window.electronAPI?.notifications?.isHandedOff).then((handedOff) => {
       if (handedOff) return;
-      fireNotification(`${context.panelName} needs your input`, context.body, undefined, `pane:panel:${panelId}`, context.panelTarget);
+      fireNotification(`${context.panelName} needs your input`, context.body, undefined, panelNotificationTag(panelId), context.panelTarget);
     });
   }
 

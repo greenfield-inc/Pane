@@ -137,6 +137,8 @@ export interface AppConfig {
     playSound: boolean;
     enabled: boolean;
   };
+  /** Show the number of agents waiting on you on the Dock or taskbar icon. Absent: on. */
+  dockBadge?: boolean;
   // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
   notify?: Partial<NotifySettings>;
   // Dev mode for debugging
@@ -280,6 +282,7 @@ export interface UpdateConfigRequest {
   highContrast?: boolean;
   uiScale?: number;
   notifications?: AppConfig['notifications'];
+  dockBadge?: boolean;
   notify?: Partial<NotifySettings>;
   devMode?: boolean;
   additionalPaths?: string[];
