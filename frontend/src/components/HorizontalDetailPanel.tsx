@@ -25,7 +25,8 @@ interface HorizontalDetailPanelProps {
   onToggleCollapse?: () => void;
   onSwapLayout?: () => void;
   terminalShortcuts?: React.ReactNode;
-  onCommitClick?: (hash: string) => void;
+  /** A history row was clicked; olderHash is set for a shift-click range. */
+  onCommitClick?: (hash: string, olderHash?: string) => void;
   inspectorTab?: InspectorTab;
   onInspectorTabChange?: (tab: InspectorTab) => void;
   filesPanel?: ToolPanel;

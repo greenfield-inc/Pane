@@ -39,7 +39,8 @@ interface DetailPanelProps {
   onToggleCollapse?: () => void;
   onSwapLayout?: () => void;
   terminalShortcuts?: React.ReactNode;
-  onCommitClick?: (hash: string) => void;
+  /** A history row was clicked; olderHash is set for a shift-click range. */
+  onCommitClick?: (hash: string, olderHash?: string) => void;
   /** Inspector tab state; Files and Changes host the Explorer and Review panels. */
   inspectorTab?: InspectorTab;
   onInspectorTabChange?: (tab: InspectorTab) => void;
