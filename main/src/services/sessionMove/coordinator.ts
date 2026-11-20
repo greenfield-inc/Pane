@@ -6,7 +6,7 @@ import path from 'path';
 import { promisify } from 'util';
 import { app } from 'electron';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
-import { boundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import {
   SESSION_MOVE_FEATURE,
   SESSION_MOVE_MANIFEST_VERSION,
@@ -38,10 +38,11 @@ import { databaseService } from '../database';
 import { locateConversation } from './conversations';
 import { createBundle, createSnapshot, ignoredPaths, putBackRef } from './gitSnapshot';
 import { agentFarmProfiles, cliVersion, type TargetPreflight, type TargetStatus } from './importer';
-import { agentFarmProfileOf, heldBackChecks, sessionOpenApprovals } from './rules';
+import { agentFarmProfileOf, heldBackChecks, sessionApprovals, type SessionApprovals } from './rules';
+import type { MovedApproval } from '../notify/notifyService';
 import { keepIgnoredFiles } from './ignoredFiles';
 import { runpaneWaits } from '../agentStatus/midTurn';
-import { readTabFields, sessionMoveCheckSchema, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveTab, type PackageFile } from './manifest';
+import { moveManifestSchema, movedApprovals, readTabFields, sessionMoveCheckSchema, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveTab, type PackageFile } from './manifest';
 import { resolvePeer, type MovePeer } from './peer';
 import { settleAfterFreeze, type FreezeOutcome, type FreezeWait } from './afterFreeze';
 import { listSessionFolder } from './sessionFolder';
@@ -120,6 +121,12 @@ interface SourceJob {
   settling?: Promise<void>;
   /** Ends the loop's current wait early (Check again). */
   wake?: () => void;
+  /** Waiting cards held from the moment the move stops tabs until it packs them (T-44). */
+  heldApprovals: string[];
+  /** The cards the pack took from this machine; put back if the move doesn't happen. */
+  carriedApprovals?: MovedApproval[];
+  /** Cards answered while the move stopped tabs: they stay here, each with a note for the summary. */
+  approvalsStayed: string[];
 }
 
 const STEP_TITLES = {
@@ -189,7 +196,7 @@ export class MoveCoordinator {
   // ── The manifest ───────────────────────────────────────────────────────
 
   /** The manifest without package files (preflight), or with them (`pack`). */
-  private async manifest(record: OrchestrationSessionRecord, moveId: string, pack?: { outDir: string; tabs: MovedTab[]; snapshotRefs: SourceJob['snapshotRefs'] }): Promise<{ manifest: MoveManifest; sources: Map<string, string> }> {
+  private async manifest(record: OrchestrationSessionRecord, moveId: string, pack?: { outDir: string; tabs: MovedTab[]; snapshotRefs: SourceJob['snapshotRefs']; approvals: MovedApproval[] }): Promise<{ manifest: MoveManifest; sources: Map<string, string> }> {
     const sources = new Map<string, string>();
     const panes: MovePane[] = [];
     const agentVersions: Record<string, string | null> = {};
@@ -282,7 +289,7 @@ export class MoveCoordinator {
     if (pack) for (const relative of folderFiles) sources.set(`session/${relative}`, path.join(folderRoot, ...relative.split('/')));
     const here = profileNames.size ? await agentFarmProfiles() : {};
     const profiles = Object.fromEntries([...profileNames].map(name => [name, here[name] ?? null]));
-    const approvals = pack ? this.openApprovals(record, paneIds) : [];
+    const approvals = (pack?.approvals ?? []).map(approval => toJsonObject(approval));
     const files: PackageFile[] = [];
     if (pack) for (const [packagePath, source] of sources) files.push({ path: packagePath, ...(await fileDigest(source)) });
     const manifest: MoveManifest = {
@@ -298,10 +305,11 @@ export class MoveCoordinator {
     return { manifest, sources };
   }
 
-  private openApprovals(record: OrchestrationSessionRecord, paneIds: string[]): JsonObject[] {
+  /** The Session's approvals as the move sees them: those it carries, and those that hold it back. */
+  private approvalsOf(record: OrchestrationSessionRecord): SessionApprovals {
     const store = this.services.approvalStore;
-    if (!store) return [];
-    return sessionOpenApprovals(store.openItems(), [record.id, ...paneIds]).map(item => toJsonObject(item));
+    if (!store) return { carried: [], held: [] };
+    return sessionApprovals(store.openItems(), [record.id, record.internalSessionId, ...this.memberPaneIds(record)]);
   }
 
   // ── Preflight ──────────────────────────────────────────────────────────
@@ -344,9 +352,8 @@ export class MoveCoordinator {
   }
 
   private heldBackChecks(record: OrchestrationSessionRecord, stopped = false): SessionMoveCheck[] {
-    const approvals = this.openApprovals(record, [record.internalSessionId, ...this.memberPaneIds(record)]).length;
     const tabs = this.tabsOf(record).map(tab => ({ panelId: tab.panel.id, title: tab.panel.title, running: tab.running, queued: queuedMessages(tab.panel) }));
-    return heldBackChecks(approvals, tabs, stopped);
+    return heldBackChecks(this.approvalsOf(record), tabs, stopped);
   }
 
   private async estimate(manifest: MoveManifest): Promise<number> {
@@ -392,7 +399,7 @@ export class MoveCoordinator {
     const tabs = this.tabsOf(record);
     const job: SourceJob = {
       record, peer: resolvePeer(target, this.services.configManager), paneIds: [record.internalSessionId, ...this.memberPaneIds(record)], tabs,
-      stopNow: false, cancelled: false, scripts: [], snapshotRefs: [], outDir: path.join(getAppDirectory(), 'moves-out', moveId), lastHeard: Date.now(),
+      stopNow: false, cancelled: false, scripts: [], snapshotRefs: [], heldApprovals: [], approvalsStayed: [], outDir: path.join(getAppDirectory(), 'moves-out', moveId), lastHeard: Date.now(),
       progress: {
         moveId, sessionId, sessionName: record.name, target, phase: 'waiting', waiting: [], stoppedTabs: 0, totalTabs: tabs.length,
         steps: steps(), frozen: false, updatedAt: new Date().toISOString(),
@@ -428,7 +435,7 @@ export class MoveCoordinator {
     }));
     const job: SourceJob = {
       record, peer: resolvePeer(record.move.machine, this.services.configManager), paneIds: [record.internalSessionId, ...this.memberPaneIds(record)],
-      tabs, stopNow: false, cancelled: false, scripts: [], snapshotRefs: [], outDir: path.join(getAppDirectory(), 'moves-out', record.move.moveId), lastHeard: Date.now(),
+      tabs, stopNow: false, cancelled: false, scripts: [], snapshotRefs: [], heldApprovals: [], approvalsStayed: [], outDir: path.join(getAppDirectory(), 'moves-out', record.move.moveId), lastHeard: Date.now(),
       progress: {
         moveId: record.move.moveId, sessionId, sessionName: record.name, target: record.move.machine, phase: 'confirming', waiting: [], stoppedTabs: tabs.length, totalTabs: tabs.length,
         steps: steps().map(step => ({ ...step, state: step.id === 'start' ? 'running' : 'done' })), frozen: true, updatedAt: new Date().toISOString(),
@@ -480,6 +487,8 @@ export class MoveCoordinator {
   }
 
   private async run(job: SourceJob): Promise<void> {
+    // Held before any tab stops: a stopping tab would otherwise end its waiting cards (T-44).
+    job.heldApprovals = this.services.notifyService?.holdMovingApprovals(this.approvalsOf(job.record).carried.map(item => item.id)) ?? [];
     await this.stopTabs(job);
     this.checkCancelled(job);
     this.setStep(job, 'stop', 'done', this.stoppedSummary(job));
@@ -489,9 +498,14 @@ export class MoveCoordinator {
     await fs.promises.mkdir(job.outDir, { recursive: true });
     const record = await this.manager().get({ sessionId: job.record.id });
     // Asked again once every tab stopped: Stop now can leave a queue, and an approval can open while turns end.
-    const held = this.heldBackChecks(record, true)[0];
+    const held = this.heldBackChecks(record, true).find(check => check.level === 'block');
     if (held) throw new PaneError('ERR_MOVE_HELD_BACK', `${held.title}, so the Session didn't move.`, held.detail ?? 'Check again.');
-    const { manifest, sources } = await this.manifest(record, job.progress.moveId, { outDir: job.outDir, tabs: job.tabs, snapshotRefs: job.snapshotRefs });
+    // The held cards leave this machine now; one answered meanwhile stays here, with its answer.
+    const taken = this.services.notifyService?.takeMovingApprovals(job.heldApprovals, job.progress.target) ?? { carried: [], stayed: [] };
+    job.heldApprovals = [];
+    job.carriedApprovals = taken.carried;
+    job.approvalsStayed = taken.stayed.map(card => `“${card.title}” was answered while the move stopped the Session's tabs${card.answer ? ` (${card.answer})` : ''}. The answer stays on ${thisMachineName()}; its tab moved before it heard it, so tell the agent on ${job.progress.target}.`);
+    const { manifest, sources } = await this.manifest(record, job.progress.moveId, { outDir: job.outDir, tabs: job.tabs, snapshotRefs: job.snapshotRefs, approvals: taken.carried });
     this.setStep(job, 'pack', 'done', `${manifest.panes.filter(pane => pane.role === 'member').length} Panes, ${manifest.panes.reduce((sum, pane) => sum + pane.tabs.filter(tab => tab.conversation).length, 0)} conversations, the Session folder`);
     this.checkCancelled(job);
 
@@ -597,7 +611,7 @@ export class MoveCoordinator {
       summary: {
         panes: job.paneIds.length - 1, tabs: job.tabs.filter(tab => tab.kind === 'chat' || !!readTabFields(toJsonObject(tab.panel.state.customState ?? {})).agentId).length, resumed: status.resumed ?? 0, failedTabs: status.failedTabs ?? [],
         approvals: status.approvals ?? built?.approvals ?? 0, leftBehind: status.leftBehind ?? built?.leftBehind ?? [], missingEnv: status.missingEnv ?? built?.missingEnv ?? [],
-        previewsNotCarried: status.previewsNotCarried ?? built?.previewsNotCarried ?? [], stayedHere: kept,
+        previewsNotCarried: status.previewsNotCarried ?? built?.previewsNotCarried ?? [], approvalsStayed: job.approvalsStayed, stayedHere: kept,
       },
     });
     await fs.promises.rm(job.outDir, { recursive: true, force: true }).catch(() => undefined);
@@ -762,12 +776,24 @@ export class MoveCoordinator {
       }
     }
     await restartRunScripts(this.registry, job.scripts);
+    // The move didn't happen: its approvals are this machine's again, waiting, their answers going to their tabs here.
+    this.services.notifyService?.releaseMovingApprovals(job.heldApprovals);
+    const carried = await this.carriedApprovalsOf(job);
+    if (carried.length) this.services.notifyService?.adoptMovedApprovals(carried);
     // The move didn't happen: its snapshot refs go, and an earlier move's ref (kept for Restore) comes back.
     for (const { worktree, ref, previous } of job.snapshotRefs) {
       await putBackRef(worktree, ref, previous).catch(error => console.warn(`[SessionMove] ${ref} wasn't put back:`, error));
     }
     await fs.promises.rm(job.outDir, { recursive: true, force: true }).catch(() => undefined);
     return cleaned;
+  }
+
+  /** The cards the pack took: from memory, or after a restart here from the manifest it sent. */
+  private async carriedApprovalsOf(job: SourceJob): Promise<MovedApproval[]> {
+    if (job.carriedApprovals) return job.carriedApprovals;
+    const text = await fs.promises.readFile(path.join(job.outDir, 'manifest.json'), 'utf8').catch(() => null);
+    if (!text) return [];
+    return movedApprovals(decodeBoundary(JSON.parse(text), moveManifestSchema).approvals);
   }
 
   private async fail(job: SourceJob, error: Error): Promise<void> {

@@ -11,7 +11,7 @@ import { createBundle, createSnapshot } from './gitSnapshot';
 import { MoveImporter, type ImporterTabs, type TargetStatus } from './importer';
 import { gitSteps } from '../../test/gitBudget';
 import { settleAfterFreeze, type FreezeTarget } from './afterFreeze';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import type { PaneCommandValue } from '../../daemon/commandRegistry';
 import type { MoveManifest, MovePane, MoveTab } from './manifest';
 import { assertHostBrowserFileNavigation } from '../browserPanelFiles';
@@ -86,6 +86,8 @@ function fakeServices(repo: string, setupGate?: Promise<void>, panels = new Map<
   });
   // Pane notices the importer shows the person.
   const notices: Array<{ title?: string; context?: string }> = [];
+  // Approvals that arrived with a move, as Notify took them in here.
+  const adopted: Array<{ item: JsonObject; report?: JsonObject }> = [];
   const rekey = (from: string, to: string, panelIds: Record<string, string>) => {
     const row = rows.get(from);
     if (row) { rows.delete(from); rows.set(to, { ...row, id: to }); }
@@ -130,11 +132,14 @@ function fakeServices(repo: string, setupGate?: Promise<void>, panels = new Map<
     worktreeManager: { getWorktreePath: (_project: string, name: string) => path.join(root, 'worktrees', name) },
     taskQueue: { runWorktreeSetup: async () => { await setupGate; } },
     orchestrationSessionManager: { list: async () => ({ sessions }), importArriving, removeArriving, setMoveMark },
-    notifyService: { queue: { ask: async (request: { question: { title?: string; context?: string } }) => { notices.push(request.question); return { answer: 'ok' }; } } },
+    notifyService: {
+      queue: { ask: async (request: { question: { title?: string; context?: string } }) => { notices.push(request.question); return { answer: 'ok' }; } },
+      adoptMovedApprovals: (approvals: typeof adopted) => { adopted.push(...approvals); },
+    },
   };
   // SAFETY: the fixture supplies the exact AppServices members the importer reads, with their call shapes.
   const services = fixture as AppServices;
-  return { services, rows, replaced, active, setMoveMark, importArriving, removeArriving, sessions, notices };
+  return { services, rows, replaced, active, setMoveMark, importArriving, removeArriving, sessions, notices, adopted };
 }
 
 let moveCount = 0;
@@ -248,16 +253,26 @@ describe('MoveImporter', { timeout: BUILD_TIMEOUT_MS }, () => {
     expect(fs.readFileSync(path.join(folder, 'notes.md'), 'utf8')).toBe(`see ${folder}/x`);
   });
 
-  it('refuses a package that carries open approvals, and keeps nothing (F-9)', async () => {
-    const { services, importArriving } = fakeServices(target);
+  it('carries open approvals: Notify here takes them in when the move starts, never before, with paths for this machine (T-44)', async () => {
+    const { services, adopted } = fakeServices(target);
     const importer = new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
     const moveId = newMoveId();
-    await stage(importer, manifest(moveId, [], { approvals: [{ id: 'n-1' }] }), {});
+    const card = {
+      id: 'in-7', ui: 'options', title: 'Q-7: Ship it?', state: 'waiting', createdAt: 1, originKind: 'worker', machine: 'A',
+      source: { name: 'Pane p1', agent: 'Claude', paneId: 'p1', panelId: 't-agent', session: { id: 'sess-1', name: 'S', paneId: '__owner__' } },
+      links: [{ label: 'plan', path: '/a/.pane/sessions/sess-1/plan.html' }],
+    };
+    const report = { id: 'in-7', sessionId: 'sess-1', kind: 'report', at: '2026-11-20T18:00:00.000Z', paneId: 'p1', paneName: 'Pane p1', panelId: 't-agent' };
+    await stage(importer, manifest(moveId, [], { approvals: [{ item: card, report }] }), {});
     importer.build(moveId);
-    const status = await waitStage(importer, moveId, ['built', 'failed']);
-    expect(status.stage).toBe('failed');
-    expect(status.error?.message).toMatch(/approval/);
-    expect(importArriving).not.toHaveBeenCalled();
+    const built = await waitStage(importer, moveId, ['built', 'failed']);
+    expect(built.error?.message ?? built.stage).toBe('built');
+    expect(built.approvals).toBe(1);
+    // Built is not committed: the source can still roll back, so nothing shows here yet.
+    expect(adopted).toEqual([]);
+    importer.start(moveId);
+    expect((await waitStage(importer, moveId, ['started', 'failed'])).stage).toBe('started');
+    expect(adopted).toEqual([{ item: { ...card, links: [{ label: 'plan', path: `${sessionWorkspacePath('sess-1')}/plan.html` }] }, report }]);
   });
 
   it('a failed move back puts back the archived Pane, its tabs and its snapshot ref, and deletes nothing it saved (F-6)', async () => {

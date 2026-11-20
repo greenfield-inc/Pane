@@ -71,6 +71,7 @@ const progressSchema: BoundarySchema<SessionMoveProgress> = boundary.object({
     leftBehind: boundary.array(boundary.string),
     missingEnv: boundary.array(boundary.string),
     previewsNotCarried: boundary.optional(boundary.array(boundary.string)),
+    approvalsStayed: boundary.optional(boundary.array(boundary.string)),
     stayedHere: boundary.optional(boundary.array(boundary.string)),
   })),
   error: boundary.optional(boundary.object({ message: boundary.string, next: boundary.string })),

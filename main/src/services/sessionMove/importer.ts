@@ -22,7 +22,7 @@ import { thisMachineName } from '../approvals/approvalStore';
 import { isBinaryFile } from '../../utils/binaryFile';
 import { placeConversation, undoConversationPlacement, type PlacedConversation } from './conversations';
 import { addWorktree, applySnapshot, deleteRefs, importBundle, MoveGitError, placeBranch, snapshotMatches } from './gitSnapshot';
-import { moveManifestSchema, panelBuffersSchema, readTabFields, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveRepo, type MoveTab } from './manifest';
+import { moveManifestSchema, movedApprovals, panelBuffersSchema, readTabFields, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveRepo, type MoveTab } from './manifest';
 import { buildPathMap, mapPath, rewriteText, type PathMap } from './pathMap';
 import { arrivingPreview, previewSourcePath, relativeInside, type MovedRoot } from './filePreviews';
 import { MoveReceiver, type WriteRequest, type WriteResult } from './transfer';
@@ -542,9 +542,11 @@ export class MoveImporter {
         throw new PaneError('ERR_MOVE_DIGEST_MISMATCH', `${file.path} is missing or doesn't match ${manifest.source.machine}'s copy.`, 'Nothing was set up here. Try the move again.');
       }
     }
-    // Open approvals don't move yet (the source refuses them); a package with any is refused here too.
-    if (manifest.approvals.length) {
-      throw new PaneError('ERR_MOVE_APPROVALS_OPEN', `${manifest.approvals.length} open approval${manifest.approvals.length === 1 ? '' : 's'} came with the move, and approvals can't move yet.`, 'Answer them on the other machine, then move again.');
+    // Waiting approvals move with the Session (T-44); a kind that can't move is refused before anything is built.
+    try {
+      movedApprovals(manifest.approvals);
+    } catch (error) {
+      throw new PaneError('ERR_MOVE_APPROVALS_INVALID', `An approval that came with the move can't be taken in here: ${reasonOf(error)}.`, 'Nothing was set up here. Answer it on the other machine, then move again.');
     }
     const members = manifest.panes.filter(pane => pane.role === 'member');
     job.status.panesTotal = members.length;
@@ -765,7 +767,7 @@ export class MoveImporter {
     const missingEnv = manifest.source.envNames.filter(name => !this.envNamesHere().has(name));
     // Built: the plan goes on disk before the source hears it, so the start survives a restart here.
     this.ledger.built(moveId, this.commitPlan(job, { leftBehind, missingEnv, previewsNotCarried }));
-    job.status = { ...job.status, stage: 'built', detail: undefined, approvals: 0, leftBehind, missingEnv, previewsNotCarried };
+    job.status = { ...job.status, stage: 'built', detail: undefined, approvals: manifest.approvals.length, leftBehind, missingEnv, previewsNotCarried };
   }
 
   /** What the start does, from the build's results, in a form that survives a restart. */
@@ -786,7 +788,9 @@ export class MoveImporter {
       told: tabs.filter(tab => orchestratorPanels.has(tab.id) || tab.working).map(tab => tab.id),
       movedLine: movedLine(manifest.source.machine, thisMachineName(), job.map!),
       setAside: [...job.setAside], leftovers: job.conversations.flatMap(placed => placed.leftovers),
-      approvals: 0, leftBehind, missingEnv, previewsNotCarried,
+      approvals: manifest.approvals.length, leftBehind, missingEnv, previewsNotCarried,
+      // Shown here only once the move commits, with this machine's paths: until then the source may still roll it back.
+      approvalItems: manifest.approvals.map(approval => decodeBoundary(JSON.parse(rewriteText(job.map!, JSON.stringify(approval))), boundary.jsonObject)),
     };
   }
 
@@ -1090,6 +1094,8 @@ export class MoveImporter {
     }
     for (const file of plan.leftovers) await fs.promises.rm(file, { force: true }).catch(error => console.warn("[SessionMove] A previous conversation copy wasn't removed:", error));
     await manager.setMoveMark(plan.sessionId, undefined, `Moved here from ${plan.source}.`);
+    // The approvals that came along wait here now; each answer goes to its tab once that tab is at its prompt.
+    if (plan.approvalItems?.length) this.services.notifyService?.adoptMovedApprovals(movedApprovals(plan.approvalItems));
     const told = new Set(plan.told);
     const tell: Array<{ panelId: string; title: string; input: string }> = [];
     for (const tab of plan.tabs) {

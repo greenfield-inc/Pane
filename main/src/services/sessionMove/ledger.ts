@@ -55,6 +55,8 @@ export interface CommitPlan {
   missingEnv: string[];
   /** File preview tabs the build didn't carry, each with why; absent in a ledger from before T-42. */
   previewsNotCarried?: string[];
+  /** The approvals the move carries, with this machine's paths, taken in at the commit (T-44). */
+  approvalItems?: JsonObject[];
 }
 
 /** A conversation filed here, as its undo needs it: each file's target, staged and previous copy. */
@@ -140,6 +142,7 @@ const entrySchema = boundary.object({
     movedLine: boundary.string, setAside: boundary.array(boundary.string), leftovers: boundary.array(boundary.string),
     approvals: boundary.number, leftBehind: boundary.array(boundary.string), missingEnv: boundary.array(boundary.string),
     previewsNotCarried: boundary.optional(boundary.array(boundary.string)),
+    approvalItems: boundary.optional(boundary.array(boundary.jsonObject)),
   })),
   done: boundary.record(boundary.enumeration('resumed', 'failed', 'skipped')),
   journal: boundary.array(boundary.object({
