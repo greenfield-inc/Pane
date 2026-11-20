@@ -12,6 +12,22 @@ const SNAPSHOT_TIMEOUT_MS = 5_000;
 const EXIT_POLL_INTERVAL_MS = 25;
 const DEFAULT_TERMINATE_TIMEOUT_MS = 5_000;
 
+/** What `terminateProcessTrees` asks of the OS. Tests stand in for Windows through it. */
+export interface ProcessTreeSystem {
+  platform: NodeJS.Platform;
+  isAlive(pid: number): boolean;
+  /** Like `execFile`: a failure rejects with an Error carrying the `stdout` read so far. */
+  run(file: string, args: readonly string[], options: { timeout: number; maxBuffer?: number; windowsHide: boolean }): Promise<{ stdout: string }>;
+}
+
+const nativeSystem: ProcessTreeSystem = {
+  get platform() {
+    return process.platform;
+  },
+  isAlive: pid => isProcessAlive(pid),
+  run: (file, args, options) => execFileAsync(file, [...args], { ...options, encoding: 'utf8' }),
+};
+
 /**
  * Whether a process with this pid is still running.
  *
@@ -38,12 +54,13 @@ export function isProcessAlive(pid: number): boolean {
 export async function waitForProcessesToExit(
   pids: readonly number[],
   timeoutMs: number,
+  isAlive: (pid: number) => boolean = isProcessAlive,
 ): Promise<number[]> {
   const deadline = Date.now() + timeoutMs;
-  let alive = pids.filter(isProcessAlive);
+  let alive = pids.filter(pid => isAlive(pid));
   while (alive.length > 0 && Date.now() < deadline) {
     await delay(Math.min(EXIT_POLL_INTERVAL_MS, Math.max(0, deadline - Date.now())));
-    alive = alive.filter(isProcessAlive);
+    alive = alive.filter(pid => isAlive(pid));
   }
   return alive;
 }
@@ -109,85 +126,170 @@ export async function readControllingTerminals(): Promise<Map<number, string>> {
  * Returns the pids not confirmed exited when `timeoutMs` ran out — empty when
  * the whole tree is gone.
  *
+ * Roots that have all exited return at once, without reading the process
+ * table. On Windows the rest costs one PowerShell process, which reads the
+ * table, kills and waits: about a second idle, more under load.
+ *
  * Used when a process outlives the polite shutdown its owner asked for. On
  * Windows that matters beyond leaking a process: a directory cannot be renamed
  * or removed while it is any live process's current working directory.
  */
 export async function terminateProcessTrees(
   rootPids: readonly number[],
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; system?: ProcessTreeSystem } = {},
 ): Promise<number[]> {
-  const roots = rootPids.filter(pid => Number.isInteger(pid) && pid > 0);
-  if (roots.length === 0) return [];
+  const system = options.system ?? nativeSystem;
+  const roots = [...new Set(rootPids.filter(pid => Number.isInteger(pid) && pid > 0))];
+  // A dead root leaves nothing to walk to: Windows only links a child to a
+  // parent still in the table, and POSIX reparents orphans. Reading the table
+  // would cost a process (PowerShell on Windows, seconds under load) to find
+  // nothing.
+  if (!roots.some(pid => system.isAlive(pid))) return [];
   const deadline = Date.now() + (options.timeoutMs ?? DEFAULT_TERMINATE_TIMEOUT_MS);
+  if (system.platform === 'win32') return terminateWindowsTrees(roots, deadline, system);
   const tree = [...new Set([...roots, ...await listDescendantPids(roots)])];
-  const killedAt = Date.now();
   // Deepest first: killing a parent can orphan a child nothing can walk to.
-  await killProcesses([...tree].reverse());
-  const alive = await waitForProcessesToExit(tree, Math.max(0, deadline - Date.now()));
-  // A survivor already decides the answer, and with no time left there is nothing to wait on.
-  const left = deadline - Date.now();
-  if (process.platform !== 'win32' || alive.length > 0 || left <= 0) return alive;
-  return waitForWindowsExit(tree, killedAt, left);
+  await killProcesses([...tree].reverse(), system);
+  return waitForProcessesToExit(tree, Math.max(0, deadline - Date.now()), pid => system.isAlive(pid));
 }
 
 /**
+ * Windows: one PowerShell process reads the table, walks the trees, kills them
+ * and waits for them to exit. Each step used to start its own process, and
+ * PowerShell's start-up costs more than any of them.
+ *
  * Windows sets a killed process's exit code, which is all `isProcessAlive`
  * sees, before it closes that process's handles (its current directory among
- * them), and signals the process only once they are closed. Waits for that
- * signal, so the directories the processes sat in can be moved once this
- * returns. Returns the pids not signalled in time. A pid whose process is
- * gone, or that a process born after `killedAt` now holds, has exited. When the
- * wait cannot run (PowerShell's Constrained Language Mode, which AppLocker and
- * WDAC enforce, blocks `Add-Type`), returns none: the exit-code poll's answer
- * stands, as it did before this wait existed.
+ * them), and signals the process only once they are closed. The script waits
+ * for that signal, so the directories the processes sat in can be moved once
+ * this returns. A pid the script could not wait on is polled by exit code. When
+ * PowerShell cannot run at all, the roots are killed by pid.
  */
-async function waitForWindowsExit(pids: readonly number[], killedAt: number, timeoutMs: number): Promise<number[]> {
-  if (pids.length === 0) return [];
-  // FILETIME counts 100 ns ticks from 1601; Date.now() counts ms from 1970.
-  const killedAtFiletime = BigInt(killedAt) * 10_000n + 116_444_736_000_000_000n;
-  const script = [
-    `$deadline = [DateTime]::UtcNow.AddMilliseconds(${timeoutMs})`,
-    "Add-Type -Namespace Pane -Name ProcessExit -MemberDefinition '"
-      + '[DllImport("kernel32.dll")] public static extern IntPtr OpenProcess(uint access, bool inherit, int pid);'
-      + '[DllImport("kernel32.dll")] public static extern bool GetProcessTimes(IntPtr process, out long created, out long exited, out long kernel, out long user);'
-      + '[DllImport("kernel32.dll")] public static extern uint WaitForSingleObject(IntPtr handle, uint ms);'
-      + '[DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);'
-      + "'",
-    `foreach ($id in @(${pids.join(',')})) {`,
-    // SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION. No handle means the process is gone.
-    '  $handle = [Pane.ProcessExit]::OpenProcess(0x00101000, $false, $id)',
-    '  if ($handle -eq [IntPtr]::Zero) { continue }',
-    '  $created = 0; $exited = 0; $kernel = 0; $user = 0',
-    '  [void][Pane.ProcessExit]::GetProcessTimes($handle, [ref]$created, [ref]$exited, [ref]$kernel, [ref]$user)',
-    `  if ($created -le ${killedAtFiletime}) {`,
-    '    $left = [Math]::Max(0, [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds)',
-    // WAIT_OBJECT_0 (0) means signalled.
-    '    if ([Pane.ProcessExit]::WaitForSingleObject($handle, [uint32]$left) -ne 0) { $id }',
-    '  }',
-    '  [void][Pane.ProcessExit]::CloseHandle($handle)',
+async function terminateWindowsTrees(roots: readonly number[], deadline: number, system: ProcessTreeSystem): Promise<number[]> {
+  let stdout: string;
+  try {
+    ({ stdout } = await system.run('powershell', ['-NoProfile', '-NonInteractive', '-Command', windowsTerminateScript(roots, deadline)], {
+      // The script stops waiting at the deadline; this bounds start-up and the table read.
+      timeout: Math.max(0, deadline - Date.now()) + SNAPSHOT_TIMEOUT_MS,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+    }));
+  } catch (error) {
+    console.warn('[ProcessTree] terminate_failed:', error);
+    // SAFETY: `run` rejects like execFile, with an Error that carries the output read so far.
+    stdout = String((error as { stdout?: unknown }).stdout ?? '');
+  }
+  const report = parseWindowsTerminateReport(stdout);
+  if (report.snapshotError) console.warn('[ProcessTree] snapshot_failed:', report.snapshotError);
+  if (report.tree.length === 0) {
+    // PowerShell reported nothing, not even the roots it always lists first.
+    await killProcesses(roots, system);
+    return waitForProcessesToExit(roots, Math.max(0, deadline - Date.now()), pid => system.isAlive(pid));
+  }
+  const unconfirmed = report.tree.filter(pid => !report.exited.has(pid) && !report.alive.has(pid));
+  const polled = await waitForProcessesToExit(unconfirmed, Math.max(0, deadline - Date.now()), pid => system.isAlive(pid));
+  return [...report.alive, ...polled];
+}
+
+interface WindowsTerminateReport {
+  /** The roots and their verified descendants, roots first. */
+  tree: number[];
+  /** Signalled, or gone before the kill. */
+  exited: Set<number>;
+  /** Still not signalled at the deadline. */
+  alive: Set<number>;
+  snapshotError?: string;
+}
+
+function parseWindowsTerminateReport(stdout: string): WindowsTerminateReport {
+  const report: WindowsTerminateReport = { tree: [], exited: new Set(), alive: new Set() };
+  for (const line of stdout.split(/\r?\n/u)) {
+    const snapshot = /^snapshot_failed (.*)$/u.exec(line.trim());
+    if (snapshot) report.snapshotError = snapshot[1];
+    const match = /^(tree|exited|alive) (\d+)$/u.exec(line.trim());
+    if (!match) continue;
+    const pid = Number.parseInt(match[2], 10);
+    if (match[1] === 'tree') report.tree.push(pid);
+    else report[match[1] === 'exited' ? 'exited' : 'alive'].add(pid);
+  }
+  return report;
+}
+
+/**
+ * The PowerShell script behind `terminateWindowsTrees`. It prints `tree <pid>`
+ * for each root and verified descendant, then `exited <pid>` or `alive <pid>`
+ * for each process it held a handle to. Exported for tests.
+ *
+ * Windows never clears a dead parent's pid from its children, and reuses pids
+ * quickly: a child counts only when it was born no earlier than the process
+ * holding its parent pid now. Each kill goes through a handle opened first and
+ * checked against the birth time the table read, so a pid that a new process
+ * took since then is never killed; the wait uses the same handle. Constrained
+ * Language Mode (AppLocker, WDAC) blocks those handles: there the script kills
+ * by pid with `Stop-Process` and leaves the wait to the caller's exit-code
+ * poll, as it did before this wait existed.
+ */
+export function windowsTerminateScript(roots: readonly number[], deadline: number): string {
+  // .NET DateTime ticks count 100 ns from year 1; Date.now() counts ms from 1970.
+  const deadlineTicks = BigInt(deadline) * 10_000n + 621_355_968_000_000_000n;
+  return [
+    `$deadline = [long]${deadlineTicks}`,
+    `$roots = @(${roots.join(',')})`,
+    '$born = @{}',
+    '$children = @{}',
+    '$table = @()',
+    "try { $table = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CreationDate -ErrorAction Stop) } catch { 'snapshot_failed ' + ($_.Exception.Message -replace '\\s+', ' ') }",
+    // CIM reports microseconds; the handle's start time below is truncated to match.
+    'foreach ($row in $table) { if ($row.CreationDate) { [long]$ticks = $row.CreationDate.ToUniversalTime().Ticks; $born[[int]$row.ProcessId] = $ticks - ($ticks % [long]10) } }',
+    'foreach ($row in $table) {',
+    '  $id = [int]$row.ProcessId; $parent = [int]$row.ParentProcessId',
+    '  if ($id -eq $parent -or -not $born.ContainsKey($id) -or -not $born.ContainsKey($parent) -or $born[$parent] -gt $born[$id]) { continue }',
+    '  if ($children.ContainsKey($parent)) { $children[$parent] += $id } else { $children[$parent] = @($id) }',
+    '}',
+    '$tree = @($roots)',
+    '$seen = @{}',
+    'foreach ($id in $roots) { $seen[$id] = $true }',
+    'for ($i = 0; $i -lt $tree.Count; $i++) {',
+    '  if (-not $children.ContainsKey($tree[$i])) { continue }',
+    '  foreach ($child in $children[$tree[$i]]) { if (-not $seen.ContainsKey($child)) { $seen[$child] = $true; $tree += $child } }',
+    '}',
+    'foreach ($id in $tree) { "tree $id" }',
+    "$full = $ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage'",
+    '$held = @()',
+    '$heldIds = @()',
+    // Deepest first: killing a parent can orphan a child nothing can walk to.
+    'for ($i = $tree.Count - 1; $i -ge 0; $i--) {',
+    '  $id = $tree[$i]',
+    '  if (-not $full) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue; continue }',
+    '  $p = $null',
+    '  try { $p = [Diagnostics.Process]::GetProcessById($id) } catch { "exited $id"; continue }',
+    // Reading Handle pins this process: Kill and WaitForExit use it, not a later lookup of the pid.
+    '  try { $null = $p.Handle; [long]$ticks = $p.StartTime.ToUniversalTime().Ticks; $ticks = $ticks - ($ticks % [long]10) } catch { $p.Dispose(); continue }',
+    // Another process holds the pid now: the one the table saw has exited.
+    '  if ($born.ContainsKey($id) -and $born[$id] -ne $ticks) { $p.Dispose(); "exited $id"; continue }',
+    '  try { $p.Kill() } catch { }',
+    '  $held += $p',
+    '  $heldIds += $id',
+    '}',
+    'for ($i = 0; $i -lt $held.Count; $i++) {',
+    '  $left = ($deadline - [DateTime]::UtcNow.Ticks) / 10000',
+    '  if ($left -lt 0) { $left = 0 }',
+    '  if ($held[$i].WaitForExit([int]$left)) { "exited $($heldIds[$i])" } else { "alive $($heldIds[$i])" }',
+    '  $held[$i].Dispose()',
     '}',
   ].join('\n');
-  try {
-    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: timeoutMs + SNAPSHOT_TIMEOUT_MS });
-    return stdout.split(/\r?\n/u).filter(line => /^\d+$/u.test(line.trim())).map(line => Number.parseInt(line, 10));
-  } catch (error) {
-    console.warn('[ProcessTree] exit_wait_failed:', error);
-    return [];
-  }
 }
 
 /** Kills these processes as forcefully as the platform allows. Never throws. */
-async function killProcesses(pids: readonly number[]): Promise<void> {
-  if (process.platform === 'win32') {
-    // One taskkill for the lot — a process per pid would cost more than the
-    // kill itself. taskkill reports a pid it cannot touch without abandoning
-    // the rest.
+async function killProcesses(pids: readonly number[], system: ProcessTreeSystem): Promise<void> {
+  if (system.platform === 'win32') {
+    // Only when PowerShell cannot run. One taskkill for the lot: taskkill
+    // reports a pid it cannot touch without abandoning the rest.
     // No `/T`: taskkill walks children by a parent pid that Windows never
     // clears, so it would also kill whatever outlived a dead process whose pid
-    // one of these now holds. The list already holds the verified descendants.
+    // one of these now holds.
     const args = ['/F', ...pids.flatMap(pid => ['/PID', String(pid)])];
-    await execFileAsync('taskkill', args, { timeout: SNAPSHOT_TIMEOUT_MS }).catch(() => undefined);
+    await system.run('taskkill', args, { timeout: SNAPSHOT_TIMEOUT_MS, windowsHide: true }).catch(() => undefined);
     return;
   }
   for (const pid of pids) {
