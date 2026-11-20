@@ -47,7 +47,10 @@ function formatBoundaryPath(path: DecodePath): string {
 
 export interface BoundaryCursor {
   readonly value: unknown;
+  /** Built on first read from the cursor's ancestors, so decoding a deep value copies no paths until one is reported. */
   readonly path: DecodePath;
+  /** `path.length`, without building the path. */
+  readonly depth: number;
   child(key: string | number, value: unknown): BoundaryCursor;
   fail(message: string): never;
   /**
@@ -70,25 +73,83 @@ type InferObject<Fields extends ObjectFields> = {
   [Key in keyof Fields]: InferSchema<Fields[Key]>;
 };
 
-function cursor(value: unknown, path: DecodePath = [], issues?: BoundaryIssue[]): BoundaryCursor {
-  return {
-    value,
-    path,
-    child(key, childValue) {
-      return cursor(childValue, [...path, key], issues);
-    },
-    fail(message) {
-      throw new BoundaryDecodeError(message, path);
-    },
-    collect(error) {
-      if (!issues) return false;
-      issues.push(issueFrom(error));
-      return true;
-    },
-    strict() {
-      return cursor(value, path);
-    },
-  };
+/**
+ * Thrown in place of a new `BoundaryDecodeError` when a failure will be discarded: a union branch
+ * that does not match, or a value `decodeOptionalBoundary` turns into undefined. Building an error
+ * captures a stack trace, which dominated decoding values that try many shapes. It is still a
+ * `BoundaryDecodeError`, so schemas that catch one behave as before.
+ */
+const DISCARDED_FAILURE = new BoundaryDecodeError("discarded failure");
+
+class Cursor implements BoundaryCursor {
+  readonly value: unknown;
+  readonly depth: number;
+  private readonly parent: Cursor | undefined;
+  private readonly key: string | number | undefined;
+  private readonly issues: BoundaryIssue[] | undefined;
+  /** Failures are discarded by an enclosing union or optional decode. */
+  private readonly discards: boolean;
+  private builtPath: DecodePath | undefined;
+
+  constructor(
+    value: unknown,
+    parent: Cursor | undefined,
+    key: string | number | undefined,
+    issues: BoundaryIssue[] | undefined,
+    discards: boolean,
+  ) {
+    this.value = value;
+    this.parent = parent;
+    this.key = key;
+    this.issues = issues;
+    this.discards = discards;
+    this.depth = parent === undefined ? 0 : parent.depth + 1;
+  }
+
+  get path(): DecodePath {
+    if (this.builtPath === undefined) {
+      this.builtPath = this.parent === undefined || this.key === undefined ? [] : [...this.parent.path, this.key];
+    }
+    return this.builtPath;
+  }
+
+  child(key: string | number, value: unknown): BoundaryCursor {
+    return new Cursor(value, this, key, this.issues, this.discards);
+  }
+
+  fail(message: string): never {
+    if (this.discards) throw DISCARDED_FAILURE;
+    throw new BoundaryDecodeError(message, this.path);
+  }
+
+  collect(error: BoundaryDecodeError): boolean {
+    if (!this.issues) return false;
+    this.issues.push(issueFrom(error));
+    return true;
+  }
+
+  /** Whether `collect` records failures (`decodeBoundaryAll`). */
+  get collects(): boolean {
+    return this.issues !== undefined;
+  }
+
+  strict(): BoundaryCursor {
+    return new Cursor(this.value, this.parent, this.key, undefined, this.discards);
+  }
+
+  /** The same position, non-collecting, for a decode whose failure the caller discards. */
+  discarding(): BoundaryCursor {
+    return new Cursor(this.value, this.parent, this.key, undefined, true);
+  }
+}
+
+function rootCursor(value: unknown, issues?: BoundaryIssue[]): Cursor {
+  return new Cursor(value, undefined, undefined, issues, false);
+}
+
+/** A cursor whose failures are discarded; any other cursor fails with its real error. */
+function discardingCursor(current: BoundaryCursor): BoundaryCursor {
+  return current instanceof Cursor ? current.discarding() : current.strict();
 }
 
 function issueFrom(error: BoundaryDecodeError): BoundaryIssue {
@@ -107,6 +168,8 @@ function decodeChild<Value>(
     return schema.decode(child);
   } catch (error) {
     if (!(error instanceof BoundaryDecodeError)) throw error;
+    // Build the "missing" error only when it will be collected; otherwise the original is rethrown.
+    if (current instanceof Cursor && !current.collects) throw error;
     const reported = value === undefined ? new BoundaryDecodeError("missing", child.path) : error;
     if (!current.collect(reported)) throw error;
     return undefined;
@@ -138,8 +201,9 @@ function decodeUnion<Schemas extends readonly BoundarySchema<unknown>[]>(
 ): InferSchema<Schemas[number]> {
   for (const schema of schemas) {
     try {
+      // A branch that misses is expected, so its failure is discarded rather than built.
       // SAFETY: Schemas[number] is the schema being decoded in this iteration.
-      return schema.decode(current.strict()) as InferSchema<Schemas[number]>;
+      return schema.decode(discardingCursor(current)) as InferSchema<Schemas[number]>;
     } catch (error) {
       if (!(error instanceof BoundaryDecodeError)) throw error;
     }
@@ -151,7 +215,7 @@ function decodeUnion<Schemas extends readonly BoundarySchema<unknown>[]>(
 const MAX_JSON_DEPTH = 512;
 
 function decodeJsonValue(current: BoundaryCursor): JsonValue {
-  if (current.path.length > MAX_JSON_DEPTH) return current.fail(`JSON nesting is deeper than ${MAX_JSON_DEPTH} levels`);
+  if (current.depth > MAX_JSON_DEPTH) return current.fail(`JSON nesting is deeper than ${MAX_JSON_DEPTH} levels`);
   if (
     current.value === null ||
     typeof current.value === "string" ||
@@ -288,7 +352,7 @@ export function decodeBoundary<Value>(
   value: unknown,
   schema: BoundarySchema<Value>,
 ): Value {
-  return schema.decode(cursor(value));
+  return schema.decode(rootCursor(value));
 }
 
 /**
@@ -303,7 +367,7 @@ export function decodeBoundaryAll<Value>(
   const issues: BoundaryIssue[] = [];
   let decoded: Value;
   try {
-    decoded = schema.decode(cursor(value, [], issues));
+    decoded = schema.decode(rootCursor(value, issues));
   } catch (error) {
     if (!(error instanceof BoundaryDecodeError)) throw error;
     issues.push(issueFrom(error));
