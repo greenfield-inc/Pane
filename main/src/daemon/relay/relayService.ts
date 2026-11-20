@@ -350,16 +350,19 @@ export class RelayService {
     // One certificate per domain: a reconnect while the first order is in flight shares that order.
     if (!this.certificate || this.certificateDomain !== domain) {
       this.certificateDomain = domain;
+      const authorities = this.authorities();
+      // A staging certificate is kept apart, so switching to a trusted CA orders a new one instead of loading it.
+      const staging = authorities[0].directoryUrl === LETS_ENCRYPT_STAGING_DIRECTORY ? '.staging' : '';
       this.certificate = new ComputerCertificate({
         key,
         domain,
-        certificateStore: fileStore(path.join(this.deps.dataDir, 'relay', `${domain}.certificate.pem`)),
+        certificateStore: fileStore(path.join(this.deps.dataDir, 'relay', `${domain}${staging}.certificate.pem`)),
         accountStore: {
           read: () => this.deps.secrets.read('relay/acme-account'),
           write: (value) => this.deps.secrets.write('relay/acme-account', value),
         },
         setTxt: (values) => this.agent?.setAcmeTxt(values) ?? Promise.reject(new Error('The relay is not connected.')),
-        authorities: this.authorities(),
+        authorities,
         acmeCa: readOptionalFile(this.env.PANE_ACME_CA)?.toString(),
         log: this.deps.log,
       });
