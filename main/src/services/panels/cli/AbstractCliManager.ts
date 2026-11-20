@@ -1191,7 +1191,7 @@ export abstract class AbstractCliManager extends EventEmitter {
       if (platform === 'win32') {
         const result = execSync(
           `wmic process where (ParentProcessId=${parentPid}) get ProcessId`,
-          { encoding: 'utf8' }
+          { encoding: 'utf8', windowsHide: true }
         );
 
         const lines = result.split('\n').filter((line: string) => line.trim());
@@ -1238,7 +1238,7 @@ export abstract class AbstractCliManager extends EventEmitter {
         if (platform === 'win32') {
           const result = execSync(
             `wmic process where ProcessId=${pid} get Name`,
-            { encoding: 'utf8' }
+            { encoding: 'utf8', windowsHide: true }
           );
           const lines = result.split('\n').filter((line: string) => line.trim());
           if (lines.length > 1) {
@@ -1275,13 +1275,13 @@ export abstract class AbstractCliManager extends EventEmitter {
     try {
       if (platform === 'win32') {
         try {
-          await this.execAsync(`taskkill /F /T /PID ${pid}`);
+          await this.execAsync(`taskkill /F /T /PID ${pid}`, { windowsHide: true });
           this.logger?.verbose(`[${this.getCliToolName()}] Successfully killed Windows process tree ${pid}`);
         } catch (error) {
           this.logger?.warn(`[${this.getCliToolName()}] Error killing Windows process tree: ${error instanceof Error ? error : new Error(String(error))}`);
           for (const childPid of descendantPids) {
             try {
-              await this.execAsync(`taskkill /F /PID ${childPid}`);
+              await this.execAsync(`taskkill /F /PID ${childPid}`, { windowsHide: true });
             } catch {
               // Process might already be dead
             }
