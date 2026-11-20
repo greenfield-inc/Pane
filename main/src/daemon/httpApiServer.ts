@@ -598,9 +598,12 @@ export class PaneRemoteHttpApiServer {
     }
 
     if (server) {
-      await new Promise<void>((resolve) => {
+      const closed = new Promise<void>((resolve) => {
         server.close(() => resolve());
       });
+      // close() only refuses new connections; a kept-alive one would stay open until its client drops it.
+      server.closeIdleConnections();
+      await closed;
     }
   }
 
