@@ -1111,7 +1111,7 @@ export class DeviceService {
     if (!capabilities.android.ready || !/^Pane_Android(_\d+)?$/.test(name)) throw new PaneError('ERR_DEVICE_REMOVE_FAILED', `Pane could not delete ${name}: it deletes only its own emulators, with the Android SDK's avdmanager.`, 'Delete it in Android Studio\'s Device Manager.');
     const env = capabilities.android.javaHome ? { ...process.env, JAVA_HOME: capabilities.android.javaHome } : process.env;
     try {
-      if (process.platform === 'win32') await execFileAsync('cmd.exe', ['/d', '/s', '/c', `"${capabilities.android.avdmanager}" delete avd -n ${name}`], { env, timeout: 120_000, windowsVerbatimArguments: true });
+      if (process.platform === 'win32') await execFileAsync('cmd.exe', ['/d', '/s', '/c', `"${capabilities.android.avdmanager}" delete avd -n ${name}`], { env, timeout: 120_000, windowsHide: true, windowsVerbatimArguments: true });
       else await execFileAsync(capabilities.android.avdmanager, ['delete', 'avd', '-n', name], { env, timeout: 120_000 });
     } catch (cause) {
       throw new PaneError('ERR_DEVICE_REMOVE_FAILED', `Pane could not delete ${name}: ${reasonOf(cause)}`, 'Try `runpane devices free --all` again in a minute.');

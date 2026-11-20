@@ -31,7 +31,7 @@ export async function getWSLHome(distro: string): Promise<string | null> {
     const { stdout } = await execFileAsync(
       'wsl.exe',
       ['-d', distro, '--', 'bash', '-c', 'echo "$HOME"'],
-      { timeout: 5000, encoding: 'utf8' }
+      { timeout: 5000, encoding: 'utf8', windowsHide: true }
     );
     const home = stdout.trim();
     if (home && home.startsWith('/')) {
@@ -249,7 +249,7 @@ export async function bumpWSLInotifyLimits(distros: string[]): Promise<void> {
         'sysctl', '-w',
         'fs.inotify.max_user_watches=2147483647',
         'fs.inotify.max_user_instances=8192',
-      ], { timeout: 10000 })
+      ], { timeout: 10000, windowsHide: true })
     )
   );
 }
@@ -257,7 +257,7 @@ export async function bumpWSLInotifyLimits(distros: string[]): Promise<void> {
 type RunWSL = (args: string[]) => Promise<Buffer>;
 
 const runWSL: RunWSL = async args =>
-  (await execFileAsync('wsl.exe', args, { encoding: 'buffer', timeout: 5000 })).stdout;
+  (await execFileAsync('wsl.exe', args, { encoding: 'buffer', timeout: 5000, windowsHide: true })).stdout;
 
 export async function listWSLDistributions(run: RunWSL = runWSL): Promise<string[]> {
   const output = await run(['-l', '-q']);
