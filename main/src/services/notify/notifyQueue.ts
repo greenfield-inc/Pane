@@ -922,7 +922,8 @@ export class NotifyQueue extends EventEmitter {
   /** The reader order (D-258): the asker (its call, else its tab), the orchestrator that relayed it, then Autopilot. */
   private firstReader(entry: Entry, tried: Set<string>): NotifyReplyReader | undefined {
     const { item } = entry;
-    const openCall = (entry.waiter !== undefined || entry.resumeLoop) && !tried.has('call');
+    // Between resume rounds a tab's asker may never call again (F-1), so its tab reads the reply instead.
+    const openCall = (entry.waiter !== undefined || (entry.resumeLoop && !outlivesCall(item))) && !tried.has('call');
     // A worker's open call is its orchestrator's relay: the worker's own tab reads first.
     if (openCall && item.originKind !== 'worker') return { kind: 'asker', name: askerName(item) };
     const asker = item.source.panelId;
@@ -1029,7 +1030,8 @@ export class NotifyQueue extends EventEmitter {
     // A call between resume rounds gets it on its next --resume, unless that call read the reply itself.
     const callRead = reply.reader !== undefined && !reply.reader.panelId;
     if (entry.waiter) entry.waiter.resolve(result);
-    else if (entry.resumeLoop && !callRead) entry.pending = result;
+    // A tab's card keeps it for a later --resume too, as it does a picked answer (F-1).
+    else if ((entry.resumeLoop || outlivesCall(item)) && !callRead) entry.pending = result;
     if (reply.reader?.kind !== 'orchestrator') this.correctRelay(item);
     if (reply.reader?.kind !== 'asker' && item.source.panelId && !this.env.askerGone?.(item)) this.enqueueTabMessage(item, answerLine(item), true);
     this.save(entry);
