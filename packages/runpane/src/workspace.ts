@@ -41,6 +41,8 @@ export interface TailnetMachine {
   routes?: RemoteRoute[];
   /** Other names it answers to, lowercased: its Pane id, install id, relay id, and route host names. */
   aliases?: string[];
+  /** Why a saved computer did not answer when runpane asked it. */
+  unreachable?: string;
 }
 
 export type Tailnet =
@@ -101,6 +103,14 @@ const localStatusSchema = boundary.object({
   fix: boundary.optional(boundary.string),
   machineName: boundary.optional(boundary.string),
   url: boundary.optional(boundary.string),
+});
+
+/** This machine's phone access through Pane relay (`relay:status`): linked computers reach it the same way. */
+const relayStatusSchema = boundary.object({
+  enabled: boundary.boolean,
+  phase: boundary.string,
+  address: boundary.nullable(boundary.string),
+  lastError: boundary.nullable(boundary.string),
 });
 
 // ---------------------------------------------------------------- tailnet
@@ -420,8 +430,8 @@ async function withOs(machine: TailnetMachine, known: boolean): Promise<TailnetM
   try {
     const info = await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS);
     return { ...machine, os: info.os, online: true };
-  } catch {
-    return { ...machine, online: false };
+  } catch (error) {
+    return { ...machine, online: false, unreachable: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -443,7 +453,7 @@ async function readMachines(paneDir?: string): Promise<Tailnet> {
       || left.name.localeCompare(right.name));
   if (tailnet.ok) return { ...tailnet, machines };
   if (!saved.length) return tailnet;
-  const hostname = os.hostname().replace(/\.local$/i, '');
+  const hostname = await machineHostname();
   const self: TailnetMachine = {
     name: machineSlug(hostname), dnsName: hostname, os: process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux',
     online: true, ips: [], self: true, owner: 'you', mine: true,
@@ -456,7 +466,7 @@ const NOT_ANSWERING = 'Pane is not answering there; it needs a Pane with workspa
 const CERTIFICATES_OFF = 'this tailnet has HTTPS certificates turned off. Fix: Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns.';
 
 async function probeMachine(machine: TailnetMachine, target = workspaceTarget(machine), notAnswering = NOT_ANSWERING): Promise<{ info?: MachineInfo; error?: string }> {
-  if (!machine.online) return { error: 'offline' };
+  if (!machine.online) return { error: machine.unreachable ?? 'offline' };
   try {
     return { info: await invokeRemoteDaemon(target, 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS) };
   } catch (error) {
@@ -501,7 +511,7 @@ async function routePath(value: string, verb: string, paneDir?: string): Promise
 
 export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
   const tailnet = await requireTailnet(parsed.paneDir);
-  const local = await readLocalStatus(parsed.paneDir);
+  const [local, relay] = await Promise.all([readLocalStatus(parsed.paneDir), readRelayStatus(parsed.paneDir)]);
   // Offline machines need no probe, so only online ones count toward the limit; mine come first.
   const probed = new Set(tailnet.machines.filter((machine) => machine.online).slice(0, MAX_PROBED_MACHINES));
   const rows = await Promise.all(tailnet.machines.map(async (machine) => {
@@ -514,9 +524,9 @@ export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
   if (parsed.json) {
     console.log(JSON.stringify({
       ok: true,
-      self: { ...tailnet.self, workspace: local },
+      self: { ...tailnet.self, workspace: local, relay },
       // Route tokens stay internal: the list names where each route goes and which key it holds.
-      machines: rows.map(({ machine: { routes, aliases, ...machine }, probe, route }) => ({
+      machines: rows.map(({ machine: { routes, aliases, unreachable: _unreachable, ...machine }, probe, route }) => ({
         ...machine,
         ids: aliases,
         routes: routes?.map((candidate) => ({ kind: candidate.kind, baseUrl: candidate.baseUrl, fingerprint: candidate.fingerprint, answered: candidate === route })),
@@ -527,12 +537,14 @@ export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
     }, null, 2));
     return 0;
   }
-  console.log(`${tailnet.self.name} (this machine, ${tailnet.self.os}): ${local ? describeLocalStatus(local) : 'off (Pane is not running)'}`);
+  const tailscale = local ? describeLocalStatus(local) : 'off (Pane is not running)';
+  console.log(`${tailnet.self.name} (this machine, ${tailnet.self.os}): ${relay?.enabled ? `${describeRelay(relay)}. Tailscale: ${tailscale}` : tailscale}`);
   for (const { machine, probe, route } of rows) {
     const through = route && machine.routes ? ` through ${routeLabel(route.kind)}` : '';
     const state = probe.info ? `joined${through}, shell ${probe.info.shell}` : `not reachable: ${probe.error}`;
     const routes = machine.routes ? ` [${machine.routes.map((candidate) => routeLabel(candidate.kind)).join(', ')}]` : '';
-    console.log(`${describeMachine(machine)}${routes}: ${machine.online ? state : 'offline'}`);
+    const offline = machine.unreachable ? `not reachable: ${machine.unreachable}` : 'offline';
+    console.log(`${describeMachine(machine)}${routes}: ${machine.online ? state : offline}`);
   }
   console.log(REACH_LINE);
   return 0;
@@ -672,6 +684,32 @@ async function readLocalStatus(paneDir?: string): Promise<ReturnType<typeof loca
       ? { enabled: false, state: 'off', reason: 'this Pane is older than workspaces', fix: 'Update Pane, then restart it.', machineName: undefined, url: undefined }
       : null;
   }
+}
+
+/**
+ * This machine's name as Pane and Tailscale give it (main/src/utils/computerName.ts): a Mac with a
+ * network-assigned host name (`Mac.localdomain`, `localhost`) goes by its LocalHostName.
+ */
+async function machineHostname(): Promise<string> {
+  const host = os.hostname().replace(/\.local$/i, '');
+  if (process.platform !== 'darwin' || (!host.includes('.') && host !== 'localhost')) return host;
+  return new Promise((resolve) => {
+    execFile('/usr/sbin/scutil', ['--get', 'LocalHostName'], { encoding: 'utf8', timeout: 2_000 }, (error, stdout) => resolve((!error && stdout.trim()) || host));
+  });
+}
+
+/** null when Pane does not answer here or is older than phone access. */
+async function readRelayStatus(paneDir?: string): Promise<ReturnType<typeof relayStatusSchema.decode> | null> {
+  try {
+    return await invokeDaemon('relay:status', [], relayStatusSchema, { paneDir, timeoutMs: LOCAL_STATUS_TIMEOUT_MS });
+  } catch {
+    return null;
+  }
+}
+
+function describeRelay(relay: ReturnType<typeof relayStatusSchema.decode>): string {
+  if (relay.phase === 'ready') return `reachable through Pane relay (${relay.address ?? 'its relay address'})`;
+  return `not reachable through Pane relay yet (${relay.lastError ?? 'still connecting'})`;
 }
 
 function describeLocalStatus(status: ReturnType<typeof localStatusSchema.decode>): string {
