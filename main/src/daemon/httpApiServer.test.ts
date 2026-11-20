@@ -1614,6 +1614,36 @@ describe('workspace identity mode', () => {
     stream.close();
   });
 
+  it('does not keep an event client that left while its password was still being checked', async () => {
+    let finishCheck: () => void = () => {};
+    let checking = false;
+    const slow: WorkspaceSecretVerifier = {
+      check: () => new Promise((resolve) => {
+        checking = true;
+        finishCheck = () => resolve('valid');
+      }),
+      isProved: () => true,
+    };
+    const server = await startWorkspaceServer(() => ownerOnly({ verifySecret: slow }));
+    const address = server.getAddress();
+    if (!address) throw new Error('Remote HTTP API server is not listening');
+    const request = http.request({
+      host: address.host,
+      port: address.port,
+      path: '/serve-secret/events',
+      method: 'GET',
+      headers: { ...as(owner, 'correct horse') },
+    });
+    request.on('error', () => {});
+    request.end();
+    await vi.waitFor(() => expect(checking).toBe(true));
+    request.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    finishCheck();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(server.getConnectedClients()).toEqual([]);
+  });
+
   it('counts only the owner\'s desktop as reading this computer\'s cards, never a teammate naming a machine', async () => {
     const server = await startWorkspaceServer(() => ownerOnly({ visibility: 'tailnet' }));
     const teammateStream = await openEventStream(server, undefined, { ...as(teammate), 'X-Pane-Machine-Id': 'book-install' }, '/serve-secret/events');
