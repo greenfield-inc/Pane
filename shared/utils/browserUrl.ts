@@ -10,17 +10,27 @@ export function hasFileProtocol(value: string | undefined): boolean {
   }
 }
 
-const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0']);
 
-/** The port an http(s) URL points at on loopback, if it does. */
+/** Whether a URL's hostname means "this computer": localhost, 127.0.0.1, [::1], 0.0.0.0 or *.localhost. */
+export function isLoopbackHostname(hostname: string): boolean {
+  return LOOPBACK_HOSTNAMES.has(hostname) || hostname.endsWith('.localhost');
+}
+
+/** The port an http(s) URL points at on loopback (isLoopbackHostname), if it does. */
 export function loopbackPortOf(url: string): number | null {
   try {
     const parsed = new URL(url);
-    if (!['http:', 'https:'].includes(parsed.protocol) || !LOOPBACK_HOSTNAMES.has(parsed.hostname)) return null;
+    if (!['http:', 'https:'].includes(parsed.protocol) || !isLoopbackHostname(parsed.hostname)) return null;
     return Number.parseInt(parsed.port || (parsed.protocol === 'https:' ? '443' : '80'), 10);
   } catch {
     return null;
   }
+}
+
+/** A page on the host itself: a file, or a dev server on its loopback. */
+export function isHostLocalUrl(url: string | undefined): boolean {
+  return url !== undefined && (hasFileProtocol(url) || loopbackPortOf(url) !== null);
 }
 
 /**

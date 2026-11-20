@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { normalizeUrl, WEBVIEW_ALLOW_POPUPS, webviewPartition } from './browserUrl';
-import { hasFileProtocol, localTargetOf, remapLoopbackPort } from '../../../../../shared/utils/browserUrl';
+import { hasFileProtocol, isHostLocalUrl, localTargetOf, remapLoopbackPort } from '../../../../../shared/utils/browserUrl';
 import type { ListeningPort, ListeningPortsSnapshot } from '../../../../../shared/types/listeningPorts';
 
 describe('browser file protocol selection', () => {
@@ -77,6 +77,10 @@ describe('localTargetOf, where a remote desktop loads a host URL', () => {
   it('loads a tunnelled host port at the port this desktop reaches it on', () => {
     expect(localTargetOf('http://localhost:5173/app?x=1', host([{ ...vite, localPort: 5174 }])))
       .toEqual({ kind: 'load', url: 'http://localhost:5174/app?x=1' });
+    // A *.localhost name and 0.0.0.0 are the host's loopback too.
+    expect(localTargetOf('http://app.localhost:5173/', host([{ ...vite, localPort: 5174 }])))
+      .toEqual({ kind: 'load', url: 'http://app.localhost:5174/' });
+    expect(localTargetOf('http://0.0.0.0:5173/', host([vite]))).toEqual({ kind: 'unreachable', port: 5173, listed: true });
   });
 
   it('refuses a listed host port that has no tunnel here, instead of loading this desktop\'s own port', () => {
@@ -95,5 +99,19 @@ describe('localTargetOf, where a remote desktop loads a host URL', () => {
     expect(localTargetOf('http://localhost:5173/', host([], { unsupportedHost: true })))
       .toEqual({ kind: 'load', url: 'http://localhost:5173/' });
     expect(localTargetOf('https://example.com/', null)).toEqual({ kind: 'load', url: 'https://example.com/' });
+  });
+});
+
+describe('isHostLocalUrl, the pages another screen always loads as its own copy', () => {
+  it('counts host files and every loopback name', () => {
+    for (const url of ['file:///Users/me/repo/plan.html', 'http://localhost:5173/', 'http://127.0.0.1:3000/x', 'http://[::1]:8080/', 'http://0.0.0.0:4000/', 'https://app.localhost/']) {
+      expect(isHostLocalUrl(url)).toBe(true);
+    }
+  });
+
+  it('leaves web pages, and names that only look local, to the stream', () => {
+    for (const url of ['https://reddit.com/login', 'http://localhost.example.com/', 'http://mylocalhost:3000/', undefined]) {
+      expect(isHostLocalUrl(url)).toBe(false);
+    }
   });
 });

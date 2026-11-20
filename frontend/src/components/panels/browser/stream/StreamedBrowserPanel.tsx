@@ -1,25 +1,42 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Check, Copy, Loader2, RotateCw } from 'lucide-react';
-import type { ToolPanel } from '../../../../../../shared/types/panels';
+import type { BrowserPanelState, ToolPanel } from '../../../../../../shared/types/panels';
 import type { BrowserInput } from '../../../../../../shared/types/browserStream';
 import type { JsonValue } from '../../../../../../shared/validation/boundaryDecoder';
 import { cn } from '../../../../utils/cn';
 import { normalizeUrl } from '../browserUrl';
+import { isHostLocalUrl } from '../../../../../../shared/utils/browserUrl';
 import { BROWSER_NAVIGATE_EVENT, navigateRequestAction, type BrowserNavigateRequest } from '../browserNavigation';
 import { BrowserStreamView, stopLine } from './BrowserStreamView';
 import { streamClient } from './streamClient';
 import { useBrowserStream } from './useBrowserStream';
 import { useStreamWatch } from './useStreamWatch';
+import { useStreamChoice } from './useStreamChoice';
+import { LiveChip } from './LiveChip';
 
 const invokeHost = (channel: string, ...args: Parameters<Parameters<typeof useStreamWatch>[0]>[1][]): Promise<JsonValue> => window.electronAPI.invoke(channel, ...args);
 
 
 /**
- * A browser tab on a desktop showing another computer's Pane: the page runs on that computer, with
- * its sign-ins, and this desktop draws its frames and sends input back (docs/BROWSER_AGENTS.md).
- * A host on an older Pane streams nothing: `ownCopy` then renders this desktop's own copy.
+ * A browser tab on a desktop showing another computer's Pane. It shows this desktop's own copy
+ * (`ownCopy`, loaded through the host's file and port routes for host files and dev servers) until
+ * an agent acts on the page; then it streams the host's page, where the agent works, until 30 s after
+ * the last input by anyone (the agent's, or the person's after a Take over) or Back to my copy (docs/BROWSER_AGENTS.md). Host files and dev servers
+ * always stay a copy, which live-reloads with the agent's edits.
  */
 export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: ToolPanel; isActive: boolean; ownCopy: () => ReactNode }) {
+  // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
+  const state = panel.state.customState as BrowserPanelState | undefined;
+  const choice = useStreamChoice(state?.driver?.by === 'agent');
+  if (isHostLocalUrl(state?.currentUrl) || !choice.stream) return <>{ownCopy()}</>;
+  return <HostStreamPanel panel={panel} isActive={isActive} ownCopy={ownCopy} onBack={choice.back} onInput={choice.input} />;
+}
+
+/**
+ * The host's page as a stream: this desktop draws its frames and sends input back. A host on an
+ * older Pane streams nothing: `ownCopy` then renders this desktop's own copy.
+ */
+function HostStreamPanel({ panel, isActive, ownCopy, onBack, onInput }: { panel: ToolPanel; isActive: boolean; ownCopy: () => ReactNode; onBack(): void; onInput(): void }) {
   const client = useMemo(() => streamClient((channel, ...args) => window.electronAPI.invoke(channel, ...args)), []);
   const stream = useBrowserStream(client, panel.id, isActive);
   // This desktop reports the stream's own box (below the address bar), so a Take over sizes the page to it.
@@ -62,6 +79,7 @@ export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: Tool
   // While the host can't be reached nothing is sent; a refusal or a missed deadline shows under the address bar.
   const act = (input: BrowserInput) => {
     if (stream.stop === 'unreachable' || stream.stop === 'gone') return;
+    onInput();
     if (stream.stop === 'asleep') stream.wake();
     void client.input(panel.id, [input]).catch((cause: unknown) => setError(`${host} didn't take that: ${cause instanceof Error ? cause.message : String(cause)}`));
   };
@@ -99,16 +117,14 @@ export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: Tool
             placeholder="Enter a URL"
             className="min-w-0 flex-1 bg-transparent px-2.5 py-1 text-sm text-text-primary placeholder-text-tertiary focus:outline-none"
           />
-          <span className="mr-1 max-w-[40%] flex-shrink-0 truncate rounded bg-surface-secondary px-1.5 text-[11px] leading-5 text-text-tertiary" title={`This page runs on ${host}, signed in as ${host}`}>
-            on {host}
-          </span>
         </form>
         <button type="button" className={button} disabled={!view?.url} onClick={() => { if (view?.url) void navigator.clipboard.writeText(view.url).then(() => setCopied(true), () => undefined); }} title="Copy URL">
           {copied ? <Check className="h-3.5 w-3.5 text-status-success" /> : <Copy className="h-3.5 w-3.5" />}
         </button>
       </div>
+      <LiveChip host={host} onBack={onBack} />
       {error && <div className="border-b border-border-primary bg-bg-primary px-2 py-1 text-xs text-status-error">{error}</div>}
-      <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} />
+      <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} onPersonInput={onInput} />
     </div>
   );
 }

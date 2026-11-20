@@ -1,4 +1,5 @@
 import type { ListeningPortsSnapshot } from '../types/listeningPorts';
+import { isLoopbackHostname } from './browserUrl';
 
 /**
  * What a phone browser tab shows for a panel's saved, host-relative URL. `address` is what the
@@ -27,7 +28,6 @@ type UnavailablePage = Extract<PhonePage, { kind: 'unavailable' }>;
  */
 export type PhoneUnavailableCause = 'invalid' | 'reading' | 'pages-off' | 'refused' | 'not-web' | 'starting';
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0']);
 
 /**
  * Maps a browser panel's URL to what the phone loads: a host dev server to its port's phone
@@ -52,7 +52,7 @@ export function phonePage(url: string, ports: ListeningPortsSnapshot | null, pan
     return { kind: 'frame', src: `${ports.phone.filesUrl}/file/${encodeURIComponent(panelId)}/${name}${parsed.search}${parsed.hash}`, address, host };
   }
 
-  if (!LOOPBACK_HOSTS.has(parsed.hostname)) return { kind: 'frame', src: parsed.href, address: url };
+  if (!isLoopbackHostname(parsed.hostname)) return { kind: 'frame', src: parsed.href, address: url };
 
   const port = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
   const path = `${parsed.pathname}${parsed.search}${parsed.hash}`;
@@ -102,7 +102,7 @@ export function relayPreview(url: string, panelId: string): RelayPreview | null 
     const name = parsed.pathname.slice(parsed.pathname.lastIndexOf('/') + 1);
     return { ask: { files: `/file/${encodeURIComponent(panelId)}/${name}` }, address: decodeURIComponent(name), search: parsed.search, hash: parsed.hash };
   }
-  if (!LOOPBACK_HOSTS.has(parsed.hostname)) return null;
+  if (!isLoopbackHostname(parsed.hostname)) return null;
   const port = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
   return { ask: { port }, address: `localhost:${port}${parsed.pathname}${parsed.search}${parsed.hash}`, pathname: parsed.pathname, search: parsed.search, hash: parsed.hash };
 }

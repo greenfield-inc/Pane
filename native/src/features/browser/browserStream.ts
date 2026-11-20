@@ -30,6 +30,11 @@ export function stopLine(stop: StreamStop, host: string): string {
 }
 
 /** The driver chip's words and its button, as on the desktop's chip. */
+/** The line over a streamed tab: the page shown is the computer's own, live. */
+export function liveLine(host: string): string {
+  return `Live from ${host}`;
+}
+
 export function driverChip(driver: DeviceDriver, agentName: string | undefined): { label: string; action: string; to: 'person' | 'agent' } {
   if (driver.by === 'agent') return { label: `${driver.agent} is driving`, action: 'Take over', to: 'person' };
   const agent = driver.agentWaiting ?? agentName ?? 'agent';

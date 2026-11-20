@@ -51,6 +51,8 @@ interface BrowserStreamViewProps {
   phone?: boolean;
   /** Set by the view: focuses its text field, opening a phone's keyboard (the keyboard button). */
   keyboardRef?: { current: (() => void) | null };
+  /** Hears each click, key, scroll or chip press the person sends (not hover), which keeps the stream shown. */
+  onPersonInput?: () => void;
 }
 
 /**
@@ -59,7 +61,7 @@ interface BrowserStreamViewProps {
  * and goes to the host in order. Shows who drives, the agent's cursor, the page's dialogs and file
  * pickers, downloads and why the stream stopped.
  */
-export function BrowserStreamView({ client, panelId, stream, hostName, phone = false, keyboardRef }: BrowserStreamViewProps) {
+export function BrowserStreamView({ client, panelId, stream, hostName, phone = false, keyboardRef, onPersonInput }: BrowserStreamViewProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keysRef = useRef<HTMLInputElement>(null);
@@ -90,8 +92,11 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   // Input made while the host can't be reached is dropped, never replayed late onto a page that may have changed.
   const stopRef = useRef(stop);
   useEffect(() => { stopRef.current = stop; }, [stop]);
+  const onPersonInputRef = useRef(onPersonInput);
+  useEffect(() => { onPersonInputRef.current = onPersonInput; }, [onPersonInput]);
   const send = useCallback((input: BrowserInput | null) => {
     if (stopRef.current && stopRef.current !== 'older') return;
+    onPersonInputRef.current?.();
     // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
     if (movesFocus(input)) setField('password');
     queue(input);
@@ -350,6 +355,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   }, [driveFailed]);
   const drive = (who: 'person' | 'agent') => {
     if (stopRef.current) return;
+    onPersonInputRef.current?.();
     void client.driver(panelId, who).catch((cause: unknown) => setDriveFailed(`${who === 'person' ? 'Take over' : 'Hand back'} didn't reach ${host}: ${cause instanceof Error ? cause.message : String(cause)}`));
   };
 
@@ -380,12 +386,6 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
     if (firstDownload.current === null) { firstDownload.current = download?.at; return; }
     if (download && download.at !== firstDownload.current) setDownloadSeenAt(Date.now());
   }, [download?.at]);
-  const [dismissed, setDismissed] = useState<string | null>(null);
-  const noticeSeen = dismissed === host || readNoticeSeen(host);
-  const dismissNotice = () => {
-    setDismissed(host);
-    try { localStorage.setItem(noticeKey(host), 'seen'); } catch { /* storage blocked: the note shows again next time */ }
-  };
 
   return (
     <div
@@ -443,12 +443,6 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
           />
         )}
       </div>
-      {view && !noticeSeen && (
-        <div role="note" className="absolute left-3 top-12 z-10 flex max-w-[min(32rem,calc(100%-24px))] items-start gap-3 rounded-md bg-surface-primary px-3 py-2 text-xs text-text-secondary shadow-md" onPointerDown={event => event.stopPropagation()} data-testid="browser-sign-in-notice">
-          <span>This page runs on {host}, signed in as {host}. Sign in here once and every device sees it.</span>
-          <button type="button" className="flex-shrink-0 text-interactive hover:text-interactive-hover" onClick={dismissNotice}>Got it</button>
-        </div>
-      )}
       {stop && stop !== 'older' && (
         <div role="status" className="absolute inset-x-0 bottom-0 flex justify-center p-3">
           <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">{stopLine(stop, host, phone)}</p>
@@ -509,15 +503,6 @@ function jpegBlob(dataUrl: string): Blob {
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return new Blob([bytes], { type: dataUrl.slice(5, dataUrl.indexOf(';')) || 'image/jpeg' });
-}
-
-/** Each host's one-time note about whose sign-ins its tabs use is remembered per screen. */
-function noticeKey(host: string): string {
-  return `pane.browserSignInNotice.${host}`;
-}
-
-function readNoticeSeen(host: string): boolean {
-  try { return localStorage.getItem(noticeKey(host)) === 'seen'; } catch { return false; }
 }
 
 function toBase64(file: File): Promise<string> {

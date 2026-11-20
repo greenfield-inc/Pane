@@ -1382,7 +1382,7 @@ export function RemotePwaApp() {
               className="flex min-h-0 flex-1 flex-col overflow-hidden"
             >
               {selectedPanel.type === 'browser' && adapter && (
-                // The page streams from the host; a host on an older Pane gets the page's own copy.
+                // The page's own copy, or the host's stream while an agent acts on it.
                 <RemoteStreamedBrowser key={selectedPanel.id} adapter={adapter} panel={selectedPanel} hostName={activeProfile?.label ?? listeningPorts?.host ?? 'the computer'} ownCopy={() => (
                   <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onRefreshPorts={refreshListeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} onRelayAddress={isRelayComputer ? relayAddress : undefined} />
                 )} />

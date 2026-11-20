@@ -36,6 +36,15 @@ export function RemoteBrowserPanel({ panel, ports, onRefreshPorts, onNavigate, o
   const [draft, setDraft] = useState<string | null>(null);
   const [portsOpen, setPortsOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // An agent reopened the page after rewriting it (runpane panels open): load it again.
+  // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
+  const reopenedAt = (panel.state.customState as BrowserPanelState | undefined)?.reopenedAt;
+  const lastReopenedAt = useRef(reopenedAt);
+  useEffect(() => {
+    if (!reopenedAt || reopenedAt === lastReopenedAt.current) return;
+    lastReopenedAt.current = reopenedAt;
+    setReloadKey(key => key + 1);
+  }, [reopenedAt]);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const toolbarRef = useRef<HTMLDivElement | null>(null);

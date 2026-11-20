@@ -6,8 +6,9 @@ don't run in them. To sign in to a page beside your agent:
 - **Open in your browser.** On the computer that runs the tab, the address
   bar's **Open in your browser** button (the arrow out of a box, after Copy
   URL) opens the page in your default browser, where your password manager's
-  extension already works. A tab streamed to another screen has no such button:
-  sign in once on the computer that runs it, and every screen sees it. On a
+  extension already works. While another screen streams the tab (an agent is
+  working on it), the stream has no such button; the screen's own copy, shown
+  the rest of the time, has its own sign-ins. On a
   desktop connected to a remote host, it opens the address this computer
   reaches the host's port at. A `.html` page, such as a Session's status
   page, opens there too; when the page is on the host, Pane opens a copy of

@@ -54,6 +54,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   // Null until the config loads: until then this desktop may be remote.
   const remoteMode = useConfigStore((state) => (state.config ? state.config.remoteDaemon?.client.mode === 'remote' : null));
   const isRemoteMode = remoteMode === true;
+  const remoteModeRef = useRef(isRemoteMode);
+  useEffect(() => { remoteModeRef.current = isRemoteMode; }, [isRemoteMode]);
   const remoteRuntime = useRemoteRuntimeState();
   const viewingRemoteHost = remoteRuntime.connectionState.mode === 'remote';
   // Ports open on this computer's localhost, so only once local mode is confirmed; a remote
@@ -513,7 +515,10 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
         lastNavigationUrlRef.current = currentUrl;
         setShownUrl(currentUrl);
         setInputUrl(currentUrl);
-        persistState(currentUrl);
+        // A remote desktop's copy keeps its navigations (links, redirects to its own sign-in page) to
+        // itself: saving them would move the host's page, where an agent may be working. An address
+        // the person enters still goes to the tab (navigateTo).
+        if (!remoteModeRef.current) persistState(currentUrl);
       }
       setCanGoBack(webview.canGoBack());
       setCanGoForward(webview.canGoForward());

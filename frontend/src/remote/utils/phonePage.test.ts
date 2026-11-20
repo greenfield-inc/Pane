@@ -22,6 +22,7 @@ describe('phonePage', () => {
     });
     expect(phonePage('http://127.0.0.1:5173/', ports, 'panel-1')).toMatchObject({ src: 'https://mac.tail3c2c57.ts.net:44301/' });
     expect(phonePage('http://[::1]:5173', ports, 'panel-1')).toMatchObject({ src: 'https://mac.tail3c2c57.ts.net:44301/' });
+    expect(phonePage('http://app.localhost:5173/', ports, 'panel-1')).toMatchObject({ src: 'https://mac.tail3c2c57.ts.net:44301/' });
   });
 
   it('opens a host HTML file from the files address, by the panel that holds it', () => {

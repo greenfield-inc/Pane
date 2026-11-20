@@ -23,7 +23,8 @@ export interface RemotePwaMockOptions {
   /** Orchestration Sessions the mock host reports. */
   orchestrationSessionNames?: string[];
   /** Browser panels after the terminals, by title and saved URL ('' for a new tab). */
-  browserPanels?: Array<{ title: string; url: string }>;
+  /** `driver` is the tab's driver in its state: an agent driving makes the web app stream it. */
+  browserPanels?: Array<{ title: string; url: string; driver?: { by: 'agent'; agent: string } }>;
   /** What `ports:list` answers. */
   ports?: ListeningPortsSnapshot;
   /** Worktree files by relative path, served through `file:*`; adds the Explorer tab last. Binary files are `null`. */
@@ -152,7 +153,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
     const panels = [
       ...panelTitles.map((title, index) => panel(paneId, options.panelTypes?.[index] ?? 'terminal', title, index)),
       ...(options.browserPanels ?? []).map((browser, index) => (
-        panel(paneId, 'browser', browser.title, panelTitles.length + index, { currentUrl: browser.url })
+        panel(paneId, 'browser', browser.title, panelTitles.length + index, browser.driver ? { currentUrl: browser.url, driver: browser.driver } : { currentUrl: browser.url })
       )),
     ];
     if (options.files) panels.push(panel(paneId, 'explorer', 'Explorer', panels.length));
@@ -431,6 +432,22 @@ export async function emitRemoteHostEvent(page: Page, channel: string, ...args: 
   }, { channel, args });
 }
 
+/** Sets the driver in the host's browser tab state, as an agent's call or a Take over does, and tells the web app. */
+export async function setRemoteBrowserDriver(page: Page, driver: { by: 'agent'; agent: string } | { by: 'person'; agentWaiting?: string } | undefined): Promise<void> {
+  const host = pageHosts.get(page);
+  const fixtures = host ? hostFixtures.get(host) : undefined;
+  const panel = fixtures && Object.values(fixtures.panelsByPane).flat().find(candidate => candidate.type === 'browser');
+  if (!panel) throw new Error('The mock host has no browser tab.');
+  // SAFETY: A browser panel's custom state is its BrowserPanelState, a plain JSON object.
+  const { driver: _old, ...rest } = (panel.state.customState ?? {}) as Record<string, JsonValue>;
+  panel.state = { ...panel.state, customState: driver ? { ...rest, driver } : rest };
+  if (host?.browserStream) {
+    host.browserStream.driver = driver?.by === 'agent' ? driver : driver ? { by: 'person' } : undefined;
+    host.browserStream.version += 1;
+  }
+  await emitRemoteHostEvent(page, 'panel:updated', JSON.parse(JSON.stringify(panel)));
+}
+
 /** Brings the held host back, settling the status to `connected`. */
 export async function restoreRemoteConnection(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -637,7 +654,7 @@ async function answerBrowser(host: RemotePwaMockHost, channel: string, args: Jso
   }
   if (channel === 'browser:view') {
     if (Number(args[1]) >= stream.version) await wait();
-    const view: JsonValue = { version: stream.version, url: 'http://localhost:5173/signup', title: 'Sign up', loading: false, canGoBack: true, canGoForward: false, pointer: 'default', downloads: [], host: 'MacBook Pro' };
+    const view: JsonValue = { version: stream.version, url: 'https://example.com/signup', title: 'Sign up', loading: false, canGoBack: true, canGoForward: false, pointer: 'default', downloads: [], host: 'MacBook Pro' };
     return stream.driver ? { ...view, driver: stream.driver } : view;
   }
   stream.calls.push({ channel, args });
