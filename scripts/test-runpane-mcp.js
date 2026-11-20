@@ -206,6 +206,54 @@ test('a new contract command becomes a tool with inputs from its usage and agent
   assert.throws(() => buildToolArgv(tool, { widget: 'w1', color: 'red' }), /Unknown argument\(s\) for widgets_frob: color/);
 });
 
+test('the bundled tools are built once per process and frozen, so every handler shares them (#1624)', () => {
+  const { buildMcpTools } = require(dist('mcpTools.js'));
+  const decoder = require(dist('boundaryDecoder.js'));
+  const first = buildMcpTools();
+  const original = decoder.decodeBoundary;
+  let decodes = 0;
+  decoder.decodeBoundary = (...args) => { decodes += 1; return original(...args); };
+  let second;
+  try {
+    second = buildMcpTools();
+    // Each handler Pane builds (one per toolsets setting) calls buildMcpTools again.
+    const { createPaneMcpHttpHandler } = require(dist('mcpHttp.js'));
+    createPaneMcpHttpHandler({ toolsets: ['all'], runCli: async () => ({ code: 0, stdout: '', stderr: '' }) });
+  } finally {
+    decoder.decodeBoundary = original;
+  }
+  assert.equal(second, first);
+  assert.equal(decodes, 0, 'a later build decodes nothing');
+  const tool = first.find((candidate) => candidate.outputSchema.properties !== undefined);
+  for (const value of [first, tool, tool.parameters, tool.inputSchema, tool.inputSchema.properties, tool.outputSchema, tool.outputSchema.properties, tool.annotations]) {
+    assert.ok(Object.isFrozen(value));
+  }
+  tool.outputSchema.properties.added = {};
+  assert.equal('added' in tool.outputSchema.properties, false, 'a caller cannot change the shared tools');
+});
+
+test('building tools decodes each schema once, not once per node (#1624)', () => {
+  const { buildMcpTools } = require(dist('mcpTools.js'));
+  const decoder = require(dist('boundaryDecoder.js'));
+  const { RUNPANE_CONTRACT } = require(dist('generated/contract.js'));
+  // A copy of the bundled contract is built fresh: only the bundled contract's tools are shared.
+  const contract = JSON.parse(JSON.stringify(RUNPANE_CONTRACT));
+  const original = decoder.decodeBoundary;
+  let decodes = 0;
+  decoder.decodeBoundary = (...args) => { decodes += 1; return original(...args); };
+  let tools;
+  try {
+    tools = buildMcpTools(contract);
+  } finally {
+    decoder.decodeBoundary = original;
+  }
+  assert.deepEqual(tools, buildMcpTools());
+  assert.notEqual(tools, buildMcpTools());
+  // A few decodes per tool (its typed inputs and output schemas). Before #1624 a build decoded every
+  // node's whole subtree, about 19,000 times for 155 tools.
+  assert.ok(decodes < tools.length * 5, `${decodes} decodes for ${tools.length} tools`);
+});
+
 test('todos tools need no yes, take the to-do and text as inputs, and pass lists the CLI reads back', () => {
   const { buildMcpTools, buildToolArgv } = require(dist('mcpTools.js'));
   const { parseRunpaneArgs } = require(dist('commands.js'));
@@ -226,7 +274,7 @@ test('todos tools need no yes, take the to-do and text as inputs, and pass lists
   assert.deepEqual([parsed.todoArgs, parsed.doneWhen, parsed.noStart], [['- Fix the sheet'], ['Opens with ?', 'Approvals work'], true]);
   assert.deepEqual(buildToolArgv(byName('todos_comment'), { todo: 'T-12', text: '- done', escalate: true }), ['todos', 'comment', 'T-12', '- done', '--escalate', '--json']);
   // todos_snooze takes the same --until text as the CLI, which reads it in its own zone (round 9, T-17).
-  assert.deepEqual(byName('todos_snooze').inputSchema.required.sort(), ['todo', 'until']);
+  assert.deepEqual([...byName('todos_snooze').inputSchema.required].sort(), ['todo', 'until']);
   assert.equal(byName('todos_snooze').annotations.destructiveHint, true);
   assert.deepEqual(buildToolArgv(byName('todos_snooze'), { todo: 'T-12', until: 'tomorrow 14:30', note: '- check Sentry', remindMe: true }),
     ['todos', 'snooze', 'T-12', '--until=tomorrow 14:30', '--note=- check Sentry', '--remind-me', '--json']);

@@ -22,7 +22,10 @@ const MCP_PATH = '/mcp';
 const BEARER = /^Bearer\s+(\S+)$/i;
 /** MCP requests are small JSON-RPC messages; anything bigger is refused. */
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
-/** The handler takes about 0.2 s to build, so Pane builds it this long after startup, not on a tab's spawn. */
+/**
+ * Loading runpane's MCP module and building the first handler take about 0.1 s each of main-thread
+ * CPU (later handlers reuse the first one's tools), so Pane does both this long after startup, not on a tab's spawn.
+ */
 const WARM_UP_DELAY_MS = 10_000;
 /** The URL and header a launch's MCP config names: the agent reads both from its environment, so no token is ever in argv or on disk. */
 const URL_REFERENCE = `\${${PANE_MCP_URL_ENV}}`;
