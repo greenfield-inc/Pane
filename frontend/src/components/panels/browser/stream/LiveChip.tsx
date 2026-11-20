@@ -1,7 +1,7 @@
 import { Radio } from 'lucide-react';
 
 /** The text of the line a streamed tab shows: whose page this is and whether an agent drives it. */
-export function liveLabel(host: string, driving: boolean): string {
+function liveLabel(host: string, driving: boolean): string {
   return driving ? `Agent driving · live from ${host}` : `Live from ${host}`;
 }
 

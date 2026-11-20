@@ -5,7 +5,7 @@ import { useEffect, useReducer } from 'react';
  * Whether the phone streams a tab from its host (an agent acts on it, or did in the last 30 s) or
  * shows its own copy; `back` returns to the own copy now (shared/utils/streamChoice.ts).
  */
-export function useStreamChoice(driving: boolean): { stream: boolean; driving: boolean; back(): void } {
+export function useStreamChoice(driving: boolean) {
   const [state, dispatch] = useReducer(streamChoice, driving, initialStreamChoice);
   useEffect(() => { dispatch({ kind: 'driver', driving, at: Date.now() }); }, [driving]);
   const next = nextStreamTick(state);
