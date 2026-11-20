@@ -12,6 +12,22 @@ const SNAPSHOT_TIMEOUT_MS = 5_000;
 const EXIT_POLL_INTERVAL_MS = 25;
 const DEFAULT_TERMINATE_TIMEOUT_MS = 5_000;
 
+/** What `terminateProcessTrees` asks of the OS. Tests stand in for Windows through it. */
+export interface ProcessTreeSystem {
+  platform: NodeJS.Platform;
+  isAlive(pid: number): boolean;
+  /** Like `execFile`: a failure rejects with an Error carrying the `stdout` read so far. */
+  run(file: string, args: readonly string[], options: { timeout: number; maxBuffer?: number; windowsHide: boolean }): Promise<{ stdout: string }>;
+}
+
+const nativeSystem: ProcessTreeSystem = {
+  get platform() {
+    return process.platform;
+  },
+  isAlive: pid => isProcessAlive(pid),
+  run: (file, args, options) => execFileAsync(file, [...args], { ...options, encoding: 'utf8' }),
+};
+
 /**
  * Whether a process with this pid is still running.
  *
@@ -38,12 +54,13 @@ export function isProcessAlive(pid: number): boolean {
 export async function waitForProcessesToExit(
   pids: readonly number[],
   timeoutMs: number,
+  isAlive: (pid: number) => boolean = isProcessAlive,
 ): Promise<number[]> {
   const deadline = Date.now() + timeoutMs;
-  let alive = pids.filter(isProcessAlive);
+  let alive = pids.filter(pid => isAlive(pid));
   while (alive.length > 0 && Date.now() < deadline) {
     await delay(Math.min(EXIT_POLL_INTERVAL_MS, Math.max(0, deadline - Date.now())));
-    alive = alive.filter(isProcessAlive);
+    alive = alive.filter(pid => isAlive(pid));
   }
   return alive;
 }
@@ -109,26 +126,34 @@ export async function readControllingTerminals(): Promise<Map<number, string>> {
  * Returns the pids not confirmed exited when `timeoutMs` ran out — empty when
  * the whole tree is gone.
  *
+ * Roots that have all exited return at once, without reading the process
+ * table.
+ *
  * Used when a process outlives the polite shutdown its owner asked for. On
  * Windows that matters beyond leaking a process: a directory cannot be renamed
  * or removed while it is any live process's current working directory.
  */
 export async function terminateProcessTrees(
   rootPids: readonly number[],
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; system?: ProcessTreeSystem } = {},
 ): Promise<number[]> {
-  const roots = rootPids.filter(pid => Number.isInteger(pid) && pid > 0);
-  if (roots.length === 0) return [];
+  const system = options.system ?? nativeSystem;
+  const roots = [...new Set(rootPids.filter(pid => Number.isInteger(pid) && pid > 0))];
+  // A dead root leaves nothing to walk to: Windows only links a child to a
+  // parent still in the table, and POSIX reparents orphans. Reading the table
+  // would cost a process (PowerShell on Windows, seconds under load) to find
+  // nothing.
+  if (!roots.some(pid => system.isAlive(pid))) return [];
   const deadline = Date.now() + (options.timeoutMs ?? DEFAULT_TERMINATE_TIMEOUT_MS);
   const tree = [...new Set([...roots, ...await listDescendantPids(roots)])];
   const killedAt = Date.now();
   // Deepest first: killing a parent can orphan a child nothing can walk to.
-  await killProcesses([...tree].reverse());
-  const alive = await waitForProcessesToExit(tree, Math.max(0, deadline - Date.now()));
+  await killProcesses([...tree].reverse(), system);
+  const alive = await waitForProcessesToExit(tree, Math.max(0, deadline - Date.now()), pid => system.isAlive(pid));
   // A survivor already decides the answer, and with no time left there is nothing to wait on.
   const left = deadline - Date.now();
-  if (process.platform !== 'win32' || alive.length > 0 || left <= 0) return alive;
-  return waitForWindowsExit(tree, killedAt, left);
+  if (system.platform !== 'win32' || alive.length > 0 || left <= 0) return alive;
+  return waitForWindowsExit(tree, killedAt, left, system);
 }
 
 /**
@@ -142,7 +167,7 @@ export async function terminateProcessTrees(
  * WDAC enforce, blocks `Add-Type`), returns none: the exit-code poll's answer
  * stands, as it did before this wait existed.
  */
-async function waitForWindowsExit(pids: readonly number[], killedAt: number, timeoutMs: number): Promise<number[]> {
+async function waitForWindowsExit(pids: readonly number[], killedAt: number, timeoutMs: number, system: ProcessTreeSystem): Promise<number[]> {
   if (pids.length === 0) return [];
   // FILETIME counts 100 ns ticks from 1601; Date.now() counts ms from 1970.
   const killedAtFiletime = BigInt(killedAt) * 10_000n + 116_444_736_000_000_000n;
@@ -169,7 +194,7 @@ async function waitForWindowsExit(pids: readonly number[], killedAt: number, tim
     '}',
   ].join('\n');
   try {
-    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: timeoutMs + SNAPSHOT_TIMEOUT_MS });
+    const { stdout } = await system.run('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout: timeoutMs + SNAPSHOT_TIMEOUT_MS, windowsHide: true });
     return stdout.split(/\r?\n/u).filter(line => /^\d+$/u.test(line.trim())).map(line => Number.parseInt(line, 10));
   } catch (error) {
     console.warn('[ProcessTree] exit_wait_failed:', error);
@@ -178,8 +203,8 @@ async function waitForWindowsExit(pids: readonly number[], killedAt: number, tim
 }
 
 /** Kills these processes as forcefully as the platform allows. Never throws. */
-async function killProcesses(pids: readonly number[]): Promise<void> {
-  if (process.platform === 'win32') {
+async function killProcesses(pids: readonly number[], system: ProcessTreeSystem): Promise<void> {
+  if (system.platform === 'win32') {
     // One taskkill for the lot — a process per pid would cost more than the
     // kill itself. taskkill reports a pid it cannot touch without abandoning
     // the rest.
@@ -187,7 +212,7 @@ async function killProcesses(pids: readonly number[]): Promise<void> {
     // clears, so it would also kill whatever outlived a dead process whose pid
     // one of these now holds. The list already holds the verified descendants.
     const args = ['/F', ...pids.flatMap(pid => ['/PID', String(pid)])];
-    await execFileAsync('taskkill', args, { timeout: SNAPSHOT_TIMEOUT_MS }).catch(() => undefined);
+    await system.run('taskkill', args, { timeout: SNAPSHOT_TIMEOUT_MS, windowsHide: true }).catch(() => undefined);
     return;
   }
   for (const pid of pids) {
