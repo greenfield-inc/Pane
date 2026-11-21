@@ -1,4 +1,4 @@
-import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
+import { requestRecordingPermissionsAsync, setAudioModeAsync, type AudioStreamBuffer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 
@@ -17,7 +17,7 @@ import { useAffordances } from '../hosts/hostSettings';
 
 import { LiveTranscript, voiceStreamUrl, wavStreamHeader } from './liveTranscript';
 import { MAX_RECORDING_MS, SilenceWatch, pcmLevelDbfs, recordingClock } from './recordingLimits';
-import type { VoiceAudio, VoiceAudioObjects } from './VoiceAudio';
+import type { VoiceAudioObjects } from './VoiceAudio';
 import { micMode } from './voiceKeys';
 
 const OPEN_TIMEOUT_MS = 8_000;
@@ -82,7 +82,7 @@ export function useVoiceDictation(onText: (text: string) => void) {
     setAudioWanted(true);
     return new Promise(resolve => audioWaiters.current.push(resolve));
   };
-  const onBuffer: Parameters<typeof VoiceAudio>[0]['onBuffer'] = buffer => {
+  const onBuffer = (buffer: AudioStreamBuffer) => {
     silence.current.hear(pcmLevelDbfs(buffer.data), Date.now());
     const open = socket.current;
     if (open?.readyState !== WebSocket.OPEN) return;

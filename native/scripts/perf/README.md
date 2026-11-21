@@ -62,7 +62,7 @@ Before each scenario `journeys.sh` resets the hosts to the snapshot (`hosts.sh r
 | `switch` | T10: the machine pills, Perf-B then Perf-A |
 | any | T12: stalls over 100 ms |
 
-Every scenario starts from a fresh launch, and a reopen goes back with the screen's own back button, so earlier screens never stay mounted underneath. Navigation goes through Maestro, which answers iOS's "Open in Pane?" prompt; its accessibility snapshots can pause the app, so read stalls from the `return-*` and `cold-launch` scenarios.
+Every scenario starts from a fresh launch, and a reopen goes back with the screen's own back button, so earlier screens never stay mounted underneath. Navigation goes through Maestro, which answers iOS's "Open in Pane?" prompt; its accessibility snapshots can pause the app. On a dev client, read stalls from the `return-*` and `cold-launch` scenarios only. On a Release build (below), the `open-*` scenarios' stalls count too: there the snapshots pause the app for under 100 ms.
 
 ### Stalls need a Release build
 
