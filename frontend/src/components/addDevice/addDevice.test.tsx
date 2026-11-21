@@ -222,7 +222,7 @@ describe('Add a device › Phone without a code', () => {
     expect(buttons(html)).toContain('Try again');
   });
 
-  it('pauses relay pairing while the certificate limit is used up, without a code, and points to Tailscale', () => {
+  it('pauses relay pairing while both certificate services refuse, without a code, and points to Tailscale', () => {
     const html = renderToStaticMarkup(<PhoneTab view={{ step: 'limited', until: '2026-11-20T22:16:39Z' }} paired={null} renewed={false} onRetry={() => undefined} onSetUpTailscale={() => undefined} />);
     expect(text(html)).toContain('New pairings through Pane relay are paused until');
     expect(text(html)).toContain('Tailscale still works.');

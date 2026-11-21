@@ -98,7 +98,7 @@ test('waits while this computer gets ready, then shows the code', async ({ page 
 });
 
 for (const theme of ['light', 'dark'] as const) {
-  test(`while the certificate limit is used up, relay pairing is grayed out with the reason and Tailscale stays open (${theme})`, async ({ page }) => {
+  test(`while both certificate services refuse, relay pairing is grayed out with the reason and Tailscale stays open (${theme})`, async ({ page }) => {
     await openHome(page, { relay: { certificateLimitUntil: '2099-01-02T16:47:00Z' } }, theme);
     const dialog = await openPairDialog(page);
     await expect(dialog.getByText('New pairings through Pane relay are paused until')).toBeVisible();
