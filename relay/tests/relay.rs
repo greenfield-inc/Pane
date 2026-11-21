@@ -2618,7 +2618,7 @@ async fn wait_counts(env: &Env, want: pane_relay::Counts) {
 
 #[tokio::test]
 async fn usage_counts_computers_their_clients_and_computers_seen_today() {
-    let env = Env::start(&[]).await;
+    let env = Env::start(&["--usage-settle-secs", "0"]).await;
     let a = Agent::connect(&env, &SigningKey::generate()).await;
     let b = Agent::connect(&env, &SigningKey::generate()).await;
     let host = format!("{}.{D}", a.id);
@@ -2630,6 +2630,7 @@ async fn usage_counts_computers_their_clients_and_computers_seen_today() {
         pane_relay::Counts {
             computers: 2,
             computers_seen_24h: 2,
+            new_computers: 2,
             clients: 1,
             client_connections: 2,
             computers_with_clients: 1,
@@ -2645,10 +2646,74 @@ async fn usage_counts_computers_their_clients_and_computers_seen_today() {
         pane_relay::Counts {
             computers: 1,
             computers_seen_24h: 2,
+            new_computers: 2,
             clients: 0,
             client_connections: 0,
             computers_with_clients: 0,
         },
     )
     .await;
+}
+
+/// The JSON body of the next `entries:write` call whose entry says `reason`.
+async fn next_usage_entry(logging: &mut Provider, reason: &str) -> (Received, Value) {
+    loop {
+        let r = logging.next().await;
+        let body: Value = serde_json::from_slice(&r.body).unwrap();
+        if body["entries"][0]["jsonPayload"]["reason"] == reason {
+            return (r, body);
+        }
+    }
+}
+
+#[tokio::test]
+async fn usage_counts_go_to_cloud_logging_without_ids_or_addresses() {
+    let mut logging = Provider::start(|_, _| (200, "{}".to_string())).await;
+    let (metadata_url, _metadata) = metadata_server().await;
+    let mut env = Env::start(&[
+        "--usage-project",
+        "pane-usage",
+        "--usage-period-secs",
+        "1",
+        "--usage-settle-secs",
+        "0",
+        "--metadata-url",
+        &metadata_url,
+        "--logging-url",
+        &logging.url,
+        "--provider-ca",
+        logging.ca.to_str().unwrap(),
+    ])
+    .await;
+    let agent = Agent::connect(&env, &SigningKey::generate()).await;
+
+    let (request, body) = loop {
+        let (r, body) = next_usage_entry(&mut logging, "hourly").await;
+        if body["entries"][0]["jsonPayload"]["computers"] == 1 {
+            break (r, body);
+        }
+    };
+    assert_eq!(request.path, "/v2/entries:write");
+    assert_eq!(
+        header(&request, "authorization"),
+        Some("Bearer ya29.keyless")
+    );
+    assert_eq!(body["logName"], "projects/pane-usage/logs/pane-relay-usage");
+    assert_eq!(
+        body["entries"][0]["jsonPayload"],
+        json!({"region": "us", "reason": "hourly", "computers": 1, "computers_seen_24h": 1,
+            "new_computers": 1, "clients": 0, "client_connections": 0, "computers_with_clients": 0})
+    );
+    let text = String::from_utf8_lossy(&request.body);
+    assert!(
+        !text.contains(&agent.id) && !text.contains("127.0.0.1"),
+        "{text}"
+    );
+
+    // The next line counts only computers new since the last one; stopping sends a last line.
+    let (_, body) = next_usage_entry(&mut logging, "hourly").await;
+    assert_eq!(body["entries"][0]["jsonPayload"]["new_computers"], 0);
+    env.relay.take().unwrap().shutdown().await;
+    let (_, body) = next_usage_entry(&mut logging, "shutdown").await;
+    assert_eq!(body["entries"][0]["jsonPayload"]["computers"], 1);
 }

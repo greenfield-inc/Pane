@@ -146,6 +146,8 @@ pub struct State {
     client_pairs: Mutex<HashMap<(String, String), usize>>,
     /// When each computer last connected here, for `counts`.
     seen: Mutex<HashMap<String, Instant>>,
+    new_computers: AtomicUsize,
+    started: Instant,
     next_session: AtomicU64,
 }
 
@@ -175,6 +177,10 @@ pub struct Counts {
     pub computers: usize,
     /// Distinct computers that connected here in the last 24 hours.
     pub computers_seen_24h: usize,
+    /// Computers this relay's registry didn't know that connected since the last line. Those
+    /// that connect in the first 10 minutes after a start are reconnecting, so they don't count;
+    /// a computer offline across a restart that comes back later does.
+    pub new_computers: usize,
     /// Distinct computer and client-address pairs with an open connection: roughly the
     /// phones, glasses and other Panes using a computer. The relay forwards TLS without
     /// decrypting it, so it can't tell which kind each one is.
@@ -224,6 +230,8 @@ impl State {
             open_clients: AtomicUsize::new(0),
             client_pairs: Mutex::default(),
             seen: Mutex::default(),
+            new_computers: AtomicUsize::new(0),
+            started: Instant::now(),
             next_session: AtomicU64::new(1),
         }
     }
@@ -346,6 +354,21 @@ impl State {
         (n < self.cfg.max_connections).then_some(slot)
     }
 
+    /// Counts a computer the registry didn't know, unless the relay started moments ago.
+    pub fn count_new_computer(&self) {
+        if self.started.elapsed() >= Duration::from_secs(self.cfg.usage_settle_secs) {
+            self.new_computers.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// `counts`, starting the next line's count of new computers from zero.
+    pub fn take_counts(&self) -> Counts {
+        let counts = self.counts();
+        self.new_computers
+            .fetch_sub(counts.new_computers, Ordering::Relaxed);
+        counts
+    }
+
     /// Forgets computers last seen more than a day ago, then counts.
     pub fn counts(&self) -> Counts {
         let mut seen = self.seen.lock().unwrap();
@@ -357,6 +380,7 @@ impl State {
         Counts {
             computers: self.computers(),
             computers_seen_24h,
+            new_computers: self.new_computers.load(Ordering::Relaxed),
             clients: pairs.len(),
             client_connections: pairs.values().sum(),
             computers_with_clients: with_clients.len(),

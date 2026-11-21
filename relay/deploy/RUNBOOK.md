@@ -31,7 +31,7 @@ Merging the PR to `main` does not release the desktop app.
 | Android app links (`assetlinks.json`) | The SHA-256 of the Play app signing certificate (Play Console › App integrity) |
 | iOS universal links | Team id and bundle id `com.dcouple.pane.mobile` |
 | Android alerts | `pane-push-sender` with Firebase Cloud Messaging send rights, and `roles/artifactregistry.reader` on the `pane-preview` repository so the VMs can pull the relay image |
-| Relay logs in Cloud Logging | `pane-push-sender` granted `roles/logging.logWriter` on the project (once, by hand). `deploy.sh` enables `logging.googleapis.com` and sets `google-logging-enabled=true` on each VM |
+| Usage counts in Cloud Logging | `pane-push-sender` granted `roles/logging.logWriter` on the project (once, by hand). `deploy.sh` enables `logging.googleapis.com` and passes `--usage-project` |
 | Google Trust Services EAB keys | `publicca.googleapis.com` enabled (`deploy.sh` enables it) and `pane-push-sender` granted `roles/publicca.externalAccountKeyCreator` on the project (once, by hand: done 2026-11-20). The VMs already have the `cloud-platform` scope |
 
 ## Steps
@@ -99,17 +99,18 @@ own within 30 seconds. To roll back, run it from the earlier commit.
 ## Watch
 
 - Uptime checks `pane-relay-us`, `-eu`, `-asia`, `-west` in Cloud Monitoring.
-- Logs: Cloud Logging keeps each relay's logs for 30 days (Logs Explorer,
-  resource "VM Instance"), one JSON object a line. Before logging was on, and
-  for the current container only:
-  `gcloud compute ssh pane-relay-us --zone us-central1-a -- docker logs pane-relay`.
-  They show ids, IP addresses, byte counts and close reasons, never payloads.
-- Usage: once an hour, and when it stops, each relay logs a `relay usage` line
-  with counts only: `computers` connected now, `computers_seen_24h`,
-  `clients` (distinct computer and client address pairs, roughly devices;
-  the relay can't tell a phone from glasses), `client_connections` and
-  `computers_with_clients`. For a daily table of online peak, new computers
-  and clients per computer:
+- Logs: `gcloud compute ssh pane-relay-us --zone us-central1-a -- docker logs pane-relay`.
+  They show ids, IP addresses, byte counts and close reasons, never payloads,
+  and stay on the VM until the next deploy replaces the container.
+- Usage: once an hour, and when it stops, each relay writes a `relay usage`
+  line to Cloud Logging (log `pane-relay-usage`, kept 30 days). It holds
+  counts only: `computers` connected now, `computers_seen_24h`,
+  `new_computers` (unknown to the relay's registry when they connected, since
+  the last line), `clients` (distinct computer and client address pairs,
+  roughly devices; the relay can't tell a phone from glasses),
+  `client_connections` and `computers_with_clients`. A restart starts the
+  counts again. For a daily table of online peak, new computers and clients
+  per computer:
 
   ```sh
   node relay/deploy/usage.mjs --account <you@example.com> [--days 7]

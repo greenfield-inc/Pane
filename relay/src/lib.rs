@@ -15,6 +15,7 @@ pub mod registry;
 mod sni;
 mod state;
 mod tls;
+mod usage;
 
 pub use config::Config;
 pub use state::Counts;
@@ -36,7 +37,6 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_HELLO: usize = 32 * 1024;
 const BLOCKLIST_POLL: Duration = Duration::from_secs(5);
-const USAGE_PERIOD: Duration = Duration::from_secs(3600);
 
 /// A running relay.
 pub struct Relay {
@@ -47,6 +47,7 @@ pub struct Relay {
     /// The self-signed certificate's PEM file in --dev mode.
     pub dev_cert: Option<PathBuf>,
     state: Arc<State>,
+    usage_log: Arc<usage::UsageLog>,
     task: JoinHandle<()>,
     direct: iroh_relay::server::Server,
 }
@@ -60,7 +61,11 @@ impl Relay {
     /// Logs the last `relay usage` line, stops accepting, sends `close shutdown` to
     /// computers, and waits up to 3 s for them.
     pub async fn shutdown(self) {
-        log_usage(&self.state, "shutdown");
+        let _ = tokio::time::timeout(
+            Duration::from_secs(3),
+            log_usage(&self.state, &self.usage_log, "shutdown"),
+        )
+        .await;
         self.state.shutdown.cancel();
         let _ = self.task.await;
         let _ = self.direct.shutdown().await;
@@ -137,6 +142,7 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
     let blocklist = cfg.blocklist.clone();
     let alerts = alerts::Alerts::load(&cfg)?;
     let eab = eab::Eab::load(&cfg)?;
+    let usage_log = Arc::new(usage::UsageLog::load(&cfg)?);
     let direct = direct::spawn(cfg.direct_quic, &tls).await?;
     let direct_addr = direct.http_addr().ok_or("iroh relay has no address")?;
     let direct_quic_addr = direct.quic_addr();
@@ -160,7 +166,7 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
     }
     tokio::spawn(maintenance(state.clone(), blocklist, blocklist_mtime));
     tokio::spawn(resync(state.clone()));
-    tokio::spawn(usage(state.clone()));
+    tokio::spawn(hourly_usage(state.clone(), usage_log.clone()));
     if let Some(a) = acme {
         tokio::spawn(acme::run(state.clone(), cert, a));
     }
@@ -193,6 +199,7 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
         direct_quic_addr,
         dev_cert,
         state: relay_state,
+        usage_log,
         task,
         direct,
     })
@@ -310,29 +317,34 @@ async fn resync(state: Arc<State>) {
     }
 }
 
-/// One structured line with this relay's counts, for the daily table in
-/// relay/deploy/usage.mjs.
-fn log_usage(state: &State, reason: &str) {
-    let c = state.counts();
+/// One `relay usage` line with this relay's counts: in its own log, and in Cloud Logging
+/// with --usage-project, where relay/deploy/usage.mjs reads it.
+async fn log_usage(state: &State, usage_log: &usage::UsageLog, reason: &str) {
+    let c = state.take_counts();
+    let region = &state.cfg.region;
     tracing::info!(
-        region = %state.cfg.region,
+        region = %region,
         reason,
         computers = c.computers,
         computers_seen_24h = c.computers_seen_24h,
+        new_computers = c.new_computers,
         clients = c.clients,
         client_connections = c.client_connections,
         computers_with_clients = c.computers_with_clients,
         "relay usage"
     );
+    if let Err(e) = usage_log.write(region, reason, c).await {
+        tracing::warn!(error = %e, "relay usage line not written to Cloud Logging");
+    }
 }
 
-async fn usage(state: Arc<State>) {
-    let mut tick =
-        tokio::time::interval_at(tokio::time::Instant::now() + USAGE_PERIOD, USAGE_PERIOD);
+async fn hourly_usage(state: Arc<State>, usage_log: Arc<usage::UsageLog>) {
+    let period = Duration::from_secs(state.cfg.usage_period_secs.max(1));
+    let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
     loop {
         tokio::select! {
             _ = state.shutdown.cancelled() => return,
-            _ = tick.tick() => log_usage(&state, "hourly"),
+            _ = tick.tick() => log_usage(&state, &usage_log, "hourly").await,
         }
     }
 }

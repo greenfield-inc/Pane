@@ -101,8 +101,6 @@ US_IP="$IP_us" EU_IP="$IP_eu"
 # 3. The VMs. The startup script reads secrets from Secret Manager with the VM's
 #    own identity and (re)starts the container; rerunning it updates the image.
 #    gcloud reads it from a file: --metadata splits its value on commas.
-#    google-logging-enabled sends the container's logs to Cloud Logging, which
-#    relay/deploy/usage.mjs reads.
 startup_file=$(mktemp)
 trap 'rm -f "$startup_file"' EXIT
 for line in "${RELAYS[@]}"; do
@@ -155,7 +153,7 @@ docker run -d --name pane-relay --restart always \
   --ns-ip $NS_IPS --registry-url $helpers $dns_flag \
   --direct-quic 0.0.0.0:7842 \
   --acme-email $ACME_EMAIL --acme-cache /data/acme \
-  --fcm-project $PROJECT --eab-project $PROJECT \${apns} ${ANDROID_SHA:+--android-cert-sha256 $ANDROID_SHA}
+  --fcm-project $PROJECT --eab-project $PROJECT --usage-project $PROJECT \${apns} ${ANDROID_SHA:+--android-cert-sha256 $ANDROID_SHA}
 sleep 10
 if [ "\$(docker inspect -f '{{.State.Running}}' pane-relay)" != true ]; then
   docker logs --tail 50 pane-relay >&2
@@ -167,7 +165,7 @@ EOF
 )
   printf '%s\n' "$startup" >"$startup_file"
   if exists compute instances describe "pane-relay-$name" --zone "$zone"; then
-    gc compute instances add-metadata "pane-relay-$name" --zone "$zone" --metadata google-logging-enabled=true --metadata-from-file "startup-script=$startup_file"
+    gc compute instances add-metadata "pane-relay-$name" --zone "$zone" --metadata-from-file "startup-script=$startup_file"
     gc compute instances reset "pane-relay-$name" --zone "$zone"
   else
     # Secret Manager accepts only the cloud-platform scope, so the scope stays
@@ -175,7 +173,7 @@ EOF
     gc compute instances create "pane-relay-$name" --zone "$zone" --machine-type "$MACHINE" \
       --image-family cos-stable --image-project cos-cloud --tags pane-relay \
       --address "pane-relay-$name" --service-account "$SA" --scopes cloud-platform \
-      --metadata google-logging-enabled=true --metadata-from-file "startup-script=$startup_file"
+      --metadata-from-file "startup-script=$startup_file"
   fi
 done
 

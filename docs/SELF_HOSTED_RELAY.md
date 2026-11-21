@@ -224,9 +224,8 @@ and its devices, at `https://us.relay.relay.example.com/` on the same port
 
 Which computer each connection is for (the TLS server name), IP addresses,
 timing and byte counts. It never decrypts traffic: each computer ends TLS
-with its own key. It logs no payloads, tokens or URLs. Under Docker it logs
-one JSON object a line, with an hourly `relay usage` line of counts only
-(computers and clients connected, computers seen in the last 24 hours); it
-sends its logs nowhere. Packets on direct
+with its own key. It logs no payloads, tokens or URLs, and an hourly
+`relay usage` line of counts only (computers and clients connected,
+computers seen in the last 24 hours). It sends its logs nowhere; `--usage-project` sends that one line to Cloud Logging. Packets on direct
 paths are encrypted between the two ends; the relay sees their iroh endpoint
 ids, IP addresses and byte counts.
