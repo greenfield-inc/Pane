@@ -352,7 +352,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   const [step, setStep] = useState<FirstRunStep>('agent');
   const [agents, setAgents] = useState<FirstRunAgent[] | null>(null);
   const [isPicking, setIsPicking] = useState(false);
-  const [terminalCommand, setTerminalCommand] = useState<string>();
+  const terminalChoice = useRef<string | undefined>(undefined);
   const [pickedAgent, setPickedAgent] = useState<PaneChatAgent | null>(null);
   // null while the scan runs.
   const [bringIn, setBringIn] = useState<ImportSession[] | null>(null);
@@ -388,7 +388,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
     setStep('agent');
     setIsPicking(false);
     setPickedAgent(null);
-    setTerminalCommand(undefined);
+    terminalChoice.current = undefined;
     setBringIn(null);
     setIsHandingOff(false);
     setError(null);
@@ -463,6 +463,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
    * try again. Returns whether it handed off.
    */
   const openChosenSession = async (handoff: OnboardingHandoff): Promise<boolean> => {
+    const terminalCommand = terminalChoice.current;
     if (terminalCommand !== undefined) {
       try {
         const store = useOrchestrationSessionStore.getState();
@@ -574,7 +575,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
     setError(null);
     try {
       await useConfigStore.getState().updateConfig({ defaultSessionTerminalCommand: command });
-      setTerminalCommand(command);
+      terminalChoice.current = command;
       setStep('project');
     } catch (cause) {
       setError(`Couldn't save your terminal choice: ${reasonText(cause instanceof Error ? cause.message : undefined, 'the save failed')}. Try again.`);
