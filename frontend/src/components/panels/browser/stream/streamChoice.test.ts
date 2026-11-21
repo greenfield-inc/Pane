@@ -80,6 +80,13 @@ describe('streamChoice', () => {
   it('streams a tab the agent typed into on a screen that opens it later', () => {
     expect(initialStreamChoice(false, true).stream).toBe(true);
   });
+
+  it('streams on a screen that kept its own copy while the agent typed out of its sight', () => {
+    // The phone showed its own copy, closed the tab, and opens it again after the agent typed.
+    const state = typed(tick(agent(agent(initialStreamChoice(false), true, 0), false, 1_000), 31_000), true, 60_000);
+    expect(state.stream).toBe(true);
+    expect(tick(state, 600_000).stream).toBe(true);
+  });
 });
 
 describe('View live', () => {
@@ -90,7 +97,11 @@ describe('View live', () => {
     viewLive('form-1', formTab);
     expect(streamChoices.all().get('form-1')?.stream).toBe(true);
     expect(offersViewLive(streamChoices.all().get('form-1'), formTab)).toBe(false);
-    streamChoices.dispatch('form-1', { kind: 'tick', at: Date.now() + 600_000 }, () => initialStreamChoice(false));
+    // An agent acts and stops: without View live, 30 s later the screen would go back.
+    const at = Date.now();
+    streamChoices.dispatch('form-1', { kind: 'agent', driving: true, at }, () => initialStreamChoice(false));
+    streamChoices.dispatch('form-1', { kind: 'agent', driving: false, at: at + 1_000 }, () => initialStreamChoice(false));
+    streamChoices.dispatch('form-1', { kind: 'tick', at: at + 600_000 }, () => initialStreamChoice(false));
     expect(streamChoices.all().get('form-1')?.stream).toBe(true);
     streamChoices.dispatch('form-1', { kind: 'back' }, () => initialStreamChoice(false));
     expect(offersViewLive(streamChoices.all().get('form-1'), formTab)).toBe(true);

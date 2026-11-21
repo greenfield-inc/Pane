@@ -348,7 +348,11 @@ try {
   });
   // View live from a browser tab's page menu.
   ipcRenderer.on(BROWSER_VIEW_LIVE_CHANNEL, (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
-    window.dispatchEvent(new CustomEvent(BROWSER_VIEW_LIVE_CHANNEL, { detail: data }));
+    try {
+      window.dispatchEvent(new CustomEvent(BROWSER_VIEW_LIVE_CHANNEL, { detail: data }));
+    } catch (e) {
+      console.error(`Failed to dispatch ${BROWSER_VIEW_LIVE_CHANNEL} to window:`, e);
+    }
   });
   // A docs page's link that opens a new window.
   ipcRenderer.on('docs:open-link', (_event: Electron.IpcRendererEvent, url: string) => {

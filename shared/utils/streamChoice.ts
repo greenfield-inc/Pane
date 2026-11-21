@@ -46,10 +46,13 @@ export function streamChoice(state: StreamChoice, event: StreamChoiceEvent): Str
       return event.driving ? { ...state, stream: true, agent: true, idleSince: undefined } : { ...state, agent: false, idleSince: event.at };
     case 'typed':
       if (event.typed === state.typed) return state;
+      // The agent typed while this screen showed its own copy, or had the tab closed: stream it.
+      if (event.typed) return { ...state, stream: true, typed: true };
       // The page left what the agent typed (it loaded a new document): the 30 s start now.
-      return event.typed ? { ...state, typed: true } : { ...state, typed: false, idleSince: event.at };
+      return { ...state, typed: false, idleSince: event.at };
     case 'input':
-      return state.stream && !state.agent ? { ...state, idleSince: event.at } : state;
+      // Only a stream that can time out notes input, so a typed or View live stream changes nothing per key.
+      return state.stream && !state.agent && !state.typed && !state.live ? { ...state, idleSince: event.at } : state;
     case 'back':
       return { ...state, stream: false, live: false };
     case 'live':
@@ -93,6 +96,18 @@ export const streamChoices = {
 /** A tab's choice before this screen made one, from its state on the host. */
 export function tabStreamChoice(state: BrowserPanelState | undefined): StreamChoice {
   return initialStreamChoice(state?.driver?.by === 'agent', state?.agentUse === 'typed');
+}
+
+/** Brings the tab's choice up to date with its host state: whether an agent drives it and whether one typed into its page. */
+export function syncStreamChoice(panelId: string, agentDriving: boolean, typed: boolean, at: number): void {
+  const initial = () => initialStreamChoice(agentDriving, typed);
+  streamChoices.dispatch(panelId, { kind: 'agent', driving: agentDriving, at }, initial);
+  streamChoices.dispatch(panelId, { kind: 'typed', typed, at }, initial);
+}
+
+/** Which tabs have a choice on this screen and which of them stream, as one comparable string (tab menus). */
+export function streamingKey(): string {
+  return [...choices].map(([id, choice]) => `${id}:${choice.stream ? 1 : 0}`).join(',');
 }
 
 /**

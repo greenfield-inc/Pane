@@ -459,12 +459,16 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (driver) return driver;
     driver = new PageDriver(page, holdSettings.screenshotMs);
     pages.set(page.id, driver);
-    page.once('destroyed', () => { pages.delete(page.id); documents.delete(page.id); });
+    // A page that went (the tab slept, or Pane quit) reloads from its URL, so nothing typed survives.
+    page.once('destroyed', () => {
+      pages.delete(page.id);
+      documents.delete(page.id);
+      forgetTyping(tabId, 'its page closed');
+    });
     // A new document holds nothing an agent typed, so other screens may go back to their own copy.
     page.on('did-navigate', () => {
       documents.set(page.id, (documents.get(page.id) ?? 0) + 1);
-      const tab = host.tab(tabId);
-      if (tab && tabState(tab).agentUse === 'typed') void host.update(tab, { ...tabState(tab), agentUse: 'used' }).catch(() => undefined);
+      forgetTyping(tabId, 'its page loaded a new document');
     });
     // The person touching a page an agent drives takes it over until they stop (TOUCH_HOLD_MS).
     page.on('input-event', (_event, input) => {
@@ -481,6 +485,13 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       }
     });
     return driver;
+  }
+
+  /** Marks a tab `used` once its page no longer holds what an agent typed, so other screens may go back to their own copy. */
+  function forgetTyping(tabId: string, why: string): void {
+    const tab = host.tab(tabId);
+    if (!tab || tabState(tab).agentUse !== 'typed') return;
+    void host.update(tab, { ...tabState(tab), agentUse: 'used' }).catch(cause => console.warn(`[browser] Tab ${tabId} stays marked typed although ${why}; other screens keep streaming it until Back to my copy:`, cause));
   }
 
   function tabOf(tabId: string): BrowserPanelState | undefined {

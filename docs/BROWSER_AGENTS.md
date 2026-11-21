@@ -129,8 +129,8 @@ and scrolls keep it). Thirty seconds after the last input by anyone, the screen 
 copy at the page's current URL; **Back to my copy** goes back sooner, and the agent's next action
 streams again. Anything on the page that its URL doesn't hold (a half-filled form, the scroll
 position) stays on the host, so a page the agent typed into (`browser_type`, `browser_select`,
-`browser_upload` or `browser_press`) keeps streaming until you press **Back to my copy** or the page
-loads a new document; a screen that opens the tab later streams it too. **View live** shows the
+`browser_upload` or `browser_press`) keeps streaming until you press **Back to my copy**, the page
+loads a new document or the tab goes to sleep; a screen that opens the tab later streams it too. **View live** shows the
 host's page on any tab an agent has used, until **Back to my copy**: it sits next to the address bar
 of the own copy, in the tab's right-click menu and the page's right-click menu on a desktop, and in
 the tab's long-press menu in the Pane phone app. While you are the driver, the copy shows "You're driving" with **Hand

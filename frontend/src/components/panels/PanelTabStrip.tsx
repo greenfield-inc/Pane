@@ -9,7 +9,7 @@ import React, { useCallback, useEffect, useState, useRef, useMemo, useSyncExtern
 import { Pause, Pencil, Play, Radio, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { ToolPanel, LogsPanelState, pausedMarkOf, type BrowserPanelState } from '../../../../shared/types/panels';
-import { offersViewLive, streamChoices, viewLive } from '../../../../shared/utils/streamChoice';
+import { offersViewLive, streamChoices, streamingKey, viewLive } from '../../../../shared/utils/streamChoice';
 import { Dropdown, type DropdownItem } from '../ui/Dropdown';
 import { runPauseAction } from '../../utils/pause';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
@@ -105,8 +105,8 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   getPanelTabPresentation,
   idNamespace,
 }) => {
-  // A browser tab's View live item follows this screen's stream choices.
-  const streamed = useSyncExternalStore(streamChoices.subscribe, streamChoices.all);
+  // A browser tab's View live item follows which tabs this screen streams; input on a stream changes nothing here.
+  useSyncExternalStore(streamChoices.subscribe, streamingKey);
   const compact = variant === 'compact';
   const [editingPanelId, setEditingPanelId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -403,7 +403,8 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
         const page = panel.type === 'browser' ? panel.state.customState as BrowserPanelState | undefined : undefined;
         // Only a tab this desktop streams from another computer has a choice (StreamedBrowserPanel).
-        const live = streamed.has(panel.id) && offersViewLive(streamed.get(panel.id), page);
+        const choice = streamChoices.all().get(panel.id);
+        const live = choice !== undefined && offersViewLive(choice, page);
         const menuItems: DropdownItem[] = isDisabled ? [] : [
           ...(live ? [{ id: 'view-live', label: 'View live', icon: Radio, onClick: () => { viewLive(panel.id, page); onPanelSelect(panel); } }] : []),
           ...(!isPermanent && !isDiffPanel ? [{ id: 'rename', label: 'Rename tab…', icon: Pencil, onClick: () => startRename(panel) }] : []),

@@ -808,6 +808,11 @@ describe('browser tabs: streaming a page to another screen', () => {
     Object.assign(page, { insertText: async () => { page.emit('did-navigate'); } });
     await call(fixture, 'type', { tab: 'form', ref: 'e1', text: 'ada@example.com' });
     expect(use('form')).toBe('used');
+    // A page that goes (the tab slept) reloads from its URL later, without what was typed.
+    await call(fixture, 'type', { tab: 'browsed', ref: 'e1', text: 'ada@example.com' });
+    expect(use('browsed')).toBe('typed');
+    fixture.pages.get('browsed')?.emit('destroyed');
+    await vi.waitFor(() => expect(use('browsed')).toBe('used'));
   });
 
   it('says a tab is asleep, so the screen offers to wake it', async () => {
