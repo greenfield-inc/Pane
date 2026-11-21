@@ -141,21 +141,20 @@ export function useRelayPairing(open: boolean, showCode = true) {
   else if (status?.phase === 'certificate') view = { step: 'preparing', label: 'Getting a certificate…' };
   else view = { step: 'preparing', label: 'Connecting to Pane…' };
 
-  // Only the phone tab shows a code; each opening of it reports once (PairingReport).
-  const reporting = open && showCode;
+  // Each opening reports once (PairingReport), across tab switches; only the Phone tab shows a code.
   const report = useRef<PairingReport | null>(null);
   useEffect(() => {
-    if (!reporting) return;
+    if (!open) return;
     const opening = new PairingReport(capture);
     report.current = opening;
     return () => {
       opening.close();
       report.current = null;
     };
-  }, [reporting]);
+  }, [open]);
   useEffect(() => {
-    if (fresh) report.current?.observe(view);
-  }, [fresh, view]);
+    if (fresh && showCode) report.current?.observe(view);
+  }, [fresh, showCode, view]);
 
   return { view, ready, paired, renewal, retry, relay: status?.relay ?? null };
 }

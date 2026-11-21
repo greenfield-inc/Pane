@@ -14,16 +14,18 @@ function failureOf(view: PairingView): PairingFailure | null {
 }
 
 /**
- * What one opening of Add a device › Phone reports: `pairing_opened` once, with whether the QR code
+ * What one opening of Add a device reports about its Phone tab: `pairing_opened` once, with whether the QR code
  * showed or why it was paused, and `pairing_failed` once per reason. Enum values only.
  */
 export class PairingReport {
   private opened = false;
+  private observed = false;
   private readonly failed = new Set<PairingFailure>();
 
   constructor(private readonly send: Send) {}
 
   observe(view: PairingView): void {
+    this.observed = true;
     const failure = failureOf(view);
     if (!this.opened && (view.step === 'code' || failure)) {
       this.opened = true;
@@ -35,9 +37,9 @@ export class PairingReport {
     }
   }
 
-  /** The dialog closed. Closed before a code or a failure: paused, not ready yet. */
+  /** The dialog closed. Closed on the Phone tab before a code or a failure: paused, not ready yet. */
   close(): void {
-    if (!this.opened) this.send('pairing_opened', { qr: 'paused', paused_reason: 'not_ready' });
+    if (this.observed && !this.opened) this.send('pairing_opened', { qr: 'paused', paused_reason: 'not_ready' });
     this.opened = true;
   }
 }

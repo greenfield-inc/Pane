@@ -40,4 +40,8 @@ describe('what one opening of Add a device › Phone reports', () => {
   it('reports an opening closed while still getting ready as paused, not ready', () => {
     expect(opening([preparing])).toEqual([['pairing_opened', { qr: 'paused', paused_reason: 'not_ready' }]]);
   });
+
+  it('reports nothing for an opening that never showed the Phone tab', () => {
+    expect(opening([])).toEqual([]);
+  });
 });

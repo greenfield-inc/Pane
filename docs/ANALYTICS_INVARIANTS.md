@@ -259,7 +259,7 @@ error message.
 
 | Event | Source | Properties |
 |---|---|---|
-| `pairing_opened` | `frontend/src/hooks/pairingReport.ts`, once per opening of Add a device › Phone | `qr`: `shown` or `paused`; when paused, `paused_reason`: `certificate_limit`, `relay_unreachable`, `other` or `not_ready` (closed before a code was ready) |
+| `pairing_opened` | `frontend/src/hooks/pairingReport.ts`, once per opening of Add a device that shows its Phone tab | `qr`: `shown` or `paused`; when paused, `paused_reason`: `certificate_limit`, `relay_unreachable`, `other` or `not_ready` (closed before a code was ready) |
 | `pairing_failed` | the same, once per reason per opening | `reason`: `certificate_limit`, `relay_unreachable` (phone access couldn't start), `timeout` (a code ran out unused) or `other` (the code couldn't be made) |
 | `pairing_completed` | `main/src/daemon/httpApiServer.ts`, when a pairing code or glasses secret is traded for a token | `device`: `phone`, `computer` or `glasses`; `route`: `relay`, `direct` (a direct path the relay set up), `lan` or `tailscale` |
 | `certificate_issued` | `main/src/daemon/relay/computerCertificate.ts` through `main/src/services/pairingAnalytics.ts` | `ca`: `letsencrypt` or `google`; `renewal`: whether it replaced a certificate this computer held. Other CAs send nothing |
