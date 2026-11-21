@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RelayPairingInfo, RelayStatus } from '../../../shared/types/relay';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
+import { capture } from '../services/posthog';
+import { PairingReport } from './pairingReport';
 
 /** What Add a device › Phone shows in its code box. */
 export type PairingView =
   /** `label` says what this computer is waiting for. */
   | { step: 'preparing'; label: string }
-  | { step: 'error'; message: string }
+  /** `cause` says whether phone access couldn't start (`relay`) or only the code failed (`code`). */
+  | { step: 'error'; message: string; cause: 'relay' | 'code' }
   /** The CA is turning this computer away until `until`: the relay pairs no new devices; Tailscale still works. */
   | { step: 'limited'; until: string }
   | { step: 'code'; url: string; secondsLeft: number }
@@ -24,12 +27,14 @@ const SETUP_FAILED = "Pane's servers didn't answer. Check this computer's intern
 export function useRelayPairing(open: boolean, showCode = true) {
   const [status, setStatus] = useState<RelayStatus | null>(null);
   const [code, setCode] = useState<RelayPairingInfo | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ message: string; cause: 'relay' | 'code' } | null>(null);
   /** The phone that used the last code, until the dialog closes. */
   const [paired, setPaired] = useState<string | null>(null);
   /** Why the current code replaced an earlier one. */
   const [renewal, setRenewal] = useState<'paired' | 'expired' | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  /** False until this opening's state is reset, so the first render after reopening isn't read as this opening's. */
+  const [fresh, setFresh] = useState(false);
   // Bumped per request and on close, so a late answer never lands on a newer state.
   const generation = useRef(0);
   const requesting = useRef(false);
@@ -50,7 +55,7 @@ export function useRelayPairing(open: boolean, showCode = true) {
       if (restart || !next.enabled) next = await window.electronAPI.invoke('relay:set-enabled', true);
       if (asked === generation.current) setStatus(next);
     } catch (cause) {
-      if (asked === generation.current) setFailure(ipcErrorMessage(cause, SETUP_FAILED));
+      if (asked === generation.current) setFailure({ message: ipcErrorMessage(cause, SETUP_FAILED), cause: 'relay' });
     }
   }, []);
 
@@ -61,6 +66,7 @@ export function useRelayPairing(open: boolean, showCode = true) {
     setFailure(null);
     setPaired(null);
     setRenewal(null);
+    setFresh(true);
     void prepare(false);
     const offStatus = window.electronAPI.events.onRelayStatusChanged((next) => setStatus(next));
     const offPaired = window.electronAPI.events.onRelayPaired(({ kind, label }) => {
@@ -73,6 +79,7 @@ export function useRelayPairing(open: boolean, showCode = true) {
     return () => {
       generation.current += 1;
       requesting.current = false;
+      setFresh(false);
       offStatus();
       offPaired();
       const undo = reachedReady.current ? null : turnedOn.current;
@@ -98,7 +105,7 @@ export function useRelayPairing(open: boolean, showCode = true) {
       (cause: Error) => {
         if (asked !== generation.current) return;
         requesting.current = false;
-        setFailure(ipcErrorMessage(cause, "Pane couldn't make a pairing code. Choose Try again."));
+        setFailure({ message: ipcErrorMessage(cause, "Pane couldn't make a pairing code. Choose Try again."), cause: 'code' });
       },
     );
   }, [ready, showCode, code, failure]);
@@ -127,12 +134,28 @@ export function useRelayPairing(open: boolean, showCode = true) {
 
   let view: PairingView;
   if (status?.certificateLimit) view = { step: 'limited', until: status.certificateLimit.until };
-  else if (failure) view = { step: 'error', message: failure };
-  else if (status?.phase === 'error') view = { step: 'error', message: status.lastError ?? SETUP_FAILED };
+  else if (failure) view = { step: 'error', ...failure };
+  else if (status?.phase === 'error') view = { step: 'error', message: status.lastError ?? SETUP_FAILED, cause: 'relay' };
   else if (code && expiresAt !== null) view = { step: 'code', url: code.url, secondsLeft: Math.max(0, Math.ceil((expiresAt - now) / 1000)) };
   else if (renewal === 'expired' && status?.phase === 'ready') view = { step: 'renewing' };
   else if (status?.phase === 'certificate') view = { step: 'preparing', label: 'Getting a certificate…' };
   else view = { step: 'preparing', label: 'Connecting to Pane…' };
+
+  // Only the phone tab shows a code; each opening of it reports once (PairingReport).
+  const reporting = open && showCode;
+  const report = useRef<PairingReport | null>(null);
+  useEffect(() => {
+    if (!reporting) return;
+    const opening = new PairingReport(capture);
+    report.current = opening;
+    return () => {
+      opening.close();
+      report.current = null;
+    };
+  }, [reporting]);
+  useEffect(() => {
+    if (fresh) report.current?.observe(view);
+  }, [fresh, view]);
 
   return { view, ready, paired, renewal, retry, relay: status?.relay ?? null };
 }
