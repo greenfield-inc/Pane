@@ -2,163 +2,129 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.startServiceStub = startServiceStub;
 const errors_1 = require("../errors");
-const fleet_1 = require("../fleet");
 const service_1 = require("../service");
 const server_1 = require("./server");
+const AWAKE = ['creating', 'starting', 'running'];
+const HOUR = 3_600_000;
 /**
- * An in-memory Pane Cloud service that keeps the contract, for building the desktop adapter and for
- * the contract tests. Machines start and stop at once.
+ * An in-memory Pane Cloud service that keeps the contract, for building Pane against and for the
+ * contract tests. Every account has a personal organization on the Free plan. VMs start and stop at
+ * once, and agent-hours are counted from the stub's clock.
  */
 async function startServiceStub(options) {
     const now = options.now ?? (() => new Date());
     const iso = () => now().toISOString();
     const versions = options.paneVersions ?? ['2.4.214', '2.4.215'];
     const latest = versions.at(-1) ?? '2.4.215';
+    const capacity = options.capacity ?? Number.POSITIVE_INFINITY;
     let counter = 0;
     const nextId = (prefix) => `${prefix}_${(counter += 1)}`;
-    const accounts = new Map();
-    options.accounts.forEach((entry, index) => {
-        accounts.set(entry.githubLogin.toLowerCase(), {
-            account: {
-                id: `acct_${index + 1}`,
-                githubId: 1000 + index,
-                githubLogin: entry.githubLogin,
-                name: entry.name ?? null,
-                email: null,
-                access: entry.cohort ? 'invited' : 'waitlisted',
-                teamId: null,
-                role: null,
-                tailscaleLogin: null,
-            },
-            joinedAt: iso(),
-        });
-    });
+    const accounts = new Map(options.accounts.map((entry, index) => [
+        entry.email.toLowerCase(),
+        {
+            id: `acct_${index + 1}`,
+            email: entry.email,
+            name: entry.name ?? null,
+            access: entry.invited ? 'invited' : 'waitlisted',
+            signupState: entry.signupState ?? 'ready',
+            organizations: [{ organizationId: `org_${index + 1}`, name: 'Personal', personal: true, role: 'owner' }],
+        },
+    ]));
     const devices = new Map();
     const tokens = new Map();
-    const teams = new Map();
-    const invites = new Map();
-    const machines = new Map();
-    const logs = new Map();
+    const vms = new Map();
     const idempotent = new Map();
-    const codes = new Map();
-    const dropCodes = (match) => {
-        for (const key of [...codes.keys()])
-            if (match(key))
-                codes.delete(key);
-    };
-    const DAY = 86_400_000;
-    const beta = () => {
-        const ends = options.beta ? Date.parse(options.beta.endsAt) : null;
-        const nowMs = now().getTime();
-        const at = (ms) => (ms === null ? null : new Date(ms).toISOString());
-        const noticeAt = ends === null ? null : ends - service_1.BETA_NOTICE_DAYS * DAY;
-        const pushFrom = ends === null ? null : ends - service_1.BETA_PUSH_WINDOW_DAYS * DAY;
-        let phase = 'open';
-        if (ends !== null && noticeAt !== null && pushFrom !== null) {
-            if (nowMs >= ends)
-                phase = 'ended';
-            else if (nowMs >= pushFrom)
-                phase = 'push_windows';
-            else if (nowMs >= noticeAt)
-                phase = 'notice';
-        }
-        return {
-            endsAt: at(ends),
-            noticeAt: at(noticeAt),
-            pushWindowsFrom: at(pushFrom),
-            phase,
-            pushWindowMinutes: service_1.BETA_PUSH_WINDOW_MINUTES,
-            announcementUrl: options.beta?.announcementUrl ?? null,
-            ownAwsTemplateUrl: options.beta?.ownAwsTemplateUrl ?? null,
-        };
-    };
-    const byId = (accountId) => [...accounts.values()].find((r) => r.account.id === accountId);
-    const view = (record) => ({
-        ...record.account,
-        pendingInvites: [...invites.values()].filter((i) => i.status === 'pending' && i.githubLogin.toLowerCase() === record.account.githubLogin.toLowerCase()),
-    });
+    const byId = (accountId) => [...accounts.values()].find((a) => a.id === accountId);
     const caller = (token) => {
         const accountId = token ? tokens.get(token) : undefined;
-        const record = accountId ? byId(accountId) : undefined;
-        if (!record)
+        const account = accountId ? byId(accountId) : undefined;
+        if (!account)
             throw new errors_1.CloudApiError('unauthenticated', 'The token is unknown or signed out.', 'Sign in again.');
+        return account;
+    };
+    const membership = (account, organizationId) => {
+        const found = account.organizations.find((m) => m.organizationId === organizationId);
+        if (!found)
+            throw new errors_1.CloudApiError('not_org_member', `You are not a member of organization ${organizationId}.`, 'Pick one of the organizations on your account.');
+        return found;
+    };
+    const ownVm = (account, vmId) => {
+        const record = vms.get(vmId);
+        if (!record || record.vm.createdByAccountId !== account.id) {
+            throw new errors_1.CloudApiError('vm_not_found', `You have no Session VM ${vmId}.`, 'List your Session VMs to find its id.');
+        }
         return record;
     };
-    const teamOf = (record) => {
-        const team = record.account.teamId ? teams.get(record.account.teamId) : undefined;
-        if (!team)
-            throw new errors_1.CloudApiError('not_team_member', 'This account is not on a team yet.', 'Accept a team invite, or ask to join the cohort.');
-        return team;
-    };
-    const requireOwner = (record) => {
-        const team = teamOf(record);
-        if (team.ownerId !== record.account.id)
-            throw new errors_1.CloudApiError('not_team_owner', 'Only the team owner can do this.', 'Ask your team owner.');
-        return team;
-    };
-    const ownMachine = (record, machineId) => {
-        const machine = machines.get(machineId);
-        if (!machine || machine.ownerAccountId !== record.account.id) {
-            throw new errors_1.CloudApiError('machine_not_found', `You have no machine ${machineId}.`, 'List your machines to find its id.');
+    const isAwake = (record) => AWAKE.includes(record.vm.state);
+    const awakeOf = (accountId, organizationId) => [...vms.values()].filter((r) => r.vm.createdByAccountId === accountId && r.vm.organizationId === organizationId && isAwake(r)).length;
+    /** The checks before a VM wakes: the member's awake limit, then the host's room. */
+    const requireRoomToWake = (account, organizationId) => {
+        const limit = service_1.PLANS.free.awakeLimitPerMember;
+        if (awakeOf(account.id, organizationId) >= limit) {
+            throw new errors_1.CloudApiError('awake_limit_reached', `You already have ${limit} Sessions running, the most your plan allows at once.`, 'Stop one of your Sessions, then try again.');
         }
-        return machine;
+        if ([...vms.values()].filter(isAwake).length >= capacity) {
+            throw new errors_1.CloudApiError('no_capacity', 'The invite-only pool is full right now.', 'Stop one of your Sessions first, or try again later.');
+        }
     };
-    const publicMachine = ({ cpuSecondsUsed, ...machine }) => {
-        const day = iso().slice(0, 10);
-        const reset = new Date(`${day}T00:00:00.000Z`);
-        reset.setUTCDate(reset.getUTCDate() + 1);
-        return {
-            ...machine,
-            usage: machine.state === 'deleted' ? null : { day, cpuSecondsUsed, throttled: cpuSecondsUsed >= fleet_1.MACHINE_LIMITS.dailyCpuSeconds, resetsAt: reset.toISOString(), egressBytesThisMonth: 0, diskUsedBytes: 4 * 1024 ** 3 },
-        };
+    const setState = (record, state, reason) => {
+        const wasAwake = isAwake(record);
+        record.vm.state = state;
+        record.vm.stateReason = reason;
+        record.vm.updatedAt = iso();
+        const open = record.awake.at(-1);
+        if (wasAwake && !isAwake(record) && open)
+            open.to = now().getTime();
+        if (!wasAwake && isAwake(record))
+            record.awake.push({ from: now().getTime(), to: null });
     };
-    const log = (machine, operation, actor, reason, parameters = {}) => {
+    const requireState = (record, state, action) => {
+        if (record.vm.state !== state) {
+            throw new errors_1.CloudApiError('invalid_state', `${action} needs a ${state} Session VM; it is ${record.vm.state}.`, 'Refresh the Session and try the action that fits its state.');
+        }
+    };
+    const log = (record, operation, actor, reason, parameters = {}) => {
         const entry = {
             id: nextId('act'),
-            machineId: machine.id,
+            vmId: record.vm.id,
             operation,
             parameters,
-            actor: actor === 'service' || actor === 'host'
-                ? { kind: actor, accountId: null, githubLogin: null }
-                : { kind: 'user', accountId: actor.account.id, githubLogin: actor.account.githubLogin },
+            actor: actor === 'service' || actor === 'host' ? { kind: actor, accountId: null } : { kind: 'user', accountId: actor.id },
             reason,
             status: 'succeeded',
             error: null,
             requestedAt: iso(),
             finishedAt: iso(),
         };
-        logs.get(machine.id)?.unshift(entry);
+        record.log.unshift(entry);
         return entry;
     };
-    const setState = (machine, state, reason) => {
-        machine.state = state;
-        machine.stateReason = reason;
-        machine.updatedAt = iso();
-    };
-    const requireState = (machine, state, action) => {
-        if (machine.state !== state)
-            throw new errors_1.CloudApiError('invalid_state', `${action} needs a ${state} machine; it is ${machine.state}.`, 'Refresh the machine and try the action that fits its state.');
-    };
     const releaseFor = (version) => ({ version, arch: 'arm64', debSha256: 'a'.repeat(64) });
-    const team = (teamId) => {
-        const t = teams.get(teamId);
-        if (!t)
-            throw new Error(`stub: no team ${teamId}`);
+    const agentHours = (record, from, to) => {
+        const awakeMs = record.awake.reduce((sum, i) => sum + Math.max(0, Math.min(i.to ?? now().getTime(), to) - Math.max(i.from, from)), 0);
+        return (awakeMs / HOUR) * service_1.AGENT_HOURS_PER_AWAKE_HOUR[record.vm.memoryGiB];
+    };
+    const usage = (organizationId, month) => {
+        const from = Date.parse(`${month}-01T00:00:00.000Z`);
+        const reset = new Date(from);
+        reset.setUTCMonth(reset.getUTCMonth() + 1);
+        const to = reset.getTime();
+        const inOrg = [...vms.values()].filter((r) => r.vm.organizationId === organizationId);
+        const members = [...accounts.values()].flatMap((account) => {
+            const member = account.organizations.find((m) => m.organizationId === organizationId);
+            if (!member)
+                return [];
+            const used = inOrg.filter((r) => r.vm.createdByAccountId === account.id).reduce((sum, r) => sum + agentHours(r, from, to), 0);
+            return [{ accountId: account.id, name: account.name, role: member.role, agentHoursUsed: used, awakeNow: awakeOf(account.id, organizationId), awakeLimit: service_1.PLANS.free.awakeLimitPerMember }];
+        });
+        const fullAccess = members.filter((m) => m.role !== 'view_only').length;
         return {
-            id: t.id,
-            name: t.name,
-            members: [...accounts.values()]
-                .filter((r) => r.account.teamId === teamId)
-                .map((r) => ({
-                accountId: r.account.id,
-                githubLogin: r.account.githubLogin,
-                name: r.account.name,
-                role: r.account.role ?? 'member',
-                tailscaleLogin: r.account.tailscaleLogin,
-                seat: { status: 'free', foundingPrice: true },
-                joinedAt: r.joinedAt,
-            })),
-            invites: [...invites.values()].filter((i) => byId(i.invitedByAccountId)?.account.teamId === teamId && i.status === 'pending'),
+            organizationId,
+            plan: 'free',
+            month,
+            resetsAt: reset.toISOString(),
+            agentHours: { used: members.reduce((sum, m) => sum + m.agentHoursUsed, 0), limit: service_1.PLANS.free.agentHoursPerMember * fullAccess },
+            members,
         };
     };
     const r = service_1.serviceRoutes;
@@ -166,8 +132,8 @@ async function startServiceStub(options) {
         (0, server_1.bind)(r.startDeviceSignIn, () => {
             const deviceCode = nextId('dev');
             const userCode = `STUB-${counter}`;
-            devices.set(deviceCode, { userCode, state: 'pending', login: null });
-            return { deviceCode, userCode, verificationUri: 'https://github.com/login/device', expiresIn: 900, interval: 1 };
+            devices.set(deviceCode, { userCode, state: 'pending', email: null });
+            return { deviceCode, userCode, verificationUri: 'https://auth.example.test/device', verificationUriComplete: `https://auth.example.test/device?user_code=${userCode}`, expiresIn: 900, interval: 1 };
         }),
         (0, server_1.bind)(r.pollDeviceSignIn, ({ body }) => {
             const grant = devices.get(body.deviceCode);
@@ -178,129 +144,96 @@ async function startServiceStub(options) {
             if (grant.state === 'denied')
                 return { status: 'denied' };
             grant.state = 'used';
-            const record = accounts.get((grant.login ?? '').toLowerCase());
-            if (!record)
+            const account = accounts.get((grant.email ?? '').toLowerCase());
+            if (!account)
                 return { status: 'denied' };
-            if (record.account.access === 'invited' && !record.account.teamId && options.accounts.find((a) => a.githubLogin.toLowerCase() === record.account.githubLogin.toLowerCase())?.cohort) {
-                const teamId = nextId('team');
-                teams.set(teamId, { id: teamId, name: `${record.account.githubLogin}'s team`, ownerId: record.account.id });
-                record.account.teamId = teamId;
-                record.account.role = 'owner';
-            }
             const token = nextId('tok');
-            tokens.set(token, record.account.id);
-            return { status: 'complete', token, expiresAt: new Date(now().getTime() + 30 * 86_400_000).toISOString(), account: view(record) };
+            tokens.set(token, account.id);
+            return { status: 'complete', token, expiresAt: new Date(now().getTime() + 30 * 86_400_000).toISOString(), account };
         }),
         (0, server_1.bind)(r.signOut, ({ token }) => {
             caller(token);
             tokens.delete(token ?? '');
             return { signedOut: true };
         }),
-        (0, server_1.bind)(r.getAccount, ({ token }) => view(caller(token))),
-        (0, server_1.bind)(r.setTailscaleLogin, ({ token, body }) => {
-            const record = caller(token);
-            record.account.tailscaleLogin = body.tailscaleLogin;
-            return view(record);
+        (0, server_1.bind)(r.getAccount, ({ token }) => caller(token)),
+        (0, server_1.bind)(r.listVms, ({ token, params }) => {
+            const account = caller(token);
+            const organizationId = params.organizationId ?? '';
+            membership(account, organizationId);
+            return { vms: [...vms.values()].filter((v) => v.vm.organizationId === organizationId && v.vm.createdByAccountId === account.id && v.vm.state !== 'deleted').map((v) => v.vm) };
         }),
-        (0, server_1.bind)(r.listMachines, ({ token }) => {
-            const record = caller(token);
-            return { machines: [...machines.values()].filter((m) => m.ownerAccountId === record.account.id && m.state !== 'deleted').map(publicMachine) };
-        }),
-        (0, server_1.bind)(r.createMachine, ({ token, body }) => {
-            const record = caller(token);
-            const key = `${record.account.id}:${body.idempotencyKey}`;
+        (0, server_1.bind)(r.createVm, ({ token, params, body }) => {
+            const account = caller(token);
+            const organizationId = params.organizationId ?? '';
+            membership(account, organizationId);
+            const key = `${account.id}:${body.idempotencyKey}`;
             const repeat = idempotent.get(key);
-            if (repeat) {
-                const machine = machines.get(repeat.machineId);
-                const entry = logs.get(repeat.machineId)?.find((e) => e.id === repeat.entryId);
-                if (machine && entry)
-                    return { machine: publicMachine(machine), operation: entry };
-            }
-            if (record.account.access !== 'invited' || !record.account.teamId) {
-                throw new errors_1.CloudApiError('not_invited', "You're on the list. Pane Cloud is invite-only for now.", 'Wait for your invite, or ask a team owner to invite your GitHub login.');
-            }
-            const { phase } = beta();
-            if (phase === 'push_windows' || phase === 'ended') {
-                throw new errors_1.CloudApiError('invalid_state', 'The Pane Cloud beta is ending, so no new machines can be created.', 'Use the own-AWS template from GET /v1/beta to run a machine in your own account.');
-            }
-            if ([...machines.values()].some((m) => m.ownerAccountId === record.account.id && m.state !== 'deleted')) {
-                throw new errors_1.CloudApiError('seat_has_machine', 'Your seat already has a machine.', 'Open your existing machine, or delete it before creating another.');
-            }
-            const id = nextId('m');
-            const machine = {
-                id,
-                name: body.name,
-                ownerAccountId: record.account.id,
-                state: 'running',
-                stateReason: null,
-                paneVersion: latest,
-                tailnet: { status: 'awaiting_login', loginUrl: `https://login.tailscale.com/a/stub-${id}`, hostname: null },
-                limits: { vcpu: fleet_1.MACHINE_LIMITS.vcpu, memoryMiB: fleet_1.MACHINE_LIMITS.memoryMiB, diskGiB: fleet_1.MACHINE_LIMITS.diskGiB, dailyCpuSeconds: fleet_1.MACHINE_LIMITS.dailyCpuSeconds, monthlyEgressBytes: fleet_1.MACHINE_LIMITS.monthlyEgressBytes },
-                usage: null,
-                shared: false,
-                pushWindowEndsAt: null,
-                createdAt: iso(),
-                updatedAt: iso(),
-                cpuSecondsUsed: 0,
+            const repeated = repeat ? vms.get(repeat.vmId) : undefined;
+            const repeatedEntry = repeated?.log.find((e) => e.id === repeat?.entryId);
+            if (repeated && repeatedEntry)
+                return { vm: repeated.vm, operation: repeatedEntry };
+            if (account.access !== 'invited')
+                throw new errors_1.CloudApiError('not_invited', "You're on the list. Pane Cloud is invite-only for now.", 'Wait for your invite email.');
+            if (account.signupState !== 'ready')
+                throw new errors_1.CloudApiError('signup_incomplete', 'Finish signing up before you create a cloud Session.', 'Verify your phone number and add a card on the sign-up page.');
+            requireRoomToWake(account, organizationId);
+            const id = nextId('vm');
+            const record = {
+                vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, createdAt: iso(), updatedAt: iso() },
+                awake: [],
+                log: [],
             };
-            machines.set(id, machine);
-            logs.set(id, []);
-            const entry = log(machine, 'create', record, 'You created this machine.');
-            log(machine, 'bootstrap', 'service', 'First boot: install Pane and wait for your tailnet login.', { release: releaseFor(latest) });
-            idempotent.set(key, { machineId: id, entryId: entry.id });
-            return { machine: publicMachine(machine), operation: entry };
+            vms.set(id, record);
+            setState(record, 'running', null);
+            const entry = log(record, 'create', account, 'You created this Session.');
+            log(record, 'bootstrap', 'service', 'First boot: install Pane.', { release: releaseFor(latest) });
+            idempotent.set(key, { vmId: id, entryId: entry.id });
+            return { vm: record.vm, operation: entry };
         }),
-        (0, server_1.bind)(r.getMachine, ({ token, params }) => publicMachine(ownMachine(caller(token), params.machineId ?? ''))),
-        (0, server_1.bind)(r.startMachine, ({ token, params }) => {
-            const record = caller(token);
-            const machine = ownMachine(record, params.machineId ?? '');
-            requireState(machine, 'stopped', 'Start');
-            const { phase } = beta();
-            if (phase === 'ended')
-                throw new errors_1.CloudApiError('invalid_state', 'The Pane Cloud beta has ended, so machines no longer start.', 'Contact support if you still need work from this machine.');
-            setState(machine, 'running', null);
-            if (phase === 'push_windows') {
-                machine.pushWindowEndsAt = new Date(now().getTime() + service_1.BETA_PUSH_WINDOW_MINUTES * 60_000).toISOString();
-                return { machine: publicMachine(machine), operation: log(machine, 'start', record, `You started this machine for a ${service_1.BETA_PUSH_WINDOW_MINUTES}-minute push window before the beta ends.`) };
-            }
-            return { machine: publicMachine(machine), operation: log(machine, 'start', record, 'You started this machine.') };
+        (0, server_1.bind)(r.getVm, ({ token, params }) => ownVm(caller(token), params.vmId ?? '').vm),
+        (0, server_1.bind)(r.startVm, ({ token, params }) => {
+            const account = caller(token);
+            const record = ownVm(account, params.vmId ?? '');
+            if (record.vm.stateReason === 'review')
+                throw new errors_1.CloudApiError('under_review', 'Your usage is under review, so this Session stays paused.', 'Check your email for the review notice, or reply to it to appeal.');
+            requireState(record, 'stopped', 'Start');
+            requireRoomToWake(account, record.vm.organizationId);
+            setState(record, 'running', null);
+            return { vm: record.vm, operation: log(record, 'start', account, 'You started this Session.') };
         }),
-        (0, server_1.bind)(r.stopMachine, ({ token, params }) => {
-            const record = caller(token);
-            const machine = ownMachine(record, params.machineId ?? '');
-            requireState(machine, 'running', 'Stop');
-            log(machine, 'prepare_to_stop', 'service', 'Let Pane finish writing before the stop.');
-            setState(machine, 'stopped', 'user');
-            machine.pushWindowEndsAt = null;
-            return { machine: publicMachine(machine), operation: log(machine, 'stop', record, 'You stopped this machine.') };
+        (0, server_1.bind)(r.stopVm, ({ token, params }) => {
+            const account = caller(token);
+            const record = ownVm(account, params.vmId ?? '');
+            requireState(record, 'running', 'Stop');
+            log(record, 'prepare_to_stop', 'service', 'Let Pane finish writing before the stop.');
+            setState(record, 'stopped', 'user');
+            return { vm: record.vm, operation: log(record, 'stop', account, 'You stopped this Session.', { cause: 'user' }) };
         }),
-        (0, server_1.bind)(r.deleteMachine, ({ token, params }) => {
-            const record = caller(token);
-            const machine = ownMachine(record, params.machineId ?? '');
-            if (machine.state === 'deleted')
-                throw new errors_1.CloudApiError('invalid_state', 'This machine is already deleted.', 'Nothing to do.');
-            setState(machine, 'deleted', 'user');
-            machine.shared = false;
-            dropCodes((key) => key.startsWith(`${machine.id}:`));
-            return { machine: publicMachine(machine), operation: log(machine, 'delete', record, 'You deleted this machine and its disk.') };
+        (0, server_1.bind)(r.deleteVm, ({ token, params }) => {
+            const account = caller(token);
+            const record = ownVm(account, params.vmId ?? '');
+            if (record.vm.state === 'deleted')
+                throw new errors_1.CloudApiError('invalid_state', 'This Session is already deleted.', 'Nothing to do.');
+            setState(record, 'deleted', 'user');
+            return { vm: record.vm, operation: log(record, 'delete', account, 'You deleted this Session and its disk.') };
         }),
         (0, server_1.bind)(r.requestOperation, ({ token, params, body }) => {
-            const record = caller(token);
-            const machine = ownMachine(record, params.machineId ?? '');
+            const account = caller(token);
+            const record = ownVm(account, params.vmId ?? '');
             const request = (0, service_1.parseUserOperation)(body);
-            requireState(machine, 'running', request.operation);
+            requireState(record, 'running', request.operation);
             if (request.operation === 'update_pane') {
                 const version = request.parameters.version ?? latest;
                 if (!versions.includes(version))
                     throw new errors_1.CloudApiError('release_not_published', `Pane ${version} is not a published release.`, `Pick one of: ${versions.join(', ')}.`);
-                machine.paneVersion = version;
-                return log(machine, 'update_pane', record, `You updated Pane to ${version}.`, { release: releaseFor(version) });
+                record.vm.paneVersion = version;
+                return log(record, 'update_pane', account, `You updated Pane to ${version}.`, { release: releaseFor(version) });
             }
-            return log(machine, 'collect_diagnostics', record, 'You collected diagnostics.');
+            return log(record, 'collect_diagnostics', account, 'You collected diagnostics.');
         }),
         (0, server_1.bind)(r.listActionLog, ({ token, params, query }) => {
-            const machine = ownMachine(caller(token), params.machineId ?? '');
-            const all = logs.get(machine.id) ?? [];
+            const all = ownVm(caller(token), params.vmId ?? '').log;
             const cursorAt = query.before ? all.findIndex((e) => e.id === query.before) : -1;
             if (query.before && cursorAt < 0)
                 throw new errors_1.CloudApiError('invalid_request', `Unknown cursor ${query.before}.`, 'Pass a nextCursor from an earlier page, or no cursor for the newest entries.');
@@ -309,166 +242,35 @@ async function startServiceStub(options) {
             const last = entries.at(-1);
             return { entries, nextCursor: last && start + entries.length < all.length ? last.id : null };
         }),
-        (0, server_1.bind)(r.setSharing, ({ token, params, body }) => {
-            const record = caller(token);
-            teamOf(record);
-            const machine = ownMachine(record, params.machineId ?? '');
-            machine.shared = body.shared;
-            if (!body.shared)
-                dropCodes((key) => key.startsWith(`${machine.id}:`));
-            machine.updatedAt = iso();
-            return publicMachine(machine);
-        }),
-        (0, server_1.bind)(r.leaveConnectionCode, ({ token, params, body }) => {
-            const record = caller(token);
-            const machine = ownMachine(record, params.machineId ?? '');
-            if (!machine.shared)
-                throw new errors_1.CloudApiError('invalid_state', 'This machine is not shared with your team.', 'Turn on sharing for it first.');
-            const teammate = byId(body.forAccountId);
-            if (!teammate || teammate.account.teamId !== record.account.teamId || teammate.account.id === record.account.id) {
-                throw new errors_1.CloudApiError('not_team_member', 'That account is not a teammate.', 'Invite them to your team first.');
-            }
-            const expires = Date.parse(body.expiresAt);
-            if (expires <= now().getTime() || expires > now().getTime() + service_1.CONNECTION_CODE_MAX_SECONDS * 1000) {
-                throw new errors_1.CloudApiError('invalid_request', `A connection code must expire within ${service_1.CONNECTION_CODE_MAX_SECONDS / 60} minutes.`, 'Mint a fresh code on the host and leave it again.');
-            }
-            const handoff = { id: nextId('cc'), code: body.code, expiresAt: body.expiresAt };
-            codes.set(`${machine.id}:${teammate.account.id}`, handoff);
-            return { id: handoff.id, machineId: machine.id, forAccountId: teammate.account.id, expiresAt: handoff.expiresAt };
-        }),
-        (0, server_1.bind)(r.claimConnectionCode, ({ token, params }) => {
-            const record = caller(token);
-            const key = `${params.machineId}:${record.account.id}`;
-            const handoff = codes.get(key);
-            codes.delete(key);
-            const machine = machines.get(params.machineId ?? '');
-            const owner = machine ? byId(machine.ownerAccountId) : undefined;
-            const stillAllowed = machine && machine.shared && machine.state !== 'deleted' && record.account.teamId !== null && owner?.account.teamId === record.account.teamId;
-            if (!handoff || !machine || !stillAllowed || Date.parse(handoff.expiresAt) <= now().getTime()) {
-                throw new errors_1.CloudApiError('connection_code_not_found', 'No connection code is waiting for you on this machine.', 'Ask the machine owner to approve you from their Pane.');
-            }
-            return { machineId: machine.id, code: handoff.code, tailnetHostname: machine.tailnet.hostname, expiresAt: handoff.expiresAt };
-        }),
-        (0, server_1.bind)(r.getBeta, () => beta()),
-        (0, server_1.bind)(r.getBilling, ({ token }) => {
-            const record = caller(token);
-            const t = teamOf(record);
-            return {
-                teamId: t.id,
-                plan: 'cohort',
-                seatPriceCents: 4900,
-                currency: 'usd',
-                foundingPriceLocked: true,
-                status: 'free',
-                seats: team(t.id).members.length,
-                chargesStartAt: null,
-                graceEndsAt: null,
-                currentPeriodEnd: null,
-                manageUrl: t.ownerId === record.account.id ? 'https://billing.stripe.com/p/session/stub' : null,
-            };
-        }),
-        (0, server_1.bind)(r.getTeam, ({ token }) => team(teamOf(caller(token)).id)),
-        (0, server_1.bind)(r.createInvite, ({ token, body }) => {
-            const record = caller(token);
-            const t = requireOwner(record);
-            if (team(t.id).members.some((m) => m.githubLogin.toLowerCase() === body.githubLogin.toLowerCase())) {
-                throw new errors_1.CloudApiError('already_member', `${body.githubLogin} is already on this team.`, 'Nothing to do.');
-            }
-            const invite = { id: nextId('inv'), githubLogin: body.githubLogin, invitedByAccountId: record.account.id, status: 'pending', createdAt: iso(), expiresAt: new Date(now().getTime() + 14 * 86_400_000).toISOString() };
-            invites.set(invite.id, invite);
-            return invite;
-        }),
-        (0, server_1.bind)(r.revokeInvite, ({ token, params }) => {
-            const t = requireOwner(caller(token));
-            const invite = invites.get(params.inviteId ?? '');
-            if (!invite || byId(invite.invitedByAccountId)?.account.teamId !== t.id)
-                throw new errors_1.CloudApiError('invite_not_found', 'No such invite on your team.', 'List your team to see its invites.');
-            invite.status = 'revoked';
-            return invite;
-        }),
-        (0, server_1.bind)(r.acceptInvite, ({ token, params }) => {
-            const record = caller(token);
-            const invite = invites.get(params.inviteId ?? '');
-            if (!invite || invite.status !== 'pending' || Date.parse(invite.expiresAt) <= now().getTime() || invite.githubLogin.toLowerCase() !== record.account.githubLogin.toLowerCase()) {
-                throw new errors_1.CloudApiError('invite_not_found', 'No pending invite for you with that id.', 'Ask the team owner to invite your GitHub login.');
-            }
-            if (record.account.teamId)
-                throw new errors_1.CloudApiError('already_member', 'You are already on a team.', 'Ask your current team owner to remove you, then accept again.');
-            invite.status = 'accepted';
-            record.account.teamId = byId(invite.invitedByAccountId)?.account.teamId ?? null;
-            record.account.role = 'member';
-            record.account.access = 'invited';
-            record.joinedAt = iso();
-            return view(record);
-        }),
-        (0, server_1.bind)(r.removeMember, ({ token, params }) => {
-            const t = requireOwner(caller(token));
-            const member = byId(params.accountId ?? '');
-            if (!member || member.account.teamId !== t.id)
-                throw new errors_1.CloudApiError('not_team_member', 'That account is not on your team.', 'List your team to see its members.');
-            if (member.account.id === t.ownerId)
-                throw new errors_1.CloudApiError('invalid_request', 'The owner cannot be removed.', 'Remove other members only.');
-            member.account.teamId = null;
-            member.account.role = null;
-            for (const machine of machines.values())
-                if (machine.ownerAccountId === member.account.id)
-                    machine.shared = false;
-            dropCodes((key) => key.endsWith(`:${member.account.id}`) || [...machines.values()].some((m) => m.ownerAccountId === member.account.id && key.startsWith(`${m.id}:`)));
-            return team(t.id);
-        }),
-        (0, server_1.bind)(r.listSharedMachines, ({ token }) => {
-            const t = teamOf(caller(token));
-            return {
-                machines: [...machines.values()]
-                    .filter((m) => m.shared && m.state !== 'deleted' && byId(m.ownerAccountId)?.account.teamId === t.id)
-                    .map((m) => {
-                    const owner = byId(m.ownerAccountId)?.account;
-                    if (!owner)
-                        throw new Error(`stub: no owner for ${m.id}`);
-                    return {
-                        machineId: m.id,
-                        name: m.name,
-                        state: m.state,
-                        owner: { accountId: owner.id, githubLogin: owner.githubLogin, name: owner.name, tailscaleLogin: owner.tailscaleLogin },
-                        tailnetHostname: m.tailnet.hostname,
-                        sharedAt: m.updatedAt,
-                    };
-                }),
-            };
+        (0, server_1.bind)(r.getUsage, ({ token, params, query }) => {
+            const organizationId = params.organizationId ?? '';
+            membership(caller(token), organizationId);
+            return usage(organizationId, query.month ?? iso().slice(0, 7));
         }),
     ]);
     const running = await (0, server_1.listen)(server);
-    const anyMachine = (machineId) => {
-        const machine = machines.get(machineId);
-        if (!machine)
-            throw new Error(`stub: no machine ${machineId}`);
-        return machine;
+    const grantFor = (userCode) => {
+        const grant = [...devices.values()].find((d) => d.userCode === userCode);
+        if (!grant)
+            throw new Error(`stub: no device code ${userCode}`);
+        return grant;
     };
     return {
         ...running,
-        approveDevice(userCode, githubLogin) {
-            const grant = [...devices.values()].find((d) => d.userCode === userCode);
-            if (!grant)
-                throw new Error(`stub: no device code ${userCode}`);
+        approveDevice(userCode, email) {
+            const grant = grantFor(userCode);
             grant.state = 'approved';
-            grant.login = githubLogin;
+            grant.email = email;
         },
         denyDevice(userCode) {
-            const grant = [...devices.values()].find((d) => d.userCode === userCode);
-            if (grant)
-                grant.state = 'denied';
+            grantFor(userCode).state = 'denied';
         },
-        hostStop(machineId, reason) {
-            const machine = anyMachine(machineId);
-            setState(machine, 'stopped', reason);
-            log(machine, 'stop', 'host', reason === 'idle' ? 'No agent ran and no one was connected for 30 minutes.' : `The host stopped this machine (${reason}).`);
-        },
-        joinTailnet(machineId) {
-            const machine = anyMachine(machineId);
-            machine.tailnet = { status: 'joined', loginUrl: null, hostname: `pane-${machineId}.tailnet.ts.net` };
-        },
-        setCpuSecondsUsed(machineId, seconds) {
-            anyMachine(machineId).cpuSecondsUsed = seconds;
+        pauseForReview(vmId) {
+            const record = vms.get(vmId);
+            if (!record)
+                throw new Error(`stub: no Session VM ${vmId}`);
+            setState(record, 'stopped', 'review');
+            log(record, 'stop', 'service', 'Paused while your usage is under review.', { cause: 'review' });
         },
     };
 }

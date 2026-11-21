@@ -1,16 +1,17 @@
 import { type ContractCase } from './cases';
-type Who = 'owner' | 'teammate' | 'outsider';
+type Who = 'member' | 'unverified' | 'waitlisted';
 export interface ServiceContractTarget {
     baseUrl: string;
     /**
-     * Signs in a test account and returns its token. `owner` is in the cohort and owns a team with no
-     * other members; `teammate` and `outsider` are waitlisted and on no team.
+     * Signs in a test account and returns its token. `member` is invited, has finished sign-up, is on
+     * the Free plan in its personal organization and has no Session VMs awake. `unverified` is invited
+     * but has not finished the phone and card checks. `waitlisted` is not invited.
      */
     signIn(who: Who): Promise<string>;
-    logins: Record<Who, string>;
-    /** How long to wait for a machine to settle. Default 180 s (journey 2's 3 minutes). */
+    emails: Record<Who, string>;
+    /** How long to wait for a VM to settle. Default 180 s. */
     timeoutMs?: number;
 }
-/** The service API contract: what S1 must do for the desktop adapter. */
+/** The service API contract: what the service must do for Pane. */
 export declare function serviceContractCases(target: ServiceContractTarget): ContractCase[];
 export {};

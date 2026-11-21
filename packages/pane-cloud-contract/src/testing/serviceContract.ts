@@ -1,24 +1,25 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { callRoute } from '../http';
-import { createServiceClient, type Machine, type ServiceClient, serviceRoutes, type SubmittedOperation } from '../service';
+import { createServiceClient, PLANS, type ServiceClient, serviceRoutes, type SessionVm, type SubmittedOperation } from '../service';
 import { type ContractCase, expectError, waitFor } from './cases';
 
-type Who = 'owner' | 'teammate' | 'outsider';
+type Who = 'member' | 'unverified' | 'waitlisted';
 
 export interface ServiceContractTarget {
   baseUrl: string;
   /**
-   * Signs in a test account and returns its token. `owner` is in the cohort and owns a team with no
-   * other members; `teammate` and `outsider` are waitlisted and on no team.
+   * Signs in a test account and returns its token. `member` is invited, has finished sign-up, is on
+   * the Free plan in its personal organization and has no Session VMs awake. `unverified` is invited
+   * but has not finished the phone and card checks. `waitlisted` is not invited.
    */
   signIn(who: Who): Promise<string>;
-  logins: Record<Who, string>;
-  /** How long to wait for a machine to settle. Default 180 s (journey 2's 3 minutes). */
+  emails: Record<Who, string>;
+  /** How long to wait for a VM to settle. Default 180 s. */
   timeoutMs?: number;
 }
 
-/** The service API contract: what S1 must do for the desktop adapter. */
+/** The service API contract: what the service must do for Pane. */
 export function serviceContractCases(target: ServiceContractTarget): ContractCase[] {
   const timeoutMs = target.timeoutMs ?? 180_000;
   const tokens = new Map<Who, string>();
@@ -28,184 +29,170 @@ export function serviceContractCases(target: ServiceContractTarget): ContractCas
     return token;
   };
   const as = async (who: Who) => createServiceClient({ baseUrl: target.baseUrl, token: await tokenFor(who) });
+  const personalOrg = async (client: ServiceClient) => {
+    const org = (await client.getAccount()).organizations.find((m) => m.personal);
+    assert.ok(org, 'every account has a personal organization');
+    return org.organizationId;
+  };
   /** Sends an operation request as written, including ones the typed client would not let you write. */
-  const rawOperation = async (machineId: string, body: SubmittedOperation) =>
-    callRoute({ baseUrl: target.baseUrl, token: await tokenFor('owner') }, serviceRoutes.requestOperation, { params: { machineId }, body });
-  const machineIn = (client: ServiceClient, machineId: string, state: Machine['state']) =>
-    waitFor(() => client.getMachine(machineId), (m) => m.state === state, `machine ${machineId} to be ${state}`, timeoutMs);
-  const withMachine = async (body: (owner: ServiceClient, machine: Machine) => Promise<void>) => {
-    const owner = await as('owner');
-    const { machine } = await owner.createMachine('contract test', randomUUID());
+  const rawOperation = async (vmId: string, body: SubmittedOperation) =>
+    callRoute({ baseUrl: target.baseUrl, token: await tokenFor('member') }, serviceRoutes.requestOperation, { params: { vmId }, body });
+  const vmIn = (client: ServiceClient, vmId: string, state: SessionVm['state']) =>
+    waitFor(() => client.getVm(vmId), (v) => v.state === state, `Session VM ${vmId} to be ${state}`, timeoutMs);
+  const cleanUp = async (client: ServiceClient, vmIds: string[]) => {
+    for (const vmId of vmIds) {
+      const current = await client.getVm(vmId);
+      if (current.state === 'creating' || current.state === 'starting') await vmIn(client, vmId, 'running');
+      if (current.state !== 'deleted' && current.state !== 'deleting') await client.deleteVm(vmId);
+    }
+  };
+  const withVm = async (body: (member: ServiceClient, vm: SessionVm) => Promise<void>) => {
+    const member = await as('member');
+    const { vm } = await member.createVm(await personalOrg(member), 'contract test', randomUUID());
     try {
-      await body(owner, await machineIn(owner, machine.id, 'running'));
+      await body(member, await vmIn(member, vm.id, 'running'));
     } finally {
-      const current = await owner.getMachine(machine.id);
-      if (current.state !== 'deleted' && current.state !== 'deleting') await owner.deleteMachine(machine.id);
+      await cleanUp(member, [vm.id]);
     }
   };
 
   return [
     {
-      name: 'service: device sign-in starts with a GitHub code, and a call without a token is refused',
+      name: 'service: device sign-in starts with a code and a browser link, and a call without a token is refused',
       async run() {
         const anonymous = createServiceClient({ baseUrl: target.baseUrl });
         const code = await anonymous.startDeviceSignIn();
-        assert.ok(code.userCode.length > 0);
+        assert.ok(code.verificationUriComplete.includes(code.userCode) || code.verificationUriComplete.startsWith(code.verificationUri));
         assert.equal((await anonymous.pollDeviceSignIn(code.deviceCode)).status, 'pending');
         await expectError('unauthenticated', () => anonymous.getAccount());
       },
     },
     {
-      name: 'service: a waitlisted account is told it is on the list and cannot create a machine',
+      name: 'service: a new account has a personal organization it owns, on the Free plan',
       async run() {
-        const outsider = await as('outsider');
-        const account = await outsider.getAccount();
-        assert.equal(account.githubLogin.toLowerCase(), target.logins.outsider.toLowerCase());
-        assert.equal(account.access, 'waitlisted');
-        await expectError('not_invited', () => outsider.createMachine('nope', randomUUID()));
+        const member = await as('member');
+        const account = await member.getAccount();
+        assert.equal(account.email.toLowerCase(), target.emails.member.toLowerCase());
+        const personal = account.organizations.filter((m) => m.personal);
+        assert.equal(personal.length, 1);
+        assert.equal(personal[0]?.role, 'owner');
+        const usage = await member.getUsage(await personalOrg(member));
+        assert.equal(usage.plan, 'free');
+        const me = usage.members.find((m) => m.accountId === account.id);
+        assert.ok(me, 'usage lists the member');
+        assert.equal(me.awakeLimit, PLANS.free.awakeLimitPerMember);
+        const fullAccess = usage.members.filter((m) => m.role !== 'view_only').length;
+        assert.equal(usage.agentHours.limit, PLANS.free.agentHoursPerMember * fullAccess, 'hours are pooled per Full access member');
+        assert.equal(Date.parse(usage.resetsAt), Date.UTC(Number(usage.month.slice(0, 4)), Number(usage.month.slice(5, 7)), 1), 'hours reset on the 1st');
       },
     },
     {
-      name: 'service: create, stop, start and delete a machine, each logged with who and why',
+      name: 'service: no Session VM before the account is invited and has finished sign-up',
       async run() {
-        await withMachine(async (owner, machine) => {
-          assert.equal(machine.limits.dailyCpuSeconds, 43_200);
-          assert.equal(machine.shared, false);
-          assert.equal((await owner.listMachines()).machines.filter((m) => m.state !== 'deleted').length, 1);
-          await owner.stopMachine(machine.id);
-          await machineIn(owner, machine.id, 'stopped');
-          await expectError('invalid_state', () => owner.stopMachine(machine.id));
-          await owner.startMachine(machine.id);
-          await machineIn(owner, machine.id, 'running');
-          const { entries } = await owner.listActionLog(machine.id);
+        const waitlisted = await as('waitlisted');
+        assert.equal((await waitlisted.getAccount()).access, 'waitlisted');
+        await expectError('not_invited', async () => waitlisted.createVm(await personalOrg(waitlisted), 'nope', randomUUID()));
+        const unverified = await as('unverified');
+        assert.notEqual((await unverified.getAccount()).signupState, 'ready');
+        await expectError('signup_incomplete', async () => unverified.createVm(await personalOrg(unverified), 'nope', randomUUID()));
+      },
+    },
+    {
+      name: 'service: create, stop, start and delete a Session VM, each logged with who and why, and a retried create returns the same VM',
+      async run() {
+        const member = await as('member');
+        const organizationId = await personalOrg(member);
+        const { id: accountId } = await member.getAccount();
+        const key = randomUUID();
+        const first = await member.createVm(organizationId, 'lifecycle', key);
+        try {
+          assert.equal((await member.createVm(organizationId, 'lifecycle', key)).vm.id, first.vm.id);
+          const vm = await vmIn(member, first.vm.id, 'running');
+          assert.equal(vm.organizationId, organizationId);
+          assert.equal(vm.createdByAccountId, accountId);
+          assert.equal(vm.memoryGiB, 8);
+          assert.ok((await member.listVms(organizationId)).vms.some((v) => v.id === vm.id));
+          await member.stopVm(vm.id);
+          assert.equal((await vmIn(member, vm.id, 'stopped')).stateReason, 'user');
+          await expectError('invalid_state', () => member.stopVm(vm.id));
+          await member.startVm(vm.id);
+          await vmIn(member, vm.id, 'running');
+          const { entries } = await member.listActionLog(vm.id);
           for (const operation of ['create', 'stop', 'start'] as const) {
             const entry = entries.find((e) => e.operation === operation);
             assert.ok(entry, `the action log lists ${operation}`);
-            assert.equal(entry.actor.kind, 'user');
-            assert.equal(entry.actor.githubLogin?.toLowerCase(), target.logins.owner.toLowerCase());
+            assert.deepEqual(entry.actor, { kind: 'user', accountId });
           }
           const ordered = entries.map((e) => Date.parse(e.requestedAt));
           assert.deepEqual(ordered, [...ordered].sort((a, b) => b - a), 'the action log is newest first');
-          await owner.deleteMachine(machine.id);
-          const gone = await waitFor(() => owner.getMachine(machine.id), (m) => m.state === 'deleted', 'the machine to be deleted', timeoutMs);
-          assert.equal(gone.state, 'deleted');
-          assert.ok(!(await owner.listMachines()).machines.some((m) => m.id === machine.id), 'a deleted machine leaves the list');
-        });
+          const page = await member.listActionLog(vm.id, { limit: 1 });
+          assert.equal(page.entries.length, 1);
+          assert.ok(page.nextCursor, 'a log longer than the page has a cursor');
+          assert.notEqual((await member.listActionLog(vm.id, { before: page.nextCursor, limit: 1 })).entries[0]?.id, page.entries[0]?.id);
+          await member.deleteVm(vm.id);
+          await vmIn(member, vm.id, 'deleted');
+          assert.ok(!(await member.listVms(organizationId)).vms.some((v) => v.id === vm.id), 'a deleted VM leaves the list');
+        } finally {
+          await cleanUp(member, [first.vm.id]);
+        }
       },
     },
     {
-      name: 'service: one machine per seat, and a retried create returns the same machine',
+      name: "service: a member can have at most their plan's awake limit of Session VMs awake at once, and a stopped one doesn't count",
       async run() {
-        const owner = await as('owner');
-        const key = randomUUID();
-        const first = await owner.createMachine('seat test', key);
+        const member = await as('member');
+        const organizationId = await personalOrg(member);
+        const { id: accountId } = await member.getAccount();
+        const me = async () => {
+          const found = (await member.getUsage(organizationId)).members.find((m) => m.accountId === accountId);
+          assert.ok(found);
+          return found;
+        };
+        const { awakeLimit, awakeNow } = await me();
+        const created: string[] = [];
         try {
-          const retried = await owner.createMachine('seat test', key);
-          assert.equal(retried.machine.id, first.machine.id);
-          await expectError('seat_has_machine', () => owner.createMachine('second', randomUUID()));
+          for (let i = awakeNow; i < awakeLimit; i += 1) created.push((await member.createVm(organizationId, `awake ${i + 1}`, randomUUID())).vm.id);
+          assert.equal((await me()).awakeNow, awakeLimit);
+          await expectError('awake_limit_reached', () => member.createVm(organizationId, 'one too many', randomUUID()));
+          const [first] = created;
+          assert.ok(first);
+          await vmIn(member, first, 'running');
+          await member.stopVm(first);
+          await vmIn(member, first, 'stopped');
+          created.push((await member.createVm(organizationId, 'after a stop', randomUUID())).vm.id);
+          await expectError('awake_limit_reached', () => member.startVm(first));
         } finally {
-          await machineIn(owner, first.machine.id, 'running');
-          await owner.deleteMachine(first.machine.id);
+          await cleanUp(member, created);
         }
       },
     },
     {
       name: 'service: runs only allow-listed operations, with fixed parameters',
       async run() {
-        await withMachine(async (owner, machine) => {
-          await expectError('operation_not_allowed', () => rawOperation(machine.id, { operation: 'run_script', parameters: { script: 'id' } }));
-          await expectError('operation_not_allowed', () => rawOperation(machine.id, { operation: 'grant_access', parameters: { githubLogin: target.logins.outsider } }));
-          await expectError('operation_not_allowed', () => rawOperation(machine.id, { operation: 'bootstrap', parameters: {} }));
-          await expectError('invalid_request', () => rawOperation(machine.id, { operation: 'update_pane', parameters: { url: 'https://example.com/pane.deb' } }));
-          await expectError('release_not_published', () => owner.requestOperation(machine.id, { operation: 'update_pane', parameters: { version: '0.0.1' } }));
-          const entry = await owner.requestOperation(machine.id, { operation: 'collect_diagnostics', parameters: {} });
+        await withVm(async (member, vm) => {
+          await expectError('operation_not_allowed', () => rawOperation(vm.id, { operation: 'run_script', parameters: { script: 'id' } }));
+          await expectError('operation_not_allowed', () => rawOperation(vm.id, { operation: 'grant_access', parameters: { email: target.emails.waitlisted } }));
+          await expectError('operation_not_allowed', () => rawOperation(vm.id, { operation: 'bootstrap', parameters: {} }));
+          await expectError('invalid_request', () => rawOperation(vm.id, { operation: 'update_pane', parameters: { url: 'https://example.com/pane.deb' } }));
+          await expectError('release_not_published', () => member.requestOperation(vm.id, { operation: 'update_pane', parameters: { version: '0.0.1' } }));
+          const entry = await member.requestOperation(vm.id, { operation: 'collect_diagnostics', parameters: {} });
           assert.equal(entry.operation, 'collect_diagnostics');
-          const { entries } = await owner.listActionLog(machine.id);
-          assert.ok(entries.some((e) => e.id === entry.id), 'the operation is in the action log');
+          assert.ok((await member.listActionLog(vm.id)).entries.some((e) => e.id === entry.id), 'the operation is in the action log');
         });
       },
     },
     {
-      name: "service: another account cannot read or change the owner's machine",
+      name: "service: another account cannot read or change a member's Session VM or organization",
       async run() {
-        await withMachine(async (_owner, machine) => {
-          const outsider = await as('outsider');
-          await expectError('machine_not_found', () => outsider.getMachine(machine.id));
-          await expectError('machine_not_found', () => outsider.stopMachine(machine.id));
-          await expectError('machine_not_found', () => outsider.listActionLog(machine.id));
+        await withVm(async (member, vm) => {
+          const other = await as('waitlisted');
+          await expectError('vm_not_found', () => other.getVm(vm.id));
+          await expectError('vm_not_found', () => other.stopVm(vm.id));
+          await expectError('vm_not_found', () => other.listActionLog(vm.id));
+          await expectError('not_org_member', () => other.listVms(vm.organizationId));
+          await expectError('not_org_member', () => other.getUsage(vm.organizationId));
+          assert.ok((await member.listVms(vm.organizationId)).vms.some((v) => v.id === vm.id));
         });
-      },
-    },
-    {
-      name: 'service: the beta end date is public, and its notice dates follow from it',
-      async run() {
-        const beta = await createServiceClient({ baseUrl: target.baseUrl }).getBeta();
-        if (beta.endsAt === null) {
-          assert.equal(beta.noticeAt, null);
-          assert.equal(beta.pushWindowsFrom, null);
-          assert.equal(beta.phase, 'open');
-          return;
-        }
-        const ends = Date.parse(beta.endsAt);
-        assert.equal(Date.parse(beta.noticeAt ?? ''), ends - 30 * 86_400_000, 'notice starts 30 days before the end');
-        assert.equal(Date.parse(beta.pushWindowsFrom ?? ''), ends - 14 * 86_400_000, 'push windows start 14 days before the end');
-      },
-    },
-    {
-      name: "service: billing status is the team's",
-      async run() {
-        const owner = await as('owner');
-        const account = await owner.getAccount();
-        const billing = await owner.getBilling();
-        assert.equal(billing.teamId, account.teamId);
-        assert.ok(billing.seats >= 1);
-      },
-    },
-    {
-      name: 'service: invite a teammate, list the roster and shared machines, relay a connection code once, and withdraw it on unshare or removal',
-      async run() {
-        const owner = await as('owner');
-        const teammate = await as('teammate');
-        const invite = await owner.createInvite(target.logins.teammate);
-        assert.equal(invite.status, 'pending');
-        assert.ok((await teammate.getAccount()).pendingInvites.some((i) => i.id === invite.id), 'the teammate sees the invite');
-        const joined = await teammate.acceptInvite(invite.id);
-        assert.equal(joined.role, 'member');
-        try {
-          await expectError('not_team_owner', () => teammate.createInvite(target.logins.outsider));
-          const confirmed = await teammate.setTailscaleLogin(`${target.logins.teammate}@github`);
-          const team = await owner.getTeam();
-          assert.ok(team.members.some((m) => m.accountId === joined.id && m.tailscaleLogin === confirmed.tailscaleLogin), 'the roster lists the teammate with their Tailscale login');
-          assert.equal((await owner.getBilling()).seats, team.members.length, 'each member is a seat');
-          await withMachine(async (ownerClient, machine) => {
-            assert.ok(!(await teammate.listSharedMachines()).machines.some((m) => m.machineId === machine.id), 'an unshared machine is not listed');
-            await expectError('invalid_state', () => ownerClient.leaveConnectionCode(machine.id, { forAccountId: joined.id, code: 'x', expiresAt: new Date(Date.now() + 60_000).toISOString() }));
-            await ownerClient.setSharing(machine.id, true);
-            const listed = (await teammate.listSharedMachines()).machines.find((m) => m.machineId === machine.id);
-            assert.ok(listed, 'the shared machine is in the team directory');
-            assert.equal(listed.owner.githubLogin.toLowerCase(), target.logins.owner.toLowerCase());
-            await expectError('machine_not_found', () => teammate.getMachine(machine.id));
-            await expectError('machine_not_found', () => teammate.stopMachine(machine.id));
-            const code = `pane-code-${randomUUID()}`;
-            await expectError('invalid_request', () => ownerClient.leaveConnectionCode(machine.id, { forAccountId: joined.id, code, expiresAt: new Date(Date.now() + 3_600_000).toISOString() }));
-            await ownerClient.leaveConnectionCode(machine.id, { forAccountId: joined.id, code, expiresAt: new Date(Date.now() + 300_000).toISOString() });
-            await expectError('connection_code_not_found', async () => (await as('outsider')).claimConnectionCode(machine.id));
-            assert.equal((await teammate.claimConnectionCode(machine.id)).code, code);
-            await expectError('connection_code_not_found', () => teammate.claimConnectionCode(machine.id));
-            const soon = () => new Date(Date.now() + 300_000).toISOString();
-            await ownerClient.leaveConnectionCode(machine.id, { forAccountId: joined.id, code: `${code}-2`, expiresAt: soon() });
-            await ownerClient.setSharing(machine.id, false);
-            await expectError('connection_code_not_found', () => teammate.claimConnectionCode(machine.id));
-            await ownerClient.setSharing(machine.id, true);
-            await ownerClient.leaveConnectionCode(machine.id, { forAccountId: joined.id, code: `${code}-3`, expiresAt: soon() });
-            await owner.removeMember(joined.id);
-            await expectError('connection_code_not_found', () => teammate.claimConnectionCode(machine.id));
-          });
-        } finally {
-          if ((await owner.getTeam()).members.some((m) => m.accountId === joined.id)) await owner.removeMember(joined.id);
-        }
-        await expectError('not_team_member', () => teammate.listSharedMachines());
-        assert.ok(!(await owner.getTeam()).members.some((m) => m.accountId === joined.id));
       },
     },
   ];
