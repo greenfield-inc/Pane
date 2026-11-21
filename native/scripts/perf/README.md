@@ -64,4 +64,20 @@ Before each scenario `journeys.sh` resets the hosts to the snapshot (`hosts.sh r
 
 Every scenario starts from a fresh launch, and a reopen goes back with the screen's own back button, so earlier screens never stay mounted underneath. Navigation goes through Maestro, which answers iOS's "Open in Pane?" prompt; its accessibility snapshots can pause the app, so read stalls from the `return-*` and `cold-launch` scenarios.
 
+### Stalls need a Release build
+
+A dev client loads the bundle from Metro as JavaScript source, and Hermes compiles each function the first time it runs. That shows up as stalls at launch and on a screen's first open that store builds and over-the-air updates, which ship Hermes bytecode, never have. Measure T12 on a Release simulator build:
+
+```bash
+cd native && npx expo prebuild -p ios
+# Otherwise the app downloads the published update after its first launch and runs that, without marks.
+/usr/libexec/PlistBuddy -c 'Set :EXUpdatesEnabled false' ios/Pane/Supporting/Expo.plist
+# arm64 only: pane-direct has no x86_64 slice.
+EXPO_PUBLIC_PANE_PERF=1 xcodebuild -workspace ios/Pane.xcworkspace -scheme Pane -configuration Release \
+  -sdk iphonesimulator -destination id=<simulator> -derivedDataPath <dir> ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build
+xcrun simctl install <simulator> <dir>/Build/Products/Release-iphonesimulator/Pane.app
+```
+
+Then run `journeys.sh` with `LAUNCH_URL` unset, so a cold launch opens the installed app. Launch timings come out faster than on a dev client as well, so compare only columns built the same way.
+
 On a phone, a perf build's lines are in the device's log: Console.app with the phone connected, filtered on `[perf]`. A loopback host cannot stage a relay or a same-network address that stops answering; those paths are covered by unit tests and by a run on a phone.
