@@ -14,6 +14,8 @@ __pycache__/
 
 # Build outputs
 dist/
+# Committed so pane-cloud can install it from GitHub without building Pane (CI checks it is current).
+!packages/pane-cloud-contract/dist/
 build/
 !build/entitlements.mac.plist
 *.tsbuildinfo
