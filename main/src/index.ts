@@ -160,7 +160,8 @@ import { routeWebviewPopups } from './services/webviewPopups';
 import { openExternalUrl } from './utils/openExternalUrl';
 import { offerAppLink, openOfferedAppLink } from './services/browser/appLinks';
 import { PaneError, paneErrorText } from '../../shared/paneError';
-import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
+import { BROWSER_TAB_NOTICE_CHANNEL, BROWSER_VIEW_LIVE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
+import type { PaneWebviewContext } from './core/runtime';
 import { DOCS_BROWSER_PARTITION } from '../../shared/constants/browserPartitions';
 import { hardenWebviewPreferences } from './services/webviewPreferences';
 import { APP_MENU_ACTION_CHANNEL, attachEditContextMenu, installApplicationMenu, type AppMenuAction } from './services/nativeMenus';
@@ -170,7 +171,7 @@ export let mainWindow: BrowserWindow | null = null;
 
 // Map webContentsId → {panelId, sessionId} for webview popup interception.
 // Populated by browser-panel:register-webview IPC, consumed by did-attach-webview handler.
-export const webviewContextMap = new Map<number, { panelId: string; sessionId: string }>();
+export const webviewContextMap = new Map<number, PaneWebviewContext>();
 
 /** Shows a line under a browser tab's address bar: an app link to confirm, a sign-in sent out, a download. */
 function sendTabNotice(panelId: string, notice: BrowserTabNotice): void {
@@ -661,7 +662,11 @@ async function createWindow() {
   // This prevents the race condition where a page calls window.open() before dom-ready fires.
   // The context map (panelId/sessionId) is populated later by the browser-panel:register-webview IPC.
   mainWindow.webContents.on('did-attach-webview', (_event, wvContents: WebContents) => {
-    attachEditContextMenu(wvContents);
+    attachEditContextMenu(wvContents, () => {
+      const context = webviewContextMap.get(wvContents.id);
+      if (!context?.viewLive) return [];
+      return [{ label: 'View live', click: () => mainWindow?.webContents.send(BROWSER_VIEW_LIVE_CHANNEL, { panelId: context.panelId }) }];
+    });
     const openOutside = (url: string) => void openExternalUrl(url).catch((error) => {
       console.error('[BrowserPanel] Did not open popup URL externally:', error);
     });

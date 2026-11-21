@@ -26,11 +26,11 @@ const TAILSCALE_DOWNLOAD_URL = Platform.OS === 'android' ? 'https://tailscale.co
 /**
  * This phone's own copy of a page tab, shown unless an agent is acting on the page (or the host
  * is on an older Pane, which streams nothing): the address row (back, forward, address, reload,
- * Safari) over the live page. Pages on the computer
+ * Safari, and View live on a page an agent used) over the live page. Pages on the computer
  * load through the phone addresses it creates over Tailscale; HTML files fall back to reading the
  * file through the computer. Each case that can't load has its own screen.
  */
-export function OwnCopyBrowserTab({ panel }: { panel: ToolPanel }) {
+export function OwnCopyBrowserTab({ panel, onViewLive }: { panel: ToolPanel; onViewLive?: () => void }) {
   const theme = useTheme();
   const { colors } = theme;
   const { profile } = useDaemon();
@@ -175,6 +175,7 @@ export function OwnCopyBrowserTab({ panel }: { panel: ToolPanel }) {
             />
           )}
         </View>
+        {onViewLive ? <ToolButton testID="browser-view-live" label="View live" ios="dot.radiowaves.left.and.right" android="sensors" onPress={onViewLive} /> : null}
         <ToolButton testID="browser-reload" label="Reload" ios="arrow.clockwise" android="refresh" onPress={reload} />
         <ToolButton testID="browser-safari" label="Open in Safari" ios="safari" android="open_in_browser" disabled={!src} onPress={openOutside} />
       </View>

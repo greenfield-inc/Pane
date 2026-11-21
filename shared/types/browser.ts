@@ -21,3 +21,5 @@ export type BrowserTabNotice =
   | { kind: 'downloaded'; name: string; file: string; agent?: string };
 
 export const BROWSER_TAB_NOTICE_CHANNEL = 'browser-panel:notice';
+/** The person chose View live in a browser tab's page menu (`{ panelId }`). */
+export const BROWSER_VIEW_LIVE_CHANNEL = 'browser-panel:view-live';

@@ -11,7 +11,7 @@ import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult }
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
-import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
+import { BROWSER_TAB_NOTICE_CHANNEL, BROWSER_VIEW_LIVE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
   type WindowControlsOverlayColors,
@@ -344,6 +344,14 @@ try {
       window.dispatchEvent(new CustomEvent(BROWSER_TAB_NOTICE_CHANNEL, { detail: data }));
     } catch (e) {
       console.error(`Failed to dispatch ${BROWSER_TAB_NOTICE_CHANNEL} to window:`, e);
+    }
+  });
+  // View live from a browser tab's page menu.
+  ipcRenderer.on(BROWSER_VIEW_LIVE_CHANNEL, (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
+    try {
+      window.dispatchEvent(new CustomEvent(BROWSER_VIEW_LIVE_CHANNEL, { detail: data }));
+    } catch (e) {
+      console.error(`Failed to dispatch ${BROWSER_VIEW_LIVE_CHANNEL} to window:`, e);
     }
   });
   // A docs page's link that opens a new window.

@@ -353,13 +353,14 @@ class PanelManager {
         const current = databaseService.getPanel(panelId)?.state.customState as TerminalPanelState | undefined;
         updates = { ...updates, state: { ...updates.state, customState: { ...updates.state.customState, paused: current?.paused } } };
       } else if (panel.type === 'browser' && updates.state?.customState) {
-        // Only main writes who drives a tab and its page size (ipc/browser.ts); the tab's own URL saves keep them.
+        // Only main writes who drives a tab, its page size and what agents did on it (ipc/browser.ts); the tab's own URL saves keep them.
         // SAFETY: This database row belongs to the browser panel above.
         const current = databaseService.getPanel(panelId)?.state.customState as BrowserPanelState | undefined;
         const update = updates.state.customState;
         let customState = update;
         if (current?.driver && !('driver' in update)) customState = { ...customState, driver: current.driver };
         if (current?.pageSize && !('pageSize' in update)) customState = { ...customState, pageSize: current.pageSize };
+        if (current?.agentUse && !('agentUse' in update)) customState = { ...customState, agentUse: current.agentUse };
         updates = { ...updates, state: { ...updates.state, customState } };
       } else if (panel.type === 'chat' && updates.state?.customState) {
         // A chat tab's state belongs to the host's chat runtime (commitChatTab);
