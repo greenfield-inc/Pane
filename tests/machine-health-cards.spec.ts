@@ -69,10 +69,10 @@ test.describe('Machine health cards', () => {
     const box = await page.getByTestId('health-popups').boundingBox();
     expect(box && box.x < 40 && box.y + box.height > 900 - 40).toBe(true);
     await expect(page.getByLabel('Composer')).toBeFocused();
-    // Hovering holds a popup; the other hides after Notify's update time.
+    // Hovering the stack holds every popup in it; leaving lets them hide after Notify's update time.
     await page.getByRole('status', { name: 'Memory is tight' }).hover();
-    await expect(page.getByRole('status', { name: 'Disk almost full' })).toHaveCount(0, { timeout: 4000 });
-    await expect(page.getByRole('status', { name: 'Memory is tight' })).toBeVisible();
+    await page.waitForTimeout(3000);
+    await expect(popups).toHaveCount(2);
     await page.mouse.move(700, 100);
     await expect(popups).toHaveCount(0, { timeout: 4000 });
     expect(await page.evaluate(() => window.qaCommands)).toEqual([]);

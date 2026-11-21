@@ -145,15 +145,19 @@ export class HealthCardController {
   }
 
   /**
-   * A disk or memory card waits only while it matches the level: back to ok resolves it, and turning
-   * critical replaces a warning card with the critical one. A dip from critical to warning keeps it.
+   * Turning critical replaces a waiting warning card with the critical one. A critical card closes
+   * once the level is back to ok, and the next episode may raise a card again; a dip to warning keeps
+   * it. A warning card keeps waiting through recovery, so a level hovering at the line never re-raises it.
    */
   private withdrawOutdated(kind: 'disk' | 'memory', level: HealthLevel): void {
     const card = this.waiting.get(kind);
-    if (!card || (level !== 'ok' && RANK[level] <= RANK[card.level])) return;
+    if (!card) return;
+    const recovered = level === 'ok' && card.level === 'critical';
+    if (!recovered && RANK[level] <= RANK[card.level]) return;
     this.waiting.delete(kind);
     this.gate.closed(kind);
-    this.deps.withdraw(card.id, level === 'ok' ? RECOVERED[kind] : 'it turned critical, and a new card replaces it');
+    if (recovered) this.gate.forget(kind);
+    this.deps.withdraw(card.id, recovered ? RECOVERED[kind] : 'it turned critical, and a new card replaces it');
   }
 
   /** One desktop alert when a level turns critical, whatever card is already waiting. */

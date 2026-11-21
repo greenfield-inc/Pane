@@ -16,33 +16,40 @@ const MAX_SHOWN = 3;
 export function HealthCardPopups({ suppressed }: { suppressed: boolean }) {
   const snapshot = useNotifyStore(state => state.snapshot);
   const [timedOut, setTimedOut] = useState<ReadonlySet<string>>(new Set());
+  // Over the stack, nothing hides, so a popup never moves out from under the pointer.
+  const [hovering, setHovering] = useState(false);
   const hide = useCallback((id: string) => setTimedOut(previous => new Set([...previous, id])), []);
   // Dismissed or snoozed cards are in `hidden`, as on Notify's strip.
+  const hidden = new Set(snapshot?.hidden);
   const cards = (snapshot?.items ?? [])
     .filter((item): item is HealthNotifyItem => isHealthCard(item) && item.state === 'waiting' && !item.unreachable && !item.dismissedAt
-      && !snapshot?.hidden.includes(item.id) && !timedOut.has(item.id))
+      && !hidden.has(item.id) && !timedOut.has(item.id))
     // Critical first, then the newest.
     .sort((a, b) => Number(b.machineHealth.level === 'critical') - Number(a.machineHealth.level === 'critical') || b.createdAt - a.createdAt)
     .slice(0, MAX_SHOWN);
   if (suppressed || !snapshot || cards.length === 0) return null;
   const hideAfterMs = snapshot.settings.updatesHideAfterSeconds * 1000;
   return (
-    <div className="fixed bottom-4 left-4 z-fixed flex w-[360px] max-w-[calc(100vw-2rem)] flex-col-reverse gap-2" data-testid="health-popups">
+    <div
+      className="fixed bottom-4 left-4 z-fixed flex w-[360px] max-w-[calc(100vw-2rem)] flex-col-reverse gap-2"
+      data-testid="health-popups"
+      onPointerEnter={() => setHovering(true)}
+      onPointerLeave={() => setHovering(false)}
+    >
       {cards.map(card => (
-        <HealthPopup key={card.id} card={card} hideAfterMs={hideAfterMs} onTimeout={hide} />
+        <HealthPopup key={card.id} card={card} hideAfterMs={hideAfterMs} held={hovering} onTimeout={hide} />
       ))}
     </div>
   );
 }
 
-function HealthPopup({ card, hideAfterMs, onTimeout }: { card: HealthNotifyItem; hideAfterMs: number; onTimeout: (id: string) => void }) {
+function HealthPopup({ card, hideAfterMs, held, onTimeout }: { card: HealthNotifyItem; hideAfterMs: number; held: boolean; onTimeout: (id: string) => void }) {
   const critical = card.machineHealth.level === 'critical';
-  const [hovering, setHovering] = useState(false);
   useEffect(() => {
-    if (critical || hovering) return;
+    if (critical || held) return;
     const timer = window.setTimeout(() => onTimeout(card.id), hideAfterMs);
     return () => window.clearTimeout(timer);
-  }, [critical, hovering, hideAfterMs, onTimeout, card.id]);
+  }, [critical, held, hideAfterMs, onTimeout, card.id]);
   const Icon = KIND_ICON[card.machineHealth.kind];
   return (
     <div
@@ -50,8 +57,6 @@ function HealthPopup({ card, hideAfterMs, onTimeout }: { card: HealthNotifyItem;
       aria-label={cardTitle(card)}
       data-testid="health-popup"
       data-level={card.machineHealth.level}
-      onPointerEnter={() => setHovering(true)}
-      onPointerLeave={() => setHovering(false)}
       // The opaque surface under the tint keeps text readable over whatever the corner covers.
       className={cn('overflow-hidden rounded-[18px] bg-surface-primary shadow-modal ring-1', critical ? 'ring-status-error/40' : 'ring-border-secondary')}
     >

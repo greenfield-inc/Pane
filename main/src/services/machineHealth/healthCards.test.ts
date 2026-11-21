@@ -126,7 +126,7 @@ describe('HealthCardController', () => {
     expect(alerts).toEqual(['Disk is almost full', 'Disk is almost full']);
   });
 
-  it('keeps a critical card through a dip to warning and takes it back once disk recovers', async () => {
+  it('keeps a critical card through a dip to warning, takes it back once disk recovers, and raises the next episode', async () => {
     const { c, asked, withdrawn } = controller(null);
     c.onSnapshot(snapshot('critical'));
     c.onSnapshot(snapshot('warning'));
@@ -137,13 +137,20 @@ describe('HealthCardController', () => {
     c.onSnapshot(snapshot('ok'));
     c.onSnapshot(snapshot('ok'));
     expect(withdrawn).toEqual([{ title: 'Disk is almost full', reason: 'free disk is back above the warning line' }]);
+    c.onSnapshot(snapshot('critical'));
+    expect(asked.map(question => question.title)).toEqual(['Disk is almost full', 'Disk is almost full']);
   });
 
-  it('takes back a waiting memory card when pressure returns to normal', () => {
-    const { c, withdrawn } = controller(null);
+  it('takes back a critical memory card when pressure returns to normal, but keeps a warning card waiting', () => {
+    const { c, asked, withdrawn } = controller(null);
     c.onSnapshot(snapshot('ok', [], 'warning'));
     c.onSnapshot(snapshot('ok', [], 'ok'));
-    expect(withdrawn).toEqual([{ title: 'Memory is tight', reason: 'memory pressure is back to normal' }]);
+    c.onSnapshot(snapshot('ok', [], 'warning'));
+    expect(asked).toHaveLength(1);
+    expect(withdrawn).toEqual([]);
+    c.onSnapshot(snapshot('ok', [], 'critical'));
+    c.onSnapshot(snapshot('ok', [], 'ok'));
+    expect(withdrawn.map(card => card.reason)).toEqual(['it turned critical, and a new card replaces it', 'memory pressure is back to normal']);
   });
 
   it('waits for the storage scan before raising the disk card', async () => {

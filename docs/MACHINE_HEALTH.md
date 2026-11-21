@@ -82,7 +82,7 @@ Review in Resources lets you choose item by item.
 Inside the Pane window, a waiting card also shows as a small popup in the
 bottom-left corner, with **Open Resources** and ✕. It never takes keyboard
 focus. A warning popup hides after Settings › Approvals › Updates hide after
-(6 seconds by default), held while the pointer is over it. A critical one (disk under the
+(6 seconds by default), held while the pointer is over the popups. A critical one (disk under the
 alert figure, memory critical) is tinted red and stays until you dismiss it or
 the condition clears. ✕ dismisses it as on Notify's strip: the card keeps
 waiting in Approvals with every choice. Up to three popups stack, critical
@@ -111,8 +111,9 @@ first.
 
 A card shows once and again only after 6 hours or when it gets worse; Not now
 holds it for 24 hours. A disk or memory card that turns critical replaces its
-warning card, and one whose level returns to normal leaves Approvals, closed
-with the reason. When disk or memory turns critical, a desktop
+warning card. A critical card whose level returns to normal leaves Approvals,
+closed with the reason, and the next time the level turns critical raises a
+new card. A warning card keeps waiting after the level recovers. When disk or memory turns critical, a desktop
 notification also fires, following your notification settings, and says what
 to do. Ask an agent, on a card or on Resources, hands the items to the agent of
 a Session named "Clean up <machine>", starting that Session when none is open,
