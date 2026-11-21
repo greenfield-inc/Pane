@@ -616,6 +616,8 @@ function LinkedComputerRow({ computer, controller, onOutcome }: { computer: Remo
   );
 }
 
+const certificateDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+
 /** Which CA issued this computer's relay certificate, and until when; nothing until it has one. */
 function RelayCertificateRow() {
   const [certificate, setCertificate] = useState<RelayStatus['certificate']>(null);
@@ -629,14 +631,13 @@ function RelayCertificateRow() {
     return () => { current = false; off(); };
   }, []);
   if (!certificate) return null;
-  const date = (iso: string) => new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   return (
     <SettingRow
       label="Certificate"
-      description={`Issued by ${certificate.issuer}. Pane renews it on ${date(certificate.renewAt)}.`}
+      description={`Issued by ${certificate.issuer}. Pane renews it on ${certificateDate(certificate.renewAt)}.`}
       className={CARD_ROW}
     >
-      <span className="text-sm text-text-secondary sm:text-right">Valid until {date(certificate.notAfter)}</span>
+      <span className="text-sm text-text-secondary sm:text-right">Valid until {certificateDate(certificate.notAfter)}</span>
     </SettingRow>
   );
 }

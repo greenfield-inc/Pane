@@ -104,9 +104,9 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(dialog.getByText('New pairings through Pane relay are paused until')).toBeVisible();
     await expect(qr(page)).toHaveCount(0);
     const code = dialog.locator('[data-paused]');
-    await expect(code).toHaveAttribute('aria-label', /^Not accepting new phone pairings through Pane relay right now: this week's certificate limit is used up\. Try again after .+, or connect with Tailscale instead\.$/);
+    await expect(code).toHaveAttribute('aria-label', /^Not accepting new phone pairings through Pane relay right now: both certificate services are turning away new computers\. Try again after .+, or connect with Tailscale instead\.$/);
     await code.hover();
-    await expect(page.getByRole('tooltip')).toContainText("this week's certificate limit is used up");
+    await expect(page.getByRole('tooltip')).toContainText('both certificate services are turning away new computers');
     await shot(page, `dialog-limited-${theme}`);
     await dialog.getByRole('tab', { name: 'Computer' }).click();
     await expect(dialog.getByRole('button', { name: 'Copy link' })).toBeDisabled();

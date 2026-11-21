@@ -204,9 +204,12 @@ and answers `{"t":"ok","req":"<n>","keyId":"...","hmacKey":"<base64>","email":".
 requires on every account, so no computer sends its own.
 The key goes only to the computer that asked; the relay never logs it.
 Errors: `unconfigured` (no `--eab-project` or `--acme-email`), `throttled` (past
-`--limit-eab-per-day`), `provider` (the API refused; the message says why).
-A computer counts `unconfigured` and `throttled` as Google Trust Services
-refusing.
+`--limit-eab-per-day` or `--limit-eab-per-hour`), `provider` (the API refused
+or didn't answer within 15 s; the message says why, and the key isn't counted).
+A computer counts `throttled` as Google Trust Services refusing for now, and
+`unconfigured`, or no answer within 20 s, as Google Trust Services being
+unavailable. The relay logs each key's id (public in every ACME request the
+account signs) with the computer id, so an account can be traced to a computer.
 
 ## Data connection
 
@@ -343,8 +346,9 @@ Open connections stay open.
   home or small site, so a sender cannot spread over its /64s.
 - Per computer address, computers new to the relay: 20 an hour
   (`--limit-new-ids-per-hour`); past it they get `over-limit`.
-- Per computer, Google Trust Services EAB keys: 3 a day
-  (`--limit-eab-per-day`); past it `eab` frames get `throttled`.
+- Google Trust Services EAB keys: 3 a day per computer
+  (`--limit-eab-per-day`) and 20 an hour per relay (`--limit-eab-per-hour`);
+  past either, `eab` frames get `throttled`.
 - Computers in the registry: 250,000 (`--max-computers`). A new computer in
   a full registry takes the place of the one offline longest. Only when
   every computer is online does it get `full` (a helper skips the new ids it

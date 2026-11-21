@@ -7,5 +7,5 @@ export function relayLimitTime(until: string, now = new Date()): string {
 
 /** The full reason Pane relay pairs no new devices (`RelayStatus.certificateLimit`), for tooltips and labels. */
 export function relayLimitSentence(until: string): string {
-  return `Not accepting new phone pairings through Pane relay right now: this week's certificate limit is used up. Try again after ${relayLimitTime(until)}, or connect with Tailscale instead.`;
+  return `Not accepting new phone pairings through Pane relay right now: both certificate services are turning away new computers. Try again after ${relayLimitTime(until)}, or connect with Tailscale instead.`;
 }

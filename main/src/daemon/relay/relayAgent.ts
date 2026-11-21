@@ -2,6 +2,7 @@ import tls from 'tls';
 import type { Duplex } from 'stream';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../../shared/validation/boundaryDecoder';
 import { signRelayChallenge, type ComputerKey } from './computerKey';
+import type { ExternalAccountKey } from './computerCertificate';
 
 export type RelayAgentState =
   | { status: 'connecting'; attempt: number; lastError: string | null }
@@ -158,7 +159,7 @@ export class RelayAgent {
    * EAB keys): for its staging CA when `staging`, with the relay's contact email for the account.
    * The key is a secret: it is never logged.
    */
-  async externalAccountKey(staging: boolean): Promise<{ keyId: string; hmacKey: string; email?: string }> {
+  async externalAccountKey(staging: boolean): Promise<ExternalAccountKey> {
     const answer = await this.request({ t: 'eab', staging });
     if (!answer.keyId || !answer.hmacKey) throw new Error('The relay answered without a Google Trust Services key.');
     return { keyId: answer.keyId, hmacKey: answer.hmacKey, email: answer.email };
@@ -187,7 +188,7 @@ export class RelayAgent {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.requests.delete(req);
-        reject(new Error('The relay did not answer within 20 seconds.'));
+        reject(new RelayRequestError('timeout', 'The relay did not answer within 20 seconds.'));
       }, 20_000);
       this.requests.set(req, {
         resolve: (answer) => { clearTimeout(timer); resolve(answer); },

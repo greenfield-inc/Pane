@@ -59,9 +59,9 @@ Every flag also reads the environment variable in brackets.
 | `--listen` [`PANE_RELAY_LISTEN`] | `0.0.0.0:443` (`127.0.0.1:8443` with `--dev`) | TLS listen address |
 | `--cert`, `--key` [`PANE_RELAY_CERT`, `PANE_RELAY_KEY`] | | PEM certificate and key for `<D>` and `<region>.relay.<D>`; win over `--acme-cache` |
 | `--acme-cache` [`PANE_RELAY_ACME_CACHE`] | | Get the certificate from an ACME CA with DNS-01 and keep the account, key and certificate in this folder (mode 0600); renewed with a third of its lifetime left, without a restart |
-| `--acme-email` [`PANE_RELAY_ACME_EMAIL`] | | Contact email for the ACME account |
+| `--acme-email` [`PANE_RELAY_ACME_EMAIL`] | | Contact email for the relay's ACME account, and for every computer's Google Trust Services account (use a role mailbox) |
 | `--acme-directory` [`PANE_RELAY_ACME_DIRECTORY`] | Let's Encrypt production | ACME directory URL; staging is `https://acme-staging-v02.api.letsencrypt.org/directory` |
-| `--caa-issuer` [`PANE_RELAY_CAA_ISSUER`] | `letsencrypt.org,pki.goog` | Helper role: the CAs named in CAA records, comma-separated (Let's Encrypt and Google Trust Services). `<D>` allows them and no wildcard; each `<id>.<D>` allows them, wildcard included, through DNS-01 only. Set it to your CA's domain with `--acme-directory`, or empty to serve no CAA |
+| `--caa-issuer` [`PANE_RELAY_CAA_ISSUER`] | `letsencrypt.org,pki.goog` | Helper role: the CAs named in CAA records, comma-separated (Let's Encrypt and Google Trust Services). `<D>` allows them and no wildcard; each `<id>.<D>` allows them, wildcard included, through DNS-01 only. Add your CA's domain to the list with `--acme-directory` (computers still order from Let's Encrypt and Google Trust Services), or set it empty to serve no CAA |
 | `--dev` [`PANE_RELAY_DEV`] | off | Generate a self-signed certificate when `--cert`/`--key` are absent |
 | `--relays` [`PANE_RELAY_RELAYS`] | this region | `us=us.relay.D,eu=eu.relay.D` for `GET /v1/relays` |
 | `--public-ip` [`PANE_RELAY_PUBLIC_IP`] | | IPv4 that DNS returns for `<D>` and for regions without `--region-ip` |
@@ -89,7 +89,8 @@ Every flag also reads the environment variable in brackets.
 | `--fcm-service-account` [`PANE_RELAY_FCM_SERVICE_ACCOUNT`] | | Firebase service account JSON key |
 | `--fcm-project` [`PANE_RELAY_FCM_PROJECT`] | | Firebase project id. Alone, Android alerts use the access token of the service account attached to the Google Compute Engine VM, from the metadata server, with no key file. With `--fcm-service-account`, overrides that key's project. With neither flag, Android alerts answer `unconfigured` |
 | `--eab-project` [`PANE_RELAY_EAB_PROJECT`] | | Google Cloud project whose Public CA API mints computers' one-time EAB keys for Google Trust Services, the CA computers fall back to when Let's Encrypt refuses. Needs `--acme-email`, which computers register their accounts with. Uses the VM's service account through the metadata server, which needs `roles/publicca.externalAccountKeyCreator` and the `cloud-platform` scope. Without it, `eab` frames answer `unconfigured` |
-| `--limit-eab-per-day` [`PANE_RELAY_LIMIT_EAB_PER_DAY`] | 3 | EAB keys per computer a day; then `throttled` |
+| `--limit-eab-per-day` [`PANE_RELAY_LIMIT_EAB_PER_DAY`] | 3 | EAB keys per computer a day; then `throttled`. A failed mint doesn't count |
+| `--limit-eab-per-hour` [`PANE_RELAY_LIMIT_EAB_PER_HOUR`] | 20 | EAB keys an hour across this relay's computers; then `throttled`. Four relays at the default stay under Google Trust Services' 100 new accounts an hour per project |
 | `--limit-alerts-per-hour` | 60 | Per computer, over a sliding hour; then `throttled` |
 | `--limit-alerts-per-token-per-hour` | 30 | Per device token across all computers, over a sliding hour; then `throttled` |
 

@@ -32,10 +32,12 @@ function decode<Value>(part: string | undefined, schema: BoundarySchema<Value>):
 
 /**
  * A small ACME server, as Google Trust Services works: it registers an account only with a contact
- * and a valid, unused EAB key from `externalAccountKeys`, passes DNS-01 challenges without looking, and answers
+ * and a valid, unused EAB key from `externalAccountKeys` (or any account, like Let's Encrypt, when
+ * `externalAccountRequired` is false), passes DNS-01 challenges without looking, and answers
  * every finalized order with `certificate`. It checks no JWS signatures besides the EAB's.
  */
-export async function startIssuingCa(options: { certificate: string; externalAccountKeys: ExternalAccountKey[] }): Promise<IssuingCa> {
+export async function startIssuingCa(options: { certificate: string; externalAccountKeys: ExternalAccountKey[]; externalAccountRequired?: boolean }): Promise<IssuingCa> {
+  const eabRequired = options.externalAccountRequired ?? true;
   const unused = new Map(options.externalAccountKeys.map((key) => [key.keyId, key.hmacKey]));
   const accounts: { jwk: string; eabKeyId: string | null }[] = [];
   const authorizations = new Map<string, { value: string; wildcard: boolean; valid: boolean }>();
@@ -78,6 +80,11 @@ export async function startIssuingCa(options: { certificate: string; externalAcc
         }
         if (payload.onlyReturnExisting) {
           problem(400, 'accountDoesNotExist', 'No account exists with the provided key');
+          return;
+        }
+        if (!eabRequired) {
+          accounts.push({ jwk, eabKeyId: null });
+          json(201, { status: 'valid' }, { Location: `${base}/account/${accounts.length - 1}` });
           return;
         }
         if (!payload.contact?.length) {

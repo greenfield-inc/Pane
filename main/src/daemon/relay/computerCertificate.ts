@@ -23,11 +23,22 @@ export interface CertificateStatus {
   issuer: string;
 }
 
-/** The CA refused for now because of its rate limits; `retryAt` is when it said to ask again, if it said. */
+/**
+ * The CA refused for now because of its rate limits; `retryAt` is when it said to ask again, if it
+ * said. `refusedBy` names the CAs that refused, when more than one was asked.
+ */
 export class CertificateRateLimited extends Error {
-  constructor(message: string, readonly retryAt: number | null) {
+  constructor(message: string, readonly retryAt: number | null, readonly refusedBy: string[] = []) {
     super(message);
     this.name = 'CertificateRateLimited';
+  }
+}
+
+/** A CA this computer can't use at all right now, as when its relay has no EAB keys to give: the next CA is asked. */
+export class CertificateAuthorityUnavailable extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CertificateAuthorityUnavailable';
   }
 }
 
@@ -42,7 +53,8 @@ export interface CertificateAuthority {
   accountStore: KeyStore;
   /**
    * A one-time EAB key for registering a new account, for a CA that requires one, with the contact
-   * email to register it with; throws `CertificateRateLimited` when none is to be had.
+   * email to register it with. Throws `CertificateRateLimited` when none is to be had for now, and
+   * `CertificateAuthorityUnavailable` when none will be.
    */
   externalAccountKey?(): Promise<ExternalAccountKey>;
 }
@@ -113,26 +125,36 @@ export class ComputerCertificate {
   }
 
   /**
-   * Orders from each CA in turn, the one that issued the current certificate first; a CA that
-   * refuses for its rate limits passes the order on. Throws `CertificateRateLimited` when every CA
-   * refused, with the earliest time one said to ask again.
+   * Orders from each CA in turn, the one that issued the current certificate first. A CA that
+   * refuses for its rate limits, or can't be used, passes the order on; so does the issuing CA on
+   * any failure, as when a relay rollback took it out of CAA. Throws `CertificateRateLimited` when
+   * every usable CA refused: with the earliest time one gave, or none when one refused without a
+   * time, so Pane asks again soon instead of waiting for a later CA's date.
    */
   private async issue(): Promise<void> {
     const issuer = this.status?.issuer ?? '';
-    const authorities = [...this.options.authorities].sort((a, b) => Number(issuer.includes(b.name)) - Number(issuer.includes(a.name)));
-    const refusals: CertificateRateLimited[] = [];
-    for (const authority of authorities) {
+    const issuedBy = (authority: CertificateAuthority) => issuer.includes(authority.name);
+    const authorities = [...this.options.authorities].sort((a, b) => Number(issuedBy(b)) - Number(issuedBy(a)));
+    const refusals: { name: string; error: CertificateRateLimited }[] = [];
+    let failure: Error | null = null;
+    for (const [index, authority] of authorities.entries()) {
       try {
         await this.order(authority);
         return;
       } catch (error) {
-        if (!(error instanceof CertificateRateLimited)) throw error;
-        this.options.log?.(`[relay] ${authority.name} refused a certificate: ${error.message}`);
-        refusals.push(new CertificateRateLimited(`${authority.name}: ${error.message}`, error.retryAt));
+        const reason = error instanceof Error ? error : new Error(String(error));
+        this.options.log?.(`[relay] ${authority.name} did not issue a certificate: ${reason.message}`);
+        if (reason instanceof CertificateRateLimited) refusals.push({ name: authority.name, error: reason });
+        else if (reason instanceof CertificateAuthorityUnavailable) failure ??= reason;
+        else if (index === 0 && issuedBy(authority) && authorities.length > 1) failure = reason;
+        else throw reason;
       }
     }
-    const times = refusals.flatMap((refusal) => (refusal.retryAt === null ? [] : [refusal.retryAt]));
-    throw new CertificateRateLimited(refusals.map((refusal) => refusal.message).join(' '), times.length ? Math.min(...times) : null);
+    if (refusals.length === 0) throw failure ?? new Error('No certificate authority is set up.');
+    const times = refusals.map(({ error }) => error.retryAt);
+    const retryAt = times.includes(null) ? null : Math.min(...times.filter((time): time is number => time !== null));
+    const message = refusals.map(({ name, error }) => `${name}: ${error.message}`).join(' ');
+    throw new CertificateRateLimited(message, retryAt, refusals.map(({ name }) => name));
   }
 
   private async order(authority: CertificateAuthority): Promise<void> {

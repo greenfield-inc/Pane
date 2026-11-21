@@ -98,7 +98,7 @@ describe('relay service', () => {
     }
   }, 30_000);
 
-  it('says both certificate services are turning the computer away when the relay has no Google Trust Services keys', async () => {
+  it('names only Let\'s Encrypt when the relay has no Google Trust Services keys to give', async () => {
     const relay = await startFakeRelay();
     const letsEncrypt = await startRefusingCa(letsEncryptLimit(new Date(Date.now() + 30 * 60_000)));
     const gts = await startIssuingCa({ certificate: '', externalAccountKeys: [] });
@@ -119,9 +119,43 @@ describe('relay service', () => {
     });
     try {
       service.start();
-      await vi.waitFor(() => expect(service.getStatus().lastError).toMatch(/Let's Encrypt and Google Trust Services, which issue them, are turning away new computers until /u), { timeout: 10_000 });
+      await vi.waitFor(() => expect(service.getStatus().lastError).toMatch(/and Let's Encrypt, which issues them, is turning away new computers until /u), { timeout: 10_000 });
       expect(service.getStatus().phase).toBe('error');
+      expect(relay.eabRequests).toEqual([true]);
       expect(gts.orders()).toBe(0);
+    } finally {
+      await service.stop();
+      relay.close();
+      await letsEncrypt.close();
+      await gts.close();
+    }
+  }, 30_000);
+
+  it('names both certificate services and asks again within minutes when the relay has no keys left for today', async () => {
+    const relay = await startFakeRelay({ externalAccountKey: 'throttled' });
+    const letsEncrypt = await startRefusingCa(letsEncryptLimit(new Date(Date.now() + 5 * 24 * 60 * 60_000)));
+    const gts = await startIssuingCa({ certificate: '', externalAccountKeys: [] });
+    const service = new RelayService({
+      settings: () => ({ enabled: true, relayAddress: `${RELAY_HOST}:${relay.controlPort}` }),
+      onSettingsChanged: () => () => {},
+      secrets: { read: async () => null, write: async () => {} },
+      dataDir: mkdtempSync(join(tmpdir(), 'pane-relay-service-')),
+      pairingListener: () => ({ port: 1 }),
+      previewPort: () => null,
+      displayName: () => 'Studio Mac',
+      addClient: async () => {},
+      env: {
+        PANE_RELAY_CONNECT_HOST: '127.0.0.1', PANE_RELAY_CA: join(__dirname, '__fixtures__', 'ca.pem'),
+        PANE_ACME_DIRECTORY: letsEncrypt.directoryUrl, PANE_ACME_FALLBACK_DIRECTORY: gts.directoryUrl,
+        PANE_DIRECT_BIN: join(tmpdir(), 'no-pane-direct-here'),
+      },
+    });
+    try {
+      service.start();
+      await vi.waitFor(() => expect(service.getStatus().lastError).toMatch(/Let's Encrypt and Google Trust Services, which issue them, are turning away new computers until /u), { timeout: 10_000 });
+      // The pause ends at the usual backoff (at most 30 minutes), not Let's Encrypt's date 5 days out.
+      const until = Date.parse(service.getStatus().certificateLimit?.until ?? '');
+      expect(until - Date.now()).toBeLessThan(31 * 60_000);
     } finally {
       await service.stop();
       relay.close();

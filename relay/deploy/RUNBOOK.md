@@ -73,8 +73,9 @@ Merging the PR to `main` does not release the desktop app.
    per registered domain; ask Let's Encrypt for a rate limit increase if
    sign-ups outpace it. A computer that Let's Encrypt turns away orders from
    Google Trust Services instead (100 orders an hour for the project, renewals
-   included). Only when both refuse does **Add a device** say so and ask again
-   at the time Let's Encrypt gives.
+   included). Only when both refuse does **Add a device** say so and ask again:
+   at the time Let's Encrypt gives when Google Trust Services can't be used,
+   otherwise within 30 minutes.
 8. **Release the desktop app** through the normal [stable release](../../RUNBOOK.md#stable-release),
    then pair a phone with a QR code against production
    ([QR pairing](../../docs/QR_PAIRING.md)).
@@ -85,13 +86,22 @@ Rerun the workflow with `apply` on from the commit to deploy: it pushes
 `pane-relay:<commit>` and restarts each VM on it. Computers reconnect on their
 own within 30 seconds. To roll back, run it from the earlier commit.
 
-## Watch
+- **Deploy the relays before releasing a desktop build that needs a new relay
+  feature.** A desktop with the Google Trust Services fallback asks its relay
+  for EAB keys; an older relay never answers, so the fallback is skipped.
+- A rollback to a commit before the Google Trust Services fallback drops
+  `pki.goog` from CAA, and computers holding a Google Trust Services
+  certificate then renew at Let's Encrypt. Keep `--caa-issuer
+  letsencrypt.org,pki.goog` on such a rollback when Let's Encrypt is still
+  refusing new computers.
 
-- Google Trust Services keys: `docker logs pane-relay | grep 'EAB key'` shows
-  each key minted or failed, by computer id; never the key itself.
+## Watch
 
 - Uptime checks `pane-relay-us`, `-eu`, `-asia`, `-west` in Cloud Monitoring.
 - Logs: `gcloud compute ssh pane-relay-us --zone us-central1-a -- docker logs pane-relay`.
   They show ids, IP addresses, byte counts and close reasons, never payloads.
 - Block a computer: add its id to the blocklist file and pass `--blocklist`
   (see [relay/README.md](../README.md)).
+- Google Trust Services keys: the logs show each key minted (`EAB key minted`,
+  with the computer id and the key id, never the key itself) or failed, and
+  `EAB keys throttled relay-wide` when a relay reaches its hourly cap.

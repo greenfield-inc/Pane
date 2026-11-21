@@ -10,7 +10,7 @@ import type { RelayComputer, RelayDirectEndpoint, RelayLinkLifetime, RelayPairin
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { loadComputerKey, type ComputerKey, type KeyStore } from './computerKey';
 import {
-  CertificateRateLimited, ComputerCertificate, GOOGLE_TRUST_SERVICES_DIRECTORY, GOOGLE_TRUST_SERVICES_STAGING_DIRECTORY,
+  CertificateAuthorityUnavailable, CertificateRateLimited, ComputerCertificate, GOOGLE_TRUST_SERVICES_DIRECTORY, GOOGLE_TRUST_SERVICES_STAGING_DIRECTORY,
   LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY, type CertificateAuthority, type ExternalAccountKey,
 } from './computerCertificate';
 import { createComputerTlsServer, type ComputerTlsServer } from './computerTlsServer';
@@ -304,11 +304,7 @@ export class RelayService {
 
   private async startup(target: string): Promise<void> {
     this.lastError = null;
-    const store = (name: string): KeyStore => ({
-      read: () => this.deps.secrets.read(name),
-      write: (value) => this.deps.secrets.write(name, value),
-    });
-    this.key ??= await loadComputerKey(store('relay/computer-key'));
+    this.key ??= await loadComputerKey(this.secretStore('relay/computer-key'));
     const key = this.key;
     const { host, port } = target ? parseHostPort(target) : { host: await nearestRelay(PANE_RELAYS), port: 443 };
     this.relayHost = target || host;
@@ -362,7 +358,8 @@ export class RelayService {
       this.certificateDomain = domain;
       const authorities = this.certificateAuthorities();
       // A staging certificate is kept apart, so switching to a trusted CA orders a new one instead of loading it.
-      const staging = authorities[0]?.directoryUrl === LETS_ENCRYPT_STAGING_DIRECTORY ? '.staging' : '';
+      const stagingDirectories = [LETS_ENCRYPT_STAGING_DIRECTORY, GOOGLE_TRUST_SERVICES_STAGING_DIRECTORY];
+      const staging = authorities.some((authority) => stagingDirectories.includes(authority.directoryUrl)) ? '.staging' : '';
       this.certificate = new ComputerCertificate({
         key,
         domain,
@@ -406,16 +403,12 @@ export class RelayService {
    * pins one CA (tests, self-tests); `PANE_ACME_FALLBACK_DIRECTORY` adds a fallback to it.
    */
   private certificateAuthorities(): CertificateAuthority[] {
-    const secretStore = (name: string) => ({
-      read: () => this.deps.secrets.read(name),
-      write: (value: string) => this.deps.secrets.write(name, value),
-    });
     const pinned = this.env.PANE_ACME_DIRECTORY;
     const development = this.deps.developmentBuild === true;
     const primary: CertificateAuthority = {
       name: "Let's Encrypt",
       directoryUrl: pinned ?? (development ? LETS_ENCRYPT_STAGING_DIRECTORY : LETS_ENCRYPT_DIRECTORY),
-      accountStore: secretStore('relay/acme-account'),
+      accountStore: this.secretStore('relay/acme-account'),
     };
     const fallbackUrl = this.env.PANE_ACME_FALLBACK_DIRECTORY
       ?? (pinned ? undefined : development ? GOOGLE_TRUST_SERVICES_STAGING_DIRECTORY : GOOGLE_TRUST_SERVICES_DIRECTORY);
@@ -423,22 +416,32 @@ export class RelayService {
     return [primary, {
       name: 'Google Trust Services',
       directoryUrl: fallbackUrl,
-      accountStore: secretStore('relay/acme-account-gts'),
+      accountStore: this.secretStore('relay/acme-account-gts'),
       // Anything but the trusted CA gets a staging key, so a test never spends a production one.
       externalAccountKey: () => this.externalAccountKey(fallbackUrl !== GOOGLE_TRUST_SERVICES_DIRECTORY),
     }];
   }
 
-  /** A relay that has no keys to give, or none left for this computer today, counts as Google Trust Services refusing. */
+  private secretStore(name: string): KeyStore {
+    return {
+      read: () => this.deps.secrets.read(name),
+      write: (value) => this.deps.secrets.write(name, value),
+    };
+  }
+
+  /**
+   * A relay with no keys left for now counts as Google Trust Services refusing; one that has none to
+   * give, or doesn't answer (a relay from before EAB keys), makes it unavailable.
+   */
   private async externalAccountKey(staging: boolean): Promise<ExternalAccountKey> {
     const agent = this.agent;
     if (!agent) throw new Error('The relay is not connected.');
     try {
       return await agent.externalAccountKey(staging);
     } catch (error) {
-      if (error instanceof RelayRequestError && (error.code === 'unconfigured' || error.code === 'throttled')) {
-        throw new CertificateRateLimited(error.message, null);
-      }
+      if (!(error instanceof RelayRequestError)) throw error;
+      if (error.code === 'throttled') throw new CertificateRateLimited(error.message, null);
+      if (error.code === 'unconfigured' || error.code === 'timeout') throw new CertificateAuthorityUnavailable(error.message);
       throw error;
     }
   }
@@ -459,7 +462,9 @@ export class RelayService {
         const caTime = error instanceof CertificateRateLimited ? error.retryAt : null;
         const retryAt = this.retryCertificate(caTime);
         this.certificateLimitUntil = error instanceof CertificateRateLimited ? caTime ?? retryAt : null;
-        this.lastError = this.certificateLimitUntil !== null ? certificateRefused(this.certificateLimitUntil, this.certificateAuthorities().map((authority) => authority.name)) : certificateFailed(reasonOf(error), retryAt);
+        this.lastError = error instanceof CertificateRateLimited && this.certificateLimitUntil !== null
+          ? certificateRefused(this.certificateLimitUntil, error.refusedBy)
+          : certificateFailed(reasonOf(error), retryAt);
       }
       this.deps.log?.(`[relay] ${this.lastError}`);
     }

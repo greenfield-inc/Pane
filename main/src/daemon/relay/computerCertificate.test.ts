@@ -6,7 +6,7 @@ import net from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { loadComputerKey, type KeyStore } from './computerKey';
-import { CertificateRateLimited, ComputerCertificate, type CertificateAuthority, type ExternalAccountKey } from './computerCertificate';
+import { CertificateAuthorityUnavailable, CertificateRateLimited, ComputerCertificate, type CertificateAuthority, type ExternalAccountKey } from './computerCertificate';
 import { integrationEnvSet } from './__fixtures__/integrationEnv';
 import { startIssuingCa } from './__fixtures__/issuingCa';
 import { letsEncryptLimit, startRefusingCa } from './__fixtures__/refusingCa';
@@ -136,7 +136,7 @@ describe('falling back to Google Trust Services', () => {
     }
   });
 
-  it('says when Let\'s Encrypt takes orders again when Google Trust Services refuses too', async () => {
+  it('asks again soon, not at Let\'s Encrypt\'s later time, when Google Trust Services refuses too without a time', async () => {
     const letsEncryptCa = await startRefusingCa(letsEncryptLimit(refusedUntil));
     const gtsCa = await startRefusingCa('Quota exceeded for new orders');
     try {
@@ -149,7 +149,8 @@ describe('falling back to Google Trust Services', () => {
       const failure = await certificate.ensure().then(() => null, (error: Error) => error);
 
       expect(failure).toBeInstanceOf(CertificateRateLimited);
-      expect(failure).toMatchObject({ retryAt: refusedUntil.getTime() });
+      // Google's quota is hourly: waiting for Let's Encrypt's date would hold the computer for days.
+      expect(failure).toMatchObject({ retryAt: null, refusedBy: ["Let's Encrypt", 'Google Trust Services'] });
       expect(failure?.message).toMatch(/^Let's Encrypt: too many certificates.* Google Trust Services: Quota exceeded/u);
       expect(gtsCa.orders()).toBe(1);
     } finally {
@@ -158,11 +159,11 @@ describe('falling back to Google Trust Services', () => {
     }
   });
 
-  it('counts a relay with no key to give as Google Trust Services refusing', async () => {
+  it('keeps Let\'s Encrypt\'s time when the relay has no Google Trust Services key to give', async () => {
     const letsEncryptCa = await startRefusingCa(letsEncryptLimit(refusedUntil));
     const gtsCa = await startIssuingCa({ certificate: fixture('gts-computer.pem'), externalAccountKeys: [] });
     try {
-      const gts = googleTrustServices(gtsCa.directoryUrl, [() => Promise.reject(new CertificateRateLimited('This relay does not hand out Google Trust Services keys.', null))]);
+      const gts = googleTrustServices(gtsCa.directoryUrl, [() => Promise.reject(new CertificateAuthorityUnavailable('This relay does not hand out Google Trust Services keys.'))]);
       const certificate = new ComputerCertificate({
         key: await computerKey(), domain: 'relay.test', certificateStore: memory(), setTxt: async () => undefined,
         authorities: [letsEncrypt(letsEncryptCa.directoryUrl), gts.authority],
@@ -171,11 +172,36 @@ describe('falling back to Google Trust Services', () => {
       const failure = await certificate.ensure().then(() => null, (error: Error) => error);
 
       expect(failure).toBeInstanceOf(CertificateRateLimited);
-      expect(failure).toMatchObject({ retryAt: refusedUntil.getTime() });
+      expect(failure).toMatchObject({ retryAt: refusedUntil.getTime(), refusedBy: ["Let's Encrypt"] });
+      expect(gts.asked()).toBe(1);
       expect(gtsCa.accounts()).toEqual([]);
     } finally {
       await letsEncryptCa.close();
       await gtsCa.close();
+    }
+  });
+
+  it('renews at Let\'s Encrypt when Google Trust Services, which issued the certificate, fails', async () => {
+    const letsEncryptCa = await startIssuingCa({ certificate: fixture('computer.pem'), externalAccountKeys: [], externalAccountRequired: false });
+    const gtsCa = await startRefusingCa('unused');
+    await gtsCa.close();
+    try {
+      // A Google Trust Services certificate a third of the way from expiry, and Google out of reach.
+      const certificateStore = memory(fixture('gts-computer.pem'));
+      const renewing = new ComputerCertificate({
+        key: await computerKey(), domain: 'relay.test', certificateStore, setTxt: async () => undefined,
+        authorities: [letsEncrypt(letsEncryptCa.directoryUrl), googleTrustServices(gtsCa.directoryUrl, []).authority],
+        now: () => Date.parse('2100-01-01T00:00:00Z'),
+      });
+      await renewing.load();
+      expect(renewing.getStatus()?.issuer).toBe('Google Trust Services');
+
+      await renewing.ensure();
+
+      expect(letsEncryptCa.orders()).toBe(1);
+      expect(certificateStore.value).toBe(fixture('computer.pem'));
+    } finally {
+      await letsEncryptCa.close();
     }
   });
 });

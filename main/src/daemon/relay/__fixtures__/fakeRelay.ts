@@ -4,6 +4,7 @@ import net, { type AddressInfo } from 'net';
 import { join } from 'path';
 import tls from 'tls';
 import { boundary, decodeBoundary, type JsonObject } from '../../../../../shared/validation/boundaryDecoder';
+import type { ExternalAccountKey } from '../computerCertificate';
 
 const fixture = (name: string) => readFileSync(join(__dirname, name));
 /** The relay's domain; its certificate (relay.pem) names `us.relay.relay.test`. */
@@ -15,7 +16,7 @@ export const RELAY_HOST = `us.relay.${DOMAIN}`;
  * signature, announces each raw client connection with `open`, and splices it to the computer's
  * data connection. Clients connect to it as plain TCP standing in for the relay's port 443.
  */
-export async function startFakeRelay(options: { refuse?: string; externalAccountKey?: { keyId: string; hmacKey: string; email: string } } = {}) {
+export async function startFakeRelay(options: { refuse?: string; externalAccountKey?: ExternalAccountKey | 'throttled' } = {}) {
   const agents: tls.TLSSocket[] = [];
   const waiting = new Map<string, net.Socket>();
   const hellos: JsonObject[] = [];
@@ -62,7 +63,11 @@ export async function startFakeRelay(options: { refuse?: string; externalAccount
             } else if (frame.t === 'eab') {
               eabRequests.push(frame.staging === true);
               const key = options.externalAccountKey;
-              socket.write(`${JSON.stringify(key ? { t: 'ok', req: frame.req, ...key } : { t: 'error', req: frame.req, code: 'unconfigured', message: 'This relay does not hand out Google Trust Services keys.' })}\n`);
+              const answer = key === 'throttled'
+                ? { t: 'error', req: frame.req, code: 'throttled', message: 'At most 3 Google Trust Services keys a day per computer.' }
+                : key ? { t: 'ok', req: frame.req, ...key }
+                  : { t: 'error', req: frame.req, code: 'unconfigured', message: 'This relay does not hand out Google Trust Services keys.' };
+              socket.write(`${JSON.stringify(answer)}\n`);
             }
           }
         });
