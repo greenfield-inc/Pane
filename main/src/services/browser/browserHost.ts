@@ -27,7 +27,7 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
     tabs: (paneId) => panelManager.getPanelsBySessionAndType(paneId, 'browser'),
     tab: (panelId) => panelManager.getPanel(panelId),
     open: (paneId, url, callerPanelId) => {
-      const customState: BrowserPanelState = { currentUrl: url };
+      const customState: BrowserPanelState = { currentUrl: url, agentUse: 'used' };
       return panelManager.createPanel({
         sessionId: paneId,
         type: 'browser',

@@ -1056,7 +1056,15 @@ export function registerPanelHandlers(
   // Register a webview's panel/session context so the did-attach-webview popup handler
   // (in index.ts) can route popups to the correct browser panel.
   ipcMain.handle('browser-panel:register-webview', async (_, wcId: number, panelId: string, sessionId: string) => {
-    getPaneWebviewContextMap().set(wcId, { panelId, sessionId });
+    const viewLive = getPaneWebviewContextMap().get(wcId)?.viewLive;
+    getPaneWebviewContextMap().set(wcId, { panelId, sessionId, viewLive });
+    return { success: true };
+  });
+
+  // Whether a webview's page menu offers View live (BrowserPanel on a desktop showing another computer).
+  ipcMain.handle('browser-panel:offer-live', async (_, wcId: number, on: boolean) => {
+    const context = getPaneWebviewContextMap().get(wcId);
+    if (context) context.viewLive = on;
     return { success: true };
   });
 

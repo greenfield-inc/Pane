@@ -162,7 +162,7 @@ export const BrowserLayer = memo(function BrowserLayer() {
             <PanelErrorBoundary panelId={panel.id}>
               <Suspense fallback={null}>
                 {fromHost
-                  ? <StreamedBrowserPanel panel={panel} isActive={visible} ownCopy={() => <BrowserPanel panel={panel} isActive={visible} />} />
+                  ? <StreamedBrowserPanel panel={panel} isActive={visible} ownCopy={onViewLive => <BrowserPanel panel={panel} isActive={visible} onViewLive={onViewLive} />} />
                   : <BrowserPanel panel={panel} isActive={visible} />}
               </Suspense>
             </PanelErrorBoundary>

@@ -135,7 +135,7 @@ const driverSchema = boundary.optional(boundary.union(
   boundary.object({ by: boundary.literal('person'), agentWaiting: boundary.optional(boundary.string) }),
 ));
 const pageSizeSchema = boundary.object({ width: boundary.number, height: boundary.number, mobile: boundary.boolean, scale: boundary.optional(boundary.number) });
-const tabStateSchema = boundary.object({ currentUrl: boundary.optional(boundary.string), isPopup: boundary.optional(boundary.boolean), driver: driverSchema, pageSize: boundary.optional(pageSizeSchema) });
+const tabStateSchema = boundary.object({ currentUrl: boundary.optional(boundary.string), isPopup: boundary.optional(boundary.boolean), driver: driverSchema, pageSize: boundary.optional(pageSizeSchema), agentUse: boundary.optional(boundary.enumeration('used', 'typed')) });
 /** What a screen showing a tab reports (`browser:watch`); null when it stops showing it. */
 const watchReportSchema = boundary.optional(boundary.object({
   kind: boundary.enumeration('desktop', 'phone', 'web'),
@@ -156,6 +156,8 @@ const inputSchema: BoundarySchema<BrowserInput[]> = boundary.array(boundary.unio
   boundary.object({ kind: boundary.literal('files'), files: boundary.array(boundary.object({ name: boundary.string, data: boundary.string })) }),
   boundary.object({ kind: boundary.literal('files-cancel') }),
 ));
+/** Agent calls that put input into a page, which its URL doesn't hold (BrowserPanelState.agentUse). */
+const TYPING_VERBS: ReadonlySet<VerbRequest['verb']> = new Set(['type', 'select', 'upload', 'press']);
 /** How long a frame read waits on the host for a newer frame before answering "unchanged". */
 const FRAME_WAIT_MS = 1_000;
 /** The screencast stops this long after the last frame read. */
@@ -456,6 +458,11 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     driver = new PageDriver(page, holdSettings.screenshotMs);
     pages.set(page.id, driver);
     page.once('destroyed', () => pages.delete(page.id));
+    // A new document holds nothing an agent typed, so other screens may go back to their own copy.
+    page.on('did-navigate', () => {
+      const tab = host.tab(tabId);
+      if (tab && tabState(tab).agentUse === 'typed') void host.update(tab, { ...tabState(tab), agentUse: 'used' }).catch(() => undefined);
+    });
     // The person touching a page an agent drives takes it over until they stop (TOUCH_HOLD_MS).
     page.on('input-event', (_event, input) => {
       if (!['mouseDown', 'rawKeyDown', 'keyDown', 'mouseWheel', 'touchStart', 'gestureScrollBegin'].includes(input.type)) return;
@@ -636,12 +643,25 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       host.setBusy(tab.id, false);
     }
     refuseNonWebPage(contents, 'is now on');
+    if (write) await noteAgentUse(tab.id, TYPING_VERBS.has(request.verb) ? 'typed' : 'used');
     if (outcome.cursor) {
       host.showCursor(tab.id, outcome.cursor.x, outcome.cursor.y);
       agentCursors.set(tab.id, { ...outcome.cursor, at: Date.now() });
       changedView(tab.id);
     }
     return outcome;
+  }
+
+  /**
+   * Records what an agent did on a tab, for the screens showing it: any action makes it `used`; typing
+   * into its page makes it `typed` until the page loads a new document (driverFor).
+   */
+  async function noteAgentUse(tabId: string, use: 'used' | 'typed'): Promise<void> {
+    const tab = host.tab(tabId);
+    if (!tab) return;
+    const state = tabState(tab);
+    if (state.agentUse === use || (use === 'used' && state.agentUse === 'typed')) return;
+    await host.update(tab, { ...state, agentUse: use });
   }
 
   /**

@@ -20,15 +20,16 @@ const invokeHost = (channel: string, ...args: Parameters<Parameters<typeof useSt
 /**
  * A browser tab on a desktop showing another computer's Pane. It shows this desktop's own copy
  * (`ownCopy`, loaded through the host's file and port routes for host files and dev servers) until
- * an agent acts on the page; then it streams the host's page, where the agent works, until 30 s after
- * the last input by anyone (the agent's, or the person's after a Take over) or Back to my copy (docs/BROWSER_AGENTS.md). Host files and dev servers
+ * an agent acts on the page or the person chooses View live; then it streams the host's page, where the agent works, until 30 s after
+ * the last input by anyone (the agent's, or the person's after a Take over), or for a page the agent typed into or View live, until Back to my copy (docs/BROWSER_AGENTS.md). Host files and dev servers
  * always stay a copy, which live-reloads with the agent's edits.
  */
-export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: ToolPanel; isActive: boolean; ownCopy: () => ReactNode }) {
+export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: ToolPanel; isActive: boolean; ownCopy: (onViewLive?: () => void) => ReactNode }) {
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const state = panel.state.customState as BrowserPanelState | undefined;
-  const choice = useStreamChoice(state?.driver?.by === 'agent');
-  if (isHostLocalUrl(state?.currentUrl) || !choice.stream) return <>{ownCopy()}</>;
+  const choice = useStreamChoice(panel.id, state);
+  const hostLocal = isHostLocalUrl(state?.currentUrl);
+  if (hostLocal || !choice.stream) return <>{ownCopy(state?.agentUse && !hostLocal ? choice.live : undefined)}</>;
   return <HostStreamPanel panel={panel} isActive={isActive} ownCopy={ownCopy} onBack={choice.back} onInput={choice.input} />;
 }
 
@@ -36,7 +37,7 @@ export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: Tool
  * The host's page as a stream: this desktop draws its frames and sends input back. A host on an
  * older Pane streams nothing: `ownCopy` then renders this desktop's own copy.
  */
-function HostStreamPanel({ panel, isActive, ownCopy, onBack, onInput }: { panel: ToolPanel; isActive: boolean; ownCopy: () => ReactNode; onBack(): void; onInput(): void }) {
+function HostStreamPanel({ panel, isActive, ownCopy, onBack, onInput }: { panel: ToolPanel; isActive: boolean; ownCopy: (onViewLive?: () => void) => ReactNode; onBack(): void; onInput(): void }) {
   const client = useMemo(() => streamClient((channel, ...args) => window.electronAPI.invoke(channel, ...args)), []);
   const stream = useBrowserStream(client, panel.id, isActive);
   // This desktop reports the stream's own box (below the address bar), so a Take over sizes the page to it.

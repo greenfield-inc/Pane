@@ -655,7 +655,7 @@ describe('daemon registry IPC bindings', () => {
     expect(
       ipcMain.boundChannels.filter(
         channel => channel !== 'terminal:clipboard-paste-image' && channel !== 'browser-panel:register-webview'
-          && channel !== 'browser-panel:prepare-file' && channel !== 'browser-data:clear',
+          && channel !== 'browser-panel:prepare-file' && channel !== 'browser-panel:offer-live' && channel !== 'browser-data:clear',
       ).sort(),
     ).toEqual([...PANEL_CHANNELS].sort());
     expect(registry.has('terminal:clipboard-paste-image')).toBe(false);

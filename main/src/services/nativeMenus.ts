@@ -136,21 +136,24 @@ const CONTEXT_MENU_DISMISS_GRACE_MS = 100;
 
 /**
  * Right-click on editable fields, selected text and links opens the native edit menu;
- * a link gets Open in System Browser and Copy Link.
+ * a link gets Open in System Browser and Copy Link. `leading` adds items that open the menu
+ * anywhere on the page (a browser tab's View live).
  * Pane's own menus (sidebar rows, file tree, terminals through
  * showContextMenu) call preventDefault on the DOM event, so Chromium never
  * raises this event for them.
  */
-export function attachEditContextMenu(contents: WebContents): void {
+export function attachEditContextMenu(contents: WebContents, leading: () => MenuItemConstructorOptions[] = () => []): void {
   contents.on('context-menu', (_event, params) => {
     // A right click an agent or another screen sent never opens a menu on this computer's screen.
     if (syntheticInputInFlight(contents.id)) return;
     const { editFlags, isEditable, misspelledWord, dictionarySuggestions } = params;
     const selection = params.selectionText.trim();
     const link = externalUrlOrNull(params.linkURL);
-    if (!isEditable && !selection && !link) return;
+    const first = leading();
+    if (!isEditable && !selection && !link && first.length === 0) return;
 
-    const items: MenuItemConstructorOptions[] = [];
+    const items: MenuItemConstructorOptions[] = [...first];
+    if (first.length > 0 && (isEditable || selection || link)) items.push({ type: 'separator' });
     // A link in a browser tab, a chat message or a card can always go to the system browser.
     if (link) {
       items.push(

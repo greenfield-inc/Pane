@@ -5,6 +5,8 @@ import { noopPaneEventSink, type PaneEventSink } from './eventSink';
 export interface PaneWebviewContext {
   panelId: string;
   sessionId: string;
+  /** The tab is this desktop's own copy of another computer's page an agent used: its page menu offers View live. */
+  viewLive?: boolean;
 }
 
 export interface PtyHandleLike {

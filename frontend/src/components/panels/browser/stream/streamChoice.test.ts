@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { initialStreamChoice, streamChoice, type StreamChoice } from '../../../../../../shared/utils/streamChoice';
+import type { BrowserPanelState } from '../../../../../../shared/types/panels';
+import { initialStreamChoice, offersViewLive, streamChoice, streamChoices, viewLive, type StreamChoice } from '../../../../../../shared/utils/streamChoice';
 
 const agent = (state: StreamChoice, driving: boolean, at: number) => streamChoice(state, { kind: 'agent', driving, at });
 const input = (state: StreamChoice, at: number) => streamChoice(state, { kind: 'input', at });
 const tick = (state: StreamChoice, at: number) => streamChoice(state, { kind: 'tick', at });
+const typed = (state: StreamChoice, on: boolean, at: number) => streamChoice(state, { kind: 'typed', typed: on, at });
 
 describe('streamChoice', () => {
   it('shows the own copy until an agent acts, then streams', () => {
@@ -55,5 +57,47 @@ describe('streamChoice', () => {
     expect(state.stream).toBe(false);
     state = agent(state, true, 20_000);
     expect(state.stream).toBe(true);
+  });
+
+  it('keeps streaming a page the agent typed into long after it stops, until Back to my copy', () => {
+    // The agent fills page 2 of a form whose state its URL doesn't hold, then stops.
+    let state = typed(agent(initialStreamChoice(false), true, 0), true, 5_000);
+    state = agent(state, false, 6_000);
+    expect(tick(state, 600_000).stream).toBe(true);
+    state = streamChoice(state, { kind: 'back' });
+    expect(state.stream).toBe(false);
+    // The agent's next action streams it again.
+    expect(agent(state, true, 700_000).stream).toBe(true);
+  });
+
+  it('goes back 30 s after the typed page loads a new document', () => {
+    let state = agent(typed(agent(initialStreamChoice(false), true, 0), true, 1_000), false, 2_000);
+    state = typed(state, false, 100_000);
+    expect(tick(state, 129_999).stream).toBe(true);
+    expect(tick(state, 130_000).stream).toBe(false);
+  });
+
+  it('streams a tab the agent typed into on a screen that opens it later', () => {
+    expect(initialStreamChoice(false, true).stream).toBe(true);
+  });
+});
+
+describe('View live', () => {
+  const formTab: BrowserPanelState = { currentUrl: 'https://letsencrypt.formstack.com/forms/isrg_sponsorship', agentUse: 'used' };
+
+  it('is offered on a tab an agent used while it shows the own copy, and streams it until Back to my copy', () => {
+    expect(offersViewLive('form-1', formTab)).toBe(true);
+    viewLive('form-1', formTab);
+    expect(streamChoices.get('form-1')?.stream).toBe(true);
+    expect(offersViewLive('form-1', formTab)).toBe(false);
+    streamChoices.dispatch('form-1', { kind: 'tick', at: Date.now() + 600_000 }, () => initialStreamChoice(false));
+    expect(streamChoices.get('form-1')?.stream).toBe(true);
+    streamChoices.dispatch('form-1', { kind: 'back' }, () => initialStreamChoice(false));
+    expect(offersViewLive('form-1', formTab)).toBe(true);
+  });
+
+  it('is not offered on a tab no agent used, or on a host dev server', () => {
+    expect(offersViewLive('plain', { currentUrl: 'https://example.com/' })).toBe(false);
+    expect(offersViewLive('dev', { currentUrl: 'http://localhost:5173/', agentUse: 'typed' })).toBe(false);
   });
 });

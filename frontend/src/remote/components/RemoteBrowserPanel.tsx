@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Copy, ExternalLink, List, Loader2, RotateCw } from 'lucide-react';
+import { Check, Copy, ExternalLink, List, Loader2, Radio, RotateCw } from 'lucide-react';
 import type { BrowserPanelState, ToolPanel } from '../../../../shared/types/panels';
 import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
 import { PortsList } from '../../components/panels/browser/PortsList';
@@ -21,6 +21,8 @@ interface RemoteBrowserPanelProps {
   onError(message: string): void;
   /** Set for a computer reached through Pane's servers: returns a one-time address for a page on it. */
   onRelayAddress?: (ask: RelayPreview['ask']) => Promise<string>;
+  /** A page an agent used on the computer: switch to its live page there. */
+  onViewLive?: () => void;
 }
 
 const TOOL_BUTTON = 'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-40';
@@ -30,7 +32,7 @@ const TOOL_BUTTON = 'flex h-8 w-8 flex-shrink-0 items-center justify-center roun
  * address, with the host-relative address in the bar. A cross-origin frame cannot report a page
  * that refuses framing, so "Open in Safari" is always offered.
  */
-export function RemoteBrowserPanel({ panel, ports, onRefreshPorts, onNavigate, onRequestAddress, onError, onRelayAddress }: RemoteBrowserPanelProps) {
+export function RemoteBrowserPanel({ panel, ports, onRefreshPorts, onNavigate, onRequestAddress, onError, onRelayAddress, onViewLive }: RemoteBrowserPanelProps) {
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const url = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl ?? '';
   const [draft, setDraft] = useState<string | null>(null);
@@ -155,6 +157,11 @@ export function RemoteBrowserPanel({ panel, ports, onRefreshPorts, onNavigate, o
               <span className="min-w-0 max-w-[35%] truncate text-xs text-text-tertiary" title={`on ${page.host}`}>on {page.host}</span>
             )}
           </form>
+          {onViewLive && (
+            <button type="button" className={TOOL_BUTTON} aria-label="View live" title="View live" data-testid="browser-view-live" onClick={onViewLive}>
+              <Radio className="h-4 w-4" />
+            </button>
+          )}
           <button
             type="button"
             className={cn(TOOL_BUTTON, portsOpen && 'bg-surface-hover text-text-primary')}

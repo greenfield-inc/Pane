@@ -25,19 +25,21 @@ const TOOL_BUTTON = 'flex h-9 w-9 flex-shrink-0 items-center justify-center roun
  * A browser tab in the web app (PWA). It shows the page's own copy (`ownCopy`, through the host's
  * phone addresses) until an agent acts on the page; then it streams the host's page, where the agent
  * works, with touch, the phone's keyboard or a mouse, until 30 s after the last input by anyone or
+ * Back to my copy; a page the agent typed into, or one the person chose View live on, streams until
  * Back to my copy (docs/BROWSER_AGENTS.md). Host files and dev servers always stay a copy.
  */
-export function RemoteStreamedBrowser({ adapter, panel, hostName, ownCopy }: { adapter: RemoteRuntimeAdapter; panel: ToolPanel; hostName: string; ownCopy: () => ReactNode }) {
+export function RemoteStreamedBrowser({ adapter, panel, hostName, ownCopy }: { adapter: RemoteRuntimeAdapter; panel: ToolPanel; hostName: string; ownCopy: (onViewLive?: () => void) => ReactNode }) {
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const state = panel.state.customState as BrowserPanelState | undefined;
-  const choice = useStreamChoice(state?.driver?.by === 'agent');
+  const choice = useStreamChoice(panel.id, state);
   if (isHostLocalUrl(state?.currentUrl) || !choice.stream) {
     const driver = state?.driver;
-    if (driver?.by !== 'person') return <>{ownCopy()}</>;
+    const onViewLive = state?.agentUse && !isHostLocalUrl(state.currentUrl) ? choice.live : undefined;
+    if (driver?.by !== 'person') return <>{ownCopy(onViewLive)}</>;
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <HandBackRow adapter={adapter} panelId={panel.id} agent={driver.agentWaiting} />
-        <div className="flex min-h-0 flex-1 flex-col">{ownCopy()}</div>
+        <div className="flex min-h-0 flex-1 flex-col">{ownCopy(onViewLive)}</div>
       </div>
     );
   }
@@ -60,7 +62,7 @@ function HandBackRow({ adapter, panelId, agent }: { adapter: RemoteRuntimeAdapte
 }
 
 /** The host's page as a stream; a host on an older Pane streams nothing and `ownCopy` shows instead. */
-function HostStream({ adapter, panel, hostName, ownCopy, onBack, onInput }: { adapter: RemoteRuntimeAdapter; panel: ToolPanel; hostName: string; ownCopy: () => ReactNode; onBack(): void; onInput(): void }) {
+function HostStream({ adapter, panel, hostName, ownCopy, onBack, onInput }: { adapter: RemoteRuntimeAdapter; panel: ToolPanel; hostName: string; ownCopy: (onViewLive?: () => void) => ReactNode; onBack(): void; onInput(): void }) {
   const client = useMemo(() => streamClient((channel, ...args) => adapter.invoke<JsonValue>(channel, args)), [adapter]);
   const stream = useBrowserStream(client, panel.id, true);
   const view = stream.view;
