@@ -58,7 +58,7 @@ pub async fn run(
             return;
         }
     };
-    if data.write_all(&hello).await.is_err() {
+    if send_hello(&mut data, &hello).await.is_err() {
         return;
     }
 
@@ -92,6 +92,13 @@ pub async fn run(
         reason,
         "client connection ended"
     );
+}
+
+/// Sends the client's ClientHello to the computer. The client then waits for the computer's
+/// answer, so without a flush the part TLS held back would wait for the idle timeout.
+async fn send_hello<W: AsyncWrite + Unpin>(data: &mut W, hello: &[u8]) -> std::io::Result<()> {
+    data.write_all(hello).await?;
+    data.flush().await
 }
 
 /// Paces one client connection's bytes to its address's rates.
@@ -141,5 +148,56 @@ async fn watch_idle(last: &AtomicU64, started: Instant, idle: Duration) {
             return;
         }
         tokio::time::sleep_until(deadline.into()).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::io::test_tls;
+
+    // As `direct::tests`: the end of a request reaches the computer while the client waits.
+    #[tokio::test]
+    async fn copy_delivers_the_last_bytes_while_the_client_waits() {
+        let state = State::for_tests();
+        let last = AtomicU64::new(0);
+        let meter = Meter {
+            state: &state,
+            id: "test",
+            source: "test",
+            last: &last,
+            started: Instant::now(),
+        };
+        let (mut tls, mut computer) = test_tls::pair().await;
+        let sent = vec![7u8; 4 * test_tls::PIPE];
+        // The client stays open after its bytes, so `copy` never reaches the shutdown that
+        // would also flush.
+        let (mut client, source) = tokio::io::duplex(sent.len());
+        client.write_all(&sent).await.unwrap();
+        let count = AtomicU64::new(0);
+        let mut got = vec![0u8; sent.len()];
+        tokio::select! {
+            _ = meter.copy(source, &mut tls, &count) => panic!("copy ended while the client was open"),
+            read = tokio::time::timeout(Duration::from_secs(5), computer.read_exact(&mut got)) => {
+                read.expect("the computer got every byte").unwrap();
+            }
+        }
+        assert_eq!(got, sent);
+        drop(client);
+    }
+
+    #[tokio::test]
+    async fn the_whole_client_hello_reaches_the_computer() {
+        let (mut data, mut computer) = test_tls::pair().await;
+        // Larger than the pipe, so part of its TLS record has to wait for the flush.
+        let hello = vec![0x16u8; 3 * test_tls::PIPE];
+        let mut got = vec![0u8; hello.len()];
+        let (sent, read) = tokio::join!(send_hello(&mut data, &hello), async {
+            tokio::time::timeout(Duration::from_secs(5), computer.read_exact(&mut got)).await
+        });
+        sent.unwrap();
+        read.expect("the computer got the whole ClientHello")
+            .unwrap();
+        assert_eq!(got, hello);
     }
 }

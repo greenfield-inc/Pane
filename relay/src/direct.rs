@@ -84,3 +84,32 @@ async fn copy<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     }
     let _ = w.shutdown().await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::io::test_tls;
+    use crate::state::State;
+
+    // The bytes a client sent last reach the iroh relay while the client waits for the answer,
+    // over a link that takes only part of a TLS record at a time.
+    #[tokio::test]
+    async fn copy_delivers_the_last_bytes_while_the_sender_waits() {
+        let state = State::for_tests();
+        let (mut tls, mut peer) = test_tls::pair().await;
+        let sent = vec![7u8; 4 * test_tls::PIPE];
+        // The sender stays open after its bytes, so `copy` never reaches the shutdown that
+        // would also flush.
+        let (mut sender, source) = tokio::io::duplex(sent.len());
+        sender.write_all(&sent).await.unwrap();
+        let mut got = vec![0u8; sent.len()];
+        tokio::select! {
+            _ = copy(&state, "test", source, &mut tls) => panic!("copy ended while the sender was open"),
+            read = tokio::time::timeout(Duration::from_secs(5), peer.read_exact(&mut got)) => {
+                read.expect("the peer got every byte").unwrap();
+            }
+        }
+        assert_eq!(got, sent);
+        drop(sender);
+    }
+}
