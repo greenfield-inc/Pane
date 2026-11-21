@@ -13,7 +13,9 @@ describe('relay service', () => {
   it('a computer Let\'s Encrypt turns away says until when, asks again only then, and Try again asks at once', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
     const relay = await startFakeRelay();
-    const ca = await startRefusingCa(letsEncryptLimit(new Date(Date.now() + 30 * 60_000)));
+    // Let's Encrypt names the time to the second.
+    const caTime = new Date(Math.floor((Date.now() + 30 * 60_000) / 1000) * 1000);
+    const ca = await startRefusingCa(letsEncryptLimit(caTime));
     const service = new RelayService({
       settings: () => ({ enabled: true, relayAddress: `${RELAY_HOST}:${relay.controlPort}` }),
       onSettingsChanged: () => () => {},
@@ -32,7 +34,7 @@ describe('relay service', () => {
     try {
       service.start();
       await vi.waitFor(() => expect(service.getStatus().lastError).toMatch(/Let's Encrypt, which issues them, is turning away new computers until .+\. Keep Add a device open/u), { timeout: 10_000 });
-      expect(service.getStatus().phase).toBe('error');
+      expect(service.getStatus()).toMatchObject({ phase: 'error', certificateLimit: { until: caTime.toISOString() } });
       expect(ca.orders()).toBe(1);
 
       // Waking the computer doesn't order before the CA's time.
@@ -47,7 +49,7 @@ describe('relay service', () => {
       // Try again clears the old reason while it asks.
       await vi.waitFor(() => expect(service.getStatus().lastError).toMatch(/turning away/u), { timeout: 10_000 });
       service.retryNow();
-      expect(service.getStatus()).toMatchObject({ phase: 'certificate', lastError: null });
+      expect(service.getStatus()).toMatchObject({ phase: 'certificate', lastError: null, certificateLimit: null });
       await vi.waitFor(() => expect(ca.orders()).toBe(3), { timeout: 10_000 });
     } finally {
       await service.stop();

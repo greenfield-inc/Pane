@@ -223,11 +223,15 @@ every computer it reached through yours.
   Awake.
 - **A browser on a Wi-Fi with no internet** can't reach the computer: a
   browser needs internet DNS. Open the Pane app instead.
-- **"Phones can't reach this computer yet: it needs a security certificate":**
-  each computer gets its own certificate, and Let's Encrypt, which issues them,
-  limits how many new computers it serves per week. Keep Add a device open and
-  Pane asks again at the time it shows, or open Add a device again after then.
-  A computer that already has its certificate is not affected.
+- **"New pairings through Pane relay are paused until …":** each computer
+  gets its own certificate, and Let's Encrypt, which issues them, limits how
+  many new computers it serves per week. Until the time shown, Add a device
+  grays out the QR code and the Computer link, and Remote Access › Phones and
+  glasses says the same. Keep Add a device open and Pane asks again then, or
+  connect with Tailscale now: **Set up Tailscale** opens Remote Access ›
+  Tailscale. Tailscale uses its own `ts.net` certificates, so the limit
+  doesn't apply to it. A computer that already has its certificate is not
+  affected.
 - **"Can't reach &lt;computer&gt;" on the phone right after scanning:** that
   computer didn't answer within 10 seconds. Check that the phone is online,
   then open **Add a device** on the computer: it shows a code once phones can

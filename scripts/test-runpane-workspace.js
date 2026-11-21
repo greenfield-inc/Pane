@@ -419,6 +419,17 @@ test('this machine says other computers reach it through Pane relay while Tailsc
   });
 });
 
+test('this machine says new pairings through Pane relay are paused while the certificate limit is used up, and points to Tailscale', posixOnly, async () => {
+  const relay = { enabled: true, phase: 'error', address: null, lastError: 'refused', certificateLimit: { until: '2026-11-20T22:16:39Z' } };
+  await withComputer({ relay, computers: ({ laptop, keys }) => ({ computers: [travelLaptop([relayRoute(laptop, keys.laptop)])] }) }, async (run) => {
+    const list = await run('workspace', 'list');
+    assert.equal(list.status, 0, list.output);
+    assert.match(list.output.split('\n')[0], /\(this machine, \w+\): not accepting new phone pairings through Pane relay until .+: this week's certificate limit is used up\. Connect with Tailscale instead\. Tailscale: off \(Tailscale is signed out\)/);
+    const json = await run('workspace', 'list', '--json');
+    assert.deepEqual(JSON.parse(json.output).self.relay.certificateLimit, { until: '2026-11-20T22:16:39Z' });
+  });
+});
+
 test('when a route does not answer, the next one does, within 10 seconds', posixOnly, async () => {
   const computers = ({ laptop, silent, keys }) => ({
     computers: [travelLaptop([

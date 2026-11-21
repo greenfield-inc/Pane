@@ -17,6 +17,12 @@ export interface RelayStatus {
   localAddresses: string[];
   certificate: { notBefore: string; notAfter: string; renewAt: string } | null;
   lastError: string | null;
+  /**
+   * Set while this computer has no certificate because the CA is turning away new computers
+   * (Let's Encrypt's weekly limit): `until` is when it takes them again. New phones and computers
+   * can't pair through the relay until then; Tailscale is unaffected.
+   */
+  certificateLimit: { until: string } | null;
 }
 
 /** How long a one-time link lasts, chosen when it is made. A QR code shown on screen lasts 10 minutes. */

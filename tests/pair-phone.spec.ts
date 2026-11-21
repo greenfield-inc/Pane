@@ -97,6 +97,29 @@ test('waits while this computer gets ready, then shows the code', async ({ page 
   await expect(qr(page)).toBeVisible();
 });
 
+for (const theme of ['light', 'dark'] as const) {
+  test(`while the certificate limit is used up, relay pairing is grayed out with the reason and Tailscale stays open (${theme})`, async ({ page }) => {
+    await openHome(page, { relay: { certificateLimitUntil: '2099-01-02T16:47:00Z' } }, theme);
+    const dialog = await openPairDialog(page);
+    await expect(dialog.getByText('New pairings through Pane relay are paused until')).toBeVisible();
+    await expect(qr(page)).toHaveCount(0);
+    const code = dialog.locator('[data-paused]');
+    await expect(code).toHaveAttribute('aria-label', /^Not accepting new phone pairings through Pane relay right now: this week's certificate limit is used up\. Try again after .+, or connect with Tailscale instead\.$/);
+    await code.hover();
+    await expect(page.getByRole('tooltip')).toContainText("this week's certificate limit is used up");
+    await shot(page, `dialog-limited-${theme}`);
+    await dialog.getByRole('tab', { name: 'Computer' }).click();
+    await expect(dialog.getByRole('button', { name: 'Copy link' })).toBeDisabled();
+    await shot(page, `dialog-limited-computer-${theme}`);
+    await dialog.getByRole('button', { name: 'Set up Tailscale' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole('tab', { name: 'Tailscale' })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('tab', { name: /Phones and glasses/ }).click();
+    await expect(page.getByText('New pairings through Pane relay are paused until')).toBeVisible();
+    await shot(page, `remote-access-limited-${theme}`);
+  });
+}
+
 test('a computer that cannot reach the relay says why and retries', async ({ page }) => {
   await openHome(page, { relay: { phaseWhenOn: 'error', lastError: "Pane's servers didn't answer from us.relay.pane.example, so phones can't reach this computer yet." } });
   const dialog = await openPairDialog(page);

@@ -1,10 +1,13 @@
 import type { ReactNode } from 'react';
-import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, QrCode as QrCodeIcon } from 'lucide-react';
 import { Button } from '../ui/Button';
 import type { PairingView } from '../../hooks/useRelayPairing';
 import { cn } from '../../utils/cn';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
+import { Tooltip } from '../ui/Tooltip';
 import { QR_PAPER, QrCode, TestFlightLine } from './QrCode';
+import { RelayLimitNotice, RelayLimitTip } from './RelayLimitNotice';
+import { relayLimitSentence, relayLimitTime } from './relayLimit';
 
 /** The code box and its caption keep this footprint in every state. */
 const CODE_BOX = 'h-[200px] w-[200px]';
@@ -20,6 +23,20 @@ function countdown(seconds: number): string {
 }
 
 function CodeBox({ view, onRetry }: { view: PairingView; onRetry: () => void }) {
+  if (view.step === 'limited') {
+    return (
+      <Tooltip content={<RelayLimitTip until={view.until} />} side="bottom">
+        <div
+          role="img"
+          aria-label={relayLimitSentence(view.until)}
+          data-paused=""
+          className={cn(CODE_BOX, 'flex items-center justify-center rounded-xl border border-dashed border-border-secondary bg-surface-secondary')}
+        >
+          <QrCodeIcon className="h-20 w-20 text-text-disabled" aria-hidden="true" />
+        </div>
+      </Tooltip>
+    );
+  }
   if (view.step === 'error') {
     return (
       <div className={cn(CODE_BOX, 'flex flex-col items-center justify-center gap-3 rounded-xl border border-border-secondary bg-surface-secondary p-4 text-center')}>
@@ -54,14 +71,24 @@ function CodeBox({ view, onRetry }: { view: PairingView; onRetry: () => void }) 
 
 function caption(view: PairingView, renewed: boolean): string {
   if (view.step === 'preparing') return view.label;
+  if (view.step === 'limited') return `Paused until ${relayLimitTime(view.until)}`;
   if (view.step !== 'code') return 'Codes last 10 minutes';
   return renewed ? `New code · ${countdown(view.secondsLeft)}` : `Works once · ${countdown(view.secondsLeft)}`;
 }
 
 /** Add a device › Phone: a one-time code, good for 10 minutes, that a phone scans to reach this computer from any network. */
-export function PhoneTab({ view, paired, renewed, onRetry }: { view: PairingView; paired: string | null; renewed: boolean; onRetry: () => void }) {
+export function PhoneTab({ view, paired, renewed, onRetry, onSetUpTailscale }: {
+  view: PairingView;
+  paired: string | null;
+  renewed: boolean;
+  onRetry: () => void;
+  /** Opens Remote Access › Tailscale, the way to pair while Pane relay is paused. */
+  onSetUpTailscale: () => void;
+}) {
   let side: ReactNode;
-  if (view.step === 'error') {
+  if (view.step === 'limited') {
+    side = <RelayLimitNotice until={view.until} onSetUpTailscale={onSetUpTailscale} />;
+  } else if (view.step === 'error') {
     side = (
       <div role="alert" className="space-y-1">
         <p className="text-sm font-medium text-text-primary">This computer can&apos;t be paired right now</p>
