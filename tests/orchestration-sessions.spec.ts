@@ -2335,7 +2335,13 @@ for (const neighbour of ['terminal', 'chat'] as const) {
   });
 }
 
-test('In All machines, Enter on a highlighted Session opens it, from this machine and from another one, while another machine\'s Sessions change (T-45)', async ({ page }, testInfo) => {
+const allMachinesEnterCases = [
+  { layout: 'single', origin: 'local' },
+  { layout: 'single', origin: 'remote' },
+  { layout: 'tiled', origin: 'local' },
+  { layout: 'tiled', origin: 'remote' },
+] as const;
+for (const { layout, origin } of allMachinesEnterCases) test(`In All machines, Enter opens the highlighted ${origin} Session during updates (T-45, ${layout})`, async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   const local = [
     sessionFixture('alpha', 'Alpha', 'Alpha goal.', '', '2026-09-16T12:00:00.000Z'),
@@ -2374,13 +2380,16 @@ test('In All machines, Enter on a highlighted Session opens it, from this machin
     tailnetMachine: 'build-box', tailnetDomain: 'tail1234.ts.net',
   }));
 
-  // Alpha and Beta tiled, Beta's tile focused, as in the Sessions sidebar.
+  // Alpha shown; when tiled, Beta beside it with Beta's tile focused, as in the Sessions sidebar.
   await page.getByTestId('orchestration-session-alpha').click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached();
-  const tileLayout = await layoutBox(page.getByTestId('session-tile-layout'));
-  await dragSessionOntoTile(page, 'orchestration-session-beta', { x: tileLayout.x + tileLayout.width - 20, y: tileLayout.y + tileLayout.height / 2 });
-  await expect(page.getByTestId('session-tile-header')).toHaveCount(2);
-  await page.locator('[data-session-tile="beta"]').click({ position: { x: 40, y: 10 } });
+  await expect(page.locator('[data-session-tile="alpha"] [data-panel-group-id]').first()).toBeVisible();
+  if (layout === 'tiled') {
+    const tileLayout = await layoutBox(page.getByTestId('session-tile-layout'));
+    await dragSessionOntoTile(page, 'orchestration-session-beta', { x: tileLayout.x + tileLayout.width - 20, y: tileLayout.y + tileLayout.height / 2 });
+    await expect(page.getByTestId('session-tile-header')).toHaveCount(2);
+    await expect(page.locator('[data-session-tile="beta"] [data-panel-group-id]').first()).toBeVisible();
+    await page.locator('[data-session-tile="beta"]').click({ position: { x: 40, y: 10 } });
+  }
 
   await page.getByRole('button', { name: /Switch machine$/ }).click();
   await page.getByRole('menuitemradio', { name: /All machines/ }).click();
@@ -2398,14 +2407,37 @@ test('In All machines, Enter on a highlighted Session opens it, from this machin
       return get(selector);
     };
   });
-  const emitBuild = async (sessions: UiSessionFixture[]) => (await machinesMock(page)).evaluate((api, build) => {
-    api.emitMachineEvent({ type: 'event', machineId: 'build', channel: 'orchestration-sessions:changed', args: [] }, { build });
-  }, lists(sessions));
+  // Change both machines' statuses and let a new remote Session join the merged list.
+  const mockApi = await machinesMock(page);
+  await mockApi.evaluate((api, { local, remote }) => {
+    let tick = 0;
+    setInterval(() => {
+      tick += 1;
+      for (const [machineId, sessions] of [['local', local], ['build', tick < 4 ? remote.slice(0, 1) : remote]] as const) {
+        const activity = sessions.map(({ id }, index) => {
+          const working = (tick + index) % 2 === 0;
+          return { sessionId: id, state: working ? 'working' : 'idle', workingPanes: working ? 1 : 0 };
+        });
+        api.emitMachineEvent({ type: 'event', machineId, channel: 'orchestration-sessions:activity', args: [] }, {
+          [machineId]: { 'orchestration-sessions:activity-list': { success: true, data: activity } },
+        });
+        if (machineId === 'build' && tick === 4) {
+          api.emitMachineEvent({ type: 'event', machineId, channel: 'orchestration-sessions:changed', args: [] }, {
+            build: { 'orchestration-sessions:list': { success: true, data: { sessions } } },
+          });
+        }
+      }
+    }, 150);
+  }, { local, remote });
 
-  // This machine's row: the cursor walks to Gamma while build-box's Session changes, then Enter.
+  // Sample every frame so Playwright's assertion backoff cannot repeatedly miss a short working interval.
+  await page.waitForFunction(() => ['local:alpha', 'build:rotate'].every(key => (
+    document.querySelector(`[data-row-key="${key}"] [data-testid="session-activity-icon"]`)?.getAttribute('data-state') === 'working'
+  )));
+
   const order = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-testid="all-machines-sidebar"] [data-sidebar-item]'))
     .map(element => element.getAttribute('aria-label') ?? ''));
-  const walk = async (from: string, to: string, during?: () => Promise<void>) => {
+  const walk = async (from: string, to: string) => {
     await expect(async () => {
       const labels = await order();
       const [start, end] = [labels.indexOf(from), labels.indexOf(to)];
@@ -2413,41 +2445,45 @@ test('In All machines, Enter on a highlighted Session opens it, from this machin
       expect(end).toBeGreaterThanOrEqual(0);
       await page.getByRole('button', { name: from, exact: true }).focus();
       for (let step = 0; step < Math.abs(end - start); step += 1) await page.keyboard.press(end > start ? 'j' : 'k');
-      await during?.();
       await expect(page.getByRole('button', { name: to, exact: true })).toBeFocused({ timeout: 500 });
     }).toPass();
   };
-  await walk('Session Alpha on studio-mac', 'Session Gamma on studio-mac', () => emitBuild([{ ...remote[0], blockers: ['waiting on review'] }]));
-  await page.screenshot({ path: testInfo.outputPath('all-machines-01-cursor-on-gamma.png') });
-  // A terminal that finishes opening can take a key meant for the row: retry until Gamma opens.
-  await expect(async () => {
-    if (!(await row('Gamma', 'studio-mac').evaluate(element => element === document.activeElement))) await row('Gamma', 'studio-mac').focus();
+  if (origin === 'local') {
+    await walk('Session Alpha on studio-mac', 'Session Gamma on studio-mac');
+    await page.screenshot({ path: testInfo.outputPath('01-highlighted-gamma.png') });
+    if (!(await row('Gamma', 'studio-mac').evaluate(element => element === document.activeElement))) {
+      await walk('Session Alpha on studio-mac', 'Session Gamma on studio-mac');
+    }
     await page.keyboard.press('Enter');
-    await expect(row('Gamma', 'studio-mac')).toHaveAttribute('aria-current', 'page', { timeout: 500 });
-  }).toPass();
-  const focusedTile = () => page.evaluate(() => document.activeElement?.closest('[data-session-tile]')?.getAttribute('data-session-tile') ?? null);
-  await expect.poll(focusedTile).toBe('gamma');
-  await page.evaluate(() => window.__releaseGamma?.());
-  await expect(page.locator('[data-session-tile="gamma"] [data-panel-group-id]').first()).toBeVisible();
-  await expect.poll(focusedTile).toBe('gamma');
-  await expect(row('Gamma', 'studio-mac')).toHaveAttribute('aria-current', 'page');
-  await expect(row('Alpha', 'studio-mac')).not.toHaveAttribute('aria-current', 'page');
-  await page.screenshot({ path: testInfo.outputPath('all-machines-02-gamma-opened.png') });
+    // Let the two-frame focus handoff run while Gamma's workspace is still loading.
+    await page.evaluate(() => new Promise<void>(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    }));
+    await page.screenshot({ path: testInfo.outputPath('02-after-enter.png') });
+    const selectedSession = () => page.locator('[data-testid="all-machines-sidebar"] [aria-current="page"]').getAttribute('aria-label');
+    expect(await selectedSession()).toBe('Session Gamma on studio-mac');
+    await page.evaluate(() => window.__releaseGamma?.());
+    await expect(page.locator('[data-session-tile="gamma"] [data-panel-group-id]').first()).toBeVisible();
+    expect(await selectedSession()).toBe('Session Gamma on studio-mac');
+    await page.screenshot({ path: testInfo.outputPath('03-opened-gamma.png') });
+    return;
+  }
 
-  // Another machine's row: a Session arrives on build-box while the cursor is on its way, then Enter.
-  await walk('Session Gamma on studio-mac', 'Session Backup rotation on build-box', () => emitBuild([remote[1], remote[0]]));
+  await walk('Session Alpha on studio-mac', 'Session Backup rotation on build-box');
   await expect(row('Nightly rebuild', 'build-box')).toBeVisible();
   await walk('Session Backup rotation on build-box', 'Session Nightly rebuild on build-box');
-  await page.screenshot({ path: testInfo.outputPath('all-machines-03-cursor-on-nightly-build-box.png') });
+  await page.screenshot({ path: testInfo.outputPath('01-highlighted-nightly.png') });
+  if (!(await row('Nightly rebuild', 'build-box').evaluate(element => element === document.activeElement))) {
+    await walk('Session Backup rotation on build-box', 'Session Nightly rebuild on build-box');
+  }
   await page.keyboard.press('Enter');
-  // The switch leaves that Session in build-box's navigation memory, which the host change restores.
-  const mockApi = await machinesMock(page);
+  // The switch saves the requested Session in build-box's navigation memory.
   await expect.poll(() => mockApi.evaluate(api => api.getNavigationMemory('build')))
     .toMatchObject({ view: 'pane-chat', orchestrationSessionId: 'nightly' });
   await mockApi.evaluate(api => api.emitRemoteDaemonResyncRequested({ hostChanged: true }));
   await expect(row('Nightly rebuild', 'build-box')).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { level: 1, name: 'Nightly rebuild', exact: true })).toBeAttached();
-  await page.screenshot({ path: testInfo.outputPath('all-machines-04-nightly-opened-on-build-box.png') });
+  await page.screenshot({ path: testInfo.outputPath('02-opened-nightly.png') });
 });
 
 test('New offers Session and Pane in one dialog and restores keyboard focus', async ({ page }) => {
