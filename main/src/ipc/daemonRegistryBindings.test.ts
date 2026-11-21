@@ -224,6 +224,7 @@ const SESSION_CHANNELS = [
   'sessions:dismiss-interrupted',
   'archive:get-progress',
   'archive:retry-cleanup',
+  'archive:dismiss-completed',
   'panels:get-output',
   'panels:get-conversation-messages',
   'panels:get-json-messages',

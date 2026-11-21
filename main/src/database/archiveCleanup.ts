@@ -66,3 +66,10 @@ export function writeArchiveCleanupJob(db: Database.Database, job: ArchiveCleanu
     )`).run();
   }
 }
+
+/** Deletes finished jobs only (one session's, or all). Unfinished and failed jobs are never touched. */
+export function deleteCompletedArchiveCleanupJobs(db: Database.Database, sessionId?: string): void {
+  const completed = `json_extract(job, '$.status') = 'completed'`;
+  if (sessionId === undefined) db.prepare(`DELETE FROM archive_cleanup_jobs WHERE ${completed}`).run();
+  else db.prepare(`DELETE FROM archive_cleanup_jobs WHERE session_id = ? AND ${completed}`).run(sessionId);
+}

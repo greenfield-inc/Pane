@@ -20,7 +20,7 @@ import { PaneError, reasonOf } from '../../../shared/paneError';
 /** File-system errors a short wait usually clears (a lock, a scanner); the cleanup job retries them. */
 const RETRYABLE_CLEANUP_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY']);
 
-type CleanupStore = Pick<DatabaseService, 'getArchiveCleanupJobs' | 'saveArchiveCleanupJob' | 'getSession'>;
+type CleanupStore = Pick<DatabaseService, 'getArchiveCleanupJobs' | 'saveArchiveCleanupJob' | 'deleteCompletedArchiveCleanupJobs' | 'getSession'>;
 type CleanupSessions = Pick<SessionManager, 'getProjectContextByProjectId' | 'runArchiveScript'>;
 
 /** Explicit intents only. There is deliberately no scan of archived sessions. */
@@ -181,6 +181,15 @@ export class ArchiveCleanupManager {
       ?? (this.teardownSession ? (tracker: ArchiveProcessTracker) => this.teardownSession!(sessionId, tracker) : undefined);
     if (teardown) this.enqueue(job, teardown);
     else this.enqueue(job, async () => {});
+  }
+
+  /** Hides finished rows from Archive Tasks: one session's, or all. Failed and unfinished jobs stay; the archived Pane is untouched. */
+  dismissCompleted(sessionId?: string): void {
+    this.db.deleteCompletedArchiveCleanupJobs(sessionId);
+    for (const job of [...this.jobs.values()]) {
+      if (job.status === 'completed' && (sessionId === undefined || job.sessionId === sessionId)) this.jobs.delete(job.sessionId);
+    }
+    this.publish();
   }
 
   assertRestorable(sessionId: string): void {

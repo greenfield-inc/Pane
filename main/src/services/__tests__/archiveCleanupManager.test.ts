@@ -290,6 +290,24 @@ describe('durable archive cleanup', { timeout: 15000 }, () => {
     expect(f.progress.getActiveTasks()).toHaveLength(11);
     expect(f.progress.getActiveTasks().find(task => task.sessionId === f.session.id)?.status).toBe('failed');
   });
+  it('dismisses completed rows without touching failed jobs, in memory or after a restart', async () => {
+    const f = fixture();
+    const job = await f.manager.prepare(f.session, true, false);
+    f.db.saveArchiveCleanupJob({ ...job, status: 'failed' });
+    for (const id of ['done-a', 'done-b', 'done-c']) {
+      f.db.saveArchiveCleanupJob({ ...job, sessionId: id, status: 'completed', endTime: new Date().toISOString() });
+    }
+    f.restart();
+    expect(f.progress.getActiveTasks()).toHaveLength(4);
+    f.manager.dismissCompleted('done-a');
+    expect(f.progress.getActiveTasks().map(task => task.sessionId).sort()).toEqual(['done-b', 'done-c', f.session.id].sort());
+    f.manager.dismissCompleted(f.session.id);
+    expect(f.progress.getActiveTasks().find(task => task.sessionId === f.session.id)?.status).toBe('failed');
+    f.manager.dismissCompleted();
+    expect(f.progress.getActiveTasks().map(task => task.sessionId)).toEqual([f.session.id]);
+    f.restart();
+    expect(f.progress.getActiveTasks().map(task => task.sessionId)).toEqual([f.session.id]);
+  });
   it('atomically rolls back archive when persisting intent fails', async () => {
     const f = fixture();
     const job = await f.manager.prepare(f.session, true, false);
