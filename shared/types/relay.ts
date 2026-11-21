@@ -15,11 +15,12 @@ export interface RelayStatus {
   region: string | null;
   /** Same-network addresses phones try first. */
   localAddresses: string[];
-  certificate: { notBefore: string; notAfter: string; renewAt: string } | null;
+  /** `issuer`: the issuing CA's organization, such as Let's Encrypt or Google Trust Services. */
+  certificate: { notBefore: string; notAfter: string; renewAt: string; issuer: string } | null;
   lastError: string | null;
   /**
-   * Set while this computer has no certificate because the CA is turning away new computers
-   * (Let's Encrypt's weekly limit): `until` is when it takes them again. New phones and computers
+   * Set while this computer has no certificate because every CA is turning away new computers
+   * (Let's Encrypt's weekly limit, then Google Trust Services): `until` is when Pane asks again. New phones and computers
    * can't pair through the relay until then; Tailscale is unaffected.
    */
   certificateLimit: { until: string } | null;

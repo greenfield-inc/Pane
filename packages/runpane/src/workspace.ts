@@ -712,7 +712,7 @@ async function readRelayStatus(paneDir?: string): Promise<ReturnType<typeof rela
 function describeRelay(relay: ReturnType<typeof relayStatusSchema.decode>): string {
   if (relay.certificateLimit) {
     const until = new Date(relay.certificateLimit.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    return `not accepting new phone pairings through Pane relay until ${until}: this week's certificate limit is used up. Connect with Tailscale instead`;
+    return `not accepting new phone pairings through Pane relay until ${until}: both certificate services are turning away new computers. Connect with Tailscale instead`;
   }
   if (relay.phase === 'ready') return `reachable through Pane relay (${relay.address ?? 'its relay address'})`;
   return `not reachable through Pane relay yet (${relay.lastError ?? 'still connecting'})`;

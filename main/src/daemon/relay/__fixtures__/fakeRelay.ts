@@ -4,6 +4,7 @@ import net, { type AddressInfo } from 'net';
 import { join } from 'path';
 import tls from 'tls';
 import { boundary, decodeBoundary, type JsonObject } from '../../../../../shared/validation/boundaryDecoder';
+import type { ExternalAccountKey } from '../computerCertificate';
 
 const fixture = (name: string) => readFileSync(join(__dirname, name));
 /** The relay's domain; its certificate (relay.pem) names `us.relay.relay.test`. */
@@ -15,13 +16,15 @@ export const RELAY_HOST = `us.relay.${DOMAIN}`;
  * signature, announces each raw client connection with `open`, and splices it to the computer's
  * data connection. Clients connect to it as plain TCP standing in for the relay's port 443.
  */
-export async function startFakeRelay(options: { refuse?: string } = {}) {
+export async function startFakeRelay(options: { refuse?: string; externalAccountKey?: ExternalAccountKey | 'throttled' } = {}) {
   const agents: tls.TLSSocket[] = [];
   const waiting = new Map<string, net.Socket>();
   const hellos: JsonObject[] = [];
   const link = { answerPings: true, pings: 0 };
   const dataSockets: tls.TLSSocket[] = [];
   const verified: boolean[] = [];
+  /** The `staging` flag of each `eab` frame. */
+  const eabRequests: boolean[] = [];
   const control = tls.createServer({ key: fixture('relay.key'), cert: fixture('relay.pem') }, (socket) => {
     let head = '';
     const onHead = (chunk: Buffer) => {
@@ -57,6 +60,14 @@ export async function startFakeRelay(options: { refuse?: string } = {}) {
               if (link.answerPings) socket.write(`${JSON.stringify({ t: 'pong' })}\n`);
             } else if (frame.t === 'txt') {
               socket.write(`${JSON.stringify({ t: 'ok', req: frame.req })}\n`);
+            } else if (frame.t === 'eab') {
+              eabRequests.push(frame.staging === true);
+              const key = options.externalAccountKey;
+              const answer = key === 'throttled'
+                ? { t: 'error', req: frame.req, code: 'throttled', message: 'At most 3 Google Trust Services keys a day per computer.' }
+                : key ? { t: 'ok', req: frame.req, ...key }
+                  : { t: 'error', req: frame.req, code: 'unconfigured', message: 'This relay does not hand out Google Trust Services keys.' };
+              socket.write(`${JSON.stringify(answer)}\n`);
             }
           }
         });
@@ -92,6 +103,7 @@ export async function startFakeRelay(options: { refuse?: string } = {}) {
     frontPort: (front.address() as AddressInfo).port,
     hellos,
     verified,
+    eabRequests,
     /** Whether the relay answers pings, and how many it got. */
     link,
     agentsConnected: () => agents.length,

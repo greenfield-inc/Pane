@@ -2,6 +2,7 @@ import tls from 'tls';
 import type { Duplex } from 'stream';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../../shared/validation/boundaryDecoder';
 import { signRelayChallenge, type ComputerKey } from './computerKey';
+import type { ExternalAccountKey } from './computerCertificate';
 
 export type RelayAgentState =
   | { status: 'connecting'; attempt: number; lastError: string | null }
@@ -42,6 +43,9 @@ const relayFrameSchema = boundary.object({
   message: text,
   status: { decode: (current) => decodeOptionalBoundary(current.value, boundary.number) } satisfies BoundarySchema<number | undefined>,
   body: text,
+  keyId: text,
+  hmacKey: text,
+  email: text,
 });
 type RelayFrame = ReturnType<typeof relayFrameSchema.decode>;
 
@@ -64,7 +68,7 @@ export type RelayAlert = RelayAlertPayload & { grant: string };
 export interface RelayGrantRequest { platform: 'ios' | 'android'; token: string; hostProfileId: string }
 
 /** A request to the relay; its answer is an `ok` or `error` frame with the same `req`. */
-type RelayRequest = { t: 'txt'; values: string[] } | ({ t: 'alert' } & RelayAlert) | ({ t: 'grant' } & RelayGrantRequest);
+type RelayRequest = { t: 'txt'; values: string[] } | { t: 'eab'; staging: boolean } | ({ t: 'alert' } & RelayAlert) | ({ t: 'grant' } & RelayGrantRequest);
 
 /** A frame the computer sends to the relay (relay/PROTOCOL.md). */
 type ComputerFrame =
@@ -150,6 +154,17 @@ export class RelayAgent {
     await this.request({ t: 'txt', values });
   }
 
+  /**
+   * A one-time Google Trust Services EAB key, minted by the relay for this computer (relay/PROTOCOL.md,
+   * EAB keys): for its staging CA when `staging`, with the relay's contact email for the account.
+   * The key is a secret: it is never logged.
+   */
+  async externalAccountKey(staging: boolean): Promise<ExternalAccountKey> {
+    const answer = await this.request({ t: 'eab', staging });
+    if (!answer.keyId || !answer.hmacKey) throw new Error('The relay answered without a Google Trust Services key.');
+    return { keyId: answer.keyId, hmacKey: answer.hmacKey, email: answer.email };
+  }
+
   /** Delivers a push alert with the Pane app's keys held by the relay (relay/PROTOCOL.md, Alerts). */
   async sendAlert(alert: RelayAlert): Promise<{ status: number; body: string }> {
     const answer = await this.request({ t: 'alert', ...alert });
@@ -173,7 +188,7 @@ export class RelayAgent {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.requests.delete(req);
-        reject(new Error('The relay did not answer within 20 seconds.'));
+        reject(new RelayRequestError('timeout', 'The relay did not answer within 20 seconds.'));
       }, 20_000);
       this.requests.set(req, {
         resolve: (answer) => { clearTimeout(timer); resolve(answer); },

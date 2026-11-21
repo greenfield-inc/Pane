@@ -53,7 +53,7 @@ gc() { run gcloud --project "$PROJECT" "$@"; }
 exists() { gcloud --project "$PROJECT" "$@" >/dev/null 2>&1; }
 
 # 0. APIs, and the two secrets the VMs read with their own identity.
-gc services enable compute.googleapis.com secretmanager.googleapis.com monitoring.googleapis.com
+gc services enable compute.googleapis.com secretmanager.googleapis.com monitoring.googleapis.com publicca.googleapis.com
 if ! exists secrets describe pane-relay-registry-secret; then
   if [ "$APPLY" = 1 ]; then
     openssl rand -base64 32 | gcloud --project "$PROJECT" secrets create pane-relay-registry-secret --data-file=-
@@ -153,7 +153,7 @@ docker run -d --name pane-relay --restart always \
   --ns-ip $NS_IPS --registry-url $helpers $dns_flag \
   --direct-quic 0.0.0.0:7842 \
   --acme-email $ACME_EMAIL --acme-cache /data/acme \
-  --fcm-project $PROJECT \${apns} ${ANDROID_SHA:+--android-cert-sha256 $ANDROID_SHA}
+  --fcm-project $PROJECT --eab-project $PROJECT \${apns} ${ANDROID_SHA:+--android-cert-sha256 $ANDROID_SHA}
 sleep 10
 if [ "\$(docker inspect -f '{{.State.Running}}' pane-relay)" != true ]; then
   docker logs --tail 50 pane-relay >&2

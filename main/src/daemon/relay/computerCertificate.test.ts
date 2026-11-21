@@ -6,8 +6,9 @@ import net from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { loadComputerKey, type KeyStore } from './computerKey';
-import { CertificateRateLimited, ComputerCertificate } from './computerCertificate';
+import { CertificateAuthorityUnavailable, CertificateRateLimited, ComputerCertificate, type CertificateAuthority, type ExternalAccountKey } from './computerCertificate';
 import { integrationEnvSet } from './__fixtures__/integrationEnv';
+import { startIssuingCa } from './__fixtures__/issuingCa';
 import { letsEncryptLimit, startRefusingCa } from './__fixtures__/refusingCa';
 
 /**
@@ -20,6 +21,10 @@ const PEBBLE_DIR = process.env.PEBBLE_DIR;
 
 function memory(initial: string | null = null): KeyStore & { value: string | null } {
   return { value: initial, async read() { return this.value; }, async write(value) { this.value = value; } };
+}
+
+function letsEncrypt(directoryUrl: string, accountStore: KeyStore = memory()): CertificateAuthority {
+  return { name: "Let's Encrypt", directoryUrl, accountStore };
 }
 
 async function freePort(): Promise<number> {
@@ -36,7 +41,7 @@ describe('computer certificate', () => {
   it('starts with no certificate when the saved one cannot be read, so it orders a new one', async () => {
     const key = await loadComputerKey(memory());
     const certificate = new ComputerCertificate({
-      key, domain: 'relay.test', certificateStore: memory('not a certificate'), accountStore: memory(), setTxt: async () => undefined,
+      key, domain: 'relay.test', certificateStore: memory('not a certificate'), authorities: [], setTxt: async () => undefined,
     });
 
     await certificate.load();
@@ -51,8 +56,8 @@ describe('a certificate authority that refuses for its rate limits', () => {
     const ca = await startRefusingCa(letsEncryptLimit(new Date('2026-11-20T22:16:39Z')));
     try {
       const certificate = new ComputerCertificate({
-        key: await loadComputerKey(memory()), domain: 'runpane.net', certificateStore: memory(), accountStore: memory(),
-        setTxt: async () => undefined, directoryUrl: ca.directoryUrl,
+        key: await loadComputerKey(memory()), domain: 'runpane.net', certificateStore: memory(), authorities: [letsEncrypt(ca.directoryUrl)],
+        setTxt: async () => undefined,
       });
 
       const started = Date.now();
@@ -64,6 +69,139 @@ describe('a certificate authority that refuses for its rate limits', () => {
       expect(certificate.isValid()).toBe(false);
     } finally {
       await ca.close();
+    }
+  });
+});
+
+describe('falling back to Google Trust Services', () => {
+  const fixture = (name: string) => readFileSync(join(__dirname, '__fixtures__', name), 'utf8');
+  // The computer key the fake CA's certificate names (75rnqtlvttepjja3.relay.test).
+  const computerKey = () => loadComputerKey(memory(fixture('computer.key')));
+  const refusedUntil = new Date('2099-11-20T22:16:39Z');
+
+  /** Google Trust Services as Pane asks it: a separate account, registered with a one-time key from the relay. */
+  function googleTrustServices(directoryUrl: string, keys: (() => Promise<ExternalAccountKey>)[], accountStore = memory()) {
+    let asked = 0;
+    const authority: CertificateAuthority = {
+      name: 'Google Trust Services',
+      directoryUrl,
+      accountStore,
+      externalAccountKey: () => {
+        const next = keys[asked] ?? (() => Promise.reject(new Error('no more keys')));
+        asked += 1;
+        return next();
+      },
+    };
+    return { authority, asked: () => asked };
+  }
+
+  it('orders from Google Trust Services with a one-time EAB key once Let\'s Encrypt refuses, and renews there with the same account', async () => {
+    const letsEncryptCa = await startRefusingCa(letsEncryptLimit(refusedUntil));
+    const gtsCa = await startIssuingCa({ certificate: fixture('gts-computer.pem'), externalAccountKeys: [{ keyId: 'kid-1', hmacKey: 'c2VjcmV0LTE=' }] });
+    try {
+      const key = await computerKey();
+      const certificateStore = memory();
+      const gts = googleTrustServices(gtsCa.directoryUrl, [async () => ({ keyId: 'kid-1', hmacKey: 'c2VjcmV0LTE=', email: 'certificates@pane.example' })]);
+      const txt: string[][] = [];
+      const options = { key, domain: 'relay.test', certificateStore, setTxt: async (values: string[]) => { txt.push(values); } };
+      const certificate = new ComputerCertificate({ ...options, authorities: [letsEncrypt(letsEncryptCa.directoryUrl), gts.authority] });
+
+      await certificate.ensure();
+
+      expect(certificate.isValid()).toBe(true);
+      expect(certificate.getStatus()?.issuer).toBe('Google Trust Services');
+      expect(gtsCa.accounts()).toEqual([{ eabKeyId: 'kid-1' }]);
+      // The name and its wildcard, each proven over DNS-01 through the relay.
+      expect(gtsCa.challenges()).toBe(2);
+      expect(Math.max(...txt.map((values) => values.length))).toBeGreaterThanOrEqual(1);
+      expect(letsEncryptCa.orders()).toBe(1);
+
+      // At renewal time the order goes to Google Trust Services, which issued it, on the account it already has.
+      const status = certificate.getStatus();
+      const renewing = new ComputerCertificate({
+        ...options, authorities: [letsEncrypt(letsEncryptCa.directoryUrl), gts.authority],
+        now: () => Date.parse(status?.renewAt ?? '') + 1_000,
+      });
+      await renewing.load();
+      expect(renewing.needsRenewal()).toBe(true);
+      await renewing.ensure();
+
+      expect(gtsCa.orders()).toBe(2);
+      expect(letsEncryptCa.orders()).toBe(1);
+      expect(gts.asked()).toBe(1);
+      expect(gtsCa.accounts()).toHaveLength(1);
+    } finally {
+      await letsEncryptCa.close();
+      await gtsCa.close();
+    }
+  });
+
+  it('asks again soon, not at Let\'s Encrypt\'s later time, when Google Trust Services refuses too without a time', async () => {
+    const letsEncryptCa = await startRefusingCa(letsEncryptLimit(refusedUntil));
+    const gtsCa = await startRefusingCa('Quota exceeded for new orders');
+    try {
+      const gts = googleTrustServices(gtsCa.directoryUrl, [async () => ({ keyId: 'kid-1', hmacKey: 'c2VjcmV0LTE=' })]);
+      const certificate = new ComputerCertificate({
+        key: await computerKey(), domain: 'relay.test', certificateStore: memory(), setTxt: async () => undefined,
+        authorities: [letsEncrypt(letsEncryptCa.directoryUrl), gts.authority],
+      });
+
+      const failure = await certificate.ensure().then(() => null, (error: Error) => error);
+
+      expect(failure).toBeInstanceOf(CertificateRateLimited);
+      // Google's quota is hourly: waiting for Let's Encrypt's date would hold the computer for days.
+      expect(failure).toMatchObject({ retryAt: null, refusedBy: ["Let's Encrypt", 'Google Trust Services'] });
+      expect(failure?.message).toMatch(/^Let's Encrypt: too many certificates.* Google Trust Services: Quota exceeded/u);
+      expect(gtsCa.orders()).toBe(1);
+    } finally {
+      await letsEncryptCa.close();
+      await gtsCa.close();
+    }
+  });
+
+  it('keeps Let\'s Encrypt\'s time when the relay has no Google Trust Services key to give', async () => {
+    const letsEncryptCa = await startRefusingCa(letsEncryptLimit(refusedUntil));
+    const gtsCa = await startIssuingCa({ certificate: fixture('gts-computer.pem'), externalAccountKeys: [] });
+    try {
+      const gts = googleTrustServices(gtsCa.directoryUrl, [() => Promise.reject(new CertificateAuthorityUnavailable('This relay does not hand out Google Trust Services keys.'))]);
+      const certificate = new ComputerCertificate({
+        key: await computerKey(), domain: 'relay.test', certificateStore: memory(), setTxt: async () => undefined,
+        authorities: [letsEncrypt(letsEncryptCa.directoryUrl), gts.authority],
+      });
+
+      const failure = await certificate.ensure().then(() => null, (error: Error) => error);
+
+      expect(failure).toBeInstanceOf(CertificateRateLimited);
+      expect(failure).toMatchObject({ retryAt: refusedUntil.getTime(), refusedBy: ["Let's Encrypt"] });
+      expect(gts.asked()).toBe(1);
+      expect(gtsCa.accounts()).toEqual([]);
+    } finally {
+      await letsEncryptCa.close();
+      await gtsCa.close();
+    }
+  });
+
+  it('renews at Let\'s Encrypt when Google Trust Services, which issued the certificate, fails', async () => {
+    const letsEncryptCa = await startIssuingCa({ certificate: fixture('computer.pem'), externalAccountKeys: [], externalAccountRequired: false });
+    const gtsCa = await startRefusingCa('unused');
+    await gtsCa.close();
+    try {
+      // A Google Trust Services certificate a third of the way from expiry, and Google out of reach.
+      const certificateStore = memory(fixture('gts-computer.pem'));
+      const renewing = new ComputerCertificate({
+        key: await computerKey(), domain: 'relay.test', certificateStore, setTxt: async () => undefined,
+        authorities: [letsEncrypt(letsEncryptCa.directoryUrl), googleTrustServices(gtsCa.directoryUrl, []).authority],
+        now: () => Date.parse('2100-01-01T00:00:00Z'),
+      });
+      await renewing.load();
+      expect(renewing.getStatus()?.issuer).toBe('Google Trust Services');
+
+      await renewing.ensure();
+
+      expect(letsEncryptCa.orders()).toBe(1);
+      expect(certificateStore.value).toBe(fixture('computer.pem'));
+    } finally {
+      await letsEncryptCa.close();
     }
   });
 });
@@ -107,9 +245,8 @@ describe.skipIf(!integrationEnvSet(['PEBBLE_BIN', 'PEBBLE_DIR']))('computer cert
       key,
       domain: 'relay.test',
       certificateStore,
-      accountStore: memory(),
+      authorities: [letsEncrypt(directoryUrl)],
       setTxt: async (values) => { txtCalls.push(values); },
-      directoryUrl,
       acmeCa,
     });
     await certificate.ensure();
@@ -125,8 +262,8 @@ describe.skipIf(!integrationEnvSet(['PEBBLE_BIN', 'PEBBLE_DIR']))('computer cert
 
     // A saved certificate is reused after a restart: no new order.
     const restarted = new ComputerCertificate({
-      key, domain: 'relay.test', certificateStore, accountStore: memory(),
-      setTxt: async () => { throw new Error('no order expected'); }, directoryUrl, acmeCa,
+      key, domain: 'relay.test', certificateStore, authorities: [letsEncrypt(directoryUrl)],
+      setTxt: async () => { throw new Error('no order expected'); }, acmeCa,
     });
     await restarted.load();
     await restarted.ensure();
@@ -138,7 +275,7 @@ describe.skipIf(!integrationEnvSet(['PEBBLE_BIN', 'PEBBLE_DIR']))('computer cert
     const key = await loadComputerKey(memory());
     const certificateStore = memory();
     const accountStore = memory();
-    const first = new ComputerCertificate({ key, domain: 'relay.test', certificateStore, accountStore, setTxt: async () => undefined, directoryUrl, acmeCa });
+    const first = new ComputerCertificate({ key, domain: 'relay.test', certificateStore, authorities: [letsEncrypt(directoryUrl, accountStore)], setTxt: async () => undefined, acmeCa });
     await first.ensure();
     const status = first.getStatus();
     if (!status) throw new Error('no certificate was issued');
@@ -149,7 +286,7 @@ describe.skipIf(!integrationEnvSet(['PEBBLE_BIN', 'PEBBLE_DIR']))('computer cert
     const { key, certificateStore, accountStore, status, serial } = await issued();
     const account = accountStore.value;
     const later = new ComputerCertificate({
-      key, domain: 'relay.test', certificateStore, accountStore, setTxt: async () => undefined, directoryUrl, acmeCa,
+      key, domain: 'relay.test', certificateStore, authorities: [letsEncrypt(directoryUrl, accountStore)], setTxt: async () => undefined, acmeCa,
       now: () => Date.parse(status.renewAt) + 1_000,
     });
     await later.load();
@@ -164,8 +301,9 @@ describe.skipIf(!integrationEnvSet(['PEBBLE_BIN', 'PEBBLE_DIR']))('computer cert
   it('registers a saved account key this ACME server has never seen, as after switching directories', async () => {
     const key = await loadComputerKey(memory());
     const certificate = new ComputerCertificate({
-      key, domain: 'relay.test', certificateStore: memory(), accountStore: memory(generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()),
-      setTxt: async () => undefined, directoryUrl, acmeCa,
+      key, domain: 'relay.test', certificateStore: memory(),
+      authorities: [letsEncrypt(directoryUrl, memory(generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()))],
+      setTxt: async () => undefined, acmeCa,
     });
     await certificate.ensure();
     expect(certificate.isValid()).toBe(true);
@@ -174,7 +312,7 @@ describe.skipIf(!integrationEnvSet(['PEBBLE_BIN', 'PEBBLE_DIR']))('computer cert
   it('replaces a certificate that expired while the computer was off', async () => {
     const { key, certificateStore, accountStore, status, serial } = await issued();
     const afterExpiry = new ComputerCertificate({
-      key, domain: 'relay.test', certificateStore, accountStore, setTxt: async () => undefined, directoryUrl, acmeCa,
+      key, domain: 'relay.test', certificateStore, authorities: [letsEncrypt(directoryUrl, accountStore)], setTxt: async () => undefined, acmeCa,
       now: () => Date.parse(status.notAfter) + 24 * 60 * 60_000,
     });
     await afterExpiry.load();

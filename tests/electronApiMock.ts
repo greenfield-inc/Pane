@@ -218,6 +218,8 @@ export type ElectronApiMockOptions = {
     codeTtlMs?: number;
     /** What the "everywhere" commands report. */
     everywhere?: { removed: string[]; notReached: string[] };
+    /** This computer's relay certificate from the start. */
+    certificate?: RelayStatus['certificate'];
   };
   /** Client records this computer's host holds: phones, linked computers, glasses. */
   hostClients?: RemoteDaemonClientRecord[];
@@ -355,7 +357,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const relayOptions = mockOptions.relay ?? {};
     const relayStatus: RelayStatus = {
       enabled: false, phase: 'off', id: null, domain: null, address: null, relay: null, region: null,
-      localAddresses: [], certificate: null, lastError: null, certificateLimit: null,
+      localAddresses: [], certificate: relayOptions.certificate ?? null, lastError: null, certificateLimit: null,
     };
     let relayCodes = 0;
     const turnRelayOn = () => {

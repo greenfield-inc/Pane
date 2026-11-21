@@ -20,7 +20,7 @@ export function RelayLimitNotice({ until, onSetUpTailscale }: { until: string; o
           New pairings through Pane relay are paused until {relayLimitTime(until)}
         </p>
       </Tooltip>
-      <p className="text-sm text-text-secondary">This week&apos;s certificate limit is used up. Tailscale still works.</p>
+      <p className="text-sm text-text-secondary">Both certificate services are turning away new computers. Tailscale still works.</p>
       <Button type="button" variant="secondary" size="sm" icon={<Network className="h-4 w-4" />} onClick={onSetUpTailscale}>
         Set up Tailscale
       </Button>
