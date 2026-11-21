@@ -16,6 +16,8 @@ const MAX_FRAME: u64 = 64 * 1024;
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 const SILENCE_TIMEOUT: Duration = Duration::from_secs(75);
 const SLOW_CONN_DELAY: Duration = Duration::from_secs(1);
+/// A Public CA API call that takes longer fails, so a stalled mint never holds a computer's key.
+const EAB_TIMEOUT: Duration = Duration::from_secs(15);
 
 enum ReadError {
     Closed,
@@ -245,12 +247,23 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
             }
             "eab" => {
                 let staging = v["staging"].as_bool().unwrap_or(false);
+                let throttled = |what: String| json!({"t": "error", "req": req, "code": "throttled", "message": what});
+                // Charged up front so concurrent asks can't pass the limits; refunded when no key was made.
                 let refusal = if state.eab.contact().is_none() {
                     Some(json!({"t": "error", "req": req, "code": "unconfigured",
                         "message": "This relay does not hand out Google Trust Services keys."}))
                 } else if state.charge(Charge::Eab(&id), 1) != Level::Ok {
-                    Some(json!({"t": "error", "req": req, "code": "throttled",
-                        "message": format!("At most {} Google Trust Services keys a day per computer.", state.cfg.limit_eab_per_day)}))
+                    Some(throttled(format!(
+                        "At most {} Google Trust Services keys a day per computer.",
+                        state.cfg.limit_eab_per_day
+                    )))
+                } else if state.charge(Charge::EabRelay, 1) != Level::Ok {
+                    state.refund(Charge::Eab(&id));
+                    tracing::warn!(id, "EAB keys throttled relay-wide");
+                    Some(throttled(
+                        "This relay has handed out its Google Trust Services keys for this hour."
+                            .to_string(),
+                    ))
                 } else {
                     None
                 };
@@ -260,14 +273,22 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
                 }
                 let (state, tx, id) = (state.clone(), tx.clone(), id.clone());
                 tokio::spawn(async move {
-                    // The key's secret goes only to this computer, never to the log.
-                    let answer = match state.eab.mint(staging).await {
+                    let minted = tokio::time::timeout(EAB_TIMEOUT, state.eab.mint(staging))
+                        .await
+                        .unwrap_or_else(|_| {
+                            Err("the Public CA API did not answer within 15 s".to_string())
+                        });
+                    // The key's secret goes only to this computer; its id (public in every ACME
+                    // request it signs) is logged so an account can be traced to the computer.
+                    let answer = match minted {
                         Ok(key) => {
-                            tracing::info!(id, staging, "EAB key minted");
+                            tracing::info!(id, key_id = key.key_id, staging, "EAB key minted");
                             json!({"t": "ok", "req": req, "keyId": key.key_id, "hmacKey": key.hmac_key,
                                 "email": state.eab.contact()})
                         }
                         Err(e) => {
+                            state.refund(Charge::Eab(&id));
+                            state.refund(Charge::EabRelay);
                             tracing::warn!(id, staging, error = %e, "EAB key failed");
                             json!({"t": "error", "req": req, "code": "provider",
                                 "message": format!("The relay could not get a Google Trust Services key: {e}")})

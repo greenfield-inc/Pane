@@ -65,7 +65,7 @@ struct Fcm {
     auth: FcmAuth,
     project: String,
     url: String,
-    token: tokio::sync::Mutex<Option<(String, Instant)>>,
+    token: TokenCache,
 }
 
 /// Where FCM access tokens come from.
@@ -610,36 +610,51 @@ impl Apns {
 impl Fcm {
     /// An OAuth2 access token, fetched again 5 minutes before it expires.
     async fn access_token(&self, http: &Http) -> Result<String, String> {
-        let mut cached = self.token.lock().await;
-        if let Some((token, until)) = &*cached
-            && Instant::now() < *until
-        {
-            return Ok(token.clone());
-        }
-        let (status, body) = match &self.auth {
-            FcmAuth::Key {
-                key,
-                email,
-                token_url,
-            } => key_token(http, key, email, token_url).await?,
-            FcmAuth::Metadata { url } => metadata_get(url).await?,
-        };
-        if status != 200 {
-            return Err(format!("the FCM token endpoint answered {status}"));
-        }
-        let v: Value = serde_json::from_slice(&body)
-            .map_err(|_| "the FCM token endpoint answered invalid JSON".to_string())?;
-        let token = v["access_token"]
-            .as_str()
-            .ok_or("the FCM token endpoint answered no access_token")?
-            .to_string();
-        let lifetime = Duration::from_secs(v["expires_in"].as_u64().unwrap_or(3600));
-        *cached = Some((
-            token.clone(),
-            Instant::now() + lifetime.saturating_sub(FCM_TOKEN_MARGIN),
-        ));
-        Ok(token)
+        cached_token(&self.token, "the FCM token endpoint", async {
+            match &self.auth {
+                FcmAuth::Key {
+                    key,
+                    email,
+                    token_url,
+                } => key_token(http, key, email, token_url).await,
+                FcmAuth::Metadata { url } => metadata_get(url).await,
+            }
+        })
+        .await
     }
+}
+
+/// An OAuth2 access token held until 5 minutes before it expires.
+pub(crate) type TokenCache = tokio::sync::Mutex<Option<(String, Instant)>>;
+
+/// The cached access token, or a new one from `fetch` (a token endpoint's status and JSON body).
+pub(crate) async fn cached_token(
+    cache: &TokenCache,
+    source: &str,
+    fetch: impl std::future::Future<Output = Result<(u16, Bytes), String>>,
+) -> Result<String, String> {
+    let mut cached = cache.lock().await;
+    if let Some((token, until)) = &*cached
+        && Instant::now() < *until
+    {
+        return Ok(token.clone());
+    }
+    let (status, body) = fetch.await?;
+    if status != 200 {
+        return Err(format!("{source} answered {status}"));
+    }
+    let v: Value =
+        serde_json::from_slice(&body).map_err(|_| format!("{source} answered invalid JSON"))?;
+    let token = v["access_token"]
+        .as_str()
+        .ok_or_else(|| format!("{source} answered no access_token"))?
+        .to_string();
+    let lifetime = Duration::from_secs(v["expires_in"].as_u64().unwrap_or(3600));
+    *cached = Some((
+        token.clone(),
+        Instant::now() + lifetime.saturating_sub(FCM_TOKEN_MARGIN),
+    ));
+    Ok(token)
 }
 
 /// Trades a JWT signed with the service account key for an access token.

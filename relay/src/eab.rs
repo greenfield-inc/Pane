@@ -5,14 +5,10 @@
 //! The key's secret goes only to the computer that asked: it is never logged.
 
 use crate::Error;
-use crate::alerts::{Http, metadata_get};
+use crate::alerts::{Http, TokenCache, cached_token, metadata_get};
 use crate::config::Config;
 use bytes::Bytes;
 use serde_json::Value;
-use std::time::{Duration, Instant};
-
-/// Fetch a new access token this long before the cached one expires.
-const TOKEN_MARGIN: Duration = Duration::from_secs(5 * 60);
 
 pub struct Eab {
     project: Option<String>,
@@ -22,7 +18,7 @@ pub struct Eab {
     staging_url: String,
     metadata_url: String,
     http: Http,
-    token: tokio::sync::Mutex<Option<(String, Instant)>>,
+    token: TokenCache,
 }
 
 /// A computer's one-time key: `keyId` and the base64 `hmacKey` as the Public CA API returns them.
@@ -87,29 +83,13 @@ impl Eab {
         }
     }
 
-    /// The service account's access token from the metadata server, cached until 5 minutes before it expires.
+    /// The service account's access token from the metadata server.
     async fn access_token(&self) -> Result<String, String> {
-        let mut cached = self.token.lock().await;
-        if let Some((token, until)) = &*cached
-            && Instant::now() < *until
-        {
-            return Ok(token.clone());
-        }
-        let (status, body) = metadata_get(&self.metadata_url).await?;
-        if status != 200 {
-            return Err(format!("the metadata server answered {status}"));
-        }
-        let v: Value = serde_json::from_slice(&body)
-            .map_err(|_| "the metadata server answered invalid JSON".to_string())?;
-        let token = v["access_token"]
-            .as_str()
-            .ok_or("the metadata server answered no access_token")?
-            .to_string();
-        let lifetime = Duration::from_secs(v["expires_in"].as_u64().unwrap_or(3600));
-        *cached = Some((
-            token.clone(),
-            Instant::now() + lifetime.saturating_sub(TOKEN_MARGIN),
-        ));
-        Ok(token)
+        cached_token(
+            &self.token,
+            "the metadata server",
+            metadata_get(&self.metadata_url),
+        )
+        .await
     }
 }

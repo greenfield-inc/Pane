@@ -77,6 +77,7 @@ const DAY: Duration = Duration::from_secs(86_400);
 const MAX_FRAMES_PER_MIN: u64 = 600;
 
 /// What a usage counter counts, each with its own limit (see PROTOCOL.md, Limits).
+#[derive(Clone, Copy)]
 pub enum Charge<'a> {
     /// Client connections to a computer, by computer id and client source.
     Client(&'a str, &'a str),
@@ -92,6 +93,8 @@ pub enum Charge<'a> {
     NewIds(&'a str),
     /// Google Trust Services EAB keys, by computer id.
     Eab(&'a str),
+    /// Google Trust Services EAB keys across all of this relay's computers.
+    EabRelay,
 }
 
 /// The address a client is counted under: IPv4 as is, IPv6 by its /64, the
@@ -295,10 +298,10 @@ impl State {
         (n < self.cfg.max_connections).then_some(slot)
     }
 
-    /// Adds `n` to a counter and returns its level: over its limit slows, over twice refuses.
-    pub fn charge(&self, charge: Charge, n: u64) -> Level {
+    /// A counter's key, window and limit.
+    fn counter(&self, charge: Charge) -> (String, Duration, u64) {
         let cfg = &self.cfg;
-        let (key, window, limit) = match charge {
+        match charge {
             Charge::Client(id, source) => (
                 format!("client {id} {source}"),
                 MINUTE,
@@ -318,7 +321,13 @@ impl State {
             ),
             Charge::NewIds(source) => (format!("new {source}"), HOUR, cfg.limit_new_ids_per_hour),
             Charge::Eab(id) => (format!("eab {id}"), DAY, cfg.limit_eab_per_day),
-        };
+            Charge::EabRelay => ("eab *".to_string(), HOUR, cfg.limit_eab_per_hour),
+        }
+    }
+
+    /// Adds `n` to a counter and returns its level: over its limit slows, over twice refuses.
+    pub fn charge(&self, charge: Charge, n: u64) -> Level {
+        let (key, window, limit) = self.counter(charge);
         let mut usage = self.usage.lock().unwrap();
         let now = Instant::now();
         let fresh = Usage {
@@ -338,6 +347,14 @@ impl State {
             Level::Slow
         } else {
             Level::Ok
+        }
+    }
+
+    /// Takes back one count, for a charge whose work failed before it was used.
+    pub fn refund(&self, charge: Charge) {
+        let (key, _, _) = self.counter(charge);
+        if let Some(u) = self.usage.lock().unwrap().get_mut(&key) {
+            u.count = u.count.saturating_sub(1);
         }
     }
 

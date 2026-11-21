@@ -262,6 +262,11 @@ pub struct Config {
     #[arg(long, env = "PANE_RELAY_LIMIT_EAB_PER_DAY", default_value_t = 3)]
     pub limit_eab_per_day: u64,
 
+    /// Across this relay's computers: EAB keys an hour before answering `throttled`. Four
+    /// relays at the default stay under Google Trust Services' 100 new accounts an hour per project.
+    #[arg(long, env = "PANE_RELAY_LIMIT_EAB_PER_HOUR", default_value_t = 20)]
+    pub limit_eab_per_hour: u64,
+
     #[arg(long, hide = true, default_value = "https://publicca.googleapis.com")]
     pub publicca_url: String,
 
@@ -276,6 +281,7 @@ pub struct Config {
     #[arg(
         long,
         hide = true,
+        alias = "fcm-metadata-url",
         env = "PANE_RELAY_METADATA_URL",
         default_value = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
     )]

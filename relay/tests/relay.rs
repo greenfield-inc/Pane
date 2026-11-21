@@ -2508,7 +2508,14 @@ async fn computers_get_one_time_google_trust_services_keys_minted_with_the_vm_ac
 #[tokio::test]
 async fn a_relay_without_an_eab_project_and_email_says_it_has_no_keys() {
     // Google Trust Services refuses accounts without a contact, so the project alone is not enough.
-    let env = Env::start(&["--eab-project", "pane-eab"]).await;
+    // A dead metadata URL keeps the test off the real one even if PANE_RELAY_ACME_EMAIL is set.
+    let env = Env::start(&[
+        "--eab-project",
+        "pane-eab",
+        "--metadata-url",
+        "http://127.0.0.1:9/token",
+    ])
+    .await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
     agent.send(json!({"t": "eab", "req": "1"})).await;
     let answer = agent.next().await;
@@ -2533,6 +2540,8 @@ async fn a_public_ca_refusal_reaches_the_computer_without_a_key() {
         "pane-eab",
         "--acme-email",
         "certificates@pane.example",
+        "--limit-eab-per-day",
+        "1",
         "--metadata-url",
         &metadata_url,
         "--publicca-url",
@@ -2545,6 +2554,9 @@ async fn a_public_ca_refusal_reaches_the_computer_without_a_key() {
     agent.send(json!({"t": "eab", "req": "1"})).await;
     let answer = agent.next().await;
     assert_eq!(answer["code"], "provider");
+    // A failed mint doesn't spend the computer's key for the day: the next ask reaches Google again.
+    agent.send(json!({"t": "eab", "req": "2"})).await;
+    assert_eq!(agent.next().await["code"], "provider");
     assert!(
         answer["message"]
             .as_str()
@@ -2553,4 +2565,39 @@ async fn a_public_ca_refusal_reaches_the_computer_without_a_key() {
         "{answer}"
     );
     assert!(answer.get("hmacKey").is_none());
+}
+
+#[tokio::test]
+async fn a_relay_hands_out_only_so_many_keys_an_hour_across_its_computers() {
+    let mut publicca =
+        Provider::start(|_, _| (200, r#"{"keyId":"kid","b64MacKey":"c2VjcmV0"}"#.to_string()))
+            .await;
+    let (metadata_url, _metadata) = metadata_server().await;
+    let env = Env::start(&[
+        "--eab-project",
+        "pane-eab",
+        "--acme-email",
+        "certificates@pane.example",
+        "--limit-eab-per-hour",
+        "2",
+        "--metadata-url",
+        &metadata_url,
+        "--publicca-url",
+        &publicca.url,
+        "--provider-ca",
+        publicca.ca.to_str().unwrap(),
+    ])
+    .await;
+    for _ in 0..2 {
+        let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+        agent.send(json!({"t": "eab", "req": "1"})).await;
+        assert_eq!(agent.next().await["t"], "ok");
+        publicca.next().await;
+    }
+    // A third computer, with its own day untouched, is refused for the relay's hour.
+    let mut third = Agent::connect(&env, &SigningKey::generate()).await;
+    third.send(json!({"t": "eab", "req": "1"})).await;
+    let answer = third.next().await;
+    assert_eq!(answer["code"], "throttled");
+    assert!(publicca.received.try_recv().is_err());
 }
