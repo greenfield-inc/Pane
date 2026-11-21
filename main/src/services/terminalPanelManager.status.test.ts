@@ -658,6 +658,56 @@ describe('terminal status events', () => {
     expect(await exitManager.hasLaunchCommandExited('p')).toBe(false);
   });
 
+  // Windows terminals cannot report their foreground: there a live mark ends with its shell or tab.
+  it.skipIf(process.platform === 'win32')("ends a tab's live-agent mark when its agent exits to the shell, but not when Pane's quit stopped it", async () => {
+    let foregroundGroup: number | undefined = 999;
+    const exitManager = new TerminalPanelManager(undefined, undefined, async () => foregroundGroup);
+    // SAFETY: This seam mirrors the private members used by these PTY fixtures, as `access` does above.
+    const exitAccess = exitManager as StatusAccess;
+    const customState: TerminalPanelState = { agentType: 'claude', initialCommand: 'claude', agentLive: true };
+    const panel = {
+      id: 'p', sessionId: 's', type: 'terminal' as const, title: 'Claude',
+      state: { isActive: true, customState },
+      metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+    };
+    panelManager.getPanel.mockImplementation(() => panel);
+    panelManager.updatePanel.mockResolvedValue(undefined);
+    const fixture = createTerminal('claude');
+    fixtures.push(fixture);
+    Object.assign(fixture.terminal, { launchCommandWrittenAt: Date.now(), isPtyHost: false });
+    fixture.terminal.pty.process = 'claude';
+    exitAccess.terminals.set('p', fixture.terminal);
+    exitAccess.agentStatusMonitor.register('p', 0);
+    const poll = async () => {
+      await fixture.terminal.screenEmulator.refresh();
+      exitAccess.pollAgentStatus();
+      await new Promise(resolve => setImmediate(resolve));
+    };
+
+    vi.setSystemTime(Date.now() + 2_000);
+    await poll();
+    expect(panel.state.customState.agentLive).toBe(true);
+
+    // The person quit the agent: Pane's own shell holds the foreground again.
+    fixture.terminal.pty.process = 'zsh';
+    foregroundGroup = fixture.terminal.pty.pid;
+    await poll();
+    expect(panel.state.customState.agentLive).toBe(false);
+
+    // The person starts the agent again by hand in the same shell: it is live again.
+    fixture.terminal.pty.process = 'claude';
+    foregroundGroup = 999;
+    await poll();
+    expect(panel.state.customState.agentLive).toBe(true);
+
+    // Then Pane's quit sent Ctrl+C: it left, but not on purpose.
+    exitManager.prepareForQuit();
+    fixture.terminal.pty.process = 'zsh';
+    foregroundGroup = fixture.terminal.pty.pid;
+    await poll();
+    expect(panel.state.customState.agentLive).toBe(true);
+  });
+
   it('detects a wrapper agent from its screen and then reports it to agents-only watchers', async () => {
     const customState: TerminalPanelState = { initialCommand: 'agent-farm run free-range' };
     const panel = {

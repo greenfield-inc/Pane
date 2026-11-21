@@ -19,6 +19,7 @@ import { pausedMarkOf, type TerminalPausedMark, type TerminalPanelState, type To
 import { formatForDisplay } from '../utils/timestampUtils';
 import { isCliAgentType, resolveAgentTypeFromCommand } from './agents/agentIdentity';
 import { resolveResumeId } from './agents/agentResume';
+import { interruptedTerminalState } from './terminalShutdown';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 interface CreateSessionOptions {
@@ -304,14 +305,19 @@ export class SessionManager extends EventEmitter {
     }
     const visibleDbSessions = dbSessions.filter(s => !s.is_hidden);
 
-    // Partition sessions by status
+    // An agent still marked live was running when Pane last stopped, cleanly or not: its Pane is resumable.
+    const liveAgentPanes = this.interruptLiveAgents(dbSessions);
+    for (const session of dbSessions) {
+      if (liveAgentPanes.has(session.id)) session.status = 'interrupted';
+    }
+
+    // Other Panes left running/pending had nothing live to resume (crash recovery).
     const activeSessions = dbSessions.filter(s => s.status === 'running' || s.status === 'pending');
     const interruptedSessions = dbSessions.filter(s => s.status === 'interrupted');
-
-    // Mark crashed sessions (running/pending) as stopped (crash recovery)
     if (activeSessions.length > 0) {
       const activeIds = activeSessions.map(s => s.id);
       this.db.markSessionsAsStopped(activeIds);
+      for (const session of activeSessions) session.status = 'stopped';
       console.log(`[SessionManager] Marked ${activeIds.length} crashed session(s) as stopped`);
     }
 
@@ -322,6 +328,35 @@ export class SessionManager extends EventEmitter {
 
     // Load all sessions from database
     this.emit('sessions-loaded', this.toSessions(visibleDbSessions));
+  }
+
+  /**
+   * Turns each tab whose agent was still live when Pane last stopped into an interrupted tab, and its
+   * Pane into an interrupted Pane, so the Resume dialog offers it. A paused tab stays paused. The live
+   * mark is cleared here: from now on `wasInterrupted` carries it, and a dismissed resume stays dismissed.
+   * Returns the Panes that now have a tab to resume.
+   */
+  private interruptLiveAgents(dbSessions: DbSession[]): Set<string> {
+    const panes = new Set<string>();
+    for (const session of dbSessions) {
+      if (session.archived) continue;
+      for (const panel of this.db.getPanelsForSession(session.id)) {
+        if (panel.type !== 'terminal' || terminalCustomState(panel.state.customState).agentLive !== true) continue;
+        try {
+          const interrupted = pausedMarkOf(panel) ? undefined : interruptedTerminalState(panel.state.customState);
+          const customState = { ...(interrupted ?? terminalCustomState(panel.state.customState)), agentLive: false };
+          this.db.updatePanel(panel.id, { state: { ...panel.state, customState } });
+          if (interrupted) panes.add(session.id);
+        } catch (error) {
+          console.warn(`[SessionManager] Skipping malformed terminal state for panel ${panel.id} at startup:`, error);
+        }
+      }
+    }
+    if (panes.size > 0) {
+      for (const id of panes) this.db.updateSession(id, { status: 'interrupted' });
+      console.log(`[SessionManager] ${panes.size} Pane(s) had live agents when Pane last stopped; marked interrupted`);
+    }
+    return panes;
   }
 
   /** Converts many Panes with one read of every tab's pause mark. */

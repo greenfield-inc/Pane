@@ -32,6 +32,8 @@ export interface OtherAppsDeps {
   platform: NodeJS.Platform;
   /** Pane's main process: it and everything under it are Pane's own. */
   selfPid: number;
+  /** Pane's own executable (`process.execPath`): a process running it is Pane's even when Windows lost its parent. */
+  selfExecutable?: string;
   now: () => number;
   sleep?: (ms: number) => Promise<void>;
   read: () => Promise<AppProcessRow[]>;
@@ -227,7 +229,7 @@ export class OtherApps {
   }
 
   private protectedReason(group: AppGroup, rows: readonly AppProcessRow[]): string | null {
-    if (isPane(group)) return 'This is Pane, with what it runs. Quit it from its own window.';
+    if (isPane(group) || group.rows.some(row => this.isPaneExecutable(row))) return 'This is Pane, with what it runs. Quit it from its own window.';
     // Its devices run helpers outside the runtime (launchd_sim's host, the render server), so a stop here would not end it.
     if (group.simulator) return 'Quit it from the Simulator app, or run `xcrun simctl shutdown all`. Some of its helpers run outside this list.';
     // A process can exit between ps and lsof, so one unread row among read ones does not lock the group.
@@ -240,6 +242,13 @@ export class OtherApps {
     if (group.rows.some(row => ancestors.has(row.pid))) return 'Pane runs inside it, so stopping it would stop Pane.';
     if (group.rows.some(row => this.isSystem(row))) return systemText(this.deps.platform);
     return null;
+  }
+
+  private isPaneExecutable(row: AppProcessRow): boolean {
+    const self = this.deps.selfExecutable;
+    if (!self) return false;
+    const exe = row.exe ?? row.path;
+    return this.deps.platform === 'win32' ? exe.toLowerCase() === self.toLowerCase() : exe === self;
   }
 
   private isSystem(row: AppProcessRow): boolean {

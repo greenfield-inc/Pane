@@ -39,6 +39,7 @@ class FakePtyHandle implements PtyHandleLike {
   readonly pid = 4242;
   readonly written: string[] = [];
   private readonly listeners = new Set<(data: string) => void>();
+  private readonly exitListeners = new Set<(exitCode: number | null, signal: number | null) => void>();
 
   constructor(readonly id: string) {}
 
@@ -47,8 +48,14 @@ class FakePtyHandle implements PtyHandleLike {
     return { dispose: () => { this.listeners.delete(listener); } };
   }
 
-  onExit() {
-    return { dispose: () => undefined };
+  onExit(listener: (exitCode: number | null, signal: number | null) => void) {
+    this.exitListeners.add(listener);
+    return { dispose: () => { this.exitListeners.delete(listener); } };
+  }
+
+  /** The shell exits on its own, as when the person types `exit`. */
+  exit(exitCode = 0): void {
+    for (const listener of this.exitListeners) listener(exitCode, null);
   }
 
   async write(data: string): Promise<void> {
@@ -1446,6 +1453,63 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
         expect(await manager.clearPaused([panel.id])).toEqual([panel.id]);
         await manager.initializeTerminal(panel, tempDir);
         expect(ptyHost.spawnOptions).toHaveLength(2);
+      } finally {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('a live agent across Pane crashes', () => {
+    const liveState = boundary.object({ customState: boundary.object({
+      agentLive: boundary.optional(boundary.boolean),
+      agentSessionId: boundary.optional(boundary.string),
+    }) });
+    const saved = (panelId: string) => decodeBoundary(databaseService.getPanel(panelId)?.state, liveState).customState;
+
+    async function launch(id: string, customState: TerminalPanelState): Promise<{ manager: TerminalPanelManager; handle: FakePtyHandle }> {
+      const panel = makePanel(id);
+      panel.state.customState = customState;
+      const started = await startTerminal(panel);
+      started.handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(500);
+      return started;
+    }
+
+    it('saves the live mark with the conversation it launches, before Pane can die', async () => {
+      vi.useFakeTimers();
+      try {
+        await launch('live-claude', { agentType: 'claude', initialCommand: 'claude' });
+        expect(saved('live-claude')).toEqual({ agentLive: true, agentSessionId: expect.any(String) });
+
+        await launch('plain-shell', { initialCommand: 'npm run dev' });
+        expect(saved('plain-shell').agentLive).toBeUndefined();
+      } finally {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+      }
+    });
+
+    it("clears the mark when the tab's shell exits on its own, but keeps it when Pane's quit stops it", async () => {
+      vi.useFakeTimers();
+      try {
+        const ended = await launch('ended-claude', { agentType: 'claude', initialCommand: 'claude' });
+        ended.handle.exit(0);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(saved('ended-claude').agentLive).toBeFalsy();
+
+        // Resources stopped this tab's process: not the person ending the agent.
+        const stopped = await launch('stopped-claude', { agentType: 'claude', initialCommand: 'claude' });
+        stopped.manager.keepResumable(['stopped-claude']);
+        stopped.handle.exit(1);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(saved('stopped-claude').agentLive).toBe(true);
+
+        const quitting = await launch('quit-claude', { agentType: 'claude', initialCommand: 'claude' });
+        quitting.manager.prepareForQuit();
+        quitting.handle.exit(1);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(saved('quit-claude').agentLive).toBe(true);
       } finally {
         vi.clearAllTimers();
         vi.useRealTimers();
