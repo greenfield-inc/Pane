@@ -1,9 +1,17 @@
 use clap::Parser;
 use pane_relay::Config;
+use std::io::IsTerminal;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().with_target(false).init();
+    // A terminal gets readable lines; anything else (docker, a log collector) gets one
+    // JSON object a line, which Cloud Logging stores as fields.
+    let log = tracing_subscriber::fmt().with_target(false);
+    if std::io::stdout().is_terminal() {
+        log.init();
+    } else {
+        log.json().flatten_event(true).init();
+    }
     let cfg = Config::parse();
     let relay = match pane_relay::start(cfg).await {
         Ok(r) => r,

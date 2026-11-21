@@ -30,7 +30,7 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "i
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12", "logging"] }
 tokio-util = { version = "0.7.20", features = ["rt"] }
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "ansi"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "ansi", "json"] }
 x509-parser = "0.18.1"
 
 [profile.release]

@@ -53,7 +53,7 @@ gc() { run gcloud --project "$PROJECT" "$@"; }
 exists() { gcloud --project "$PROJECT" "$@" >/dev/null 2>&1; }
 
 # 0. APIs, and the two secrets the VMs read with their own identity.
-gc services enable compute.googleapis.com secretmanager.googleapis.com monitoring.googleapis.com publicca.googleapis.com
+gc services enable compute.googleapis.com secretmanager.googleapis.com monitoring.googleapis.com publicca.googleapis.com logging.googleapis.com
 if ! exists secrets describe pane-relay-registry-secret; then
   if [ "$APPLY" = 1 ]; then
     openssl rand -base64 32 | gcloud --project "$PROJECT" secrets create pane-relay-registry-secret --data-file=-
@@ -101,6 +101,8 @@ US_IP="$IP_us" EU_IP="$IP_eu"
 # 3. The VMs. The startup script reads secrets from Secret Manager with the VM's
 #    own identity and (re)starts the container; rerunning it updates the image.
 #    gcloud reads it from a file: --metadata splits its value on commas.
+#    google-logging-enabled sends the container's logs to Cloud Logging, which
+#    relay/deploy/usage.mjs reads.
 startup_file=$(mktemp)
 trap 'rm -f "$startup_file"' EXIT
 for line in "${RELAYS[@]}"; do
@@ -165,7 +167,7 @@ EOF
 )
   printf '%s\n' "$startup" >"$startup_file"
   if exists compute instances describe "pane-relay-$name" --zone "$zone"; then
-    gc compute instances add-metadata "pane-relay-$name" --zone "$zone" --metadata-from-file "startup-script=$startup_file"
+    gc compute instances add-metadata "pane-relay-$name" --zone "$zone" --metadata google-logging-enabled=true --metadata-from-file "startup-script=$startup_file"
     gc compute instances reset "pane-relay-$name" --zone "$zone"
   else
     # Secret Manager accepts only the cloud-platform scope, so the scope stays
@@ -173,7 +175,7 @@ EOF
     gc compute instances create "pane-relay-$name" --zone "$zone" --machine-type "$MACHINE" \
       --image-family cos-stable --image-project cos-cloud --tags pane-relay \
       --address "pane-relay-$name" --service-account "$SA" --scopes cloud-platform \
-      --metadata-from-file "startup-script=$startup_file"
+      --metadata google-logging-enabled=true --metadata-from-file "startup-script=$startup_file"
   fi
 done
 

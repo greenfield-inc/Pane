@@ -2601,3 +2601,54 @@ async fn a_relay_hands_out_only_so_many_keys_an_hour_across_its_computers() {
     assert_eq!(answer["code"], "throttled");
     assert!(publicca.received.try_recv().is_err());
 }
+
+/// Opens a client connection to `sni` and holds it without sending, so it stays open.
+async fn hold_client(env: &Env, agent: &Agent, sni: &str) -> TlsStream<TcpStream> {
+    tls_connect(env.addr(), sni, &agent.cert).await.unwrap()
+}
+
+async fn wait_counts(env: &Env, want: pane_relay::Counts) {
+    let relay = env.relay.as_ref().unwrap();
+    let deadline = Instant::now() + WAIT;
+    while relay.counts() != want && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(relay.counts(), want);
+}
+
+#[tokio::test]
+async fn usage_counts_computers_their_clients_and_computers_seen_today() {
+    let env = Env::start(&[]).await;
+    let a = Agent::connect(&env, &SigningKey::generate()).await;
+    let b = Agent::connect(&env, &SigningKey::generate()).await;
+    let host = format!("{}.{D}", a.id);
+    // One device holding two connections to computer a.
+    let _c1 = hold_client(&env, &a, &host).await;
+    let _c2 = hold_client(&env, &a, &host).await;
+    wait_counts(
+        &env,
+        pane_relay::Counts {
+            computers: 2,
+            computers_seen_24h: 2,
+            clients: 1,
+            client_connections: 2,
+            computers_with_clients: 1,
+        },
+    )
+    .await;
+
+    // A computer that leaves still counts as seen today.
+    b.close().await;
+    drop((_c1, _c2));
+    wait_counts(
+        &env,
+        pane_relay::Counts {
+            computers: 1,
+            computers_seen_24h: 2,
+            clients: 0,
+            client_connections: 0,
+            computers_with_clients: 0,
+        },
+    )
+    .await;
+}

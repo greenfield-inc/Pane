@@ -107,3 +107,9 @@ port 443 or 53 as non-root works with Docker's default network (it allows
 unprivileged low ports); with host networking, grant `CAP_NET_BIND_SERVICE` or
 listen on a high port behind a port forward. On SIGTERM the relay sends
 `close shutdown` to every computer before exiting.
+
+Logs go to stdout: readable lines on a terminal, one JSON object a line
+otherwise (under Docker, for example). Once an hour, and at shutdown, the
+relay logs a `relay usage` line with counts only (computers connected,
+computers seen in the last 24 hours, client devices and connections); see
+[deploy/RUNBOOK.md](deploy/RUNBOOK.md#watch).
