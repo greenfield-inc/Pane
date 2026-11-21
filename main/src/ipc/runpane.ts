@@ -2135,7 +2135,7 @@ export function registerRunpaneHandlers(
       const sessionRecord = normalized.session
         ? await requireOrchestrationSessionManager(services).get({ sessionId: normalized.session })
         : undefined;
-      const lease = watchLeases.acquire(normalized.as, paneCommandSignal());
+      const lease = watchLeases.acquire(normalized.as, paneCommandSignal(), normalized.owner);
       try {
         const session = sessionRecord ? { id: sessionRecord.id, name: sessionRecord.name } : undefined;
         const filter: WorkspaceJournalFilter = {
@@ -5054,6 +5054,11 @@ function parseWorkspaceWaitRequest(value: PaneCommandValue): RunpaneWorkspaceWai
     throw new Error('Workspace wait epoch requires since and cannot be combined with as');
   }
   if (consumer && since !== undefined) throw new Error('Workspace wait request cannot include both as and since');
+  const owner = optionalString(value.owner)?.trim() || undefined;
+  if (owner && !WORKSPACE_CONSUMER_PATTERN.test(owner)) {
+    throw new Error('Workspace wait owner must contain 1-128 letters, numbers, dots, underscores, or hyphens');
+  }
+  if (owner && !consumer) throw new Error('Workspace wait owner requires as: only a named cursor has an owner');
   const session = optionalString(value.session)?.trim() || undefined;
   const paneIds = parseStringArray(value.paneIds, 'paneIds');
   if (session && paneIds?.length) {
@@ -5067,6 +5072,7 @@ function parseWorkspaceWaitRequest(value: PaneCommandValue): RunpaneWorkspaceWai
     since,
     epoch,
     as: consumer,
+    owner,
     from: value.from === 'earliest' ? 'earliest' : value.from === 'now' ? 'now' : undefined,
     timeoutMs: parseNonNegativeInteger(value.timeoutMs, 'timeoutMs'),
     limit: parsePositiveInteger(value.limit, 'limit'),

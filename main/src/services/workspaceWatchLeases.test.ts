@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WorkspaceWatchLeases } from './workspaceWatchLeases';
+import { WorkspaceWatchCancelledError, WorkspaceWatchLeases } from './workspaceWatchLeases';
 import { WorkspaceJournal } from './workspaceJournal';
 
 afterEach(() => vi.useRealTimers());
@@ -73,5 +73,42 @@ describe('WorkspaceWatchLeases', () => {
     vi.advanceTimersByTime(60_000);
     expect(leases.isAttached('dictate', 30_000)).toBe(true);
     replacement.release();
+  });
+
+  it('replaces the same owner\'s earlier wait quietly instead of superseding it', () => {
+    const leases = new WorkspaceWatchLeases();
+    const first = leases.acquire('monitor', undefined, 'owner-a');
+    const retry = leases.acquire('monitor', undefined, 'owner-a');
+    expect(first.signal.aborted).toBe(true);
+    expect(first.signal.reason).toBeInstanceOf(WorkspaceWatchCancelledError);
+    expect(first.signal.reason).toMatchObject({ reason: 'replaced', code: 'ERR_WORKSPACE_WATCH_REPLACED' });
+    expect(first.signal.reason.message).not.toContain('superseded');
+    expect(retry.signal.aborted).toBe(false);
+    first.release();
+    expect(leases.isAttached('monitor', 0)).toBe(true);
+    retry.release();
+  });
+
+  it('still supersedes a wait when a different owner takes the cursor', () => {
+    const leases = new WorkspaceWatchLeases();
+    const first = leases.acquire('monitor', undefined, 'owner-a');
+    const other = leases.acquire('monitor', undefined, 'owner-b');
+    expect(first.signal.reason).toMatchObject({
+      reason: 'superseded',
+      code: 'ERR_WORKSPACE_WATCH_SUPERSEDED',
+      message: 'Workspace watch superseded by a new request for this cursor',
+    });
+    expect(other.signal.aborted).toBe(false);
+    other.release();
+  });
+
+  it('supersedes when either request has no owner token', () => {
+    const leases = new WorkspaceWatchLeases();
+    const anonymous = leases.acquire('monitor');
+    const owned = leases.acquire('monitor', undefined, 'owner-a');
+    expect(anonymous.signal.reason).toMatchObject({ reason: 'superseded' });
+    const legacy = leases.acquire('monitor');
+    expect(owned.signal.reason).toMatchObject({ reason: 'superseded' });
+    legacy.release();
   });
 });

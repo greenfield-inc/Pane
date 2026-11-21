@@ -3145,6 +3145,9 @@ export async function runWatch(parsed: ParsedArgs, dispatch?: DispatchWatchTarge
   };
   const request = {
     as: watchAs,
+    // This process's own token for its cursor: its retries and reconnects replace its earlier wait
+    // quietly, so only a different watcher supersedes it.
+    owner: watchAs ? watchOwnerToken() : undefined,
     since: parsed.watchSince,
     epoch: parsed.watchEpoch,
     from: parsed.watchFrom,
@@ -3169,6 +3172,8 @@ export async function runWatch(parsed: ParsedArgs, dispatch?: DispatchWatchTarge
   };
 
   let armed = false;
+  // Set when the daemon reports that this process's own retry replaced its wait: re-arm silently.
+  let rearm = false;
   let failingCode: string | undefined;
   let lastFailureAt = 0;
   let lastHeartbeatAt = Date.now();
@@ -3178,6 +3183,7 @@ export async function runWatch(parsed: ParsedArgs, dispatch?: DispatchWatchTarge
   let lastActivityAt = Date.now();
   let lastActivityGeneration: number | undefined;
   do {
+    rearm = false;
     if (expireAfterMs !== undefined && Date.now() - lastActivityAt >= expireAfterMs) {
       if (failingCode) return 1;
       emitWatchLine(formatNonEntry('_expired', { expireAfterMs }, format));
@@ -3201,7 +3207,7 @@ export async function runWatch(parsed: ParsedArgs, dispatch?: DispatchWatchTarge
     const timeoutMs = parsed.selfTest ? 0 : Math.min(requestedWaitMs, heartbeatWaitMs, expiryWaitMs, 120_000);
     try {
       const callRequest = parsed.selfTest
-        ? { ...request, as: undefined, since: undefined, epoch: undefined, from: 'now' as const, idleAfterMs: 0, timeoutMs: 0 }
+        ? { ...request, as: undefined, owner: undefined, since: undefined, epoch: undefined, from: 'now' as const, idleAfterMs: 0, timeoutMs: 0 }
         : { ...request, timeoutMs, idleWindowStartMs: anonymousIdleWindowStartMs };
       const result = await invokeDaemon('runpane:workspace:wait', [callRequest], workspaceWaitResultSchema, {
         paneDir: parsed.paneDir,
@@ -3273,6 +3279,10 @@ export async function runWatch(parsed: ParsedArgs, dispatch?: DispatchWatchTarge
       }
     } catch (error) {
       const watchError = error instanceof Error ? error : new Error(String(error));
+      if (isOwnWatchReplacement(watchError)) {
+        rearm = true;
+        continue;
+      }
       if (!keepsWaiting || !isRetryableWatchError(watchError)) {
         return emitWatchFailure(watchError, format);
       }
@@ -3284,9 +3294,22 @@ export async function runWatch(parsed: ParsedArgs, dispatch?: DispatchWatchTarge
       failingCode = code;
       await new Promise(resolve => setTimeout(resolve, 1_000));
     }
-  } while (keepsWaiting);
+  } while (keepsWaiting || rearm);
 
   return 0;
+}
+
+let ownWatchToken: string | undefined;
+
+/** One token per runpane process, sent with every named watch request it makes. */
+function watchOwnerToken(): string {
+  ownWatchToken ??= `watch-${process.pid}-${randomUUID()}`;
+  return ownWatchToken;
+}
+
+/** The daemon dropped an older wait because this same process re-armed the cursor. */
+function isOwnWatchReplacement(error: Error): boolean {
+  return error instanceof PaneDaemonClientError && error.code === 'ERR_WORKSPACE_WATCH_REPLACED';
 }
 
 function emitWatchLine(line: string): void {

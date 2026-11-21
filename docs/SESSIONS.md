@@ -1404,7 +1404,8 @@ what to do on each wake, timeout, reset and error).
 Never sleep-poll your own background task output. WATCH ERROR/nonzero exit
 means failure: re-read every worker's status, then re-arm once; a second
 failure goes to `runpane doctor --report`. A superseded cursor means keep the
-replacement. A normal expiry means re-arm with the next dispatch.
+replacement; a watch's own retries and reconnects never supersede it. A normal
+expiry means re-arm with the next dispatch.
 
 
 ## Worker reports
