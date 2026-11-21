@@ -52,12 +52,12 @@ function readLogs({ account, project }, text, since) {
 function fields(entry) {
   const payload = entry.jsonPayload ?? {};
   for (const raw of [payload.message, payload.log, entry.textPayload]) {
-    if (typeof raw === 'string' && raw.trimStart().startsWith('{')) {
-      try {
-        return JSON.parse(raw);
-      } catch {
-        // Not one of the relay's lines.
-      }
+    if (raw === undefined) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.message) return parsed;
+    } catch {
+      // Plain text, not one of the relay's JSON lines.
     }
   }
   return payload;
