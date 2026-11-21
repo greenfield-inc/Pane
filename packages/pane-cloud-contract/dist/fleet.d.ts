@@ -394,7 +394,7 @@ export type OperationStatus = z.infer<typeof OperationStatus>;
 /** One VM's resource use for a UTC day, for the abuse signals and the per-VM graphs. */
 export declare const VmMetrics: z.ZodObject<{
     vmId: z.ZodString;
-    day: z.ZodString;
+    day: z.ZodISODate;
     cpuSecondsUsed: z.ZodNumber;
     memoryResidentMiB: z.ZodNumber;
     diskUsedBytes: z.ZodNumber;
@@ -533,10 +533,10 @@ export declare const fleetRoutes: {
         updatedAt: z.ZodISODateTime;
     }, z.core.$strict>>;
     getMetrics: import("./http").Route<z.ZodUndefined, z.ZodObject<{
-        day: z.ZodOptional<z.ZodString>;
+        day: z.ZodOptional<z.ZodISODate>;
     }, z.core.$strict>, z.ZodObject<{
         vmId: z.ZodString;
-        day: z.ZodString;
+        day: z.ZodISODate;
         cpuSecondsUsed: z.ZodNumber;
         memoryResidentMiB: z.ZodNumber;
         diskUsedBytes: z.ZodNumber;

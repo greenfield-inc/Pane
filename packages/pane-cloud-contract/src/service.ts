@@ -153,7 +153,7 @@ export type SubmittedOperation = z.infer<typeof SubmittedOperation>;
 
 // ---------- Usage ----------
 
-const Month = z.string().regex(/^\d{4}-\d{2}$/);
+const Month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 
 export const MemberUsage = z
   .object({

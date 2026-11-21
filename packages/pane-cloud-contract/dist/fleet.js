@@ -192,7 +192,7 @@ exports.OperationStatus = zod_1.z
     finishedAt: Timestamp.nullable(),
 })
     .strict();
-const Day = zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const Day = zod_1.z.iso.date();
 /** One VM's resource use for a UTC day, for the abuse signals and the per-VM graphs. */
 exports.VmMetrics = zod_1.z
     .object({

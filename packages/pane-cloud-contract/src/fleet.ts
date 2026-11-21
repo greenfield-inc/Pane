@@ -234,7 +234,7 @@ export const OperationStatus = z
   .strict();
 export type OperationStatus = z.infer<typeof OperationStatus>;
 
-const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const Day = z.iso.date();
 
 /** One VM's resource use for a UTC day, for the abuse signals and the per-VM graphs. */
 export const VmMetrics = z

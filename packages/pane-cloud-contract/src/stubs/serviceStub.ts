@@ -219,7 +219,7 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       const repeatedEntry = repeated?.log.find((e) => e.id === repeat?.entryId);
       if (repeated && repeatedEntry) return { vm: repeated.vm, operation: repeatedEntry };
       if (account.access !== 'invited') throw new CloudApiError('not_invited', "You're on the list. Pane Cloud is invite-only for now.", 'Wait for your invite email.');
-      if (account.signupState !== 'ready') throw new CloudApiError('signup_incomplete', 'Finish signing up before you create a cloud Session.', 'Verify your phone number and add a card on the sign-up page.');
+      if (account.signupState !== 'ready') throw new CloudApiError('signup_incomplete', 'Finish signing up before you create a cloud Session.', account.signupState === 'needs_phone' ? 'Verify your phone number on the sign-up page.' : 'Add a card on the sign-up page.');
       requireRoomToWake(account, organizationId);
       const id = nextId('vm');
       const record: VmRecord = {
