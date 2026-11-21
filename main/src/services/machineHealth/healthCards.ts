@@ -6,7 +6,7 @@ import type { IdleOffer } from './memoryRelief';
 const HOUR = 3_600_000;
 const REPEAT_AFTER_MS = 6 * HOUR;
 const SNOOZE_MS = 24 * HOUR;
-const RANK = { ok: 0, warning: 1, critical: 2 } as const satisfies Record<HealthLevel, number>;
+export const RANK = { ok: 0, warning: 1, critical: 2 } as const satisfies Record<HealthLevel, number>;
 
 /** When a card for one condition may show: once per 6 hours unless it worsens, 24 hours after Not now, never twice at once. */
 export class CardGate {

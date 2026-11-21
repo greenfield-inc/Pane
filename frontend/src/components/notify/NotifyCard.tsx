@@ -201,7 +201,7 @@ function KeepsWaiting({ item }: { item: NotifyItem }) {
 }
 
 /** ✕ dismisses the question without answering it (it stays in Approvals); right-click or a long press offers a reminder instead. */
-function CloseButton({ item, onCommand, menuPlacement = 'above' }: Pick<NotifyCardProps, 'item' | 'onCommand' | 'menuPlacement'>) {
+export function CloseButton({ item, onCommand, menuPlacement = 'above' }: Pick<NotifyCardProps, 'item' | 'onCommand' | 'menuPlacement'>) {
   const [menuOpen, setMenuOpen] = useState(false);
   const pressTimer = useRef<number | null>(null);
   const openedByPress = useRef(false);
