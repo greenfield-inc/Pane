@@ -70,6 +70,8 @@ export interface ComputerCertificateOptions {
   setTxt(values: string[]): Promise<void>;
   /** Extra CA for the ACME server (a test server's own CA). */
   acmeCa?: string;
+  /** Called after each certificate is issued: the issuer's organization, and whether it replaced one this computer held. */
+  onIssued?: (event: { issuer: string; renewal: boolean }) => void;
   now?: () => number;
   log?: (line: string) => void;
 }
@@ -160,6 +162,7 @@ export class ComputerCertificate {
   private async order(authority: CertificateAuthority): Promise<void> {
     const { key, domain } = this.options;
     const base = `${key.id}.${domain}`;
+    const renewal = this.status !== null;
     // Loaded on first use: with its x509 and axios dependencies it delayed app ready
     // at every launch, and only issuing a certificate needs it.
     const acme = await import('acme-client');
@@ -208,6 +211,7 @@ export class ComputerCertificate {
     this.use(pem);
     await this.options.certificateStore.write(pem);
     this.options.log?.(`[relay] certificate for ${base} from ${this.status?.issuer} valid until ${this.status?.notAfter}`);
+    if (this.status) this.options.onIssued?.({ issuer: this.status.issuer, renewal });
   }
 
   private use(pem: string): void {

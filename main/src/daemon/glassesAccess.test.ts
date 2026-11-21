@@ -10,6 +10,7 @@ import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiSe
 import { hashRemoteDaemonToken } from './auth';
 import { createDefaultRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { GLASSES_COMMANDS } from '../../../shared/types/glasses';
+import { setPairingAnalytics } from '../services/pairingAnalytics';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 const OWNER = 'owner@example.com';
@@ -132,9 +133,12 @@ function errorCode(response: Response): string {
 describe('glasses on the workspace listener', () => {
   it('pairs from the phone in one step: a single-use secret becomes a 256-bit device token stored only as a hash', async () => {
     const host = await setup();
-    const { secret, token, paired } = await host.pair();
+    const sent: Array<[string, object | undefined]> = [];
+    setPairingAnalytics({ track: (name, properties) => { sent.push([name, properties]); } });
+    const { secret, token, paired } = await host.pair().finally(() => setPairingAnalytics(null));
 
     expect(paired.status).toBe(200);
+    expect(sent).toEqual([['pairing_completed', { device: 'glasses', route: 'tailscale' }]]);
     expect(Buffer.from(token.slice('pgt_'.length), 'base64url').length).toBeGreaterThanOrEqual(32);
     expect(Buffer.from(secret.slice('pgs_'.length), 'base64url').length).toBeGreaterThanOrEqual(32);
     const stored = JSON.stringify(host.config());

@@ -119,7 +119,7 @@ function network() {
           return result.ok ? { ...result, computer: info } : result;
         },
         computerInfo: () => info,
-        clientAddress: () => null,
+        forwardedClient: () => null,
       },
       links,
       routesReport: () => routes,

@@ -15,13 +15,14 @@ import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/
 import type { PairingRoute } from '../httpApiServer';
 import type { PairingExchangeRequest, PairingExchangeResult, PairingRefusal } from './pairingExchange';
 import { relayComputerSchema, type CallComputer, type LinkedComputer, type PostToComputer, type RelayLinks } from './relayLinks';
+import type { ForwardedClient } from './computerTlsServer';
 
 /** The relay service's side of a trade: checking and spending secrets, and this computer's relay identity. */
 interface PairingHost {
   checkSecret(secret: string, source: string): { ok: true; expiresAt: string } | PairingRefusal;
   exchangeSecret(request: PairingExchangeRequest): Promise<PairingExchangeResult & { computer?: RelayComputer }>;
   computerInfo(): RelayComputer | undefined;
-  clientAddress(remoteAddress: string | undefined, remotePort: number | undefined): string | null;
+  forwardedClient(remoteAddress: string | undefined, remotePort: number | undefined): ForwardedClient | null;
 }
 
 const offerSchema = boundary.object({
@@ -87,7 +88,7 @@ export function createPairingRoute(deps: {
       const [linked, routes] = await Promise.all([links.computerGrantsFor(offer.computer, request.known ?? []), deps.routesReport()]);
       return routes ? { ...result, linked, routes } : { ...result, linked };
     },
-    clientAddress: (remoteAddress, remotePort) => host.clientAddress(remoteAddress, remotePort),
+    forwardedClient: (remoteAddress, remotePort) => host.forwardedClient(remoteAddress, remotePort),
   };
 }
 

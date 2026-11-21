@@ -13,7 +13,8 @@ import {
   CertificateAuthorityUnavailable, CertificateRateLimited, ComputerCertificate, GOOGLE_TRUST_SERVICES_DIRECTORY, GOOGLE_TRUST_SERVICES_STAGING_DIRECTORY,
   LETS_ENCRYPT_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY, type CertificateAuthority, type ExternalAccountKey,
 } from './computerCertificate';
-import { createComputerTlsServer, type ComputerTlsServer } from './computerTlsServer';
+import { createComputerTlsServer, type ComputerTlsServer, type ForwardedClient } from './computerTlsServer';
+import { trackCertificateIssued } from '../../services/pairingAnalytics';
 import { computerHost, localAddressHost } from './computerNames';
 import { PairingExchange, type PairingExchangeRequest, type PairingExchangeResult, type PairingRefusal } from './pairingExchange';
 import { RelayAgent, RelayRequestError, type RelayAgentState, type RelayAlert, type RelayGrantRequest } from './relayAgent';
@@ -241,8 +242,8 @@ export class RelayService {
   }
 
   /** The client IP behind a connection the TLS terminator forwarded to a loopback listener; null for any other. */
-  clientAddress(remoteAddress: string | undefined, remotePort: number | undefined): string | null {
-    return this.terminator?.clientAddress(remoteAddress, remotePort) ?? null;
+  forwardedClient(remoteAddress: string | undefined, remotePort: number | undefined): ForwardedClient | null {
+    return this.terminator?.forwardedClient(remoteAddress, remotePort) ?? null;
   }
 
   /** What a paired phone stores about this computer. */
@@ -367,6 +368,7 @@ export class RelayService {
         authorities,
         setTxt: (values) => this.agent?.setAcmeTxt(values) ?? Promise.reject(new Error('The relay is not connected.')),
         acmeCa: readOptionalFile(this.env.PANE_ACME_CA)?.toString(),
+        onIssued: ({ issuer, renewal }) => trackCertificateIssued(issuer, renewal),
         log: this.deps.log,
       });
       await this.certificate.load();
