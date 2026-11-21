@@ -243,6 +243,8 @@ const DEFAULT_HOLDS: BrowserHoldSettings = { limit: 4, idleMs: 15 * 60_000, swee
 export function registerBrowserHandlers(services: BrowserServices, commandRegistry: PaneCommandRegistry, host: BrowserHost, settingsOverride: Partial<BrowserHoldSettings> = {}): () => void {
   const holdSettings = { ...DEFAULT_HOLDS, ...settingsOverride };
   const pages = new Map<number, PageDriver>();
+  /** How many documents each page has loaded since Pane began driving it, so a typing call knows it left the page. */
+  const documents = new Map<number, number>();
   /** Tabs another device watches: their pages keep painting and running while hidden here. */
   const remotelyWatched = (): string[] => holds.held().filter(tabId => holds.viewers(tabId).some(viewer => viewer.kind !== 'host' && viewer.onScreen));
   const holds = new BrowserHolds({ limit: holdSettings.limit, idleMs: holdSettings.idleMs, watch: holdSettings.watch, onChange: held => host.setHeld(held, remotelyWatched()) });
@@ -457,9 +459,10 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (driver) return driver;
     driver = new PageDriver(page, holdSettings.screenshotMs);
     pages.set(page.id, driver);
-    page.once('destroyed', () => pages.delete(page.id));
+    page.once('destroyed', () => { pages.delete(page.id); documents.delete(page.id); });
     // A new document holds nothing an agent typed, so other screens may go back to their own copy.
     page.on('did-navigate', () => {
+      documents.set(page.id, (documents.get(page.id) ?? 0) + 1);
       const tab = host.tab(tabId);
       if (tab && tabState(tab).agentUse === 'typed') void host.update(tab, { ...tabState(tab), agentUse: 'used' }).catch(() => undefined);
     });
@@ -634,6 +637,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     // A size whose screen left goes back before the call, so the agent works on (and captures) the page at its own size.
     if (sizeOutlivedItsScreen(tab.id)) await setPageSize(tab.id, undefined);
     host.setBusy(tab.id, true);
+    const documentBefore = documents.get(contents.id);
     let outcome: VerbOutcome;
     try {
       // A hidden page starts painting again for the call; give it a frame before capturing it.
@@ -643,7 +647,9 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       host.setBusy(tab.id, false);
     }
     refuseNonWebPage(contents, 'is now on');
-    if (write) await noteAgentUse(tab.id, TYPING_VERBS.has(request.verb) ? 'typed' : 'used');
+    // Typing that loaded a new document (Enter submitting the form) left nothing typed on the page.
+    const typed = TYPING_VERBS.has(request.verb) && documents.get(contents.id) === documentBefore;
+    if (write) await noteAgentUse(tab.id, typed ? 'typed' : 'used');
     if (outcome.cursor) {
       host.showCursor(tab.id, outcome.cursor.x, outcome.cursor.y);
       agentCursors.set(tab.id, { ...outcome.cursor, at: Date.now() });

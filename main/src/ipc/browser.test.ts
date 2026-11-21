@@ -802,6 +802,12 @@ describe('browser tabs: streaming a page to another screen', () => {
     expect(use('form')).toBe('typed');
     fixture.pages.get('form')?.emit('did-navigate');
     await vi.waitFor(() => expect(use('form')).toBe('used'));
+    // Typing that submits the form (Enter) loads the next document during the call itself.
+    const page = fixture.pages.get('form');
+    if (!page) throw new Error('The form tab has no page.');
+    Object.assign(page, { insertText: async () => { page.emit('did-navigate'); } });
+    await call(fixture, 'type', { tab: 'form', ref: 'e1', text: 'ada@example.com' });
+    expect(use('form')).toBe('used');
   });
 
   it('says a tab is asleep, so the screen offers to wake it', async () => {
