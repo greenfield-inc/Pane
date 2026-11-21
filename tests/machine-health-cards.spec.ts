@@ -93,6 +93,18 @@ test.describe('Machine health cards', () => {
     await expect(critical).toHaveCount(0);
   });
 
+  test('a popup that arrives after the stack closed under the pointer still hides on its own', async ({ page }) => {
+    await open(page, 'popup=critical');
+    const critical = page.getByRole('alert', { name: 'Disk is almost full' });
+    await critical.hover();
+    // Both cards end while the pointer rests on the stack, so it unmounts without a pointer leave.
+    await page.evaluate(() => { window.qaResolve('m1'); window.qaResolve('d1'); });
+    await expect(page.getByTestId('health-popups')).toHaveCount(0);
+    await page.evaluate(() => window.qaAdd('l1'));
+    await expect(page.getByTestId('health-popup')).toHaveCount(1);
+    await expect(page.getByTestId('health-popup')).toHaveCount(0, { timeout: 4000 });
+  });
+
   test('Open Resources on a popup opens the Resources view', async ({ page }) => {
     await open(page, 'popup=critical');
     await page.getByRole('alert', { name: 'Disk is almost full' }).getByRole('button', { name: 'Open Resources' }).click();

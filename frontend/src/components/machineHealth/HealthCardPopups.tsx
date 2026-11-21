@@ -16,8 +16,6 @@ const MAX_SHOWN = 3;
 export function HealthCardPopups({ suppressed }: { suppressed: boolean }) {
   const snapshot = useNotifyStore(state => state.snapshot);
   const [timedOut, setTimedOut] = useState<ReadonlySet<string>>(new Set());
-  // Over the stack, nothing hides, so a popup never moves out from under the pointer.
-  const [hovering, setHovering] = useState(false);
   const hide = useCallback((id: string) => setTimedOut(previous => new Set([...previous, id])), []);
   // Dismissed or snoozed cards are in `hidden`, as on Notify's strip.
   const hidden = new Set(snapshot?.hidden);
@@ -28,7 +26,13 @@ export function HealthCardPopups({ suppressed }: { suppressed: boolean }) {
     .sort((a, b) => Number(b.machineHealth.level === 'critical') - Number(a.machineHealth.level === 'critical') || b.createdAt - a.createdAt)
     .slice(0, MAX_SHOWN);
   if (suppressed || !snapshot || cards.length === 0) return null;
-  const hideAfterMs = snapshot.settings.updatesHideAfterSeconds * 1000;
+  return <PopupStack cards={cards} hideAfterMs={snapshot.settings.updatesHideAfterSeconds * 1000} onTimeout={hide} />;
+}
+
+/** Mounted only while popups show, so a hover never outlives the stack it was on. */
+function PopupStack({ cards, hideAfterMs, onTimeout }: { cards: HealthNotifyItem[]; hideAfterMs: number; onTimeout: (id: string) => void }) {
+  // Over the stack, nothing hides, so a popup never moves out from under the pointer.
+  const [hovering, setHovering] = useState(false);
   return (
     <div
       className="fixed bottom-4 left-4 z-fixed flex w-[360px] max-w-[calc(100vw-2rem)] flex-col-reverse gap-2"
@@ -37,7 +41,7 @@ export function HealthCardPopups({ suppressed }: { suppressed: boolean }) {
       onPointerLeave={() => setHovering(false)}
     >
       {cards.map(card => (
-        <HealthPopup key={card.id} card={card} hideAfterMs={hideAfterMs} held={hovering} onTimeout={hide} />
+        <HealthPopup key={card.id} card={card} hideAfterMs={hideAfterMs} held={hovering} onTimeout={onTimeout} />
       ))}
     </div>
   );

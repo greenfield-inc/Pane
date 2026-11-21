@@ -12,7 +12,7 @@ import '../../frontend/src/index.css';
 // linked machine). Answers land in window.qaAnswers and Ask an agent in window.qaAsked.
 // ?popup=warning|critical: the in-window popups over a sample window, with Notify commands in window.qaCommands,
 // window.qaResolve(id) ending a card, and window.qaView() naming the view Open Resources went to.
-declare global { interface Window { qaAnswers: string[]; qaAsked: number; qaCommands: NotifyCommand[]; qaResolve: (id: string) => void; qaView: () => string } }
+declare global { interface Window { qaAnswers: string[]; qaAsked: number; qaCommands: NotifyCommand[]; qaResolve: (id: string) => void; qaAdd: (id: string) => void; qaView: () => string } }
 window.qaAnswers = [];
 window.qaAsked = 0;
 const params = new URLSearchParams(location.search);
@@ -132,7 +132,9 @@ if (popup) {
   const snapshot = { settings: { ...DEFAULT_NOTIFY_SETTINGS, updatesHideAfterSeconds: 2 }, items, queue: items.map(item => item.id), hidden: [], strip: null, stripSurface: null, pausedUntil: null,
     shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [], cardsOn: { kind: 'any' as const }, thisMachine: null };
   useNotifyStore.setState({ snapshot });
-  window.qaResolve = id => useNotifyStore.setState({ snapshot: { ...snapshot, items: snapshot.items.filter(item => item.id !== id), queue: snapshot.queue.filter(other => other !== id) } });
+  const current = () => useNotifyStore.getState().snapshot ?? snapshot;
+  window.qaResolve = id => useNotifyStore.setState({ snapshot: { ...current(), items: current().items.filter(item => item.id !== id), queue: current().queue.filter(other => other !== id) } });
+  window.qaAdd = id => useNotifyStore.setState({ snapshot: { ...current(), items: [...current().items, toItem(id, cards.leak, Date.now())], queue: [...current().queue, id] } });
   window.qaView = () => useNavigationStore.getState().activeView;
 }
 
