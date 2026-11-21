@@ -106,7 +106,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   idNamespace,
 }) => {
   // A browser tab's View live item follows this screen's stream choices.
-  useSyncExternalStore(streamChoices.subscribe, streamChoices.version);
+  const streamed = useSyncExternalStore(streamChoices.subscribe, streamChoices.all);
   const compact = variant === 'compact';
   const [editingPanelId, setEditingPanelId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -403,7 +403,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
         const page = panel.type === 'browser' ? panel.state.customState as BrowserPanelState | undefined : undefined;
         // Only a tab this desktop streams from another computer has a choice (StreamedBrowserPanel).
-        const live = streamChoices.get(panel.id) !== undefined && offersViewLive(panel.id, page);
+        const live = streamed.has(panel.id) && offersViewLive(streamed.get(panel.id), page);
         const menuItems: DropdownItem[] = isDisabled ? [] : [
           ...(live ? [{ id: 'view-live', label: 'View live', icon: Radio, onClick: () => { viewLive(panel.id, page); onPanelSelect(panel); } }] : []),
           ...(!isPermanent && !isDiffPanel ? [{ id: 'rename', label: 'Rename tab…', icon: Pencil, onClick: () => startRename(panel) }] : []),

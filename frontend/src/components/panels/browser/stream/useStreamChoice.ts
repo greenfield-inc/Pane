@@ -8,11 +8,11 @@ import { initialStreamChoice, nextStreamTick, streamChoices, type StreamChoiceEv
  * until Back to my copy. The choice outlives this view, so tab menus see it too.
  */
 export function useStreamChoice(panelId: string, state: BrowserPanelState | undefined) {
-  useSyncExternalStore(streamChoices.subscribe, streamChoices.version);
+  const stored = useSyncExternalStore(streamChoices.subscribe, streamChoices.all).get(panelId);
   const agentDriving = state?.driver?.by === 'agent';
   const typed = state?.agentUse === 'typed';
   const dispatch = (event: StreamChoiceEvent) => streamChoices.dispatch(panelId, event, () => initialStreamChoice(agentDriving, typed));
-  const choice = streamChoices.get(panelId) ?? initialStreamChoice(agentDriving, typed);
+  const choice = stored ?? initialStreamChoice(agentDriving, typed);
   useEffect(() => {
     const initial = () => initialStreamChoice(agentDriving, typed);
     const at = Date.now();

@@ -70,26 +70,24 @@ export function nextStreamTick(state: StreamChoice): number | undefined {
 /**
  * Each tab's choice on this screen, kept while its view is closed (another tab or Pane in front), so
  * Back to my copy and View live last until the next change, and tab menus can offer View live.
+ * `all` is a new map after each change, for useSyncExternalStore.
  */
-const choices = new Map<string, StreamChoice>();
+let choices: ReadonlyMap<string, StreamChoice> = new Map();
 const listeners = new Set<() => void>();
-let version = 0;
 
 export const streamChoices = {
-  get: (panelId: string): StreamChoice | undefined => choices.get(panelId),
+  all: (): ReadonlyMap<string, StreamChoice> => choices,
   dispatch(panelId: string, event: StreamChoiceEvent, initial: () => StreamChoice): void {
     const current = choices.get(panelId) ?? initial();
     const next = streamChoice(current, event);
     if (next === current && choices.has(panelId)) return;
-    choices.set(panelId, next);
-    version += 1;
+    choices = new Map(choices).set(panelId, next);
     for (const listener of listeners) listener();
   },
   subscribe(listener: () => void): () => void {
     listeners.add(listener);
     return () => { listeners.delete(listener); };
   },
-  version: () => version,
 };
 
 /** A tab's choice before this screen made one, from its state on the host. */
@@ -97,10 +95,13 @@ export function tabStreamChoice(state: BrowserPanelState | undefined): StreamCho
   return initialStreamChoice(state?.driver?.by === 'agent', state?.agentUse === 'typed');
 }
 
-/** View live applies to a tab an agent has used, showing its own copy here; host files and dev servers never stream. */
-export function offersViewLive(panelId: string, state: BrowserPanelState | undefined): boolean {
+/**
+ * View live applies to a tab an agent has used while this screen shows its own copy (`choice`, from
+ * streamChoices.all()); host files and dev servers never stream.
+ */
+export function offersViewLive(choice: StreamChoice | undefined, state: BrowserPanelState | undefined): boolean {
   if (!state?.agentUse || isHostLocalUrl(state.currentUrl)) return false;
-  return !(streamChoices.get(panelId) ?? tabStreamChoice(state)).stream;
+  return !(choice ?? tabStreamChoice(state)).stream;
 }
 
 /** Shows the host's live page for the tab on this screen until Back to my copy. */

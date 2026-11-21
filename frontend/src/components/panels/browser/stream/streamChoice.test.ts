@@ -86,18 +86,18 @@ describe('View live', () => {
   const formTab: BrowserPanelState = { currentUrl: 'https://letsencrypt.formstack.com/forms/isrg_sponsorship', agentUse: 'used' };
 
   it('is offered on a tab an agent used while it shows the own copy, and streams it until Back to my copy', () => {
-    expect(offersViewLive('form-1', formTab)).toBe(true);
+    expect(offersViewLive(streamChoices.all().get('form-1'), formTab)).toBe(true);
     viewLive('form-1', formTab);
-    expect(streamChoices.get('form-1')?.stream).toBe(true);
-    expect(offersViewLive('form-1', formTab)).toBe(false);
+    expect(streamChoices.all().get('form-1')?.stream).toBe(true);
+    expect(offersViewLive(streamChoices.all().get('form-1'), formTab)).toBe(false);
     streamChoices.dispatch('form-1', { kind: 'tick', at: Date.now() + 600_000 }, () => initialStreamChoice(false));
-    expect(streamChoices.get('form-1')?.stream).toBe(true);
+    expect(streamChoices.all().get('form-1')?.stream).toBe(true);
     streamChoices.dispatch('form-1', { kind: 'back' }, () => initialStreamChoice(false));
-    expect(offersViewLive('form-1', formTab)).toBe(true);
+    expect(offersViewLive(streamChoices.all().get('form-1'), formTab)).toBe(true);
   });
 
   it('is not offered on a tab no agent used, or on a host dev server', () => {
-    expect(offersViewLive('plain', { currentUrl: 'https://example.com/' })).toBe(false);
-    expect(offersViewLive('dev', { currentUrl: 'http://localhost:5173/', agentUse: 'typed' })).toBe(false);
+    expect(offersViewLive(undefined, { currentUrl: 'https://example.com/' })).toBe(false);
+    expect(offersViewLive(undefined, { currentUrl: 'http://localhost:5173/', agentUse: 'typed' })).toBe(false);
   });
 });

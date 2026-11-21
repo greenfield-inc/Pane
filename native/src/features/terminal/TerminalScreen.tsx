@@ -9,7 +9,7 @@ import { PaneError } from '@shared/paneError';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import type { OrchestrationSessionView } from '@shared/types/orchestrationSession';
 import { pausedMarkOf, type BrowserPanelState, type EditorPanelState, type TerminalPanelState, type ToolPanel } from '@shared/types/panels';
-import { offersViewLive, viewLive } from '@shared/utils/streamChoice';
+import { offersViewLive, streamChoices, viewLive } from '@shared/utils/streamChoice';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
 import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
@@ -183,7 +183,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       : close;
     // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
     const page = tab.type === 'browser' ? tab.state.customState as BrowserPanelState | undefined : undefined;
-    const live = tab.type === 'browser' && offersViewLive(tab.id, page) ? () => { viewLive(tab.id, page); selectPanel(tab); } : undefined;
+    const live = tab.type === 'browser' && offersViewLive(streamChoices.all().get(tab.id), page) ? () => { viewLive(tab.id, page); selectPanel(tab); } : undefined;
     offerClose(tab.title, confirm, live);
   };
 
