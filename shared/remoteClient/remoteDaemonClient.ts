@@ -222,6 +222,8 @@ export class RemoteDaemonClient {
   private resendAttempts = new AbortController();
   private readonly schedule: RemoteSchedule;
   private streamController: AbortController | null = null;
+  /** Whether the host has answered the current stream request. */
+  private streamOpened = false;
   private restoreListeners = new Map<(signal: AbortSignal) => Promise<void>, string>();
   private eventListeners = new Set<(event: RemoteDaemonClientEvent) => void>();
   private statusListeners = new Set<(state: RemoteDaemonConnectionState) => void>();
@@ -262,6 +264,8 @@ export class RemoteDaemonClient {
    * Runs on every connect and reconnect once the event stream is open. The connection turns
    * `connected` when every listener's promise settles: a listener that must finish its reads first
    * awaits them, and one that only starts them (the phone's lists) returns at once.
+   * Listeners start newest first: a screen registers after the app's own lists, so the screen in
+   * view sends its reads before them and is not queued behind them for a connection.
    * `label` names the step in the timing logs.
    */
   onRestore(listener: (signal: AbortSignal) => Promise<void>, label = 'restore'): () => void {
@@ -338,7 +342,10 @@ export class RemoteDaemonClient {
     this.probeAfterWake();
   }
 
-  /** Probes the host until the event stream opens; the first answer replaces a stream attempt stuck on the old path. */
+  /**
+   * Probes the host until the event stream opens. The first answer proves the path works: a stream
+   * attempt still waiting gets one more probe round trip to open, then is replaced as stuck.
+   */
   private probeAfterWake(): void {
     const connection = this.abortController;
     if (!connection || connection.signal.aborted || this.state.status !== 'reconnecting') return;
@@ -357,12 +364,18 @@ export class RemoteDaemonClient {
       inFlight += 1;
       this.noteWakeAttempt();
       const attempt = abortSignalAny([probes.signal], this.schedule, WAKE_PROBE_TIMEOUT_MS);
+      const sentAt = Date.now();
       this.fetch(this.endpoint('health'), { signal: attempt.signal, cache: 'no-store' }).then(response => {
         if (!live() || !response.ok) return;
         probes.abort();
         this.noteWakeAnswer();
         this.clearReconnectTimer();
-        void this.openEventStream(connection.signal);
+        const waiting = this.streamController;
+        if (!waiting || waiting.signal.aborted) { void this.openEventStream(connection.signal); return; }
+        this.schedule(() => {
+          const stuck = waiting === this.streamController && !waiting.signal.aborted && !this.streamOpened;
+          if (stuck && connection === this.abortController && !connection.signal.aborted) void this.openEventStream(connection.signal);
+        }, Date.now() - sentAt);
       }, (error: Error) => {
         // Fetch implementations word a cancel differently; the timeout is what happened.
         if (this.wake && !probes.signal.aborted) {
@@ -633,6 +646,7 @@ export class RemoteDaemonClient {
     this.failedRequestsInARow = 0;
     const stream = new AbortController();
     this.streamController = stream;
+    this.streamOpened = false;
     this.noteWakeAttempt();
     let ready = false;
     const abortStream = () => stream.abort();
@@ -657,6 +671,7 @@ export class RemoteDaemonClient {
         signal: stream.signal,
         onOpen: () => {
           if (stream.signal.aborted) return;
+          this.streamOpened = true;
           armStaleTimer();
           this.stopWakeProbes();
           this.noteWakeAnswer();
@@ -705,11 +720,11 @@ export class RemoteDaemonClient {
     }
   }
 
-  /** Runs every restore listener, timing each, and fails if they outlast `RESTORE_TIMEOUT_MS`. */
+  /** Runs every restore listener, newest first, timing each, and fails if they outlast `RESTORE_TIMEOUT_MS`. */
   private async restore(signal: AbortSignal): Promise<void> {
     const started = Date.now();
     const pending = new Set<string>();
-    const steps = [...this.restoreListeners].map(async ([listener, label]) => {
+    const steps = [...this.restoreListeners].reverse().map(async ([listener, label]) => {
       pending.add(label);
       await listener(signal);
       pending.delete(label);
