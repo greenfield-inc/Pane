@@ -39,6 +39,7 @@ import { AttachSheet } from '../upload/AttachSheet';
 import { UploadReceipts } from '../upload/UploadReceipts';
 import { useUploads } from '../upload/useUploads';
 import { useVoiceDictation } from '../voice/useVoiceDictation';
+import { VoiceAudio } from '../voice/VoiceAudio';
 import { VoiceSetupSheet } from '../voice/VoiceSetupSheet';
 import { CopySheet } from './CopySheet';
 import { controllerLayout } from './controllerLayout';
@@ -189,6 +190,8 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       behavior="padding"
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
+      {/* Dictation's audio, here so a recording survives switching tabs; mounted on first use. */}
+      {voice.audio ? <VoiceAudio {...voice.audio} /> : null}
       {topBar ?? <TerminalTopBar paneName={title} onClearScrollback={terminalActive ? () => terminalActions.current?.clearScrollback() : undefined} />}
       {/* An approval's layout is final once the tabs and the tab body stop moving (perf marks). */}
       <View onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `tabs=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
