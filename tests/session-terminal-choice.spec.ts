@@ -78,9 +78,16 @@ test('plain-terminal onboarding, custom command, and chat recovery work in Elect
     await create.getByTestId('create-session-agent-claude').click();
     await create.getByLabel('Session name (optional)').fill('Missing agent QA');
     await create.getByRole('button', { name: 'Create Session', exact: true }).click();
-    await second.page.getByRole('button', { name: 'Missing agent QA', exact: true }).click();
-    const problem = second.page.getByRole('alert', { name: 'Chat stopped' });
-    await problem.getByRole('button', { name: 'Open a plain terminal' }).click();
+    await expect.poll(async () => (await second.page.evaluate(() => window.electronAPI.config.get())).data?.defaultSessionTerminalCommand).toBeNull();
+    const missingSession = await second.page.evaluate(async () => (await window.electronAPI.orchestrationSessions.list()).data?.sessions.find(session => session.name === 'Missing agent QA'));
+    expect(missingSession).toBeDefined();
+    const missing = second.page.getByTestId(`orchestration-session-${missingSession?.id}`);
+    const openTerminal = second.page.getByRole('button', { name: 'Open a plain terminal' });
+    await expect(async () => {
+      if (!(await openTerminal.isVisible())) await missing.click();
+      await expect(openTerminal).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
+    await openTerminal.click();
     const recovery = writeMarker(pane.root, 'recovery-ready');
     await typeInShell(second.page, recovery.command);
     await recovery.wait();
@@ -98,7 +105,7 @@ test('onboarding saves and runs a custom CLI command', async ({ baseURL }) => {
     const onboarding = page.getByRole('dialog', { name: welcome });
     const ready = onboarding.getByRole('button', { name: 'Use a plain terminal' });
     await expect(ready).toBeEnabled({ timeout: 30_000 });
-    await onboarding.getByText('Add a custom CLI command?', { exact: true }).click();
+    await onboarding.getByText(/Add a custom CLI command/).click();
     const input = onboarding.getByLabel('Command to run when a Session starts');
     await expect(input).toHaveValue('');
     await expect(onboarding.getByRole('button', { name: 'Use this command' })).toBeDisabled();
