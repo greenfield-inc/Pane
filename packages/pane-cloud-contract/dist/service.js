@@ -131,7 +131,7 @@ const UserOperationName = zod_1.z.enum(exports.USER_OPERATIONS);
 /** What requestOperation accepts before parseUserOperation checks it. */
 exports.SubmittedOperation = zod_1.z.object({ operation: zod_1.z.string(), parameters: zod_1.z.record(zod_1.z.string(), zod_1.z.json()) }).strict();
 // ---------- Usage ----------
-const Month = zod_1.z.string().regex(/^\d{4}-\d{2}$/);
+const Month = zod_1.z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 exports.MemberUsage = zod_1.z
     .object({
     accountId: Id,

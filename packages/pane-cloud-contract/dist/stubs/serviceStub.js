@@ -176,7 +176,7 @@ async function startServiceStub(options) {
             if (account.access !== 'invited')
                 throw new errors_1.CloudApiError('not_invited', "You're on the list. Pane Cloud is invite-only for now.", 'Wait for your invite email.');
             if (account.signupState !== 'ready')
-                throw new errors_1.CloudApiError('signup_incomplete', 'Finish signing up before you create a cloud Session.', 'Verify your phone number and add a card on the sign-up page.');
+                throw new errors_1.CloudApiError('signup_incomplete', 'Finish signing up before you create a cloud Session.', account.signupState === 'needs_phone' ? 'Verify your phone number on the sign-up page.' : 'Add a card on the sign-up page.');
             requireRoomToWake(account, organizationId);
             const id = nextId('vm');
             const record = {

@@ -24,15 +24,24 @@ control-plane repo (the service and the host agent), depend on the Pane repo at 
 "pane-cloud-contract": "github:greenfield-inc/Pane#<commit>&path:/packages/pane-cloud-contract"
 ```
 
-The built `dist` is committed (CI checks it matches the source), so installing from GitHub runs no
-build and needs no build-script allowance.
+Install it with pnpm: npm ignores `&path:` and installs the whole repo instead. The built `dist` is
+committed (CI checks it matches the source), so nothing builds on install, but pnpm still asks to
+allow a git dependency's install scripts. On pnpm 10 it only warns; to silence it, list
+`pane-cloud-contract` in `onlyBuiltDependencies` in `package.json`'s `pnpm` field. On pnpm 11 and
+later the install fails until you add the key its error prints to `allowBuilds` in
+`pnpm-workspace.yaml`:
+
+```yaml
+allowBuilds:
+  "pane-cloud-contract@https://codeload.github.com/greenfield-inc/Pane/tar.gz/<commit>#path:/packages/pane-cloud-contract": true
+```
 
 Run the contract tests against your own server, in any test framework. This wires both suites to
 the stubs with `node:test`:
 
 ```ts
 import { test, after } from 'node:test';
-import { createServiceClient } from 'pane-cloud-contract';
+import { createServiceClient, type PaneRelease } from 'pane-cloud-contract';
 import { startFleetStub, startServiceStub } from 'pane-cloud-contract/stubs';
 import { createLocalSigner, fleetContractCases, serviceContractCases } from 'pane-cloud-contract/testing';
 
@@ -47,18 +56,20 @@ const service = await startServiceStub({
   ],
 });
 // signIn runs device sign-in; on the stub, approveDevice stands in for the person signing in.
-const signIn = async (who) => {
+const signIn = async (who: keyof typeof emails) => {
   const client = createServiceClient({ baseUrl: service.url });
   const { deviceCode, userCode } = await client.startDeviceSignIn();
   service.approveDevice(userCode, emails[who]);
-  return (await client.pollDeviceSignIn(deviceCode)).token;
+  const result = await client.pollDeviceSignIn(deviceCode);
+  if (result.status !== 'complete') throw new Error(`sign-in ended ${result.status}`);
+  return result.token;
 };
 for (const c of serviceContractCases({ baseUrl: service.url, emails, signIn })) test(c.name, c.run);
 
 // Fleet: a key the fleet trusts, one it doesn't, and a release it may install.
 const trusted = createLocalSigner('service-key');
 const untrusted = createLocalSigner('service-key');
-const release = { version: '2.4.215', arch: 'arm64', debSha256: 'c'.repeat(64) };
+const release: PaneRelease = { version: '2.4.215', arch: 'arm64', debSha256: 'c'.repeat(64) };
 const fleet = await startFleetStub({ trustedKeys: { 'service-key': trusted.publicKeyPem }, publishedReleases: [release] });
 for (const c of fleetContractCases({ baseUrl: fleet.url, token: 'any', signer: trusted.signer, untrustedSigner: untrusted.signer, release })) {
   test(c.name, c.run);
@@ -129,7 +140,7 @@ Called only by the service. Every change to a VM is one signed operation.
 
 | Call | Route | Notes |
 | --- | --- | --- |
-| Submit an operation | `POST /v1/operations` | `202` with its status; resending a `requestId` returns the first result; a different payload under a used `requestId` is `invalid_request` |
+| Submit an operation | `POST /v1/operations` | `202` with its status; resending an accepted `requestId` returns the first result; a different payload under a used `requestId` is `invalid_request`; a refused operation is not recorded, so resending it is checked again |
 | Operation status | `GET /v1/operations/:requestId` | `accepted`, `running`, `succeeded` or `failed` |
 | VM | `GET /v1/vms/:vmId` | State, last stop reason, host, memory, Pane version |
 | Metrics | `GET /v1/vms/:vmId/metrics?day=` | CPU seconds, resident memory, disk, and egress for a UTC day |
