@@ -39,6 +39,7 @@ export const LANES = [
   { workflow: 'quality.yml', job: 'quality-checks', run: NATIVE_GLASSES_MOBILE, list: { vitest: 'native' } },
   { workflow: 'quality.yml', job: 'quality-checks', run: NATIVE_GLASSES_MOBILE, list: { vitest: 'glasses' } },
   { workflow: 'quality.yml', job: 'quality-checks', run: NATIVE_GLASSES_MOBILE, list: { vitest: 'mobile' } },
+  { workflow: 'quality.yml', job: 'quality-checks', run: 'pnpm --filter pane-cloud-contract test', list: { vitest: 'packages/pane-cloud-contract' } },
   { workflow: 'quality.yml', job: 'quality-checks', list: { named: [
     'scripts/test-publish-github-release.sh',
     'scripts/test-merge-mac-latest.js',
