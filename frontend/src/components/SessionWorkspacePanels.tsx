@@ -748,7 +748,6 @@ export function SessionWorkspacePanels({
   }
 
   return (
-    <OpenPlainTerminalContext.Provider value={openPlainTerminal}>
     <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
       {trailingSlot && createPortal(titleBarActions, trailingSlot)}
       {/* Portal events reach this component, not the group's PanelGroupView, so the Overview syncs its own group's focus. */}
@@ -776,15 +775,17 @@ export function SessionWorkspacePanels({
                 {closeLabel => approval.render(closeLabel, approval.onClose, approvalFocused)}
               </SplitApprovalOverlay>
             )}
-            {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={focusWithin ? layout.focusedGroupId ?? primaryGroup(layout.root).id : ''}
-              hidden={hidden} onToggleMaximize={toggleMaximize}
-              isMainRepo={false} onSizesChange={resizeSplit} onPanelSelect={selectPanel} onPanelClose={handleClose}
-              onFocusGroup={focusGroup} alwaysShowClose keepPermanentTabsInGroups
-              renderAddTool={renderGroupAddTool}
-              isTabDragging={draggedPanelId !== null} draggedPanelId={draggedPanelId} dropZones={dropZones}
-              onDropZoneChange={handleDropZoneChange} onDropTab={handleDropTab} onDragStart={setDraggedPanelId}
-              onDragEnd={endTabDrag} onStripDrop={handleStripDrop}
-              renderPanelContent={renderPanelContent} getPanelTabPresentation={tabPresentation} />}
+            {layout && <OpenPlainTerminalContext.Provider value={openPlainTerminal}>
+              <SplitLayout layout={layout} panels={tabs} focusedGroupId={focusWithin ? layout.focusedGroupId ?? primaryGroup(layout.root).id : ''}
+                hidden={hidden} onToggleMaximize={toggleMaximize}
+                isMainRepo={false} onSizesChange={resizeSplit} onPanelSelect={selectPanel} onPanelClose={handleClose}
+                onFocusGroup={focusGroup} alwaysShowClose keepPermanentTabsInGroups
+                renderAddTool={renderGroupAddTool}
+                isTabDragging={draggedPanelId !== null} draggedPanelId={draggedPanelId} dropZones={dropZones}
+                onDropZoneChange={handleDropZoneChange} onDropTab={handleDropTab} onDragStart={setDraggedPanelId}
+                onDragEnd={endTabDrag} onStripDrop={handleStripDrop}
+                renderPanelContent={renderPanelContent} getPanelTabPresentation={tabPresentation} />
+            </OpenPlainTerminalContext.Provider>}
           </div>
           <div ref={terminalRegionRef} data-focus-region="terminal" data-region-open={showTerminal && Boolean(terminal)} className="flex flex-shrink-0 flex-col border-t border-border-primary" style={{ height: showTerminal ? '35%' : 32 }}>
             <button type="button" disabled={!loaded} aria-label={showTerminal ? 'Collapse terminal' : 'Expand terminal'}
@@ -844,6 +845,5 @@ export function SessionWorkspacePanels({
         </aside>}
       </div>
     </div>
-    </OpenPlainTerminalContext.Provider>
   );
 }
