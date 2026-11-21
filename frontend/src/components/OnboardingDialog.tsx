@@ -11,10 +11,11 @@ import { formatTimeAgo } from '../utils/timestampUtils';
 import { cn } from '../utils/cn';
 import type { FirstRunAgent, FoundRepo, HostRepos, WslRepos } from '../../../shared/types/onboarding';
 import { FIRST_RUN_MIGRATE_SESSION_OPENING, ONBOARDING_HANDOFF_PREFERENCE, firstRunMigratePrompt, type OnboardingHandoff, type PaneChatAgent } from '../../../shared/types/paneChat';
-import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestrationSession';
+import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
 import type { ImportSession } from '../../../shared/types/sessionImport';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useConfigStore } from '../stores/configStore';
 import { AgentStep, PhoneStepBody, SessionsStepBody, SessionsStepFooter } from './FirstRunSteps';
 import { PairPhoneDialog } from './PairPhoneDialog';
 import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from './ui/Skeleton';
@@ -351,6 +352,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   const [step, setStep] = useState<FirstRunStep>('agent');
   const [agents, setAgents] = useState<FirstRunAgent[] | null>(null);
   const [isPicking, setIsPicking] = useState(false);
+  const [terminalCommand, setTerminalCommand] = useState<string>();
   const [pickedAgent, setPickedAgent] = useState<PaneChatAgent | null>(null);
   // null while the scan runs.
   const [bringIn, setBringIn] = useState<ImportSession[] | null>(null);
@@ -382,6 +384,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
     setStep('agent');
     setIsPicking(false);
     setPickedAgent(null);
+    setTerminalCommand(undefined);
     setBringIn(null);
     setIsHandingOff(false);
     setError(null);
@@ -456,6 +459,22 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
    * try again. Returns whether it handed off.
    */
   const handOff = async (handoff: OnboardingHandoff): Promise<boolean> => {
+    if (terminalCommand !== undefined) {
+      try {
+        const store = useOrchestrationSessionStore.getState();
+        await store.refresh({ throwOnError: true });
+        const name = nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions, 'Terminal');
+        await store.create({ name, terminalCommand });
+      } catch (cause) {
+        setError(`Couldn't open the Terminal Session: ${reasonText(cause instanceof Error ? cause.message : undefined, 'Pane could not create it')}. Try again.`);
+        return false;
+      }
+      closedRef.current = true;
+      if (!fromHome) await markOnboardingComplete();
+      void useSessionStore.getState().setActiveSession(null);
+      navigateToPaneChat();
+      return true;
+    }
     if (fromHome) {
       // Reopened from Home: onboarding is already done and its answer stays as it was.
       if (handoff === 'migrate') return startMigrateSession();
@@ -521,6 +540,20 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
     return complete(properties);
   };
 
+  const pickTerminal = async (command: string) => {
+    setIsPicking(true);
+    setError(null);
+    try {
+      await useConfigStore.getState().updateConfig({ defaultSessionTerminalCommand: command });
+      setTerminalCommand(command);
+      setStep('project');
+    } catch (cause) {
+      setError(`Couldn't save your terminal choice: ${reasonText(cause instanceof Error ? cause.message : undefined, 'the save failed')}. Try again.`);
+    } finally {
+      setIsPicking(false);
+    }
+  };
+
   const pickAgent = async (agent: PaneChatAgent) => {
     setIsPicking(true);
     setError(null);
@@ -534,6 +567,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
           const switched = await API.orchestrationSessions.setAgent({ sessionId: LEGACY_ORCHESTRATION_SESSION_ID }, agent);
           if (!switched.success) throw new Error(switched.error);
         }
+        await useConfigStore.getState().updateConfig({ defaultSessionTerminalCommand: null });
       } catch (cause) {
         setError(`Couldn't switch to that agent: ${reasonText(cause instanceof Error ? cause.message : undefined, 'Pane could not save it')}. Pick it again, or change it later in Settings.`);
         setIsPicking(false);
@@ -721,7 +755,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   // Git is checked before step 1, so without it the screen shows only the Git Required message.
   const view: FirstRunStep | 'detecting' = env === null ? 'detecting' : gitMissing ? 'project' : step;
   const title = view === 'detecting' ? 'Welcome to Pane'
-    : view === 'agent' ? 'Which agent do you use?'
+    : view === 'agent' ? 'How would you like to start new Sessions?'
       : view === 'sessions' ? (bringIn === null ? 'Looking for your sessions…' : `Bring your ${bringIn.length} ${bringIn.length === 1 ? 'session' : 'sessions'} into Pane?`)
         : 'Open your project';
 
@@ -754,7 +788,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
             // One AgentStep across detecting and agent, so its skeleton swap holds and fades.
             <>
               {view === 'detecting' && <LoadingStatus label="Checking this computer" />}
-              <AgentStep agents={view === 'detecting' ? null : agents} disabled={view === 'detecting' || isPicking} onPick={agent => void pickAgent(agent)} />
+              <AgentStep agents={view === 'detecting' ? null : agents} disabled={view === 'detecting' || isPicking} onPick={agent => void pickAgent(agent)} onPickTerminal={command => void pickTerminal(command)} />
             </>
           ) : (
             <SessionsStepBody sessions={bringIn} />

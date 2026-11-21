@@ -238,7 +238,7 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
         machineName={formMachineName} environment={environment} readRuntimes={otherRuntimes}
         onCreate={async ({ name: requestedName, ...input }) => {
           if (onOtherMachine) {
-            const name = requestedName || nextOrchestrationSessionName(await readSessionNames(machine));
+            const name = requestedName || nextOrchestrationSessionName(await readSessionNames(machine), input.terminalCommand === undefined ? undefined : 'Terminal');
             const sessionId = await createSessionOn(machine, { ...input, name, nameFromFirstMessage: !requestedName });
             rememberNewMachine(machine.id);
             // Without the memory the switch still works; openSession then selects it after the restore.
@@ -250,7 +250,7 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
           if (!window.electronAPI?.orchestrationSessions) throw new Error('This host does not support Sessions.');
           const store = useOrchestrationSessionStore.getState();
           await store.load();
-          const name = requestedName || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
+          const name = requestedName || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions, input.terminalCommand === undefined ? undefined : 'Terminal');
           await store.create({ ...input, name, nameFromFirstMessage: !requestedName });
           rememberNewMachine(machine.id);
           useSessionStore.getState().setActiveSession(null);

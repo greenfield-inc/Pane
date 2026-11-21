@@ -359,6 +359,7 @@ export class ConfigManager extends EventEmitter {
         ...this.config.agentContext!,
         ...loadedConfig.agentContext
       },
+      defaultSessionTerminalCommand: decodeOptionalBoundary(loadedConfig.defaultSessionTerminalCommand, boundary.string)?.trim() ?? null,
       defaultOrchestratorAgent: normalizePaneChatAgent(
         loadedConfig.defaultOrchestratorAgent ?? this.config.defaultOrchestratorAgent,
       ),
@@ -676,6 +677,9 @@ export class ConfigManager extends EventEmitter {
       agentContext,
       notify,
       machineHealth,
+      defaultSessionTerminalCommand: 'defaultSessionTerminalCommand' in updates
+        ? (decodeOptionalBoundary(updates.defaultSessionTerminalCommand, boundary.string)?.trim() ?? null)
+        : current.defaultSessionTerminalCommand,
       defaultOrchestratorAgent: 'defaultOrchestratorAgent' in updates
         ? normalizePaneChatAgent(updates.defaultOrchestratorAgent)
         : current.defaultOrchestratorAgent,

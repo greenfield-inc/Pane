@@ -133,13 +133,13 @@ async function openFirstRun(page: Page, finder: FinderSetup, options: ElectronAp
   await page.locator('#pane-launch-outline').waitFor({ state: 'detached' });
   if (finder.done) return page.getByRole('heading', { name: 'Get Started', exact: true });
   if (finder.atFirstStep) {
-    const first = page.getByRole('dialog', { name: 'Which agent do you use?' });
+    const first = page.getByRole('dialog', { name: 'How would you like to start new Sessions?' });
     await expect(first).toBeVisible();
     return first;
   }
   if (finder.gitInstalled !== false) {
     // Nothing is found by default, so picking an agent goes straight to "Open your project".
-    await page.getByRole('dialog', { name: 'Which agent do you use?' }).getByRole('button', { name: 'Claude Code' }).click();
+    await page.getByRole('dialog', { name: 'How would you like to start new Sessions?' }).getByRole('button', { name: 'Claude Code' }).click();
   }
   const dialog = page.getByRole('dialog', { name: 'Open your project' });
   await expect(dialog).toBeVisible();
@@ -244,7 +244,7 @@ test('step 1 lists the agents this computer supports and links a missing one to 
   await expect(dialog.getByRole('button', { name: 'Codex' })).toHaveCount(0);
   await expect(dialog.getByText('Not found on this computer')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Install' })).toBeVisible();
-  await expect(dialog.getByText('Pane runs it for you, with its permission prompts off. You can change it later in Settings.')).toBeVisible();
+  await expect(dialog.getByText('Pane runs chat agents with permission prompts off.')).toBeVisible();
 });
 
 test('step 2 counts the sessions from the last 7 days, and Yes opens the Onboarding Session (J1)', async ({ page }) => {
@@ -315,7 +315,7 @@ test('without Git, only the Git Required message shows and step 1 never appears 
 
   await expect(dialog.getByText('Git Required')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Install Git' })).toBeVisible();
-  await expect(page.getByRole('dialog', { name: 'Which agent do you use?' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'How would you like to start new Sessions?' })).toHaveCount(0);
 });
 
 test('loading, empty and three results share one dialog height', async ({ page }) => {
@@ -479,7 +479,7 @@ test("Home's \"Start a Session\" reopens the first-run screen, and Yes asks for 
   });
   const reopen = async (agent: string) => {
     await page.getByRole('button', { name: 'Start a Session', exact: true }).click();
-    await page.getByRole('dialog', { name: 'Which agent do you use?' }).getByRole('button', { name: agent }).click();
+    await page.getByRole('dialog', { name: 'How would you like to start new Sessions?' }).getByRole('button', { name: agent }).click();
     return page.getByRole('dialog', { name: 'Bring your 4 sessions into Pane?' });
   };
   // SAFETY: the evaluate above installed __homeFirstRun.

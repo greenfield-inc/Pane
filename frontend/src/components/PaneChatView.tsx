@@ -13,6 +13,7 @@ import type {
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
 } from '../../../shared/types/orchestrationSession';
+import { orchestrationSessionPanelId } from '../../../shared/types/orchestrationSession';
 import type { SessionTileNode, SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { SessionProvider } from '../contexts/SessionContext';
@@ -473,8 +474,8 @@ function SessionTile({
   // needs the newer record folded in.
   useEffect(() => {
     if (!view || !record || view.session.id !== record.id) return;
-    if (view.agent !== record.agent || view.panel.id !== record.panelIds[record.agent]) {
-      const reloadKey = `${record.id}:${record.agent}:${record.panelIds[record.agent]}`;
+    if (view.agent !== record.agent || view.panel.id !== orchestrationSessionPanelId(record)) {
+      const reloadKey = `${record.id}:${record.agent}:${orchestrationSessionPanelId(record)}`;
       if (agentReloadKey.current === reloadKey) return;
       agentReloadKey.current = reloadKey;
       void load().finally(() => {
@@ -608,7 +609,7 @@ function SessionTileFallback({ record, error, isLoading, chrome, onRetry }: {
 
 /** The agent tab's title, as the host names it, for a Session not open yet. */
 function agentTabTitle(record: OrchestrationSessionRecord | undefined): string {
-  return record ? `${record.name} · ${configuredAgent(record.agent).title}` : 'Session';
+  return record ? `${record.name} · ${record.terminalCommand === undefined ? configuredAgent(record.agent).title : 'Terminal'}` : 'Session';
 }
 
 /** A Session's workspace skeleton, in the layout this window last showed it with. */
@@ -616,7 +617,7 @@ function SavedSessionSkeleton({ record, name, chromeInline }: { record?: Orchest
   const internalId = record?.internalSessionId;
   const layout = usePanelStore(state => (internalId ? state.layouts[internalId] : undefined));
   const panels = usePanelStore(state => (internalId ? state.panels[internalId] : undefined));
-  return <SessionWorkspaceSkeleton name={name} tabTitle={agentTabTitle(record)} agentPanelId={record?.panelIds[record.agent]}
+  return <SessionWorkspaceSkeleton name={name} tabTitle={agentTabTitle(record)} agentPanelId={record && orchestrationSessionPanelId(record)}
     chain={internalId} layout={layout} panels={panels} chromeInline={chromeInline} />;
 }
 

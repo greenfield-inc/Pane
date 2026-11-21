@@ -181,7 +181,7 @@ export function OrchestrationSessionNav({
 
   const createSession = useCallback(async ({ name: requestedName, ...input }: SessionCreateRequest) => {
     await load();
-    const name = requestedName || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
+    const name = requestedName || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions, input.terminalCommand === undefined ? undefined : 'Terminal');
     await create({ ...input, name, nameFromFirstMessage: !requestedName });
     setShowCreate(false);
     setActiveSession(null);

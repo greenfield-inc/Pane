@@ -62,6 +62,8 @@ interface CreateOrchestrationSessionDialogProps {
 
 interface SessionCreationForm {
   agent: PaneChatAgent;
+  mode: 'chat' | 'shell' | 'custom';
+  terminalCommand: string;
   name: string;
   goal: string;
   launchCommand: string;
@@ -79,6 +81,8 @@ function initialSessionCreationForm(config: AppConfig | null, environment?: Proj
   const agent = supportedSessionAgent(config?.defaultOrchestratorAgent, environment);
   return {
     agent,
+    mode: config?.defaultSessionTerminalCommand == null ? 'chat' : config.defaultSessionTerminalCommand ? 'custom' : 'shell',
+    terminalCommand: config?.defaultSessionTerminalCommand ?? '',
     name: '',
     goal: '',
     ...defaultLaunch(config, agent),
@@ -112,13 +116,14 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [isOpen, readRuntimes]);
-  const [{ agent, name, goal, launchCommand, customResume, profile, startPinned, error }, dispatch] = useReducer(sessionCreationReducer, null, config => initialSessionCreationForm(config, environment));
+  const [{ agent, mode, terminalCommand, name, goal, launchCommand, customResume, profile, startPinned, error }, dispatch] = useReducer(sessionCreationReducer, null, config => initialSessionCreationForm(config, environment));
   const userEditedLaunch = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const config = useConfigStore(state => state.config);
   const fetchConfig = useConfigStore(state => state.fetchConfig);
   const updateConfig = useConfigStore(state => state.updateConfig);
   const userSelectedAgent = useRef(false);
+  const userSelectedMode = useRef(false);
   const userToggledPinned = useRef(false);
 
   useEffect(() => {
@@ -131,6 +136,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
   useEffect(() => {
     if (!isOpen) return;
     userSelectedAgent.current = false;
+    userSelectedMode.current = false;
     userEditedLaunch.current = false;
     userToggledPinned.current = false;
     const savedConfig = useConfigStore.getState().config;
@@ -138,6 +144,10 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
     if (!savedConfig) {
       void fetchConfig().then(nextConfig => {
         if (!userSelectedAgent.current) dispatch({ type: 'update', values: { agent: supportedSessionAgent(nextConfig.defaultOrchestratorAgent, environment) } });
+        if (!userSelectedMode.current) {
+          const { mode, terminalCommand } = initialSessionCreationForm(nextConfig, environment);
+          dispatch({ type: 'update', values: { mode, terminalCommand } });
+        }
         if (!userToggledPinned.current) dispatch({ type: 'update', values: { startPinned: nextConfig.defaultSessionPinned ?? false } });
         if (!userEditedLaunch.current) {
           dispatch({ type: 'update', values: {
@@ -157,23 +167,23 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isSubmitting) return;
+    if (isSubmitting || (mode === 'custom' && !terminalCommand.trim())) return;
     setIsSubmitting(true);
     onSubmittingChange?.(true);
     dispatch({ type: 'update', values: { error: null } });
     try {
       const defaults: Partial<AppConfig> = {};
-      if (config?.defaultOrchestratorAgent !== agent) defaults.defaultOrchestratorAgent = agent;
+      const terminal = mode === 'chat' ? null : mode === 'shell' ? '' : terminalCommand.trim();
+      if ((config?.defaultSessionTerminalCommand ?? null) !== terminal) defaults.defaultSessionTerminalCommand = terminal;
+      if (mode === 'chat' && config?.defaultOrchestratorAgent !== agent) defaults.defaultOrchestratorAgent = agent;
       // Launch fields the person left alone are the defaults (filtered for OpenCode), not new ones.
-      if (userEditedLaunch.current && (config?.defaultSessionCommand ?? '') !== launchCommand) defaults.defaultSessionCommand = launchCommand;
-      if (userEditedLaunch.current && JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(customResume)) defaults.defaultSessionResume = customResume;
+      if (mode === 'chat' && userEditedLaunch.current && (config?.defaultSessionCommand ?? '') !== launchCommand) defaults.defaultSessionCommand = launchCommand;
+      if (mode === 'chat' && userEditedLaunch.current && JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(customResume)) defaults.defaultSessionResume = customResume;
       await onCreate({
-        agent,
+        ...(terminal === null ? { agent, launchCommand, customResume } : { terminalCommand: terminal }),
         name: name.trim() || undefined,
         goal: goal.trim() || undefined,
-        launchCommand,
         profile,
-        customResume,
         runtime: wslDistribution ? 'wsl' : undefined,
         wslDistribution: wslDistribution || undefined,
         isPinned: startPinned,
@@ -192,14 +202,15 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
       <form onSubmit={submit} className="flex min-h-0 flex-col">
         {header ?? <ModalHeader title="Create Session" />}
         <ModalBody className="min-h-0 space-y-4">
-          <Input label="Session name (optional)" value={name} onChange={event => dispatch({ type: 'update', values: { name: event.target.value } })} placeholder="Named from your first message" autoFocus fullWidth />
+          <Input label="Session name (optional)" value={name} onChange={event => dispatch({ type: 'update', values: { name: event.target.value } })} placeholder={mode === 'chat' ? 'Named from your first message' : undefined} autoFocus fullWidth />
           <Textarea label="What is this Session for? (optional)" value={goal} onChange={event => dispatch({ type: 'update', values: { goal: event.target.value } })} rows={2} fullWidth />
           <fieldset className="space-y-2">
-            <legend className="text-label font-medium text-text-primary">Choose an agent</legend>
-            <div className="grid gap-2" role="radiogroup" aria-label="Session agent">
+            <legend className="text-label font-medium text-text-primary">How would you like to start this Session?</legend>
+            <div className="text-sm font-medium text-text-primary">Chat</div>
+            <div className="grid gap-2" role="group" aria-label="Chat">
               {availableSessionAgents(Boolean(wslDistribution), environment).map(option => {
-                const selected = agent === option.id;
-                const isDefault = config?.defaultOrchestratorAgent === option.id;
+                const selected = mode === 'chat' && agent === option.id;
+                const isDefault = config?.defaultSessionTerminalCommand == null && config?.defaultOrchestratorAgent === option.id;
                 return (
                   <label
                     key={option.id}
@@ -219,7 +230,8 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
                       checked={selected}
                       onChange={() => {
                         userSelectedAgent.current = true;
-                        dispatch({ type: 'update', values: { agent: option.id } });
+                        userSelectedMode.current = true;
+                        dispatch({ type: 'update', values: { agent: option.id, mode: 'chat' } });
                       }}
                       className="sr-only"
                     />
@@ -229,10 +241,32 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
                 );
               })}
             </div>
+            <div className="text-sm font-medium text-text-primary">Terminal</div>
+            <label className="flex items-center gap-2 rounded border border-border-primary px-3 py-2 text-sm text-text-primary">
+              <input type="radio" name="orchestration-session-agent" checked={mode === 'shell'} onChange={() => {
+                userSelectedMode.current = true;
+                dispatch({ type: 'update', values: { mode: 'shell' } });
+              }} />
+              Use a plain terminal
+            </label>
+            <details open={mode === 'custom'} className="space-y-2">
+              <summary className="cursor-pointer text-sm text-text-secondary">Add a custom CLI command…</summary>
+              <label className="flex items-center gap-2 text-sm text-text-primary">
+                <input type="radio" name="orchestration-session-agent" checked={mode === 'custom'} onChange={() => {
+                  userSelectedMode.current = true;
+                  dispatch({ type: 'update', values: { mode: 'custom' } });
+                }} />
+                Use a custom CLI command
+              </label>
+              <Input label="Command to run when a Session starts" value={terminalCommand} onChange={event => {
+                userSelectedMode.current = true;
+                dispatch({ type: 'update', values: { mode: 'custom', terminalCommand: event.target.value } });
+              }} fullWidth />
+            </details>
           </fieldset>
           {distributions.length > 0 && (
             <div className="space-y-2">
-              <label htmlFor="session-runtime" className="text-label font-medium text-text-primary">Run agent in</label>
+              <label htmlFor="session-runtime" className="text-label font-medium text-text-primary">Run Session in</label>
               <select id="session-runtime" value={wslDistribution} onChange={event => {
                 setWslDistribution(event.target.value);
                 if (!event.target.value) dispatch({ type: 'update', values: { agent: supportedSessionAgent(agent, environment) } });
@@ -241,7 +275,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
                 <option value="">Windows</option>
                 {distributions.map(distribution => <option key={distribution} value={distribution}>WSL · {distribution}</option>)}
               </select>
-              {wslDistribution && <p className="text-xs text-text-secondary">The agent must be installed in this distribution.</p>}
+              {mode === 'chat' && wslDistribution && <p className="text-xs text-text-secondary">The agent must be installed in this distribution.</p>}
             </div>
           )}
           <div className="flex items-center gap-3">
@@ -261,7 +295,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
               }}
             />
           </div>
-          <details className="space-y-3">
+          {mode === 'chat' && <details className="space-y-3">
             <summary className="cursor-default text-sm font-medium text-text-secondary transition-colors hover:text-text-primary">Launch command and behavior</summary>
             <SessionLaunchFields
               resume={customResume}
@@ -272,12 +306,12 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
               onCommandChange={value => { userEditedLaunch.current = true; dispatch({ type: 'update', values: { launchCommand: value } }); }}
               onProfileChange={value => { userEditedLaunch.current = true; dispatch({ type: 'update', values: { profile: value } }); }}
             />
-          </details>
+          </details>}
           {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
         </ModalBody>
         <ModalFooter className="shrink-0">
           <Button type="button" variant="secondary" disabled={isSubmitting} onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={isSubmitting} loadingText="Creating…">{machineName ? `Create Session on ${machineName}` : 'Create Session'}</Button>
+          <Button type="submit" disabled={mode === 'custom' && !terminalCommand.trim()} loading={isSubmitting} loadingText="Creating…">{machineName ? `Create Session on ${machineName}` : 'Create Session'}</Button>
         </ModalFooter>
       </form>
   );

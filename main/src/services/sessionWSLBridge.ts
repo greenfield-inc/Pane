@@ -1,7 +1,7 @@
 import path from 'path';
 import { escapeForBash, RUNPANE_PATH_FLAGS, RUNPANE_WSL_PATH_FUNCTIONS, WSLPATH } from '../utils/wslUtils';
 import { sessionRuntimePath } from './sessionRuntime';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import { orchestrationSessionPanelId, type OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import { AGENT_FARM_HOST_ENV } from '../../../shared/types/customCommandResume';
 
 function quotePowerShell(value: string): string {
@@ -31,7 +31,7 @@ export function sessionWSLBridge(appDirectory: string, record: OrchestrationSess
     '# Pane-managed WSL Session bridge. Arguments cross as PowerShell literals.',
     'set -euo pipefail',
     ...RUNPANE_WSL_PATH_FUNCTIONS,
-    `panel_id=\${PANE_PANEL_ID:-${escapeForBash(record.panelIds[record.agent])}}`,
+    `panel_id=\${PANE_PANEL_ID:-${escapeForBash(orchestrationSessionPanelId(record))}}`,
     "panel_id=${panel_id//\\'/\\'\\'}",
     `command=${escapeForBash(`${command}; $env:PANE_PANEL_ID = `)}`,
     'command+="\'$panel_id\'; \\$paneArgs = @("',

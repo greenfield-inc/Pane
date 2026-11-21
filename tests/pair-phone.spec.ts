@@ -259,7 +259,7 @@ test('first run ends on "Take your agents with you", whose Pair a phone opens Ad
     window.electronAPI.onboarding.detectEnvironment = async () => ({ success: true, data: { gitInstalled: true } });
   });
   await gotoApp(page);
-  await page.getByRole('dialog', { name: 'Which agent do you use?' }).getByRole('button', { name: 'Claude Code' }).click();
+  await page.getByRole('dialog', { name: 'How would you like to start new Sessions?' }).getByRole('button', { name: 'Claude Code' }).click();
   await page.getByRole('dialog', { name: 'Open your project' }).getByRole('button', { name: 'Skip', exact: true }).click();
   const step = page.getByRole('dialog', { name: 'Take your agents with you' });
   await expect(step).toBeVisible();

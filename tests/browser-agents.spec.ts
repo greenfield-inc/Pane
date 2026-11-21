@@ -139,7 +139,7 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     // can hold back many seconds. Opened later, over the agent's Pane, it hides the chip's Take over, and its
     // last Skip moves the window to Pane Chat. So finish it before the repo goes in: it always opens until then.
     const firstRun = (title: string) => page.getByRole('dialog', { name: title });
-    await firstRun('Which agent do you use?').getByRole('button', { name: 'Skip', exact: true }).click();
+    await firstRun('How would you like to start new Sessions?').getByRole('button', { name: 'Skip', exact: true }).click();
     await firstRun('Open your project').getByRole('button', { name: 'Skip', exact: true }).click();
     await firstRun('Take your agents with you').getByRole('button', { name: 'Skip for now', exact: true }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);

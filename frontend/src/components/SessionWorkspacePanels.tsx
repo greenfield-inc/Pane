@@ -10,6 +10,7 @@ import { readPaneLayout, rememberPaneLayout } from '../utils/paneLayoutMemory';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { usePanelStore } from '../stores/panelStore';
 import { PanelContainer } from './panels/PanelContainer';
+import { OpenPlainTerminalContext } from './chatTab/openPlainTerminal';
 import { PanelTabStrip } from './panels/PanelTabStrip';
 import { SplitLayout } from './panels/SplitLayout';
 import type { PanelTabPresentationResolver } from '../types/panelComponents';
@@ -477,6 +478,10 @@ export function SessionWorkspacePanels({
     }
   }, [sessionId, applyLayout]);
 
+  const openPlainTerminal = useCallback(() => {
+    void addTool({ type: 'terminal', title: 'Terminal' });
+  }, [addTool]);
+
   const renderGroupAddTool = useCallback((groupId: string) => (
     <SessionAddToolMenu disabled={!loaded} onAdd={tool => { void addTool(tool, groupId); }} />
   ), [loaded, addTool]);
@@ -743,6 +748,7 @@ export function SessionWorkspacePanels({
   }
 
   return (
+    <OpenPlainTerminalContext.Provider value={openPlainTerminal}>
     <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
       {trailingSlot && createPortal(titleBarActions, trailingSlot)}
       {/* Portal events reach this component, not the group's PanelGroupView, so the Overview syncs its own group's focus. */}
@@ -838,5 +844,6 @@ export function SessionWorkspacePanels({
         </aside>}
       </div>
     </div>
+    </OpenPlainTerminalContext.Provider>
   );
 }

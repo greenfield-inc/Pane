@@ -19,6 +19,7 @@ import {
   type OrchestrationLink,
   type OrchestrationReport,
   type OrchestrationSessionRecord,
+  orchestrationSessionPanelId,
   type OrchestrationSessionStoreData,
 } from '../../../shared/types/orchestrationSession';
 import { getPaneChatPanelId, type PaneChatAgent } from '../../../shared/types/paneChat';
@@ -119,6 +120,7 @@ const sessionSchema = boundary.object({
   isPinned: boundary.optional(boundary.boolean),
   todoNumber: boundary.optional(boundary.refine(boundary.number, value => Number.isInteger(value) && value > 0, 'expected a to-do number')),
   agent: paneChatAgentSchema,
+  terminalCommand: boundary.optional(boundary.string),
   launchCommand: boundary.optional(boundary.string),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
   resume: boundary.optional(boundary.nonEmptyString),
@@ -439,8 +441,12 @@ function sanitizeSession(value: JsonValue, index: number, problems: string[]): O
       if (saved !== undefined && id === undefined) problems.push(`${label}: replaced an invalid ${agentLabel(agent)} panel id`);
       return [agent, id ?? (session.id === LEGACY_ORCHESTRATION_SESSION_ID ? getPaneChatPanelId(agent) : `__orchestration_panel_${session.id}_${agent}`)];
     }));
+    const terminal = decodeOptionalBoundary(session.panelIds.terminal, boundary.nonEmptyString)
+      ?? (session.terminalCommand === undefined ? undefined : `__orchestration_panel_${session.id}_terminal`);
     // SAFETY: the map above gives every configured agent an id.
-    return { ...session, panelIds: panelIds as Record<ConfiguredAgentId, string> };
+    const record: OrchestrationSessionRecord = { ...session, panelIds: panelIds as Record<ConfiguredAgentId, string> };
+    if (terminal) record.panelIds.terminal = terminal;
+    return record;
   } catch (error) {
     if (!(error instanceof BoundaryDecodeError)) throw error;
     problems.push(`dropped ${label}: ${error.message}`);
@@ -479,7 +485,7 @@ function membershipOf(session: OrchestrationSessionRecord): OrchestrationSession
     internalSessionId: session.internalSessionId,
     archived: session.archived === true,
     agent: session.agent,
-    agentPanelId: session.panelIds[session.agent] ?? null,
+    agentPanelId: orchestrationSessionPanelId(session),
     panelIds: Object.values(session.panelIds),
     associations: session.associations.map(association => {
       const member: OrchestrationSessionMembership['associations'][number] = { paneId: association.paneId, panelIds: [...association.panelIds] };

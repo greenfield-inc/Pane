@@ -52,7 +52,7 @@ export function isolatedPane(prefix: string, extra: Record<string, string> = {},
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined || INHERITED.test(key)) continue;
-    env[key] = value;
+    env[key.toUpperCase() === 'PATH' ? 'PATH' : key] = value;
   }
   env.PATH = (env.PATH ?? '').split(path.delimiter).filter(entry => !entry.startsWith(REAL_PANE)).join(path.delimiter);
   Object.assign(env, {

@@ -13,6 +13,7 @@ import { toAssistantMessage } from '../agentChat/convertMessage';
 import type { ActiveMachine } from '../../stores/activeMachineStore';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { ChatProblem } from './ChatProblem';
+import { OpenPlainTerminalContext } from './openPlainTerminal';
 import { ChatQuestionCard } from './ChatQuestionCard';
 import { ChatPermissionCard } from './ChatPermissionCard';
 import { ChatTurnView, WorkerNoteLine, type ChatTurnActions } from './ChatTurns';
@@ -208,6 +209,7 @@ function TurnsSkeleton() {
 }
 
 export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
+  const openPlainTerminal = useContext(OpenPlainTerminalContext);
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   const catalog = useChatAgents(client);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
@@ -547,6 +549,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         restart={!(stoppedNotice && stopped)}
         onRestart={() => void act(() => client.restart(panelId))}
         onSignIn={() => void act(() => client.signIn(panelId))}
+        onOpenTerminal={openPlainTerminal}
         onInstall={url => void window.electronAPI?.openExternal(url)} />}
       {view?.banner && <ChatSwitchBanner banner={view.banner} busy={busy || !connected}
         onPickAnother={() => setPicking(true)} onDismiss={() => void act(() => client.dismissBanner(panelId))} />}

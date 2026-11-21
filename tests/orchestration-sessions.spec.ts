@@ -111,7 +111,7 @@ test('Session runtime defaults to Windows and submits the selected installed dis
   await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
-  const runtime = page.getByLabel('Run agent in');
+  const runtime = page.getByLabel('Run Session in');
   await expect(runtime).toHaveValue('');
   await runtime.selectOption('Ubuntu-24.04');
   await page.getByLabel('Session name (optional)', { exact: true }).fill('WSL planning');
@@ -127,7 +127,7 @@ test('Session runtime is hidden when the host offers no WSL distributions', asyn
   await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
-  await expect(page.getByLabel('Run agent in')).toHaveCount(0);
+  await expect(page.getByLabel('Run Session in')).toHaveCount(0);
 });
 
 test('selecting WSL restores a Cursor default while preserving an explicit agent choice', async ({ page }) => {
@@ -139,7 +139,7 @@ test('selecting WSL restores a Cursor default while preserving an explicit agent
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
   await expect(page.getByRole('radio', { name: 'Cursor', exact: true })).toHaveCount(0);
-  const runtime = page.getByLabel('Run agent in');
+  const runtime = page.getByLabel('Run Session in');
   await runtime.selectOption('Ubuntu-24.04');
   await expect(page.getByRole('radio', { name: 'Cursor', exact: true })).toBeChecked();
   await page.getByTestId('create-session-agent-codex').click();
@@ -246,7 +246,7 @@ test('Session creation agent picker supports native radio keyboard semantics', a
 
   await page.getByTestId('new-orchestration-session').click();
   const dialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
-  const radios = dialog.getByRole('radio');
+  const radios = dialog.getByRole('group', { name: 'Chat', exact: true }).getByRole('radio');
   // Claude, Codex, Cursor, OpenCode and Pi.
   await expect(radios).toHaveCount(5);
   await expect(dialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
@@ -276,7 +276,7 @@ test('Session creation hides unsupported Cursor on Windows', async ({ page }) =>
   await page.getByTestId('new-orchestration-session').click();
   const dialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
   // Claude, Codex, OpenCode and Pi.
-  await expect(dialog.getByRole('radio')).toHaveCount(4);
+  await expect(dialog.getByRole('group', { name: 'Chat', exact: true }).getByRole('radio')).toHaveCount(4);
   await expect(dialog.getByRole('radio', { name: 'Cursor', exact: true })).toHaveCount(0);
   await expect(dialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
   await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
@@ -2271,7 +2271,7 @@ test('New offers Session and Pane in one dialog and restores keyboard focus', as
   await expect(dialog).toHaveCount(1);
   await expect(dialog.getByRole('radio', { name: 'Session', exact: true })).toBeChecked();
   await expect(dialog.getByLabel('Session name (optional)')).toBeFocused();
-  await expect(dialog.getByLabel('Run agent in')).toHaveCount(0);
+  await expect(dialog.getByLabel('Run Session in')).toHaveCount(0);
   // One machine: no picker, and the Create button names no machine.
   await expect(dialog.getByRole('radiogroup', { name: 'Machine' })).toHaveCount(0);
   await expect(dialog.getByRole('button', { name: 'Create Session', exact: true })).toBeVisible();
@@ -2292,7 +2292,7 @@ test('New creates a Session with its selected WSL runtime and agent', async ({ p
   await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByLabel('Run agent in').selectOption('Ubuntu-24.04');
+  await page.getByLabel('Run Session in').selectOption('Ubuntu-24.04');
   await page.getByTestId('create-session-agent-cursor').click();
   await page.getByLabel('Session name (optional)').fill('Coordinate new work');
   await page.getByRole('button', { name: 'Create Session', exact: true }).click();
@@ -2354,7 +2354,7 @@ test('New can show Session settings when an older host has no Session API', asyn
   await dismissStartupDialogs(page);
   await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
   await expect(page.getByLabel('Session name (optional)')).toBeVisible();
-  await expect(page.getByLabel('Run agent in')).toHaveCount(0);
+  await expect(page.getByLabel('Run Session in')).toHaveCount(0);
   await page.getByRole('button', { name: 'Create Session', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('This host does not support Sessions.');
 });

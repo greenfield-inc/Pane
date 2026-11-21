@@ -1,19 +1,16 @@
 # Sessions
 
-Sessions are named, ongoing Pane Chats where work intent lives. Each Session
-opens one chat, and its sidebar row can expand to show associated Panes. The
-**Overview** tab beside the chat keeps the Session name, associated Panes, and
-recent activity together while the chat remains the focused work surface. A tab
+Sessions are named workstreams. Each Session opens a chat or terminal, and its
+sidebar row can expand to show associated Panes. The **Overview** tab keeps
+the Session name, associated Panes, and recent activity together. A tab
 shares its parent Pane's worktree.
 
-In the sidebar, `+` opens an agent picker, an optional Session name field, and
-an optional "What is this Session for?" field that becomes the Session's goal.
-Pane remembers the chosen agent as the default for future Sessions while
-existing Sessions keep their own agent. A blank name starts as `New chat` or
-`New chat 2`, and the Session agent renames it once, in 3 to 5 words, when it
-replies to your first task. A name you type or set later is kept. Each new Session opens as one Pane
-Chat and can be renamed later from its Overview. Expand a Session to see
-its associated Panes and open any Pane in its existing sidebar view.
+In the sidebar, `+` lets you choose a chat agent, a plain terminal, or a custom
+CLI command and optionally give the Session a name and goal. Pane remembers
+the launch choice for future Sessions. Existing Sessions keep their own launch
+settings. An unnamed chat Session starts as `New chat` or `New chat 2`, and its
+agent renames it once when it replies to your first task. You can rename any
+Session from its Overview. Expand a Session to see its associated Panes.
 
 With [chat tabs](CHAT_TABS.md) on (Settings → AI & Agents → Chat tabs), a new
 Session runs its orchestrator in a chat tab instead of a terminal for any agent
@@ -590,15 +587,18 @@ its Panes stay where they are, and the original Session is not archived.
 On a new install, Pane's first-run screen asks two things before anything
 else:
 
-1. **Which agent do you use?** Claude Code, Codex or Cursor, showing only the
-   agents this computer supports. An agent whose CLI Pane can't find says "Not
+1. **How would you like to start new Sessions?** Under **Chat**, Pane shows
+   the agents this computer supports. Under **Terminal**, you can open a plain
+   shell or enter a custom CLI command. A terminal choice skips the
+   agent-session import offer and opens a terminal Session after project setup. An agent whose CLI Pane can't find says "Not
    found on this computer", with an install link. The screen says Pane runs it
    with its permission prompts off, as Pane always launches these agents.
    When Claude Code then shows its one-time bypass-permissions warning in the
    Onboarding Session, Pane answers "Yes, I accept" in the terminal, and Claude
    records the acceptance itself. Pane never edits Claude's config files while
    Claude may be running. The pick becomes the Onboarding Session's agent and
-   the default for new Sessions (Settings → AI & Agents).
+   the default for new Sessions. The missing-agent recovery card also offers
+   **Open a plain terminal** to continue in the same Session.
 2. **Bring your N sessions into Pane?** Pane looks for sessions from Claude
    Code, Codex, Conductor, Paradev (formerly Superset), Herdr, Emdash, Orca
    and T3 Code on this computer and counts those running now or used in the last 7 days. Pane opens
