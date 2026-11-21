@@ -31,7 +31,7 @@ describe('relay agent', () => {
     cleanups.push(relay.close);
     let terminator: ReturnType<typeof createComputerTlsServer> | null = null;
     const devServer = http.createServer((request, response) => response.end(
-      `dev server saw ${request.headers.host} from ${terminator?.clientAddress(request.socket.remoteAddress, request.socket.remotePort)}`,
+      `dev server saw ${request.headers.host} from ${terminator?.forwardedClient(request.socket.remoteAddress, request.socket.remotePort)?.address}`,
     ));
     await new Promise<void>((resolve) => devServer.listen(0, '127.0.0.1', resolve));
     cleanups.push(() => { devServer.close(); });

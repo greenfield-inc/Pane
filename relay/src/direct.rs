@@ -32,7 +32,7 @@ pub async fn spawn(quic: Option<SocketAddr>, tls: &rustls::ServerConfig) -> Resu
 /// Passes one decrypted https connection to the iroh relay, starting with the
 /// request head already read. Limits apply per client IP address.
 pub async fn proxy(state: Arc<State>, client: BoxStream, head: Vec<u8>, peer: IpAddr) {
-    let Some(_slot) = state.client_slot() else {
+    let Some(_slot) = state.client_slot(None) else {
         tracing::warn!(%peer, "direct relay client refused: relay at --max-connections");
         return;
     };

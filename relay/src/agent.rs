@@ -120,6 +120,7 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
             return;
         }
     };
+    let known = state.registry.get(&id).is_some();
     let refusal = if state.is_blocked(&id) {
         Some(("blocked", "This computer is blocked on this relay."))
     } else if state.over_limit(&id) {
@@ -127,7 +128,7 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
             "over-limit",
             "This computer sent too many control frames; try again in a minute.",
         ))
-    } else if state.registry.get(&id).is_some() {
+    } else if known {
         None
     } else if !state.registry.has_room() {
         Some((
@@ -163,6 +164,9 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
     }
     let (tx, mut rx) = mpsc::unbounded_channel();
     let handle = state.register_agent(&id, tx.clone());
+    if !known {
+        state.count_new_computer();
+    }
     let _ = state.publish(&id, local.clone(), None, true).await;
     tracing::info!(id, %peer, name_len = name.len(), "computer connected");
 

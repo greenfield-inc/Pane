@@ -142,16 +142,53 @@ pub struct State {
     buckets: Mutex<HashMap<String, Bucket>>,
     blocked: RwLock<HashSet<String>>,
     open_clients: AtomicUsize,
+    /// Open client connections per computer and client source.
+    client_pairs: Mutex<HashMap<(String, String), usize>>,
+    /// When each computer last connected here, for `counts`.
+    seen: Mutex<HashMap<String, Instant>>,
+    new_computers: AtomicUsize,
+    started: Instant,
     next_session: AtomicU64,
 }
 
-/// Holds one of the --max-connections client slots.
-pub struct ClientSlot(Arc<State>);
+/// Holds one of the --max-connections client slots, and for a computer's client
+/// its place in `counts`.
+pub struct ClientSlot(Arc<State>, Option<(String, String)>);
 
 impl Drop for ClientSlot {
     fn drop(&mut self) {
         self.0.open_clients.fetch_sub(1, Ordering::Relaxed);
+        if let Some(pair) = self.1.take() {
+            let mut pairs = self.0.client_pairs.lock().unwrap();
+            if let Some(n) = pairs.get_mut(&pair) {
+                *n -= 1;
+                if *n == 0 {
+                    pairs.remove(&pair);
+                }
+            }
+        }
     }
+}
+
+/// What the relay logs once an hour and at shutdown: counts only, never ids or addresses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Counts {
+    /// Computers with a control connection here now.
+    pub computers: usize,
+    /// Distinct computers that connected here in the last 24 hours.
+    pub computers_seen_24h: usize,
+    /// Computers this relay's registry didn't know that connected since the last line. Those
+    /// that connect in the first 10 minutes after a start are reconnecting, so they don't count;
+    /// a computer offline across a restart that comes back later does.
+    pub new_computers: usize,
+    /// Distinct computer and client-address pairs with an open connection: roughly the
+    /// phones, glasses and other Panes using a computer. The relay forwards TLS without
+    /// decrypting it, so it can't tell which kind each one is.
+    pub clients: usize,
+    /// Open client connections; one device often holds several.
+    pub client_connections: usize,
+    /// Computers with at least one open client connection.
+    pub computers_with_clients: usize,
 }
 
 pub fn frame(v: serde_json::Value) -> String {
@@ -191,6 +228,10 @@ impl State {
             buckets: Mutex::default(),
             blocked: RwLock::default(),
             open_clients: AtomicUsize::new(0),
+            client_pairs: Mutex::default(),
+            seen: Mutex::default(),
+            new_computers: AtomicUsize::new(0),
+            started: Instant::now(),
             next_session: AtomicU64::new(1),
         }
     }
@@ -219,6 +260,10 @@ impl State {
         let handle = AgentHandle { session, tx, cut };
         agents.insert(id.to_string(), handle.clone());
         drop(agents);
+        self.seen
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), Instant::now());
         if let Some(old) = old {
             let _ = old.tx.send(close_frame(
                 "replaced",
@@ -292,10 +337,54 @@ impl State {
         self.pending.lock().unwrap().remove(conn)
     }
 
-    pub fn client_slot(self: &Arc<Self>) -> Option<ClientSlot> {
+    /// A client slot for the iroh relay, or for a computer's client with `computer`
+    /// (its id and the client's source).
+    pub fn client_slot(self: &Arc<Self>, computer: Option<(&str, &str)>) -> Option<ClientSlot> {
         let n = self.open_clients.fetch_add(1, Ordering::Relaxed);
-        let slot = ClientSlot(self.clone());
+        let pair = computer.map(|(id, source)| (id.to_string(), source.to_string()));
+        if let Some(pair) = &pair {
+            *self
+                .client_pairs
+                .lock()
+                .unwrap()
+                .entry(pair.clone())
+                .or_default() += 1;
+        }
+        let slot = ClientSlot(self.clone(), pair);
         (n < self.cfg.max_connections).then_some(slot)
+    }
+
+    /// Counts a computer the registry didn't know, unless the relay started moments ago.
+    pub fn count_new_computer(&self) {
+        if self.started.elapsed() >= Duration::from_secs(self.cfg.usage_settle_secs) {
+            self.new_computers.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// `counts`, starting the next line's count of new computers from zero.
+    pub fn take_counts(&self) -> Counts {
+        let counts = self.counts();
+        self.new_computers
+            .fetch_sub(counts.new_computers, Ordering::Relaxed);
+        counts
+    }
+
+    /// Forgets computers last seen more than a day ago, then counts.
+    pub fn counts(&self) -> Counts {
+        let mut seen = self.seen.lock().unwrap();
+        seen.retain(|_, at| at.elapsed() < DAY);
+        let computers_seen_24h = seen.len();
+        drop(seen);
+        let pairs = self.client_pairs.lock().unwrap();
+        let with_clients: HashSet<&str> = pairs.keys().map(|(id, _)| id.as_str()).collect();
+        Counts {
+            computers: self.computers(),
+            computers_seen_24h,
+            new_computers: self.new_computers.load(Ordering::Relaxed),
+            clients: pairs.len(),
+            client_connections: pairs.values().sum(),
+            computers_with_clients: with_clients.len(),
+        }
     }
 
     /// A counter's key, window and limit.

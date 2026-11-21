@@ -3,6 +3,12 @@ import tls from 'tls';
 import type { Duplex } from 'stream';
 import { parseComputerName, type ComputerName } from './computerNames';
 
+/** A client behind a connection this server forwarded: its IP, and whether it came through the relay, a direct path or the same network. */
+export interface ForwardedClient {
+  address: string;
+  route: 'relay' | 'direct' | 'lan';
+}
+
 export interface ComputerTlsServerOptions {
   id: string;
   domain: string;
@@ -19,10 +25,10 @@ export interface ComputerTlsServer {
   /** Listens for same-network clients; returns the bound port. */
   listen(port: number, host: string): Promise<number>;
   /**
-   * The client IP behind a connection this server forwarded, from the address and port the target
+   * The client behind a connection this server forwarded, from the address and port the target
    * listener saw; null for a connection it did not forward.
    */
-  clientAddress(remoteAddress: string | undefined, remotePort: number | undefined): string | null;
+  forwardedClient(remoteAddress: string | undefined, remotePort: number | undefined): ForwardedClient | null;
   close(): Promise<void>;
 }
 
@@ -36,8 +42,8 @@ const PROBE_SUMMARY_MS = 60 * 60_000;
  */
 export function createComputerTlsServer(options: ComputerTlsServerOptions): ComputerTlsServer {
   const open = new Set<Duplex>();
-  /** The client IP for each forwarded connection, by the loopback port it comes from. */
-  const clients = new Map<number, string>();
+  /** The client for each forwarded connection, by the loopback port it comes from. */
+  const clients = new Map<number, ForwardedClient>();
   let probes = 0;
   let probesSince = 0;
   const SNICallback = (servername: string, callback: (error: Error | null, context?: tls.SecureContext) => void) => {
@@ -61,7 +67,7 @@ export function createComputerTlsServer(options: ComputerTlsServerOptions): Comp
   };
 
   // Node sets `servername` on server-side sockets from the ClientHello; its typings omit it.
-  const forward = (socket: tls.TLSSocket & { servername?: string | false }, peer: string) => {
+  const forward = (socket: tls.TLSSocket & { servername?: string | false }, client: ForwardedClient) => {
     const servername = socket.servername || '';
     const name = parseComputerName(servername, options.id, options.domain);
     const port = name ? options.target(name) : null;
@@ -74,7 +80,7 @@ export function createComputerTlsServer(options: ComputerTlsServerOptions): Comp
     // Before the piped bytes are flushed, so the target can look the client up on its first read.
     upstream.once('connect', () => {
       localPort = upstream.localPort;
-      if (localPort !== undefined) clients.set(localPort, peer);
+      if (localPort !== undefined) clients.set(localPort, client);
     });
     open.add(socket);
     socket.once('close', () => open.delete(socket));
@@ -83,7 +89,7 @@ export function createComputerTlsServer(options: ComputerTlsServerOptions): Comp
     socket.on('error', () => upstream.destroy());
     socket.on('close', () => upstream.destroy());
     upstream.on('close', () => {
-      if (localPort !== undefined && clients.get(localPort) === peer) clients.delete(localPort);
+      if (localPort !== undefined && clients.get(localPort) === client) clients.delete(localPort);
       socket.destroy();
     });
   };
@@ -92,7 +98,10 @@ export function createComputerTlsServer(options: ComputerTlsServerOptions): Comp
   // stream in from 127.0.0.1 and does not report the QUIC peer, so direct-path clients share one
   // pairing lockout: five wrong codes over the direct path pause direct pairing for 15 minutes,
   // while pairing through the relay and on the same network still works.
-  server.on('secureConnection', (socket: tls.TLSSocket) => forward(socket, (socket.remoteAddress ?? '').replace(/^::ffff:/u, '')));
+  server.on('secureConnection', (socket: tls.TLSSocket) => {
+    const address = (socket.remoteAddress ?? '').replace(/^::ffff:/u, '');
+    forward(socket, { address, route: address === '127.0.0.1' ? 'direct' : 'lan' });
+  });
   server.on('tlsClientError', clientError);
 
   return {
@@ -103,7 +112,7 @@ export function createComputerTlsServer(options: ComputerTlsServerOptions): Comp
       let secure = false;
       socket.once('secure', () => {
         secure = true;
-        forward(socket, peer);
+        forward(socket, { address: peer, route: 'relay' });
       });
       socket.on('error', (error) => {
         if (!secure) clientError(error);
@@ -121,7 +130,7 @@ export function createComputerTlsServer(options: ComputerTlsServerOptions): Comp
         });
       });
     },
-    clientAddress(remoteAddress, remotePort) {
+    forwardedClient(remoteAddress, remotePort) {
       // Forwarded connections come from 127.0.0.1; any other address is not one of them.
       if (remotePort === undefined || remoteAddress?.replace(/^::ffff:/u, '') !== '127.0.0.1') return null;
       return clients.get(remotePort) ?? null;
