@@ -1,33 +1,31 @@
+import { type Account } from '../service';
 import { type RunningStub } from './server';
 export interface StubAccount {
-    githubLogin: string;
+    email: string;
     name?: string;
-    /** In the invite-only cohort. Others are waitlisted until a team invites them. */
-    cohort: boolean;
+    /** Invited to the beta. Others are waitlisted and can create nothing. */
+    invited: boolean;
+    /** Where the account is in sign-up. Default `ready`. */
+    signupState?: Account['signupState'];
 }
 export interface ServiceStubOptions {
     accounts: StubAccount[];
     /** Published Pane versions, oldest first; the last is what create and update_pane install by default. */
     paneVersions?: string[];
-    /** The beta's public end date and its links; omitted, no end date is set. */
-    beta?: {
-        endsAt: string;
-        announcementUrl?: string;
-        ownAwsTemplateUrl?: string;
-    };
+    /** VMs the stub's one host holds awake at once; past it, create and start answer no_capacity. Default unlimited. */
+    capacity?: number;
     now?: () => Date;
 }
 export interface ServiceStub extends RunningStub {
-    /** The person entering the device code on GitHub and approving. */
-    approveDevice(userCode: string, githubLogin: string): void;
+    /** The person signing in on the hosted page and approving. */
+    approveDevice(userCode: string, email: string): void;
     denyDevice(userCode: string): void;
-    /** The fleet stopping a machine on its own; logged with actor `host`. */
-    hostStop(machineId: string, reason: 'idle' | 'memory_pressure' | 'host_maintenance'): void;
-    joinTailnet(machineId: string): void;
-    setCpuSecondsUsed(machineId: string, seconds: number): void;
+    /** An automatic pause or a person's Suspend: the VM stops with reason `review`, logged with actor `service`. */
+    pauseForReview(vmId: string): void;
 }
 /**
- * An in-memory Pane Cloud service that keeps the contract, for building the desktop adapter and for
- * the contract tests. Machines start and stop at once.
+ * An in-memory Pane Cloud service that keeps the contract, for building Pane against and for the
+ * contract tests. Every account has a personal organization on the Free plan. VMs start and stop at
+ * once, and agent-hours are counted from the stub's clock.
  */
 export declare function startServiceStub(options: ServiceStubOptions): Promise<ServiceStub>;

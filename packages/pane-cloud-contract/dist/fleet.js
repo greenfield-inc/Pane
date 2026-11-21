@@ -1,32 +1,24 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fleetRoutes = exports.FleetEvent = exports.MachineMetrics = exports.OperationStatus = exports.OperationError = exports.FleetMachine = exports.TailnetStatus = exports.StateReason = exports.FleetMachineState = exports.SubmittedEnvelope = exports.OperationEnvelope = exports.OperationSignature = exports.OperationPayload = exports.FleetOperationName = exports.FLEET_OPERATIONS = exports.StopCause = exports.PaneRelease = exports.MachineId = exports.CLOCK_SKEW_SECONDS = exports.MAX_OPERATION_LIFETIME_SECONDS = exports.DIAGNOSTIC_FILES = exports.MACHINE_LIMITS = void 0;
+exports.fleetRoutes = exports.FleetEvent = exports.VmMetrics = exports.OperationStatus = exports.OperationError = exports.FleetVm = exports.StateReason = exports.FleetVmState = exports.SubmittedEnvelope = exports.OperationEnvelope = exports.OperationSignature = exports.OperationPayload = exports.FleetOperationName = exports.FLEET_OPERATIONS = exports.StopCause = exports.PaneRelease = exports.VmId = exports.CLOCK_SKEW_SECONDS = exports.MAX_OPERATION_LIFETIME_SECONDS = exports.DIAGNOSTIC_FILES = exports.VmMemoryGiB = void 0;
 exports.canonicalJson = canonicalJson;
 exports.operationSigningBytes = operationSigningBytes;
 exports.signOperation = signOperation;
 exports.verifyOperation = verifyOperation;
 exports.createFleetClient = createFleetClient;
 /**
- * The fleet API: what the Pane Cloud service calls on the fleet (the host agent and scheduler).
+ * The fleet API: what the Pane Cloud service calls on the fleet (the host agent).
  *
- * Every change to a machine is one signed operation sent to POST /v1/operations. The fleet runs only
- * the operations named in FLEET_OPERATIONS, each with the fixed parameters its schema allows, and
- * refuses an envelope whose signature, lifetime or parameters do not check out (D-6).
+ * Every change to a Session VM is one signed operation sent to POST /v1/operations. The fleet runs
+ * only the operations named in FLEET_OPERATIONS, each with the fixed parameters its schema allows,
+ * and refuses an envelope whose signature, lifetime or parameters do not check out.
  */
 const node_crypto_1 = require("node:crypto");
 const zod_1 = require("zod");
 const errors_1 = require("./errors");
 const http_1 = require("./http");
-/** D-13's fair-use ceilings, the same for every machine. */
-exports.MACHINE_LIMITS = {
-    vcpu: 8,
-    memoryMiB: 16_384,
-    diskGiB: 50,
-    /** 12 vCPU-hours per UTC day; past it the machine runs at 0.5 vCPU until the next UTC midnight. */
-    dailyCpuSeconds: 43_200,
-    throttledVcpu: 0.5,
-    monthlyEgressBytes: 100 * 1024 ** 3,
-};
+/** A Session VM's memory. Every VM is created at 8 GiB; growing to 16 GiB comes later (resize). */
+exports.VmMemoryGiB = zod_1.z.union([zod_1.z.literal(8), zod_1.z.literal(16)]);
 /**
  * The only files collect_diagnostics reads, on the guest. Globs match file names only. Nothing under
  * a user's home other than Pane's own logs is read.
@@ -40,7 +32,7 @@ exports.DIAGNOSTIC_FILES = [
 exports.MAX_OPERATION_LIFETIME_SECONDS = 300;
 /** Allowed clock difference between the service and a host when checking issuedAt. */
 exports.CLOCK_SKEW_SECONDS = 30;
-exports.MachineId = zod_1.z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
+exports.VmId = zod_1.z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 const Timestamp = zod_1.z.iso.datetime({ offset: true });
 /** A published Pane release. update_pane and bootstrap install exactly this .deb, or refuse. */
 exports.PaneRelease = zod_1.z
@@ -53,18 +45,20 @@ exports.PaneRelease = zod_1.z
 const NoParameters = zod_1.z.object({}).strict();
 const ReleaseParameters = zod_1.z.object({ release: exports.PaneRelease }).strict();
 /**
- * Why the service stops a machine; the fleet records it as the machine's stateReason. Stops the
- * fleet makes on its own (idle, memory pressure, host maintenance, host loss) set their own reason.
+ * Why the service stops a VM; the fleet records it as the VM's stateReason. `user`: its creator
+ * stopped it. `review`: paused for review, automatically or by a person's Suspend (one state, D-68).
+ * Stops the fleet makes on its own (host maintenance, host loss) set their own reason.
  */
-exports.StopCause = zod_1.z.enum(['user', 'billing', 'end_of_beta', 'abuse']);
+exports.StopCause = zod_1.z.enum(['user', 'review']);
 const StopParameters = zod_1.z.object({ cause: exports.StopCause }).strict();
 /**
- * The allow-list. Lifecycle operations run on the host; guest operations run inside the machine
- * through the guest agent. Nothing else exists: no shell command, no file write, no access grant.
+ * The allow-list. Lifecycle operations run on the host; guest operations run inside the VM through
+ * the guest agent. Nothing else exists: no shell command, no file write, no access grant. `create`
+ * makes an 8 GiB, 4 vCPU VM and starts it; `stop` keeps its disk; `start` boots it from that disk.
  */
 exports.FLEET_OPERATIONS = {
     create: { runsOn: 'host', parameters: NoParameters },
-    resume: { runsOn: 'host', parameters: NoParameters },
+    start: { runsOn: 'host', parameters: NoParameters },
     stop: { runsOn: 'host', parameters: StopParameters },
     delete: { runsOn: 'host', parameters: NoParameters },
     bootstrap: { runsOn: 'guest', parameters: ReleaseParameters },
@@ -78,8 +72,8 @@ exports.FleetOperationName = zod_1.z.enum(operationNames);
 const payloadFields = {
     /** Chosen by the service; sending the same requestId again returns the first result. */
     requestId: zod_1.z.uuid(),
-    machineId: exports.MachineId,
-    /** Why the operation runs, shown to the machine's user in its action log. */
+    vmId: exports.VmId,
+    /** Why the operation runs, shown to the VM's creator in its action log. */
     reason: zod_1.z.string().min(1).max(500),
     issuedAt: Timestamp,
     expiresAt: Timestamp,
@@ -89,7 +83,7 @@ function payloadFor(name, parameters) {
 }
 exports.OperationPayload = zod_1.z.discriminatedUnion('operation', [
     payloadFor('create', exports.FLEET_OPERATIONS.create.parameters),
-    payloadFor('resume', exports.FLEET_OPERATIONS.resume.parameters),
+    payloadFor('start', exports.FLEET_OPERATIONS.start.parameters),
     payloadFor('stop', exports.FLEET_OPERATIONS.stop.parameters),
     payloadFor('delete', exports.FLEET_OPERATIONS.delete.parameters),
     payloadFor('bootstrap', exports.FLEET_OPERATIONS.bootstrap.parameters),
@@ -163,27 +157,17 @@ function verifyOperation(envelope, trustedKeys, now = new Date()) {
     }
     return parsed.data;
 }
-exports.FleetMachineState = zod_1.z.enum(['creating', 'running', 'stopping', 'stopped', 'resuming', 'deleting', 'deleted', 'error']);
-/** Why a machine last stopped or failed; null while it runs normally. */
-exports.StateReason = zod_1.z.enum(['user', 'idle', 'memory_pressure', 'host_maintenance', 'host_lost', 'abuse', 'billing', 'end_of_beta', 'failed']);
-/** The machine's place on the user's tailnet. It joins only from a login link its user opens. */
-exports.TailnetStatus = zod_1.z
+exports.FleetVmState = zod_1.z.enum(['creating', 'running', 'stopping', 'stopped', 'starting', 'deleting', 'deleted', 'error']);
+/** Why a VM last stopped or failed; null while it runs normally. */
+exports.StateReason = zod_1.z.enum(['user', 'review', 'host_maintenance', 'host_lost', 'failed']);
+exports.FleetVm = zod_1.z
     .object({
-    status: zod_1.z.enum(['awaiting_login', 'joined']),
-    /** The `tailscale up` login link, shown only to the machine's owner, until the machine joins. */
-    loginUrl: zod_1.z.url().nullable(),
-    /** The machine's MagicDNS name once it has joined. */
-    hostname: zod_1.z.string().nullable(),
-})
-    .strict();
-exports.FleetMachine = zod_1.z
-    .object({
-    machineId: exports.MachineId,
-    state: exports.FleetMachineState,
+    vmId: exports.VmId,
+    state: exports.FleetVmState,
     stateReason: exports.StateReason.nullable(),
     hostId: zod_1.z.string().nullable(),
+    memoryGiB: exports.VmMemoryGiB,
     paneVersion: zod_1.z.string().nullable(),
-    tailnet: exports.TailnetStatus,
     updatedAt: Timestamp,
 })
     .strict();
@@ -198,7 +182,7 @@ const DiagnosticsResult = zod_1.z
 exports.OperationStatus = zod_1.z
     .object({
     requestId: zod_1.z.uuid(),
-    machineId: exports.MachineId,
+    vmId: exports.VmId,
     operation: exports.FleetOperationName,
     status: zod_1.z.enum(['accepted', 'running', 'succeeded', 'failed']),
     error: exports.OperationError.nullable(),
@@ -208,29 +192,33 @@ exports.OperationStatus = zod_1.z
     finishedAt: Timestamp.nullable(),
 })
     .strict();
-exports.MachineMetrics = zod_1.z
+const Day = zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+/** One VM's resource use for a UTC day, for the abuse signals and the per-VM graphs. */
+exports.VmMetrics = zod_1.z
     .object({
-    machineId: exports.MachineId,
+    vmId: exports.VmId,
     /** UTC day, YYYY-MM-DD. */
-    day: zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    day: Day,
     cpuSecondsUsed: zod_1.z.number().nonnegative(),
-    cpuBudgetSeconds: zod_1.z.literal(exports.MACHINE_LIMITS.dailyCpuSeconds),
-    throttled: zod_1.z.boolean(),
-    /** Host-side resident memory, which F4's reclaim rules act on. */
+    /** Host-side resident memory. */
     memoryResidentMiB: zod_1.z.number().nonnegative(),
     diskUsedBytes: zod_1.z.number().int().nonnegative(),
-    egressBytesThisMonth: zod_1.z.number().int().nonnegative(),
+    /** Bytes the VM sent out to the internet this UTC day. */
+    egressBytes: zod_1.z.number().int().nonnegative(),
     sampledAt: Timestamp,
 })
     .strict();
-/** Things the fleet did or saw on its own (an idle stop, a memory-pressure stop, a host loss). */
+/**
+ * What the fleet did, in order: every state change (with its time, the service meters agent-hours
+ * from these) and every finished operation, including stops the fleet made on its own.
+ */
 exports.FleetEvent = zod_1.z
     .object({
     /** Monotonic cursor; pass the last one seen as `after`. */
     id: zod_1.z.string(),
-    machineId: exports.MachineId,
-    kind: zod_1.z.enum(['state_changed', 'operation_finished', 'budget_exhausted', 'budget_reset']),
-    state: exports.FleetMachineState.nullable(),
+    vmId: exports.VmId,
+    kind: zod_1.z.enum(['state_changed', 'operation_finished']),
+    state: exports.FleetVmState.nullable(),
     reason: exports.StateReason.nullable(),
     requestId: zod_1.z.uuid().nullable(),
     at: Timestamp,
@@ -247,14 +235,14 @@ exports.fleetRoutes = {
         status: 202,
     }),
     getOperation: (0, http_1.route)({ id: 'fleet.getOperation', method: 'GET', path: '/v1/operations/:requestId', auth: true, response: exports.OperationStatus }),
-    getMachine: (0, http_1.route)({ id: 'fleet.getMachine', method: 'GET', path: '/v1/machines/:machineId', auth: true, response: exports.FleetMachine }),
+    getVm: (0, http_1.route)({ id: 'fleet.getVm', method: 'GET', path: '/v1/vms/:vmId', auth: true, response: exports.FleetVm }),
     getMetrics: (0, http_1.route)({
         id: 'fleet.getMetrics',
         method: 'GET',
-        path: '/v1/machines/:machineId/metrics',
+        path: '/v1/vms/:vmId/metrics',
         auth: true,
-        query: zod_1.z.object({ day: zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).strict(),
-        response: exports.MachineMetrics,
+        query: zod_1.z.object({ day: Day.optional() }).strict(),
+        response: exports.VmMetrics,
     }),
     listEvents: (0, http_1.route)({
         id: 'fleet.listEvents',
@@ -270,8 +258,8 @@ function createFleetClient(config) {
     return {
         submitOperation: (envelope) => (0, http_1.callRoute)(config, exports.fleetRoutes.submitOperation, { body: envelope }),
         getOperation: (requestId) => (0, http_1.callRoute)(config, exports.fleetRoutes.getOperation, { params: { requestId } }),
-        getMachine: (machineId) => (0, http_1.callRoute)(config, exports.fleetRoutes.getMachine, { params: { machineId } }),
-        getMetrics: (machineId, day) => (0, http_1.callRoute)(config, exports.fleetRoutes.getMetrics, { params: { machineId }, query: { day } }),
+        getVm: (vmId) => (0, http_1.callRoute)(config, exports.fleetRoutes.getVm, { params: { vmId } }),
+        getMetrics: (vmId, day) => (0, http_1.callRoute)(config, exports.fleetRoutes.getMetrics, { params: { vmId }, query: { day } }),
         listEvents: (after, limit) => (0, http_1.callRoute)(config, exports.fleetRoutes.listEvents, { query: { after, limit } }),
     };
 }

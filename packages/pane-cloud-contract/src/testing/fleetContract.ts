@@ -3,8 +3,7 @@ import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import {
   createFleetClient,
   type FleetEvent,
-  type FleetMachine,
-  MACHINE_LIMITS,
+  type FleetVm,
   type OperationEnvelope,
   type OperationPayload,
   type OperationSigner,
@@ -38,23 +37,23 @@ export interface FleetContractTarget {
   untrustedSigner: OperationSigner;
   /** A published release the fleet will install. */
   release: PaneRelease;
-  /** How long to wait for a machine or operation to settle. Default 120 s. */
+  /** How long to wait for a VM or operation to settle. Default 120 s. */
   timeoutMs?: number;
 }
 
-/** The fleet API contract: what F2's host agent and scheduler must do for the service. */
+/** The fleet API contract: what the host agent must do for the service. */
 export function fleetContractCases(target: FleetContractTarget): ContractCase[] {
   // Read baseUrl at call time, so a target can name a server that starts after the cases are built.
   const fleet = createFleetClient({ get baseUrl() { return target.baseUrl; }, token: target.token });
   const timeoutMs = target.timeoutMs ?? 120_000;
 
-  const payload = (machineId: string, operation: OperationPayload['operation'], extra: Partial<OperationPayload> = {}): OperationPayload => {
+  const payload = (vmId: string, operation: OperationPayload['operation'], extra: Partial<OperationPayload> = {}): OperationPayload => {
     const issuedAt = new Date();
     const parameters = operation === 'bootstrap' || operation === 'update_pane' ? { release: target.release } : operation === 'stop' ? { cause: 'user' } : {};
     // SAFETY: parameters match `operation` (a release for bootstrap and update_pane, a cause for stop, none otherwise); signOperation parses it again.
     return {
       requestId: randomUUID(),
-      machineId,
+      vmId,
       reason: `contract test: ${operation}`,
       issuedAt: issuedAt.toISOString(),
       expiresAt: new Date(issuedAt.getTime() + 120_000).toISOString(),
@@ -63,108 +62,108 @@ export function fleetContractCases(target: FleetContractTarget): ContractCase[] 
       ...extra,
     } as OperationPayload;
   };
-  const run = async (machineId: string, operation: OperationPayload['operation']) => {
-    const accepted = await fleet.submitOperation(await signOperation(payload(machineId, operation), target.signer));
-    assert.equal(accepted.machineId, machineId);
+  const run = async (vmId: string, operation: OperationPayload['operation']) => {
+    const accepted = await fleet.submitOperation(await signOperation(payload(vmId, operation), target.signer));
+    assert.equal(accepted.vmId, vmId);
     assert.equal(accepted.operation, operation);
     const finished = await waitFor(() => fleet.getOperation(accepted.requestId), (s) => s.status === 'succeeded' || s.status === 'failed', `${operation} to finish`, timeoutMs);
     assert.equal(finished.status, 'succeeded', `${operation} failed: ${finished.error?.message ?? ''}`);
     return finished;
   };
-  const machineIn = (machineId: string, state: FleetMachine['state']) =>
-    waitFor(() => fleet.getMachine(machineId), (m) => m.state === state, `machine ${machineId} to be ${state}`, timeoutMs);
+  const vmIn = (vmId: string, state: FleetVm['state']) =>
+    waitFor(() => fleet.getVm(vmId), (m) => m.state === state, `VM ${vmId} to be ${state}`, timeoutMs);
   /** Signs raw bytes, skipping signOperation's own check, to send what a compromised caller might. */
   const signRaw = async (body: Parameters<typeof operationSigningBytes>[0]): Promise<OperationEnvelope> => {
     const signature = await target.signer.sign(operationSigningBytes(body));
     // SAFETY: deliberately outside the contract; the case checks the fleet refuses it.
     return { payload: body, signature: { keyId: target.signer.keyId, algorithm: 'ECDSA_SHA_256', value: signature.toString('base64') } } as OperationEnvelope;
   };
-  const newMachine = async () => {
-    const machineId = `contract-${randomUUID().slice(0, 8)}`;
-    await run(machineId, 'create');
-    await machineIn(machineId, 'running');
-    return machineId;
+  const newVm = async () => {
+    const vmId = `contract-${randomUUID().slice(0, 8)}`;
+    await run(vmId, 'create');
+    await vmIn(vmId, 'running');
+    return vmId;
   };
 
   return [
     {
-      name: 'fleet: create, bootstrap, stop, resume and delete a machine, each as one signed operation, and a stop records its cause',
+      name: 'fleet: create, bootstrap, stop, start and delete a VM, each as one signed operation, and a stop records its cause',
       async run() {
-        const machineId = await newMachine();
-        await run(machineId, 'bootstrap');
-        const booted = await fleet.getMachine(machineId);
+        const vmId = await newVm();
+        await run(vmId, 'bootstrap');
+        const booted = await fleet.getVm(vmId);
         assert.equal(booted.paneVersion, target.release.version);
-        await run(machineId, 'prepare_to_stop');
-        await run(machineId, 'stop');
-        assert.equal((await machineIn(machineId, 'stopped')).stateReason, 'user');
-        await run(machineId, 'resume');
-        await machineIn(machineId, 'running');
-        const billingStop = await fleet.submitOperation(await signOperation({ ...payload(machineId, 'stop'), operation: 'stop', parameters: { cause: 'billing' } }, target.signer));
-        await waitFor(() => fleet.getOperation(billingStop.requestId), (s) => s.status === 'succeeded', 'the billing stop', timeoutMs);
-        assert.equal((await machineIn(machineId, 'stopped')).stateReason, 'billing', 'a service stop records its cause');
-        await run(machineId, 'delete');
-        await machineIn(machineId, 'deleted');
+        await run(vmId, 'prepare_to_stop');
+        await run(vmId, 'stop');
+        assert.equal((await vmIn(vmId, 'stopped')).stateReason, 'user');
+        await run(vmId, 'start');
+        const started = await vmIn(vmId, 'running');
+        assert.equal(started.memoryGiB, 8);
+        const reviewStop = await fleet.submitOperation(await signOperation({ ...payload(vmId, 'stop'), operation: 'stop', parameters: { cause: 'review' } }, target.signer));
+        await waitFor(() => fleet.getOperation(reviewStop.requestId), (s) => s.status === 'succeeded', 'the review stop', timeoutMs);
+        assert.equal((await vmIn(vmId, 'stopped')).stateReason, 'review', 'a service stop records its cause');
+        await run(vmId, 'delete');
+        await vmIn(vmId, 'deleted');
       },
     },
     {
       name: 'fleet: sending the same signed operation twice runs it once',
       async run() {
-        const machineId = `contract-${randomUUID().slice(0, 8)}`;
-        const envelope = await signOperation(payload(machineId, 'create'), target.signer);
+        const vmId = `contract-${randomUUID().slice(0, 8)}`;
+        const envelope = await signOperation(payload(vmId, 'create'), target.signer);
         const first = await fleet.submitOperation(envelope);
         const second = await fleet.submitOperation(envelope);
         assert.equal(second.requestId, first.requestId);
-        await machineIn(machineId, 'running');
-        await run(machineId, 'delete');
+        await vmIn(vmId, 'running');
+        await run(vmId, 'delete');
       },
     },
     {
       name: 'fleet: refuses an operation signed by an untrusted key, or changed after signing',
       async run() {
-        const machineId = `contract-${randomUUID().slice(0, 8)}`;
-        await expectError('signature_invalid', async () => fleet.submitOperation(await signOperation(payload(machineId, 'create'), target.untrustedSigner)));
-        const envelope = await signOperation(payload(machineId, 'create'), target.signer);
+        const vmId = `contract-${randomUUID().slice(0, 8)}`;
+        await expectError('signature_invalid', async () => fleet.submitOperation(await signOperation(payload(vmId, 'create'), target.untrustedSigner)));
+        const envelope = await signOperation(payload(vmId, 'create'), target.signer);
         await expectError('signature_invalid', () => fleet.submitOperation({ ...envelope, payload: { ...envelope.payload, reason: 'changed after signing' } }));
-        await expectError('machine_not_found', () => fleet.getMachine(machineId));
+        await expectError('vm_not_found', () => fleet.getVm(vmId));
       },
     },
     {
       name: 'fleet: refuses an operation outside its time window: expired, too long-lived, or issued in the future',
       async run() {
-        const machineId = `contract-${randomUUID().slice(0, 8)}`;
+        const vmId = `contract-${randomUUID().slice(0, 8)}`;
         const past = Date.now() - 600_000;
-        const stale = payload(machineId, 'create', { issuedAt: new Date(past).toISOString(), expiresAt: new Date(past + 120_000).toISOString() });
+        const stale = payload(vmId, 'create', { issuedAt: new Date(past).toISOString(), expiresAt: new Date(past + 120_000).toISOString() });
         await expectError('operation_expired', async () => fleet.submitOperation(await signOperation(stale, target.signer)));
         const nowMs = Date.now();
-        const tooLong = payload(machineId, 'create', { issuedAt: new Date(nowMs).toISOString(), expiresAt: new Date(nowMs + 600_000).toISOString() });
+        const tooLong = payload(vmId, 'create', { issuedAt: new Date(nowMs).toISOString(), expiresAt: new Date(nowMs + 600_000).toISOString() });
         await expectError('operation_expired', async () => fleet.submitOperation(await signOperation(tooLong, target.signer)));
-        const future = payload(machineId, 'create', { issuedAt: new Date(nowMs + 120_000).toISOString(), expiresAt: new Date(nowMs + 240_000).toISOString() });
+        const future = payload(vmId, 'create', { issuedAt: new Date(nowMs + 120_000).toISOString(), expiresAt: new Date(nowMs + 240_000).toISOString() });
         await expectError('operation_expired', async () => fleet.submitOperation(await signOperation(future, target.signer)));
-        await expectError('machine_not_found', () => fleet.getMachine(machineId));
+        await expectError('vm_not_found', () => fleet.getVm(vmId));
       },
     },
     {
       name: 'fleet: runs nothing outside the allow-list or its fixed parameters',
       async run() {
-        const machineId = await newMachine();
-        const base = payload(machineId, 'collect_diagnostics');
+        const vmId = await newVm();
+        const base = payload(vmId, 'collect_diagnostics');
         await expectError('operation_not_allowed', async () => fleet.submitOperation(await signRaw({ ...base, operation: 'run_script', parameters: { script: 'id' } })));
         await expectError('operation_not_allowed', async () => fleet.submitOperation(await signRaw({ ...base, operation: 'write_file', parameters: { path: '/etc/passwd', content: '' } })));
         await expectError('invalid_request', async () => fleet.submitOperation(await signRaw({ ...base, parameters: { files: ['/home/pane/.ssh/id_ed25519'] } })));
         const otherChecksum = { ...target.release, debSha256: target.release.debSha256 === '0'.repeat(64) ? '1'.repeat(64) : '0'.repeat(64) };
-        await expectError('release_not_published', async () => fleet.submitOperation(await signOperation({ ...payload(machineId, 'update_pane'), operation: 'update_pane', parameters: { release: otherChecksum } }, target.signer)));
-        const diagnostics = await run(machineId, 'collect_diagnostics');
+        await expectError('release_not_published', async () => fleet.submitOperation(await signOperation({ ...payload(vmId, 'update_pane'), operation: 'update_pane', parameters: { release: otherChecksum } }, target.signer)));
+        const diagnostics = await run(vmId, 'collect_diagnostics');
         assert.ok(diagnostics.result, 'collect_diagnostics returns what it collected');
-        await run(machineId, 'delete');
+        await run(vmId, 'delete');
       },
     },
     {
-      name: 'fleet: reports metrics against the daily CPU budget, and events with a cursor',
+      name: "fleet: reports a VM's daily metrics, and every state change as an event with a cursor",
       async run() {
-        const machineId = await newMachine();
-        const metrics = await fleet.getMetrics(machineId);
-        assert.equal(metrics.cpuBudgetSeconds, MACHINE_LIMITS.dailyCpuSeconds);
-        assert.equal(metrics.throttled, metrics.cpuSecondsUsed >= MACHINE_LIMITS.dailyCpuSeconds);
+        const vmId = await newVm();
+        const day = new Date().toISOString().slice(0, 10);
+        assert.equal((await fleet.getMetrics(vmId, day)).day, day);
         const readAll = async () => {
           const events: FleetEvent[] = [];
           let cursor: string | null = null;
@@ -175,12 +174,12 @@ export function fleetContractCases(target: FleetContractTarget): ContractCase[] 
             cursor = page.nextCursor;
           }
         };
-        const seen = await waitFor(readAll, (p) => p.events.some((e) => e.machineId === machineId), `an event for ${machineId}`, timeoutMs);
+        const seen = await waitFor(readAll, (p) => p.events.some((e) => e.vmId === vmId && e.kind === 'state_changed' && e.state === 'running'), `a running event for ${vmId}`, timeoutMs);
         assert.ok(seen.cursor, 'a feed with events has a cursor');
         assert.equal(new Set(seen.events.map((e) => e.id)).size, seen.events.length, 'paging never repeats an event');
         const after = await fleet.listEvents(seen.cursor ?? undefined);
         assert.ok(after.events.every((e) => !seen.events.some((old) => old.id === e.id)), 'events after the cursor are new');
-        await run(machineId, 'delete');
+        await run(vmId, 'delete');
       },
     },
   ];

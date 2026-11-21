@@ -16,8 +16,8 @@ export interface FleetContractTarget {
     untrustedSigner: OperationSigner;
     /** A published release the fleet will install. */
     release: PaneRelease;
-    /** How long to wait for a machine or operation to settle. Default 120 s. */
+    /** How long to wait for a VM or operation to settle. Default 120 s. */
     timeoutMs?: number;
 }
-/** The fleet API contract: what F2's host agent and scheduler must do for the service. */
+/** The fleet API contract: what the host agent must do for the service. */
 export declare function fleetContractCases(target: FleetContractTarget): ContractCase[];

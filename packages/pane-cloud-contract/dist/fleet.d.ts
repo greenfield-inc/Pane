@@ -1,15 +1,8 @@
 import { z } from 'zod';
 import { type ClientConfig } from './http';
-/** D-13's fair-use ceilings, the same for every machine. */
-export declare const MACHINE_LIMITS: {
-    readonly vcpu: 8;
-    readonly memoryMiB: 16384;
-    readonly diskGiB: 50;
-    /** 12 vCPU-hours per UTC day; past it the machine runs at 0.5 vCPU until the next UTC midnight. */
-    readonly dailyCpuSeconds: 43200;
-    readonly throttledVcpu: 0.5;
-    readonly monthlyEgressBytes: number;
-};
+/** A Session VM's memory. Every VM is created at 8 GiB; growing to 16 GiB comes later (resize). */
+export declare const VmMemoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
+export type VmMemoryGiB = z.infer<typeof VmMemoryGiB>;
 /**
  * The only files collect_diagnostics reads, on the guest. Globs match file names only. Nothing under
  * a user's home other than Pane's own logs is read.
@@ -19,7 +12,7 @@ export declare const DIAGNOSTIC_FILES: readonly ["/var/log/pane-cloud/guest-agen
 export declare const MAX_OPERATION_LIFETIME_SECONDS = 300;
 /** Allowed clock difference between the service and a host when checking issuedAt. */
 export declare const CLOCK_SKEW_SECONDS = 30;
-export declare const MachineId: z.ZodString;
+export declare const VmId: z.ZodString;
 /** A published Pane release. update_pane and bootstrap install exactly this .deb, or refuse. */
 export declare const PaneRelease: z.ZodObject<{
     version: z.ZodString;
@@ -28,25 +21,25 @@ export declare const PaneRelease: z.ZodObject<{
 }, z.core.$strict>;
 export type PaneRelease = z.infer<typeof PaneRelease>;
 /**
- * Why the service stops a machine; the fleet records it as the machine's stateReason. Stops the
- * fleet makes on its own (idle, memory pressure, host maintenance, host loss) set their own reason.
+ * Why the service stops a VM; the fleet records it as the VM's stateReason. `user`: its creator
+ * stopped it. `review`: paused for review, automatically or by a person's Suspend (one state, D-68).
+ * Stops the fleet makes on its own (host maintenance, host loss) set their own reason.
  */
 export declare const StopCause: z.ZodEnum<{
     user: "user";
-    billing: "billing";
-    end_of_beta: "end_of_beta";
-    abuse: "abuse";
+    review: "review";
 }>;
 /**
- * The allow-list. Lifecycle operations run on the host; guest operations run inside the machine
- * through the guest agent. Nothing else exists: no shell command, no file write, no access grant.
+ * The allow-list. Lifecycle operations run on the host; guest operations run inside the VM through
+ * the guest agent. Nothing else exists: no shell command, no file write, no access grant. `create`
+ * makes an 8 GiB, 4 vCPU VM and starts it; `stop` keeps its disk; `start` boots it from that disk.
  */
 export declare const FLEET_OPERATIONS: {
     readonly create: {
         readonly runsOn: "host";
         readonly parameters: z.ZodObject<{}, z.core.$strict>;
     };
-    readonly resume: {
+    readonly start: {
         readonly runsOn: "host";
         readonly parameters: z.ZodObject<{}, z.core.$strict>;
     };
@@ -55,9 +48,7 @@ export declare const FLEET_OPERATIONS: {
         readonly parameters: z.ZodObject<{
             cause: z.ZodEnum<{
                 user: "user";
-                billing: "billing";
-                end_of_beta: "end_of_beta";
-                abuse: "abuse";
+                review: "review";
             }>;
         }, z.core.$strict>;
     };
@@ -97,7 +88,7 @@ export declare const FLEET_OPERATIONS: {
 export type FleetOperationName = keyof typeof FLEET_OPERATIONS;
 export declare const FleetOperationName: z.ZodEnum<{
     create: "create";
-    resume: "resume";
+    start: "start";
     stop: "stop";
     delete: "delete";
     bootstrap: "bootstrap";
@@ -109,15 +100,15 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     operation: z.ZodLiteral<"create">;
     parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
-    machineId: z.ZodString;
+    vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
     expiresAt: z.ZodISODateTime;
 }, z.core.$strict>, z.ZodObject<{
-    operation: z.ZodLiteral<"resume">;
+    operation: z.ZodLiteral<"start">;
     parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
-    machineId: z.ZodString;
+    vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
     expiresAt: z.ZodISODateTime;
@@ -126,13 +117,11 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     parameters: z.ZodObject<{
         cause: z.ZodEnum<{
             user: "user";
-            billing: "billing";
-            end_of_beta: "end_of_beta";
-            abuse: "abuse";
+            review: "review";
         }>;
     }, z.core.$strict>;
     requestId: z.ZodUUID;
-    machineId: z.ZodString;
+    vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
     expiresAt: z.ZodISODateTime;
@@ -140,7 +129,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     operation: z.ZodLiteral<"delete">;
     parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
-    machineId: z.ZodString;
+    vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
     expiresAt: z.ZodISODateTime;
@@ -154,7 +143,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strict>;
     }, z.core.$strict>;
     requestId: z.ZodUUID;
-    machineId: z.ZodString;
+    vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
     expiresAt: z.ZodISODateTime;
@@ -168,7 +157,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strict>;
     }, z.core.$strict>;
     requestId: z.ZodUUID;
-    machineId: z.ZodString;
+    vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
     expiresAt: z.ZodISODateTime;
@@ -176,7 +165,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     operation: z.ZodLiteral<"prepare_to_stop">;
     parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
-    machineId: z.ZodString;
+    vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
     expiresAt: z.ZodISODateTime;
@@ -184,7 +173,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     operation: z.ZodLiteral<"collect_diagnostics">;
     parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
-    machineId: z.ZodString;
+    vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
     expiresAt: z.ZodISODateTime;
@@ -200,15 +189,15 @@ export declare const OperationEnvelope: z.ZodObject<{
         operation: z.ZodLiteral<"create">;
         parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
-        machineId: z.ZodString;
+        vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
         expiresAt: z.ZodISODateTime;
     }, z.core.$strict>, z.ZodObject<{
-        operation: z.ZodLiteral<"resume">;
+        operation: z.ZodLiteral<"start">;
         parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
-        machineId: z.ZodString;
+        vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
         expiresAt: z.ZodISODateTime;
@@ -217,13 +206,11 @@ export declare const OperationEnvelope: z.ZodObject<{
         parameters: z.ZodObject<{
             cause: z.ZodEnum<{
                 user: "user";
-                billing: "billing";
-                end_of_beta: "end_of_beta";
-                abuse: "abuse";
+                review: "review";
             }>;
         }, z.core.$strict>;
         requestId: z.ZodUUID;
-        machineId: z.ZodString;
+        vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
         expiresAt: z.ZodISODateTime;
@@ -231,7 +218,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         operation: z.ZodLiteral<"delete">;
         parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
-        machineId: z.ZodString;
+        vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
         expiresAt: z.ZodISODateTime;
@@ -245,7 +232,7 @@ export declare const OperationEnvelope: z.ZodObject<{
             }, z.core.$strict>;
         }, z.core.$strict>;
         requestId: z.ZodUUID;
-        machineId: z.ZodString;
+        vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
         expiresAt: z.ZodISODateTime;
@@ -259,7 +246,7 @@ export declare const OperationEnvelope: z.ZodObject<{
             }, z.core.$strict>;
         }, z.core.$strict>;
         requestId: z.ZodUUID;
-        machineId: z.ZodString;
+        vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
         expiresAt: z.ZodISODateTime;
@@ -267,7 +254,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         operation: z.ZodLiteral<"prepare_to_stop">;
         parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
-        machineId: z.ZodString;
+        vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
         expiresAt: z.ZodISODateTime;
@@ -275,7 +262,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         operation: z.ZodLiteral<"collect_diagnostics">;
         parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
-        machineId: z.ZodString;
+        vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
         expiresAt: z.ZodISODateTime;
@@ -321,73 +308,49 @@ export declare function signOperation(payload: OperationPayload, signer: Operati
  * for an unknown key or a bad signature, operation_expired outside the payload's time window.
  */
 export declare function verifyOperation(envelope: SubmittedEnvelope, trustedKeys: Readonly<Record<string, string>>, now?: Date): OperationEnvelope;
-export declare const FleetMachineState: z.ZodEnum<{
+export declare const FleetVmState: z.ZodEnum<{
     error: "error";
     creating: "creating";
     running: "running";
     stopping: "stopping";
     stopped: "stopped";
-    resuming: "resuming";
+    starting: "starting";
     deleting: "deleting";
     deleted: "deleted";
 }>;
-/** Why a machine last stopped or failed; null while it runs normally. */
+/** Why a VM last stopped or failed; null while it runs normally. */
 export declare const StateReason: z.ZodEnum<{
     user: "user";
-    billing: "billing";
-    end_of_beta: "end_of_beta";
-    abuse: "abuse";
-    idle: "idle";
-    memory_pressure: "memory_pressure";
+    review: "review";
     host_maintenance: "host_maintenance";
     host_lost: "host_lost";
     failed: "failed";
 }>;
-/** The machine's place on the user's tailnet. It joins only from a login link its user opens. */
-export declare const TailnetStatus: z.ZodObject<{
-    status: z.ZodEnum<{
-        awaiting_login: "awaiting_login";
-        joined: "joined";
-    }>;
-    loginUrl: z.ZodNullable<z.ZodURL>;
-    hostname: z.ZodNullable<z.ZodString>;
-}, z.core.$strict>;
-export declare const FleetMachine: z.ZodObject<{
-    machineId: z.ZodString;
+export declare const FleetVm: z.ZodObject<{
+    vmId: z.ZodString;
     state: z.ZodEnum<{
         error: "error";
         creating: "creating";
         running: "running";
         stopping: "stopping";
         stopped: "stopped";
-        resuming: "resuming";
+        starting: "starting";
         deleting: "deleting";
         deleted: "deleted";
     }>;
     stateReason: z.ZodNullable<z.ZodEnum<{
         user: "user";
-        billing: "billing";
-        end_of_beta: "end_of_beta";
-        abuse: "abuse";
-        idle: "idle";
-        memory_pressure: "memory_pressure";
+        review: "review";
         host_maintenance: "host_maintenance";
         host_lost: "host_lost";
         failed: "failed";
     }>>;
     hostId: z.ZodNullable<z.ZodString>;
+    memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
     paneVersion: z.ZodNullable<z.ZodString>;
-    tailnet: z.ZodObject<{
-        status: z.ZodEnum<{
-            awaiting_login: "awaiting_login";
-            joined: "joined";
-        }>;
-        loginUrl: z.ZodNullable<z.ZodURL>;
-        hostname: z.ZodNullable<z.ZodString>;
-    }, z.core.$strict>;
     updatedAt: z.ZodISODateTime;
 }, z.core.$strict>;
-export type FleetMachine = z.infer<typeof FleetMachine>;
+export type FleetVm = z.infer<typeof FleetVm>;
 export declare const OperationError: z.ZodObject<{
     code: z.ZodString;
     message: z.ZodString;
@@ -395,10 +358,10 @@ export declare const OperationError: z.ZodObject<{
 }, z.core.$strict>;
 export declare const OperationStatus: z.ZodObject<{
     requestId: z.ZodUUID;
-    machineId: z.ZodString;
+    vmId: z.ZodString;
     operation: z.ZodEnum<{
         create: "create";
-        resume: "resume";
+        start: "start";
         stop: "stop";
         delete: "delete";
         bootstrap: "bootstrap";
@@ -428,27 +391,27 @@ export declare const OperationStatus: z.ZodObject<{
     finishedAt: z.ZodNullable<z.ZodISODateTime>;
 }, z.core.$strict>;
 export type OperationStatus = z.infer<typeof OperationStatus>;
-export declare const MachineMetrics: z.ZodObject<{
-    machineId: z.ZodString;
+/** One VM's resource use for a UTC day, for the abuse signals and the per-VM graphs. */
+export declare const VmMetrics: z.ZodObject<{
+    vmId: z.ZodString;
     day: z.ZodString;
     cpuSecondsUsed: z.ZodNumber;
-    cpuBudgetSeconds: z.ZodLiteral<43200>;
-    throttled: z.ZodBoolean;
     memoryResidentMiB: z.ZodNumber;
     diskUsedBytes: z.ZodNumber;
-    egressBytesThisMonth: z.ZodNumber;
+    egressBytes: z.ZodNumber;
     sampledAt: z.ZodISODateTime;
 }, z.core.$strict>;
-export type MachineMetrics = z.infer<typeof MachineMetrics>;
-/** Things the fleet did or saw on its own (an idle stop, a memory-pressure stop, a host loss). */
+export type VmMetrics = z.infer<typeof VmMetrics>;
+/**
+ * What the fleet did, in order: every state change (with its time, the service meters agent-hours
+ * from these) and every finished operation, including stops the fleet made on its own.
+ */
 export declare const FleetEvent: z.ZodObject<{
     id: z.ZodString;
-    machineId: z.ZodString;
+    vmId: z.ZodString;
     kind: z.ZodEnum<{
         state_changed: "state_changed";
         operation_finished: "operation_finished";
-        budget_exhausted: "budget_exhausted";
-        budget_reset: "budget_reset";
     }>;
     state: z.ZodNullable<z.ZodEnum<{
         error: "error";
@@ -456,17 +419,13 @@ export declare const FleetEvent: z.ZodObject<{
         running: "running";
         stopping: "stopping";
         stopped: "stopped";
-        resuming: "resuming";
+        starting: "starting";
         deleting: "deleting";
         deleted: "deleted";
     }>>;
     reason: z.ZodNullable<z.ZodEnum<{
         user: "user";
-        billing: "billing";
-        end_of_beta: "end_of_beta";
-        abuse: "abuse";
-        idle: "idle";
-        memory_pressure: "memory_pressure";
+        review: "review";
         host_maintenance: "host_maintenance";
         host_lost: "host_lost";
         failed: "failed";
@@ -483,10 +442,10 @@ export declare const fleetRoutes: {
         signature: z.ZodObject<{}, z.core.$loose>;
     }, z.core.$strict>, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
         requestId: z.ZodUUID;
-        machineId: z.ZodString;
+        vmId: z.ZodString;
         operation: z.ZodEnum<{
             create: "create";
-            resume: "resume";
+            start: "start";
             stop: "stop";
             delete: "delete";
             bootstrap: "bootstrap";
@@ -517,10 +476,10 @@ export declare const fleetRoutes: {
     }, z.core.$strict>>;
     getOperation: import("./http").Route<z.ZodUndefined, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
         requestId: z.ZodUUID;
-        machineId: z.ZodString;
+        vmId: z.ZodString;
         operation: z.ZodEnum<{
             create: "create";
-            resume: "resume";
+            start: "start";
             stop: "stop";
             delete: "delete";
             bootstrap: "bootstrap";
@@ -549,52 +508,39 @@ export declare const fleetRoutes: {
         acceptedAt: z.ZodISODateTime;
         finishedAt: z.ZodNullable<z.ZodISODateTime>;
     }, z.core.$strict>>;
-    getMachine: import("./http").Route<z.ZodUndefined, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
-        machineId: z.ZodString;
+    getVm: import("./http").Route<z.ZodUndefined, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
+        vmId: z.ZodString;
         state: z.ZodEnum<{
             error: "error";
             creating: "creating";
             running: "running";
             stopping: "stopping";
             stopped: "stopped";
-            resuming: "resuming";
+            starting: "starting";
             deleting: "deleting";
             deleted: "deleted";
         }>;
         stateReason: z.ZodNullable<z.ZodEnum<{
             user: "user";
-            billing: "billing";
-            end_of_beta: "end_of_beta";
-            abuse: "abuse";
-            idle: "idle";
-            memory_pressure: "memory_pressure";
+            review: "review";
             host_maintenance: "host_maintenance";
             host_lost: "host_lost";
             failed: "failed";
         }>>;
         hostId: z.ZodNullable<z.ZodString>;
+        memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
         paneVersion: z.ZodNullable<z.ZodString>;
-        tailnet: z.ZodObject<{
-            status: z.ZodEnum<{
-                awaiting_login: "awaiting_login";
-                joined: "joined";
-            }>;
-            loginUrl: z.ZodNullable<z.ZodURL>;
-            hostname: z.ZodNullable<z.ZodString>;
-        }, z.core.$strict>;
         updatedAt: z.ZodISODateTime;
     }, z.core.$strict>>;
     getMetrics: import("./http").Route<z.ZodUndefined, z.ZodObject<{
         day: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>, z.ZodObject<{
-        machineId: z.ZodString;
+        vmId: z.ZodString;
         day: z.ZodString;
         cpuSecondsUsed: z.ZodNumber;
-        cpuBudgetSeconds: z.ZodLiteral<43200>;
-        throttled: z.ZodBoolean;
         memoryResidentMiB: z.ZodNumber;
         diskUsedBytes: z.ZodNumber;
-        egressBytesThisMonth: z.ZodNumber;
+        egressBytes: z.ZodNumber;
         sampledAt: z.ZodISODateTime;
     }, z.core.$strict>>;
     listEvents: import("./http").Route<z.ZodUndefined, z.ZodObject<{
@@ -603,12 +549,10 @@ export declare const fleetRoutes: {
     }, z.core.$strict>, z.ZodObject<{
         events: z.ZodArray<z.ZodObject<{
             id: z.ZodString;
-            machineId: z.ZodString;
+            vmId: z.ZodString;
             kind: z.ZodEnum<{
                 state_changed: "state_changed";
                 operation_finished: "operation_finished";
-                budget_exhausted: "budget_exhausted";
-                budget_reset: "budget_reset";
             }>;
             state: z.ZodNullable<z.ZodEnum<{
                 error: "error";
@@ -616,17 +560,13 @@ export declare const fleetRoutes: {
                 running: "running";
                 stopping: "stopping";
                 stopped: "stopped";
-                resuming: "resuming";
+                starting: "starting";
                 deleting: "deleting";
                 deleted: "deleted";
             }>>;
             reason: z.ZodNullable<z.ZodEnum<{
                 user: "user";
-                billing: "billing";
-                end_of_beta: "end_of_beta";
-                abuse: "abuse";
-                idle: "idle";
-                memory_pressure: "memory_pressure";
+                review: "review";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
                 failed: "failed";
@@ -641,8 +581,8 @@ export declare const fleetRoutes: {
 export declare function createFleetClient(config: ClientConfig): {
     submitOperation: (envelope: OperationEnvelope) => Promise<{
         requestId: string;
-        machineId: string;
-        operation: "create" | "resume" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics";
+        vmId: string;
+        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics";
         status: "running" | "failed" | "accepted" | "succeeded";
         error: {
             code: string;
@@ -661,8 +601,8 @@ export declare function createFleetClient(config: ClientConfig): {
     }>;
     getOperation: (requestId: string) => Promise<{
         requestId: string;
-        machineId: string;
-        operation: "create" | "resume" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics";
+        vmId: string;
+        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics";
         status: "running" | "failed" | "accepted" | "succeeded";
         error: {
             code: string;
@@ -679,37 +619,31 @@ export declare function createFleetClient(config: ClientConfig): {
         acceptedAt: string;
         finishedAt: string | null;
     }>;
-    getMachine: (machineId: string) => Promise<{
-        machineId: string;
-        state: "error" | "creating" | "running" | "stopping" | "stopped" | "resuming" | "deleting" | "deleted";
-        stateReason: "user" | "billing" | "end_of_beta" | "abuse" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "failed" | null;
+    getVm: (vmId: string) => Promise<{
+        vmId: string;
+        state: "error" | "creating" | "running" | "stopping" | "stopped" | "starting" | "deleting" | "deleted";
+        stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
         hostId: string | null;
+        memoryGiB: 8 | 16;
         paneVersion: string | null;
-        tailnet: {
-            status: "awaiting_login" | "joined";
-            loginUrl: string | null;
-            hostname: string | null;
-        };
         updatedAt: string;
     }>;
-    getMetrics: (machineId: string, day?: string) => Promise<{
-        machineId: string;
+    getMetrics: (vmId: string, day?: string) => Promise<{
+        vmId: string;
         day: string;
         cpuSecondsUsed: number;
-        cpuBudgetSeconds: 43200;
-        throttled: boolean;
         memoryResidentMiB: number;
         diskUsedBytes: number;
-        egressBytesThisMonth: number;
+        egressBytes: number;
         sampledAt: string;
     }>;
     listEvents: (after?: string, limit?: number) => Promise<{
         events: {
             id: string;
-            machineId: string;
-            kind: "state_changed" | "operation_finished" | "budget_exhausted" | "budget_reset";
-            state: "error" | "creating" | "running" | "stopping" | "stopped" | "resuming" | "deleting" | "deleted" | null;
-            reason: "user" | "billing" | "end_of_beta" | "abuse" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "failed" | null;
+            vmId: string;
+            kind: "state_changed" | "operation_finished";
+            state: "error" | "creating" | "running" | "stopping" | "stopped" | "starting" | "deleting" | "deleted" | null;
+            reason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
             requestId: string | null;
             at: string;
         }[];

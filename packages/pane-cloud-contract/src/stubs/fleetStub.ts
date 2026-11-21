@@ -2,10 +2,8 @@ import { CloudApiError } from '../errors';
 import {
   canonicalJson,
   type FleetEvent,
-  type FleetMachine,
   fleetRoutes,
-  MACHINE_LIMITS,
-  type MachineMetrics,
+  type FleetVm,
   type OperationStatus,
   type PaneRelease,
   verifyOperation,
@@ -21,15 +19,12 @@ export interface FleetStubOptions {
 }
 
 export interface FleetStub extends RunningStub {
-  /** The fleet stopping a machine on its own (idle, memory pressure, host maintenance). */
-  hostStop(machineId: string, reason: 'idle' | 'memory_pressure' | 'host_maintenance' | 'abuse'): void;
-  /** The machine's user opening its Tailscale login link. */
-  joinTailnet(machineId: string): void;
-  setCpuSecondsUsed(machineId: string, seconds: number): void;
+  /** The fleet stopping a VM on its own (host maintenance or host loss). */
+  hostStop(vmId: string, reason: 'host_maintenance' | 'host_lost'): void;
+  setCpuSecondsUsed(vmId: string, seconds: number): void;
 }
 
-const notFound = (machineId: string) =>
-  new CloudApiError('machine_not_found', `The fleet has no machine ${machineId}.`, 'Create the machine first, or check its id.');
+const notFound = (vmId: string) => new CloudApiError('vm_not_found', `The fleet has no VM ${vmId}.`, 'Create the VM first, or check its id.');
 
 /**
  * An in-memory fleet that keeps the contract: every operation checks out or is refused exactly as the
@@ -38,26 +33,26 @@ const notFound = (machineId: string) =>
 export async function startFleetStub(options: FleetStubOptions): Promise<FleetStub> {
   const now = options.now ?? (() => new Date());
   const iso = () => now().toISOString();
-  const machines = new Map<string, FleetMachine>();
+  const vms = new Map<string, FleetVm>();
   const cpu = new Map<string, number>();
   const operations = new Map<string, { status: OperationStatus; payloadJson: string }>();
   const events: FleetEvent[] = [];
 
   const record = (event: Omit<FleetEvent, 'id' | 'at'>) => events.push({ ...event, id: String(events.length + 1), at: iso() });
-  const setState = (machine: FleetMachine, state: FleetMachine['state'], reason: FleetMachine['stateReason'], requestId: string | null = null) => {
-    machine.state = state;
-    machine.stateReason = reason;
-    machine.updatedAt = iso();
-    record({ machineId: machine.machineId, kind: 'state_changed', state, reason, requestId });
+  const setState = (vm: FleetVm, state: FleetVm['state'], reason: FleetVm['stateReason'], requestId: string | null = null) => {
+    vm.state = state;
+    vm.stateReason = reason;
+    vm.updatedAt = iso();
+    record({ vmId: vm.vmId, kind: 'state_changed', state, reason, requestId });
   };
-  const requireMachine = (machineId: string) => {
-    const machine = machines.get(machineId);
-    if (!machine || machine.state === 'deleted') throw notFound(machineId);
-    return machine;
+  const requireVm = (vmId: string) => {
+    const vm = vms.get(vmId);
+    if (!vm || vm.state === 'deleted') throw notFound(vmId);
+    return vm;
   };
-  const requireState = (machine: FleetMachine, state: FleetMachine['state'], operation: string) => {
-    if (machine.state !== state) {
-      throw new CloudApiError('invalid_state', `${operation} needs a ${state} machine; ${machine.machineId} is ${machine.state}.`, 'Read the machine state and send the operation that fits it.');
+  const requireState = (vm: FleetVm, state: FleetVm['state'], operation: string) => {
+    if (vm.state !== state) {
+      throw new CloudApiError('invalid_state', `${operation} needs a ${state} VM; ${vm.vmId} is ${vm.state}.`, 'Read the VM state and send the operation that fits it.');
     }
   };
   const requireRelease = (release: PaneRelease) => {
@@ -76,55 +71,44 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
       }
       let result: OperationStatus['result'] = null;
       if (payload.operation === 'create') {
-        const existing = machines.get(payload.machineId);
-        if (existing && existing.state !== 'deleted') throw new CloudApiError('machine_exists', `Machine ${payload.machineId} already exists.`, 'Use a new machine id, or resume the existing machine.');
-        const machine: FleetMachine = {
-          machineId: payload.machineId,
-          state: 'running',
-          stateReason: null,
-          hostId: 'stub-host-1',
-          paneVersion: null,
-          tailnet: { status: 'awaiting_login', loginUrl: null, hostname: null },
-          updatedAt: iso(),
-        };
-        machines.set(machine.machineId, machine);
-        record({ machineId: machine.machineId, kind: 'state_changed', state: 'running', reason: null, requestId: payload.requestId });
+        const existing = vms.get(payload.vmId);
+        if (existing && existing.state !== 'deleted') throw new CloudApiError('vm_exists', `VM ${payload.vmId} already exists.`, 'Use a new VM id, or start the existing VM.');
+        const vm: FleetVm = { vmId: payload.vmId, state: 'running', stateReason: null, hostId: 'stub-host-1', memoryGiB: 8, paneVersion: null, updatedAt: iso() };
+        vms.set(vm.vmId, vm);
+        record({ vmId: vm.vmId, kind: 'state_changed', state: 'running', reason: null, requestId: payload.requestId });
       } else {
-        const machine = requireMachine(payload.machineId);
+        const vm = requireVm(payload.vmId);
         switch (payload.operation) {
           case 'stop':
-            requireState(machine, 'running', 'stop');
-            setState(machine, 'stopped', payload.parameters.cause, payload.requestId);
+            requireState(vm, 'running', 'stop');
+            setState(vm, 'stopped', payload.parameters.cause, payload.requestId);
             break;
-          case 'resume':
-            requireState(machine, 'stopped', 'resume');
-            setState(machine, 'running', null, payload.requestId);
+          case 'start':
+            requireState(vm, 'stopped', 'start');
+            setState(vm, 'running', null, payload.requestId);
             break;
           case 'delete':
-            setState(machine, 'deleted', 'user', payload.requestId);
+            setState(vm, 'deleted', 'user', payload.requestId);
             break;
           case 'bootstrap':
           case 'update_pane':
-            requireState(machine, 'running', payload.operation);
+            requireState(vm, 'running', payload.operation);
             requireRelease(payload.parameters.release);
-            machine.paneVersion = payload.parameters.release.version;
-            if (payload.operation === 'bootstrap' && machine.tailnet.status === 'awaiting_login') {
-              machine.tailnet.loginUrl = `https://login.tailscale.com/a/stub-${machine.machineId}`;
-            }
-            machine.updatedAt = iso();
+            vm.paneVersion = payload.parameters.release.version;
+            vm.updatedAt = iso();
             break;
           case 'prepare_to_stop':
-            requireState(machine, 'running', 'prepare_to_stop');
+            requireState(vm, 'running', 'prepare_to_stop');
             break;
           case 'collect_diagnostics':
-            requireState(machine, 'running', 'collect_diagnostics');
-            result = { files: [{ path: '/var/log/pane-cloud/guest-agent.log', bytes: 0 }], archiveKey: `diagnostics/${machine.machineId}/${payload.requestId}.tar.gz` };
+            requireState(vm, 'running', 'collect_diagnostics');
+            result = { files: [{ path: '/var/log/pane-cloud/guest-agent.log', bytes: 0 }], archiveKey: `diagnostics/${vm.vmId}/${payload.requestId}.tar.gz` };
             break;
         }
       }
       const status: OperationStatus = {
         requestId: payload.requestId,
-        machineId: payload.machineId,
+        vmId: payload.vmId,
         operation: payload.operation,
         status: 'succeeded',
         error: null,
@@ -133,7 +117,7 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
         finishedAt: iso(),
       };
       operations.set(payload.requestId, { status, payloadJson });
-      record({ machineId: payload.machineId, kind: 'operation_finished', state: null, reason: null, requestId: payload.requestId });
+      record({ vmId: payload.vmId, kind: 'operation_finished', state: null, reason: null, requestId: payload.requestId });
       return status;
     }),
     bind(fleetRoutes.getOperation, ({ params }) => {
@@ -141,26 +125,23 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
       if (!found) throw new CloudApiError('operation_not_found', `No operation ${params.requestId}.`, 'Check the requestId the operation was sent with.');
       return found.status;
     }),
-    bind(fleetRoutes.getMachine, ({ params }) => {
-      const machine = machines.get(params.machineId ?? '');
-      if (!machine) throw notFound(params.machineId ?? '');
-      return machine;
+    bind(fleetRoutes.getVm, ({ params }) => {
+      const vm = vms.get(params.vmId ?? '');
+      if (!vm) throw notFound(params.vmId ?? '');
+      return vm;
     }),
     bind(fleetRoutes.getMetrics, ({ params, query }) => {
-      const machine = requireMachine(params.machineId ?? '');
-      const used = cpu.get(machine.machineId) ?? 0;
-      const metrics: MachineMetrics = {
-        machineId: machine.machineId,
+      const vm = requireVm(params.vmId ?? '');
+      const used = cpu.get(vm.vmId) ?? 0;
+      return {
+        vmId: vm.vmId,
         day: query.day ?? iso().slice(0, 10),
         cpuSecondsUsed: used,
-        cpuBudgetSeconds: MACHINE_LIMITS.dailyCpuSeconds,
-        throttled: used >= MACHINE_LIMITS.dailyCpuSeconds,
-        memoryResidentMiB: machine.state === 'running' ? 3072 : 0,
+        memoryResidentMiB: vm.state === 'running' ? 3072 : 0,
         diskUsedBytes: 4 * 1024 ** 3,
-        egressBytesThisMonth: 0,
+        egressBytes: 0,
         sampledAt: iso(),
       };
-      return metrics;
     }),
     bind(fleetRoutes.listEvents, ({ query }) => {
       const start = query.after ? Number(query.after) : 0;
@@ -173,22 +154,13 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
   const running = await listen(server);
   return {
     ...running,
-    hostStop(machineId, reason) {
-      const machine = requireMachine(machineId);
-      setState(machine, 'stopped', reason);
+    hostStop(vmId, reason) {
+      const vm = requireVm(vmId);
+      setState(vm, 'stopped', reason);
     },
-    joinTailnet(machineId) {
-      const machine = requireMachine(machineId);
-      machine.tailnet = { status: 'joined', loginUrl: null, hostname: `pane-${machineId}.tailnet.ts.net` };
-      machine.updatedAt = iso();
-    },
-    setCpuSecondsUsed(machineId, seconds) {
-      requireMachine(machineId);
-      const before = cpu.get(machineId) ?? 0;
-      cpu.set(machineId, seconds);
-      if (before < MACHINE_LIMITS.dailyCpuSeconds && seconds >= MACHINE_LIMITS.dailyCpuSeconds) {
-        record({ machineId, kind: 'budget_exhausted', state: null, reason: null, requestId: null });
-      }
+    setCpuSecondsUsed(vmId, seconds) {
+      requireVm(vmId);
+      cpu.set(vmId, seconds);
     },
   };
 }
