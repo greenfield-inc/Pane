@@ -459,8 +459,8 @@ and tab IDs.
 
 The dialog lists your Tailscale machines running Pane, except the one the
 Session is on. Your teammates' machines are listed but disabled: a whole
-Session moves only between your own macOS and Linux machines, so for a teammate
-use **Hand off with a note…** (below). Machines Pane can't reach, or that run a
+Session moves only between your own macOS and Linux machines. A Session with
+an agent can use **Hand off with a note…** for a teammate (below). Machines Pane can't reach, or that run a
 Pane too old to receive a Session, are disabled with the reason. While you view
 a host connected with a pairing code rather than over Tailscale, the item is
 disabled. In All machines, the same item is in each Session's menu and moves

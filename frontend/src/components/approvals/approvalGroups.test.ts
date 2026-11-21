@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
-import { approvalIdsInListOrder, approvalRowLines, besideOf, connectedOf, groupApprovals, groupCountText, offlineRows, offlineRowText, parseApprovalsSort, readApprovalsSort, relayReadOnlyLine, saveApprovalsSort, sidebarSessionKeys } from './approvalGroups';
+import { approvalIdsInListOrder, approvalRowLines, besideOf, connectedOf, groupApprovals, groupCountText, offlineRows, offlineRowText, parseApprovalsSort, readApprovalsSort, relayReadOnlyLine, sessionApprovalPanelId, saveApprovalsSort, sidebarSessionKeys } from './approvalGroups';
 
 const launch = { id: 'session-1', name: 'Pane Fixes', paneId: 'session-pane' };
 const infra = { id: 'session-2', name: 'Infra', paneId: 'infra-pane' };
@@ -8,6 +8,18 @@ const infra = { id: 'session-2', name: 'Infra', paneId: 'infra-pane' };
 function item(id: string, createdAt: number, extra: Partial<NotifyItem> = {}): NotifyItem {
   return { id, ui: 'approve', title: id, source: { name: 'pane', agent: 'Claude' }, state: 'waiting', createdAt, ...extra };
 }
+
+it('uses a terminal Session primary tab for an approval without an asking panel', () => {
+  const session: Parameters<typeof sessionApprovalPanelId>[1] = {
+    id: launch.id, name: launch.name, internalSessionId: launch.paneId, agent: 'claude',
+    terminalCommand: '', panelIds: { claude: 'agent', codex: 'codex', cursor: 'cursor', opencode: 'open', pi: 'pi', terminal: 'shell' },
+    goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
+    associations: [], activity: [], revision: 1, createdAt: '', updatedAt: '',
+  };
+  expect(sessionApprovalPanelId(item('fallback', 1), session)).toBe('shell');
+  expect(sessionApprovalPanelId(item('fallback', 1), { ...session, terminalCommand: undefined })).toBe('agent');
+  expect(sessionApprovalPanelId(item('explicit', 1, { source: { name: 'worker', agent: 'Claude', panelId: 'asking' } }), session)).toBe('asking');
+});
 
 describe('Most recent', () => {
   const ids = (list: NotifyItem[]) => list.map(entry => entry.id);

@@ -44,7 +44,14 @@ test('plain-terminal onboarding, custom command, and chat recovery work in Elect
     const onboarding = first.page.getByRole('dialog', { name: welcome });
     await expect(onboarding.getByRole('heading', { name: 'Chat', exact: true })).toBeVisible({ timeout: 30_000 });
     await onboarding.getByRole('button', { name: 'Use a plain terminal' }).click();
-    await finishOnboarding(first.page);
+    const project = first.page.getByRole('dialog', { name: 'Open your project' });
+    await project.getByRole('button', { name: 'Skip', exact: true }).evaluate(button => {
+      button.click();
+      button.click();
+    });
+    await first.page.getByRole('dialog', { name: 'Take your agents with you' }).getByRole('button', { name: 'Skip for now', exact: true }).click();
+    const sessions = await first.page.evaluate(() => window.electronAPI.orchestrationSessions.list());
+    expect(sessions.data?.sessions.filter(session => session.terminalCommand === '')).toHaveLength(1);
     const plain = writeMarker(pane.root, 'plain-ready');
     await typeInShell(first.page, plain.command);
     await plain.wait();

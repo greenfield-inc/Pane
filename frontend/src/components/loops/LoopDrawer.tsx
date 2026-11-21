@@ -88,7 +88,7 @@ function LoopDrawerForm({ loop, onClose }: { loop: Loop | undefined; onClose: ()
   const projects = useProjectList();
   const allSessions = useOrchestrationSessionStore(state => state.sessions);
   // Loops run only their own agents, so other Sessions are not offered.
-  const sessions = useMemo(() => allSessions.filter(session => !isArchivedOrchestrationSession(session) && isLoopAgent(session.agent)), [allSessions]);
+  const sessions = useMemo(() => allSessions.filter(session => session.terminalCommand === undefined && !isArchivedOrchestrationSession(session) && isLoopAgent(session.agent)), [allSessions]);
   const loadSessions = useOrchestrationSessionStore(state => state.load);
   useEffect(() => { void loadSessions().catch(() => undefined); }, [loadSessions]);
   const [form, setForm] = useState<LoopForm>(() => formFrom(loop));
