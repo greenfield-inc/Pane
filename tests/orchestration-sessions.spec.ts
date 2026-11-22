@@ -2273,20 +2273,27 @@ const machinesMock = (page: Page) => page.evaluateHandle(() => {
 });
 
 for (const neighbour of ['terminal', 'chat'] as const) {
-  test(`Enter on a highlighted sidebar Session opens that Session, not the first tile's, while Sessions are tiled (T-45, neighbour shows a ${neighbour})`, async ({ page }) => {
+  test(`Enter on a highlighted sidebar Session opens that Session, not the first tile's, while Sessions are tiled (T-45, neighbour shows a ${neighbour})`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1400, height: 900 });
     const now = new Date(0).toISOString();
     // Alpha's tile shows a chat in the second case: its message box is the first one on screen.
     const alphaChat = { id: '__orchestration_panel_alpha_claude', sessionId: '__orchestration_session_alphaterminal__', type: 'chat', title: 'Alpha · Claude Code',
       state: { isActive: true, hasBeenViewed: true, customState: { agent: 'claude', launch: { kind: 'new' }, cwd: '/tmp/pane-fixtures', status: 'idle', orchestrationSessionId: 'alpha' } },
       metadata: { createdAt: now, lastActiveAt: now, position: 0 } };
-    await installSessionsFixture(page, [
-      sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
-      sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
-      sessionFixture('gamma', 'Gamma', 'Gamma goal.', 'Gamma context.', '2026-09-16T12:02:00.000Z'),
-    ], [], neighbour === 'chat' ? { initialPanels: [alphaChat] } : {});
+    const sessions = [
+      ['delta', 'Delta'],
+      ['gamma', 'Gamma'],
+      ['epsilon', 'Epsilon'],
+      ['alpha', 'Alpha'],
+      ['zeta', 'Zeta'],
+      ['beta', 'Beta'],
+      ['eta', 'Eta'],
+    ].map(([id, name], index) => sessionFixture(id, name, `${name} goal.`, '', `2026-09-16T12:0${index}:00.000Z`));
+    await installSessionsFixture(page, sessions, [], neighbour === 'chat' ? { initialPanels: [alphaChat] } : {});
     await gotoApp(page);
     await dismissStartupDialogs(page);
+    await expect.poll(() => listedSessions(page, 'orchestration-sessions-list'))
+      .toEqual(['Delta', 'Gamma', 'Epsilon', 'Alpha', 'Zeta', 'Beta', 'Eta']);
     await page.getByTestId('orchestration-session-alpha').click();
     await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached();
     if (neighbour === 'chat') await expect(page.locator('[data-session-tile="alpha"] [data-chat-composer]')).toBeVisible();
@@ -2294,8 +2301,10 @@ for (const neighbour of ['terminal', 'chat'] as const) {
     const tileLayout = await layoutBox(page.getByTestId('session-tile-layout'));
     await dragSessionOntoTile(page, 'orchestration-session-beta', { x: tileLayout.x + tileLayout.width - 20, y: tileLayout.y + tileLayout.height / 2 });
     await expect(page.getByTestId('session-tile-header')).toHaveCount(2);
+    await expect(page.locator('[data-session-tile]').first()).toHaveAttribute('data-session-tile', 'alpha');
     await page.locator('[data-session-tile="beta"]').click({ position: { x: 40, y: 10 } });
     await expect(page.locator('[data-session-tile="beta"]')).toHaveAttribute('data-session-focused', 'true');
+    await expect(page.locator('[data-session-tile="beta"] [data-panel-group-id]').first()).toBeVisible();
 
     // A real host answers over IPC: Gamma's workspace stays loading until the test lets it.
     await page.evaluate(() => {
@@ -2308,17 +2317,25 @@ for (const neighbour of ['terminal', 'chat'] as const) {
       };
     });
 
-    // The cursor walks to Gamma with the keyboard, and Enter opens it. A terminal that finishes
-    // opening focuses itself and can take a key meant for the row, so retry until Gamma opens.
+    // An opening terminal can take focus before Enter reaches the row. Wait for the row
+    // to receive the click, then check separately which Session survives the focus handoff.
+    const gamma = page.getByTestId('orchestration-session-gamma');
+    await gamma.evaluate(row => row.addEventListener('click', () => row.setAttribute('data-enter-clicked', 'true'), { once: true }));
     await expect(async () => {
-      await page.getByTestId('orchestration-session-beta').focus();
+      await page.getByTestId('orchestration-session-delta').focus();
       await page.keyboard.press('j');
-      await expect(page.getByTestId('orchestration-session-gamma')).toBeFocused({ timeout: 500 });
+      await expect(gamma).toBeFocused({ timeout: 500 });
       await page.keyboard.press('Enter');
-      await expect(page.getByTestId('orchestration-session-gamma')).toHaveAttribute('aria-current', 'page', { timeout: 500 });
+      await expect(gamma).toHaveAttribute('data-enter-clicked', 'true', { timeout: 500 });
     }).toPass();
+    // Let the two-frame handoff finish while Gamma is still loading.
+    await page.evaluate(() => new Promise<void>(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    }));
+    await page.screenshot({ path: testInfo.outputPath('after-enter-while-loading.png') });
+    const selected = page.locator('#orchestration-sessions-list [aria-current="page"]');
+    expect(await selected.getAttribute('aria-label')).toBe('Open Session Gamma');
 
-    // While Gamma loads, focus waits in Gamma's tile; it never enters Alpha's tile, which would select Alpha.
     const focusedTile = () => page.evaluate(() => document.activeElement?.closest('[data-session-tile]')?.getAttribute('data-session-tile') ?? null);
     await expect.poll(focusedTile).toBe('gamma');
     await page.waitForTimeout(400);
@@ -2407,8 +2424,20 @@ for (const { layout, origin } of allMachinesEnterCases) test(`In All machines, E
       return get(selector);
     };
   });
-  // Change both machines' statuses and let a new remote Session join the merged list.
   const mockApi = await machinesMock(page);
+  // Wait for each machine's activity update before starting the churn.
+  await mockApi.evaluate(api => {
+    for (const [machineId, sessionId] of [['local', 'alpha'], ['build', 'rotate']]) {
+      api.emitMachineEvent({ type: 'event', machineId, channel: 'orchestration-sessions:activity', args: [] }, {
+        [machineId]: { 'orchestration-sessions:activity-list': { success: true, data: [{ sessionId, state: 'working', workingPanes: 1 }] } },
+      });
+    }
+  });
+  for (const key of ['local:alpha', 'build:rotate']) {
+    await expect(page.locator(`[data-row-key="${key}"]`).getByTestId('session-activity-icon')).toHaveAttribute('data-state', 'working');
+  }
+
+  // Change both machines' statuses and let a new remote Session join the merged list.
   await mockApi.evaluate((api, { local, remote }) => {
     let tick = 0;
     setInterval(() => {
@@ -2429,11 +2458,6 @@ for (const { layout, origin } of allMachinesEnterCases) test(`In All machines, E
       }
     }, 150);
   }, { local, remote });
-
-  // Sample every frame so Playwright's assertion backoff cannot repeatedly miss a short working interval.
-  await page.waitForFunction(() => ['local:alpha', 'build:rotate'].every(key => (
-    document.querySelector(`[data-row-key="${key}"] [data-testid="session-activity-icon"]`)?.getAttribute('data-state') === 'working'
-  )));
 
   const order = () => page.evaluate(() => Array.from(document.querySelectorAll('[data-testid="all-machines-sidebar"] [data-sidebar-item]'))
     .map(element => element.getAttribute('aria-label') ?? ''));
@@ -2469,6 +2493,11 @@ for (const { layout, origin } of allMachinesEnterCases) test(`In All machines, E
     return;
   }
 
+  const priorMemory = { view: 'pane-chat', projectId: null, paneId: null, orchestrationSessionId: 'rotate' } as const;
+  const saved = await page.evaluate(memory => window.electronAPI.uiState.saveNavigationMemory('build', memory), priorMemory);
+  expect(saved.success).toBe(true);
+  expect(await mockApi.evaluate(api => api.getNavigationMemory('build'))).toMatchObject(priorMemory);
+
   await walk('Session Alpha on studio-mac', 'Session Backup rotation on build-box');
   await expect(row('Nightly rebuild', 'build-box')).toBeVisible();
   await walk('Session Backup rotation on build-box', 'Session Nightly rebuild on build-box');
@@ -2484,6 +2513,51 @@ for (const { layout, origin } of allMachinesEnterCases) test(`In All machines, E
   await expect(row('Nightly rebuild', 'build-box')).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { level: 1, name: 'Nightly rebuild', exact: true })).toBeAttached();
   await page.screenshot({ path: testInfo.outputPath('02-opened-nightly.png') });
+});
+
+test('Single layout Enter follows the focused Session through a reorder and key repeat (T-45)', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installSessionsFixture(page, fourSessions());
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+  const alpha = page.getByTestId('orchestration-session-a');
+  const bravo = page.getByTestId('orchestration-session-b');
+  await alpha.click();
+  // The terminal takes focus when its activation refresh lands. Start keyboard
+  // navigation after that handoff so the reorder is the only focus change under test.
+  await expect(page.locator('[data-session-tile="a"] .xterm-helper-textarea')).toBeFocused();
+
+  await alpha.focus();
+  await page.keyboard.press('j');
+  await expect(bravo).toBeFocused();
+  await page.keyboard.press('k');
+  await expect(alpha).toBeFocused();
+  await page.keyboard.press('j');
+  await page.keyboard.press('Alt+ArrowDown');
+  await expect.poll(() => listedSessions(page, 'orchestration-sessions-list')).toEqual(['Alpha', 'Charlie', 'Bravo', 'Delta']);
+  await expect(bravo).toBeFocused();
+  await expect(page.locator('#orchestration-sessions-list [data-sidebar-item]:focus-visible')).toHaveAttribute('data-testid', 'orchestration-session-b');
+  await expect(alpha).toHaveAttribute('aria-current', 'page');
+
+  // Record the click targets, including native defaults if Enter were handled twice.
+  await page.evaluate(() => {
+    const list = document.getElementById('orchestration-sessions-list');
+    list?.addEventListener('click', event => {
+      if (!(event.target instanceof Element)) return;
+      const row = event.target.closest('[data-sidebar-item]');
+      list.dataset.activations = (list.dataset.activations ?? '') + `${row?.getAttribute('aria-label')},`;
+    });
+  });
+  await page.keyboard.down('Enter');
+  await expect(bravo).toHaveAttribute('aria-current', 'page');
+  const list = page.locator('#orchestration-sessions-list');
+  await expect(list).toHaveAttribute('data-activations', 'Open Session Bravo,');
+  await page.keyboard.down('Enter');
+  await page.keyboard.up('Enter');
+  await expect(page.locator('[data-session-tile="b"] [data-panel-group-id]').first()).toBeVisible();
+  await expect(page.locator('[data-session-tile]')).toHaveCount(1);
+  await expect(bravo).toHaveAttribute('aria-current', 'page');
+  await expect(list).toHaveAttribute('data-activations', /^(Open Session Bravo,)+$/);
 });
 
 test('New offers Session and Pane in one dialog and restores keyboard focus', async ({ page }) => {
