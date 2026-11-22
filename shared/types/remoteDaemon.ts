@@ -305,8 +305,6 @@ export interface RemoteRelaySettings {
   enabled: boolean;
   /** "Relay address": a self-hosted relay's `host[:port]`. Absent: Pane's relays. */
   relayAddress?: string;
-  /** A Pane Cloud VM's guest image sets this: the computer refuses to save a token for any other computer. */
-  receiveOnly?: boolean;
 }
 
 export interface RemoteDaemonConnectionPair {
@@ -822,7 +820,6 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
     const relaySettings: RemoteRelaySettings = { enabled: readBoolean(relay.enabled, false) };
     const relayAddress = readOptionalString(relay.relayAddress)?.trim();
     if (relayAddress) relaySettings.relayAddress = relayAddress;
-    if (readBoolean(relay.receiveOnly, false)) relaySettings.receiveOnly = true;
     normalized.relay = relaySettings;
   }
   return normalized;

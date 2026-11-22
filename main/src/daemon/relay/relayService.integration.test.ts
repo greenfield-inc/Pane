@@ -156,7 +156,6 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     let config = createDefaultRemoteDaemonConfig();
     config.host.config = { ...config.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0 };
     config.relay = { enabled: true, relayAddress: `us.relay.${DOMAIN}:${relayPort}` };
-    if (options.receiveOnly) config.relay.receiveOnly = true;
     const secrets = new Map<string, string>();
     const configManager = {
       getConfig: () => ({ remoteDaemon: config }),
@@ -182,6 +181,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
       previewPort: () => null,
       displayName: () => name,
       addClient: (record) => links.addClient(record),
+      receiveOnly: options.receiveOnly,
       env,
     });
     const call = createComputerCaller({ dial, extraCa });
@@ -191,6 +191,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
       call,
       disconnect: (ids) => server?.disconnectClients(ids),
       connectedClientIds: () => new Set(),
+      receiveOnly: options.receiveOnly,
     });
     const linking = new ComputerLinking({ links, self: () => service.computerInfo(), routesReport: () => undefined, post: createComputerPoster({ dial, extraCa }), call });
     const registry = new PaneCommandRegistry();

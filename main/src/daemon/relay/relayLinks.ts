@@ -75,6 +75,8 @@ export interface RelayLinksDeps {
   /** Drops live connections of revoked clients. */
   disconnect(clientIds: string[]): void;
   connectedClientIds(): ReadonlySet<string>;
+  /** A Pane Cloud VM (`onCloudVm`), read once at start: it never keeps a token for another computer. */
+  receiveOnly?: boolean;
   log?(line: string): void;
 }
 
@@ -347,7 +349,7 @@ export class RelayLinks {
 
   /** Whether this computer is a Pane Cloud VM that holds no token for any other computer. */
   receiveOnly(): boolean {
-    return this.remote().relay?.receiveOnly === true;
+    return this.deps.receiveOnly === true;
   }
 
   /** On a receive-only computer, refuses to keep a way to call `peer`. */

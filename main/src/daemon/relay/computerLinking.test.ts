@@ -103,11 +103,8 @@ function network() {
     const { id, fingerprint } = relayIdentity(seed);
     const info: RelayComputer = { id, name, domain: DOMAIN, address: `https://${id}.${DOMAIN}`, local: [], fingerprint };
     let config = createDefaultRemoteDaemonConfig();
-    // As a Pane Cloud VM's guest image sets it, and as RelayService then reports it.
-    if (options.receiveOnly) {
-      config.relay = { enabled: true, receiveOnly: true };
-      info.receiveOnly = true;
-    }
+    // As on a Pane Cloud VM (onCloudVm), and as RelayService then reports it.
+    if (options.receiveOnly) info.receiveOnly = true;
     const configManager = {
       getConfig: () => ({ remoteDaemon: config }),
       updateConfigWith: async (update: (current: AppConfig) => Partial<AppConfig>) => {
@@ -119,7 +116,7 @@ function network() {
       },
     };
     const routes: ComputerRoutesReport = { ...report, name, relay: { id, address: info.address, fingerprint: info.fingerprint, local: [] } };
-    const links: RelayLinks = new RelayLinks({ config: configManager, self: () => info, call, disconnect: () => undefined, connectedClientIds: () => new Set() });
+    const links: RelayLinks = new RelayLinks({ config: configManager, self: () => info, call, disconnect: () => undefined, connectedClientIds: () => new Set(), receiveOnly: options.receiveOnly });
     const exchange = new PairingExchange({ now: () => now, addClient: (record) => links.addClient(record) });
     const linking = new ComputerLinking({ links, self: () => info, routesReport: () => routes, post, call });
     const paired: RelayPairedEvent[] = [];

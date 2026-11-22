@@ -1,3 +1,4 @@
+import { onCloudVm } from './cloudVm';
 import { computerName } from '../../utils/computerName';
 import { getPaneEventSink } from '../../core/runtime';
 import { systemSecretBackend } from '../../services/paneSecrets';
@@ -71,7 +72,10 @@ export async function createRelayHost(deps: {
     extraCa: process.env.PANE_RELAY_EXTRA_CA ? readFileSync(process.env.PANE_RELAY_EXTRA_CA, 'utf8') : undefined,
   };
   const call = createComputerCaller(dialOptions);
+  const receiveOnly = onCloudVm();
+  if (receiveOnly) deps.log('[relay] This is a Pane Cloud VM, so it keeps no token for any other computer (receive-only).');
   const links = new RelayLinks({
+    receiveOnly,
     config: configManager,
     self: () => service?.computerInfo(),
     call,
@@ -93,6 +97,7 @@ export async function createRelayHost(deps: {
       };
     },
     secrets: relaySecrets(deps.dataDir),
+    receiveOnly,
     dataDir: deps.dataDir,
     developmentBuild: isDevelopmentBuild(),
     // The port the listener bound, never the configured one: another app may hold that.
