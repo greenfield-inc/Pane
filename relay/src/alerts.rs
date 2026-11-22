@@ -697,8 +697,14 @@ pub(crate) async fn metadata_get(url: &str) -> Result<(u16, Bytes), String> {
         .strip_prefix("http://")
         .ok_or("--metadata-url must start with http://")?;
     let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    // http:// without a port means 80, as in production's http://metadata.google.internal/...
+    let address = if authority.contains(':') {
+        authority.to_string()
+    } else {
+        format!("{authority}:80")
+    };
     let fetch = async {
-        let mut tcp = TcpStream::connect(authority).await?;
+        let mut tcp = TcpStream::connect(address.as_str()).await?;
         let req =
             format!("GET {path} HTTP/1.0\r\nhost: {authority}\r\nmetadata-flavor: Google\r\n\r\n");
         tcp.write_all(req.as_bytes()).await?;
@@ -709,7 +715,7 @@ pub(crate) async fn metadata_get(url: &str) -> Result<(u16, Bytes), String> {
     let out = tokio::time::timeout(TIMEOUT, fetch)
         .await
         .map_err(|_| "the metadata server timed out".to_string())?
-        .map_err(|e| format!("the metadata server at {authority}: {e}"))?;
+        .map_err(|e| format!("the metadata server at {address}: {e}"))?;
     let split = out
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
