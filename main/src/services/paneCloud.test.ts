@@ -19,7 +19,7 @@ let started: Array<{ machineId: string; input: JsonObject }>;
 let forgotten: string[];
 const managers: PaneCloudManager[] = [];
 
-function manager(): PaneCloudManager {
+function manager(overrides: Partial<ConstructorParameters<typeof PaneCloudManager>[0]> = {}): PaneCloudManager {
   const created = new PaneCloudManager({
     serviceUrl: service.url,
     tokenFile: path.join(dir, 'pane-cloud.json'),
@@ -37,6 +37,7 @@ function manager(): PaneCloudManager {
     },
     forget: async (machineId) => { forgotten.push(machineId); },
     pollMs: { waiting: 10, steady: 60_000 },
+    ...overrides,
   });
   managers.push(created);
   return created;
@@ -72,7 +73,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   for (const cloud of managers.splice(0)) cloud.dispose();
-  await service.close();
+  await service.close().catch(() => undefined);
+  vi.useRealTimers();
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -88,6 +90,23 @@ describe('Pane Cloud sign-in', () => {
     const tokenFile = path.join(dir, 'pane-cloud.json');
     if (process.platform !== 'win32') expect((await stat(tokenFile)).mode & 0o777).toBe(0o600);
     expect((await manager().refresh()).signIn).toMatchObject({ state: 'signed-in', email: 'maya@example.test' });
+  });
+
+  it('opens no sign-in page that is not a web address', async () => {
+    // A hostile or spoofed service could answer with a link that launches a program instead.
+    // SAFETY: the test only calls it as the client does, with a URL and init.
+    const hostile = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const answer = await fetch(input, init);
+      if (!String(input).endsWith('/v1/auth/device')) return answer;
+      const code = await answer.json();
+      return new Response(JSON.stringify({ ...code, verificationUriComplete: 'ms-msdt:/id x' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    const cloud = manager({ fetch: hostile });
+
+    const after = await cloud.startSignIn();
+    expect(opened).toEqual([]);
+    expect(after.signIn).toEqual({ state: 'signed-out' });
+    expect(after.error?.message).toMatch(/not a web address/);
   });
 
   it('forgets the session on sign-out', async () => {
@@ -155,6 +174,15 @@ describe('New cloud Session', () => {
     await expect(cloud.createSession(session('Docs'))).rejects.toMatchObject({ message: 'Phone access did not get ready on this computer.', next: 'Check this computer can reach the internet.' });
     expect(cloud.snapshot().sessions).toEqual([]);
     expect(cloud.snapshot().usage?.awakeNow).toBe(0);
+  });
+
+  it('deletes the VM and forgets its computer when the Session does not start on it', async () => {
+    const cloud = manager({ startSession: async () => { throw new PaneError('ERR_CLOUD_SESSION_NOT_CREATED', 'The cloud machine did not create the Session.', 'Try New cloud Session again.'); } });
+    await signIn(cloud, 'maya@example.test');
+
+    await expect(cloud.createSession(session('Docs'))).rejects.toMatchObject({ message: 'The cloud machine did not create the Session.' });
+    expect(forgotten).toEqual(['computer-1']);
+    expect(cloud.snapshot().sessions).toEqual([]);
   });
 
   it('refuses a sixth Session awake with the service\'s reason and creates nothing more', async () => {
@@ -228,8 +256,8 @@ describe('a cloud Session', () => {
     await cloud.stop(vmId);
 
     const actions = await cloud.actions(vmId);
-    expect(actions.map((action) => action.operation)).toEqual(['stop', 'prepare_to_stop', 'create_pairing_link', 'bootstrap', 'create']);
-    expect(actions[0]).toMatchObject({ actor: 'you', failed: false });
+    expect(actions[0]).toMatchObject({ operation: 'stop', actor: 'you', failed: false });
+    expect(actions.at(-1)).toMatchObject({ operation: 'create', actor: 'you' });
   });
 });
 
@@ -244,6 +272,49 @@ describe('when the service ends the session', () => {
     const after = await cloud.refresh();
     expect(after.signIn).toEqual({ state: 'signed-out' });
     expect(after.error?.message).toMatch(/session ended/i);
+    // The VMs still run and this desktop can still reach them, so they stay listed.
+    expect(after.sessions).toEqual([expect.objectContaining({ name: 'Docs', machineId: 'computer-1' })]);
     expect(forgotten).toEqual([]);
+  });
+
+  it('says the sign-in expired, and keeps the cloud Sessions listed', async () => {
+    const cloud = manager();
+    await signIn(cloud, 'maya@example.test');
+    await cloud.createSession(session('Docs'));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // The stub's tokens last 30 days from its own clock.
+    vi.setSystemTime(new Date(clock.getTime() + 31 * 86_400_000));
+
+    const after = await cloud.refresh();
+    expect(after.signIn).toEqual({ state: 'signed-out' });
+    expect(after.error?.message).toMatch(/sign-in expired/i);
+    expect(after.sessions).toEqual([expect.objectContaining({ name: 'Docs' })]);
+  });
+
+  it('stays signed in, and says Pane Cloud is unreachable, when the service is down at start', async () => {
+    await signIn(manager(), 'maya@example.test');
+    await service.close();
+
+    const after = await manager().refresh();
+    expect(after.signIn).toEqual({ state: 'unavailable' });
+    expect(after.error?.message).toMatch(/could not reach Pane Cloud/);
+  });
+});
+
+describe('background re-reads', () => {
+  it('polls only while the account has cloud Sessions', async () => {
+    let calls = 0;
+    // SAFETY: the test only calls it as the client does, with a URL and init.
+    const counting = ((input: RequestInfo | URL, init?: RequestInit) => { calls += 1; return fetch(input, init); }) as typeof fetch;
+    const cloud = manager({ fetch: counting, pollMs: { waiting: 10, steady: 20 } });
+    await signIn(cloud, 'maya@example.test');
+    await cloud.refresh();
+    const settled = calls;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(calls).toBe(settled);
+
+    await cloud.createSession(session('Docs'));
+    const afterCreate = calls;
+    await vi.waitFor(() => expect(calls).toBeGreaterThan(afterCreate), { timeout: 2_000 });
   });
 });

@@ -1,5 +1,6 @@
 import path from 'path';
-import { shell, type IpcMain } from 'electron';
+import type { IpcMain } from 'electron';
+import { openExternalUrl } from '../utils/openExternalUrl';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import type { MachineConnections } from '../services/machineConnections';
 import type { ConfigManager } from '../services/configManager';
@@ -8,7 +9,6 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { PaneError } from '../../../shared/paneError';
 import { computerRelayId } from '../../../shared/types/remoteComputers';
 import { normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
-import { RELAY_DEVICE_COMMANDS } from '../../../shared/types/relay';
 import type { PaneCloudSnapshot } from '../../../shared/types/paneCloud';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
@@ -31,7 +31,7 @@ let manager: PaneCloudManager | null = null;
 export function registerPaneCloudHandlers(ipcMain: IpcMain, deps: {
   commands: Pick<PaneCommandRegistry, 'invoke'>;
   machines: Pick<MachineConnections, 'machineState' | 'run'>;
-  configManager: Pick<ConfigManager, 'getConfig'>;
+  configManager: Pick<ConfigManager, 'getConfig' | 'updateConfigWith'>;
   send: (channel: string, snapshot: PaneCloudSnapshot) => void;
 }): void {
   manager?.dispose();
@@ -39,7 +39,8 @@ export function registerPaneCloudHandlers(ipcMain: IpcMain, deps: {
   const cloud = new PaneCloudManager({
     serviceUrl: process.env.PANE_CLOUD_URL || DEFAULT_PANE_CLOUD_URL,
     tokenFile: path.join(getAppDirectory(), 'pane-cloud', 'session.json'),
-    openExternal: (url) => shell.openExternal(url),
+    // Pane's own allowlist (http, https, mailto) as well as the manager's web-address check.
+    openExternal: (url) => openExternalUrl(url),
     pair: async ({ link, relay }) => {
       const request = { link, relay: { computerId: relay.computerId, fingerprint: relay.fingerprint, domain: relay.domain } };
       return decodeBoundary(await commands.invoke('relay:redeem-vouched', [request]), pairedSchema).computerId;
@@ -54,19 +55,27 @@ export function registerPaneCloudHandlers(ipcMain: IpcMain, deps: {
       }
       return reply.data.session.id;
     },
-    forget: async (machineId) => { await commands.invoke(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, [{ computerId: machineId }]); },
+    // Only this computer forgets it: a cloud VM is never linked with the person's other computers, so none is told.
+    forget: async (machineId) => {
+      await configManager.updateConfigWith((current) => {
+        const remote = normalizeRemoteDaemonConfig(current.remoteDaemon);
+        const client = { ...remote.client, computers: remote.client.computers.filter((computer) => computer.id !== machineId) };
+        if (client.activeProfileId === machineId) Object.assign(client, { activeProfileId: null, mode: 'local' });
+        return { remoteDaemon: { ...remote, client } };
+      });
+    },
     onChange: (snapshot) => deps.send('pane-cloud:changed', snapshot),
   });
   manager = cloud;
 
   const vmId = (value: PaneCommandValue) => decodeBoundary(value, boundary.nonEmptyString);
-  ipcMain.handle('pane-cloud:get', async () => ({ success: true, data: await cloud.refresh() }));
-  ipcMain.handle('pane-cloud:sign-in', async () => ({ success: true, data: await cloud.startSignIn() }));
-  ipcMain.handle('pane-cloud:sign-out', async () => ({ success: true, data: await cloud.signOut() }));
-  ipcMain.handle('pane-cloud:stop', async (_event, id: PaneCommandValue) => ({ success: true, data: await cloud.stop(vmId(id)) }));
-  ipcMain.handle('pane-cloud:start', async (_event, id: PaneCommandValue) => ({ success: true, data: await cloud.start(vmId(id)) }));
-  ipcMain.handle('pane-cloud:delete', async (_event, id: PaneCommandValue) => ({ success: true, data: await cloud.remove(vmId(id)) }));
-  ipcMain.handle('pane-cloud:update-pane', async (_event, id: PaneCommandValue) => ({ success: true, data: await cloud.updatePane(vmId(id)) }));
+  ipcMain.handle('pane-cloud:get', () => answer(() => cloud.refresh()));
+  ipcMain.handle('pane-cloud:sign-in', () => answer(() => cloud.startSignIn()));
+  ipcMain.handle('pane-cloud:sign-out', () => answer(() => cloud.signOut()));
+  ipcMain.handle('pane-cloud:stop', (_event, id: PaneCommandValue) => answer(() => cloud.stop(vmId(id))));
+  ipcMain.handle('pane-cloud:start', (_event, id: PaneCommandValue) => answer(() => cloud.start(vmId(id))));
+  ipcMain.handle('pane-cloud:delete', (_event, id: PaneCommandValue) => answer(() => cloud.remove(vmId(id))));
+  ipcMain.handle('pane-cloud:update-pane', (_event, id: PaneCommandValue) => answer(() => cloud.updatePane(vmId(id))));
   ipcMain.handle('pane-cloud:actions', async (_event, id: PaneCommandValue) => answer(() => cloud.actions(vmId(id))));
   ipcMain.handle('pane-cloud:create', async (_event, input: PaneCommandValue) =>
     answer(() => cloud.createSession(decodeBoundary(input, boundary.jsonObject))));
@@ -78,6 +87,7 @@ async function answer<T>(call: () => Promise<T>) {
     return { success: true, data: await call() };
   } catch (error) {
     if (error instanceof PaneCloudFailure) return { success: false, error: error.message, details: error.next ?? undefined, code: error.code };
+    if (error instanceof PaneError) return { success: false, error: error.message, details: error.next, code: error.code };
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }

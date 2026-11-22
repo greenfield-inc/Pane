@@ -34,6 +34,8 @@ export interface PaneCloudManagerOptions {
   /** Forgets the saved computer of a deleted VM. */
   forget(machineId: string): Promise<void>;
   onChange?: (snapshot: PaneCloudSnapshot) => void;
+  /** Secrets sync (K1) carries this desktop's secrets to new cloud Sessions; the card says so only then. */
+  sendsSecrets?: boolean;
   fetch?: typeof fetch;
   /** How often to re-read: while a VM changes state, and otherwise. */
   pollMs?: { waiting: number; steady: number };
@@ -66,11 +68,15 @@ export class PaneCloudManager {
   private account: Account | null = null;
   private vms: SessionVm[] = [];
   private signInAttempt = 0;
+  /** A background re-read in flight; the next tick waits for it instead of stacking another. */
+  private reading = false;
   private watchTimer: NodeJS.Timeout | null = null;
   private watchWaiting = false;
   private disposed = false;
 
-  constructor(private readonly options: PaneCloudManagerOptions) {}
+  constructor(private readonly options: PaneCloudManagerOptions) {
+    this.state = { ...SIGNED_OUT_PANE_CLOUD, sendsSecrets: options.sendsSecrets ?? false };
+  }
 
   snapshot(): PaneCloudSnapshot {
     return this.state;
@@ -78,15 +84,25 @@ export class PaneCloudManager {
 
   /** Reads the account, its cloud Sessions and the month's usage. A background re-read keeps the last error on screen. */
   async refresh({ background = false }: { background?: boolean } = {}): Promise<PaneCloudSnapshot> {
-    const client = await this.signedInClient();
+    if (background && this.reading) return this.state;
+    const session = await this.loadSession();
+    if (session && Date.parse(session.expiresAt) <= Date.now()) return this.expire(SIGN_IN_EXPIRED);
+    const client = session ? this.client(session.token) : null;
     if (!client) {
-      return this.update({ signIn: this.state.signIn.state === 'pending' ? this.state.signIn : { state: 'signed-out' }, sessions: [], usage: null });
+      if (this.state.signIn.state === 'pending') return this.state;
+      // The last list stays: those cloud Sessions still run. Sign-out clears it on purpose.
+      if (background) return this.update({ signIn: { state: 'signed-out' } });
+      return this.update({ signIn: { state: 'signed-out' }, error: null });
     }
+    const generation = this.signInAttempt;
+    this.reading = true;
     try {
-      await this.load(client);
+      await this.load(client, generation);
       return background ? this.state : this.update({ error: null });
     } catch (error) {
       return this.fail(error);
+    } finally {
+      this.reading = false;
     }
   }
 
@@ -95,6 +111,10 @@ export class PaneCloudManager {
     const attempt = ++this.signInAttempt;
     try {
       const code = await this.client().startDeviceSignIn();
+      // The page opens in the system browser, so only a web address goes: any other scheme could launch a program.
+      if (!/^https?:$/.test(new URL(code.verificationUriComplete).protocol)) {
+        throw new PaneCloudFailure({ message: 'Pane Cloud sent a sign-in page that is not a web address, so Pane did not open it.', next: 'Try signing in again; if this keeps happening, write to Pane Cloud support.' });
+      }
       void this.pollSignIn(attempt, code.deviceCode, code.interval, Date.now() + code.expiresIn * 1000);
       const snapshot = this.update({ signIn: { state: 'pending', userCode: code.userCode, verificationUri: code.verificationUri }, error: null });
       await this.options.openExternal(code.verificationUriComplete);
@@ -111,7 +131,7 @@ export class PaneCloudManager {
     await client?.signOut().catch(() => undefined);
     await this.saveSession(null);
     this.forgetAccount();
-    return this.update({ ...SIGNED_OUT_PANE_CLOUD });
+    return this.update({ ...SIGNED_OUT_PANE_CLOUD, sendsSecrets: this.state.sendsSecrets });
   }
 
   /**
@@ -142,7 +162,7 @@ export class PaneCloudManager {
     } catch (error) {
       // A VM without its Session would count toward the awake limit with nothing on it, so it goes.
       if (made) await this.discard(made).catch((cleanup) => console.warn('[PaneCloud] Could not delete the half-made cloud Session:', cleanup));
-      const snapshot = this.fail(error);
+      const snapshot = await this.fail(error);
       this.update({ creating: null });
       throw snapshot.error ? new PaneCloudFailure(snapshot.error) : error;
     }
@@ -267,20 +287,22 @@ export class PaneCloudManager {
         return;
       } catch (error) {
         this.update({ signIn: { state: 'signed-out' } });
-        this.fail(error);
+        await this.fail(error);
         return;
       }
     }
   }
 
-  private async load(client: ServiceClient): Promise<void> {
+  /** Reads the account, its VMs and usage. A read that started before a sign-out or new sign-in writes nothing. */
+  private async load(client: ServiceClient, generation = this.signInAttempt): Promise<void> {
     const account = await client.getAccount();
-    this.account = account;
     const organizationId = personalOrganization(account);
     const [{ vms }, usage] = await Promise.all([client.listVms(organizationId), client.getUsage(organizationId)]);
+    if (generation !== this.signInAttempt) return;
+    this.account = account;
     this.vms = vms;
     this.update({ signIn: this.signedIn(account), sessions: vms.map((vm) => this.sessionView(vm)), usage: usageView(usage, account) });
-    this.watchWhile(vms);
+    this.watchWhile(account, vms);
   }
 
   private sessionView(vm: SessionVm): PaneCloudSession {
@@ -307,9 +329,15 @@ export class PaneCloudManager {
     };
   }
 
-  /** Re-reads while signed in: quickly while a VM changes state, slowly otherwise (the service may pause one for review). */
-  private watchWhile(vms: SessionVm[]): void {
-    if (this.disposed) return;
+  /**
+   * Re-reads while the account has cloud Sessions: quickly while a VM changes state, slowly otherwise
+   * (the service may pause one for review). An account with none is read only when a view opens.
+   */
+  private watchWhile(account: Account, vms: SessionVm[]): void {
+    if (this.disposed || account.access !== 'invited' || vms.length === 0) {
+      this.stopWatching();
+      return;
+    }
     const waiting = vms.some((vm) => CHANGING.has(vm.state));
     if (this.watchTimer && waiting === this.watchWaiting) return;
     this.stopWatching();
@@ -362,13 +390,22 @@ export class PaneCloudManager {
     await fs.rename(temporary, this.options.tokenFile);
   }
 
+  /**
+   * Signed out by the service or by time. The cloud Sessions keep running and stay reachable as saved
+   * computers, so the last list stays on screen; only the service calls wait for a new sign-in.
+   */
+  private async expire(error: PaneCloudError): Promise<PaneCloudSnapshot> {
+    await this.saveSession(null);
+    this.account = null;
+    this.stopWatching();
+    return this.update({ signIn: { state: 'signed-out' }, usage: null, busy: [], error });
+  }
+
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Callers pass whatever a service call threw; only CloudApiError and PaneCloudFailure are read.
-  private fail(error: unknown): PaneCloudSnapshot {
-    if (error instanceof CloudApiError && error.code === 'unauthenticated') {
-      void this.saveSession(null);
-      this.forgetAccount();
-      return this.update({ ...SIGNED_OUT_PANE_CLOUD, error: { message: 'Your Pane Cloud session ended.', next: 'Sign in to Pane Cloud again. Your cloud Sessions keep running.' } });
-    }
+  private async fail(error: unknown): Promise<PaneCloudSnapshot> {
+    if (error instanceof CloudApiError && error.code === 'unauthenticated') return this.expire(SESSION_ENDED);
+    // Signed in, but nothing read yet: the service is down, which is not a sign-out.
+    if (this.session && this.state.signIn.state === 'signed-out') return this.update({ signIn: { state: 'unavailable' }, error: describeError(error) });
     return this.update({ error: describeError(error) });
   }
 
@@ -393,6 +430,8 @@ export class PaneCloudFailure extends Error {
 }
 
 const SIGNED_OUT_ERROR: PaneCloudError = { message: 'You are not signed in to Pane Cloud.', next: 'Sign in to Pane Cloud, then try again.' };
+const SESSION_ENDED: PaneCloudError = { message: 'Your Pane Cloud session ended.', next: 'Sign in to Pane Cloud again. Your cloud Sessions keep running.' };
+const SIGN_IN_EXPIRED: PaneCloudError = { message: 'Your Pane Cloud sign-in expired.', next: 'Sign in to Pane Cloud again. Your cloud Sessions keep running.' };
 
 /** The organization cloud Sessions go in. The slice has personal organizations only (O1). */
 function personalOrganization(account: Account): string {

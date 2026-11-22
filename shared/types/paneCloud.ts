@@ -6,6 +6,8 @@
 
 export type PaneCloudSignIn =
   | { state: 'signed-out' }
+  /** Signed in, but Pane Cloud can't be reached to read the account: the last error says why. */
+  | { state: 'unavailable' }
   /** The person signs in on the service's page in the system browser; main polls until they finish. */
   | { state: 'pending'; userCode: string; verificationUri: string }
   | {
@@ -70,10 +72,10 @@ export interface PaneCloudUsage {
   members: PaneCloudMemberUsage[];
 }
 
-/** One entry of a cloud Session's action log: every lifecycle step and operation, with who and why (D-6). */
 /** Lifecycle steps and allow-listed operations, as a cloud Session's action log names them. */
 export type PaneCloudOperation = 'create' | 'start' | 'stop' | 'delete' | 'bootstrap' | 'update_pane' | 'prepare_to_stop' | 'collect_diagnostics' | 'create_pairing_link';
 
+/** One entry of a cloud Session's action log: every lifecycle step and operation, with who and why (D-6). */
 export interface PaneCloudAction {
   id: string;
   operation: PaneCloudOperation;
@@ -97,6 +99,8 @@ export interface PaneCloudSnapshot {
   busy: string[];
   /** The last failure, said the PaneError way. */
   error: PaneCloudError | null;
+  /** New cloud Sessions get this desktop's secrets (K1's secrets sync); false until it ships. */
+  sendsSecrets: boolean;
 }
 
 /** The fields of Create Session that New cloud Session passes on to the Session on the VM. */
@@ -114,4 +118,4 @@ export interface PaneCloudCreated {
   snapshot: PaneCloudSnapshot;
 }
 
-export const SIGNED_OUT_PANE_CLOUD: PaneCloudSnapshot = { signIn: { state: 'signed-out' }, sessions: [], usage: null, creating: null, busy: [], error: null };
+export const SIGNED_OUT_PANE_CLOUD: PaneCloudSnapshot = { signIn: { state: 'signed-out' }, sessions: [], usage: null, creating: null, busy: [], error: null, sendsSecrets: false };
