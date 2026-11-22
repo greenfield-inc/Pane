@@ -57,6 +57,7 @@ import type {
   OrchestrationSessionUpdateInput,
 } from '../../shared/types/orchestrationSession';
 import type { AgentUsageSnapshot } from '../../shared/types/agentUsage';
+import type { PaneCloudAction, PaneCloudCreated, PaneCloudSnapshot } from '../../shared/types/paneCloud';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
@@ -1552,6 +1553,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.removeListener('machines:event', listener);
         if (--machineEventListeners === 0) ipcRenderer.send('machines:subscribe', false);
       };
+    },
+  },
+
+  // Pane Cloud: sign-in, cloud Sessions and usage. Runs on this computer whichever machine the window shows.
+  paneCloud: {
+    get: (): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:get'),
+    signIn: (): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:sign-in'),
+    signOut: (): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:sign-out'),
+    create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse<PaneCloudCreated>> => ipcRenderer.invoke('pane-cloud:create', input),
+    stop: (vmId: string): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:stop', vmId),
+    start: (vmId: string): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:start', vmId),
+    remove: (vmId: string): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:delete', vmId),
+    updatePane: (vmId: string): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:update-pane', vmId),
+    actions: (vmId: string): Promise<IPCResponse<PaneCloudAction[]>> => ipcRenderer.invoke('pane-cloud:actions', vmId),
+    onChanged: (callback: (snapshot: PaneCloudSnapshot) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, snapshot: PaneCloudSnapshot) => callback(snapshot);
+      ipcRenderer.on('pane-cloud:changed', listener);
+      return () => { ipcRenderer.removeListener('pane-cloud:changed', listener); };
     },
   },
 

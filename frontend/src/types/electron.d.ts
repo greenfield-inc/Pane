@@ -65,6 +65,7 @@ import type {
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
 } from '../../../shared/types/orchestrationSession';
+import type { PaneCloudAction, PaneCloudCreated, PaneCloudSnapshot } from '../../../shared/types/paneCloud';
 import type { UsageIndexStatus, UsageReport, UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../../../shared/types/loop';
@@ -868,6 +869,20 @@ interface ElectronAPI {
   };
 
   // Every machine the desktop knows, addressed by id: LOCAL_MACHINE_ID for this computer, else a saved profile id
+  /** Pane Cloud: sign-in, cloud Sessions and usage (shared/types/paneCloud.ts). Runs on this computer. */
+  paneCloud: {
+    get: () => Promise<IPCResponse<PaneCloudSnapshot>>;
+    signIn: () => Promise<IPCResponse<PaneCloudSnapshot>>;
+    signOut: () => Promise<IPCResponse<PaneCloudSnapshot>>;
+    /** New cloud Session: the VM, the pairing and the Session on it; `details` carries the next step on failure. */
+    create: (input: OrchestrationSessionCreateInput) => Promise<IPCResponse<PaneCloudCreated>>;
+    stop: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
+    start: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
+    remove: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
+    updatePane: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
+    actions: (vmId: string) => Promise<IPCResponse<PaneCloudAction[]>>;
+    onChanged: (callback: (snapshot: PaneCloudSnapshot) => void) => () => void;
+  };
   machines: {
     list: () => Promise<MachineState[]>;
     /** One of the machine's list reads, tagged with the machine; `data` is what that channel answers. */
