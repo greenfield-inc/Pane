@@ -97,7 +97,7 @@ runs `fleetContractCases`; Pane builds on `startServiceStub`. This package's own
 suites against both stubs: `pnpm --filter pane-cloud-contract test`.
 
 Some service cases need test-mode setup: pass `controls` to `serviceContractCases` with any of
-`pauseForReview`, `setCapacity`, `addMember`, `setPlan`, `setMemoryGiB` and `setClock`
+`pauseForReview`, `setCapacity`, `addMember`, `changeMember`, `setPlan`, `setMemoryGiB` and `setClock`
 (`ServiceContractControls`). A case whose control is missing throws `SkipCase`; report it as
 skipped. `setClock` only moves forward, so run the cases in order. Without controls, the cases
 that need them are the review pause, `no_capacity`, a second organization with Full access and
@@ -148,7 +148,7 @@ Bearer token from device sign-in on every route except the two sign-in calls.
 | Start, stop | `POST /v1/vms/:vmId/start`, `/stop` | `202`; `invalid_state` if it is already running (start) or stopped (stop); start answers `under_review` for a VM paused for review, and `awake_limit_reached` or `no_capacity` like create |
 | Delete | `DELETE /v1/vms/:vmId` | `202`; deletes the disk |
 | Run an operation | `POST /v1/vms/:vmId/operations` | Only `update_pane` (`{ version? }`, latest release when omitted; the service looks up the checksum) and `collect_diagnostics` (`{}`); any other name is `operation_not_allowed` |
-| Pair a device | `POST /v1/vms/:vmId/pairing` | A one-time pairing link (10 minutes) and the VM's relay identity (`computerId`, key `fingerprint`, `domain`). The client pairs only with a VM that presents exactly that key. The service keeps the first identity a VM reports and answers `relay_key_changed` when it later reports another. `invalid_state` unless running; logged as `create_pairing_link`, without the link |
+| Pair a device | `POST /v1/vms/:vmId/pairing` | A one-time pairing link (10 minutes) and the VM's relay identity (`computerId`, key `fingerprint`, `domain`). The client pairs only with a VM that presents exactly that key. The service keeps the first identity a VM reports and answers `relay_key_changed` when it later reports another. Only the VM's creator, while they still have Full access in its organization: `view_only` or `not_org_member` otherwise. `invalid_state` unless running; logged as `create_pairing_link`, without the link |
 | Action log | `GET /v1/vms/:vmId/operations` | Newest first, `?before=<id>&limit=`; every lifecycle step and operation with actor, reason and parameters |
 | Usage | `GET /v1/organizations/:organizationId/usage` | `?month=YYYY-MM`, this month by default: the plan, agent-hours used and the pooled limit, when they reset, and per member their hours, VMs awake now and awake limit |
 

@@ -250,6 +250,8 @@ async function startServiceStub(options) {
         (0, server_1.bind)(r.pairVm, ({ token, params }) => {
             const account = caller(token);
             const record = ownVm(account, params.vmId ?? '');
+            // Pairing hands a device control of the VM: its creator must still have Full access in its organization.
+            requireFullAccess(account, record.vm.organizationId);
             requireState(record, 'running', 'Pairing');
             const reported = record.relayKey;
             const vouched = record.vm.relay;
@@ -302,6 +304,14 @@ async function startServiceStub(options) {
                 throw new Error(`stub: no account ${email}`);
             if (!account.organizations.some((m) => m.organizationId === organizationId))
                 account.organizations.push({ organizationId, name: `Organization ${organizationId}`, personal: false, role });
+        },
+        changeMember(organizationId, email, role) {
+            const account = accounts.get(email.toLowerCase());
+            if (!account)
+                throw new Error(`stub: no account ${email}`);
+            const others = account.organizations.filter((m) => m.organizationId !== organizationId);
+            const current = account.organizations.find((m) => m.organizationId === organizationId);
+            account.organizations = role === null || !current ? others : [...others, { ...current, role }];
         },
         setPlan(organizationId, plan) {
             plans.set(organizationId, plan);

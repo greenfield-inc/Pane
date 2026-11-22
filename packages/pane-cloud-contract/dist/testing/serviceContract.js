@@ -210,6 +210,32 @@ function serviceContractCases(target) {
             },
         },
         {
+            name: 'service: a creator who is now View only, or no longer a member, cannot pair a device with the Session VM',
+            async run() {
+                const addMember = control('addMember');
+                const changeMember = control('changeMember');
+                const member = await as('member');
+                const team = await personalOrg(await as('unverified'));
+                await addMember('member', team, 'full_access');
+                await changeMember('member', team, 'full_access');
+                const { vm } = await member.createVm(team, 'team pairing', (0, node_crypto_1.randomUUID)());
+                try {
+                    await vmIn(member, vm.id, 'running');
+                    await member.pairVm(vm.id);
+                    await changeMember('member', team, 'view_only');
+                    await (0, cases_1.expectError)('view_only', () => member.pairVm(vm.id));
+                    await changeMember('member', team, null);
+                    await (0, cases_1.expectError)('not_org_member', () => member.pairVm(vm.id));
+                    strict_1.default.equal((await member.listActionLog(vm.id)).entries.filter((e) => e.operation === 'create_pairing_link').length, 1, 'a refused pairing is not logged as one');
+                }
+                finally {
+                    await addMember('member', team, 'full_access');
+                    await changeMember('member', team, 'full_access');
+                    await cleanUp(member, [vm.id]);
+                }
+            },
+        },
+        {
             name: "service: another account cannot read or change a member's Session VM or organization",
             async run() {
                 await withVm(async (member, vm) => {

@@ -31,6 +31,8 @@ export interface ServiceContractControls {
   setCapacity(capacity: number | null): Promise<void> | void;
   /** Adds a test account to an organization with a role, as an accepted invitation does. */
   addMember(who: Who, organizationId: string, role: 'full_access' | 'view_only'): Promise<void> | void;
+  /** Changes a test account's role in an organization, or removes it from the organization with null. */
+  changeMember(who: Who, organizationId: string, role: 'full_access' | 'view_only' | null): Promise<void> | void;
   /** Puts an organization on a plan. */
   setPlan(organizationId: string, plan: Plan): Promise<void> | void;
   /** Gives a VM 16 GiB, as a resize does. */
@@ -233,6 +235,31 @@ export function serviceContractCases(target: ServiceContractTarget): ContractCas
           assert.ok(logged.every((e) => !JSON.stringify(e).includes(secret)), 'the action log never holds the link');
           await expectError('vm_not_found', async () => (await as('waitlisted')).pairVm(vm.id));
         });
+      },
+    },
+    {
+      name: 'service: a creator who is now View only, or no longer a member, cannot pair a device with the Session VM',
+      async run() {
+        const addMember = control('addMember');
+        const changeMember = control('changeMember');
+        const member = await as('member');
+        const team = await personalOrg(await as('unverified'));
+        await addMember('member', team, 'full_access');
+        await changeMember('member', team, 'full_access');
+        const { vm } = await member.createVm(team, 'team pairing', randomUUID());
+        try {
+          await vmIn(member, vm.id, 'running');
+          await member.pairVm(vm.id);
+          await changeMember('member', team, 'view_only');
+          await expectError('view_only', () => member.pairVm(vm.id));
+          await changeMember('member', team, null);
+          await expectError('not_org_member', () => member.pairVm(vm.id));
+          assert.equal((await member.listActionLog(vm.id)).entries.filter((e) => e.operation === 'create_pairing_link').length, 1, 'a refused pairing is not logged as one');
+        } finally {
+          await addMember('member', team, 'full_access');
+          await changeMember('member', team, 'full_access');
+          await cleanUp(member, [vm.id]);
+        }
       },
     },
     {

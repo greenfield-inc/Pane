@@ -46,6 +46,8 @@ export interface ServiceStub extends RunningStub {
   setCapacity(capacity: number | null): void;
   /** Adds an account to an organization, as an accepted invitation will. */
   addMember(organizationId: string, email: string, role: Exclude<OrgRole, 'owner'>): void;
+  /** Changes an account's role in an organization, or removes it from the organization with null. */
+  changeMember(organizationId: string, email: string, role: Exclude<OrgRole, 'owner'> | null): void;
   /** Puts an organization on a plan, as a subscription will. */
   setPlan(organizationId: string, plan: Plan): void;
   /** Gives a VM 16 GiB (or back to 8), as a resize will; its later awake hours count at the new rate. */
@@ -307,6 +309,8 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
     bind(r.pairVm, ({ token, params }) => {
       const account = caller(token);
       const record = ownVm(account, params.vmId ?? '');
+      // Pairing hands a device control of the VM: its creator must still have Full access in its organization.
+      requireFullAccess(account, record.vm.organizationId);
       requireState(record, 'running', 'Pairing');
       const reported = record.relayKey;
       const vouched = record.vm.relay;
@@ -357,6 +361,13 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       const account = accounts.get(email.toLowerCase());
       if (!account) throw new Error(`stub: no account ${email}`);
       if (!account.organizations.some((m) => m.organizationId === organizationId)) account.organizations.push({ organizationId, name: `Organization ${organizationId}`, personal: false, role });
+    },
+    changeMember(organizationId, email, role) {
+      const account = accounts.get(email.toLowerCase());
+      if (!account) throw new Error(`stub: no account ${email}`);
+      const others = account.organizations.filter((m) => m.organizationId !== organizationId);
+      const current = account.organizations.find((m) => m.organizationId === organizationId);
+      account.organizations = role === null || !current ? others : [...others, { ...current, role }];
     },
     setPlan(organizationId, plan) {
       plans.set(organizationId, plan);

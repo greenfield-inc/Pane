@@ -32,6 +32,7 @@ describe('service stub passes the service contract', () => {
       pauseForReview: (vmId) => stub.pauseForReview(vmId),
       setCapacity: (capacity) => stub.setCapacity(capacity),
       addMember: (who, organizationId, role) => stub.addMember(organizationId, emails[who], role),
+      changeMember: (who, organizationId, role) => stub.changeMember(organizationId, emails[who], role),
       setPlan: (organizationId, plan) => stub.setPlan(organizationId, plan),
       setMemoryGiB: (vmId, memoryGiB) => stub.setMemoryGiB(vmId, memoryGiB),
       setClock: (at) => {
