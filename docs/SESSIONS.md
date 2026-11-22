@@ -466,8 +466,9 @@ A cloud Session sits in the Sessions list like any other. Its ⋯ menu has
 You can have 5 cloud Sessions running at once on the Free plan. **Settings ›
 Usage & Limits** shows your plan, agent-hours this month of the plan's amount,
 and how many Sessions are running. Each cloud Session's page under **Settings ›
-Remote Access** lists every operation Pane Cloud ran on it, with who asked and
-why.
+Remote Access** lists every operation you or Pane Cloud asked for on it, with
+who asked and why. If Pane Cloud can't be reached or your sign-in ends, your
+cloud Sessions stay in the list and keep running.
 
 `PANE_CLOUD_URL` points a dev build at another Pane Cloud service, such as the
 stub in `packages/pane-cloud-contract`.
