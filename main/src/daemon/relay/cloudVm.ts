@@ -7,12 +7,14 @@ const PANE_CLOUD_VM_MARKER = '/etc/pane-cloud/cloud-vm';
 
 /**
  * Whether this Pane runs on a Pane Cloud VM, which is receive-only: it never keeps a token for
- * another computer. Either marker is enough. It fails closed: a marker file that exists but can't
+ * another computer. Either marker is enough; the file counts on Linux only. It fails closed: a marker file that exists but can't
  * be checked counts as present.
  */
-export function onCloudVm(env: NodeJS.ProcessEnv = process.env, marker: string = PANE_CLOUD_VM_MARKER): boolean {
+export function onCloudVm(env: NodeJS.ProcessEnv = process.env, marker: string = PANE_CLOUD_VM_MARKER, platform: string = process.platform): boolean {
   const value = env[PANE_CLOUD_VM_ENV]?.trim();
   if (value && value !== '0') return true;
+  // Pane Cloud VMs run Linux; elsewhere `/etc/...` may be a path any local user can create.
+  if (platform !== 'linux') return false;
   try {
     statSync(marker);
     return true;

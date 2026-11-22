@@ -12,6 +12,7 @@ import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../
 import { PaneCommandRegistry } from '../commandRegistry';
 import { PaneRemoteHttpApiServer } from '../httpApiServer';
 import { RelayService } from './relayService';
+import { RelayKeyMismatch } from './keyPinning';
 import { createComputerCaller, createComputerPoster, RelayLinks, relayComputerSchema } from './relayLinks';
 import { ComputerLinking, createPairingRoute } from './computerLinking';
 import { computerRelayId } from '../../../../shared/types/remoteComputers';
@@ -366,7 +367,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
 
     const poster = createComputerPoster({ dial, extraCa });
     const studioKey = studio.service.computerInfo()?.fingerprint;
-    await expect(poster(self.address, '/pair/preview', { secret: 'unused' }, 'Cloud Session', studioKey)).rejects.toThrow(/did not pair with/u);
+    await expect(poster(self.address, '/pair/preview', { secret: 'unused' }, 'Cloud Session', studioKey)).rejects.toBeInstanceOf(RelayKeyMismatch);
 
     expect(await laptop.registry.invoke('relay:redeem-vouched', [pairing])).toMatchObject({ name: 'Cloud Session' });
     const saved = laptop.links.linked().find((profile) => profile.relay.computerId === self.id);

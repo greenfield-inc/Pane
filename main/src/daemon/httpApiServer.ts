@@ -281,7 +281,7 @@ interface PairingRequest {
   phoneId?: string;
   /** Computer ids the phone already has a token for. */
   known?: string[];
-  /** A computer redeeming the code: who it is, its routes and a token for this computer (`RelayComputerOffer`), decoded by the route. */
+  /** A computer redeeming the code: who it is, its routes and, except when pairing one way with a Pane Cloud VM, a token for this computer (`RelayComputerOffer`), decoded by the route. */
   computer?: JsonValue;
   /** The caller's IP address; wrong secrets lock out only this source. */
   source: string;

@@ -1,6 +1,11 @@
 import { createHash, X509Certificate } from 'crypto';
 import tls, { type PeerCertificate } from 'tls';
 
+/** The computer at a pinned address showed another key: an impostor, or a computer that lost its key. */
+export class RelayKeyMismatch extends Error {
+  override name = 'RelayKeyMismatch';
+}
+
 /**
  * A certificate check that also requires the computer's own key: the base64url SHA-256 of its
  * SubjectPublicKeyInfo, saved when the device paired. A certificate issued to anyone else for
@@ -13,6 +18,6 @@ export function pinnedServerIdentity(fingerprint: string, label: string): (host:
     const key = new X509Certificate(certificate.raw).publicKey.export({ format: 'der', type: 'spki' });
     return createHash('sha256').update(key).digest('base64url') === fingerprint
       ? undefined
-      : new Error(`${label} presented a key it did not pair with, so Pane did not connect.`);
+      : new RelayKeyMismatch(`${label} presented a key it did not pair with, so Pane did not connect.`);
   };
 }

@@ -61,6 +61,7 @@ export function relayProfile(grant: RelayComputerGrant, linkedBy?: string): Rela
   const { computer, token } = grant;
   const relay: StoredRelayProfile = { computerId: computer.id, fingerprint: computer.fingerprint, domain: computer.domain, local: computer.local };
   if (linkedBy) relay.linkedBy = linkedBy;
+  if (computer.receiveOnly) relay.receiveOnly = true;
   return { id: `relay:${computer.id}`, label: computer.name, baseUrl: computer.address.replace(/\/+$/u, ''), token, transport: 'http+sse', relay };
 }
 
@@ -230,7 +231,7 @@ export interface RelayLinkPeer {
  */
 export async function linkRelayComputers(added: RelayLinkPeer, others: readonly RelayLinkPeer[]): Promise<string[]> {
   const peers = others.filter(other => other.computer.id !== added.computer.id);
-  // Asked live: a saved profile doesn't say whether a computer is receive-only.
+  // The saved mark first, else asked live: a profile saved before marks existed has none.
   const addedReceivesOnly = receivesOnly(added);
   const results = await Promise.allSettled(peers.map(async (other) => {
     const [addedOnly, otherOnly] = await Promise.all([addedReceivesOnly, receivesOnly(other)]);
@@ -252,7 +253,11 @@ export async function linkRelayComputers(added: RelayLinkPeer, others: readonly 
   });
 }
 
-/** Whether a computer says it is receive-only (a Pane Cloud VM). One that doesn't answer counts as not. */
+/**
+ * Whether a computer is receive-only (a Pane Cloud VM): marked so on this device, else by its own
+ * answer. The device's mark wins, so a VM that stops saying so still gets no token. One that
+ * doesn't answer counts as not.
+ */
 async function receivesOnly(peer: RelayLinkPeer): Promise<boolean> {
   if (peer.computer.receiveOnly) return true;
   try {
@@ -281,7 +286,9 @@ export function linkWithSavedRelayComputers(
 /** The computer a relay profile stands for, as the link commands take it. */
 export function relayComputerOf(profile: RelayConnectionProfile): RelayComputer {
   const { relay } = profile;
-  return { id: relay.computerId, name: profile.label, domain: relay.domain, address: profile.baseUrl, local: relay.local, fingerprint: relay.fingerprint };
+  const computer: RelayComputer = { id: relay.computerId, name: profile.label, domain: relay.domain, address: profile.baseUrl, local: relay.local, fingerprint: relay.fingerprint };
+  if (relay.receiveOnly) computer.receiveOnly = true;
+  return computer;
 }
 
 /**

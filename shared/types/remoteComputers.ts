@@ -86,6 +86,7 @@ const routeSchema: BoundarySchema<ComputerRoute> = boundary.object({
     computerId: boundary.nonEmptyString,
     fingerprint: boundary.nonEmptyString,
     linkedBy: boundary.optional(boundary.nonEmptyString),
+    receiveOnly: boundary.optional(boundary.boolean),
   })),
   ssh: boundary.optional(boundary.object({ host: boundary.nonEmptyString, remotePort: boundary.number })),
 });
@@ -235,7 +236,10 @@ export function routeFromProfile(profile: RemotePaneConnectionProfile, source?: 
   if (profile.tunnel) route.tunnel = profile.tunnel;
   if (profile.tailnetMachine) route.tailnetMachine = profile.tailnetMachine;
   if (profile.tailnetDomain) route.tailnetDomain = profile.tailnetDomain;
-  if (profile.relay) route.relay = { computerId: profile.relay.computerId, fingerprint: profile.relay.fingerprint };
+  if (profile.relay) {
+    route.relay = { computerId: profile.relay.computerId, fingerprint: profile.relay.fingerprint };
+    if (profile.relay.receiveOnly) route.relay.receiveOnly = true;
+  }
   return route;
 }
 
@@ -254,6 +258,7 @@ export function routeProfile(computer: RemoteComputer, route: ComputerRoute): Re
   if (route.relay) {
     profile.relay = { computerId: route.relay.computerId, fingerprint: route.relay.fingerprint };
     if (computer.linkedBy) profile.relay.linkedBy = computer.linkedBy;
+    if (route.relay.receiveOnly) profile.relay.receiveOnly = true;
   }
   return profile;
 }

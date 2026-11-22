@@ -13,7 +13,8 @@ import type { PairingRoute } from '../httpApiServer';
 import { ComputerLinking, createPairingRoute } from './computerLinking';
 import { PairingExchange } from './pairingExchange';
 import { registerRelayCommands } from './relayCommands';
-import { RelayLinks, type CallComputer, type PostToComputer } from './relayLinks';
+import { RelayKeyMismatch } from './keyPinning';
+import { RelayLinks, type CallComputer, type PostToComputer, type RelayLinksDeps } from './relayLinks';
 import { RelayPreviews } from './relayPreviews';
 
 const DOMAIN = 'relay.test';
@@ -33,6 +34,8 @@ interface Computer {
   preview(link: string): Promise<PaneCommandValue>;
   redeem(link: string): Promise<PaneCommandValue>;
   redeemVouched(pairing: VouchedPairing): Promise<PaneCommandValue>;
+  /** A VM running a modified Pane: it stops saying it is receive-only and keeps any token it is sent. */
+  lie(): void;
 }
 
 /**
@@ -66,7 +69,7 @@ function network() {
   const post: PostToComputer = async (address, path, body, label, fingerprint) => {
     const { route, info } = at(address);
     // As the pinned TLS check does: a computer with another key never sees the request.
-    if (fingerprint && fingerprint !== info.fingerprint) throw new Error(`${label} presented a key it did not pair with, so Pane did not connect.`);
+    if (fingerprint && fingerprint !== info.fingerprint) throw new RelayKeyMismatch(`${label} presented a key it did not pair with, so Pane did not connect.`);
     // As the listener reads it: JSON off the wire.
     const request = decodeBoundary(JSON.parse(JSON.stringify(body)), boundary.jsonObject);
     const secret = String(request.secret);
@@ -116,7 +119,8 @@ function network() {
       },
     };
     const routes: ComputerRoutesReport = { ...report, name, relay: { id, address: info.address, fingerprint: info.fingerprint, local: [] } };
-    const links: RelayLinks = new RelayLinks({ config: configManager, self: () => info, call, disconnect: () => undefined, connectedClientIds: () => new Set(), receiveOnly: options.receiveOnly });
+    const linkDeps: RelayLinksDeps = { config: configManager, self: () => info, call, disconnect: () => undefined, connectedClientIds: () => new Set(), receiveOnly: options.receiveOnly };
+    const links: RelayLinks = new RelayLinks(linkDeps);
     const exchange = new PairingExchange({ now: () => now, addClient: (record) => links.addClient(record) });
     const linking = new ComputerLinking({ links, self: () => info, routesReport: () => routes, post, call });
     const paired: RelayPairedEvent[] = [];
@@ -158,6 +162,10 @@ function network() {
       preview: (link) => registry.invoke('relay:link-preview', [{ link }]),
       redeem: (link) => registry.invoke('relay:redeem-link', [{ link }]),
       redeemVouched: (pairing) => registry.invoke('relay:redeem-vouched', [{ ...pairing, relay: { ...pairing.relay } }]),
+      lie: () => {
+        linkDeps.receiveOnly = false;
+        delete info.receiveOnly;
+      },
     };
     computers.set(id, computer);
     return computer;
@@ -448,7 +456,7 @@ describe('pairing with a cloud VM from the identity Pane Cloud vouches for', () 
     const vouchedKey = vm.info.fingerprint;
     vm.info.fingerprint = relayIdentity('another key').fingerprint;
 
-    await expect(laptop.redeemVouched(pairing)).rejects.toMatchObject({ message: expect.stringContaining('presented a key it did not pair with') });
+    await expect(laptop.redeemVouched(pairing)).rejects.toMatchObject({ code: 'ERR_PAIRING_KEY_MISMATCH' });
     expect(laptop.listed()).toEqual([]);
     expect(vm.config().host.clients).toEqual([]);
 
@@ -554,5 +562,56 @@ describe('pairing with a cloud VM from the identity Pane Cloud vouches for', () 
       expect(laptop.config().host.clients).toEqual([]);
       await expect(laptop.redeemVouched({ link, relay: { computerId: vm.info.id, fingerprint: vm.info.fingerprint, domain: DOMAIN } })).resolves.toMatchObject({ name: 'Cloud Session' });
     });
+  
+    it.each([
+      ['a phone links a new computer', 'phone'],
+      ['the desktop redeems another computer\'s link', 'ours'],
+      ['another computer redeems the desktop\'s link', 'theirs'],
+    ])('a VM that stops saying it is receive-only still gets no token when %s (F-1)', async (_name, path) => {
+      const net = network();
+      const laptop = net.add('Laptop', 'laplaplaplaplap0');
+      const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
+      const mini = net.add('Mini', 'minminminminmin0');
+      await laptop.redeemVouched(await vouched(vm));
+      vm.lie();
+      // The phone learns of the VM only now, from the desktop, while the VM claims to be ordinary.
+      const saved = await phonePairs(net, laptop);
+
+      if (path === 'phone') {
+        const [miniProfile] = await phonePairs(net, mini);
+        await linkWithSavedRelayComputers(miniProfile, [], saved, net.phoneClient);
+      } else if (path === 'ours') {
+        await laptop.redeem(await mini.link());
+      } else {
+        await mini.redeem(await laptop.link());
+      }
+
+      expect(await net.reaches(mini, vm)).toBe(true);
+      expect(vm.config().client.computers).toEqual([]);
+      expect(net.received.filter((call) => call.to === 'Cloud Session').map((call) => call.channel)).not.toContain('relay:client:save-link');
+    });
+  });
+
+  it('a computer that is not a cloud VM refuses a link redeemed without a token, and the link stays unused (F-2)', async () => {
+    const net = network();
+    const mac = net.add('Mac', 'macmacmacmacmac0');
+    const mini = net.add('Mini', 'minminminminmin0');
+    await mini.redeem(await mac.link());
+    const stranger = net.add('Stranger', 'strstrstrstrstr0');
+    const link = await mac.link();
+    const secret = new URLSearchParams(new URL(link).hash.slice(1)).get('s') ?? '';
+
+    const result = await mac.route.exchange({ secret, label: 'Stranger', known: [], computer: { computer: { ...stranger.info } }, source: '192.168.1.40' });
+
+    expect(result).toMatchObject({ ok: false, code: 'ERR_PAIRING_BAD_REQUEST' });
+    expect(mac.config().host.clients.map((client) => client.label)).toEqual(['Mini']);
+    expect(mini.config().host.clients.map((client) => client.label)).toEqual(['Mac']);
+    await expect(stranger.redeem(link)).resolves.toMatchObject({ linked: expect.arrayContaining(['Mac']) });
+  });
+
+  it('refuses a vouched pairing that names this computer itself (F-10)', async () => {
+    const net = network();
+    const laptop = net.add('Laptop', 'laplaplaplaplap0');
+    await expect(laptop.redeemVouched(await vouched(laptop))).rejects.toMatchObject({ code: 'ERR_RELAY_LINK_SELF' });
   });
 });

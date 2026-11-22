@@ -100,7 +100,11 @@ export interface RelayExchangeRequest {
   phoneId?: string;
   /** Computer ids the app already has a token for. Linked computers among them hand out no new token, which would replace the app's. */
   known?: string[];
-  /** Set when a computer redeems the link: the maker saves it as a computer, not a phone. */
+  /**
+   * Set when a computer redeems the link: the maker records it as a computer, not a phone. With a
+   * token the maker saves it to call back; without one (accepted only by a Pane Cloud VM) the pairing
+   * is one way.
+   */
   computer?: RelayComputerOffer;
 }
 
@@ -137,7 +141,10 @@ export interface LinkRedeemResult {
 export interface RelayPairedEvent {
   kind: 'phone' | 'computer';
   label: string;
-  /** Computers only: its id in `client.computers`, for "Not you? Unlink". */
+  /**
+   * A computer this one saved: its id in `client.computers`, for "Not you? Unlink". Absent for a
+   * phone, and on a Pane Cloud VM for a desktop that paired one way (the VM saves nothing to call).
+   */
   computerId?: string;
 }
 

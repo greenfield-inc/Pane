@@ -15,6 +15,7 @@ import {
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PairingRoute } from '../httpApiServer';
 import type { PairingExchangeRequest, PairingExchangeResult, PairingRefusal } from './pairingExchange';
+import { RelayKeyMismatch } from './keyPinning';
 import { relayComputerSchema, type CallComputer, type LinkedComputer, type PostToComputer, type RelayLinks } from './relayLinks';
 
 /** The relay service's side of a trade: checking and spending secrets, and this computer's relay identity. */
@@ -48,7 +49,8 @@ const tokenSchema = boundary.object({ token: boundary.nonEmptyString });
  * The maker's side of a link or QR code, behind the pairing listener's `/pair/preview` and
  * `/pair/exchange`. A phone becomes a phone client; a computer that offers its own token becomes a
  * linked computer saved in `client.computers`, and every computer linked with this one hands it a
- * token too.
+ * token too. On a Pane Cloud VM it is the other way round: a computer must offer no token, it
+ * becomes a client only, and nothing else hands it one. Anywhere else a tokenless offer is refused.
  */
 export function createPairingRoute(deps: {
   host: PairingHost;
@@ -76,6 +78,10 @@ export function createPairingRoute(deps: {
       const offer = decodeOptionalBoundary(request.computer, offerSchema);
       if (!offer) return { ok: false, status: 400, code: 'ERR_PAIRING_BAD_REQUEST', message: 'The computer did not say who it is, so the code was not used.' };
       // Checked before the secret is spent, so a refused computer leaves the code for another.
+      // Only a Pane Cloud VM is paired one way; anywhere else a computer that can't be called back couldn't be undone with "Not you? Unlink".
+      if (offer.token === undefined && !links.receiveOnly()) {
+        return { ok: false, status: 400, code: 'ERR_PAIRING_BAD_REQUEST', message: 'The computer offered no way to call it back, which only a Pane Cloud VM accepts, so the code was not used.' };
+      }
       try {
         if (offer.token !== undefined) links.refuseIfReceiveOnly(offer.computer.name);
         links.checkPeer(offer.computer);
@@ -87,7 +93,8 @@ export function createPairingRoute(deps: {
       // Without a token the computer is a client here and nothing more: this computer can't call it.
       const computerId = offer.token === undefined ? undefined : await links.saveComputer({ computer: offer.computer, token: offer.token, routes: decodeComputerRoutesReport(offer.routes) });
       deps.onPaired(computerId === undefined ? { kind: 'computer', label: offer.computer.name } : { kind: 'computer', label: offer.computer.name, computerId });
-      const [linked, routes] = await Promise.all([links.computerGrantsFor(offer.computer, request.known ?? []), deps.routesReport()]);
+      // A one-way pairing (to a Pane Cloud VM) hands out no tokens for other computers.
+      const [linked, routes] = await Promise.all([computerId === undefined ? Promise.resolve([]) : links.computerGrantsFor(offer.computer, request.known ?? []), deps.routesReport()]);
       return routes ? { ...result, linked, routes } : { ...result, linked };
     },
     clientAddress: (remoteAddress, remotePort) => host.clientAddress(remoteAddress, remotePort),
@@ -228,6 +235,7 @@ export class ComputerLinking {
     if (!self) {
       throw new PaneError('ERR_RELAY_OFF', `Phone access is off on this computer, so it was not paired with ${link.name}.`, 'Open Settings › Remote Access › Add a device on this computer, which turns phone access on, then open the Session again.');
     }
+    if (link.computerId === self.id) throw new PaneError('ERR_RELAY_LINK_SELF', 'Pane Cloud vouched for this computer\'s own id, so nothing was paired.', 'Open the Session again; if this keeps happening, write to Pane Cloud support.');
     if (link.domain !== self.domain) {
       throw new PaneError('ERR_RELAY_LINK_OUTSIDE_DOMAIN', `${link.name} uses the relay ${link.domain} and this computer uses ${self.domain}, so they were not paired.`, `Set the Relay address in Settings › Remote Access › Phones and glasses to ${link.domain}, then open the Session again.`);
     }
@@ -236,6 +244,9 @@ export class ComputerLinking {
       const request: RelayExchangeRequest = { secret: link.secret, label: self.name, known: [], computer: { computer: self } };
       answer = await this.deps.post(relayComputerAddress(link), '/pair/exchange', request, link.name, relay.fingerprint);
     } catch (error) {
+      if (error instanceof RelayKeyMismatch) {
+        throw new PaneError('ERR_PAIRING_KEY_MISMATCH', `${link.name} presented a key other than the one Pane Cloud vouched for, so Pane did not send it anything and nothing was paired.`, 'Don\'t retry: write to Pane Cloud support with the Session name.');
+      }
       throw new PaneError('ERR_LINK_UNREACHABLE', `Can't reach ${link.name}: ${reasonOf(error)}. Nothing was paired.`, 'Check that this computer is online, then open the Session again.');
     }
     const result = decodeOptionalBoundary(answer.json, exchangeSchema);
@@ -243,7 +254,8 @@ export class ComputerLinking {
     if (result.computer.id !== relay.computerId || result.computer.fingerprint !== relay.fingerprint || !isRelayComputerUnder(result.computer, relay.domain)) {
       throw new PaneError('ERR_PAIRING_KEY_MISMATCH', `${link.name} answered with a key Pane Cloud did not vouch for, so Pane did not pair with it.`, 'Open the Session again; if this keeps happening, write to Pane Cloud support.');
     }
-    const computerId = await this.deps.links.saveComputer({ computer: result.computer, token: result.token, routes: decodeComputerRoutesReport(result.routes) });
+    // Marked receive-only here, so this computer never sends it a token, whatever it later says about itself.
+    const computerId = await this.deps.links.saveComputer({ computer: result.computer, token: result.token, routes: decodeComputerRoutesReport(result.routes), receiveOnly: true });
     return { computerId, name: result.computer.name };
   }
 
@@ -310,8 +322,9 @@ export class ComputerLinking {
       }
     };
     // A receive-only computer (a Pane Cloud VM) is never sent a token: only the other side gets one for it.
+    // For ours, this computer's own mark decides, not the VM's live answer.
     const forTheirs = theirs.receiveOnly ? null : await mint(ourProfile, theirs);
-    const forOurs = ours.receiveOnly ? null : await mint(theirProfile, ours);
+    const forOurs = ours.receiveOnly || this.deps.links.markedReceiveOnly(ours.id) ? null : await mint(theirProfile, ours);
     if (forTheirs) await this.deps.call(theirProfile, RELAY_CLIENT_COMMANDS.saveLink, [{ peer: ours, token: forTheirs }]);
     if (forOurs) await this.deps.call(ourProfile, RELAY_CLIENT_COMMANDS.saveLink, [{ peer: theirs, token: forOurs }]);
   }

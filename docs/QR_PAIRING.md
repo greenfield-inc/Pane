@@ -86,7 +86,9 @@ and it reaches none of them: linking gives the other computer a token for
 the VM and never gives the VM one. The VM's guest image marks it with
 `PANE_CLOUD_VM=1` in the Pane daemon's unit or a root-owned
 `/etc/pane-cloud/cloud-vm` file; with either, Pane refuses to save a token for
-any other computer, and nothing in Pane's own settings turns that off.
+any other computer, and nothing in Pane's own settings turns that off. Your
+computers and phones also remember a Session they paired with as a Pane Cloud
+VM, so they never send it a token even if it stops saying it is one.
 
 **Settings › Remote Access › Computers** shows each computer once, with a
 pill for every route Pane can reach it on and a dot on the route in use.
@@ -104,6 +106,8 @@ computer's browser app keeps its own list.
 
 A computer always asks before it uses a link, unless it already reaches the
 computer that made the link: once linked, that computer can run agents on it.
+Pairing with your own Pane Cloud Session asks nothing: it is one way, so the
+Session can't run anything on your computer.
 A phone or browser asks when it already reaches computers and the link comes
 from a computer it doesn't reach yet. A phone or browser that reaches no
 computers yet pairs without asking, since pairing gives it access and nothing

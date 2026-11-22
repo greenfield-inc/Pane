@@ -313,7 +313,7 @@ export class RelayLinks {
    * reported, on its record in `client.computers` (a computer saved already gains the routes).
    * Returns the record's id.
    */
-  async saveComputer(peer: { computer: RelayComputer; token: string; routes?: ComputerRoutesReport; linkedBy?: string }): Promise<string> {
+  async saveComputer(peer: { computer: RelayComputer; token: string; routes?: ComputerRoutesReport; linkedBy?: string; receiveOnly?: boolean }): Promise<string> {
     const { computer, token, linkedBy } = peer;
     this.refuseIfReceiveOnly(computer.name);
     // A report about another relay id is not this computer's.
@@ -328,6 +328,10 @@ export class RelayLinks {
     };
     let id = '';
     await this.update((remote) => {
+      // A computer marked receive-only here stays marked, whatever it later says about itself.
+      const wasMarked = remote.client.computers.some((saved) => computerRelayId(saved) === computer.id
+        && saved.routes.some((route) => route.relay?.receiveOnly));
+      if (peer.receiveOnly || computer.receiveOnly || wasMarked) linkRoute.relay = { computerId: computer.id, fingerprint: computer.fingerprint, receiveOnly: true };
       // An install id another saved computer holds under a different relay id is not trusted to merge.
       const holder = report ? remote.client.computers.find((candidate) => candidate.machineId === report.machineId) : undefined;
       const holderRelay = holder && computerRelayId(holder);
@@ -345,6 +349,11 @@ export class RelayLinks {
     });
     this.deps.log?.(`[relay] linked with ${computer.name} (${computer.id})${linkedBy ? `, linked by ${linkedBy}` : ''}`);
     return id;
+  }
+
+  /** Whether this computer marked a saved computer receive-only (it paired with it as a Pane Cloud VM). */
+  markedReceiveOnly(relayId: string): boolean {
+    return this.linked().some((profile) => profile.relay.computerId === relayId && profile.relay.receiveOnly === true);
   }
 
   /** Whether this computer is a Pane Cloud VM that holds no token for any other computer. */
@@ -414,6 +423,8 @@ export class RelayLinks {
         const token = decodeOptionalBoundary(result, grantedTokenSchema)?.token;
         const info = decodeOptionalBoundary(computer, relayComputerSchema);
         if (token === undefined || !info || info.id !== profile.relay.computerId) return null;
+        // This computer's own mark, not the VM's word, tells the device the grant goes to.
+        if (profile.relay.receiveOnly) info.receiveOnly = true;
         return { computer: info, token };
       } catch (error) {
         this.deps.log?.(`[relay] ${profile.label} did not hand out a token: ${error instanceof Error ? error.message : String(error)}`);
