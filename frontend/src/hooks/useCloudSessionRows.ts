@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePaneCloudStore } from '../stores/paneCloudStore';
 import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { LOCAL_MACHINE_ID, type MachineConnectionsEvent } from '../../../shared/types/machineConnections';
-import type { OrchestrationSessionRecord, SessionActivity } from '../../../shared/types/orchestrationSession';
+import { LEGACY_ORCHESTRATION_SESSION_ID, type OrchestrationSessionRecord, type SessionActivity } from '../../../shared/types/orchestrationSession';
 
 /** One row the Sessions list shows for a Session on another machine: a cloud Session, or this computer's while the window is on a cloud Session. */
 export interface CloudSessionRow {
@@ -11,6 +11,8 @@ export interface CloudSessionRow {
   machineId: string | null;
   /** The cloud Session's VM; null for this computer's Sessions. */
   vmId: string | null;
+  /** The cloud Session's own name, which Delete names: a VM is one cloud Session, whatever runs on it. */
+  cloudName: string | null;
   /** The Session on that machine; null before its list has been read (a stopped cloud Session). */
   sessionId: string | null;
   name: string;
@@ -86,10 +88,11 @@ export function useCloudSessionRows(): CloudSessionRow[] {
 
   return useMemo(() => {
     const rows: CloudSessionRow[] = [];
-    const fromLists = (machineId: string, vmId: string | null, extra: Pick<CloudSessionRow, 'underReview' | 'busy'>): CloudSessionRow[] | null => {
+    const fromLists = (machineId: string, vmId: string | null, extra: Pick<CloudSessionRow, 'underReview' | 'busy' | 'cloudName'>): CloudSessionRow[] | null => {
       const read = lists[machineId];
       if (!read) return null;
-      return read.sessions.filter((session) => !session.archived).map((session) => {
+      // Every Pane starts with its own Pane Chat (Onboarding) Session; another machine's is not a Session the person made.
+      return read.sessions.filter((session) => !session.archived && session.id !== LEGACY_ORCHESTRATION_SESSION_ID).map((session) => {
         const activity = read.activity.find((entry) => entry.sessionId === session.id);
         return {
           key: `${machineId}:${session.id}`,
@@ -104,10 +107,10 @@ export function useCloudSessionRows(): CloudSessionRow[] {
         };
       });
     };
-    if (onCloud) rows.push(...(fromLists(LOCAL_MACHINE_ID, null, { underReview: false, busy: false }) ?? []));
+    if (onCloud) rows.push(...(fromLists(LOCAL_MACHINE_ID, null, { underReview: false, busy: false, cloudName: null }) ?? []));
     for (const session of cloud.sessions) {
       if (session.machineId !== null && session.machineId === activeId) continue;
-      const extra = { underReview: session.underReview, busy: cloud.busy.includes(session.vmId) };
+      const extra = { underReview: session.underReview, busy: cloud.busy.includes(session.vmId), cloudName: session.name };
       const read = session.awake && session.machineId ? fromLists(session.machineId, session.vmId, extra) : null;
       if (read && read.length > 0) {
         rows.push(...read);

@@ -38,8 +38,8 @@ export function CloudSessionRows({ rows }: { rows: CloudSessionRow[] }) {
         isOpen={deleting !== null}
         onClose={() => setDeleting(null)}
         onConfirm={() => { if (deleting?.vmId) void deleteCloudSession(deleting.vmId, deleting.machineId); }}
-        title={`Delete ${deleting?.name ?? 'this cloud Session'}?`}
-        message="This deletes the cloud Session with its machine and disk. Work on it that you haven't pushed is lost."
+        title={`Delete ${deleting?.cloudName ?? 'this cloud Session'}?`}
+        message="This deletes the cloud Session with its machine and disk, and every Session on it. Work on it that you haven't pushed is lost."
         confirmText="Delete"
       />
     </>

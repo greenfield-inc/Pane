@@ -91,7 +91,7 @@ test('cloud Sessions sit in the Sessions list like any other, with Stop and Star
       ],
       reads: {
         'cloud-1': {
-          'orchestration-sessions:list': { success: true, data: { sessions: [{ id: 'c-1', name: 'Docs site migration', archived: false }] } },
+          'orchestration-sessions:list': { success: true, data: { sessions: [{ id: 'legacy-pane-chat', name: 'Onboarding', archived: false }, { id: 'c-1', name: 'Docs site migration', archived: false }] } },
           'orchestration-sessions:activity-list': { success: true, data: [{ sessionId: 'c-1', state: 'working', workingPanes: 2 }] },
         },
       },
@@ -112,6 +112,14 @@ test('cloud Sessions sit in the Sessions list like any other, with Stop and Star
   const stopped = list.getByRole('button', { name: 'Open Session Pricing page copy', exact: true });
   await expect(stopped).toBeVisible();
   await page.getByTestId('sidebar').first().screenshot({ path: `${process.env.PANE_SCRATCH_DIR ?? 'tmp'}/screens/frame-C-built.png` });
+
+  // The VM's own Onboarding Session is not one the person made, so it gets no row.
+  await expect(list.getByRole('button', { name: 'Open Session Onboarding', exact: true })).toHaveCount(0);
+  await working.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Delete…', exact: true }).click();
+  const confirm = page.getByRole('dialog', { name: 'Delete Docs site migration?' });
+  await expect(confirm).toContainText('every Session on it');
+  await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
 
   await working.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Stop', exact: true }).click();

@@ -12,7 +12,7 @@ import type { AppConfig } from '../types/config';
 import { useConfigStore } from '../stores/configStore';
 import { useAllMachinesStore } from '../stores/allMachinesStore';
 import { PaneCloudCallError, usePaneCloudStore } from '../stores/paneCloudStore';
-import { openOnMachine } from '../utils/machineRowActions';
+import { openOnMachine, type MachineTarget } from '../utils/machineRowActions';
 import type { MachineOs } from '../utils/machineList';
 import { createSessionOn, readSessionNames } from '../utils/newOnMachine';
 import { visibleAgentPresets } from '../utils/agentPresets';
@@ -27,9 +27,21 @@ import { WhereItRuns, type PaneCloudGate, type Place, type PlaceMachine } from '
 /** How long a newly paired cloud machine may take to reach the machine menu. */
 const LISTED_DEADLINE_MS = 15_000;
 
-/** Resolves once the machine menu lists the machine, which follows main's config push; opening sooner finds no such machine. */
-function untilListed(machineId: string): Promise<void> {
-  const listed = () => useAllMachinesStore.getState().entries.some((entry) => entry.id === machineId);
+/**
+ * Opens the new cloud Session. The machine menu lists the VM only after main's config push, and the
+ * switch restores the VM's own last-shown Session, so once the window is on the VM it opens the new
+ * one again, in place.
+ */
+async function openNewCloudSession(machineId: string, target: MachineTarget): Promise<void> {
+  await until(() => useAllMachinesStore.getState().entries.some((entry) => entry.id === machineId));
+  await openOnMachine(machineId, target);
+  await until(() => useAllMachinesStore.getState().entries.some((entry) => entry.id === machineId && entry.active));
+  await openOnMachine(machineId, target);
+}
+
+/** Resolves once `ready` holds for the machine menu, or after a while regardless. */
+function until(ready: () => boolean): Promise<void> {
+  const listed = ready;
   if (listed()) return Promise.resolve();
   return new Promise((resolve) => {
     const timer = setTimeout(() => { stop(); resolve(); }, LISTED_DEADLINE_MS);
@@ -271,7 +283,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
         const sessionName = request.name || nextOrchestrationSessionName(cloud.sessions);
         const created = await usePaneCloudStore.getState().create({ ...request, name: sessionName, nameFromFirstMessage: !request.name });
         onClose();
-        void untilListed(created.machineId).then(() => openOnMachine(created.machineId, { kind: 'session', id: created.sessionId, name: sessionName }));
+        void openNewCloudSession(created.machineId, { kind: 'session', id: created.sessionId, name: sessionName });
       } else if (otherMachine) {
         const sessionName = request.name || nextOrchestrationSessionName(await readSessionNames(otherMachine));
         const sessionId = await createSessionOn(otherMachine, { ...request, name: sessionName, nameFromFirstMessage: !request.name });
