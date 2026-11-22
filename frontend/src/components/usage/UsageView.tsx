@@ -18,6 +18,7 @@ import type { MachineState } from '../../../../shared/types/machineConnections';
 import { LeaderboardTab } from './LeaderboardTab';
 import { settingDomId } from '../settings/catalog';
 import { PaneUsageSummary } from './PaneUsageSummary';
+import { PaneCloudUsage } from './PaneCloudUsage';
 import { UsageDateRangeDialog } from './UsageDateRangeDialog';
 import { hasNoAgentTranscripts } from './usageEmptyState';
 import { presetCalendarRange, rollingUsageRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
@@ -653,6 +654,7 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
         </div>
       ) : (
       <div ref={contentRef} className="relative min-h-0 flex-1 overflow-auto p-4">
+        <PaneCloudUsage />
         {!loading && error ? (
           <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">
             {error}

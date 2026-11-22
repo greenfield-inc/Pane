@@ -56,6 +56,9 @@ export interface PaneCloudMemberUsage {
 /** The organization's month, as Usage & Limits shows it. */
 export interface PaneCloudUsage {
   plan: 'free' | 'pro' | 'max';
+  /** The plan's own amounts: agent-hours per member a month and Sessions awake at once. */
+  planAgentHours: number;
+  planAwakeLimit: number;
   /** The month's hours reset then: the 1st of the next month, UTC. */
   resetsAt: string;
   agentHoursUsed: number;
@@ -68,9 +71,12 @@ export interface PaneCloudUsage {
 }
 
 /** One entry of a cloud Session's action log: every lifecycle step and operation, with who and why (D-6). */
+/** Lifecycle steps and allow-listed operations, as a cloud Session's action log names them. */
+export type PaneCloudOperation = 'create' | 'start' | 'stop' | 'delete' | 'bootstrap' | 'update_pane' | 'prepare_to_stop' | 'collect_diagnostics' | 'create_pairing_link';
+
 export interface PaneCloudAction {
   id: string;
-  operation: string;
+  operation: PaneCloudOperation;
   actor: 'you' | 'Pane Cloud' | 'the host';
   reason: string;
   failed: boolean;

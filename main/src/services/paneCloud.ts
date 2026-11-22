@@ -1,11 +1,10 @@
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { CloudApiError, createServiceClient, type Account, type ActionLogEntry, type OrganizationUsage, type ServiceClient, type SessionVm } from 'pane-cloud-contract';
+import { CloudApiError, createServiceClient, PLANS, type Account, type ActionLogEntry, type OrganizationUsage, type ServiceClient, type SessionVm } from 'pane-cloud-contract';
 import { PaneError } from '../../../shared/paneError';
-import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 import type { VouchedPairing } from '../../../shared/types/relay';
-import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
 import type {
   PaneCloudAction,
   PaneCloudCreated,
@@ -30,8 +29,8 @@ export interface PaneCloudManagerOptions {
   pair(pairing: VouchedPairing): Promise<string>;
   /** The saved computer this desktop holds for a relay id, or null when it isn't paired. */
   computerFor(relayComputerId: string): string | null;
-  /** Creates the Session on the paired VM once it answers; resolves with the Session's id there. */
-  startSession(machineId: string, input: OrchestrationSessionCreateInput): Promise<string>;
+  /** Creates the Session on the paired VM once it answers, from Create Session's input; resolves with the Session's id there. */
+  startSession(machineId: string, input: JsonObject): Promise<string>;
   /** Forgets the saved computer of a deleted VM. */
   forget(machineId: string): Promise<void>;
   onChange?: (snapshot: PaneCloudSnapshot) => void;
@@ -51,6 +50,8 @@ interface StoredSession {
   token: string;
   expiresAt: string;
 }
+/** Create Session's name; the rest of its input goes to the VM, which checks it. */
+const namedSchema = boundary.object({ name: boundary.string });
 const storedSessionSchema: BoundarySchema<StoredSession> = boundary.object({ token: boundary.nonEmptyString, expiresAt: boundary.nonEmptyString });
 
 /**
@@ -117,8 +118,8 @@ export class PaneCloudManager {
    * New cloud Session: a VM in the person's organization, paired with this desktop, with the
    * Session created on it. Throws a PaneCloudError-shaped error, also left in the snapshot.
    */
-  async createSession(input: OrchestrationSessionCreateInput): Promise<PaneCloudCreated> {
-    const name = input.name.trim().slice(0, 64) || UNNAMED;
+  async createSession(input: JsonObject): Promise<PaneCloudCreated> {
+    const name = (decodeOptionalBoundary(input, namedSchema)?.name.trim().slice(0, 64) ?? '') || UNNAMED;
     let made: { client: ServiceClient; vmId: string; machineId: string | null } | null = null;
     try {
       const { client, account } = await this.readyToCreate();
@@ -402,6 +403,8 @@ function usageView(usage: OrganizationUsage, account: Account): PaneCloudUsage {
   const you = usage.members.find((member) => member.accountId === account.id);
   return {
     plan: usage.plan,
+    planAgentHours: PLANS[usage.plan].agentHoursPerMember,
+    planAwakeLimit: PLANS[usage.plan].awakeLimitPerMember,
     resetsAt: usage.resetsAt,
     agentHoursUsed: usage.agentHours.used,
     agentHoursLimit: usage.agentHours.limit,

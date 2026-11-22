@@ -6,7 +6,7 @@ import { startServiceStub, type ServiceStub } from 'pane-cloud-contract/stubs';
 import { PaneCloudManager } from './paneCloud';
 import { PaneError } from '../../../shared/paneError';
 import type { VouchedPairing } from '../../../shared/types/relay';
-import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
+import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
 
 let service: ServiceStub;
 let dir: string;
@@ -15,7 +15,7 @@ let opened: string[];
 let pairings: VouchedPairing[];
 /** Saved computers by relay id, as pairing leaves them in client.computers. */
 let computers: Map<string, string>;
-let started: Array<{ machineId: string; input: OrchestrationSessionCreateInput }>;
+let started: Array<{ machineId: string; input: JsonObject }>;
 let forgotten: string[];
 const managers: PaneCloudManager[] = [];
 
@@ -50,7 +50,7 @@ async function signIn(cloud: PaneCloudManager, email: string) {
   await vi.waitFor(() => expect(cloud.snapshot().signIn.state).toBe('signed-in'), { timeout: 5_000 });
 }
 
-const session = (name: string): OrchestrationSessionCreateInput => ({ name, agent: 'claude', goal: 'Fix the flaky test' });
+const session = (name: string): JsonObject => ({ name, agent: 'claude', goal: 'Fix the flaky test' });
 
 beforeEach(async () => {
   dir = await mkdtemp(path.join(os.tmpdir(), 'pane-cloud-'));

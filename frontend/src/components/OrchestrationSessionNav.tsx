@@ -1,6 +1,10 @@
 import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
+import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Square, Terminal } from 'lucide-react';
+import { CloudSessionRows, stopCloudSession } from './CloudSessionRows';
+import { useCloudSessionRows } from '../hooks/useCloudSessionRows';
+import { useActiveMachineStore } from '../stores/activeMachineStore';
+import { usePaneCloudStore } from '../stores/paneCloudStore';
 import { SessionApprovalsCount } from './approvals/ApprovalsCount';
 import { SessionApprovalsCountButton } from './approvals/SessionApprovals';
 import { openApprovalsFromCount } from './approvals/useSessionApprovals';
@@ -433,6 +437,9 @@ export function OrchestrationSessionNav({
     }
   }, [sessionMenu]);
 
+  const cloudRows = useCloudSessionRows();
+  const activeMachineId = useActiveMachineStore(state => state.machine?.id ?? null);
+  const cloudHere = usePaneCloudStore(state => state.snapshot.sessions.find(cloud => cloud.machineId !== null && cloud.machineId === activeMachineId));
   const sessionsVisible = availabilityIsVisible(availability);
   const hasPinnedContent = pinnedSessions.length > 0 || Boolean(pinnedPaneRows);
 
@@ -724,10 +731,11 @@ export function OrchestrationSessionNav({
             {actionError}
           </div>
         )}
-        {availability === 'ready' && activeSessions.length === 0 && (
+        {availability === 'ready' && activeSessions.length === 0 && cloudRows.length === 0 && (
           <p className="px-4 py-1 text-[11px] text-text-muted">Create a Session to keep intent and discussion together.</p>
         )}
         {activeSessions.map(session => renderSessionRow(session, 'sessions'))}
+        <CloudSessionRows rows={cloudRows} />
         </div>
       </div>}
       <SessionContextMenu
@@ -736,6 +744,7 @@ export function OrchestrationSessionNav({
         onArchive={() => void archiveSession()}
         onPin={() => void pinSession()}
         onMoveToHost={() => { setMovingSessionId(sessionMenu?.sessionId ?? null); setSessionMenu(null); }}
+        onStopCloud={cloudHere?.awake ? () => { setSessionMenu(null); void stopCloudSession(cloudHere.vmId, cloudHere.machineId); } : undefined}
       />
       {moveDialogElement}
       <CreateOrchestrationSessionDialog isOpen={showCreate} onClose={() => setShowCreate(false)} onCreate={createSession} />
@@ -754,9 +763,11 @@ interface SessionContextMenuProps {
   onArchive: () => void;
   onPin: () => void;
   onMoveToHost: () => void;
+  /** Stops the cloud Session the window is on; absent on any other machine. */
+  onStopCloud?: () => void;
 }
 
-function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: SessionContextMenuProps) {
+function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost, onStopCloud }: SessionContextMenuProps) {
   const moveBlockedReason = useMoveToHostBlockedReason();
   const [renaming, setRenaming] = useState<SessionContextMenuState | null>(null);
   const [name, setName] = useState('');
@@ -843,6 +854,11 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
         >
           <span className="flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" />Move to machine…</span>
         </PopoverButton>
+        {onStopCloud && (
+          <PopoverButton role="menuitem" onClick={onStopCloud}>
+            <span className="flex items-center gap-2"><Square className="h-4 w-4" />Stop</span>
+          </PopoverButton>
+        )}
         <PopoverButton role="menuitem" variant="danger" onClick={onArchive}>
           <span className="flex items-center gap-2">
             <Archive className="h-4 w-4" />

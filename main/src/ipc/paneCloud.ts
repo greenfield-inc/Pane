@@ -9,7 +9,6 @@ import { PaneError } from '../../../shared/paneError';
 import { computerRelayId } from '../../../shared/types/remoteComputers';
 import { normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { RELAY_DEVICE_COMMANDS } from '../../../shared/types/relay';
-import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
 import type { PaneCloudSnapshot } from '../../../shared/types/paneCloud';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
@@ -41,11 +40,14 @@ export function registerPaneCloudHandlers(ipcMain: IpcMain, deps: {
     serviceUrl: process.env.PANE_CLOUD_URL || DEFAULT_PANE_CLOUD_URL,
     tokenFile: path.join(getAppDirectory(), 'pane-cloud', 'session.json'),
     openExternal: (url) => shell.openExternal(url),
-    pair: async (pairing) => decodeBoundary(await commands.invoke('relay:redeem-vouched', [pairing as unknown as PaneCommandValue]), pairedSchema).computerId,
+    pair: async ({ link, relay }) => {
+      const request = { link, relay: { computerId: relay.computerId, fingerprint: relay.fingerprint, domain: relay.domain } };
+      return decodeBoundary(await commands.invoke('relay:redeem-vouched', [request]), pairedSchema).computerId;
+    },
     computerFor: (relayId) => normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon).client.computers.find((computer) => computerRelayId(computer) === relayId)?.id ?? null,
     startSession: async (machineId, input) => {
       await waitUntilOnline(machines, machineId);
-      const { data } = await machines.run(machineId, { type: 'create-session', input: input as unknown as PaneCommandValue });
+      const { data } = await machines.run(machineId, { type: 'create-session', input });
       const reply = decodeBoundary(data, createdSchema);
       if (!reply.success || !reply.data) {
         throw new PaneError('ERR_CLOUD_SESSION_NOT_CREATED', `The cloud machine did not create the Session: ${reply.error ?? 'it gave no reason'}.`, 'Try New cloud Session again.');
@@ -67,7 +69,7 @@ export function registerPaneCloudHandlers(ipcMain: IpcMain, deps: {
   ipcMain.handle('pane-cloud:update-pane', async (_event, id: PaneCommandValue) => ({ success: true, data: await cloud.updatePane(vmId(id)) }));
   ipcMain.handle('pane-cloud:actions', async (_event, id: PaneCommandValue) => answer(() => cloud.actions(vmId(id))));
   ipcMain.handle('pane-cloud:create', async (_event, input: PaneCommandValue) =>
-    answer(() => cloud.createSession(decodeBoundary(input, boundary.jsonObject) as unknown as OrchestrationSessionCreateInput)));
+    answer(() => cloud.createSession(decodeBoundary(input, boundary.jsonObject))));
 }
 
 /** A call's IPC answer: its data, or what failed and the next step. */
