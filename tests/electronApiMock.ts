@@ -205,6 +205,8 @@ export type ElectronApiMockOptions = {
   paneSecrets?: Partial<PaneSecretsOverview>;
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
+  /** The window's connection at start: a saved machine it shows instead of this computer. Absent: local. */
+  remoteConnection?: Partial<RemotePaneConnectionState>;
   /** machines:latency answers by machine, in ms, over the route its machine state names; `pending` never answers. Absent: null (no answer). */
   machineLatency?: Record<string, number | null | 'pending'>;
   /** machines:run answers by machine, then command type. Absent: `{ success: true }`. */
@@ -341,6 +343,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       activeBaseUrl: null,
       lastError: null,
       lastSeenAt: null,
+      ...mockOptions.remoteConnection,
     };
     const remoteHostState = {
       enabled: false,
@@ -1397,6 +1400,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       creating: null,
       busy: [],
       error: null,
+      sendsSecrets: false,
     };
     const paneCloudCreates: OrchestrationSessionCreateInput[] = [];
     const paneCloudAnswer = () => Promise.resolve({ success: true, data: clone(paneCloudSnapshot) });

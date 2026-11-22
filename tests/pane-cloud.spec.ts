@@ -4,17 +4,23 @@ import { dismissStartupDialogs, installSessionsFixture, sessionFixture } from '.
 import type { MachineConnectionsEvent } from '../shared/types/machineConnections';
 import type { OrchestrationSessionCreateInput } from '../shared/types/orchestrationSession';
 import type { PaneCloudSnapshot } from '../shared/types/paneCloud';
+import { notifyFixture } from './fixtures/notifySnapshot';
 
 type MockWindow = typeof window & {
   __paneTestElectronMock: {
     setPaneCloud(parts: Partial<PaneCloudSnapshot>): void;
     getPaneCloudCreates(): OrchestrationSessionCreateInput[];
     getPaneCloudCalls(): Array<{ action: string; vmId: string }>;
+    getMachineRuns(): Array<{ machineId: string; command: { type: string } }>;
     emitMachineEvent(event: MachineConnectionsEvent): void;
   };
 };
 
-const INSPECTION = 'During the beta, automated checks can inspect cloud machines to stop abuse. Staff look only at flagged accounts, and every look is logged.';
+// L1's machine-inspection disclosure, which replaces the frame's shorter sentence.
+const INSPECTION = "During the beta, your cloud Sessions are not private from Greenfield. Automated checks look at the programs running, the files on disk and where network traffic goes, to stop abuse such as crypto mining. A Greenfield staff member opens a Session's files only when its account has been flagged or the law requires it, through a read-only view, and each look is logged on your usage page unless the law forbids telling you. Do not put health records or anything else you cannot share on these terms into a cloud Session.";
+const SECRETS = /Your secrets come along/;
+/** Design screenshots are written only when asked for, so a test run leaves nothing behind. */
+const screenshotPath = (name: string) => (process.env.PANE_CLOUD_SCREENSHOTS ? `${process.env.PANE_CLOUD_SCREENSHOTS}/${name}` : undefined);
 
 async function openCreateSession(page: Page, cloud: Partial<PaneCloudSnapshot> = {}) {
   await installSessionsFixture(page, [], [], { initialConfig: { appearanceMode: 'fixed', theme: 'dark' } });
@@ -47,9 +53,11 @@ test('creates a Session on Pane Cloud from Where it runs', async ({ page }) => {
   await dialog.getByTestId('where-it-runs-cloud').click();
   await expect(dialog.getByRole('radio', { name: 'Pane Cloud', exact: true })).toBeChecked();
   await expect(dialog.getByText(INSPECTION, { exact: true })).toBeVisible();
+  // Secrets sync (K1) isn't here yet, so the card makes no claim about secrets.
+  await expect(dialog.getByText(SECRETS)).toHaveCount(0);
   const submit = dialog.getByRole('button', { name: 'Create on Pane Cloud', exact: true });
   await expect(submit).toBeEnabled();
-  await dialog.screenshot({ path: `${process.env.PANE_SCRATCH_DIR ?? 'tmp'}/screens/frame-B-built.png` });
+  await dialog.screenshot({ path: screenshotPath('frame-B-built.png') });
 
   await submit.click();
   await expect.poll(() => page.evaluate(() => (
@@ -111,7 +119,7 @@ test('cloud Sessions sit in the Sessions list like any other, with Stop and Star
   await expect(working).toContainText('2 working');
   const stopped = list.getByRole('button', { name: 'Open Session Pricing page copy', exact: true });
   await expect(stopped).toBeVisible();
-  await page.getByTestId('sidebar').first().screenshot({ path: `${process.env.PANE_SCRATCH_DIR ?? 'tmp'}/screens/frame-C-built.png` });
+  await page.getByTestId('sidebar').first().screenshot({ path: screenshotPath('frame-C-built.png') });
 
   // The VM's own Onboarding Session is not one the person made, so it gets no row.
   await expect(list.getByRole('button', { name: 'Open Session Onboarding', exact: true })).toHaveCount(0);
@@ -150,5 +158,91 @@ test('Usage & Limits shows Pane Cloud hours as a plain number of the plan, with 
   await expect(cloud.getByText('1 of 5', { exact: true })).toBeVisible();
   await expect(cloud.getByText('An hour in a Session running at 16 GB counts as 2 hours.', { exact: true })).toBeVisible();
   await expect(cloud.getByRole('button', { name: /upgrade/i })).toHaveCount(0);
-  await cloud.screenshot({ path: `${process.env.PANE_SCRATCH_DIR ?? 'tmp'}/screens/frame-P-built.png` });
+  await cloud.screenshot({ path: screenshotPath('frame-P-built.png') });
+});
+
+test('the Pane Cloud card says secrets come along once secrets sync is there', async ({ page }) => {
+  const dialog = await openCreateSession(page, { sendsSecrets: true });
+  await dialog.getByTestId('where-it-runs-cloud').click();
+  await expect(dialog.getByText(SECRETS)).toBeVisible();
+});
+
+test('a cloud row shows its approvals count, as any Session row does', async ({ page }) => {
+  const now = Date.now();
+  await installSessionsFixture(page, [], [], {
+    initialConfig: { appearanceMode: 'fixed', theme: 'dark' },
+    notifySnapshot: {
+      ...notifyFixture(now),
+      items: [{ id: 'q-1', ui: 'approve', title: 'Push the docs branch?', machineId: 'cloud-1', source: { name: 'docs', agent: 'Claude', session: { id: 'c-1', name: 'Docs site migration' } }, state: 'waiting', createdAt: now - 60_000 }],
+      queue: ['q-1'],
+      strip: null,
+    },
+    machineConnections: {
+      machines: [
+        { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+        { id: 'cloud-1', label: 'Docs site migration', kind: 'remote', status: 'online', offlineSince: null },
+      ],
+      reads: { 'cloud-1': { 'orchestration-sessions:list': { success: true, data: { sessions: [{ id: 'c-1', name: 'Docs site migration', archived: false }] } } } },
+    },
+  });
+  await page.addInitScript((parts) => {
+    // SAFETY: installElectronApiMock's init script, registered first, defines this test-only API.
+    (window as MockWindow).__paneTestElectronMock.setPaneCloud(parts);
+  }, CLOUD_SESSIONS);
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+
+  const row = page.locator('#orchestration-sessions-list').getByRole('button', { name: 'Open Session Docs site migration', exact: true });
+  await expect(row.getByTestId('session-approvals-count')).toHaveText('1');
+});
+
+test('on a cloud Session, this computer\'s Sessions keep their menu, and its Pane Chat stays its own', async ({ page }) => {
+  const remoteDaemon = {
+    host: { config: { enabled: false, listenHost: '127.0.0.1', listenPort: 42137, pairingRequired: true, allowInsecureHttpOnLoopback: true }, clients: [] },
+    client: {
+      mode: 'remote', activeProfileId: 'cloud-1',
+      profiles: [{ id: 'cloud-1', label: 'Docs site migration', baseUrl: 'https://cloud-1.example:8443', token: 'paired', transport: 'http+sse' }],
+      computers: [{ id: 'cloud-1', label: 'Docs site migration', routes: [{ id: 'public:https://cloud-1.example:8443', kind: 'public', source: 'manual', baseUrl: 'https://cloud-1.example:8443', token: 'paired' }] }],
+    },
+  };
+  await installSessionsFixture(page, [sessionFixture('legacy-pane-chat', 'Onboarding', 'The cloud machine\'s own Pane Chat', '', '2026-11-20T09:00:00.000Z'), sessionFixture('c-1', 'Docs site migration', 'Move the docs', '', '2026-11-20T10:00:00.000Z')], [], {
+    initialConfig: { appearanceMode: 'fixed', theme: 'dark', remoteDaemon },
+    remoteConnection: { mode: 'remote', status: 'connected', activeProfileId: 'cloud-1', activeProfileLabel: 'Docs site migration', activeBaseUrl: 'https://cloud-1.example:8443' },
+    machineConnections: {
+      machines: [
+        { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+        { id: 'cloud-1', label: 'Docs site migration', kind: 'remote', status: 'online', offlineSince: null },
+      ],
+      reads: {
+        local: {
+          'orchestration-sessions:list': { success: true, data: { sessions: [
+            { id: 'legacy-pane-chat', name: 'Pane Chat', archived: false },
+            { id: 'checkout', name: 'Checkout redesign', archived: false },
+            { id: 'todo-7', name: 'T-7 Fix the footer', archived: false, todoNumber: 7 },
+          ] } },
+        },
+      },
+    },
+  });
+  await page.addInitScript((parts) => {
+    // SAFETY: installElectronApiMock's init script, registered first, defines this test-only API.
+    (window as MockWindow).__paneTestElectronMock.setPaneCloud(parts);
+  }, CLOUD_SESSIONS);
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+
+  const list = page.locator('#orchestration-sessions-list');
+  const local = list.getByRole('button', { name: 'Open Session Checkout redesign', exact: true });
+  await expect(local).toBeVisible();
+  await expect(list.getByRole('button', { name: 'Open Session T-7 Fix the footer', exact: true })).toHaveCount(0);
+  await expect(list.getByText('Onboarding', { exact: true })).toHaveCount(0);
+  await expect(list.getByRole('button', { name: 'Open Session Pane Chat', exact: true })).toBeVisible();
+
+  await local.click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Rename…', exact: true })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (
+    // SAFETY: installElectronApiMock defines this test-only API before navigation.
+    window as MockWindow
+  ).__paneTestElectronMock.getMachineRuns())).toContainEqual({ machineId: 'local', command: { type: 'archive', target: { kind: 'session', id: 'checkout' } } });
 });
