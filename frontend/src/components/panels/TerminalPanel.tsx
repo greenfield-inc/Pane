@@ -2000,6 +2000,14 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     let delayedRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     let hideOverlayTimer: ReturnType<typeof setTimeout> | null = null;
 
+    const focusAfterActivation = () => {
+      if (!autoFocus || findBarHasFocus(panel.id)) return;
+      // The sidebar cursor is DOM focus. A replay may finish after the user has
+      // moved that cursor, and focusing xterm would send their next key there.
+      if (document.activeElement?.matches('[data-sidebar-item]:focus-visible')) return;
+      xtermRef.current?.focus();
+    };
+
     const fitAndRefresh = () => {
       if (cancelled || !fitAddonRef.current || !xtermRef.current || !terminalRef.current) return;
 
@@ -2017,7 +2025,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       if (containerWidth < MIN_VIABLE_RECT_PX) {
         forwardToMainLog('warn', `[TerminalPanel] Activation refresh bailed for panel ${panel.id}: container ${containerWidth}px`);
         releaseMask();
-        if (autoFocus && fullRefresh && !findBarHasFocus(panel.id)) xtermRef.current?.focus();
+        if (fullRefresh) focusAfterActivation();
         return;
       }
 
@@ -2043,10 +2051,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         // Masked activations report from the overlay linger timer when the mask lifts.
         if (!masked) markPaneTerminalShown(panel.sessionId);
 
-        // Cmd+F pressed while the terminal was restoring: keep focus in the find bar.
-        if (autoFocus && (fullRefresh || hotActivation) && !findBarHasFocus(panel.id)) {
-          xtermRef.current?.focus();
-        }
+        if (fullRefresh || hotActivation) focusAfterActivation();
 
         delayedRefreshTimer = setTimeout(() => {
           void (async () => {
