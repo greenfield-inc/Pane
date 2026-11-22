@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { usePaneCloudStore } from '../stores/paneCloudStore';
+import { sessionWaitingCount, useNotifyStore } from '../stores/notifyStore';
+import { visibleOrchestrationSessions } from '../components/orchestrationSessionVisibility';
+import type { PaneCloudSnapshot } from '../../../shared/types/paneCloud';
 import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { LOCAL_MACHINE_ID, type MachineConnectionsEvent } from '../../../shared/types/machineConnections';
 import { LEGACY_ORCHESTRATION_SESSION_ID, type OrchestrationSessionRecord, type SessionActivity } from '../../../shared/types/orchestrationSession';
@@ -23,9 +26,10 @@ export interface CloudSessionRow {
   underReview: boolean;
   /** A stop, start or delete is in flight. */
   busy: boolean;
+  isPinned: boolean;
 }
 
-interface MachineLists {
+export interface MachineLists {
   sessions: OrchestrationSessionRecord[];
   activity: SessionActivity[];
 }
@@ -86,48 +90,73 @@ export function useCloudSessionRows(): CloudSessionRow[] {
     };
   }, [readKey]);
 
-  return useMemo(() => {
-    const rows: CloudSessionRow[] = [];
-    const fromLists = (machineId: string, vmId: string | null, extra: Pick<CloudSessionRow, 'underReview' | 'busy' | 'cloudName'>): CloudSessionRow[] | null => {
-      const read = lists[machineId];
-      if (!read) return null;
-      // Every Pane starts with its own Pane Chat (Onboarding) Session; another machine's is not a Session the person made.
-      return read.sessions.filter((session) => !session.archived && session.id !== LEGACY_ORCHESTRATION_SESSION_ID).map((session) => {
-        const activity = read.activity.find((entry) => entry.sessionId === session.id);
-        return {
-          key: `${machineId}:${session.id}`,
-          machineId,
-          vmId,
-          sessionId: session.id,
-          name: session.name || 'Session',
-          activity: activity?.state ?? 'idle',
-          workingPanes: activity?.workingPanes ?? 0,
-          stopped: false,
-          ...extra,
-        };
-      });
-    };
-    if (onCloud) rows.push(...(fromLists(LOCAL_MACHINE_ID, null, { underReview: false, busy: false, cloudName: null }) ?? []));
-    for (const session of cloud.sessions) {
-      if (session.machineId !== null && session.machineId === activeId) continue;
-      const extra = { underReview: session.underReview, busy: cloud.busy.includes(session.vmId), cloudName: session.name };
-      const read = session.awake && session.machineId ? fromLists(session.machineId, session.vmId, extra) : null;
-      if (read && read.length > 0) {
-        rows.push(...read);
-        continue;
-      }
-      rows.push({
-        key: `vm:${session.vmId}`,
-        machineId: session.machineId,
-        vmId: session.vmId,
-        sessionId: null,
-        name: session.name,
-        activity: 'idle',
-        workingPanes: 0,
-        stopped: !session.awake,
+  const waiting = useNotifyStore((state) => state.snapshot);
+  return useMemo(() => cloudSessionRows({
+    cloud,
+    activeId,
+    lists,
+    waitingCount: (machineId, sessionId) => sessionWaitingCount(waiting, sessionId, machineId),
+  }), [activeId, cloud, lists, waiting]);
+}
+
+const NO_IDS: ReadonlySet<string> = new Set();
+
+/**
+ * The rows for Sessions on other machines, filtered as the Sessions list filters its own: a to-do's
+ * Session never shows (its record carries the to-do's number), a loop's only while a card waits.
+ * This computer keeps its own Pane Chat row; a cloud machine's own Pane Chat (Onboarding) Session is
+ * not one the person made, so it gets none. A cloud Session not read yet is one row named for it.
+ */
+export function cloudSessionRows({ cloud, activeId, lists, waitingCount }: {
+  cloud: Pick<PaneCloudSnapshot, 'sessions' | 'busy'>;
+  activeId: string;
+  lists: Readonly<Record<string, MachineLists>>;
+  waitingCount: (machineId: string, sessionId: string) => number;
+}): CloudSessionRow[] {
+  const rows: CloudSessionRow[] = [];
+  const fromLists = (machineId: string, vmId: string | null, extra: Pick<CloudSessionRow, 'underReview' | 'busy' | 'cloudName'>): CloudSessionRow[] | null => {
+    const read = lists[machineId];
+    if (!read) return null;
+    const visible = visibleOrchestrationSessions(read.sessions, { todoSessionIds: NO_IDS, waitingCount: (sessionId) => waitingCount(machineId, sessionId) })
+      .filter((session) => vmId === null || session.id !== LEGACY_ORCHESTRATION_SESSION_ID);
+    return visible.map((session) => {
+      const activity = read.activity.find((entry) => entry.sessionId === session.id);
+      return {
+        key: `${machineId}:${session.id}`,
+        machineId,
+        vmId,
+        sessionId: session.id,
+        name: session.name || 'Pane Chat',
+        activity: activity?.state ?? 'idle',
+        workingPanes: activity?.workingPanes ?? 0,
+        stopped: false,
+        isPinned: session.isPinned === true,
         ...extra,
-      });
+      };
+    });
+  };
+  const onCloud = cloud.sessions.some((session) => session.machineId !== null && session.machineId === activeId);
+  if (onCloud) rows.push(...(fromLists(LOCAL_MACHINE_ID, null, { underReview: false, busy: false, cloudName: null }) ?? []));
+  for (const session of cloud.sessions) {
+    if (session.machineId !== null && session.machineId === activeId) continue;
+    const extra = { underReview: session.underReview, busy: cloud.busy.includes(session.vmId), cloudName: session.name };
+    const read = session.awake && session.machineId ? fromLists(session.machineId, session.vmId, extra) : null;
+    if (read && read.length > 0) {
+      rows.push(...read);
+      continue;
     }
-    return rows;
-  }, [activeId, cloud.busy, cloud.sessions, lists, onCloud]);
+    rows.push({
+      key: `vm:${session.vmId}`,
+      machineId: session.machineId,
+      vmId: session.vmId,
+      sessionId: null,
+      name: session.name,
+      activity: 'idle',
+      workingPanes: 0,
+      stopped: !session.awake,
+      isPinned: false,
+      ...extra,
+    });
+  }
+  return rows;
 }

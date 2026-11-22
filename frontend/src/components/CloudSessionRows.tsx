@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { AlertTriangle, MoreHorizontal, Play, Square, Trash2 } from 'lucide-react';
+import { AlertTriangle, Archive, MoreHorizontal, Pencil, Pin, PinOff, Play, Square, Trash2 } from 'lucide-react';
 import { PausedGlyph } from './ui/AgentStatusDot';
 import { SessionActivityCount, SessionActivityIcon } from './SessionActivity';
 import { ConfirmDialog } from './ConfirmDialog';
+import { RenameDialog } from './CompactSessionMenu';
+import { SessionApprovalsCount } from './approvals/ApprovalsCount';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 import { cn } from '../utils/cn';
-import { openOnMachine } from '../utils/machineRowActions';
+import { commandOnMachine, openOnMachine, runOnMachine } from '../utils/machineRowActions';
 import { showActionError } from '../stores/errorStore';
 import { useAllMachinesStore } from '../stores/allMachinesStore';
 import { useActiveMachineStore } from '../stores/activeMachineStore';
@@ -21,7 +23,8 @@ import type { CloudSessionRow } from '../hooks/useCloudSessionRows';
 export function CloudSessionRows({ rows }: { rows: CloudSessionRow[] }) {
   const [menu, setMenu] = useState<{ row: CloudSessionRow; x: number; y: number } | null>(null);
   const [deleting, setDeleting] = useState<CloudSessionRow | null>(null);
-  if (rows.length === 0 && !deleting) return null;
+  const [renaming, setRenaming] = useState<CloudSessionRow | null>(null);
+  if (rows.length === 0 && !deleting && !renaming) return null;
   return (
     <>
       {rows.map((row) => (
@@ -32,6 +35,15 @@ export function CloudSessionRows({ rows }: { rows: CloudSessionRow[] }) {
           {...menu}
           onClose={() => setMenu(null)}
           onDelete={() => { setDeleting(menu.row); setMenu(null); }}
+          onRename={() => { setRenaming(menu.row); setMenu(null); }}
+        />
+      )}
+      {renaming?.machineId && renaming.sessionId && (
+        <RenameDialog
+          noun="Session"
+          initialName={renaming.name}
+          onClose={() => setRenaming(null)}
+          save={(name) => commandOnMachine(renaming.machineId ?? LOCAL_MACHINE_ID, { type: 'rename', target: { kind: 'session', id: renaming.sessionId ?? '' }, name })}
         />
       )}
       <ConfirmDialog
@@ -57,7 +69,7 @@ function CloudRow({ row, onMenu }: { row: CloudSessionRow; onMenu: (x: number, y
           data-sidebar-item
           aria-label={`Open Session ${row.name}`}
           onClick={() => void openCloudRow(row)}
-          onContextMenu={(event) => { event.preventDefault(); if (row.vmId) onMenu(event.clientX, event.clientY); }}
+          onContextMenu={(event) => { event.preventDefault(); if (hasMenu(row)) onMenu(event.clientX, event.clientY); }}
           className="flex min-w-0 flex-1 items-center gap-2 rounded py-1 pl-2 pr-2 text-left focus:outline-none"
         >
           {row.underReview ? (
@@ -70,9 +82,11 @@ function CloudRow({ row, onMenu }: { row: CloudSessionRow; onMenu: (x: number, y
             <SessionActivityIcon state={row.busy ? 'working' : row.activity} />
           )}
           <span className={cn('min-w-0 flex-1 truncate text-[13px]', dimmed ? 'text-text-muted' : 'font-medium text-text-primary')}>{row.name}</span>
-          {!dimmed && <SessionActivityCount blocked={0} working={row.workingPanes} panes={0} />}
+          {!dimmed && (row.sessionId && row.machineId
+            ? <SessionApprovalsCount sessionId={row.sessionId} machineId={row.machineId} otherwise={<SessionActivityCount blocked={0} working={row.workingPanes} panes={0} />} />
+            : <SessionActivityCount blocked={0} working={row.workingPanes} panes={0} />)}
         </button>
-        {row.vmId && (
+        {hasMenu(row) && (
           <div className="absolute inset-y-0.5 right-2 z-10 flex items-center bg-surface-secondary pr-0.5 opacity-0 transition-opacity group-hover/orchestration-row:bg-[linear-gradient(var(--color-surface-hover),var(--color-surface-hover))] group-hover/orchestration-row:opacity-100 group-focus-within/orchestration-row:opacity-100">
             <button
               type="button"
@@ -95,10 +109,37 @@ function CloudRow({ row, onMenu }: { row: CloudSessionRow; onMenu: (x: number, y
   );
 }
 
+/** A cloud Session's row has Stop, Start and Delete; this computer's rows, shown while on a cloud Session, keep their own menu. */
+function hasMenu(row: CloudSessionRow): boolean {
+  return row.vmId !== null || (row.machineId === LOCAL_MACHINE_ID && row.sessionId !== null);
+}
+
+/** This computer's Session, acted on through its machine connection while the window is on a cloud Session. */
+function LocalSessionMenu({ row, x, y, onClose, onRename }: { row: CloudSessionRow; x: number; y: number; onClose: () => void; onRename: () => void }) {
+  const sessionId = row.sessionId;
+  if (!sessionId) return null;
+  const target = { kind: 'session' as const, id: sessionId };
+  return (
+    <TerminalPopover visible x={x} y={y} onClose={onClose} className="w-48">
+      <div role="menu" aria-label={`${row.name} actions`} className="py-1">
+        <PopoverButton role="menuitem" onClick={() => { onClose(); void runOnMachine(LOCAL_MACHINE_ID, { type: 'pin', target, pinned: !row.isPinned }, 'Could not pin or unpin the Session'); }}>
+          <span className="flex items-center gap-2">{row.isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}{row.isPinned ? 'Unpin' : 'Pin'}</span>
+        </PopoverButton>
+        <PopoverButton role="menuitem" onClick={onRename}>
+          <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename…</span>
+        </PopoverButton>
+        <PopoverButton role="menuitem" variant="danger" onClick={() => { onClose(); void runOnMachine(LOCAL_MACHINE_ID, { type: 'archive', target }, 'Could not archive the Session'); }}>
+          <span className="flex items-center gap-2"><Archive className="h-4 w-4" />Archive Session</span>
+        </PopoverButton>
+      </div>
+    </TerminalPopover>
+  );
+}
+
 /** Stop, Start and Delete for a cloud Session in the list. */
-function CloudSessionMenu({ row, x, y, onClose, onDelete }: { row: CloudSessionRow; x: number; y: number; onClose: () => void; onDelete: () => void }) {
+function CloudSessionMenu({ row, x, y, onClose, onDelete, onRename }: { row: CloudSessionRow; x: number; y: number; onClose: () => void; onDelete: () => void; onRename: () => void }) {
   const vmId = row.vmId;
-  if (!vmId) return null;
+  if (!vmId) return <LocalSessionMenu row={row} x={x} y={y} onClose={onClose} onRename={onRename} />;
   return (
     <TerminalPopover visible x={x} y={y} onClose={onClose} className="w-48">
       <div role="menu" aria-label={`${row.name} actions`} className="py-1">
@@ -126,13 +167,21 @@ async function leaveIfOn(machineId: string | null): Promise<void> {
 }
 
 export async function stopCloudSession(vmId: string, machineId: string | null): Promise<void> {
-  await leaveIfOn(machineId);
-  await usePaneCloudStore.getState().stop(vmId);
+  try {
+    await leaveIfOn(machineId);
+    await usePaneCloudStore.getState().stop(vmId);
+  } catch (error) {
+    showActionError('Could not stop the cloud Session', error);
+  }
 }
 
 async function deleteCloudSession(vmId: string, machineId: string | null): Promise<void> {
-  await leaveIfOn(machineId);
-  await usePaneCloudStore.getState().remove(vmId);
+  try {
+    await leaveIfOn(machineId);
+    await usePaneCloudStore.getState().remove(vmId);
+  } catch (error) {
+    showActionError('Could not delete the cloud Session', error);
+  }
 }
 
 /** Opens the row's Session on its machine; a stopped cloud Session starts first. */

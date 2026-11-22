@@ -130,14 +130,18 @@ export function OrchestrationSessionNav({
   const notifySnapshot = useNotifyStore(state => state.snapshot);
   const openSessionId = useNavigationStore(state => state.activeView === 'pane-chat') ? selectedSessionIdForList : undefined;
   const todoSessionIds = useTodoSessionIds();
+  const activeMachineId = useActiveMachineStore(state => state.machine?.id ?? null);
+  const cloudHere = usePaneCloudStore(state => state.snapshot.sessions.find(cloud => cloud.machineId !== null && cloud.machineId === activeMachineId));
   // A loop's Session lives under Loops and joins the list only while a card from it waits on you, or while
   // it is open. A to-do's own Session lives under To-dos (D-409) and never joins it (T-7).
+  // On a cloud Session, its machine's own Pane Chat is not the person's: this computer's shows below instead.
+  const onCloud = cloudHere !== undefined;
   const activeSessions = useMemo(
     () => visibleOrchestrationSessions(sessions, {
       todoSessionIds, openSessionId, loopSessionIds: loopsBySessionTarget,
       waitingCount: sessionId => sessionWaitingCount(notifySnapshot, sessionId),
-    }),
-    [sessions, loopsBySessionTarget, todoSessionIds, notifySnapshot, openSessionId],
+    }).filter(session => !onCloud || session.id !== LEGACY_ORCHESTRATION_SESSION_ID),
+    [sessions, loopsBySessionTarget, todoSessionIds, notifySnapshot, openSessionId, onCloud],
   );
   const pinnedSessions = useMemo(
     () => activeSessions.filter(session => session.isPinned === true && !loopsBySessionTarget.has(session.id)),
@@ -438,8 +442,6 @@ export function OrchestrationSessionNav({
   }, [sessionMenu]);
 
   const cloudRows = useCloudSessionRows();
-  const activeMachineId = useActiveMachineStore(state => state.machine?.id ?? null);
-  const cloudHere = usePaneCloudStore(state => state.snapshot.sessions.find(cloud => cloud.machineId !== null && cloud.machineId === activeMachineId));
   const sessionsVisible = availabilityIsVisible(availability);
   const hasPinnedContent = pinnedSessions.length > 0 || Boolean(pinnedPaneRows);
 
