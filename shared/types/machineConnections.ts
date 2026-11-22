@@ -52,6 +52,8 @@ export const MACHINE_READ_CHANNELS = [
   'notify:summary-page',
   'panels:agent-statuses',
   'orchestration-sessions:activity-list',
+  // A machine's loops, so the Sessions list can leave its loop Sessions out as that machine's own list does.
+  'loops:list',
   'projects:get-all',
   'projects:list-branches',
   'projects:detect-branch',

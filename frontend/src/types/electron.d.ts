@@ -113,6 +113,7 @@ interface MachineReadAnswers {
   'orchestration-sessions:list': IPCResponse<OrchestrationSessionListResult>;
   'panels:agent-statuses': IPCResponse<PanelAgentStatusEvent[]>;
   'orchestration-sessions:activity-list': IPCResponse<SessionActivity[]>;
+  'loops:list': IPCResponse<Loop[]>;
   'permission:getPending': IPCResponse<PanePermissionRequest[]>;
   'notify:remote-snapshot': NotifySharedState | null;
   'todos:snapshot': IPCResponse<TodosSnapshot>;

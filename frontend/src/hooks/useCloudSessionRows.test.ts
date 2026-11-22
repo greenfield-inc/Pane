@@ -17,8 +17,10 @@ const lists = {
       record({ id: 'checkout', name: 'Checkout redesign', isPinned: true }),
       record({ id: 'todo-7', name: 'T-7 Fix the footer', todoNumber: 7 }),
       record({ id: 'old', name: 'Old work', archived: true }),
+      record({ id: 'hourly', name: 'Hourly triage' }),
     ],
     activity: [{ sessionId: 'checkout', state: 'working', workingPanes: 2 }],
+    loopSessionIds: ['hourly'],
   },
   'cloud-1': {
     sessions: [
@@ -27,6 +29,7 @@ const lists = {
       record({ id: 'todo-9', name: 'T-9 Update the README', todoNumber: 9 }),
     ],
     activity: [],
+    loopSessionIds: [],
   },
 } satisfies Record<string, MachineLists>;
 
@@ -43,6 +46,13 @@ describe('the Sessions list rows for other machines', () => {
     const rows = cloudSessionRows({ cloud: { sessions: [vm({ vmId: 'vm-1', name: 'Docs site migration', machineId: 'cloud-1' })], busy: [] }, activeId: 'cloud-1', lists, waitingCount: () => 0 });
     expect(names(rows)).toEqual(['Pane Chat', 'Checkout redesign']);
     expect(rows[1]).toMatchObject({ machineId: 'local', vmId: null, isPinned: true, activity: 'working', workingPanes: 2 });
+  });
+
+  it('on a cloud Session: lists this computer\'s loop Session only while a card from it waits', () => {
+    const cloud = { sessions: [vm({ vmId: 'vm-1', name: 'Docs site migration', machineId: 'cloud-1' })], busy: [] };
+    expect(names(cloudSessionRows({ cloud, activeId: 'cloud-1', lists, waitingCount: () => 0 }))).not.toContain('Hourly triage');
+    const waiting = (machineId: string, sessionId: string) => (machineId === 'local' && sessionId === 'hourly' ? 1 : 0);
+    expect(names(cloudSessionRows({ cloud, activeId: 'cloud-1', lists, waitingCount: waiting }))).toContain('Hourly triage');
   });
 
   it('shows a cloud Session not read yet as one row, stopped when its machine is', () => {

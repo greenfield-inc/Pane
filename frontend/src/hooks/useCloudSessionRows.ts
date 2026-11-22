@@ -32,6 +32,8 @@ export interface CloudSessionRow {
 export interface MachineLists {
   sessions: OrchestrationSessionRecord[];
   activity: SessionActivity[];
+  /** Sessions that belong to that machine's loops. */
+  loopSessionIds: string[];
 }
 
 const REREAD_MS = 300;
@@ -39,11 +41,17 @@ const LIST_EVENTS = new Set(['orchestration-sessions:changed', 'orchestration-se
 
 async function readLists(machineId: string): Promise<MachineLists> {
   const machines = window.electronAPI.machines;
-  const [list, activity] = await Promise.all([
+  const [list, activity, loops] = await Promise.all([
     machines.read(machineId, 'orchestration-sessions:list'),
     machines.read(machineId, 'orchestration-sessions:activity-list').catch(() => null),
+    // An older Pane can't serve its loops: its loop Sessions then list as plain rows.
+    machines.read(machineId, 'loops:list').catch(() => null),
   ]);
-  return { sessions: list.data?.data?.sessions ?? [], activity: activity?.data?.data ?? [] };
+  return {
+    sessions: list.data?.data?.sessions ?? [],
+    activity: activity?.data?.data ?? [],
+    loopSessionIds: (loops?.data?.data ?? []).flatMap((loop) => loop.orchestrationSessionId ? [loop.orchestrationSessionId] : []),
+  };
 }
 
 /**
@@ -117,7 +125,7 @@ export function cloudSessionRows({ cloud, activeId, lists, waitingCount }: {
   const fromLists = (machineId: string, vmId: string | null, extra: Pick<CloudSessionRow, 'underReview' | 'busy' | 'cloudName'>): CloudSessionRow[] | null => {
     const read = lists[machineId];
     if (!read) return null;
-    const visible = visibleOrchestrationSessions(read.sessions, { todoSessionIds: NO_IDS, waitingCount: (sessionId) => waitingCount(machineId, sessionId) })
+    const visible = visibleOrchestrationSessions(read.sessions, { todoSessionIds: NO_IDS, loopSessionIds: new Set(read.loopSessionIds), waitingCount: (sessionId) => waitingCount(machineId, sessionId) })
       .filter((session) => vmId === null || session.id !== LEGACY_ORCHESTRATION_SESSION_ID);
     return visible.map((session) => {
       const activity = read.activity.find((entry) => entry.sessionId === session.id);
