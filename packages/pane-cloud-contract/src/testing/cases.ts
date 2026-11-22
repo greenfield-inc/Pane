@@ -7,6 +7,14 @@ export interface ContractCase {
   run(): Promise<void>;
 }
 
+/** Thrown by a case that needs a test control the server doesn't offer; report it as skipped. */
+export class SkipCase extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'SkipCase';
+  }
+}
+
 export async function expectError(code: CloudErrorCode, call: () => Promise<object>): Promise<void> {
   try {
     await call();

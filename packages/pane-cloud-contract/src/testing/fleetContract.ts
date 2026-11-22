@@ -37,6 +37,8 @@ export interface FleetContractTarget {
   untrustedSigner: OperationSigner;
   /** A published release the fleet will install. */
   release: PaneRelease;
+  /** The id of the host under test; operations are signed for it. */
+  hostId: string;
   /** How long to wait for a VM or operation to settle. Default 120 s. */
   timeoutMs?: number;
 }
@@ -53,6 +55,7 @@ export function fleetContractCases(target: FleetContractTarget): ContractCase[] 
     // SAFETY: parameters match `operation` (a release for bootstrap and update_pane, a cause for stop, none otherwise); signOperation parses it again.
     return {
       requestId: randomUUID(),
+      hostId: target.hostId,
       vmId,
       reason: `contract test: ${operation}`,
       issuedAt: issuedAt.toISOString(),
@@ -119,13 +122,43 @@ export function fleetContractCases(target: FleetContractTarget): ContractCase[] 
       },
     },
     {
-      name: 'fleet: refuses an operation signed by an untrusted key, or changed after signing',
+      name: 'fleet: refuses an operation signed by an untrusted key, or with any signed field changed after signing',
       async run() {
         const vmId = `contract-${randomUUID().slice(0, 8)}`;
         await expectError('signature_invalid', async () => fleet.submitOperation(await signOperation(payload(vmId, 'create'), target.untrustedSigner)));
-        const envelope = await signOperation(payload(vmId, 'create'), target.signer);
-        await expectError('signature_invalid', () => fleet.submitOperation({ ...envelope, payload: { ...envelope.payload, reason: 'changed after signing' } }));
+        const create = await signOperation(payload(vmId, 'create'), target.signer);
+        const tampered = (change: Record<string, unknown>) => ({ ...create, payload: { ...create.payload, ...change } }) as OperationEnvelope;
+        const later = new Date(Date.parse(create.payload.expiresAt) + 1000).toISOString();
+        for (const change of [{ reason: 'changed after signing' }, { vmId: `${vmId}-other` }, { requestId: randomUUID() }, { expiresAt: later }, { operation: 'delete' }]) {
+          await expectError('signature_invalid', () => fleet.submitOperation(tampered(change)));
+        }
+        const stop = await signOperation(payload(vmId, 'stop'), target.signer);
+        await expectError('signature_invalid', () => fleet.submitOperation({ ...stop, payload: { ...stop.payload, operation: 'stop', parameters: { cause: 'review' } } }));
         await expectError('vm_not_found', () => fleet.getVm(vmId));
+      },
+    },
+    {
+      name: 'fleet: refuses an operation signed for another host, and runs nothing',
+      async run() {
+        const vmId = `contract-${randomUUID().slice(0, 8)}`;
+        await expectError('wrong_host', async () => fleet.submitOperation(await signOperation(payload(vmId, 'create', { hostId: `${target.hostId}-other` }), target.signer)));
+        await expectError('vm_not_found', () => fleet.getVm(vmId));
+      },
+    },
+    {
+      name: 'fleet: a resent requestId gets its first outcome, a refusal included, and a new payload under it is refused',
+      async run() {
+        const vmId = await newVm();
+        const start = await signOperation(payload(vmId, 'start'), target.signer);
+        await expectError('invalid_state', () => fleet.submitOperation(start));
+        assert.equal((await fleet.getOperation(start.payload.requestId)).status, 'failed');
+        await run(vmId, 'stop');
+        await vmIn(vmId, 'stopped');
+        await expectError('invalid_state', () => fleet.submitOperation(start));
+        assert.equal((await fleet.getVm(vmId)).state, 'stopped', 'a replayed refusal runs nothing');
+        const reused = await signOperation({ ...payload(vmId, 'delete'), requestId: start.payload.requestId }, target.signer);
+        await expectError('invalid_request', () => fleet.submitOperation(reused));
+        await run(vmId, 'delete');
       },
     },
     {

@@ -5,7 +5,9 @@ import {
   AGENT_HOURS_PER_AWAKE_HOUR,
   type DeviceTokenResult,
   type OrganizationUsage,
+  type OrgRole,
   parseUserOperation,
+  type Plan,
   PLANS,
   serviceRoutes,
   type SessionVm,
@@ -36,6 +38,14 @@ export interface ServiceStub extends RunningStub {
   denyDevice(userCode: string): void;
   /** An automatic pause or a person's Suspend: the VM stops with reason `review`, logged with actor `service`. */
   pauseForReview(vmId: string): void;
+  /** VMs the stub's host holds awake at once; null for no limit. */
+  setCapacity(capacity: number | null): void;
+  /** Adds an account to an organization, as an accepted invitation will. */
+  addMember(organizationId: string, email: string, role: Exclude<OrgRole, 'owner'>): void;
+  /** Puts an organization on a plan, as a subscription will. */
+  setPlan(organizationId: string, plan: Plan): void;
+  /** Gives a VM 16 GiB (or back to 8), as a resize will; its later awake hours count at the new rate. */
+  setMemoryGiB(vmId: string, memoryGiB: SessionVm['memoryGiB']): void;
 }
 
 interface DeviceGrant {
@@ -46,8 +56,8 @@ interface DeviceGrant {
 
 interface VmRecord {
   vm: SessionVm;
-  /** Awake intervals in epoch ms; the last one is open while the VM is awake. */
-  awake: { from: number; to: number | null }[];
+  /** Awake intervals in epoch ms at one memory size; the last one is open while the VM is awake. */
+  awake: { from: number; to: number | null; memoryGiB: SessionVm['memoryGiB'] }[];
   log: ActionLogEntry[];
 }
 
@@ -56,7 +66,8 @@ const HOUR = 3_600_000;
 
 /**
  * An in-memory Pane Cloud service that keeps the contract, for building Pane against and for the
- * contract tests. Every account has a personal organization on the Free plan. VMs start and stop at
+ * contract tests. Every account has a personal organization on the Free plan, and the awake limit spans
+ * the account's organizations. VMs start and stop at
  * once, and agent-hours are counted from the stub's clock.
  */
 export async function startServiceStub(options: ServiceStubOptions): Promise<ServiceStub> {
@@ -64,7 +75,9 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
   const iso = () => now().toISOString();
   const versions = options.paneVersions ?? ['2.4.214', '2.4.215'];
   const latest = versions.at(-1) ?? '2.4.215';
-  const capacity = options.capacity ?? Number.POSITIVE_INFINITY;
+  let capacity = options.capacity ?? Number.POSITIVE_INFINITY;
+  const plans = new Map<string, Plan>();
+  const planOf = (organizationId: string): Plan => plans.get(organizationId) ?? 'free';
   let counter = 0;
   const nextId = (prefix: string) => `${prefix}_${(counter += 1)}`;
 
@@ -106,12 +119,20 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
     return record;
   };
   const isAwake = (record: VmRecord) => AWAKE.includes(record.vm.state);
-  const awakeOf = (accountId: string, organizationId: string) =>
-    [...vms.values()].filter((r) => r.vm.createdByAccountId === accountId && r.vm.organizationId === organizationId && isAwake(r)).length;
-  /** The checks before a VM wakes: the member's awake limit, then the host's room. */
-  const requireRoomToWake = (account: Account, organizationId: string) => {
-    const limit = PLANS.free.awakeLimitPerMember;
-    if (awakeOf(account.id, organizationId) >= limit) {
+  /** VMs an account has awake, across every organization it belongs to (D-74). */
+  const awakeOf = (accountId: string) => [...vms.values()].filter((r) => r.vm.createdByAccountId === accountId && isAwake(r)).length;
+  /** The highest awake limit among the account's Full access memberships (D-74). */
+  const awakeLimitOf = (account: Account) =>
+    Math.max(0, ...account.organizations.filter((m) => m.role !== 'view_only').map((m) => PLANS[planOf(m.organizationId)].awakeLimitPerMember));
+  const requireFullAccess = (account: Account, organizationId: string) => {
+    if (membership(account, organizationId).role === 'view_only') {
+      throw new CloudApiError('view_only', 'You have View only access to this organization, so you can read its shared Sessions but not create or start one.', 'Ask the organization Owner for Full access.');
+    }
+  };
+  /** The checks before a VM wakes: the account's awake limit, then the host's room. */
+  const requireRoomToWake = (account: Account) => {
+    const limit = awakeLimitOf(account);
+    if (awakeOf(account.id) >= limit) {
       throw new CloudApiError('awake_limit_reached', `You already have ${limit} Sessions running, the most your plan allows at once.`, 'Stop one of your Sessions, then try again.');
     }
     if ([...vms.values()].filter(isAwake).length >= capacity) {
@@ -125,7 +146,7 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
     record.vm.updatedAt = iso();
     const open = record.awake.at(-1);
     if (wasAwake && !isAwake(record) && open) open.to = now().getTime();
-    if (!wasAwake && isAwake(record)) record.awake.push({ from: now().getTime(), to: null });
+    if (!wasAwake && isAwake(record)) record.awake.push({ from: now().getTime(), to: null, memoryGiB: record.vm.memoryGiB });
   };
   const requireState = (record: VmRecord, state: SessionVm['state'], action: string) => {
     if (record.vm.state !== state) {
@@ -150,8 +171,8 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
   };
   const releaseFor = (version: string) => ({ version, arch: 'arm64', debSha256: 'a'.repeat(64) });
   const agentHours = (record: VmRecord, from: number, to: number) => {
-    const awakeMs = record.awake.reduce((sum, i) => sum + Math.max(0, Math.min(i.to ?? now().getTime(), to) - Math.max(i.from, from)), 0);
-    return (awakeMs / HOUR) * AGENT_HOURS_PER_AWAKE_HOUR[record.vm.memoryGiB];
+    const overlap = (i: VmRecord['awake'][number]) => Math.max(0, Math.min(i.to ?? now().getTime(), to) - Math.max(i.from, from));
+    return record.awake.reduce((sum, i) => sum + (overlap(i) / HOUR) * AGENT_HOURS_PER_AWAKE_HOUR[i.memoryGiB], 0);
   };
   const usage = (organizationId: string, month: string): OrganizationUsage => {
     const from = Date.parse(`${month}-01T00:00:00.000Z`);
@@ -163,15 +184,15 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       const member = account.organizations.find((m) => m.organizationId === organizationId);
       if (!member) return [];
       const used = inOrg.filter((r) => r.vm.createdByAccountId === account.id).reduce((sum, r) => sum + agentHours(r, from, to), 0);
-      return [{ accountId: account.id, name: account.name, role: member.role, agentHoursUsed: used, awakeNow: awakeOf(account.id, organizationId), awakeLimit: PLANS.free.awakeLimitPerMember }];
+      return [{ accountId: account.id, name: account.name, role: member.role, agentHoursUsed: used, awakeNow: awakeOf(account.id), awakeLimit: member.role === 'view_only' ? 0 : awakeLimitOf(account) }];
     });
     const fullAccess = members.filter((m) => m.role !== 'view_only').length;
     return {
       organizationId,
-      plan: 'free',
+      plan: planOf(organizationId),
       month,
       resetsAt: reset.toISOString(),
-      agentHours: { used: members.reduce((sum, m) => sum + m.agentHoursUsed, 0), limit: PLANS.free.agentHoursPerMember * fullAccess },
+      agentHours: { used: members.reduce((sum, m) => sum + m.agentHoursUsed, 0), limit: PLANS[planOf(organizationId)].agentHoursPerMember * fullAccess },
       members,
     };
   };
@@ -212,15 +233,15 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
     bind(r.createVm, ({ token, params, body }) => {
       const account = caller(token);
       const organizationId = params.organizationId ?? '';
-      membership(account, organizationId);
-      const key = `${account.id}:${body.idempotencyKey}`;
+      requireFullAccess(account, organizationId);
+      const key = `${account.id}:${organizationId}:${body.idempotencyKey}`;
       const repeat = idempotent.get(key);
       const repeated = repeat ? vms.get(repeat.vmId) : undefined;
       const repeatedEntry = repeated?.log.find((e) => e.id === repeat?.entryId);
       if (repeated && repeatedEntry) return { vm: repeated.vm, operation: repeatedEntry };
       if (account.access !== 'invited') throw new CloudApiError('not_invited', "You're on the list. Pane Cloud is invite-only for now.", 'Wait for your invite email.');
       if (account.signupState !== 'ready') throw new CloudApiError('signup_incomplete', 'Finish signing up before you create a cloud Session.', account.signupState === 'needs_phone' ? 'Verify your phone number on the sign-up page.' : 'Add a card on the sign-up page.');
-      requireRoomToWake(account, organizationId);
+      requireRoomToWake(account);
       const id = nextId('vm');
       const record: VmRecord = {
         vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, createdAt: iso(), updatedAt: iso() },
@@ -240,7 +261,8 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       const record = ownVm(account, params.vmId ?? '');
       if (record.vm.stateReason === 'review') throw new CloudApiError('under_review', 'Your usage is under review, so this Session stays paused.', 'Check your email for the review notice, or reply to it to appeal.');
       requireState(record, 'stopped', 'Start');
-      requireRoomToWake(account, record.vm.organizationId);
+      requireFullAccess(account, record.vm.organizationId);
+      requireRoomToWake(account);
       setState(record, 'running', null);
       return { vm: record.vm, operation: log(record, 'start', account, 'You started this Session.') };
     }),
@@ -304,6 +326,28 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
     },
     denyDevice(userCode) {
       grantFor(userCode).state = 'denied';
+    },
+    setCapacity(next) {
+      capacity = next ?? Number.POSITIVE_INFINITY;
+    },
+    addMember(organizationId, email, role) {
+      const account = accounts.get(email.toLowerCase());
+      if (!account) throw new Error(`stub: no account ${email}`);
+      if (!account.organizations.some((m) => m.organizationId === organizationId)) account.organizations.push({ organizationId, name: `Organization ${organizationId}`, personal: false, role });
+    },
+    setPlan(organizationId, plan) {
+      plans.set(organizationId, plan);
+    },
+    setMemoryGiB(vmId, memoryGiB) {
+      const record = vms.get(vmId);
+      if (!record) throw new Error(`stub: no Session VM ${vmId}`);
+      const open = record.awake.at(-1);
+      if (open && open.to === null) {
+        open.to = now().getTime();
+        record.awake.push({ from: now().getTime(), to: null, memoryGiB });
+      }
+      record.vm.memoryGiB = memoryGiB;
+      record.vm.updatedAt = iso();
     },
     pauseForReview(vmId) {
       const record = vms.get(vmId);

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { callRoute } from '../http';
-import { createServiceClient, PLANS, type ServiceClient, serviceRoutes, type SessionVm, type SubmittedOperation } from '../service';
-import { type ContractCase, expectError, waitFor } from './cases';
+import { createServiceClient, type Plan, type ServiceClient, serviceRoutes, type SessionVm, type SubmittedOperation } from '../service';
+import { type ContractCase, expectError, SkipCase, waitFor } from './cases';
 
 type Who = 'member' | 'unverified' | 'waitlisted';
 
@@ -17,11 +17,37 @@ export interface ServiceContractTarget {
   emails: Record<Who, string>;
   /** How long to wait for a VM to settle. Default 180 s. */
   timeoutMs?: number;
+  /**
+   * Test-mode setup the server offers. A case that needs a control it doesn't offer is skipped and
+   * says so. `setClock` moves the service's clock forward only, so the clock case runs last.
+   */
+  controls?: Partial<ServiceContractControls>;
+}
+
+export interface ServiceContractControls {
+  /** Stops a VM for review, as the automatic pause or a person's Suspend does. */
+  pauseForReview(vmId: string): Promise<void> | void;
+  /** How many VMs the host holds awake at once; null for no limit. */
+  setCapacity(capacity: number | null): Promise<void> | void;
+  /** Adds a test account to an organization with a role, as an accepted invitation does. */
+  addMember(who: Who, organizationId: string, role: 'full_access' | 'view_only'): Promise<void> | void;
+  /** Puts an organization on a plan. */
+  setPlan(organizationId: string, plan: Plan): Promise<void> | void;
+  /** Gives a VM 16 GiB, as a resize does. */
+  setMemoryGiB(vmId: string, memoryGiB: 16): Promise<void> | void;
+  /** Sets the service's clock (ISO time), never backwards. */
+  setClock(at: string): Promise<void> | void;
 }
 
 /** The service API contract: what the service must do for Pane. */
 export function serviceContractCases(target: ServiceContractTarget): ContractCase[] {
   const timeoutMs = target.timeoutMs ?? 180_000;
+  /** The control a case needs, or a skip message naming it. */
+  const control = <K extends keyof ServiceContractControls>(name: K): ServiceContractControls[K] => {
+    const found = target.controls?.[name];
+    if (!found) throw new SkipCase(`the server offers no ${name} control`);
+    return found;
+  };
   const tokens = new Map<Who, string>();
   const tokenFor = async (who: Who) => {
     const token = tokens.get(who) ?? (await target.signIn(who));
@@ -80,9 +106,9 @@ export function serviceContractCases(target: ServiceContractTarget): ContractCas
         assert.equal(usage.plan, 'free');
         const me = usage.members.find((m) => m.accountId === account.id);
         assert.ok(me, 'usage lists the member');
-        assert.equal(me.awakeLimit, PLANS.free.awakeLimitPerMember);
-        const fullAccess = usage.members.filter((m) => m.role !== 'view_only').length;
-        assert.equal(usage.agentHours.limit, PLANS.free.agentHoursPerMember * fullAccess, 'hours are pooled per Full access member');
+        assert.equal(me.awakeLimit, 5, 'Free allows 5 awake at once');
+        assert.equal(usage.members.length, 1);
+        assert.equal(usage.agentHours.limit, 300, 'Free gives one member 300 agent-hours');
         assert.equal(Date.parse(usage.resetsAt), Date.UTC(Number(usage.month.slice(0, 4)), Number(usage.month.slice(5, 7)), 1), 'hours reset on the 1st');
       },
     },
@@ -189,10 +215,102 @@ export function serviceContractCases(target: ServiceContractTarget): ContractCas
           await expectError('vm_not_found', () => other.getVm(vm.id));
           await expectError('vm_not_found', () => other.stopVm(vm.id));
           await expectError('vm_not_found', () => other.listActionLog(vm.id));
+          await expectError('vm_not_found', () => other.startVm(vm.id));
+          await expectError('vm_not_found', () => other.deleteVm(vm.id));
+          await expectError('vm_not_found', () => other.requestOperation(vm.id, { operation: 'collect_diagnostics', parameters: {} }));
+          await expectError('not_org_member', () => other.createVm(vm.organizationId, 'not mine', randomUUID()));
           await expectError('not_org_member', () => other.listVms(vm.organizationId));
           await expectError('not_org_member', () => other.getUsage(vm.organizationId));
           assert.ok((await member.listVms(vm.organizationId)).vms.some((v) => v.id === vm.id));
         });
+      },
+    },
+    {
+      name: 'service: a VM paused for review answers under_review to start',
+      async run() {
+        const pause = control('pauseForReview');
+        await withVm(async (member, vm) => {
+          await pause(vm.id);
+          assert.equal((await vmIn(member, vm.id, 'stopped')).stateReason, 'review');
+          await expectError('under_review', () => member.startVm(vm.id));
+        });
+      },
+    },
+    {
+      name: 'service: create answers no_capacity when the host is full',
+      async run() {
+        const setCapacity = control('setCapacity');
+        const member = await as('member');
+        await setCapacity(0);
+        try {
+          await expectError('no_capacity', async () => member.createVm(await personalOrg(member), 'no room', randomUUID()));
+        } finally {
+          await setCapacity(null);
+        }
+      },
+    },
+    {
+      name: 'service: in a second organization, View only members add no hours and get view_only, and the awake limit spans the account',
+      async run() {
+        const addMember = control('addMember');
+        const member = await as('member');
+        const unverified = await as('unverified');
+        const team = await personalOrg(unverified);
+        await addMember('member', team, 'full_access');
+        await addMember('waitlisted', team, 'view_only');
+        const usage = await member.getUsage(team);
+        assert.equal(usage.agentHours.limit, 600, 'two Full access members pool 2 x 300 hours; View only adds none');
+        const viewer = usage.members.find((m) => m.role === 'view_only');
+        assert.equal(viewer?.awakeLimit, 0);
+        await expectError('view_only', async () => (await as('waitlisted')).createVm(team, 'read only', randomUUID()));
+
+        const own = await personalOrg(member);
+        const { id: accountId } = await member.getAccount();
+        const created: string[] = [];
+        try {
+          for (let i = 0; i < 5; i += 1) created.push((await member.createVm(own, `personal ${i + 1}`, randomUUID())).vm.id);
+          const inTeam = (await member.getUsage(team)).members.find((m) => m.accountId === accountId);
+          assert.equal(inTeam?.awakeNow, 5, "awakeNow counts the member's VMs in every organization");
+          await expectError('awake_limit_reached', () => member.createVm(team, 'sixth', randomUUID()));
+          const setPlan = target.controls?.setPlan;
+          if (setPlan) {
+            await setPlan(team, 'pro');
+            assert.equal((await member.getUsage(own)).members.find((m) => m.accountId === accountId)?.awakeLimit, 20, 'the highest limit among memberships applies everywhere');
+            created.push((await member.createVm(team, 'sixth on Pro', randomUUID())).vm.id);
+            await setPlan(team, 'free');
+          }
+        } finally {
+          await cleanUp(member, created);
+        }
+      },
+    },
+    {
+      name: 'service: agent-hours count awake time to the minute, across a month boundary, still-running VMs included, and a 16 GiB hour as 2',
+      async run() {
+        const setClock = control('setClock');
+        const setMemoryGiB = control('setMemoryGiB');
+        const member = await as('member');
+        const own = await personalOrg(member);
+        const { id: accountId } = await member.getAccount();
+        const used = async (month: string) => (await member.getUsage(own, month)).members.find((m) => m.accountId === accountId)?.agentHoursUsed ?? 0;
+        await setClock('2027-01-31T23:00:00.000Z');
+        const [janBefore, febBefore] = [await used('2027-01'), await used('2027-02')];
+        const { vm } = await member.createVm(own, 'metered', randomUUID());
+        try {
+          await vmIn(member, vm.id, 'running');
+          await setClock('2027-02-01T00:30:00.000Z');
+          assert.equal((await used('2027-01')) - janBefore, 1, 'the hour before midnight counts in January');
+          assert.equal((await used('2027-02')) - febBefore, 0.5, 'a running VM counts up to now');
+          await setMemoryGiB(vm.id, 16);
+          await setClock('2027-02-01T01:30:00.000Z');
+          assert.equal((await used('2027-02')) - febBefore, 2.5, 'an hour at 16 GiB counts as 2');
+          await member.stopVm(vm.id);
+          await vmIn(member, vm.id, 'stopped');
+          await setClock('2027-02-01T03:30:00.000Z');
+          assert.equal((await used('2027-02')) - febBefore, 2.5, 'a stopped VM counts nothing');
+        } finally {
+          await cleanUp(member, [vm.id]);
+        }
       },
     },
   ];

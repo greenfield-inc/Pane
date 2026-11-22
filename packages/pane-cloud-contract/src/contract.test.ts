@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { canonicalJson, ContractViolationError, createFleetClient, createServiceClient } from './index';
+import { canonicalJson, ContractViolationError, operationSigningBytes, createFleetClient, createServiceClient } from './index';
 import { type FleetStub, type ServiceStub, startFleetStub, startServiceStub } from './stubs';
 import { createLocalSigner, fleetContractCases, serviceContractCases } from './testing';
 
@@ -9,8 +9,10 @@ const emails = { member: 'member@example.test', unverified: 'unverified@example.
 
 describe('service stub passes the service contract', () => {
   let stub: ServiceStub;
+  let clock = Date.parse('2026-11-22T12:00:00.000Z');
   beforeAll(async () => {
     stub = await startServiceStub({
+      now: () => new Date(clock),
       accounts: [
         { email: emails.member, name: 'Member', invited: true },
         { email: emails.unverified, invited: true, signupState: 'needs_phone' },
@@ -26,6 +28,16 @@ describe('service stub passes the service contract', () => {
     },
     emails,
     timeoutMs: 2000,
+    controls: {
+      pauseForReview: (vmId) => stub.pauseForReview(vmId),
+      setCapacity: (capacity) => stub.setCapacity(capacity),
+      addMember: (who, organizationId, role) => stub.addMember(organizationId, emails[who], role),
+      setPlan: (organizationId, plan) => stub.setPlan(organizationId, plan),
+      setMemoryGiB: (vmId, memoryGiB) => stub.setMemoryGiB(vmId, memoryGiB),
+      setClock: (at) => {
+        clock = Math.max(clock, Date.parse(at));
+      },
+    },
     async signIn(who) {
       const client = createServiceClient({ baseUrl: stub.url });
       const { deviceCode, userCode } = await client.startDeviceSignIn();
@@ -56,6 +68,7 @@ describe('fleet stub passes the fleet contract', () => {
     signer: trusted.signer,
     untrustedSigner: untrusted.signer,
     release,
+    hostId: 'stub-host-1',
     timeoutMs: 2000,
   });
   it.each(cases)('$name', (c) => c.run());
@@ -79,35 +92,26 @@ describe('clients reject a server that drifts from the contract', () => {
   });
 });
 
-describe('canonical JSON, the bytes operation signatures cover', () => {
-  it('sorts keys at every level, keeps array order, and drops whitespace', () => {
-    expect(canonicalJson({ b: 1, a: { d: [2, { f: 'x', e: null }], c: true }, B: 'upper' })).toBe('{"B":"upper","a":{"c":true,"d":[2,{"e":null,"f":"x"}]},"b":1}');
+describe('operation signing bytes', () => {
+  it('are the domain line, then the whole payload as canonical JSON', () => {
+    const payload = {
+      requestId: '11111111-1111-4111-8111-111111111111',
+      hostId: 'host-a',
+      vmId: 'vm_1',
+      operation: 'stop',
+      parameters: { cause: 'user' },
+      reason: 'You stopped this Session.',
+      issuedAt: '2027-01-01T00:00:00.000Z',
+      expiresAt: '2027-01-01T00:02:00.000Z',
+    };
+    expect(operationSigningBytes(payload).toString('utf8')).toBe(
+      'pane-cloud-operation-v1\n{"expiresAt":"2027-01-01T00:02:00.000Z","hostId":"host-a","issuedAt":"2027-01-01T00:00:00.000Z","operation":"stop","parameters":{"cause":"user"},"reason":"You stopped this Session.","requestId":"11111111-1111-4111-8111-111111111111","vmId":"vm_1"}',
+    );
   });
 });
 
-describe('the service stub counts agent-hours from awake time', () => {
-  it('counts 90 minutes awake at 8 GiB as 1.5 agent-hours, and a review pause keeps the Session from starting', async () => {
-    let clock = Date.parse('2027-01-10T12:00:00.000Z');
-    const stub = await startServiceStub({ accounts: [{ email: 'a@example.test', invited: true }], now: () => new Date(clock) });
-    try {
-      const anonymous = createServiceClient({ baseUrl: stub.url });
-      const { deviceCode, userCode } = await anonymous.startDeviceSignIn();
-      stub.approveDevice(userCode, 'a@example.test');
-      const signedIn = await anonymous.pollDeviceSignIn(deviceCode);
-      if (signedIn.status !== 'complete') throw new Error(signedIn.status);
-      const member = createServiceClient({ baseUrl: stub.url, token: signedIn.token });
-      const organizationId = signedIn.account.organizations[0]?.organizationId ?? '';
-
-      const { vm } = await member.createVm(organizationId, 'metered', 'meter-key-0001');
-      clock += 90 * 60_000;
-      await member.stopVm(vm.id);
-      clock += 60 * 60_000;
-      expect((await member.getUsage(organizationId)).agentHours).toEqual({ used: 1.5, limit: 300 });
-
-      stub.pauseForReview(vm.id);
-      await expect(member.startVm(vm.id)).rejects.toMatchObject({ code: 'under_review' });
-    } finally {
-      await stub.close();
-    }
+describe('canonical JSON, the bytes operation signatures cover', () => {
+  it('sorts keys at every level, keeps array order, and drops whitespace', () => {
+    expect(canonicalJson({ b: 1, a: { d: [2, { f: 'x', e: null }], c: true }, B: 'upper' })).toBe('{"B":"upper","a":{"c":true,"d":[2,{"e":null,"f":"x"}]},"b":1}');
   });
 });

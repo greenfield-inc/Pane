@@ -75,8 +75,13 @@ const operationNames = Object.keys(FLEET_OPERATIONS) as [FleetOperationName, ...
 export const FleetOperationName = z.enum(operationNames);
 
 const payloadFields = {
-  /** Chosen by the service; sending the same requestId again returns the first result. */
+  /**
+   * Chosen by the service. The host records it once the signature and time window check out, before
+   * running anything, so a resend answers with the first outcome, a refusal included.
+   */
   requestId: z.uuid(),
+  /** The host that should run the operation; every other host refuses it with wrong_host. */
+  hostId: z.string().min(1).max(64),
   vmId: VmId,
   /** Why the operation runs, shown to the VM's creator in its action log. */
   reason: z.string().min(1).max(500),
@@ -159,9 +164,10 @@ export async function signOperation(payload: OperationPayload, signer: Operation
 /**
  * The host agent's check of an envelope it received, before it runs anything. Throws CloudApiError:
  * operation_not_allowed or invalid_request for a payload outside the allow-list, signature_invalid
- * for an unknown key or a bad signature, operation_expired outside the payload's time window.
+ * for an unknown key or a bad signature, operation_expired outside the payload's time window, and
+ * wrong_host for an operation signed for another host.
  */
-export function verifyOperation(envelope: SubmittedEnvelope, trustedKeys: Readonly<Record<string, string>>, now: Date = new Date()): OperationEnvelope {
+export function verifyOperation(envelope: SubmittedEnvelope, trustedKeys: Readonly<Record<string, string>>, hostId: string, now: Date = new Date()): OperationEnvelope {
   const operation = envelope.payload.operation;
   if (!FleetOperationName.safeParse(operation).success) {
     throw new CloudApiError('operation_not_allowed', `"${operation}" is not an allow-listed fleet operation.`, `Use one of: ${Object.keys(FLEET_OPERATIONS).join(', ')}.`);
@@ -171,7 +177,7 @@ export function verifyOperation(envelope: SubmittedEnvelope, trustedKeys: Readon
     throw new CloudApiError('invalid_request', `The operation envelope does not match the contract: ${z.prettifyError(parsed.error)}`, 'Send only the fixed parameters the operation allows.');
   }
   const { payload, signature } = parsed.data;
-  const publicKeyPem = trustedKeys[signature.keyId];
+  const publicKeyPem = Object.hasOwn(trustedKeys, signature.keyId) ? trustedKeys[signature.keyId] : undefined;
   const verifier = createVerify('SHA256');
   verifier.update(operationSigningBytes(payload));
   if (!publicKeyPem || !verifier.verify(publicKeyPem, Buffer.from(signature.value, 'base64'))) {
@@ -187,6 +193,9 @@ export function verifyOperation(envelope: SubmittedEnvelope, trustedKeys: Readon
     expires <= nowMs
   ) {
     throw new CloudApiError('operation_expired', 'The operation is outside its signed time window.', `Sign a new operation that expires within ${MAX_OPERATION_LIFETIME_SECONDS} seconds of issuedAt.`);
+  }
+  if (payload.hostId !== hostId) {
+    throw new CloudApiError('wrong_host', `The operation is signed for host ${payload.hostId}, and this is ${hostId}.`, 'Send it to the host it names; this host ran nothing.');
   }
   return parsed.data;
 }
