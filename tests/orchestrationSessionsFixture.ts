@@ -81,7 +81,7 @@ export type SessionFixtureOptions = {
   initialPanels?: JsonObject[];
   initialLayout?: JsonObject;
   /** Machines for All machines (T-45): the other machines, their reads, and this computer's name. */
-  machines?: Pick<NonNullable<Parameters<typeof installElectronApiMock>[1]>, 'machineConnections' | 'workspaceAccess' | 'platform'>;
+  machines?: Pick<NonNullable<Parameters<typeof installElectronApiMock>[1]>, 'initialPreferences' | 'machineConnections' | 'workspaceAccess' | 'platform'>;
 };
 
 export function sessionFixture(

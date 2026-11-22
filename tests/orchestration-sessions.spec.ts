@@ -2265,6 +2265,7 @@ test('a tab dragged over a tiled neighbour Session is refused there and moves no
 type MachinesMock = {
   emitMachineEvent: (event: JsonObject, reads?: Record<string, Record<string, JsonObject | null>>) => void;
   getNavigationMemory: (hostId: string | null) => JsonObject | null;
+  emitNotifySnapshot: (snapshot: NotifySnapshot) => void;
   emitRemoteDaemonResyncRequested: (event: { hostChanged: boolean }) => void;
 };
 const machinesMock = (page: Page) => page.evaluateHandle(() => {
@@ -2559,6 +2560,125 @@ test('Single layout Enter follows the focused Session through a reorder and key 
   await expect(bravo).toHaveAttribute('aria-current', 'page');
   await expect(list).toHaveAttribute('data-activations', /^(Open Session Bravo,)+$/);
 });
+
+for (const [up, destination] of [['k', 'remote'], ['ArrowUp', 'remote'], ['k', 'local'], ['ArrowUp', 'local']] as const) {
+  test(`T-45 All machines cursor moving up opens the ${destination} Session with ${up} during terminal refresh`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    const names = ['Sprint Planning', 'Financial Planning', 'Omni Chat', 'Workspaces', 'Agent Farm Updates',
+      'Customer Support', 'Firecracker Grain', 'Pane Development', 'Video Podcast', 'Questionnaire', 'Grain Branding',
+      'Sales Follow Ups', 'Company Reset', 'Security Fixes', 'Doozy Recovery', 'Subscriptions', 'GCP Alerts',
+      'Frontend Refactor', 'Improvements', 'Bloom Refactor', 'Bloom Bugs', 'Mobile Pipeline', 'Doozy Computer Use', 'Grain Fixes'];
+    const localIndexes = new Set([2, 5, 6, 7, 10, 17, 19, 21, 22]);
+    const sessions = names.map((name, index) => sessionFixture(`s${index}`, name, '', '', new Date(index * 1000).toISOString()));
+    const local = sessions.filter((_, index) => localIndexes.has(index));
+    const remote = sessions.filter((_, index) => !localIndexes.has(index));
+    const machineId = (index: number) => localIndexes.has(index) ? 'local' : 'build';
+    const layout = { sessions: sessions.map((session, index) => `${machineId(index)}:${session.id}`),
+      open: ['section:sessions', 'section:projects'], seeded: ['sessions:local', 'sessions:build'], panes: {} };
+    const lists = (rows: UiSessionFixture[]) => ({
+      'orchestration-sessions:list': { success: true, data: { sessions: rows } },
+      'orchestration-sessions:activity-list': { success: true, data: rows.filter(row => Number(row.id.slice(1)) < 7)
+        .map(row => ({ sessionId: row.id, state: 'working', workingPanes: row.id === 's3' ? 2 : 1 })) },
+    });
+    const approvals = sessionApprovalsSnapshot();
+    await installSessionsFixture(page, sessions, [], { notifySnapshot: { ...approvals, items: [], queue: [] }, machines: {
+      platform: 'darwin',
+      workspaceAccess: { machineName: 'TM' },
+      initialPreferences: { sidebar_all_machines_layout: JSON.stringify(layout) },
+      machineConnections: {
+        machines: [
+          { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+          { id: 'build', label: 'TP', kind: 'remote', status: 'online', offlineSince: null },
+        ],
+        reads: { local: lists(local), build: lists(remote) },
+      },
+    } });
+    await gotoApp(page);
+    await dismissStartupDialogs(page);
+    const refresh = await page.evaluateHandle(() => {
+      const invoke = window.electronAPI.invoke;
+      const gate = { requested: false, settled: false, release: () => {} };
+      let activation = false;
+      const hold = new Promise<void>(resolve => { gate.release = resolve; });
+      window.electronAPI.invoke = async (channel: string, ...args: unknown[]) => {
+        if (channel === 'console:log') {
+          const message = JSON.stringify(args);
+          if (message.includes('Activation depth for panel __orchestration_panel_s7_')) activation = true;
+          if (message.includes('Delayed activation refresh for panel __orchestration_panel_s7_')) gate.settled = true;
+        }
+        if (channel === 'terminal:getState' && activation) {
+          gate.requested = true;
+          await hold;
+        }
+        return invoke(channel, ...args);
+      };
+      return gate;
+    });
+    await page.evaluate(async () => {
+      await window.electronAPI.remoteDaemon.upsertConnectionProfile({
+        id: 'build', label: 'TP', baseUrl: 'https://test-host.example:8443', token: '', transport: 'http+sse',
+        tailnetMachine: 'tp', tailnetDomain: 'test.example',
+      });
+      await window.electronAPI.uiState.saveNavigationMemory('build', {
+        view: 'pane-chat', projectId: null, paneId: null, orchestrationSessionId: 's8',
+      });
+    });
+    await page.getByTestId('orchestration-session-s7').click();
+    await expect.poll(() => refresh.evaluate(gate => gate.requested)).toBe(true);
+    await page.getByRole('button', { name: /Switch machine$/ }).click();
+    await page.getByRole('menuitemradio', { name: /All machines/ }).click();
+    const rows = page.getByTestId('all-machines-session-row');
+    await expect(rows).toHaveCount(24);
+    await expect(rows.nth(7)).toContainText('Pane Development');
+    await expect(rows.nth(3)).toContainText('2 working');
+    const current = page.getByRole('button', { name: 'Session Pane Development on TM' });
+    const target = destination === 'remote'
+      ? page.getByRole('button', { name: 'Session Agent Farm Updates on TP' })
+      : page.getByRole('button', { name: 'Session Firecracker Grain on TM' });
+    await expect(current).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('[data-session-tile]')).toHaveCount(1);
+
+    await current.focus();
+    for (let step = 0; step < (destination === 'remote' ? 3 : 1); step += 1) await page.keyboard.press(up);
+    await expect(target).toBeFocused();
+    const mock = await machinesMock(page);
+    await mock.evaluate((api, { remote, approvals }) => {
+      // A real pin update moves the row above the keyboard cursor. Activity and
+      // approval counts can change in the same feed batch.
+      api.emitMachineEvent({ type: 'event', machineId: 'build', channel: 'orchestration-sessions:changed', args: [] }, { build: {
+        'orchestration-sessions:list': { success: true, data: { sessions: remote.map(row => row.id === 's11' ? { ...row, isPinned: true } : row) } },
+        'orchestration-sessions:activity-list': { success: true, data: [{ sessionId: 's4', state: 'working', workingPanes: 2 }] },
+      } });
+      api.emitNotifySnapshot({ ...approvals, items: approvals.items.map(item => ({
+        ...item, machineId: 'build', source: { ...item.source, session: { id: 's3', name: 'Workspaces', paneId: '__orchestration_session_s3terminal__' } },
+      })) });
+    }, { remote, approvals });
+    await expect(rows.first()).toContainText('Sales Follow Ups');
+    await expect(rows.filter({ hasText: 'Agent Farm Updates' })).toContainText('2 working');
+    await expect(rows.filter({ hasText: 'Workspaces' }).getByTestId('session-approvals-count')).toHaveText('2');
+    await expect(target).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath('01-highlighted-before-refresh.png') });
+
+    await refresh.evaluate(gate => gate.release());
+    await expect.poll(() => refresh.evaluate(gate => gate.settled)).toBe(true);
+    const enterTarget = await page.evaluate(() => document.activeElement?.getAttribute('aria-label')
+      ?? document.activeElement?.className ?? '');
+    await page.keyboard.press('Enter');
+    if (destination === 'remote') {
+      const intended = await mock.evaluate(api => api.getNavigationMemory('build'));
+      if (intended?.orchestrationSessionId === 's4') {
+        await mock.evaluate(api => api.emitRemoteDaemonResyncRequested({ hostChanged: true }));
+      }
+    }
+    const targetId = destination === 'remote' ? 's4' : 's6';
+    await page.screenshot({ path: testInfo.outputPath('02-after-enter.png') });
+    const selected = page.locator('[data-testid="all-machines-sidebar"] [aria-current="page"]');
+    await expect(selected, `Enter was delivered to ${enterTarget}`).toHaveAttribute('aria-label', await target.getAttribute('aria-label') ?? '');
+    await expect(page.locator(`[data-session-tile="${targetId}"] [data-panel-group-id]`).first()).toBeVisible();
+    await expect(page.locator('[data-session-tile]')).toHaveCount(1);
+    await page.screenshot({ path: testInfo.outputPath('03-opened-session.png') });
+  });
+}
 
 test('New offers Session and Pane in one dialog and restores keyboard focus', async ({ page }) => {
   await installSessionsFixture(page, []);
