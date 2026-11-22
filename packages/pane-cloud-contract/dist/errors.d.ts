@@ -18,6 +18,7 @@ export declare const ERROR_STATUS: {
     readonly awake_limit_reached: 409;
     readonly wrong_host: 421;
     readonly relay_key_changed: 409;
+    readonly client_update_required: 426;
     readonly release_not_published: 422;
     readonly internal: 500;
     readonly no_capacity: 503;
@@ -44,6 +45,7 @@ export declare const ErrorBody: z.ZodObject<{
             awake_limit_reached: "awake_limit_reached";
             wrong_host: "wrong_host";
             relay_key_changed: "relay_key_changed";
+            client_update_required: "client_update_required";
             release_not_published: "release_not_published";
             internal: "internal";
             no_capacity: "no_capacity";

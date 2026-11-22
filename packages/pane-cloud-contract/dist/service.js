@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.serviceRoutes = exports.OrganizationUsage = exports.MemberUsage = exports.SubmittedOperation = exports.USER_OPERATIONS = exports.UserOperationRequest = exports.ActionLogEntry = exports.LoggedOperation = exports.SessionVm = exports.DeviceTokenResult = exports.Account = exports.Membership = exports.OrgRole = exports.DeviceCode = exports.AGENT_HOURS_PER_AWAKE_HOUR = exports.Plan = exports.PLANS = void 0;
+exports.serviceRoutes = exports.OrganizationUsage = exports.MemberUsage = exports.PairVmRequest = exports.PAIRING_CAPABILITY = exports.SubmittedOperation = exports.USER_OPERATIONS = exports.UserOperationRequest = exports.ActionLogEntry = exports.LoggedOperation = exports.SessionVm = exports.DeviceTokenResult = exports.Account = exports.Membership = exports.OrgRole = exports.DeviceCode = exports.AGENT_HOURS_PER_AWAKE_HOUR = exports.Plan = exports.PLANS = void 0;
 exports.createServiceClient = createServiceClient;
 exports.parseUserOperation = parseUserOperation;
 /**
@@ -135,6 +135,19 @@ exports.USER_OPERATIONS = ['update_pane', 'collect_diagnostics'];
 const UserOperationName = zod_1.z.enum(exports.USER_OPERATIONS);
 /** What requestOperation accepts before parseUserOperation checks it. */
 exports.SubmittedOperation = zod_1.z.object({ operation: zod_1.z.string(), parameters: zod_1.z.record(zod_1.z.string(), zod_1.z.json()) }).strict();
+// ---------- Pairing ----------
+/**
+ * What a client on a release that keeps the receive-only mark sends in `pairVm`'s
+ * `clientCapabilities` (D-79). The service pairs only such a client, so a device too old to keep the
+ * mark never holds a cloud VM pairing. Pane's `RELAY_RECEIVE_ONLY_CAPABILITY` is the same string.
+ */
+exports.PAIRING_CAPABILITY = 'relay-receive-only-v1';
+exports.PairVmRequest = zod_1.z
+    .object({
+    /** Must include PAIRING_CAPABILITY; without it the service answers client_update_required. */
+    clientCapabilities: zod_1.z.array(zod_1.z.string().min(1).max(64)).max(32).optional(),
+})
+    .strict();
 // ---------- Usage ----------
 const Month = zod_1.z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 exports.MemberUsage = zod_1.z
@@ -200,10 +213,11 @@ exports.serviceRoutes = {
     /**
      * A one-time link for pairing a device with a running VM, and the relay identity the service
      * vouches for. The client pairs only with a VM that presents exactly that key. A VM that reports
-     * a different identity than its first one is refused with relay_key_changed. Logged as
+     * a different identity than its first one is refused with relay_key_changed. A client that doesn't
+     * send PAIRING_CAPABILITY in clientCapabilities gets client_update_required. Logged as
      * create_pairing_link, without the link.
      */
-    pairVm: (0, http_1.route)({ id: 'service.pairVm', method: 'POST', path: '/v1/vms/:vmId/pairing', auth: true, body: zod_1.z.object({}).strict(), response: fleet_1.PairingLink }),
+    pairVm: (0, http_1.route)({ id: 'service.pairVm', method: 'POST', path: '/v1/vms/:vmId/pairing', auth: true, body: exports.PairVmRequest, response: fleet_1.PairingLink }),
     listActionLog: (0, http_1.route)({
         id: 'service.listActionLog',
         method: 'GET',
@@ -236,7 +250,7 @@ function createServiceClient(config) {
         stopVm: (vmId) => (0, http_1.callRoute)(config, r.stopVm, { params: { vmId }, body: {} }),
         deleteVm: (vmId) => (0, http_1.callRoute)(config, r.deleteVm, { params: { vmId } }),
         requestOperation: (vmId, request) => (0, http_1.callRoute)(config, r.requestOperation, { params: { vmId }, body: request }),
-        pairVm: (vmId) => (0, http_1.callRoute)(config, r.pairVm, { params: { vmId }, body: {} }),
+        pairVm: (vmId) => (0, http_1.callRoute)(config, r.pairVm, { params: { vmId }, body: { clientCapabilities: [exports.PAIRING_CAPABILITY] } }),
         listActionLog: (vmId, page = {}) => (0, http_1.callRoute)(config, r.listActionLog, { params: { vmId }, query: page }),
         getUsage: (organizationId, month) => (0, http_1.callRoute)(config, r.getUsage, { params: { organizationId }, query: { month } }),
     };
