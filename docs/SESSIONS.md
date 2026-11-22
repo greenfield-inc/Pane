@@ -452,6 +452,26 @@ time it writes. Archiving the selected Session chooses an available active
 Session or clears the selection if none remain. Restoring a Session does not
 replace an unrelated selection.
 
+### Run a Session on Pane Cloud
+
+Pane Cloud (invite-only beta) runs a Session on its own cloud machine, which
+keeps working when this computer is closed. In **New Session**, pick **Pane
+Cloud** under **Where it runs**, then **Create on Pane Cloud**. The first time,
+**Sign in** opens the Pane Cloud page in your browser. Pane creates the
+machine, pairs this computer with it over the relay (phone access turns on if
+it was off), and starts the Session there.
+
+A cloud Session sits in the Sessions list like any other. Its ⋯ menu has
+**Stop**, **Start** and **Delete…**; Delete removes the machine and its disk.
+You can have 5 cloud Sessions running at once on the Free plan. **Settings ›
+Usage & Limits** shows your plan, agent-hours this month of the plan's amount,
+and how many Sessions are running. Each cloud Session's page under **Settings ›
+Remote Access** lists every operation Pane Cloud ran on it, with who asked and
+why.
+
+`PANE_CLOUD_URL` points a dev build at another Pane Cloud service, such as the
+stub in `packages/pane-cloud-contract`.
+
 ### Move a Session to another machine
 
 Right-click a Session, or use its ⋯ button, and choose **Move to machine…** to
