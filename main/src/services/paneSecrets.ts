@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { PaneError, reasonOf } from '../../../shared/paneError';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import {
   paneSecretKey,
   paneSecretNameProblem,
@@ -19,10 +19,12 @@ import {
 import type { SharedCredential } from '../../../shared/types/sharedCredentials';
 import { SecretLeaseStore } from './secretLeases';
 import type { AppConfig } from '../types/config';
-import type { ConfigManager } from './configManager';
 import { getPaneEventSink, getRuntimeConfigManager } from '../core/runtime';
 import { getAppDirectory } from '../utils/appDirectory';
 import { KeychainItemMissing, paneKeychainService, systemKeychain, type Keychain } from './keychain';
+import { onCloudVm } from '../daemon/relay/cloudVm';
+import { readFileSync } from 'fs';
+import { EMPTY_PANE_CLOUD_SECRET_CHOICE, sendsToCloud, type PaneCloudSecretChoice } from '../../../shared/types/paneCloudSecrets';
 
 /** Index record for one secret, kept in config.json. Never holds the value. */
 export interface PaneSecretMeta {
@@ -37,6 +39,12 @@ export interface PaneSecretMeta {
 export interface PaneSecretReferenceMeta extends PaneSecretMeta {
   /** `op://<vault>/<item>/<field>`; absent once removed. */
   reference?: string;
+}
+
+/** "Choose what to send" as a host keeps it, with when and where the person last changed it. */
+export interface PaneCloudSecretChoiceMeta extends PaneCloudSecretChoice {
+  updatedAt: string;
+  source: string;
 }
 
 /** Where values live: the macOS keychain, or one 0600 file elsewhere. Addressed by `<project>/<NAME>`. */
@@ -253,6 +261,28 @@ export function systemSecretBackend(appDirectory: string, platform: string = pro
 }
 
 /**
+ * On a Pane Cloud VM, the folder that holds everything about Pane secrets (values, the index of
+ * names and machines, the cloud choice and leases): the secrets volume the guest mounts and names in
+ * PANE_SECRETS_DIR, which scans and staff never open (D-55, D-58). null on a VM without one, which
+ * then keeps no secret and no record of one. undefined on any other host without PANE_SECRETS_DIR,
+ * which keeps values in the OS store and the index in config.json.
+ */
+export function secretsVolume(env: NodeJS.ProcessEnv = process.env, cloudVm: boolean = onCloudVm(env)): string | null | undefined {
+  const directory = env.PANE_SECRETS_DIR?.trim();
+  if (directory) return directory;
+  return cloudVm ? null : undefined;
+}
+
+/** A folder nothing can be created under, for a cloud VM without its secrets volume: every write there fails. */
+const NOWHERE = path.join(os.devNull, 'pane-secrets');
+
+/** Where Pane secrets and leases keep their values: on the secrets volume when there is one (`secretsVolume`). */
+export function paneSecretValueBackend(appDirectory: string, volume: string | null | undefined = secretsVolume()): SecretValueBackend {
+  if (volume === undefined) return systemSecretBackend(appDirectory);
+  return fileSecretBackend(path.join(volume ?? NOWHERE, 'secrets.json'), electronSecretEncryption());
+}
+
+/**
  * A reference read back from config.json passes the same check as one the person set: an edited
  * file can't point a name at text op would expand (a `$`, braces) or that isn't a reference at all.
  */
@@ -277,9 +307,79 @@ export function validatePaneSecretAddress(project: string, name: string): void {
   if (problem) throw invalidSecret(problem);
 }
 
-type SecretConfig = Pick<ConfigManager, 'getConfig' | 'updateConfigWith'>;
+/** The part of config a secret store reads and writes: its index, the cloud choice, and the sharing setting `read` checks. */
+type SecretIndex = Pick<AppConfig, 'paneSecrets' | 'paneSecretReferences' | 'paneCloudSecretChoice' | 'workspaces'>;
 
-function isNewer(candidate: SharedCredential, current: PaneSecretMeta | undefined): boolean {
+/** Where a secret store keeps its index: config.json (a ConfigManager), or a file on a cloud VM's secrets volume. */
+export interface SecretIndexStore {
+  getConfig(): SecretIndex;
+  /** Applies `update` and resolves with the index afterwards. */
+  updateConfigWith(update: (current: SecretIndex) => Partial<SecretIndex>): Promise<SecretIndex>;
+}
+
+const indexMetaSchema = boundary.object({
+  updatedAt: boundary.nonEmptyString,
+  source: boundary.nonEmptyString,
+  deleted: boundary.optional(boundary.literal(true)),
+});
+const volumeIndexSchema = boundary.object({
+  paneSecrets: boundary.optional(boundary.record(indexMetaSchema)),
+  paneSecretReferences: boundary.optional(boundary.record(boundary.object({
+    updatedAt: boundary.nonEmptyString,
+    source: boundary.nonEmptyString,
+    deleted: boundary.optional(boundary.literal(true)),
+    reference: boundary.optional(boundary.string),
+  }))),
+  paneCloudSecretChoice: boundary.optional(boundary.object({
+    excludedSecrets: boundary.array(boundary.string),
+    excludedMachines: boundary.array(boundary.string),
+    updatedAt: boundary.nonEmptyString,
+    source: boundary.nonEmptyString,
+  })),
+});
+
+/**
+ * The index in one 0600 file in `directory`, a cloud VM's secrets volume, so secret names and the
+ * machines they came from stay off the Session disk (D-84). `workspaces` still comes from config.json.
+ * Without a volume (`directory` null) it starts empty and refuses every write.
+ */
+export function volumeSecretIndex(directory: string | null, base: () => Pick<AppConfig, 'workspaces'>): SecretIndexStore {
+  const file = path.join(directory ?? NOWHERE, 'index.json');
+  type Stored = Omit<SecretIndex, 'workspaces'>;
+  let index: Stored = {};
+  try {
+    index = decodeBoundary(JSON.parse(readFileSync(file, 'utf8')), volumeIndexSchema);
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error ? error.code : undefined;
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') console.warn(`[PaneSecrets] The secrets index on the secrets volume could not be read, so it starts empty: ${reasonOf(error)}`);
+  }
+  let queue: Promise<unknown> = Promise.resolve();
+  const current = (): SecretIndex => ({ ...index, workspaces: base().workspaces });
+  return {
+    getConfig: current,
+    updateConfigWith(update) {
+      const run = queue.then(async () => {
+        const { workspaces: _workspaces, ...changes } = update(current());
+        const next: Stored = { ...index, ...changes };
+        await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+        const temporary = `${file}.${process.pid}.tmp`;
+        await fs.writeFile(temporary, `${JSON.stringify(next)}\n`, { mode: 0o600 });
+        await fs.rename(temporary, file);
+        index = next;
+        return current();
+      });
+      queue = run.catch(() => undefined);
+      return run;
+    },
+  };
+}
+
+const cloudChoiceSchema: BoundarySchema<PaneCloudSecretChoice> = boundary.object({
+  excludedSecrets: boundary.array(boundary.nonEmptyString),
+  excludedMachines: boundary.array(boundary.nonEmptyString),
+});
+
+function isNewer(candidate: SharedCredential, current: Pick<PaneSecretMeta, 'updatedAt'> | undefined): boolean {
   return !current || Date.parse(candidate.updatedAt) > Date.parse(current.updatedAt);
 }
 
@@ -295,7 +395,7 @@ export class PaneSecretStore {
   private readonly known = new Map<string, { updatedAt: string; value: string }>();
 
   constructor(
-    private readonly config: SecretConfig,
+    private readonly config: SecretIndexStore,
     private readonly values: SecretValueBackend,
     private readonly hostLabel: () => string = localHostLabel,
     private readonly now: () => Date = () => new Date(),
@@ -479,6 +579,77 @@ export class PaneSecretStore {
     }
   }
 
+  /** The index record of `key` (`<project>/<NAME>`), deletions included; never a value. */
+  secretRecord(key: string): PaneSecretMeta | undefined {
+    return this.index()[key];
+  }
+
+  /** What "Choose what to send" keeps off cloud Sessions, as this host last heard it. */
+  cloudChoice(): PaneCloudSecretChoice {
+    const meta = this.config.getConfig().paneCloudSecretChoice;
+    return meta ? { excludedSecrets: [...meta.excludedSecrets], excludedMachines: [...meta.excludedMachines] } : EMPTY_PANE_CLOUD_SECRET_CHOICE;
+  }
+
+  /** The person's new choice, stamped here and now so it wins on every computer and cloud VM it reaches. */
+  async setCloudChoice(choice: PaneCloudSecretChoice): Promise<void> {
+    return this.serial(async () => {
+      const meta: PaneCloudSecretChoiceMeta = { excludedSecrets: [...choice.excludedSecrets], excludedMachines: [...choice.excludedMachines], updatedAt: this.now().toISOString(), source: this.hostLabel() };
+      await this.config.updateConfigWith(() => ({ paneCloudSecretChoice: meta }));
+      this.onLocalChange();
+    });
+  }
+
+  /** The choice for the other hosts and cloud VMs: names only. */
+  exportCloudChoiceForSync(): SharedCredential | undefined {
+    const meta = this.config.getConfig().paneCloudSecretChoice;
+    if (!meta) return undefined;
+    return { value: JSON.stringify({ excludedSecrets: meta.excludedSecrets, excludedMachines: meta.excludedMachines }), updatedAt: meta.updatedAt, source: meta.source };
+  }
+
+  /** Saves a choice newer than this host's. Returns whether it changed. */
+  async applyCloudChoiceFromSync(record: SharedCredential): Promise<boolean> {
+    return this.serial(async () => {
+      if (record.value === null || !isNewer(record, this.config.getConfig().paneCloudSecretChoice)) return false;
+      // A stamp from the future would win every later change; no real host's clock is that far ahead.
+      if (Date.parse(record.updatedAt) > this.now().getTime() + MAX_CLOCK_AHEAD_MS) return false;
+      let choice: PaneCloudSecretChoice;
+      try {
+        choice = decodeBoundary(JSON.parse(record.value), cloudChoiceSchema);
+      } catch {
+        return false;
+      }
+      await this.config.updateConfigWith(() => ({ paneCloudSecretChoice: { ...choice, updatedAt: record.updatedAt, source: record.source } }));
+      return true;
+    });
+  }
+
+  /**
+   * On a cloud VM: removes every secret the choice keeps off cloud Sessions, its value and its record,
+   * leaving no deletion behind, so it arrives again once the person turns it back on. A value that
+   * can't be removed keeps its record, so the next sync tries again. Returns the keys removed.
+   */
+  async forgetExcluded(): Promise<string[]> {
+    return this.serial(async () => {
+      const choice = this.cloudChoice();
+      const removed: string[] = [];
+      for (const [key, meta] of Object.entries(this.index())) {
+        if (meta.deleted || sendsToCloud(choice, key, meta.source)) continue;
+        try {
+          await this.values.remove(key);
+        } catch (error) {
+          console.warn(`[PaneSecrets] Could not remove ${key}, which is now kept off cloud Sessions: ${reasonOf(error)}`);
+          continue;
+        }
+        this.known.delete(key);
+        removed.push(key);
+      }
+      if (removed.length > 0) {
+        await this.config.updateConfigWith((config) => ({ paneSecrets: Object.fromEntries(Object.entries(config.paneSecrets ?? {}).filter(([key]) => !removed.includes(key))) }));
+      }
+      return removed;
+    });
+  }
+
   /** References and their removals, for the other hosts. Addresses only: a reference carries no value. */
   exportReferencesForSync() {
     const records: Record<string, SharedCredential> = {};
@@ -505,7 +676,7 @@ export class PaneSecretStore {
       }
       const changed = Object.keys(applied);
       if (changed.length > 0) {
-        await this.config.updateConfigWith((config: AppConfig) => ({ paneSecretReferences: { ...config.paneSecretReferences, ...applied } }));
+        await this.config.updateConfigWith((config) => ({ paneSecretReferences: { ...config.paneSecretReferences, ...applied } }));
       }
       return changed;
     });
@@ -554,7 +725,7 @@ export class PaneSecretStore {
       }
       const changed = Object.keys(applied);
       if (changed.length > 0) {
-        await this.config.updateConfigWith((config: AppConfig) => ({ paneSecrets: { ...config.paneSecrets, ...applied } }));
+        await this.config.updateConfigWith((config) => ({ paneSecrets: { ...config.paneSecrets, ...applied } }));
       }
       return changed;
     });
@@ -567,14 +738,16 @@ let sharedLeases: SecretLeaseStore | null = null;
 
 /** One value store per host, so secrets and leases share its write queue. */
 function hostValueBackend(): SecretValueBackend {
-  sharedValues ??= systemSecretBackend(getAppDirectory());
+  sharedValues ??= paneSecretValueBackend(getAppDirectory());
   return sharedValues;
 }
 
 /** This host's leases, built on first use. Its first read deletes any that expired while Pane was closed. */
 export function secretLeaseStore(): SecretLeaseStore {
+  // On a cloud VM the lease records and log name secrets, so they live on the secrets volume too.
+  const volume = secretsVolume();
   sharedLeases ??= new SecretLeaseStore({
-    directory: getAppDirectory(),
+    directory: volume === undefined ? getAppDirectory() : volume ?? NOWHERE,
     values: hostValueBackend(),
     onChange: () => getPaneEventSink().send('pane-secrets:changed'),
   });
@@ -585,7 +758,10 @@ export function secretLeaseStore(): SecretLeaseStore {
 export function paneSecretStore(): PaneSecretStore {
   if (!shared) {
     // A connected desktop syncs when its hosts report a settings change, as they do for shared keys.
-    shared = new PaneSecretStore(getRuntimeConfigManager(), hostValueBackend(), localHostLabel, () => new Date(), () => {
+    const config = getRuntimeConfigManager();
+    const volume = secretsVolume();
+    const index = volume === undefined ? config : volumeSecretIndex(volume, () => config.getConfig());
+    shared = new PaneSecretStore(index, hostValueBackend(), localHostLabel, () => new Date(), () => {
       getPaneEventSink().send('remote:settings-changed');
     }, secretLeaseStore);
   }

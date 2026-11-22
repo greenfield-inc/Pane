@@ -66,6 +66,7 @@ import type {
   OrchestrationSessionView,
 } from '../../../shared/types/orchestrationSession';
 import type { PaneCloudAction, PaneCloudCreated, PaneCloudSnapshot } from '../../../shared/types/paneCloud';
+import type { PaneCloudSecretChoice, PaneCloudSecrets } from '../../../shared/types/paneCloudSecrets';
 import type { UsageIndexStatus, UsageReport, UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../../../shared/types/loop';
@@ -886,6 +887,12 @@ interface ElectronAPI {
     restore: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
     updatePane: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
     actions: (vmId: string) => Promise<IPCResponse<PaneCloudAction[]>>;
+    /** "Choose what to send": this computer's secrets by name, grouped by machine, and what is turned off. */
+    secrets: () => Promise<IPCResponse<PaneCloudSecrets>>;
+    /** Remembers what to keep off cloud Sessions, for every one from now on. */
+    chooseSecrets: (choice: PaneCloudSecretChoice) => Promise<IPCResponse<void>>;
+    /** Saves an agent's sign-in token for cloud Sessions (the one `claude setup-token` prints). */
+    saveToken: (agentId: string, token: string) => Promise<IPCResponse<void>>;
     onChanged: (callback: (snapshot: PaneCloudSnapshot) => void) => () => void;
   };
   machines: {

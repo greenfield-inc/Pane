@@ -28,6 +28,8 @@ import { phoneAccessIsOff } from './addDevice/addDeviceStore';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { PaneCloudSecretsDialog } from './PaneCloudSecretsDialog';
+import { CloudSignInTokens } from './CloudSignInTokens';
 
 /** How long a newly paired cloud machine may take to reach the machine menu. */
 const LISTED_DEADLINE_MS = 15_000;
@@ -244,6 +246,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
   const userSelectedAgent = useRef(false);
   const userToggledPinned = useRef(false);
   const [chosenPlace, setChosenPlace] = useState<Place>('here');
+  const [choosingSecrets, setChoosingSecrets] = useState(false);
   const cloud = usePaneCloudStore(state => state.snapshot);
   const followCloud = usePaneCloudStore(state => state.follow);
   const signInToCloud = usePaneCloudStore(state => state.signIn);
@@ -402,7 +405,8 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
           {offerPlaces && (
             <WhereItRuns value={place} onChange={pickPlace} current={places.current} others={places.others} cloudGate={cloudGate} sendsSecrets={cloud.sendsSecrets} turnsOnPhoneAccess={phoneAccessOff} disabled={isSubmitting}
               onMacWorkDocs={xcode && !macWork.macAvailable ? () => void window.electronAPI.openExternal(MAC_WORK_DOCS_URL) : undefined}
-              onCloudSignIn={() => void signInToCloud()} onCloudWaitlist={() => void window.electronAPI.openExternal(PANE_CLOUD_WAITLIST_URL)} onCloudSignUp={() => { if (signupUrl) void window.electronAPI.openExternal(signupUrl); }} />
+              onCloudSignIn={() => void signInToCloud()} onCloudWaitlist={() => void window.electronAPI.openExternal(PANE_CLOUD_WAITLIST_URL)} onCloudSignUp={() => { if (signupUrl) void window.electronAPI.openExternal(signupUrl); }}
+              onChooseSecrets={() => setChoosingSecrets(true)} signIns={cloudGate === null ? <CloudSignInTokens /> : undefined} />
           )}
           {distributions.length > 0 && place === 'here' && (
             <div className="space-y-2">
@@ -458,6 +462,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
               : machineName ? `Create Session on ${machineName}` : 'Create Session'}
           </Button>
         </ModalFooter>
+        <PaneCloudSecretsDialog isOpen={choosingSecrets} onClose={() => setChoosingSecrets(false)} />
       </form>
   );
 }

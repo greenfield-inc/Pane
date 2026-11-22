@@ -28,6 +28,40 @@ When two hosts disagree, the copy that was set most recently wins. Removing a ke
 
 A host that is offline keeps its own copy and catches up on the next sync. Hosts running a Pane version from before key sharing are skipped.
 
+## Pane Cloud Sessions
+
+A Pane Cloud Session's machine only receives. Each of your computers that holds a link
+to it sends it your Pane secrets (the merged set from all your machines), your GitHub
+token from `gh auth token` and your Claude Code token, before the Session starts and
+again on every later sync. They travel over that computer's own connection, encrypted
+end to end to the cloud machine: Greenfield's relay passes them along and can't read
+them, and the Pane Cloud service never sees them. The cloud machine never gives a
+secret back: it answers `credentials:shared:get` with nothing and the Approvals switch
+read with a value that never wins, and the phone app leaves cloud machines out of its
+sync. Integration keys and 1Password references are not sent.
+
+On the cloud machine everything about secrets sits on its secrets volume
+(`PANE_SECRETS_DIR`), which the abuse checks and Greenfield staff never open: the values
+(`secrets.json`), the list of names with the machines they came from and the choice
+below (`index.json`), and lease records. Its `config.json`, on the Session disk, holds
+nothing about secrets. Without the volume it stores none, and the send that starts a
+new cloud Session fails, so the Session is not created without them. The GitHub and
+Claude Code tokens are the Pane secrets `pane-cloud/GH_TOKEN` and
+`pane-cloud/CLAUDE_CODE_OAUTH_TOKEN`; the machine puts them in its agents' environment,
+and git signs in to GitHub through `gh`.
+
+**Choose what to send** on the Pane Cloud card turns off a secret, or every secret
+last set on one machine. The choice (`paneCloudSecretChoice`) syncs like a secret:
+the latest change wins on all your computers and every cloud machine. Each cloud
+machine applies it to whatever reaches it, from any computer or phone, and removes
+what it turns off, so a secret you turn off leaves cloud Sessions that already have it
+the next time one of your computers reaches them. Turning it back on sends it again.
+Agents already running keep the GitHub and Claude Code sign-ins they started with.
+
+Claude Code renews its own sign-in, so copying it would sign your computer out.
+The first time you pick Pane Cloud, Pane asks you to run `claude setup-token` and
+paste the token it prints.
+
 ## The Approvals switch
 
 Settings → Approvals' on/off switch (`notify.enabled`) travels the same way, on the same syncs: read every reachable host, write the newest to those behind. A change here also tells hosts that saved this one, so they sync within seconds. It has its own commands (`notify:switch:get`, `notify:switch:apply`), only desktops carry it (not the iPhone app), and only on/off and Show cards on are shared (plus Machine health's switch, below): position, sound, shortcut and the rest stay on each machine.

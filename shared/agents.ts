@@ -64,6 +64,8 @@ interface AgentConfigBase {
   tempDirs?: readonly string[];
   onboarding?: boolean;
   onboardingPanelId?: string;
+  /** A long-lived token for a machine that can't keep the CLI's own sign-in (a Pane Cloud VM): made by running the CLI with `args`, passed in `env`. */
+  signInToken?: { env: string; args: readonly string[] };
 }
 
 /** A chat agent always says how to sign in; a terminal-only agent signs in inside its own CLI. */

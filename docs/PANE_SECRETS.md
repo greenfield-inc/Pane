@@ -249,6 +249,10 @@ A reference syncs, but its value never does: only a lease you start sends values
 and only to the machines on its card. An older host or phone ignores references and
 never receives a lease value.
 
+A Pane Cloud Session's machine gets typed secrets one way, from your computers, less
+what you turned off in **Choose what to send**, and never sends any back
+([Pane Cloud Sessions](SHARED_CREDENTIALS.md#pane-cloud-sessions)).
+
 ## Who can read a secret
 
 Any agent, and any program running as you, on any of your hosts, can use every typed
@@ -264,6 +268,7 @@ secrets.
 | Every host Pane syncs to | Typed secrets: yes, holds a copy. From 1Password: only during a lease that names that host. | Each saved host keeps a copy of typed secrets for offline use. |
 | Your paired phone | Relays, never stores | The same rule as shared keys: a paired device can already open terminals on the host. It never receives a lease value. |
 | Teammates (other Tailscale logins on your tailnet), when any one of your hosts is set to "Everyone on tailnet" | Typed secrets: yes. From 1Password: no, since that host can't receive a lease. | Their `workspace exec` commands and the terminals they open there run as you, so they can read the keychain or `secrets.json`, run `runpane`, and reach every typed secret. Each synced host keeps a copy of your typed secrets, so that setting on any one host exposes them all. Pane refuses only their direct secret requests: secret and lease cards, secret variables, chat tab keys, chat tab sign-in and [shared key sync](SHARED_CREDENTIALS.md), and their terminals and chat tabs start without secret variables or chat tab keys, including after the owner switches one of their terminals to chat. Keep "Only me" on every host unless you trust everyone on the tailnet with all your typed secrets. |
+| A Pane Cloud Session's machine | Typed secrets you chose to send: yes, on its secrets volume with their names. | Agents there use them like on any host. The abuse checks and Greenfield staff never open that volume, and its `config.json` holds nothing about secrets. |
 | A Linux host without a keyring | Typed secrets at rest in a 0600 file, unencrypted. Lease values in memory only. | `runpane secrets list` on that host says so. |
 | Chat, MCP output, Notify history and broadcasts, push payloads, Pane logs (including the lease log), analytics, `sessions.db`, `config.json` | No | Pane never writes or returns a value to any of them. |
 | An agent's transcript and Pane's saved terminal scrollback | Only if the agent prints it | `exec` puts the value in a child's environment; if that command echoes it, the output goes wherever its output goes. |

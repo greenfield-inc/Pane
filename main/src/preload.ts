@@ -58,6 +58,7 @@ import type {
 } from '../../shared/types/orchestrationSession';
 import type { AgentUsageSnapshot } from '../../shared/types/agentUsage';
 import type { PaneCloudAction, PaneCloudCreated, PaneCloudSnapshot } from '../../shared/types/paneCloud';
+import type { PaneCloudSecretChoice, PaneCloudSecrets } from '../../shared/types/paneCloudSecrets';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
@@ -1569,6 +1570,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     restore: (vmId: string): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:restore', vmId),
     updatePane: (vmId: string): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:update-pane', vmId),
     actions: (vmId: string): Promise<IPCResponse<PaneCloudAction[]>> => ipcRenderer.invoke('pane-cloud:actions', vmId),
+    secrets: (): Promise<IPCResponse<PaneCloudSecrets>> => ipcRenderer.invoke('pane-cloud:secrets'),
+    chooseSecrets: (choice: PaneCloudSecretChoice): Promise<IPCResponse<void>> => ipcRenderer.invoke('pane-cloud:secrets:choose', choice),
+    saveToken: (agentId: string, token: string): Promise<IPCResponse<void>> => ipcRenderer.invoke('pane-cloud:secrets:token', agentId, token),
     onChanged: (callback: (snapshot: PaneCloudSnapshot) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, snapshot: PaneCloudSnapshot) => callback(snapshot);
       ipcRenderer.on('pane-cloud:changed', listener);

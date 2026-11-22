@@ -460,7 +460,10 @@ Cloud** under **Where it runs**, then **Create Session on Pane Cloud**. The firs
 **Sign in** opens the Pane Cloud page in your browser. Pane Cloud is invite-only
 for now: without an invite, the card offers **Join the waitlist**. Pane creates the
 machine, pairs this computer with it over the relay (phone access turns on if
-it was off), and starts the Session there.
+it was off), sends it your secrets and GitHub sign-in, and starts the Session
+there. **Choose what to send** on the Pane Cloud card turns off a secret or a
+whole machine's secrets; the first time, Pane also asks for a Claude Code token
+from `claude setup-token` ([how secrets reach a cloud Session](SHARED_CREDENTIALS.md#pane-cloud-sessions)).
 
 Pane Cloud machines run Linux, so iOS Simulator and Xcode work needs one of
 your Macs; the Pane Cloud card says so. When the project you have open has an

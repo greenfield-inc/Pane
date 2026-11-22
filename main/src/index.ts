@@ -1293,6 +1293,10 @@ async function initializeServices() {
     commands: commandRegistry,
     machines: machineConnections,
     configManager,
+    sendSecrets: async (machineId) => {
+      if (!sharedCredentialSync) throw new PaneError('ERR_CLOUD_SECRETS_NOT_SENT', 'Pane could not send your secrets: it is still starting.', 'Try New cloud Session again in a moment.');
+      await sharedCredentialSync.sendToCloudVm(machineId);
+    },
     send: (channel, snapshot) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, snapshot); },
   });
   setDeviceMachines(machineConnections);

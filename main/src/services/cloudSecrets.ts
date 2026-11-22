@@ -1,0 +1,102 @@
+import type { PaneSecretStore } from './paneSecrets';
+import { githubCliToken } from './githubWatchClient';
+import { PaneError } from '../../../shared/paneError';
+import { paneSecretKey, type PaneSecretSummary } from '../../../shared/types/paneSecrets';
+import type { SharedCredential, SharedCredentials } from '../../../shared/types/sharedCredentials';
+import {
+  CLOUD_SIGN_IN_ENVS,
+  CLOUD_SIGN_IN_PROJECT,
+  CLOUD_TOKEN_AGENTS,
+  GITHUB_SIGN_IN_ENV,
+  sendsToCloud,
+  type PaneCloudSecretChoice,
+  type PaneCloudSecretItem,
+  type PaneCloudSecrets,
+} from '../../../shared/types/paneCloudSecrets';
+
+export const GITHUB_SIGN_IN_KEY = paneSecretKey(CLOUD_SIGN_IN_PROJECT, GITHUB_SIGN_IN_ENV);
+
+/** What a sign-in is for, as the chooser labels it in place of the secret's project. */
+function signInLabel(key: string): string | null {
+  if (key === GITHUB_SIGN_IN_KEY) return 'GitHub';
+  return CLOUD_TOKEN_AGENTS.find((agent) => paneSecretKey(CLOUD_SIGN_IN_PROJECT, agent.env) === key)?.title ?? null;
+}
+
+/** The person's GitHub token from the GitHub CLI on this computer, or null when gh is missing or signed out. */
+export function readGithubToken(): Promise<string | null> {
+  return githubCliToken().then((token) => token || null, () => null);
+}
+
+/**
+ * The secrets a cloud VM gets: every Pane secret and deletion the person's choice allows. A deletion
+ * always goes, so a VM never keeps a secret that was deleted everywhere else.
+ */
+export function cloudSecretRecords(records: Record<string, SharedCredential>, choice: PaneCloudSecretChoice): Record<string, SharedCredential> {
+  return Object.fromEntries(Object.entries(records).filter(([key, record]) => record.value === null || sendsToCloud(choice, key, record.source)));
+}
+
+/** What "Choose what to send" lists: live secrets by name, grouped by the machine each was last set on, this one first. */
+export function describeCloudSecrets(secrets: readonly PaneSecretSummary[], choice: PaneCloudSecretChoice, thisComputer: string): PaneCloudSecrets {
+  const machines = new Map<string, PaneCloudSecretItem[]>([[thisComputer, []]]);
+  for (const secret of secrets) {
+    const key = paneSecretKey(secret.project, secret.name);
+    const items = machines.get(secret.machine) ?? [];
+    items.push({ key, name: secret.name, label: signInLabel(key) ?? secret.project });
+    machines.set(secret.machine, items);
+  }
+  const saved = new Set(secrets.map((secret) => paneSecretKey(secret.project, secret.name)));
+  return {
+    machines: [...machines]
+      .filter(([, items]) => items.length > 0)
+      .map(([name, items]) => ({ name, thisComputer: name === thisComputer, secrets: items.sort((a, b) => a.name.localeCompare(b.name) || a.label.localeCompare(b.label)) })),
+    choice,
+    missingTokens: CLOUD_TOKEN_AGENTS.filter((agent) => !saved.has(paneSecretKey(CLOUD_SIGN_IN_PROJECT, agent.env))),
+  };
+}
+
+/**
+ * On a cloud VM, puts the sign-ins it holds into `env`, which agent panels inherit, and takes out
+ * any that were removed. Git uses the GitHub token through the GitHub CLI.
+ */
+export async function exportCloudSignIns(secrets: Pick<PaneSecretStore, 'has' | 'read'>, env: NodeJS.ProcessEnv): Promise<void> {
+  for (const name of CLOUD_SIGN_IN_ENVS) {
+    const value = secrets.has(CLOUD_SIGN_IN_PROJECT, name) ? await secrets.read(CLOUD_SIGN_IN_PROJECT, name).catch(() => null) : null;
+    if (value) env[name] = value;
+    else delete env[name];
+  }
+  if (env[GITHUB_SIGN_IN_ENV] && env.GIT_CONFIG_COUNT === undefined) {
+    env.GIT_CONFIG_COUNT = '1';
+    env.GIT_CONFIG_KEY_0 = 'credential.https://github.com.helper';
+    env.GIT_CONFIG_VALUE_0 = '!gh auth git-credential';
+  }
+}
+
+type CloudSecretStore = Pick<PaneSecretStore, 'applyCloudChoiceFromSync' | 'cloudChoice' | 'forgetExcluded' | 'applyFromSync' | 'secretRecord' | 'has' | 'read'>;
+
+/**
+ * A cloud VM taking secrets from any of the person's devices. The VM, not the sender, applies the
+ * person's choice: it keeps the newest choice it has heard, removes what that choice turns off,
+ * and stores only what it allows. So a second computer, or a phone from before choices, can't put
+ * back a secret the person turned off. Throws when an allowed value could not be stored, so the
+ * sender knows the Session would start without it.
+ */
+export async function receiveCloudSecrets(secrets: CloudSecretStore, incoming: SharedCredentials, env: NodeJS.ProcessEnv): Promise<string[]> {
+  if (incoming.paneCloudSecretChoice) await secrets.applyCloudChoiceFromSync(incoming.paneCloudSecretChoice);
+  const removed = await secrets.forgetExcluded();
+  const allowed = cloudSecretRecords(incoming.paneSecrets ?? {}, secrets.cloudChoice());
+  const changed = await secrets.applyFromSync(allowed);
+  if (removed.length + changed.length > 0) await exportCloudSignIns(secrets, env);
+  const missing = Object.entries(allowed).filter(([key, record]) => {
+    if (record.value === null) return false;
+    const stored = secrets.secretRecord(key);
+    return !stored || stored.deleted || Date.parse(stored.updatedAt) < Date.parse(record.updatedAt);
+  });
+  if (missing.length > 0) {
+    throw new PaneError(
+      'ERR_CLOUD_SECRETS_NOT_STORED',
+      `This cloud machine could not store ${missing.length === 1 ? 'a secret' : `${missing.length} secrets`} on its secrets volume, so its agents would start without them.`,
+      'Delete this cloud Session and create a new one. If it happens again, write to Pane Cloud support: the machine\'s secrets volume may be missing or full.',
+    );
+  }
+  return [...removed, ...changed];
+}

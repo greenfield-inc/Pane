@@ -90,10 +90,14 @@ interface WhereItRunsProps {
   turnsOnPhoneAccess: boolean;
   /** The repo has an Xcode project and none of the person's Macs is online: the Mac line links to the docs. */
   onMacWorkDocs?: () => void;
+  /** Opens "Choose what to send" (frame B2). */
+  onChooseSecrets: () => void;
+  /** Shown under the secrets line while Pane Cloud is selected: the sign-in token prompts, when any is due. */
+  signIns?: ReactNode;
   disabled?: boolean;
 }
 
-export function WhereItRuns({ value, onChange, current, others, cloudGate, onCloudSignIn, onCloudWaitlist, onCloudSignUp, sendsSecrets, turnsOnPhoneAccess, onMacWorkDocs, disabled }: WhereItRunsProps) {
+export function WhereItRuns({ value, onChange, current, others, cloudGate, onCloudSignIn, onCloudWaitlist, onCloudSignUp, sendsSecrets, turnsOnPhoneAccess, onMacWorkDocs, onChooseSecrets, signIns, disabled }: WhereItRunsProps) {
   const here = current.id === LOCAL_MACHINE_ID;
   const thisLabel = isMac() ? 'This Mac' : isWindows() ? 'This PC' : 'This computer';
   const cloudSelected = value === 'cloud';
@@ -147,12 +151,16 @@ export function WhereItRuns({ value, onChange, current, others, cloudGate, onClo
                 <span>Creating it turns on phone access on {THIS_COMPUTER}, which the new machine connects through.</span>
               </span>
             )}
-            {sendsSecrets && (
+            {sendsSecrets && <>
               <span className="mt-2.5 flex items-start gap-2 text-xs text-text-secondary">
                 <KeyRound className="mt-0.5 h-[13px] w-[13px] shrink-0 text-text-tertiary" aria-hidden="true" />
-                <span>Your secrets come along, sent straight from your machines, and are kept on a separate volume the checks don&apos;t read.</span>
+                <span>
+                  Your secrets come along, encrypted from your computer to the cloud machine, and are kept there on a separate volume the checks don&apos;t read.{' '}
+                  <button type="button" onClick={onChooseSecrets} disabled={disabled} className="text-interactive hover:underline">Choose what to send</button>
+                </span>
               </span>
-            )}
+              {signIns}
+            </>}
             <span className="mt-2.5 flex items-start gap-2 text-xs text-text-tertiary">
               <Eye className="mt-0.5 h-[13px] w-[13px] shrink-0" aria-hidden="true" />
               <span>{INSPECTION_NOTICE}</span>

@@ -155,9 +155,16 @@ export class MachineConnections {
     return () => { this.listeners.delete(listener); };
   }
 
-  /** Each saved machine's connection, for main-process callers such as key sharing. Never reaches the renderer. */
-  remotes(): Array<{ id: string; invoke: MachineClient['invoke'] }> {
-    return [...this.machines.values()].map(machine => ({ id: machine.profile.id, invoke: (channel, args) => machine.client.invoke(channel, args) }));
+  /**
+   * Each saved machine's connection, for main-process callers such as key sharing. Never reaches the renderer.
+   * `receiveOnly`: a Pane Cloud VM, as this desktop recorded when it paired with it (D-75).
+   */
+  remotes(): Array<{ id: string; receiveOnly: boolean; invoke: MachineClient['invoke'] }> {
+    return [...this.machines.values()].map(machine => ({
+      id: machine.profile.id,
+      receiveOnly: machine.profile.relay?.receiveOnly === true,
+      invoke: (channel, args) => machine.client.invoke(channel, args),
+    }));
   }
 
   /** Runs any host channel on a saved machine, for main-process callers (Session members). Never reaches the renderer. */

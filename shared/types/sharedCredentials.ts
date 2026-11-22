@@ -21,6 +21,12 @@ export type SharedCredentials = Partial<Record<SharedCredentialId, SharedCredent
    * A field of its own, so hosts, desktops and phones from before references drop it whole and never read one as a tombstone.
    */
   paneSecretReferences?: Record<string, SharedCredential>;
+  /**
+   * What "Choose what to send" keeps off cloud Sessions: `value` is the choice as JSON (names only, never a
+   * secret value). One record for all the person's computers and their cloud VMs, so every sender and every
+   * VM reads the same choice. Hosts from before it drop the field.
+   */
+  paneCloudSecretChoice?: SharedCredential;
 };
 
 /** The per-key maps that merge by newest copy. */
@@ -53,7 +59,7 @@ function isNewerCredential(candidate: SharedCredential, current: SharedCredentia
 export interface SharedCredentialMerge {
   credentials: SharedCredentials;
   changed: SharedCredentialId[];
-  /** Pane secret and reference keys (`<project>/<NAME>`) that changed. */
+  /** Pane secret and reference keys (`<project>/<NAME>`) that changed, and `paneCloudSecretChoice` when it did. */
   changedSecrets: string[];
 }
 
@@ -82,6 +88,11 @@ export function mergeSharedCredentials(current: SharedCredentials, incoming: Sha
       }
     }
     if (changedHere || current[field]) credentials[field] = merged;
+  }
+  const choice = incoming.paneCloudSecretChoice;
+  if (choice && isNewerCredential(choice, credentials.paneCloudSecretChoice)) {
+    credentials.paneCloudSecretChoice = choice;
+    changedSecrets.push('paneCloudSecretChoice');
   }
   return { credentials, changed, changedSecrets };
 }

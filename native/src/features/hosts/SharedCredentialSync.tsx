@@ -36,7 +36,8 @@ async function run(): Promise<void> {
   running = true;
   try {
     // A computer reached over Tailscale shares keys only with its owner and refuses everyone else.
-    const profiles = useHostsStore.getState().profiles;
+    // A Pane Cloud VM gets its secrets from the desktop that made it, with the person's choice, and gives none back (D-75).
+    const profiles = useHostsStore.getState().profiles.filter(profile => !profile.relay?.receiveOnly);
     if (profiles.length < 2) return;
     const hosts = profiles.map((profile): SharedCredentialHost => {
       const client = createDaemonClient(profile);
