@@ -97,7 +97,7 @@ runs `fleetContractCases`; Pane builds on `startServiceStub`. This package's own
 suites against both stubs: `pnpm --filter pane-cloud-contract test`.
 
 Some service cases need test-mode setup: pass `controls` to `serviceContractCases` with any of
-`pauseForReview`, `setCapacity`, `addMember`, `changeMember`, `setPlan`, `setMemoryGiB` and `setClock`
+`pauseForReview`, `setCapacity`, `addMember`, `changeMember`, `replaceRelayKey`, `setPlan`, `setMemoryGiB` and `setClock`
 (`ServiceContractControls`). A case whose control is missing throws `SkipCase`; report it as
 skipped. `setClock` only moves forward, so run the cases in order. Without controls, the cases
 that need them are the review pause, `no_capacity`, a second organization with Full access and
@@ -178,7 +178,7 @@ Called only by the service. Every change to a VM is one signed operation.
 | `update_pane` | guest | the same `release`; the host refuses a checksum that is not a published release |
 | `prepare_to_stop` | guest | none |
 | `collect_diagnostics` | guest | none; reads only `DIAGNOSTIC_FILES` |
-| `create_pairing_link` | guest | none; returns a one-time pairing link from the VM's Pane and its relay identity. The host keeps the link only to answer a retried `requestId` |
+| `create_pairing_link` | guest | none; returns a one-time pairing link from the VM's Pane, good for at most 10 minutes, and its relay identity. The host keeps the link only to answer a retried `requestId`, and drops it when the operation's `expiresAt` passes |
 
 There is no shell command, file write or access grant, and every schema is strict, so an extra
 parameter is refused.

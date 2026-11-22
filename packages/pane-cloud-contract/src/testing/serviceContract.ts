@@ -31,6 +31,8 @@ export interface ServiceContractControls {
   setCapacity(capacity: number | null): Promise<void> | void;
   /** Adds a test account to an organization with a role, as an accepted invitation does. */
   addMember(who: Who, organizationId: string, role: 'full_access' | 'view_only'): Promise<void> | void;
+  /** Makes the VM's Pane lose its relay key and make a new one, so it reports another identity. */
+  replaceRelayKey(vmId: string): Promise<void> | void;
   /** Changes a test account's role in an organization, or removes it from the organization with null. */
   changeMember(who: Who, organizationId: string, role: 'full_access' | 'view_only' | null): Promise<void> | void;
   /** Puts an organization on a plan. */
@@ -231,9 +233,23 @@ export function serviceContractCases(target: ServiceContractTarget): ContractCas
           assert.notEqual(second.link, first.link, 'each pairing gets a new link');
           const logged = (await member.listActionLog(vm.id)).entries.filter((e) => e.operation === 'create_pairing_link');
           assert.equal(logged.length, 2, 'each pairing is in the action log');
+          const firstLogged = logged.at(-1);
+          assert.ok(firstLogged && Date.parse(first.expiresAt) - Date.parse(firstLogged.requestedAt) <= 10 * 60_000, 'the link lasts at most 10 minutes');
           const secret = fragment.get('s') ?? '';
           assert.ok(logged.every((e) => !JSON.stringify(e).includes(secret)), 'the action log never holds the link');
           await expectError('vm_not_found', async () => (await as('waitlisted')).pairVm(vm.id));
+        });
+      },
+    },
+    {
+      name: 'service: keeps the first relay identity a Session VM reported and refuses to pair one that reports another (relay_key_changed)',
+      async run() {
+        const replaceRelayKey = control('replaceRelayKey');
+        await withVm(async (member, vm) => {
+          const { relay } = await member.pairVm(vm.id);
+          await replaceRelayKey(vm.id);
+          await expectError('relay_key_changed', () => member.pairVm(vm.id));
+          assert.deepEqual((await member.getVm(vm.id)).relay, relay, 'the vouched identity stays the first one');
         });
       },
     },

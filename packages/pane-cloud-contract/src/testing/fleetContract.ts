@@ -199,6 +199,7 @@ export function fleetContractCases(target: FleetContractTarget): ContractCase[] 
         const first = await run(vmId, 'create_pairing_link');
         assert.ok(first.result && 'relay' in first.result, 'create_pairing_link returns a link and the relay identity');
         assert.equal(new URLSearchParams(new URL(first.result.link).hash.slice(1)).get('c'), first.result.relay.computerId);
+        assert.ok(Date.parse(first.result.expiresAt) - Date.now() <= 10 * 60_000 + 30_000, 'the link lasts at most 10 minutes');
         await run(vmId, 'stop');
         await vmIn(vmId, 'stopped');
         await run(vmId, 'start');

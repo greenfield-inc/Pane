@@ -33,6 +33,7 @@ describe('service stub passes the service contract', () => {
       setCapacity: (capacity) => stub.setCapacity(capacity),
       addMember: (who, organizationId, role) => stub.addMember(organizationId, emails[who], role),
       changeMember: (who, organizationId, role) => stub.changeMember(organizationId, emails[who], role),
+      replaceRelayKey: (vmId) => stub.replaceRelayKey(vmId),
       setPlan: (organizationId, plan) => stub.setPlan(organizationId, plan),
       setMemoryGiB: (vmId, memoryGiB) => stub.setMemoryGiB(vmId, memoryGiB),
       setClock: (at) => {
@@ -125,27 +126,5 @@ describe('a relay identity', () => {
   });
   it('rejects a computer id that another key names', () => {
     expect(RelayIdentity.safeParse({ computerId: '75rnqtlvttepjja4', fingerprint, domain: 'runpane.net' }).success).toBe(false);
-  });
-});
-
-describe('the service stub vouches only for the first relay identity', () => {
-  it('refuses to pair a Session whose Pane made a new relay key', async () => {
-    const stub = await startServiceStub({ accounts: [{ email: 'a@example.test', invited: true }] });
-    try {
-      const anonymous = createServiceClient({ baseUrl: stub.url });
-      const { deviceCode, userCode } = await anonymous.startDeviceSignIn();
-      stub.approveDevice(userCode, 'a@example.test');
-      const signedIn = await anonymous.pollDeviceSignIn(deviceCode);
-      if (signedIn.status !== 'complete') throw new Error(signedIn.status);
-      const member = createServiceClient({ baseUrl: stub.url, token: signedIn.token });
-      const { vm } = await member.createVm(signedIn.account.organizations[0]?.organizationId ?? '', 'paired', 'pair-key-0001');
-      const { relay } = await member.pairVm(vm.id);
-
-      stub.replaceRelayKey(vm.id);
-      await expect(member.pairVm(vm.id)).rejects.toMatchObject({ code: 'relay_key_changed' });
-      expect((await member.getVm(vm.id)).relay).toEqual(relay);
-    } finally {
-      await stub.close();
-    }
   });
 });

@@ -203,9 +203,23 @@ function serviceContractCases(target) {
                     strict_1.default.notEqual(second.link, first.link, 'each pairing gets a new link');
                     const logged = (await member.listActionLog(vm.id)).entries.filter((e) => e.operation === 'create_pairing_link');
                     strict_1.default.equal(logged.length, 2, 'each pairing is in the action log');
+                    const firstLogged = logged.at(-1);
+                    strict_1.default.ok(firstLogged && Date.parse(first.expiresAt) - Date.parse(firstLogged.requestedAt) <= 10 * 60_000, 'the link lasts at most 10 minutes');
                     const secret = fragment.get('s') ?? '';
                     strict_1.default.ok(logged.every((e) => !JSON.stringify(e).includes(secret)), 'the action log never holds the link');
                     await (0, cases_1.expectError)('vm_not_found', async () => (await as('waitlisted')).pairVm(vm.id));
+                });
+            },
+        },
+        {
+            name: 'service: keeps the first relay identity a Session VM reported and refuses to pair one that reports another (relay_key_changed)',
+            async run() {
+                const replaceRelayKey = control('replaceRelayKey');
+                await withVm(async (member, vm) => {
+                    const { relay } = await member.pairVm(vm.id);
+                    await replaceRelayKey(vm.id);
+                    await (0, cases_1.expectError)('relay_key_changed', () => member.pairVm(vm.id));
+                    strict_1.default.deepEqual((await member.getVm(vm.id)).relay, relay, 'the vouched identity stays the first one');
                 });
             },
         },
