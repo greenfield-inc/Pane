@@ -23,6 +23,8 @@ import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/
 import type { PaneSecretsOverview, SecretLeaseStartRequest } from '../shared/types/paneSecrets';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 import type { RelayPairingInfo, RelayStatus } from '../shared/types/relay';
+import type { PaneCloudSnapshot } from '../shared/types/paneCloud';
+import type { OrchestrationSessionCreateInput } from '../shared/types/orchestrationSession';
 import type { ComputerRoute, ComputerRoutesReport, RemoteComputer } from '../shared/types/remoteComputers';
 import type { AutopilotDocument } from '../shared/types/autopilot';
 import type { TodoAction, TodoActivity, TodoAttachment, TodoCreateInput, TodoDetail, TodoSnooze, TodoStatus, TodosSnapshot } from '../shared/types/todos';
@@ -1387,6 +1389,32 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         onState: () => () => undefined,
       };
     })() : undefined;
+    // window.electronAPI.paneCloud: absent until a spec calls setPaneCloud(), which serves it.
+    let paneCloudSnapshot: PaneCloudSnapshot = {
+      signIn: { state: 'signed-in', email: 'maya@example.com', name: 'Maya', access: 'invited', signupState: 'ready', signupUrl: 'https://cloud.example.test/signup', organizationId: 'org-1' },
+      sessions: [],
+      usage: { plan: 'free', resetsAt: '2026-12-01T00:00:00.000Z', agentHoursUsed: 12, agentHoursLimit: 300, awakeNow: 1, awakeLimit: 5, members: [] },
+      creating: null,
+      busy: [],
+      error: null,
+    };
+    const paneCloudCreates: OrchestrationSessionCreateInput[] = [];
+    const paneCloudAnswer = () => Promise.resolve({ success: true, data: clone(paneCloudSnapshot) });
+    const paneCloudApi = {
+      get: paneCloudAnswer,
+      signIn: paneCloudAnswer,
+      signOut: paneCloudAnswer,
+      stop: paneCloudAnswer,
+      start: paneCloudAnswer,
+      remove: paneCloudAnswer,
+      updatePane: paneCloudAnswer,
+      actions: () => Promise.resolve({ success: true, data: [] }),
+      create: (input: OrchestrationSessionCreateInput) => {
+        paneCloudCreates.push(clone(input));
+        return Promise.resolve({ success: true, data: { machineId: 'cloud-1', sessionId: 's-1', snapshot: clone(paneCloudSnapshot) } });
+      },
+      onChanged: (callback: MockEventCallback) => subscribe('pane-cloud:changed', callback),
+    };
     const electronAPI = {
       autopilot: autopilotApi,
       todos: todosApi,
@@ -2418,6 +2446,19 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getOpenedExternalUrls() {
           return clone(openedExternalUrls);
+        },
+        /**
+         * Serves window.electronAPI.paneCloud with these parts over the default snapshot (signed in,
+         * invited, ready, free plan at 12 of 300 hours, 1 of 5 awake) and announces it.
+         */
+        setPaneCloud(parts: Partial<PaneCloudSnapshot>) {
+          paneCloudSnapshot = { ...paneCloudSnapshot, ...clone(parts) };
+          Object.assign(window.electronAPI, { paneCloud: paneCloudApi });
+          emit('pane-cloud:changed', clone(paneCloudSnapshot));
+        },
+        /** Every New cloud Session input, in order. */
+        getPaneCloudCreates() {
+          return clone(paneCloudCreates);
         },
         /** Every panel the renderer created through `panels.createPanel`, in order. */
         getPanelCreates() {
