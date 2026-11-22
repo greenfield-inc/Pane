@@ -67,6 +67,7 @@ export type UiSessionFixture = {
 };
 
 export type SessionFixtureOptions = {
+  machineConnections?: Parameters<typeof installElectronApiMock>[1]['machineConnections'];
   projects?: JsonObject[];
   activeProjectId?: number;
   distributions?: string[];
@@ -174,6 +175,7 @@ export async function installSessionsFixture(
     notifySnapshot: fixtureOptions.notifySnapshot,
     initialPanels: fixtureOptions.initialPanels,
     initialLayout: fixtureOptions.initialLayout,
+    machineConnections: fixtureOptions.machineConnections,
   });
   await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes, distributions }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]>; distributions: string[] }) => {
     type SessionRecord = UiSessionFixture;

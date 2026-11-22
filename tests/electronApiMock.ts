@@ -1393,20 +1393,23 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let paneCloudSnapshot: PaneCloudSnapshot = {
       signIn: { state: 'signed-in', email: 'maya@example.com', name: 'Maya', access: 'invited', signupState: 'ready', signupUrl: 'https://cloud.example.test/signup', organizationId: 'org-1' },
       sessions: [],
-      usage: { plan: 'free', resetsAt: '2026-12-01T00:00:00.000Z', agentHoursUsed: 12, agentHoursLimit: 300, awakeNow: 1, awakeLimit: 5, members: [] },
+      usage: { plan: 'free', planAgentHours: 300, planAwakeLimit: 5, resetsAt: '2026-12-01T00:00:00.000Z', agentHoursUsed: 12, agentHoursLimit: 300, awakeNow: 1, awakeLimit: 5, members: [] },
       creating: null,
       busy: [],
       error: null,
     };
     const paneCloudCreates: OrchestrationSessionCreateInput[] = [];
     const paneCloudAnswer = () => Promise.resolve({ success: true, data: clone(paneCloudSnapshot) });
+    /** Stop, Start and Delete calls, by VM id. */
+    const paneCloudCalls: Array<{ action: 'stop' | 'start' | 'remove'; vmId: string }> = [];
+    const paneCloudCall = (action: 'stop' | 'start' | 'remove') => (vmId: string) => { paneCloudCalls.push({ action, vmId }); return paneCloudAnswer(); };
     const paneCloudApi = {
       get: paneCloudAnswer,
       signIn: paneCloudAnswer,
       signOut: paneCloudAnswer,
-      stop: paneCloudAnswer,
-      start: paneCloudAnswer,
-      remove: paneCloudAnswer,
+      stop: paneCloudCall('stop'),
+      start: paneCloudCall('start'),
+      remove: paneCloudCall('remove'),
       updatePane: paneCloudAnswer,
       actions: () => Promise.resolve({ success: true, data: [] }),
       create: (input: OrchestrationSessionCreateInput) => {
@@ -2455,6 +2458,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           paneCloudSnapshot = { ...paneCloudSnapshot, ...clone(parts) };
           Object.assign(window.electronAPI, { paneCloud: paneCloudApi });
           emit('pane-cloud:changed', clone(paneCloudSnapshot));
+        },
+        /** Every Stop, Start and Delete of a cloud Session, in order. */
+        getPaneCloudCalls() {
+          return clone(paneCloudCalls);
         },
         /** Every New cloud Session input, in order. */
         getPaneCloudCreates() {
