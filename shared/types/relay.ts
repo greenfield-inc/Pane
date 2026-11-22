@@ -67,11 +67,25 @@ export interface RelayComputerGrant {
   token: string;
 }
 
-/** A computer redeeming a link: who it is, its routes, and a token it made for the link's maker to call it. */
+/**
+ * A computer redeeming a link: who it is, its routes, and a token it made for the link's maker to
+ * call it. Without a token the maker records the computer as a client only and can't call it back:
+ * a desktop pairing with a cloud VM.
+ */
 export interface RelayComputerOffer {
   computer: RelayComputer;
   routes?: ComputerRoutesReport;
-  token: string;
+  token?: string;
+}
+
+/**
+ * A pairing with a cloud VM, as Pane Cloud's `POST /v1/vms/:vmId/pairing` answers it: a one-time
+ * link, and the relay identity the service vouches for. Pane pairs only with a VM that presents
+ * exactly that key.
+ */
+export interface VouchedPairing {
+  link: string;
+  relay: { computerId: string; fingerprint: string; domain: string };
 }
 
 /** `POST /pair/exchange` body. `phoneId` is the app's stable install id, so "Remove from all your computers" finds the phone everywhere. */

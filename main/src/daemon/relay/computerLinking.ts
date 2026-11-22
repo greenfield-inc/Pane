@@ -1,5 +1,5 @@
 import { PaneError, reasonOf } from '../../../../shared/paneError';
-import { isRelayComputerUnder, parseRelayPairingLink, relayComputerAddress, type RelayPairingLink } from '../../../../shared/remoteClient/relay';
+import { isRelayComputerUnder, parseRelayPairingLink, relayComputerAddress, relayKeyMatchesId, type RelayPairingLink } from '../../../../shared/remoteClient/relay';
 import { RemoteRequestError } from '../../../../shared/remoteClient/remoteDaemonClient';
 import { decodeComputerRoutesReport, type ComputerRoutesReport } from '../../../../shared/types/remoteComputers';
 import {
@@ -10,6 +10,7 @@ import {
   type RelayComputerOffer,
   type RelayExchangeRequest,
   type RelayPairedEvent,
+  type VouchedPairing,
 } from '../../../../shared/types/relay';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PairingRoute } from '../httpApiServer';
@@ -26,7 +27,7 @@ interface PairingHost {
 
 const offerSchema = boundary.object({
   computer: relayComputerSchema,
-  token: boundary.nonEmptyString,
+  token: boundary.optional(boundary.nonEmptyString),
   routes: boundary.optional(boundary.json),
 });
 const groupSchema = boundary.array(boundary.object({ id: boundary.nonEmptyString, name: boundary.nonEmptyString }));
@@ -82,8 +83,9 @@ export function createPairingRoute(deps: {
       }
       const result = await host.exchangeSecret({ ...request, label: offer.computer.name, computerId: offer.computer.id });
       if (!result.ok) return result;
-      const computerId = await links.saveComputer({ computer: offer.computer, token: offer.token, routes: decodeComputerRoutesReport(offer.routes) });
-      deps.onPaired({ kind: 'computer', label: offer.computer.name, computerId });
+      // Without a token the computer is a client here and nothing more: this computer can't call it.
+      const computerId = offer.token === undefined ? undefined : await links.saveComputer({ computer: offer.computer, token: offer.token, routes: decodeComputerRoutesReport(offer.routes) });
+      deps.onPaired(computerId === undefined ? { kind: 'computer', label: offer.computer.name } : { kind: 'computer', label: offer.computer.name, computerId });
       const [linked, routes] = await Promise.all([links.computerGrantsFor(offer.computer, request.known ?? []), deps.routesReport()]);
       return routes ? { ...result, linked, routes } : { ...result, linked };
     },
@@ -201,6 +203,42 @@ export class ComputerLinking {
     const ours = await this.infoFor(before.filter((profile) => !theirIds.has(profile.relay.computerId)));
     await Promise.all(ours.flatMap(({ profile, computer }) => theirs.map((peer) => this.join(profile, computer, peer))));
     return { linked: theirs.map((computer) => computer.name) };
+  }
+
+  /**
+   * Pairs this computer with a cloud VM from the link and relay identity Pane Cloud vouches for. The
+   * VM must present exactly the vouched key. Pairing is one way: this computer gets a token for the
+   * VM and offers none back, so the VM can't call this computer. This computer is still a computer
+   * client there, so a phone paired here gets a token for the VM too. Returns the VM's id in
+   * `client.computers`.
+   */
+  async redeemVouched(pairing: VouchedPairing): Promise<{ computerId: string; name: string }> {
+    const link = this.parse(pairing.link);
+    const { relay } = pairing;
+    if (link.computerId !== relay.computerId || link.domain !== relay.domain || !relayKeyMatchesId({ id: relay.computerId, fingerprint: relay.fingerprint })) {
+      throw new PaneError('ERR_PAIRING_KEY_MISMATCH', `The pairing link for ${link.name} names a different computer than the key Pane Cloud vouched for, so nothing was paired.`, 'Open the Session again to get a new pairing; if this keeps happening, write to Pane Cloud support.');
+    }
+    const self = this.deps.self();
+    if (!self) {
+      throw new PaneError('ERR_RELAY_OFF', `Phone access is off on this computer, so it was not paired with ${link.name}.`, 'Open Settings › Remote Access › Add a device on this computer, which turns phone access on, then open the Session again.');
+    }
+    if (link.domain !== self.domain) {
+      throw new PaneError('ERR_RELAY_LINK_OUTSIDE_DOMAIN', `${link.name} uses the relay ${link.domain} and this computer uses ${self.domain}, so they were not paired.`, `Set the Relay address in Settings › Remote Access › Phones and glasses to ${link.domain}, then open the Session again.`);
+    }
+    let answer: { status: number; json: unknown };
+    try {
+      const request: RelayExchangeRequest = { secret: link.secret, label: self.name, known: [], computer: { computer: self } };
+      answer = await this.deps.post(relayComputerAddress(link), '/pair/exchange', request, link.name, relay.fingerprint);
+    } catch (error) {
+      throw new PaneError('ERR_LINK_UNREACHABLE', `Can't reach ${link.name}: ${reasonOf(error)}. Nothing was paired.`, 'Check that this computer is online, then open the Session again.');
+    }
+    const result = decodeOptionalBoundary(answer.json, exchangeSchema);
+    if (!result) throw refusal(decodeOptionalBoundary(answer.json, failureSchema)?.error.code ?? `HTTP_${answer.status}`, link.name);
+    if (result.computer.id !== relay.computerId || result.computer.fingerprint !== relay.fingerprint || !isRelayComputerUnder(result.computer, relay.domain)) {
+      throw new PaneError('ERR_PAIRING_KEY_MISMATCH', `${link.name} answered with a key Pane Cloud did not vouch for, so Pane did not pair with it.`, 'Open the Session again; if this keeps happening, write to Pane Cloud support.');
+    }
+    const computerId = await this.deps.links.saveComputer({ computer: result.computer, token: result.token, routes: decodeComputerRoutesReport(result.routes) });
+    return { computerId, name: result.computer.name };
   }
 
   private parse(text: string): RelayPairingLink {
