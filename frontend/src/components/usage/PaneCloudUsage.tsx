@@ -66,7 +66,11 @@ function SignInGroup({ snapshot }: { snapshot: PaneCloudSnapshot }) {
   const { signIn: startSignIn, signOut } = usePaneCloudStore.getState();
   return (
     <RemoteGroup title="Pane Cloud" aside={<Badge size="sm">Beta</Badge>}>
-      {signIn.state === 'pending' ? (
+      {signIn.state === 'unavailable' ? (
+        <Row label="Pane Cloud" description="Pane can't reach Pane Cloud right now, so your plan and hours can't be shown. Your cloud Sessions keep running.">
+          <Button type="button" size="sm" variant="ghost" onClick={() => void usePaneCloudStore.getState().refresh()}>Try again</Button>
+        </Row>
+      ) : signIn.state === 'pending' ? (
         <Row label="Finish signing in in your browser" description={`Your code is ${signIn.userCode}. Pane waits here until you finish.`}>
           <Button type="button" size="sm" variant="ghost" onClick={() => void signOut()}>Cancel</Button>
         </Row>
@@ -75,7 +79,7 @@ function SignInGroup({ snapshot }: { snapshot: PaneCloudSnapshot }) {
           <Button type="button" size="sm" variant="ghost" onClick={() => void signOut()}>Sign out</Button>
         </Row>
       ) : (
-        <Row label="Pane Cloud" description="A machine for each Session that keeps working when this computer is closed. 300 agent-hours a month free.">
+        <Row label="Pane Cloud" description="A machine for each Session that keeps working when this computer is closed. 300 agent-hours a month free. Most people never reach this.">
           <Button type="button" size="sm" icon={<LogIn className="h-4 w-4" />} onClick={() => void startSignIn()}>Sign in</Button>
         </Row>
       )}
@@ -103,7 +107,7 @@ function SignedInUsage({ snapshot, usage }: { snapshot: PaneCloudSnapshot; usage
         >
           {usage.agentHoursLimit === null ? hours(usage.agentHoursUsed) : `${hours(usage.agentHoursUsed)} of ${usage.agentHoursLimit.toLocaleString()}`}
         </Row>
-        <Row label="Your Sessions awake now" description={`You can have ${usage.awakeLimit} awake at once on ${plan}.`}>
+        <Row label="Your Sessions awake now" description={`You can have ${usage.awakeLimit} awake at once.`}>
           {`${usage.awakeNow} of ${usage.awakeLimit}`}
         </Row>
         <Row label="Sessions kept" description="Cloud Sessions with saved chats and files.">

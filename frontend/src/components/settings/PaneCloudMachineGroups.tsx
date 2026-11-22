@@ -27,6 +27,8 @@ export function PaneCloudMachineGroups({ machineId }: { machineId: string }) {
   const busy = usePaneCloudStore((state) => cloud !== null && state.snapshot.busy.includes(cloud.vmId));
   const [actions, setActions] = useState<PaneCloudAction[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Update Pane fails the way any Pane Cloud call does, in the shared snapshot.
+  const actionError = usePaneCloudStore((state) => state.snapshot.error);
   useEffect(() => usePaneCloudStore.getState().follow(), []);
   const vmId = cloud?.vmId ?? null;
   const paneVersion = cloud?.paneVersion ?? null;
@@ -48,10 +50,11 @@ export function PaneCloudMachineGroups({ machineId }: { machineId: string }) {
       <RemoteGroup title="Pane Cloud">
         <Row label="Pane" detail="Updates install a published release, checked against its checksum.">
           <span className="text-sm text-text-secondary">{cloud.paneVersion ?? 'Installing'}</span>
-          <Button type="button" variant="ghost" size="sm" disabled={!cloud.awake} loading={busy} onClick={() => void window.electronAPI.paneCloud.updatePane(cloud.vmId)}>Update Pane</Button>
+          <Button type="button" variant="ghost" size="sm" disabled={!cloud.awake} loading={busy} onClick={() => void usePaneCloudStore.getState().updatePane(cloud.vmId)}>Update Pane</Button>
         </Row>
+        {actionError && <p className={`text-sm text-status-error ${CARD_ROW}`} role="alert">{[actionError.message, actionError.next].filter(Boolean).join(' ')}</p>}
       </RemoteGroup>
-      <RemoteGroup title="Recent actions" footnote="Every operation Pane Cloud ran on this cloud Session, newest first. Pane Cloud can run only these named operations; it has no shell on the machine.">
+      <RemoteGroup title="Recent actions" footnote="Every operation you or Pane Cloud asked for on this cloud Session, newest first.">
         {error && <p className={`text-sm text-status-error ${CARD_ROW}`} role="alert">{error}</p>}
         {actions?.length === 0 && <p className={`text-sm text-text-tertiary ${CARD_ROW}`}>Nothing yet.</p>}
         <ul aria-label="Recent actions">

@@ -41,12 +41,11 @@ async function openNewCloudSession(machineId: string, target: MachineTarget): Pr
 
 /** Resolves once `ready` holds for the machine menu, or after a while regardless. */
 function until(ready: () => boolean): Promise<void> {
-  const listed = ready;
-  if (listed()) return Promise.resolve();
+  if (ready()) return Promise.resolve();
   return new Promise((resolve) => {
     const timer = setTimeout(() => { stop(); resolve(); }, LISTED_DEADLINE_MS);
     const stop = useAllMachinesStore.subscribe(() => {
-      if (!listed()) return;
+      if (!ready()) return;
       clearTimeout(timer);
       stop();
       resolve();
@@ -93,6 +92,7 @@ function usePlaceMachines(enabled: boolean, cloudSessions: readonly PaneCloudSes
 
 function paneCloudGate({ signIn: account, usage, error }: PaneCloudSnapshot): PaneCloudGate | null {
   if (account.state === 'signed-out') return { line: error?.message ?? 'Sign in to Pane Cloud to create Sessions there.', action: 'sign-in' };
+  if (account.state === 'unavailable') return { line: error ? [error.message, error.next].filter(Boolean).join(' ') : 'Pane cannot reach Pane Cloud right now.' };
   if (account.state === 'pending') return { line: 'Finish signing in in your browser.', code: account.userCode };
   if (account.access === 'waitlisted') return { line: "You're on the list. Pane Cloud is invite-only for now." };
   if (account.signupState !== 'ready') return { line: 'Finish signing up to create cloud Sessions.', action: 'sign-up' };
@@ -346,7 +346,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
             </div>
           </fieldset>
           {offerPlaces && (
-            <WhereItRuns value={place} onChange={setChosenPlace} current={places.current} others={places.others} cloudGate={cloudGate} disabled={isSubmitting}
+            <WhereItRuns value={place} onChange={setChosenPlace} current={places.current} others={places.others} cloudGate={cloudGate} sendsSecrets={cloud.sendsSecrets} disabled={isSubmitting}
               onCloudSignIn={() => void signInToCloud()} onCloudSignUp={() => { if (signupUrl) void window.electronAPI.openExternal(signupUrl); }} />
           )}
           {distributions.length > 0 && place === 'here' && (

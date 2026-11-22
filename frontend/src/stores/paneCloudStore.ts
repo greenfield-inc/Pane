@@ -21,11 +21,14 @@ interface PaneCloudState {
   loaded: boolean;
   /** Reads the snapshot and follows main's pushes. Returns the stop function. */
   follow: () => () => void;
+  /** Reads Pane Cloud again now. */
+  refresh: () => Promise<void>;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
   stop: (vmId: string) => Promise<void>;
   start: (vmId: string) => Promise<void>;
   remove: (vmId: string) => Promise<void>;
+  updatePane: (vmId: string) => Promise<void>;
   /** New cloud Session. Throws PaneCloudCallError with the next step. */
   create: (input: OrchestrationSessionCreateInput) => Promise<PaneCloudCreated>;
 }
@@ -78,11 +81,13 @@ export const usePaneCloudStore = create<PaneCloudState>((set) => {
         }
       };
     },
+    refresh: () => run(api()?.get),
     signIn: () => run(api()?.signIn),
     signOut: () => run(api()?.signOut),
     stop: (vmId) => run(() => api()?.stop(vmId) ?? Promise.resolve({ success: false })),
     start: (vmId) => run(() => api()?.start(vmId) ?? Promise.resolve({ success: false })),
     remove: (vmId) => run(() => api()?.remove(vmId) ?? Promise.resolve({ success: false })),
+    updatePane: (vmId) => run(() => api()?.updatePane(vmId) ?? Promise.resolve({ success: false })),
     create: async (input) => {
       const cloud = api();
       if (!cloud) throw new PaneCloudCallError({ message: 'This version of Pane cannot reach Pane Cloud.', next: 'Update Pane, then try again.' });

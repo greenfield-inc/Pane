@@ -16,7 +16,8 @@ export interface PlaceMachine {
   os: MachineOs | null;
 }
 
-const INSPECTION_SENTENCE = 'During the beta, automated checks can inspect cloud machines to stop abuse. Staff look only at flagged accounts, and every look is logged.';
+/** L1's machine-inspection disclosure (runpane-website src/lib/legal.ts), word for word until the lawyer's edit lands. */
+const INSPECTION_NOTICE = "During the beta, your cloud Sessions are not private from Greenfield. Automated checks look at the programs running, the files on disk and where network traffic goes, to stop abuse such as crypto mining. A Greenfield staff member opens a Session's files only when its account has been flagged or the law requires it, through a read-only view, and each look is logged on your usage page unless the law forbids telling you. Do not put health records or anything else you cannot share on these terms into a cloud Session.";
 
 const THIS_COMPUTER = isMac() ? 'this Mac' : 'this computer';
 
@@ -80,10 +81,12 @@ interface WhereItRunsProps {
   cloudGate: PaneCloudGate | null;
   onCloudSignIn: () => void;
   onCloudSignUp: () => void;
+  /** Secrets sync (K1) reaches new cloud Sessions: only then does the card say they come along. */
+  sendsSecrets: boolean;
   disabled?: boolean;
 }
 
-export function WhereItRuns({ value, onChange, current, others, cloudGate, onCloudSignIn, onCloudSignUp, disabled }: WhereItRunsProps) {
+export function WhereItRuns({ value, onChange, current, others, cloudGate, onCloudSignIn, onCloudSignUp, sendsSecrets, disabled }: WhereItRunsProps) {
   const here = current.id === LOCAL_MACHINE_ID;
   const thisLabel = isMac() ? 'This Mac' : isWindows() ? 'This PC' : 'This computer';
   const cloudSelected = value === 'cloud';
@@ -122,13 +125,15 @@ export function WhereItRuns({ value, onChange, current, others, cloudGate, onClo
               <Badge size="sm" className={SMALL_BADGE} icon={<Cpu className="h-2.5 w-2.5" aria-hidden="true" />}>4 vCPUs</Badge>
               <Badge size="sm" className={SMALL_BADGE} icon={<MemoryStick className="h-2.5 w-2.5" aria-hidden="true" />}>8 GB</Badge>
             </span>
-            <span className="mt-2.5 flex items-start gap-2 text-xs text-text-secondary">
-              <KeyRound className="mt-0.5 h-[13px] w-[13px] shrink-0 text-text-tertiary" aria-hidden="true" />
-              <span>Your secrets come along, sent straight from your machines, and are kept on a separate volume the checks don&apos;t read.</span>
-            </span>
-            <span className="mt-1.5 flex items-start gap-2 text-xs text-text-tertiary">
+            {sendsSecrets && (
+              <span className="mt-2.5 flex items-start gap-2 text-xs text-text-secondary">
+                <KeyRound className="mt-0.5 h-[13px] w-[13px] shrink-0 text-text-tertiary" aria-hidden="true" />
+                <span>Your secrets come along, sent straight from your machines, and are kept on a separate volume the checks don&apos;t read.</span>
+              </span>
+            )}
+            <span className="mt-2.5 flex items-start gap-2 text-xs text-text-tertiary">
               <Eye className="mt-0.5 h-[13px] w-[13px] shrink-0" aria-hidden="true" />
-              <span>{INSPECTION_SENTENCE}</span>
+              <span>{INSPECTION_NOTICE}</span>
             </span>
           </>}
         </PlaceCard>
