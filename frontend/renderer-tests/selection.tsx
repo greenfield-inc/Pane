@@ -86,6 +86,8 @@ const api = {
   sessions: { getConversationMessageCount: () => Promise.resolve({ success: true, data: 0 }), getGitCommands: () => Promise.resolve({ success: true, data: [] }), getOutput: () => Promise.resolve({ success: true, data: [] }), getJsonMessages: defaultMethod, getStatistics: defaultMethod, hasChangesToRebase: () => Promise.resolve({ success: true, data: false }), hasStash: () => Promise.resolve({ success: true, data: false }), get: (id: string) => wait('pane', id), getAll: () => location.search.includes('lists') ? wait('runtime-list', runtime) : Promise.resolve({ success: true, data: location.search.includes('runtime') ? [] : panes }), markViewed: defaultMethod },
   projects: { resolveRunScript: defaultMethod, resolveSetupScript: defaultMethod, getAll: () => Promise.resolve({ success: true, data: [{ id: 1, name: 'Test', path: '/test' }] }), get: () => Promise.resolve({ success: true, data: { id: 1, name: 'Test', path: '/test' } }) },
   appearanceSnapshot: undefined,
+  // This computer only: the Create Session dialog lists the other saved machines as places to run.
+  machines: { list: () => Promise.resolve([]), onEvent: () => () => undefined },
   getPlatform: () => Promise.resolve('linux'),
   setBackgroundColor: defaultMethod,
   setTitleBarOverlay: defaultMethod,

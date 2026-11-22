@@ -59,11 +59,18 @@ export const usePaneCloudStore = create<PaneCloudState>((set) => {
     follow: () => {
       const cloud = api();
       if (!cloud) return () => undefined;
-      if (followers++ === 0) unsubscribe = cloud.onChanged(apply);
-      // Each view that starts following reads afresh: a limit may have changed on another device since the last read.
-      void cloud.get().then((response) => { if (response.data) apply(response.data); }).catch((error) => {
-        console.warn('[paneCloud] Could not read Pane Cloud:', error);
-      });
+      // Pane Cloud never takes the views that show it down: a bridge without it (an older preload) leaves it signed out.
+      try {
+        if (followers === 0) unsubscribe = cloud.onChanged(apply);
+        // Each view that starts following reads afresh: a limit may have changed on another device since the last read.
+        void cloud.get().then((response) => { if (response.data) apply(response.data); }).catch((error) => {
+          console.warn('[paneCloud] Could not read Pane Cloud:', error);
+        });
+      } catch (error) {
+        console.warn('[paneCloud] This window cannot reach Pane Cloud:', error);
+        return () => undefined;
+      }
+      followers += 1;
       return () => {
         if (--followers === 0) {
           unsubscribe?.();
