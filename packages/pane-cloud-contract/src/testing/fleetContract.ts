@@ -127,7 +127,8 @@ export function fleetContractCases(target: FleetContractTarget): ContractCase[] 
         const vmId = `contract-${randomUUID().slice(0, 8)}`;
         await expectError('signature_invalid', async () => fleet.submitOperation(await signOperation(payload(vmId, 'create'), target.untrustedSigner)));
         const create = await signOperation(payload(vmId, 'create'), target.signer);
-        const tampered = (change: Record<string, unknown>) => ({ ...create, payload: { ...create.payload, ...change } }) as OperationEnvelope;
+        // SAFETY: deliberately outside what was signed; the case checks the fleet refuses each change.
+        const tampered = (change: Partial<OperationEnvelope['payload']> | { operation: string }) => ({ ...create, payload: { ...create.payload, ...change } }) as OperationEnvelope;
         const later = new Date(Date.parse(create.payload.expiresAt) + 1000).toISOString();
         for (const change of [{ reason: 'changed after signing' }, { vmId: `${vmId}-other` }, { requestId: randomUUID() }, { expiresAt: later }, { operation: 'delete' }]) {
           await expectError('signature_invalid', () => fleet.submitOperation(tampered(change)));

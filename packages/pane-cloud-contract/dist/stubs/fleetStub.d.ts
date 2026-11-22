@@ -5,6 +5,8 @@ export interface FleetStubOptions {
     trustedKeys: Record<string, string>;
     /** Releases update_pane and bootstrap may install. */
     publishedReleases: PaneRelease[];
+    /** This host's id; operations signed for another host are refused with wrong_host. Default `stub-host-1`. */
+    hostId?: string;
     now?: () => Date;
 }
 export interface FleetStub extends RunningStub {

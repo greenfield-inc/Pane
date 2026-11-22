@@ -14,6 +14,7 @@ async function startFleetStub(options) {
     const iso = () => now().toISOString();
     const vms = new Map();
     const cpu = new Map();
+    const hostId = options.hostId ?? 'stub-host-1';
     const operations = new Map();
     const events = [];
     const record = (event) => events.push({ ...event, id: String(events.length + 1), at: iso() });
@@ -39,66 +40,73 @@ async function startFleetStub(options) {
         if (!published)
             throw new errors_1.CloudApiError('release_not_published', `Pane ${release.version} with that checksum is not a published release.`, 'Name a published release and its exact .deb checksum.');
     };
+    /** Runs a checked operation; throws CloudApiError when the VM's state or the release refuses it. */
+    const runOperation = (payload) => {
+        let result = null;
+        if (payload.operation === 'create') {
+            const existing = vms.get(payload.vmId);
+            if (existing && existing.state !== 'deleted')
+                throw new errors_1.CloudApiError('vm_exists', `VM ${payload.vmId} already exists.`, 'Use a new VM id, or start the existing VM.');
+            const vm = { vmId: payload.vmId, state: 'running', stateReason: null, hostId, memoryGiB: 8, paneVersion: null, updatedAt: iso() };
+            vms.set(vm.vmId, vm);
+            record({ vmId: vm.vmId, kind: 'state_changed', state: 'running', reason: null, requestId: payload.requestId });
+        }
+        else {
+            const vm = requireVm(payload.vmId);
+            switch (payload.operation) {
+                case 'stop':
+                    requireState(vm, 'running', 'stop');
+                    setState(vm, 'stopped', payload.parameters.cause, payload.requestId);
+                    break;
+                case 'start':
+                    requireState(vm, 'stopped', 'start');
+                    setState(vm, 'running', null, payload.requestId);
+                    break;
+                case 'delete':
+                    setState(vm, 'deleted', 'user', payload.requestId);
+                    break;
+                case 'bootstrap':
+                case 'update_pane':
+                    requireState(vm, 'running', payload.operation);
+                    requireRelease(payload.parameters.release);
+                    vm.paneVersion = payload.parameters.release.version;
+                    vm.updatedAt = iso();
+                    break;
+                case 'prepare_to_stop':
+                    requireState(vm, 'running', 'prepare_to_stop');
+                    break;
+                case 'collect_diagnostics':
+                    requireState(vm, 'running', 'collect_diagnostics');
+                    result = { files: [{ path: '/var/log/pane-cloud/guest-agent.log', bytes: 0 }], archiveKey: `diagnostics/${vm.vmId}/${payload.requestId}.tar.gz` };
+                    break;
+            }
+        }
+        return result;
+    };
     const server = (0, server_1.createRouteServer)([
         (0, server_1.bind)(fleet_1.fleetRoutes.submitOperation, ({ body }) => {
-            const { payload } = (0, fleet_1.verifyOperation)(body, options.trustedKeys, now());
+            const { payload } = (0, fleet_1.verifyOperation)(body, options.trustedKeys, hostId, now());
             const payloadJson = (0, fleet_1.canonicalJson)(payload);
             const seen = operations.get(payload.requestId);
             if (seen) {
                 if (seen.payloadJson !== payloadJson)
                     throw new errors_1.CloudApiError('invalid_request', `requestId ${payload.requestId} was already used for a different operation.`, 'Use a new requestId for each operation.');
+                if (seen.refusal)
+                    throw seen.refusal;
                 return seen.status;
             }
-            let result = null;
-            if (payload.operation === 'create') {
-                const existing = vms.get(payload.vmId);
-                if (existing && existing.state !== 'deleted')
-                    throw new errors_1.CloudApiError('vm_exists', `VM ${payload.vmId} already exists.`, 'Use a new VM id, or start the existing VM.');
-                const vm = { vmId: payload.vmId, state: 'running', stateReason: null, hostId: 'stub-host-1', memoryGiB: 8, paneVersion: null, updatedAt: iso() };
-                vms.set(vm.vmId, vm);
-                record({ vmId: vm.vmId, kind: 'state_changed', state: 'running', reason: null, requestId: payload.requestId });
+            const status = { requestId: payload.requestId, vmId: payload.vmId, operation: payload.operation, status: 'succeeded', error: null, result: null, acceptedAt: iso(), finishedAt: null };
+            try {
+                status.result = runOperation(payload);
             }
-            else {
-                const vm = requireVm(payload.vmId);
-                switch (payload.operation) {
-                    case 'stop':
-                        requireState(vm, 'running', 'stop');
-                        setState(vm, 'stopped', payload.parameters.cause, payload.requestId);
-                        break;
-                    case 'start':
-                        requireState(vm, 'stopped', 'start');
-                        setState(vm, 'running', null, payload.requestId);
-                        break;
-                    case 'delete':
-                        setState(vm, 'deleted', 'user', payload.requestId);
-                        break;
-                    case 'bootstrap':
-                    case 'update_pane':
-                        requireState(vm, 'running', payload.operation);
-                        requireRelease(payload.parameters.release);
-                        vm.paneVersion = payload.parameters.release.version;
-                        vm.updatedAt = iso();
-                        break;
-                    case 'prepare_to_stop':
-                        requireState(vm, 'running', 'prepare_to_stop');
-                        break;
-                    case 'collect_diagnostics':
-                        requireState(vm, 'running', 'collect_diagnostics');
-                        result = { files: [{ path: '/var/log/pane-cloud/guest-agent.log', bytes: 0 }], archiveKey: `diagnostics/${vm.vmId}/${payload.requestId}.tar.gz` };
-                        break;
-                }
+            catch (error) {
+                if (!(error instanceof errors_1.CloudApiError))
+                    throw error;
+                operations.set(payload.requestId, { status: { ...status, status: 'failed', error: { code: error.code, message: error.message, next: error.next }, finishedAt: iso() }, payloadJson, refusal: error });
+                throw error;
             }
-            const status = {
-                requestId: payload.requestId,
-                vmId: payload.vmId,
-                operation: payload.operation,
-                status: 'succeeded',
-                error: null,
-                result,
-                acceptedAt: iso(),
-                finishedAt: iso(),
-            };
-            operations.set(payload.requestId, { status, payloadJson });
+            status.finishedAt = iso();
+            operations.set(payload.requestId, { status, payloadJson, refusal: null });
             record({ vmId: payload.vmId, kind: 'operation_finished', state: null, reason: null, requestId: payload.requestId });
             return status;
         }),

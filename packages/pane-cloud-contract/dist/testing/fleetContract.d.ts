@@ -16,6 +16,8 @@ export interface FleetContractTarget {
     untrustedSigner: OperationSigner;
     /** A published release the fleet will install. */
     release: PaneRelease;
+    /** The id of the host under test; operations are signed for it. */
+    hostId: string;
     /** How long to wait for a VM or operation to settle. Default 120 s. */
     timeoutMs?: number;
 }

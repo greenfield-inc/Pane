@@ -3,10 +3,19 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.SkipCase = void 0;
 exports.expectError = expectError;
 exports.waitFor = waitFor;
 const strict_1 = __importDefault(require("node:assert/strict"));
 const errors_1 = require("../errors");
+/** Thrown by a case that needs a test control the server doesn't offer; report it as skipped. */
+class SkipCase extends Error {
+    constructor(reason) {
+        super(reason);
+        this.name = 'SkipCase';
+    }
+}
+exports.SkipCase = SkipCase;
 async function expectError(code, call) {
     try {
         await call();

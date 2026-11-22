@@ -50,18 +50,19 @@ export declare const DeviceCode: z.ZodObject<{
 }, z.core.$strict>;
 /** `full_access` members open, type into and create Sessions; `view_only` members read shared ones. */
 export declare const OrgRole: z.ZodEnum<{
+    view_only: "view_only";
     owner: "owner";
     full_access: "full_access";
-    view_only: "view_only";
 }>;
+export type OrgRole = z.infer<typeof OrgRole>;
 export declare const Membership: z.ZodObject<{
     organizationId: z.ZodString;
     name: z.ZodString;
     personal: z.ZodBoolean;
     role: z.ZodEnum<{
+        view_only: "view_only";
         owner: "owner";
         full_access: "full_access";
-        view_only: "view_only";
     }>;
 }, z.core.$strict>;
 export declare const Account: z.ZodObject<{
@@ -82,9 +83,9 @@ export declare const Account: z.ZodObject<{
         name: z.ZodString;
         personal: z.ZodBoolean;
         role: z.ZodEnum<{
+            view_only: "view_only";
             owner: "owner";
             full_access: "full_access";
-            view_only: "view_only";
         }>;
     }, z.core.$strict>>;
 }, z.core.$strict>;
@@ -119,9 +120,9 @@ export declare const DeviceTokenResult: z.ZodDiscriminatedUnion<[z.ZodObject<{
             name: z.ZodString;
             personal: z.ZodBoolean;
             role: z.ZodEnum<{
+                view_only: "view_only";
                 owner: "owner";
                 full_access: "full_access";
-                view_only: "view_only";
             }>;
         }, z.core.$strict>>;
     }, z.core.$strict>;
@@ -230,9 +231,9 @@ export declare const MemberUsage: z.ZodObject<{
     accountId: z.ZodString;
     name: z.ZodNullable<z.ZodString>;
     role: z.ZodEnum<{
+        view_only: "view_only";
         owner: "owner";
         full_access: "full_access";
-        view_only: "view_only";
     }>;
     agentHoursUsed: z.ZodNumber;
     awakeNow: z.ZodNumber;
@@ -256,9 +257,9 @@ export declare const OrganizationUsage: z.ZodObject<{
         accountId: z.ZodString;
         name: z.ZodNullable<z.ZodString>;
         role: z.ZodEnum<{
+            view_only: "view_only";
             owner: "owner";
             full_access: "full_access";
-            view_only: "view_only";
         }>;
         agentHoursUsed: z.ZodNumber;
         awakeNow: z.ZodNumber;
@@ -307,9 +308,9 @@ export declare const serviceRoutes: {
                 name: z.ZodString;
                 personal: z.ZodBoolean;
                 role: z.ZodEnum<{
+                    view_only: "view_only";
                     owner: "owner";
                     full_access: "full_access";
-                    view_only: "view_only";
                 }>;
             }, z.core.$strict>>;
         }, z.core.$strict>;
@@ -335,9 +336,9 @@ export declare const serviceRoutes: {
             name: z.ZodString;
             personal: z.ZodBoolean;
             role: z.ZodEnum<{
+                view_only: "view_only";
                 owner: "owner";
                 full_access: "full_access";
-                view_only: "view_only";
             }>;
         }, z.core.$strict>>;
     }, z.core.$strict>>;
@@ -766,9 +767,9 @@ export declare const serviceRoutes: {
             accountId: z.ZodString;
             name: z.ZodNullable<z.ZodString>;
             role: z.ZodEnum<{
+                view_only: "view_only";
                 owner: "owner";
                 full_access: "full_access";
-                view_only: "view_only";
             }>;
             agentHoursUsed: z.ZodNumber;
             awakeNow: z.ZodNumber;
@@ -808,7 +809,7 @@ export declare function createServiceClient(config: ClientConfig): {
                 organizationId: string;
                 name: string;
                 personal: boolean;
-                role: "owner" | "full_access" | "view_only";
+                role: "view_only" | "owner" | "full_access";
             }[];
         };
     }>;
@@ -825,7 +826,7 @@ export declare function createServiceClient(config: ClientConfig): {
             organizationId: string;
             name: string;
             personal: boolean;
-            role: "owner" | "full_access" | "view_only";
+            role: "view_only" | "owner" | "full_access";
         }[];
     }>;
     listVms: (organizationId: string) => Promise<{
@@ -1042,7 +1043,7 @@ export declare function createServiceClient(config: ClientConfig): {
         members: {
             accountId: string;
             name: string | null;
-            role: "owner" | "full_access" | "view_only";
+            role: "view_only" | "owner" | "full_access";
             agentHoursUsed: number;
             awakeNow: number;
             awakeLimit: number;

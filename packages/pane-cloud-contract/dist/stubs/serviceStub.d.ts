@@ -1,4 +1,4 @@
-import { type Account } from '../service';
+import { type Account, type OrgRole, type Plan, type SessionVm } from '../service';
 import { type RunningStub } from './server';
 export interface StubAccount {
     email: string;
@@ -22,10 +22,19 @@ export interface ServiceStub extends RunningStub {
     denyDevice(userCode: string): void;
     /** An automatic pause or a person's Suspend: the VM stops with reason `review`, logged with actor `service`. */
     pauseForReview(vmId: string): void;
+    /** VMs the stub's host holds awake at once; null for no limit. */
+    setCapacity(capacity: number | null): void;
+    /** Adds an account to an organization, as an accepted invitation will. */
+    addMember(organizationId: string, email: string, role: Exclude<OrgRole, 'owner'>): void;
+    /** Puts an organization on a plan, as a subscription will. */
+    setPlan(organizationId: string, plan: Plan): void;
+    /** Gives a VM 16 GiB (or back to 8), as a resize will; its later awake hours count at the new rate. */
+    setMemoryGiB(vmId: string, memoryGiB: SessionVm['memoryGiB']): void;
 }
 /**
  * An in-memory Pane Cloud service that keeps the contract, for building Pane against and for the
- * contract tests. Every account has a personal organization on the Free plan. VMs start and stop at
+ * contract tests. Every account has a personal organization on the Free plan, and the awake limit spans
+ * the account's organizations. VMs start and stop at
  * once, and agent-hours are counted from the stub's clock.
  */
 export declare function startServiceStub(options: ServiceStubOptions): Promise<ServiceStub>;

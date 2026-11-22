@@ -100,6 +100,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     operation: z.ZodLiteral<"create">;
     parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
+    hostId: z.ZodString;
     vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
@@ -108,6 +109,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     operation: z.ZodLiteral<"start">;
     parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
+    hostId: z.ZodString;
     vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
@@ -121,6 +123,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }>;
     }, z.core.$strict>;
     requestId: z.ZodUUID;
+    hostId: z.ZodString;
     vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
@@ -129,6 +132,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     operation: z.ZodLiteral<"delete">;
     parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
+    hostId: z.ZodString;
     vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
@@ -143,6 +147,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strict>;
     }, z.core.$strict>;
     requestId: z.ZodUUID;
+    hostId: z.ZodString;
     vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
@@ -157,6 +162,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strict>;
     }, z.core.$strict>;
     requestId: z.ZodUUID;
+    hostId: z.ZodString;
     vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
@@ -165,6 +171,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     operation: z.ZodLiteral<"prepare_to_stop">;
     parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
+    hostId: z.ZodString;
     vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
@@ -173,6 +180,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     operation: z.ZodLiteral<"collect_diagnostics">;
     parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
+    hostId: z.ZodString;
     vmId: z.ZodString;
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
@@ -189,6 +197,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         operation: z.ZodLiteral<"create">;
         parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
+        hostId: z.ZodString;
         vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
@@ -197,6 +206,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         operation: z.ZodLiteral<"start">;
         parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
+        hostId: z.ZodString;
         vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
@@ -210,6 +220,7 @@ export declare const OperationEnvelope: z.ZodObject<{
             }>;
         }, z.core.$strict>;
         requestId: z.ZodUUID;
+        hostId: z.ZodString;
         vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
@@ -218,6 +229,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         operation: z.ZodLiteral<"delete">;
         parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
+        hostId: z.ZodString;
         vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
@@ -232,6 +244,7 @@ export declare const OperationEnvelope: z.ZodObject<{
             }, z.core.$strict>;
         }, z.core.$strict>;
         requestId: z.ZodUUID;
+        hostId: z.ZodString;
         vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
@@ -246,6 +259,7 @@ export declare const OperationEnvelope: z.ZodObject<{
             }, z.core.$strict>;
         }, z.core.$strict>;
         requestId: z.ZodUUID;
+        hostId: z.ZodString;
         vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
@@ -254,6 +268,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         operation: z.ZodLiteral<"prepare_to_stop">;
         parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
+        hostId: z.ZodString;
         vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
@@ -262,6 +277,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         operation: z.ZodLiteral<"collect_diagnostics">;
         parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
+        hostId: z.ZodString;
         vmId: z.ZodString;
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
@@ -305,9 +321,10 @@ export declare function signOperation(payload: OperationPayload, signer: Operati
 /**
  * The host agent's check of an envelope it received, before it runs anything. Throws CloudApiError:
  * operation_not_allowed or invalid_request for a payload outside the allow-list, signature_invalid
- * for an unknown key or a bad signature, operation_expired outside the payload's time window.
+ * for an unknown key or a bad signature, operation_expired outside the payload's time window, and
+ * wrong_host for an operation signed for another host.
  */
-export declare function verifyOperation(envelope: SubmittedEnvelope, trustedKeys: Readonly<Record<string, string>>, now?: Date): OperationEnvelope;
+export declare function verifyOperation(envelope: SubmittedEnvelope, trustedKeys: Readonly<Record<string, string>>, hostId: string, now?: Date): OperationEnvelope;
 export declare const FleetVmState: z.ZodEnum<{
     error: "error";
     creating: "creating";

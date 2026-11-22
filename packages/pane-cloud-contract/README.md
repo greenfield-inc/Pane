@@ -43,7 +43,7 @@ the stubs with `node:test`:
 import { test, after } from 'node:test';
 import { createServiceClient, type PaneRelease } from 'pane-cloud-contract';
 import { startFleetStub, startServiceStub } from 'pane-cloud-contract/stubs';
-import { createLocalSigner, fleetContractCases, serviceContractCases } from 'pane-cloud-contract/testing';
+import { createLocalSigner, fleetContractCases, serviceContractCases, SkipCase } from 'pane-cloud-contract/testing';
 
 // Service: three test accounts. `member` is invited and signed up, `unverified` still needs its
 // phone check, `waitlisted` is not invited.
@@ -64,14 +64,24 @@ const signIn = async (who: keyof typeof emails) => {
   if (result.status !== 'complete') throw new Error(`sign-in ended ${result.status}`);
   return result.token;
 };
-for (const c of serviceContractCases({ baseUrl: service.url, emails, signIn })) test(c.name, c.run);
+// No controls here, so the cases that need one report themselves skipped.
+for (const c of serviceContractCases({ baseUrl: service.url, emails, signIn })) {
+  test(c.name, async (t) => {
+    try {
+      await c.run();
+    } catch (error) {
+      if (!(error instanceof SkipCase)) throw error;
+      t.skip(error.message);
+    }
+  });
+}
 
 // Fleet: a key the fleet trusts, one it doesn't, and a release it may install.
 const trusted = createLocalSigner('service-key');
 const untrusted = createLocalSigner('service-key');
 const release: PaneRelease = { version: '2.4.215', arch: 'arm64', debSha256: 'c'.repeat(64) };
 const fleet = await startFleetStub({ trustedKeys: { 'service-key': trusted.publicKeyPem }, publishedReleases: [release] });
-for (const c of fleetContractCases({ baseUrl: fleet.url, token: 'any', signer: trusted.signer, untrustedSigner: untrusted.signer, release })) {
+for (const c of fleetContractCases({ baseUrl: fleet.url, token: 'any', signer: trusted.signer, untrustedSigner: untrusted.signer, release, hostId: 'stub-host-1' })) {
   test(c.name, c.run);
 }
 after(() => Promise.all([service.close(), fleet.close()]));
@@ -86,10 +96,17 @@ service runs `serviceContractCases` against itself and builds on `startFleetStub
 runs `fleetContractCases`; Pane builds on `startServiceStub`. This package's own test runs both
 suites against both stubs: `pnpm --filter pane-cloud-contract test`.
 
+Some service cases need test-mode setup: pass `controls` to `serviceContractCases` with any of
+`pauseForReview`, `setCapacity`, `addMember`, `setPlan`, `setMemoryGiB` and `setClock`
+(`ServiceContractControls`). A case whose control is missing throws `SkipCase`; report it as
+skipped. `setClock` only moves forward, so run the cases in order. Without controls, the cases
+that need them are the review pause, `no_capacity`, a second organization with Full access and
+View only members, and agent-hour metering.
+
 The service stub gives every account a personal organization on the Free plan, starts and stops
-VMs at once, and counts agent-hours from its clock (pass `now` to move it). Its controls:
-`approveDevice`, `denyDevice`, `pauseForReview(vmId)`, and the `capacity` option, past which
-create and start answer `no_capacity`.
+VMs at once, and counts agent-hours from its clock (pass `now` to move it). Its controls are
+`approveDevice` and `denyDevice` for sign-in, plus each of the controls above; this package's own
+test shows the wiring.
 
 ## Errors
 
@@ -100,7 +117,10 @@ status (`ERROR_STATUS` in `src/errors.ts`). The clients throw `CloudApiError` fo
 ## Plans
 
 `PLANS` holds D-64's three plans: hours per Full access member a month, pooled across the
-organization, and the awake limit per member.
+organization, and the awake limit per member. The awake limit spans the account (D-74): a person's
+awake Session VMs in every organization count together, against the highest limit among their
+Full access memberships. A View only member adds no hours, has an awake limit of 0 in that
+organization, and gets `view_only` from create and start there.
 
 | Plan | Agent-hours per member a month | Awake at once per member |
 | --- | --- | --- |
@@ -123,7 +143,7 @@ Bearer token from device sign-in on every route except the two sign-in calls.
 | Sign out | `POST /v1/auth/sign-out` | |
 | Account | `GET /v1/account` | `access: waitlisted` is "You're on the list"; `signupState` is the next sign-up step (`needs_phone`, `needs_card`, `ready`); the account's organizations, the personal one marked |
 | List Session VMs | `GET /v1/organizations/:organizationId/vms` | The caller's own in that organization, deleted ones left out |
-| Create | `POST /v1/organizations/:organizationId/vms` | `202`; an 8 GiB VM that starts at once; `idempotencyKey` makes a retry return the same VM; `not_invited`, `signup_incomplete`, `awake_limit_reached`, `no_capacity` |
+| Create | `POST /v1/organizations/:organizationId/vms` | `202`; an 8 GiB VM that starts at once; `not_org_member`, `view_only`, `not_invited`, `signup_incomplete`, `awake_limit_reached`, `no_capacity`; a retry with the same key in the same organization returns the first VM |
 | Get | `GET /v1/vms/:vmId` | State, why it last stopped, memory, Pane version |
 | Start, stop | `POST /v1/vms/:vmId/start`, `/stop` | `202`; `invalid_state` if it is already running (start) or stopped (stop); start answers `under_review` for a VM paused for review, and `awake_limit_reached` or `no_capacity` like create |
 | Delete | `DELETE /v1/vms/:vmId` | `202`; deletes the disk |
@@ -140,7 +160,7 @@ Called only by the service. Every change to a VM is one signed operation.
 
 | Call | Route | Notes |
 | --- | --- | --- |
-| Submit an operation | `POST /v1/operations` | `202` with its status; resending an accepted `requestId` returns the first result; a different payload under a used `requestId` is `invalid_request`; a refused operation is not recorded, so resending it is checked again |
+| Submit an operation | `POST /v1/operations` | `202` with its status; resending a `requestId` returns its first outcome, a refusal included; a different payload under a used `requestId` is `invalid_request`; the status of a refused operation is `failed` with its error |
 | Operation status | `GET /v1/operations/:requestId` | `accepted`, `running`, `succeeded` or `failed` |
 | VM | `GET /v1/vms/:vmId` | State, last stop reason, host, memory, Pane version |
 | Metrics | `GET /v1/vms/:vmId/metrics?day=` | CPU seconds, resident memory, disk, and egress for a UTC day |
@@ -163,11 +183,16 @@ parameter is refused.
 
 ### Signing
 
-An operation is `{ payload, signature }`. The payload holds `requestId` (a UUID), `vmId`,
+An operation is `{ payload, signature }`. The payload holds `requestId` (a UUID), `hostId` (the host
+that should run it), `vmId`,
 `operation`, `parameters`, `reason` (shown to the user) and `issuedAt`/`expiresAt`, at most 300
 seconds apart. The signature is ECDSA P-256 with SHA-256 (AWS KMS `ECDSA_SHA_256`), base64 DER, over
 the bytes `pane-cloud-operation-v1\n` followed by the payload's canonical JSON: keys sorted at every
-level, no whitespace (`canonicalJson`). `verifyOperation` is the host agent's check: allow-list,
-strict parameters, a trusted `keyId`, the signature, then the time window with 30 seconds of clock
-skew. The host runs nothing it refuses. A host must remember each `requestId` at least until its
-`expiresAt` plus the skew; after that the time window refuses a replay on its own.
+level, no whitespace (`canonicalJson`). `verifyOperation` is the host agent's check, in order: the
+allow-list, strict parameters, a trusted `keyId`, the signature, the time window, then the host.
+The window refuses an operation whose `issuedAt` is more than 30 seconds ahead of the host's clock,
+whose `expiresAt` has passed, or whose two times are more than 300 seconds apart (`operation_expired`).
+An operation signed for another host is `wrong_host`. Once an operation passes these checks, the
+host records its `requestId` before running anything, and remembers it at least until `expiresAt`;
+a resend inside that time gets the first outcome, and after it the window refuses the resend on
+its own.

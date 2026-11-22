@@ -139,10 +139,17 @@ exports.MemberUsage = zod_1.z
     role: exports.OrgRole,
     /** Agent-hours this member's VMs counted this month. */
     agentHoursUsed: zod_1.z.number().nonnegative(),
-    /** VMs this member created that are creating, starting or running (D-68: waking counts). */
+    /**
+     * VMs this member has creating, starting or running (waking counts, D-68), across every
+     * organization they belong to: the awake limit spans the account (D-74).
+     */
     awakeNow: zod_1.z.number().int().nonnegative(),
-    /** The plan's awake limit, or the organization's override for this member. */
-    awakeLimit: zod_1.z.number().int().positive(),
+    /**
+     * The highest awake limit among the member's Full access memberships (5 Free, 20 Pro, 50 Max, or
+     * an organization's override). 0 for a View only member of this organization, who can't create
+     * or start a Session in it (view_only).
+     */
+    awakeLimit: zod_1.z.number().int().nonnegative(),
 })
     .strict();
 /** An organization's usage for one calendar month (UTC). */

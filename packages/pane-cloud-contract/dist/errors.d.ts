@@ -10,11 +10,13 @@ export declare const ERROR_STATUS: {
     readonly signup_incomplete: 403;
     readonly not_org_member: 403;
     readonly under_review: 403;
+    readonly view_only: 403;
     readonly vm_not_found: 404;
     readonly operation_not_found: 404;
     readonly invalid_state: 409;
     readonly vm_exists: 409;
     readonly awake_limit_reached: 409;
+    readonly wrong_host: 421;
     readonly release_not_published: 422;
     readonly internal: 500;
     readonly no_capacity: 503;
@@ -33,11 +35,13 @@ export declare const ErrorBody: z.ZodObject<{
             signup_incomplete: "signup_incomplete";
             not_org_member: "not_org_member";
             under_review: "under_review";
+            view_only: "view_only";
             vm_not_found: "vm_not_found";
             operation_not_found: "operation_not_found";
             invalid_state: "invalid_state";
             vm_exists: "vm_exists";
             awake_limit_reached: "awake_limit_reached";
+            wrong_host: "wrong_host";
             release_not_published: "release_not_published";
             internal: "internal";
             no_capacity: "no_capacity";

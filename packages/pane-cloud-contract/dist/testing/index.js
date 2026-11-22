@@ -1,8 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.serviceContractCases = exports.fleetContractCases = exports.createLocalSigner = exports.waitFor = exports.expectError = void 0;
+exports.serviceContractCases = exports.fleetContractCases = exports.createLocalSigner = exports.waitFor = exports.SkipCase = exports.expectError = void 0;
 var cases_1 = require("./cases");
 Object.defineProperty(exports, "expectError", { enumerable: true, get: function () { return cases_1.expectError; } });
+Object.defineProperty(exports, "SkipCase", { enumerable: true, get: function () { return cases_1.SkipCase; } });
 Object.defineProperty(exports, "waitFor", { enumerable: true, get: function () { return cases_1.waitFor; } });
 var fleetContract_1 = require("./fleetContract");
 Object.defineProperty(exports, "createLocalSigner", { enumerable: true, get: function () { return fleetContract_1.createLocalSigner; } });
