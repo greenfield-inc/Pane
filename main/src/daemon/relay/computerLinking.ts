@@ -78,12 +78,15 @@ export function createPairingRoute(deps: {
       const offer = decodeOptionalBoundary(request.computer, offerSchema);
       if (!offer) return { ok: false, status: 400, code: 'ERR_PAIRING_BAD_REQUEST', message: 'The computer did not say who it is, so the code was not used.' };
       // Checked before the secret is spent, so a refused computer leaves the code for another.
+      // (Spending it mints the redeemer a token, which `addClient` would refuse for a marked VM, but only after the code is used.)
       // Only a Pane Cloud VM is paired one way; anywhere else a computer that can't be called back couldn't be undone with "Not you? Unlink".
       if (offer.token === undefined && !links.receiveOnly()) {
         return { ok: false, status: 400, code: 'ERR_PAIRING_BAD_REQUEST', message: 'The computer offered no way to call it back, which only a Pane Cloud VM accepts, so the code was not used.' };
       }
       try {
         if (offer.token !== undefined) links.refuseIfReceiveOnly(offer.computer.name);
+        // The redeemer gets a token for this computer: never a Pane Cloud VM this computer marked.
+        links.refuseTokenFor(offer.computer);
         links.checkPeer(offer.computer);
       } catch (error) {
         return { ok: false, status: 400, code: error instanceof PaneError ? error.code : 'ERR_PAIRING_BAD_REQUEST', message: reasonOf(error) };
@@ -197,7 +200,7 @@ export class ComputerLinking {
       if (peer.id === self.id || peer.id === result.computer.id || !isRelayComputerUnder(peer, link.domain)) continue;
       await links.saveComputer({ computer: peer, token: grant.token, linkedBy: maker });
       // A receive-only computer (a Pane Cloud VM) is never sent a token to call this one.
-      if (peer.receiveOnly) {
+      if (!links.mayGetToken(peer)) {
         theirs.push(peer);
         continue;
       }
@@ -322,9 +325,9 @@ export class ComputerLinking {
       }
     };
     // A receive-only computer (a Pane Cloud VM) is never sent a token: only the other side gets one for it.
-    // For ours, this computer's own mark decides, not the VM's live answer.
-    const forTheirs = theirs.receiveOnly ? null : await mint(ourProfile, theirs);
-    const forOurs = ours.receiveOnly || this.deps.links.markedReceiveOnly(ours.id) ? null : await mint(theirProfile, ours);
+    const { links } = this.deps;
+    const forTheirs = links.mayGetToken(theirs) ? await mint(ourProfile, theirs) : null;
+    const forOurs = links.mayGetToken(ours) ? await mint(theirProfile, ours) : null;
     if (forTheirs) await this.deps.call(theirProfile, RELAY_CLIENT_COMMANDS.saveLink, [{ peer: ours, token: forTheirs }]);
     if (forOurs) await this.deps.call(ourProfile, RELAY_CLIENT_COMMANDS.saveLink, [{ peer: theirs, token: forOurs }]);
   }

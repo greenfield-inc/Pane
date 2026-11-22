@@ -297,6 +297,12 @@ export interface RemoteDaemonClientSettings {
   profiles: RemotePaneConnectionProfile[];
   activeProfileId: string | null;
   mode: RemoteDaemonClientMode;
+  /**
+   * Relay ids of computers this one paired with as Pane Cloud VMs: it never sends or mints a token
+   * for them. Kept apart from `computers`, so nothing a computer reports about itself (its routes,
+   * its install id, its own word) removes one. Only ever added to.
+   */
+  receiveOnly?: string[];
 }
 
 export interface RemoteDaemonConfig {
@@ -821,6 +827,8 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
       mode: activeProfileId && client.mode === 'remote' ? 'remote' : 'local',
     },
   };
+  const receiveOnly = readJsonArray(client.receiveOnly).flatMap((id) => readOptionalString(id) ?? []);
+  if (receiveOnly.length) normalized.client.receiveOnly = [...new Set(receiveOnly)];
   const relay = readJsonObject(config.relay);
   if (relay) {
     const relaySettings: RemoteRelaySettings = { enabled: readBoolean(relay.enabled, false) };

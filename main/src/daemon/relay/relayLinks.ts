@@ -275,6 +275,8 @@ export class RelayLinks {
    * earlier record here, and that record's open connections close.
    */
   async addClient(record: RemoteDaemonClientRecord): Promise<void> {
+    // Every token this computer mints for another computer is stored here.
+    if (record.kind === 'computer' && record.computerId) this.refuseTokenFor({ id: record.computerId, name: record.label });
     const replaces = (client: RemoteDaemonClientRecord) => (record.kind === 'computer'
       ? client.kind === 'computer' && client.computerId === record.computerId
       : client.kind === undefined && record.kind === undefined && record.phoneId !== undefined && client.phoneId === record.phoneId);
@@ -328,10 +330,6 @@ export class RelayLinks {
     };
     let id = '';
     await this.update((remote) => {
-      // A computer marked receive-only here stays marked, whatever it later says about itself.
-      const wasMarked = remote.client.computers.some((saved) => computerRelayId(saved) === computer.id
-        && saved.routes.some((route) => route.relay?.receiveOnly));
-      if (peer.receiveOnly || computer.receiveOnly || wasMarked) linkRoute.relay = { computerId: computer.id, fingerprint: computer.fingerprint, receiveOnly: true };
       // An install id another saved computer holds under a different relay id is not trusted to merge.
       const holder = report ? remote.client.computers.find((candidate) => candidate.machineId === report.machineId) : undefined;
       const holderRelay = holder && computerRelayId(holder);
@@ -345,15 +343,36 @@ export class RelayLinks {
         routes: [...(report ? foundRoutes(report, token) : []), linkRoute],
       });
       id = saved.id;
-      return { ...remote, client: { ...remote.client, computers: saved.computers } };
+      const client = { ...remote.client, computers: saved.computers };
+      // Marked by this computer, or by the device that passed it on; a mark is never removed.
+      if (peer.receiveOnly || computer.receiveOnly) client.receiveOnly = [...new Set([...(remote.client.receiveOnly ?? []), computer.id])];
+      return { ...remote, client };
     });
     this.deps.log?.(`[relay] linked with ${computer.name} (${computer.id})${linkedBy ? `, linked by ${linkedBy}` : ''}`);
     return id;
   }
 
-  /** Whether this computer marked a saved computer receive-only (it paired with it as a Pane Cloud VM). */
+  /** Whether this computer marked a computer receive-only: it paired with it as a Pane Cloud VM, or was told so by a device that did. */
   markedReceiveOnly(relayId: string): boolean {
-    return this.linked().some((profile) => profile.relay.computerId === relayId && profile.relay.receiveOnly === true);
+    return this.remote().client.receiveOnly?.includes(relayId) === true;
+  }
+
+  /**
+   * The one rule for sending or minting a token for another computer: never for a Pane Cloud VM.
+   * This computer's own mark decides; the computer's own word can only add a refusal.
+   */
+  mayGetToken(computer: Pick<RelayComputer, 'id' | 'receiveOnly'>): boolean {
+    return computer.receiveOnly !== true && !this.markedReceiveOnly(computer.id);
+  }
+
+  /** Refuses, before anything is minted or sent, to give a Pane Cloud VM a token. */
+  refuseTokenFor(computer: Pick<RelayComputer, 'id' | 'name' | 'receiveOnly'>): void {
+    if (this.mayGetToken(computer)) return;
+    throw new PaneError(
+      'ERR_RELAY_RECEIVE_ONLY',
+      `${computer.name} is a Pane Cloud VM, which never gets a way to call your other computers, so nothing was linked.`,
+      `To reach ${computer.name}, open its Session in Pane: it pairs one way.`,
+    );
   }
 
   /** Whether this computer is a Pane Cloud VM that holds no token for any other computer. */
@@ -424,7 +443,7 @@ export class RelayLinks {
         const info = decodeOptionalBoundary(computer, relayComputerSchema);
         if (token === undefined || !info || info.id !== profile.relay.computerId) return null;
         // This computer's own mark, not the VM's word, tells the device the grant goes to.
-        if (profile.relay.receiveOnly) info.receiveOnly = true;
+        if (this.markedReceiveOnly(info.id)) info.receiveOnly = true;
         return { computer: info, token };
       } catch (error) {
         this.deps.log?.(`[relay] ${profile.label} did not hand out a token: ${error instanceof Error ? error.message : String(error)}`);

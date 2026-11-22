@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import { describe, expect, it } from 'vitest';
 import { PaneError } from '../../../../shared/paneError';
 import { linkWithSavedRelayComputers, relayProfile, type RelayConnectionProfile } from '../../../../shared/remoteClient/relay';
+import { applyRoutesReport } from '../../../../shared/types/remoteComputers';
 import { RemoteRequestError } from '../../../../shared/remoteClient/remoteDaemonClient';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
 import type { ComputerRoutesReport, RemoteComputer } from '../../../../shared/types/remoteComputers';
@@ -589,6 +590,76 @@ describe('pairing with a cloud VM from the identity Pane Cloud vouches for', () 
       expect(await net.reaches(mini, vm)).toBe(true);
       expect(vm.config().client.computers).toEqual([]);
       expect(net.received.filter((call) => call.to === 'Cloud Session').map((call) => call.channel)).not.toContain('relay:client:save-link');
+    });
+
+    /** A desktop paired with a VM that then lies: it reports itself as an ordinary computer and keeps any token it is sent. */
+    async function pairedWithLyingVm() {
+      const net = network();
+      const laptop = net.add('Laptop', 'laplaplaplaplap0');
+      const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
+      const mini = net.add('Mini', 'minminminminmin0');
+      await laptop.redeemVouched(await vouched(vm));
+      vm.lie();
+      const vmGotNothing = () => {
+        expect(vm.config().client.computers).toEqual([]);
+        expect(net.received.filter((call) => call.to === 'Cloud Session').map((call) => call.channel)).not.toContain('relay:client:save-link');
+      };
+      return { net, laptop, vm, mini, vmGotNothing };
+    }
+
+    it.each([
+      ['as the same install', 'vm-install'],
+      ['claiming another install id, which moves its route to a new record', 'another-install'],
+    ])('keeps the mark when the lying VM reports its routes %s, and the next link gives it nothing', async (_name, machineId) => {
+      const { laptop, vm, mini, vmGotNothing } = await pairedWithLyingVm();
+      const saved = laptop.config().client.computers.find((computer) => computer.label === 'Cloud Session');
+      const via = saved?.routes.find((route) => route.kind === 'relay');
+      if (!saved || !via) throw new Error('the laptop did not save the VM');
+      // What remotePaneClient applies when it connects to the VM.
+      const report: ComputerRoutesReport = { machineId, name: 'Cloud Session', relay: { id: vm.info.id, address: vm.info.address, fingerprint: vm.info.fingerprint, local: [] } };
+      laptop.seed(applyRoutesReport(laptop.config().client.computers, saved.id, via, report).computers);
+
+      await laptop.redeem(await mini.link());
+
+      vmGotNothing();
+    });
+
+    it('refuses to open a link the lying VM made, and mints nothing', async () => {
+      const { laptop, vm, vmGotNothing } = await pairedWithLyingVm();
+      const link = await vm.link();
+      const clientsBefore = laptop.config().host.clients;
+
+      await expect(laptop.redeem(link)).rejects.toMatchObject({ code: 'ERR_RELAY_RECEIVE_ONLY' });
+
+      expect(laptop.config().host.clients).toEqual(clientsBefore);
+      expect(vm.config().host.clients.map((client) => client.label)).toEqual(['Laptop']);
+      vmGotNothing();
+    });
+
+    it('refuses the lying VM redeeming the desktop\'s link, and the link stays unused', async () => {
+      const { laptop, vm, mini, vmGotNothing } = await pairedWithLyingVm();
+      const link = await laptop.link();
+
+      await expect(vm.redeem(link)).rejects.toMatchObject({ code: 'ERR_RELAY_RECEIVE_ONLY' });
+
+      expect(laptop.config().host.clients.filter((client) => client.computerId === vm.info.id)).toEqual([]);
+      vmGotNothing();
+      await expect(mini.redeem(link)).resolves.toMatchObject({ linked: expect.arrayContaining(['Laptop']) });
+    });
+
+    it('refuses a phone that the lying VM fooled when it asks the desktop to mint a token for the VM', async () => {
+      const { net, laptop, vm, vmGotNothing } = await pairedWithLyingVm();
+      // The phone scans the VM's own code, so it never heard from the desktop that this is a VM.
+      const [vmProfile] = await phonePairs(net, vm);
+      const [laptopProfile] = await phonePairs(net, laptop);
+
+      // The phone's first step asks the desktop to mint a token for the VM.
+      const failed = await linkWithSavedRelayComputers(laptopProfile, [], [vmProfile], net.phoneClient);
+
+      expect(failed).toEqual([vm.info.id]);
+      expect(net.received.some((call) => call.to === 'Laptop' && call.channel === 'relay:client:mint-link')).toBe(true);
+      expect(laptop.config().host.clients.filter((client) => client.computerId === vm.info.id)).toEqual([]);
+      vmGotNothing();
     });
   });
 
