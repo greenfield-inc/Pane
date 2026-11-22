@@ -81,6 +81,12 @@ After that:
 A phone that already reaches computers links them with the new computer's
 group when it pairs, after asking (below).
 
+A Pane Cloud Session VM links one way. Your computers and phones reach it,
+and it reaches none of them: linking gives the other computer a token for
+the VM and never gives the VM one. The VM's guest image turns this on with
+`remoteDaemon.relay.receiveOnly` in its `config.json`, and the VM refuses to
+save a token for any other computer.
+
 **Settings › Remote Access › Computers** shows each computer once, with a
 pill for every route Pane can reach it on and a dot on the route in use.
 Expand a row to see its routes in order, drag them to reorder, add one with

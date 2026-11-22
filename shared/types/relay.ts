@@ -49,6 +49,11 @@ export interface RelayComputer {
   fingerprint: string;
   /** The computer's direct QUIC endpoint (`pane-direct`); absent while it has none. */
   direct?: RelayDirectEndpoint;
+  /**
+   * Set on a Pane Cloud VM: other devices may call it, and it holds no token for any other
+   * computer. Linking with it mints a token on it for the other side and never one for it.
+   */
+  receiveOnly?: boolean;
 }
 
 /** Where `pane-direct connect` finds a computer: its node id, its addresses, and the relays that introduce the two ends. */

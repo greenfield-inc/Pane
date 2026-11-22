@@ -55,6 +55,7 @@ export const relayComputerSchema: BoundarySchema<RelayComputer> = boundary.objec
   address: boundary.nonEmptyString,
   local: boundary.array(boundary.string),
   fingerprint: boundary.nonEmptyString,
+  receiveOnly: boundary.optional(boundary.boolean),
 });
 
 /** A linked computer's `/invoke` answer. */
@@ -312,6 +313,7 @@ export class RelayLinks {
    */
   async saveComputer(peer: { computer: RelayComputer; token: string; routes?: ComputerRoutesReport; linkedBy?: string }): Promise<string> {
     const { computer, token, linkedBy } = peer;
+    this.refuseIfReceiveOnly(computer.name);
     // A report about another relay id is not this computer's.
     const report = peer.routes && (!peer.routes.relay || peer.routes.relay.id === computer.id) ? peer.routes : undefined;
     const linkRoute: ComputerRoute = {
@@ -341,6 +343,21 @@ export class RelayLinks {
     });
     this.deps.log?.(`[relay] linked with ${computer.name} (${computer.id})${linkedBy ? `, linked by ${linkedBy}` : ''}`);
     return id;
+  }
+
+  /** Whether this computer is a Pane Cloud VM that holds no token for any other computer. */
+  receiveOnly(): boolean {
+    return this.remote().relay?.receiveOnly === true;
+  }
+
+  /** On a receive-only computer, refuses to keep a way to call `peer`. */
+  refuseIfReceiveOnly(peer: string): void {
+    if (!this.receiveOnly()) return;
+    throw new PaneError(
+      'ERR_RELAY_RECEIVE_ONLY',
+      `This is a Pane Cloud VM, which never keeps a way to call other computers, so it did not save one for ${peer}.`,
+      `Nothing to do: ${peer} can still reach this VM. Update the device that sent it to a Pane release that links cloud VMs one way.`,
+    );
   }
 
   /** A phone or linked computer hands this computer the token to call a peer it just linked. */

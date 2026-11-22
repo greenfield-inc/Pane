@@ -88,6 +88,7 @@ const computerSchema = boundary.object({
   address: boundary.nonEmptyString,
   local: boundary.array(boundary.string),
   fingerprint: boundary.nonEmptyString,
+  receiveOnly: boundary.optional(boundary.boolean),
 });
 const grantSchema = boundary.object({ computer: computerSchema, token: boundary.nonEmptyString });
 const exchangeSchema = boundary.object({
@@ -229,11 +230,19 @@ export interface RelayLinkPeer {
  */
 export async function linkRelayComputers(added: RelayLinkPeer, others: readonly RelayLinkPeer[]): Promise<string[]> {
   const peers = others.filter(other => other.computer.id !== added.computer.id);
+  // Asked live: a saved profile doesn't say whether a computer is receive-only.
+  const addedReceivesOnly = receivesOnly(added);
   const results = await Promise.allSettled(peers.map(async (other) => {
-    const forOther = decodeBoundary(await added.client.invoke(RELAY_CLIENT_COMMANDS.mintLink, [{ peer: other.computer }]), tokenSchema);
-    const forAdded = decodeBoundary(await other.client.invoke(RELAY_CLIENT_COMMANDS.mintLink, [{ peer: added.computer }]), tokenSchema);
-    await other.client.invoke(RELAY_CLIENT_COMMANDS.saveLink, [{ peer: added.computer, token: forOther.token }]);
-    await added.client.invoke(RELAY_CLIENT_COMMANDS.saveLink, [{ peer: other.computer, token: forAdded.token }]);
+    const [addedOnly, otherOnly] = await Promise.all([addedReceivesOnly, receivesOnly(other)]);
+    // A receive-only computer (a Pane Cloud VM) is never sent a token: only the other side gets one for it.
+    if (!otherOnly) {
+      const forOther = decodeBoundary(await added.client.invoke(RELAY_CLIENT_COMMANDS.mintLink, [{ peer: other.computer }]), tokenSchema);
+      await other.client.invoke(RELAY_CLIENT_COMMANDS.saveLink, [{ peer: added.computer, token: forOther.token }]);
+    }
+    if (!addedOnly) {
+      const forAdded = decodeBoundary(await other.client.invoke(RELAY_CLIENT_COMMANDS.mintLink, [{ peer: added.computer }]), tokenSchema);
+      await added.client.invoke(RELAY_CLIENT_COMMANDS.saveLink, [{ peer: other.computer, token: forAdded.token }]);
+    }
   }));
   return peers.flatMap((peer, index) => {
     const result = results[index];
@@ -241,6 +250,16 @@ export async function linkRelayComputers(added: RelayLinkPeer, others: readonly 
     const alreadyLinked = result?.status === 'rejected' && result.reason instanceof RemoteRequestError && result.reason.code === 'ERR_RELAY_ALREADY_LINKED';
     return result?.status === 'rejected' && !alreadyLinked ? [peer.computer.id] : [];
   });
+}
+
+/** Whether a computer says it is receive-only (a Pane Cloud VM). One that doesn't answer counts as not. */
+async function receivesOnly(peer: RelayLinkPeer): Promise<boolean> {
+  if (peer.computer.receiveOnly) return true;
+  try {
+    return decodeOptionalBoundary(await peer.client.invoke(RELAY_CLIENT_COMMANDS.computer, []), computerSchema)?.receiveOnly === true;
+  } catch {
+    return false;
+  }
 }
 
 /**

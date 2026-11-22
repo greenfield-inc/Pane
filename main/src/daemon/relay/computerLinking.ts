@@ -77,6 +77,7 @@ export function createPairingRoute(deps: {
       if (!offer) return { ok: false, status: 400, code: 'ERR_PAIRING_BAD_REQUEST', message: 'The computer did not say who it is, so the code was not used.' };
       // Checked before the secret is spent, so a refused computer leaves the code for another.
       try {
+        if (offer.token !== undefined) links.refuseIfReceiveOnly(offer.computer.name);
         links.checkPeer(offer.computer);
       } catch (error) {
         return { ok: false, status: 400, code: error instanceof PaneError ? error.code : 'ERR_PAIRING_BAD_REQUEST', message: reasonOf(error) };
@@ -188,6 +189,11 @@ export class ComputerLinking {
       const peer = grant.computer;
       if (peer.id === self.id || peer.id === result.computer.id || !isRelayComputerUnder(peer, link.domain)) continue;
       await links.saveComputer({ computer: peer, token: grant.token, linkedBy: maker });
+      // A receive-only computer (a Pane Cloud VM) is never sent a token to call this one.
+      if (peer.receiveOnly) {
+        theirs.push(peer);
+        continue;
+      }
       const back = await links.mintFor(peer);
       try {
         await this.deps.call(this.profileFor(peer.id), RELAY_CLIENT_COMMANDS.saveLink, [{ peer: self, token: back.token }]);
@@ -303,8 +309,9 @@ export class ComputerLinking {
         throw error;
       }
     };
-    const forTheirs = await mint(ourProfile, theirs);
-    const forOurs = await mint(theirProfile, ours);
+    // A receive-only computer (a Pane Cloud VM) is never sent a token: only the other side gets one for it.
+    const forTheirs = theirs.receiveOnly ? null : await mint(ourProfile, theirs);
+    const forOurs = ours.receiveOnly ? null : await mint(theirProfile, ours);
     if (forTheirs) await this.deps.call(theirProfile, RELAY_CLIENT_COMMANDS.saveLink, [{ peer: ours, token: forTheirs }]);
     if (forOurs) await this.deps.call(ourProfile, RELAY_CLIENT_COMMANDS.saveLink, [{ peer: theirs, token: forOurs }]);
   }

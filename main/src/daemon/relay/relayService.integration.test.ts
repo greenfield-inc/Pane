@@ -152,10 +152,11 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     setListenerDown(down: boolean): void;
   }
 
-  async function startComputer(name: string, dataDir: string): Promise<Computer> {
+  async function startComputer(name: string, dataDir: string, options: { receiveOnly?: boolean } = {}): Promise<Computer> {
     let config = createDefaultRemoteDaemonConfig();
     config.host.config = { ...config.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0 };
     config.relay = { enabled: true, relayAddress: `us.relay.${DOMAIN}:${relayPort}` };
+    if (options.receiveOnly) config.relay.receiveOnly = true;
     const secrets = new Map<string, string>();
     const configManager = {
       getConfig: () => ({ remoteDaemon: config }),
@@ -355,10 +356,11 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
   }, 90_000);
 
   it('pairs a laptop with a cloud VM one way from the vouched identity, and sends the secret only to the vouched key', async () => {
-    const vm = await startComputer('Cloud Session', join(folder, 'vm'));
+    const vm = await startComputer('Cloud Session', join(folder, 'vm'), { receiveOnly: true });
     started.push(vm);
     const self = vm.service.computerInfo();
     if (!self) throw new Error('the VM has no relay identity');
+    expect(self.receiveOnly).toBe(true);
     const pairing = { link: vm.service.createPairingCode().url, relay: { computerId: self.id, fingerprint: self.fingerprint, domain: self.domain } };
 
     const poster = createComputerPoster({ dial, extraCa });

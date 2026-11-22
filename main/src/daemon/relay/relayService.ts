@@ -258,6 +258,7 @@ export class RelayService {
       fingerprint: createHash('sha256').update(this.key.spki).digest('base64url'),
     };
     if (this.directEndpoint) computer.direct = this.directEndpoint;
+    if (this.deps.settings()?.receiveOnly) computer.receiveOnly = true;
     return computer;
   }
 
