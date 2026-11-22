@@ -1,5 +1,6 @@
 import {
   RELAY_CLIENT_COMMANDS,
+  RELAY_RECEIVE_ONLY_CAPABILITY,
   type RelayComputer,
   type RelayComputerGrant,
   type RelayExchangeRequest,
@@ -150,7 +151,8 @@ export async function exchangeRelayPairing(
     response = await fetchWithin(fetch, `${relayComputerAddress(scanned)}/pair/exchange`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
+      // This release keeps the receive-only mark, so a Pane Cloud VM may pair with it.
+      body: JSON.stringify({ ...request, capabilities: [RELAY_RECEIVE_ONLY_CAPABILITY] }),
       cache: 'no-store',
     });
   } catch {
@@ -301,7 +303,7 @@ export async function fetchNewRelayProfiles(
   saved: readonly RemotePaneConnectionProfile[],
 ): Promise<RelayConnectionProfile[]> {
   const known = saved.flatMap(profile => (profile.relay ? [profile.relay.computerId] : []));
-  const grants = decodeBoundary(await client.invoke(RELAY_CLIENT_COMMANDS.computers, [{ known }]), boundary.array(grantSchema));
+  const grants = decodeBoundary(await client.invoke(RELAY_CLIENT_COMMANDS.computers, [{ known, capabilities: [RELAY_RECEIVE_ONLY_CAPABILITY] }]), boundary.array(grantSchema));
   return grants
     .filter(grant => !known.includes(grant.computer.id) && isRelayComputerUnder(grant.computer, from.relay.domain))
     .map(grant => relayProfile(grant, from.label));

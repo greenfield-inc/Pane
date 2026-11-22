@@ -422,18 +422,23 @@ export class RelayLinks {
     return { token };
   }
 
-  /** Tokens on every linked computer for a phone that just paired here, skipping those it has. */
-  grantsFor(phone: { label: string; phoneId?: string }, known: readonly string[]): Promise<RelayComputerGrant[]> {
-    return this.grants(RELAY_COMPUTER_COMMANDS.grantPhone, phone, known);
+  /**
+   * Tokens on every linked computer for a phone that just paired here, skipping those it has. A
+   * Pane Cloud VM is left out unless the phone's release keeps the receive-only mark (`keepsMark`).
+   */
+  grantsFor(phone: { label: string; phoneId?: string }, known: readonly string[], keepsMark: boolean): Promise<RelayComputerGrant[]> {
+    return this.grants(RELAY_COMPUTER_COMMANDS.grantPhone, phone, known, keepsMark);
   }
 
   /** Tokens on every linked computer for a computer that just redeemed this computer's link, skipping those it has. */
-  computerGrantsFor(peer: RelayComputer, known: readonly string[]): Promise<RelayComputerGrant[]> {
-    return this.grants(RELAY_COMPUTER_COMMANDS.grantComputer, { peer }, [...known, peer.id]);
+  computerGrantsFor(peer: RelayComputer, known: readonly string[], keepsMark: boolean): Promise<RelayComputerGrant[]> {
+    return this.grants(RELAY_COMPUTER_COMMANDS.grantComputer, { peer }, [...known, peer.id], keepsMark);
   }
 
-  private async grants(channel: string, request: { label: string; phoneId?: string } | { peer: RelayComputer }, known: readonly string[]): Promise<RelayComputerGrant[]> {
-    const grants = await Promise.all(this.linked().filter((profile) => !known.includes(profile.relay.computerId)).map(async (profile) => {
+  private async grants(channel: string, request: { label: string; phoneId?: string } | { peer: RelayComputer }, known: readonly string[], keepsMark: boolean): Promise<RelayComputerGrant[]> {
+    // A device too old to keep the receive-only mark never gets a Pane Cloud VM (D-79).
+    const offered = this.linked().filter((profile) => !known.includes(profile.relay.computerId) && (keepsMark || !this.markedReceiveOnly(profile.relay.computerId)));
+    const grants = await Promise.all(offered.map(async (profile) => {
       try {
         const [result, computer] = await Promise.all([
           this.deps.call(profile, channel, [request]),
@@ -454,10 +459,10 @@ export class RelayLinks {
   }
 
   /** A paired phone's "Your computers" refresh. */
-  computersFor(callerClientId: string, known: readonly string[]): Promise<RelayComputerGrant[]> {
+  computersFor(callerClientId: string, known: readonly string[], keepsMark: boolean): Promise<RelayComputerGrant[]> {
     // A phone only: a token handed to a linked computer would outlive that computer's removal.
     const phone = this.callerPhone(callerClientId);
-    return this.grantsFor({ label: phone.label, phoneId: phone.phoneId }, known);
+    return this.grantsFor({ label: phone.label, phoneId: phone.phoneId }, known, keepsMark);
   }
 
   /** Revokes a phone here, by its install id. */

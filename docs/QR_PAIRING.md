@@ -90,6 +90,12 @@ any other computer, and nothing in Pane's own settings turns that off. Your
 computers and phones also remember a Session they paired with as a Pane Cloud
 VM, so they never send it a token even if it stops saying it is one.
 
+Only a Pane release that keeps that memory can pair with a Session. An older
+phone or computer is refused with "Update Pane on this device", and a computer
+linked with the Session leaves it out of what it shares with an older device.
+After the device updates, its next "Your computers" refresh, or its next scan,
+brings the Session in.
+
 **Settings › Remote Access › Computers** shows each computer once, with a
 pill for every route Pane can reach it on and a dot on the route in use.
 Expand a row to see its routes in order, drag them to reorder, add one with

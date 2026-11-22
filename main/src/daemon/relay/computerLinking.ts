@@ -11,6 +11,7 @@ import {
   type RelayExchangeRequest,
   type RelayPairedEvent,
   type VouchedPairing,
+  RELAY_RECEIVE_ONLY_CAPABILITY,
 } from '../../../../shared/types/relay';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PairingRoute } from '../httpApiServer';
@@ -69,11 +70,16 @@ export function createPairingRoute(deps: {
       return { ok: true, group, expiresAt: checked.expiresAt };
     },
     exchange: async (request) => {
+      const keepsMark = request.capabilities?.includes(RELAY_RECEIVE_ONLY_CAPABILITY) === true;
+      // A Pane Cloud VM pairs only with a device whose release keeps the receive-only mark (D-79). Refused before the code is spent.
+      if (links.receiveOnly() && !keepsMark) {
+        return { ok: false, status: 426, code: 'ERR_CLIENT_UPDATE_REQUIRED', message: 'This is a Pane Cloud Session, which pairs only with an up-to-date Pane. Update Pane on this device, then open the Session again.' };
+      }
       if (request.computer === undefined) {
         const result = await host.exchangeSecret(request);
         if (!result.ok) return result;
         deps.onPaired({ kind: 'phone', label: result.client.label });
-        return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, request.known ?? []) };
+        return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, request.known ?? [], keepsMark) };
       }
       const offer = decodeOptionalBoundary(request.computer, offerSchema);
       if (!offer) return { ok: false, status: 400, code: 'ERR_PAIRING_BAD_REQUEST', message: 'The computer did not say who it is, so the code was not used.' };
@@ -97,7 +103,7 @@ export function createPairingRoute(deps: {
       const computerId = offer.token === undefined ? undefined : await links.saveComputer({ computer: offer.computer, token: offer.token, routes: decodeComputerRoutesReport(offer.routes) });
       deps.onPaired(computerId === undefined ? { kind: 'computer', label: offer.computer.name } : { kind: 'computer', label: offer.computer.name, computerId });
       // A one-way pairing (to a Pane Cloud VM) hands out no tokens for other computers.
-      const [linked, routes] = await Promise.all([computerId === undefined ? Promise.resolve([]) : links.computerGrantsFor(offer.computer, request.known ?? []), deps.routesReport()]);
+      const [linked, routes] = await Promise.all([computerId === undefined ? Promise.resolve([]) : links.computerGrantsFor(offer.computer, request.known ?? [], keepsMark), deps.routesReport()]);
       return routes ? { ...result, linked, routes } : { ...result, linked };
     },
     clientAddress: (remoteAddress, remotePort) => host.clientAddress(remoteAddress, remotePort),
@@ -179,7 +185,7 @@ export class ComputerLinking {
       const offer: RelayComputerOffer = { computer: self, token: minted.token };
       const routes = await this.deps.routesReport();
       if (routes) offer.routes = routes;
-      const request: RelayExchangeRequest = { secret: link.secret, label: self.name, known: before.map((profile) => profile.relay.computerId), computer: offer };
+      const request: RelayExchangeRequest = { secret: link.secret, label: self.name, known: before.map((profile) => profile.relay.computerId), computer: offer, capabilities: [RELAY_RECEIVE_ONLY_CAPABILITY] };
       answer = await this.deps.post(relayComputerAddress(link), '/pair/exchange', request, maker);
     } catch (error) {
       await links.dropClient(minted.clientId);
@@ -244,7 +250,7 @@ export class ComputerLinking {
     }
     let answer: { status: number; json: unknown };
     try {
-      const request: RelayExchangeRequest = { secret: link.secret, label: self.name, known: [], computer: { computer: self } };
+      const request: RelayExchangeRequest = { secret: link.secret, label: self.name, known: [], computer: { computer: self }, capabilities: [RELAY_RECEIVE_ONLY_CAPABILITY] };
       answer = await this.deps.post(relayComputerAddress(link), '/pair/exchange', request, link.name, relay.fingerprint);
     } catch (error) {
       if (error instanceof RelayKeyMismatch) {

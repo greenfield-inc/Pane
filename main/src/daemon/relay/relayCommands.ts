@@ -7,7 +7,7 @@ import type { RelayService } from './relayService';
 import type { ComputerLinking } from './computerLinking';
 import type { RelayPreviews } from './relayPreviews';
 import { RELAY_COMPUTER_COMMANDS, relayComputerSchema, type RelayLinks } from './relayLinks';
-import { RELAY_CLIENT_COMMANDS, RELAY_DEVICE_COMMANDS } from '../../../../shared/types/relay';
+import { RELAY_CLIENT_COMMANDS, RELAY_DEVICE_COMMANDS, RELAY_RECEIVE_ONLY_CAPABILITY } from '../../../../shared/types/relay';
 
 const RELAY_COMMANDS = {
   status: 'relay:status',
@@ -151,8 +151,8 @@ export function registerRelayCommands(
   ));
   registry.register(RELAY_CLIENT_COMMANDS.computer, () => relay.computerInfo() ?? null);
   registry.register(RELAY_CLIENT_COMMANDS.computers, (request: PaneCommandValue, from: PaneCommandValue) => {
-    const { known } = decodeBoundary(request ?? { known: [] }, boundary.object({ known: boundary.array(boundary.string) }));
-    return links.computersFor(caller(from), known);
+    const { known, capabilities } = decodeBoundary(request ?? { known: [] }, boundary.object({ known: boundary.array(boundary.string), capabilities: boundary.optional(boundary.array(boundary.string)) }));
+    return links.computersFor(caller(from), known, capabilities?.includes(RELAY_RECEIVE_ONLY_CAPABILITY) === true);
   });
   registry.register(RELAY_CLIENT_COMMANDS.mintLink, (request: PaneCommandValue, from: PaneCommandValue) => (
     links.mintLink(decodeBoundary(request, peerRequestSchema).peer, caller(from))

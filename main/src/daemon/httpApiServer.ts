@@ -281,6 +281,8 @@ interface PairingRequest {
   phoneId?: string;
   /** Computer ids the phone already has a token for. */
   known?: string[];
+  /** What the device's release enforces (`RELAY_RECEIVE_ONLY_CAPABILITY`). */
+  capabilities?: string[];
   /** A computer redeeming the code: who it is, its routes and, except when pairing one way with a Pane Cloud VM, a token for this computer (`RelayComputerOffer`), decoded by the route. */
   computer?: JsonValue;
   /** The caller's IP address; wrong secrets lock out only this source. */
@@ -309,6 +311,7 @@ const pairingBodySchema = boundary.object({
   label: boundary.optional(boundary.json),
   phoneId: boundary.optional(boundary.json),
   known: boundary.optional(boundary.json),
+  capabilities: boundary.optional(boundary.json),
   computer: boundary.optional(boundary.json),
 });
 
@@ -924,6 +927,8 @@ export class PaneRemoteHttpApiServer {
     if (phoneId) exchangeRequest.phoneId = phoneId;
     const known = decodeOptionalBoundary(body.known, boundary.array(boundary.string));
     if (known) exchangeRequest.known = known.slice(0, 100);
+    const capabilities = decodeOptionalBoundary(body.capabilities, boundary.array(boundary.string));
+    if (capabilities) exchangeRequest.capabilities = capabilities.slice(0, 32);
     if (body.computer !== undefined) exchangeRequest.computer = body.computer;
     const result = await pairing.exchange(exchangeRequest);
     if (!result.ok) {

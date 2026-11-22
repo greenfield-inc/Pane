@@ -1,13 +1,13 @@
 import { createHash } from 'crypto';
 import { describe, expect, it } from 'vitest';
 import { PaneError } from '../../../../shared/paneError';
-import { linkWithSavedRelayComputers, relayProfile, type RelayConnectionProfile } from '../../../../shared/remoteClient/relay';
+import { exchangeRelayPairing, fetchNewRelayProfiles, linkWithSavedRelayComputers, parseRelayPairingLink, relayProfile, type RelayConnectionProfile } from '../../../../shared/remoteClient/relay';
 import { applyRoutesReport } from '../../../../shared/types/remoteComputers';
-import { RemoteRequestError } from '../../../../shared/remoteClient/remoteDaemonClient';
+import { RemoteRequestError, type RemoteFetch } from '../../../../shared/remoteClient/remoteDaemonClient';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
 import type { ComputerRoutesReport, RemoteComputer } from '../../../../shared/types/remoteComputers';
-import type { RelayComputer, RelayLinkLifetime, RelayPairedEvent, VouchedPairing } from '../../../../shared/types/relay';
-import { boundary, decodeBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
+import { RELAY_RECEIVE_ONLY_CAPABILITY, type RelayExchangeRequest, type RelayComputer, type RelayLinkLifetime, type RelayPairedEvent, type VouchedPairing } from '../../../../shared/types/relay';
+import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { AppConfig } from '../../types/config';
 import { PaneCommandRegistry, type PaneCommandValue } from '../commandRegistry';
 import type { PairingRoute } from '../httpApiServer';
@@ -76,7 +76,7 @@ function network() {
     const secret = String(request.secret);
     const result = path === '/pair/preview'
       ? await route.preview({ secret, source: '192.168.1.20' })
-      : await route.exchange({ secret, label: String(request.label), known: decodeBoundary(request.known ?? [], boundary.array(boundary.string)), computer: request.computer, source: '192.168.1.20' });
+      : await route.exchange({ secret, label: String(request.label), known: decodeBoundary(request.known ?? [], boundary.array(boundary.string)), capabilities: decodeBoundary(request.capabilities ?? [], boundary.array(boundary.string)), computer: request.computer, source: '192.168.1.20' });
     if (!result.ok) return { status: result.status, json: { ok: false, error: { code: result.code, message: result.message } } };
     if ('client' in result) {
       const { client, ...rest } = result;
@@ -200,7 +200,15 @@ function network() {
     invoke: async <T,>(channel: string, args: unknown[] = []) => await call(profile, channel, args) as T,
   });
 
-  return { add, reaches, callAs, phoneClient, received, advance: (ms: number) => { now += ms; } };
+  /** The phone app's fetch, answered by the computers' pairing routes as the relay would forward it. */
+  const phoneFetch: RemoteFetch = async (url, init) => {
+    const request: RelayExchangeRequest = JSON.parse(String(init?.body));
+    const { status, json } = await post(new URL(url).origin, '/pair/exchange', request, 'phone');
+    const answer: JsonValue = decodeBoundary(json, boundary.json);
+    return { ok: status < 300, status, body: null, json: async () => answer };
+  };
+
+  return { add, reaches, callAs, phoneClient, phoneFetch, received, advance: (ms: number) => { now += ms; } };
 }
 
 describe('linking computers with a one-time link', () => {
@@ -433,6 +441,14 @@ describe('pairing with a cloud VM from the identity Pane Cloud vouches for', () 
   async function vouched(vm: Computer, identity: Pick<RelayComputer, 'id' | 'fingerprint'> = vm.info): Promise<VouchedPairing> {
     return { link: await vm.link(), relay: { computerId: identity.id, fingerprint: identity.fingerprint, domain: DOMAIN } };
   }
+  /** A phone pairs with `computer` by QR: its profile, plus a profile for each computer linked with it. `old`: a release from before the receive-only mark. */
+  async function phonePairs(net: ReturnType<typeof network>, computer: Computer, old = false): Promise<RelayConnectionProfile[]> {
+    const secret = new URLSearchParams(new URL(await computer.link()).hash.slice(1)).get('s') ?? '';
+    const result = await computer.route.exchange({ secret, label: 'Pixel 9', phoneId: 'phone-1', capabilities: old ? undefined : [RELAY_RECEIVE_ONLY_CAPABILITY], source: '192.168.1.30' });
+    if (!result.ok || !('linked' in result)) throw new Error('the phone did not pair');
+    return [relayProfile({ computer: computer.info, token: result.token }), ...result.linked.map((grant) => relayProfile(grant, computer.name))];
+  }
+
 
   it('pairs one way: the desktop reaches the VM, and the VM holds no token for the desktop', async () => {
     const net = network();
@@ -485,20 +501,13 @@ describe('pairing with a cloud VM from the identity Pane Cloud vouches for', () 
     await laptop.redeemVouched(await vouched(vm));
 
     const secret = new URLSearchParams(new URL(await laptop.link()).hash.slice(1)).get('s') ?? '';
-    const result = await laptop.route.exchange({ secret, label: 'Pixel 9', phoneId: 'phone-1', source: '192.168.1.30' });
+    const result = await laptop.route.exchange({ secret, label: 'Pixel 9', phoneId: 'phone-1', capabilities: [RELAY_RECEIVE_ONLY_CAPABILITY], source: '192.168.1.30' });
 
     expect(result).toMatchObject({ ok: true, linked: [{ computer: expect.objectContaining({ id: vm.info.id }), token: expect.any(String) }] });
     expect(vm.config().host.clients).toContainEqual(expect.objectContaining({ phoneId: 'phone-1', label: 'Pixel 9', grantedBy: laptop.info.id }));
   });
 
   describe('a cloud VM is receive-only', () => {
-    /** A phone pairs with `computer` by QR: its profile, plus a profile for each computer linked with it. */
-    async function phonePairs(net: ReturnType<typeof network>, computer: Computer): Promise<RelayConnectionProfile[]> {
-      const secret = new URLSearchParams(new URL(await computer.link()).hash.slice(1)).get('s') ?? '';
-      const result = await computer.route.exchange({ secret, label: 'Pixel 9', phoneId: 'phone-1', source: '192.168.1.30' });
-      if (!result.ok || !('linked' in result)) throw new Error('the phone did not pair');
-      return [relayProfile({ computer: computer.info, token: result.token }), ...result.linked.map((grant) => relayProfile(grant, computer.name))];
-    }
 
     it('a phone linking a new computer gives the new computer a token for the VM and never sends the VM one', async () => {
       const net = network();
@@ -684,5 +693,81 @@ describe('pairing with a cloud VM from the identity Pane Cloud vouches for', () 
     const net = network();
     const laptop = net.add('Laptop', 'laplaplaplaplap0');
     await expect(laptop.redeemVouched(await vouched(laptop))).rejects.toMatchObject({ code: 'ERR_RELAY_LINK_SELF' });
+  });
+
+  describe('a device too old to keep the receive-only mark never holds a cloud VM pairing (D-79)', () => {
+    const update = { ok: false, status: 426, code: 'ERR_CLIENT_UPDATE_REQUIRED' };
+
+    it('a VM refuses an older phone or desktop that pairs with it directly, before its code is spent', async () => {
+      const net = network();
+      const laptop = net.add('Laptop', 'laplaplaplaplap0');
+      const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
+      const link = await vm.link();
+      const secret = new URLSearchParams(new URL(link).hash.slice(1)).get('s') ?? '';
+
+      expect(await vm.route.exchange({ secret, label: 'Old phone', phoneId: 'old-phone', source: '192.168.1.30' })).toMatchObject(update);
+      expect(await vm.route.exchange({ secret, label: 'Laptop', known: [], computer: { computer: { ...laptop.info } }, source: '192.168.1.30' })).toMatchObject(update);
+      expect(vm.config().host.clients).toEqual([]);
+      await expect(laptop.redeemVouched({ link, relay: { computerId: vm.info.id, fingerprint: vm.info.fingerprint, domain: DOMAIN } })).resolves.toMatchObject({ name: 'Cloud Session' });
+    });
+
+    it('a desktop gives an older phone that pairs with it every computer but the VM', async () => {
+      const net = network();
+      const laptop = net.add('Laptop', 'laplaplaplaplap0');
+      const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
+      const mini = net.add('Mini', 'minminminminmin0');
+      await laptop.redeemVouched(await vouched(vm));
+      await mini.redeem(await laptop.link());
+
+      expect((await phonePairs(net, laptop, true)).map((profile) => profile.label)).toEqual(['Laptop', 'Mini']);
+      expect(vm.config().host.clients.filter((client) => client.phoneId === 'phone-1')).toEqual([]);
+      expect((await phonePairs(net, laptop)).map((profile) => profile.label).sort()).toEqual(['Cloud Session', 'Laptop', 'Mini']);
+    });
+
+    it('"Your computers" on an older phone leaves the VM out, and the same phone after it updates gets it, marked', async () => {
+      const net = network();
+      const laptop = net.add('Laptop', 'laplaplaplaplap0');
+      const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
+      const [phoneOnLaptop] = await phonePairs(net, laptop, true);
+      await laptop.redeemVouched(await vouched(vm));
+      const grantsSchema = boundary.array(boundary.object({ computer: boundary.object({ id: boundary.string, receiveOnly: boundary.optional(boundary.boolean) }), token: boundary.string }));
+
+      const before = decodeBoundary(await net.phoneClient(phoneOnLaptop).invoke('relay:client:computers', [{ known: [] }]), grantsSchema);
+      expect(before).toEqual([]);
+      const after = decodeBoundary(await net.phoneClient(phoneOnLaptop).invoke('relay:client:computers', [{ known: [], capabilities: [RELAY_RECEIVE_ONLY_CAPABILITY] }]), grantsSchema);
+      expect(after).toEqual([{ computer: expect.objectContaining({ id: vm.info.id, receiveOnly: true }), token: expect.any(String) }]);
+    });
+
+    it('a desktop gives an older computer that redeems its link every computer but the VM', async () => {
+      const net = network();
+      const laptop = net.add('Laptop', 'laplaplaplaplap0');
+      const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
+      const old = net.add('Old desktop', 'oldoldoldoldold0');
+      await laptop.redeemVouched(await vouched(vm));
+      const secret = new URLSearchParams(new URL(await laptop.link()).hash.slice(1)).get('s') ?? '';
+
+      const result = await laptop.route.exchange({ secret, label: 'Old desktop', known: [], computer: { computer: { ...old.info }, token: 'old-desktop-token' }, source: '192.168.1.40' });
+
+      expect(result).toMatchObject({ ok: true, linked: [] });
+      expect(vm.config().host.clients.filter((client) => client.computerId === old.info.id)).toEqual([]);
+    });
+
+    it('the phone app on this release presents the capability: pairing and "Your computers" both bring the VM, marked', async () => {
+      const net = network();
+      const laptop = net.add('Laptop', 'laplaplaplaplap0');
+      const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
+      const scanned = parseRelayPairingLink(await laptop.link());
+      if (!scanned) throw new Error('the laptop made no link');
+      const [laptopProfile] = await exchangeRelayPairing(net.phoneFetch, scanned, { secret: scanned.secret, label: 'Pixel 9', phoneId: 'phone-1' });
+      await laptop.redeemVouched(await vouched(vm));
+
+      const added = await fetchNewRelayProfiles(net.phoneClient(laptopProfile), laptopProfile, [laptopProfile]);
+
+      expect(added).toEqual([expect.objectContaining({ label: 'Cloud Session', relay: expect.objectContaining({ computerId: vm.info.id, receiveOnly: true }) })]);
+      const again = parseRelayPairingLink(await laptop.link());
+      if (!again) throw new Error('the laptop made no link');
+      const paired = await exchangeRelayPairing(net.phoneFetch, again, { secret: again.secret, label: 'Pixel 9', phoneId: 'phone-1' });
+      expect(paired.map((profile) => profile.label)).toEqual(['Laptop', 'Cloud Session']);
+    });
   });
 });

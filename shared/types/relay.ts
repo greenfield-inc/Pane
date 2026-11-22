@@ -93,6 +93,14 @@ export interface VouchedPairing {
   relay: { computerId: string; fingerprint: string; domain: string };
 }
 
+/**
+ * What a device on a release that keeps the receive-only mark presents when it pairs or asks for
+ * linked computers. A Pane Cloud VM pairs only with a device that presents it, and a desktop hands
+ * a grant for a VM it marked only to such a device, so a device too old to keep the mark never holds
+ * a VM pairing. Pane Cloud's `pairVm` takes the same string in `clientCapabilities`.
+ */
+export const RELAY_RECEIVE_ONLY_CAPABILITY = 'relay-receive-only-v1';
+
 /** `POST /pair/exchange` body. `phoneId` is the app's stable install id, so "Remove from all your computers" finds the phone everywhere. */
 export interface RelayExchangeRequest {
   secret: string;
@@ -100,6 +108,8 @@ export interface RelayExchangeRequest {
   phoneId?: string;
   /** Computer ids the app already has a token for. Linked computers among them hand out no new token, which would replace the app's. */
   known?: string[];
+  /** What this device's release enforces; `RELAY_RECEIVE_ONLY_CAPABILITY` when it keeps the receive-only mark. */
+  capabilities?: string[];
   /**
    * Set when a computer redeems the link: the maker records it as a computer, not a phone. With a
    * token the maker saves it to call back; without one (accepted only by a Pane Cloud VM) the pairing
@@ -159,7 +169,10 @@ export const RELAY_CLIENT_COMMANDS = {
   previewAddress: 'relay:client:preview-address',
   /** → `RelayComputer` for this computer. */
   computer: 'relay:client:computer',
-  /** `{known: string[]}` → `RelayComputerGrant[]`: linked computers, with new tokens for those not in `known`. */
+  /**
+   * `{known: string[], capabilities?: string[]}` → `RelayComputerGrant[]`: linked computers, with new
+   * tokens for those not in `known`. A Pane Cloud VM only with `RELAY_RECEIVE_ONLY_CAPABILITY`.
+   */
   computers: 'relay:client:computers',
   /** `{peer: RelayComputer}` → `{token}`: a token the peer computer uses to call this one. */
   mintLink: 'relay:client:mint-link',
