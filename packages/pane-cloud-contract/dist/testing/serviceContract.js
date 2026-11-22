@@ -182,6 +182,34 @@ function serviceContractCases(target) {
             },
         },
         {
+            name: 'service: pairing a running Session VM gives a one-time link for the relay identity the service vouches for, the same identity after a stop and start, logged without the link',
+            async run() {
+                await withVm(async (member, vm) => {
+                    strict_1.default.equal(vm.relay, null, 'a VM no device has paired with has no vouched identity yet');
+                    const first = await member.pairVm(vm.id);
+                    const link = new URL(first.link);
+                    const fragment = new URLSearchParams(link.hash.slice(1));
+                    strict_1.default.equal(link.host, first.relay.domain, 'the link is under the relay domain');
+                    strict_1.default.equal(fragment.get('c'), first.relay.computerId, 'the link names the vouched computer');
+                    strict_1.default.ok(fragment.get('s'), 'the link carries a one-time secret');
+                    strict_1.default.deepEqual((await member.getVm(vm.id)).relay, first.relay, 'the VM shows the identity the service vouches for');
+                    await member.stopVm(vm.id);
+                    await vmIn(member, vm.id, 'stopped');
+                    await (0, cases_1.expectError)('invalid_state', () => member.pairVm(vm.id));
+                    await member.startVm(vm.id);
+                    await vmIn(member, vm.id, 'running');
+                    const second = await member.pairVm(vm.id);
+                    strict_1.default.deepEqual(second.relay, first.relay, 'the relay identity survives a stop and start');
+                    strict_1.default.notEqual(second.link, first.link, 'each pairing gets a new link');
+                    const logged = (await member.listActionLog(vm.id)).entries.filter((e) => e.operation === 'create_pairing_link');
+                    strict_1.default.equal(logged.length, 2, 'each pairing is in the action log');
+                    const secret = fragment.get('s') ?? '';
+                    strict_1.default.ok(logged.every((e) => !JSON.stringify(e).includes(secret)), 'the action log never holds the link');
+                    await (0, cases_1.expectError)('vm_not_found', async () => (await as('waitlisted')).pairVm(vm.id));
+                });
+            },
+        },
+        {
             name: "service: another account cannot read or change a member's Session VM or organization",
             async run() {
                 await withVm(async (member, vm) => {

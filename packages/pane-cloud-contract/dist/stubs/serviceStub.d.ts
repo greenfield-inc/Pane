@@ -14,6 +14,8 @@ export interface ServiceStubOptions {
     paneVersions?: string[];
     /** VMs the stub's one host holds awake at once; past it, create and start answer no_capacity. Default unlimited. */
     capacity?: number;
+    /** The relay domain the stub's VMs report. Default runpane.net. */
+    relayDomain?: string;
     now?: () => Date;
 }
 export interface ServiceStub extends RunningStub {
@@ -30,6 +32,8 @@ export interface ServiceStub extends RunningStub {
     setPlan(organizationId: string, plan: Plan): void;
     /** Gives a VM 16 GiB (or back to 8), as a resize will; its later awake hours count at the new rate. */
     setMemoryGiB(vmId: string, memoryGiB: SessionVm['memoryGiB']): void;
+    /** The VM's Pane losing its relay key and making a new one, so its next pairing reports another identity. */
+    replaceRelayKey(vmId: string): void;
 }
 /**
  * An in-memory Pane Cloud service that keeps the contract, for building Pane against and for the

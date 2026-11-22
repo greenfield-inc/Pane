@@ -208,6 +208,34 @@ export function serviceContractCases(target: ServiceContractTarget): ContractCas
       },
     },
     {
+      name: 'service: pairing a running Session VM gives a one-time link for the relay identity the service vouches for, the same identity after a stop and start, logged without the link',
+      async run() {
+        await withVm(async (member, vm) => {
+          assert.equal(vm.relay, null, 'a VM no device has paired with has no vouched identity yet');
+          const first = await member.pairVm(vm.id);
+          const link = new URL(first.link);
+          const fragment = new URLSearchParams(link.hash.slice(1));
+          assert.equal(link.host, first.relay.domain, 'the link is under the relay domain');
+          assert.equal(fragment.get('c'), first.relay.computerId, 'the link names the vouched computer');
+          assert.ok(fragment.get('s'), 'the link carries a one-time secret');
+          assert.deepEqual((await member.getVm(vm.id)).relay, first.relay, 'the VM shows the identity the service vouches for');
+          await member.stopVm(vm.id);
+          await vmIn(member, vm.id, 'stopped');
+          await expectError('invalid_state', () => member.pairVm(vm.id));
+          await member.startVm(vm.id);
+          await vmIn(member, vm.id, 'running');
+          const second = await member.pairVm(vm.id);
+          assert.deepEqual(second.relay, first.relay, 'the relay identity survives a stop and start');
+          assert.notEqual(second.link, first.link, 'each pairing gets a new link');
+          const logged = (await member.listActionLog(vm.id)).entries.filter((e) => e.operation === 'create_pairing_link');
+          assert.equal(logged.length, 2, 'each pairing is in the action log');
+          const secret = fragment.get('s') ?? '';
+          assert.ok(logged.every((e) => !JSON.stringify(e).includes(secret)), 'the action log never holds the link');
+          await expectError('vm_not_found', async () => (await as('waitlisted')).pairVm(vm.id));
+        });
+      },
+    },
+    {
       name: "service: another account cannot read or change a member's Session VM or organization",
       async run() {
         await withVm(async (member, vm) => {

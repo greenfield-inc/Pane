@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.startServiceStub = startServiceStub;
 const errors_1 = require("../errors");
 const service_1 = require("../service");
+const relayKey_1 = require("./relayKey");
 const server_1 = require("./server");
 const AWAKE = ['creating', 'starting', 'running'];
 const HOUR = 3_600_000;
@@ -18,6 +19,7 @@ async function startServiceStub(options) {
     const versions = options.paneVersions ?? ['2.4.214', '2.4.215'];
     const latest = versions.at(-1) ?? '2.4.215';
     let capacity = options.capacity ?? Number.POSITIVE_INFINITY;
+    const relayDomain = options.relayDomain ?? 'runpane.net';
     const plans = new Map();
     const planOf = (organizationId) => plans.get(organizationId) ?? 'free';
     let counter = 0;
@@ -191,9 +193,10 @@ async function startServiceStub(options) {
             requireRoomToWake(account);
             const id = nextId('vm');
             const record = {
-                vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, createdAt: iso(), updatedAt: iso() },
+                vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, relay: null, createdAt: iso(), updatedAt: iso() },
                 awake: [],
                 log: [],
+                relayKey: (0, relayKey_1.newRelayIdentity)(relayDomain),
             };
             vms.set(id, record);
             setState(record, 'running', null);
@@ -243,6 +246,19 @@ async function startServiceStub(options) {
                 return log(record, 'update_pane', account, `You updated Pane to ${version}.`, { release: releaseFor(version) });
             }
             return log(record, 'collect_diagnostics', account, 'You collected diagnostics.');
+        }),
+        (0, server_1.bind)(r.pairVm, ({ token, params }) => {
+            const account = caller(token);
+            const record = ownVm(account, params.vmId ?? '');
+            requireState(record, 'running', 'Pairing');
+            const reported = record.relayKey;
+            const vouched = record.vm.relay;
+            if (vouched && (vouched.computerId !== reported.computerId || vouched.fingerprint !== reported.fingerprint || vouched.domain !== reported.domain)) {
+                throw new errors_1.CloudApiError('relay_key_changed', `This Session now reports relay key ${reported.computerId}, not ${vouched.computerId}, the one it paired with first, so no device was paired.`, 'Write to support with the Session name; its devices keep refusing the new key.');
+            }
+            record.vm.relay = reported;
+            log(record, 'create_pairing_link', account, 'You paired a device with this Session.');
+            return (0, relayKey_1.pairingLinkFor)(reported, record.vm.name, now());
         }),
         (0, server_1.bind)(r.listActionLog, ({ token, params, query }) => {
             const all = ownVm(caller(token), params.vmId ?? '').log;
@@ -308,6 +324,12 @@ async function startServiceStub(options) {
                 throw new Error(`stub: no Session VM ${vmId}`);
             setState(record, 'stopped', 'review');
             log(record, 'stop', 'service', 'Paused while your usage is under review.', { cause: 'review' });
+        },
+        replaceRelayKey(vmId) {
+            const record = vms.get(vmId);
+            if (!record)
+                throw new Error(`stub: no Session VM ${vmId}`);
+            record.relayKey = (0, relayKey_1.newRelayIdentity)(relayDomain);
         },
     };
 }

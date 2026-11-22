@@ -1,10 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fleetRoutes = exports.FleetEvent = exports.VmMetrics = exports.OperationStatus = exports.OperationError = exports.FleetVm = exports.StateReason = exports.FleetVmState = exports.SubmittedEnvelope = exports.OperationEnvelope = exports.OperationSignature = exports.OperationPayload = exports.FleetOperationName = exports.FLEET_OPERATIONS = exports.StopCause = exports.PaneRelease = exports.VmId = exports.CLOCK_SKEW_SECONDS = exports.MAX_OPERATION_LIFETIME_SECONDS = exports.DIAGNOSTIC_FILES = exports.VmMemoryGiB = void 0;
+exports.fleetRoutes = exports.FleetEvent = exports.VmMetrics = exports.OperationStatus = exports.PairingLink = exports.RelayIdentity = exports.OperationError = exports.FleetVm = exports.StateReason = exports.FleetVmState = exports.SubmittedEnvelope = exports.OperationEnvelope = exports.OperationSignature = exports.OperationPayload = exports.FleetOperationName = exports.FLEET_OPERATIONS = exports.StopCause = exports.PaneRelease = exports.VmId = exports.CLOCK_SKEW_SECONDS = exports.MAX_OPERATION_LIFETIME_SECONDS = exports.DIAGNOSTIC_FILES = exports.VmMemoryGiB = void 0;
 exports.canonicalJson = canonicalJson;
 exports.operationSigningBytes = operationSigningBytes;
 exports.signOperation = signOperation;
 exports.verifyOperation = verifyOperation;
+exports.relayComputerIdOf = relayComputerIdOf;
 exports.createFleetClient = createFleetClient;
 /**
  * The fleet API: what the Pane Cloud service calls on the fleet (the host agent).
@@ -55,6 +56,7 @@ const StopParameters = zod_1.z.object({ cause: exports.StopCause }).strict();
  * The allow-list. Lifecycle operations run on the host; guest operations run inside the VM through
  * the guest agent. Nothing else exists: no shell command, no file write, no access grant. `create`
  * makes an 8 GiB, 4 vCPU VM and starts it; `stop` keeps its disk; `start` boots it from that disk.
+ * `create_pairing_link` asks the VM's Pane for a one-time pairing link and its relay identity.
  */
 exports.FLEET_OPERATIONS = {
     create: { runsOn: 'host', parameters: NoParameters },
@@ -65,6 +67,7 @@ exports.FLEET_OPERATIONS = {
     update_pane: { runsOn: 'guest', parameters: ReleaseParameters },
     prepare_to_stop: { runsOn: 'guest', parameters: NoParameters },
     collect_diagnostics: { runsOn: 'guest', parameters: NoParameters },
+    create_pairing_link: { runsOn: 'guest', parameters: NoParameters },
 };
 // SAFETY: Object.keys of a non-empty object literal lists exactly its keys.
 const operationNames = Object.keys(exports.FLEET_OPERATIONS);
@@ -95,6 +98,7 @@ exports.OperationPayload = zod_1.z.discriminatedUnion('operation', [
     payloadFor('update_pane', exports.FLEET_OPERATIONS.update_pane.parameters),
     payloadFor('prepare_to_stop', exports.FLEET_OPERATIONS.prepare_to_stop.parameters),
     payloadFor('collect_diagnostics', exports.FLEET_OPERATIONS.collect_diagnostics.parameters),
+    payloadFor('create_pairing_link', exports.FLEET_OPERATIONS.create_pairing_link.parameters),
 ]);
 exports.OperationSignature = zod_1.z
     .object({
@@ -188,6 +192,49 @@ const DiagnosticsResult = zod_1.z
     archiveKey: zod_1.z.string(),
 })
     .strict();
+const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
+const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+/** The relay computer id a key fingerprint names: its first 80 bits in lowercase base32 (Pane's relay/PROTOCOL.md). */
+function relayComputerIdOf(fingerprint) {
+    let value = 0;
+    let bits = 0;
+    let id = '';
+    for (const char of fingerprint.slice(0, 16)) {
+        value = ((value << 6) | BASE64URL.indexOf(char)) & 0x7ff;
+        bits += 6;
+        while (bits >= 5 && id.length < 16) {
+            id += BASE32[(value >>> (bits - 5)) & 31];
+            bits -= 5;
+        }
+    }
+    return id;
+}
+/**
+ * A Session VM's relay identity: the name clients reach it at, `https://<computerId>.<domain>`, and
+ * the key they pin. The VM's Pane makes the key on first use and keeps it on the Session disk.
+ */
+exports.RelayIdentity = zod_1.z
+    .object({
+    computerId: zod_1.z.string().regex(/^[a-z2-7]{16}$/),
+    /** Base64url SHA-256 of the VM's relay public key (SubjectPublicKeyInfo DER). */
+    fingerprint: zod_1.z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+    /** The relay domain, `host[:port]`: runpane.net in production. */
+    domain: zod_1.z.string().regex(/^[a-z0-9.-]+(:\d{1,5})?$/),
+})
+    .strict()
+    .refine((relay) => relayComputerIdOf(relay.fingerprint) === relay.computerId, { message: 'computerId is not the id the fingerprint names', path: ['computerId'] });
+/**
+ * A one-time link a device trades for its token on the VM (`https://<domain>/pair#s=…&c=<computerId>&n=…`),
+ * with the identity the VM's Pane reported. The link works once, within 10 minutes. The fleet keeps
+ * it only to answer a retried request, never in a log or an event.
+ */
+exports.PairingLink = zod_1.z
+    .object({
+    relay: exports.RelayIdentity,
+    link: zod_1.z.url({ protocol: /^https$/ }),
+    expiresAt: Timestamp,
+})
+    .strict();
 exports.OperationStatus = zod_1.z
     .object({
     requestId: zod_1.z.uuid(),
@@ -195,8 +242,8 @@ exports.OperationStatus = zod_1.z
     operation: exports.FleetOperationName,
     status: zod_1.z.enum(['accepted', 'running', 'succeeded', 'failed']),
     error: exports.OperationError.nullable(),
-    /** Set for a finished collect_diagnostics; null for every other operation. */
-    result: DiagnosticsResult.nullable(),
+    /** Set for a finished collect_diagnostics or create_pairing_link; null for every other operation. */
+    result: zod_1.z.union([DiagnosticsResult, exports.PairingLink]).nullable(),
     acceptedAt: Timestamp,
     finishedAt: Timestamp.nullable(),
 })

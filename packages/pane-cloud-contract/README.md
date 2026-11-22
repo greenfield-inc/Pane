@@ -144,10 +144,11 @@ Bearer token from device sign-in on every route except the two sign-in calls.
 | Account | `GET /v1/account` | `access: waitlisted` is "You're on the list"; `signupState` is the next sign-up step (`needs_phone`, `needs_card`, `ready`); the account's organizations, the personal one marked |
 | List Session VMs | `GET /v1/organizations/:organizationId/vms` | The caller's own in that organization, deleted ones left out |
 | Create | `POST /v1/organizations/:organizationId/vms` | `202`; an 8 GiB VM that starts at once; `not_org_member`, `view_only`, `not_invited`, `signup_incomplete`, `awake_limit_reached`, `no_capacity`; a retry with the same key in the same organization returns the first VM |
-| Get | `GET /v1/vms/:vmId` | State, why it last stopped, memory, Pane version |
+| Get | `GET /v1/vms/:vmId` | State, why it last stopped, memory, Pane version, and `relay`: the relay identity the service vouches for, `null` before the first pairing |
 | Start, stop | `POST /v1/vms/:vmId/start`, `/stop` | `202`; `invalid_state` if it is already running (start) or stopped (stop); start answers `under_review` for a VM paused for review, and `awake_limit_reached` or `no_capacity` like create |
 | Delete | `DELETE /v1/vms/:vmId` | `202`; deletes the disk |
 | Run an operation | `POST /v1/vms/:vmId/operations` | Only `update_pane` (`{ version? }`, latest release when omitted; the service looks up the checksum) and `collect_diagnostics` (`{}`); any other name is `operation_not_allowed` |
+| Pair a device | `POST /v1/vms/:vmId/pairing` | A one-time pairing link (10 minutes) and the VM's relay identity (`computerId`, key `fingerprint`, `domain`). The client pairs only with a VM that presents exactly that key. The service keeps the first identity a VM reports and answers `relay_key_changed` when it later reports another. `invalid_state` unless running; logged as `create_pairing_link`, without the link |
 | Action log | `GET /v1/vms/:vmId/operations` | Newest first, `?before=<id>&limit=`; every lifecycle step and operation with actor, reason and parameters |
 | Usage | `GET /v1/organizations/:organizationId/usage` | `?month=YYYY-MM`, this month by default: the plan, agent-hours used and the pooled limit, when they reset, and per member their hours, VMs awake now and awake limit |
 
@@ -177,6 +178,7 @@ Called only by the service. Every change to a VM is one signed operation.
 | `update_pane` | guest | the same `release`; the host refuses a checksum that is not a published release |
 | `prepare_to_stop` | guest | none |
 | `collect_diagnostics` | guest | none; reads only `DIAGNOSTIC_FILES` |
+| `create_pairing_link` | guest | none; returns a one-time pairing link from the VM's Pane and its relay identity. The host keeps the link only to answer a retried `requestId` |
 
 There is no shell command, file write or access grant, and every schema is strict, so an extra
 parameter is refused.

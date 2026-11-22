@@ -164,6 +164,23 @@ function fleetContractCases(target) {
             },
         },
         {
+            name: "fleet: create_pairing_link returns a one-time link for the VM's relay identity, the same identity after a stop and start",
+            async run() {
+                const vmId = await newVm();
+                const first = await run(vmId, 'create_pairing_link');
+                strict_1.default.ok(first.result && 'relay' in first.result, 'create_pairing_link returns a link and the relay identity');
+                strict_1.default.equal(new URLSearchParams(new URL(first.result.link).hash.slice(1)).get('c'), first.result.relay.computerId);
+                await run(vmId, 'stop');
+                await vmIn(vmId, 'stopped');
+                await run(vmId, 'start');
+                await vmIn(vmId, 'running');
+                const second = await run(vmId, 'create_pairing_link');
+                strict_1.default.ok(second.result && 'relay' in second.result);
+                strict_1.default.deepEqual(second.result.relay, first.result.relay, 'the relay key lives on the VM disk and survives a stop and start');
+                await run(vmId, 'delete');
+            },
+        },
+        {
             name: "fleet: reports a VM's daily metrics, and every state change as an event with a cursor",
             async run() {
                 const vmId = await newVm();

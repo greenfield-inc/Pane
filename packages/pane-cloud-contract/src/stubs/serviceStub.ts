@@ -12,6 +12,8 @@ import {
   serviceRoutes,
   type SessionVm,
 } from '../service';
+import type { RelayIdentity } from '../fleet';
+import { newRelayIdentity, pairingLinkFor } from './relayKey';
 import { bind, createRouteServer, listen, type RunningStub } from './server';
 
 export interface StubAccount {
@@ -29,6 +31,8 @@ export interface ServiceStubOptions {
   paneVersions?: string[];
   /** VMs the stub's one host holds awake at once; past it, create and start answer no_capacity. Default unlimited. */
   capacity?: number;
+  /** The relay domain the stub's VMs report. Default runpane.net. */
+  relayDomain?: string;
   now?: () => Date;
 }
 
@@ -46,6 +50,8 @@ export interface ServiceStub extends RunningStub {
   setPlan(organizationId: string, plan: Plan): void;
   /** Gives a VM 16 GiB (or back to 8), as a resize will; its later awake hours count at the new rate. */
   setMemoryGiB(vmId: string, memoryGiB: SessionVm['memoryGiB']): void;
+  /** The VM's Pane losing its relay key and making a new one, so its next pairing reports another identity. */
+  replaceRelayKey(vmId: string): void;
 }
 
 interface DeviceGrant {
@@ -59,6 +65,8 @@ interface VmRecord {
   /** Awake intervals in epoch ms at one memory size; the last one is open while the VM is awake. */
   awake: { from: number; to: number | null; memoryGiB: SessionVm['memoryGiB'] }[];
   log: ActionLogEntry[];
+  /** The key the VM's Pane holds on its Session disk; it survives stops and starts. */
+  relayKey: RelayIdentity;
 }
 
 const AWAKE: readonly SessionVm['state'][] = ['creating', 'starting', 'running'];
@@ -76,6 +84,7 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
   const versions = options.paneVersions ?? ['2.4.214', '2.4.215'];
   const latest = versions.at(-1) ?? '2.4.215';
   let capacity = options.capacity ?? Number.POSITIVE_INFINITY;
+  const relayDomain = options.relayDomain ?? 'runpane.net';
   const plans = new Map<string, Plan>();
   const planOf = (organizationId: string): Plan => plans.get(organizationId) ?? 'free';
   let counter = 0;
@@ -244,9 +253,10 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       requireRoomToWake(account);
       const id = nextId('vm');
       const record: VmRecord = {
-        vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, createdAt: iso(), updatedAt: iso() },
+        vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, relay: null, createdAt: iso(), updatedAt: iso() },
         awake: [],
         log: [],
+        relayKey: newRelayIdentity(relayDomain),
       };
       vms.set(id, record);
       setState(record, 'running', null);
@@ -293,6 +303,19 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
         return log(record, 'update_pane', account, `You updated Pane to ${version}.`, { release: releaseFor(version) });
       }
       return log(record, 'collect_diagnostics', account, 'You collected diagnostics.');
+    }),
+    bind(r.pairVm, ({ token, params }) => {
+      const account = caller(token);
+      const record = ownVm(account, params.vmId ?? '');
+      requireState(record, 'running', 'Pairing');
+      const reported = record.relayKey;
+      const vouched = record.vm.relay;
+      if (vouched && (vouched.computerId !== reported.computerId || vouched.fingerprint !== reported.fingerprint || vouched.domain !== reported.domain)) {
+        throw new CloudApiError('relay_key_changed', `This Session now reports relay key ${reported.computerId}, not ${vouched.computerId}, the one it paired with first, so no device was paired.`, 'Write to support with the Session name; its devices keep refusing the new key.');
+      }
+      record.vm.relay = reported;
+      log(record, 'create_pairing_link', account, 'You paired a device with this Session.');
+      return pairingLinkFor(reported, record.vm.name, now());
     }),
     bind(r.listActionLog, ({ token, params, query }) => {
       const all = ownVm(caller(token), params.vmId ?? '').log;
@@ -354,6 +377,11 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       if (!record) throw new Error(`stub: no Session VM ${vmId}`);
       setState(record, 'stopped', 'review');
       log(record, 'stop', 'service', 'Paused while your usage is under review.', { cause: 'review' });
+    },
+    replaceRelayKey(vmId) {
+      const record = vms.get(vmId);
+      if (!record) throw new Error(`stub: no Session VM ${vmId}`);
+      record.relayKey = newRelayIdentity(relayDomain);
     },
   };
 }

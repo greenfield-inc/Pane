@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.startFleetStub = startFleetStub;
 const errors_1 = require("../errors");
 const fleet_1 = require("../fleet");
+const relayKey_1 = require("./relayKey");
 const server_1 = require("./server");
 const notFound = (vmId) => new errors_1.CloudApiError('vm_not_found', `The fleet has no VM ${vmId}.`, 'Create the VM first, or check its id.');
 /**
@@ -15,6 +16,7 @@ async function startFleetStub(options) {
     const vms = new Map();
     const cpu = new Map();
     const hostId = options.hostId ?? 'stub-host-1';
+    const relayKeys = new Map();
     const operations = new Map();
     const events = [];
     const record = (event) => events.push({ ...event, id: String(events.length + 1), at: iso() });
@@ -49,6 +51,7 @@ async function startFleetStub(options) {
                 throw new errors_1.CloudApiError('vm_exists', `VM ${payload.vmId} already exists.`, 'Use a new VM id, or start the existing VM.');
             const vm = { vmId: payload.vmId, state: 'running', stateReason: null, hostId, memoryGiB: 8, paneVersion: null, updatedAt: iso() };
             vms.set(vm.vmId, vm);
+            relayKeys.set(vm.vmId, (0, relayKey_1.newRelayIdentity)('runpane.net'));
             record({ vmId: vm.vmId, kind: 'state_changed', state: 'running', reason: null, requestId: payload.requestId });
         }
         else {
@@ -79,6 +82,14 @@ async function startFleetStub(options) {
                     requireState(vm, 'running', 'collect_diagnostics');
                     result = { files: [{ path: '/var/log/pane-cloud/guest-agent.log', bytes: 0 }], archiveKey: `diagnostics/${vm.vmId}/${payload.requestId}.tar.gz` };
                     break;
+                case 'create_pairing_link': {
+                    requireState(vm, 'running', 'create_pairing_link');
+                    const relay = relayKeys.get(vm.vmId);
+                    if (!relay)
+                        throw notFound(vm.vmId);
+                    result = (0, relayKey_1.pairingLinkFor)(relay, vm.vmId, now());
+                    break;
+                }
             }
         }
         return result;

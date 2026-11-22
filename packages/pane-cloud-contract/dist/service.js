@@ -89,12 +89,17 @@ exports.SessionVm = zod_1.z
     stateReason: fleet_1.StateReason.nullable(),
     memoryGiB: fleet_1.VmMemoryGiB,
     paneVersion: zod_1.z.string().nullable(),
+    /**
+     * The relay identity the VM reported when a device first paired with it, which the service
+     * vouches for from then on; null before the first pairing.
+     */
+    relay: fleet_1.RelayIdentity.nullable(),
     createdAt: Timestamp,
     updatedAt: Timestamp,
 })
     .strict();
 /** Lifecycle actions plus the allow-listed guest operations, as the VM's action log names them. */
-exports.LoggedOperation = zod_1.z.enum(['create', 'start', 'stop', 'delete', 'bootstrap', 'update_pane', 'prepare_to_stop', 'collect_diagnostics']);
+exports.LoggedOperation = zod_1.z.enum(['create', 'start', 'stop', 'delete', 'bootstrap', 'update_pane', 'prepare_to_stop', 'collect_diagnostics', 'create_pairing_link']);
 exports.ActionLogEntry = zod_1.z
     .object({
     id: Id,
@@ -192,6 +197,13 @@ exports.serviceRoutes = {
     stopVm: (0, http_1.route)({ id: 'service.stopVm', method: 'POST', path: '/v1/vms/:vmId/stop', auth: true, body: zod_1.z.object({}).strict(), response: VmAction, status: 202 }),
     deleteVm: (0, http_1.route)({ id: 'service.deleteVm', method: 'DELETE', path: '/v1/vms/:vmId', auth: true, response: VmAction, status: 202 }),
     requestOperation: (0, http_1.route)({ id: 'service.requestOperation', method: 'POST', path: '/v1/vms/:vmId/operations', auth: true, body: exports.SubmittedOperation, response: exports.ActionLogEntry, status: 202 }),
+    /**
+     * A one-time link for pairing a device with a running VM, and the relay identity the service
+     * vouches for. The client pairs only with a VM that presents exactly that key. A VM that reports
+     * a different identity than its first one is refused with relay_key_changed. Logged as
+     * create_pairing_link, without the link.
+     */
+    pairVm: (0, http_1.route)({ id: 'service.pairVm', method: 'POST', path: '/v1/vms/:vmId/pairing', auth: true, body: zod_1.z.object({}).strict(), response: fleet_1.PairingLink }),
     listActionLog: (0, http_1.route)({
         id: 'service.listActionLog',
         method: 'GET',
@@ -224,6 +236,7 @@ function createServiceClient(config) {
         stopVm: (vmId) => (0, http_1.callRoute)(config, r.stopVm, { params: { vmId }, body: {} }),
         deleteVm: (vmId) => (0, http_1.callRoute)(config, r.deleteVm, { params: { vmId } }),
         requestOperation: (vmId, request) => (0, http_1.callRoute)(config, r.requestOperation, { params: { vmId }, body: request }),
+        pairVm: (vmId) => (0, http_1.callRoute)(config, r.pairVm, { params: { vmId }, body: {} }),
         listActionLog: (vmId, page = {}) => (0, http_1.callRoute)(config, r.listActionLog, { params: { vmId }, query: page }),
         getUsage: (organizationId, month) => (0, http_1.callRoute)(config, r.getUsage, { params: { organizationId }, query: { month } }),
     };
