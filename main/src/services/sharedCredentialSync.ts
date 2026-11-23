@@ -11,7 +11,8 @@ import {
 } from './sharedCredentials';
 import { localHostLabel, paneSecretStore, type PaneSecretStore } from './paneSecrets';
 import { GITHUB_SIGN_IN_KEY, readGithubToken } from './cloudSecrets';
-import { cloudSecretRecords, parseCloudChoice } from '../../../shared/types/paneCloudSecrets';
+import { CLOUD_SIGN_IN_PROJECT, cloudSecretRecords, GITHUB_SIGN_IN_ENV, parseCloudChoice, sendsToCloud } from '../../../shared/types/paneCloudSecrets';
+import type { GitHubTokenRecord } from 'pane-cloud-contract';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
@@ -195,6 +196,21 @@ export class SharedCredentialSync {
     if ((token ?? null) === (this.githubRecord?.value ?? null)) return false;
     this.githubRecord = token ? { value: token, updatedAt: new Date().toISOString(), source: localHostLabel() } : null;
     return token !== null;
+  }
+
+  /**
+   * The GitHub token a new cloud Session's create request seals (D-107): a `pane-cloud/GH_TOKEN` the person
+   * keeps as a Pane secret, else this computer's gh token, as the same record later syncs send. Null when
+   * there is none, or the person's choice keeps the token or the machine it came from off cloud machines.
+   */
+  async githubTokenForCloud(): Promise<GitHubTokenRecord | null> {
+    await this.refreshGithubRecord();
+    const store = this.secrets();
+    const saved = store.secretRecord(GITHUB_SIGN_IN_KEY);
+    const record = saved && !saved.deleted && store.has(CLOUD_SIGN_IN_PROJECT, GITHUB_SIGN_IN_ENV)
+      ? { token: await store.read(CLOUD_SIGN_IN_PROJECT, GITHUB_SIGN_IN_ENV), source: saved.source, updatedAt: saved.updatedAt }
+      : this.githubRecord?.value ? { token: this.githubRecord.value, source: this.githubRecord.source, updatedAt: this.githubRecord.updatedAt } : null;
+    return record && sendsToCloud(store.cloudChoice(), GITHUB_SIGN_IN_KEY, record.source) ? record : null;
   }
 
   /** What a new cloud VM is sent before its first Session: this computer's merged set, as `forCloudVm` writes it. */

@@ -1,4 +1,5 @@
 import path from 'path';
+import type { GitHubTokenRecord } from 'pane-cloud-contract';
 import type { IpcMain } from 'electron';
 import { openExternalUrl } from '../utils/openExternalUrl';
 import { isRemotePaneCommand, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
@@ -66,6 +67,8 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
   send: (channel: string, snapshot: PaneCloudSnapshot) => void;
   /** The folder of a project on this computer, for the repo a new cloud Session clones. */
   projectPath?: (projectId: number) => string | null;
+  /** The GitHub token a new cloud Session's create request seals, or null (SharedCredentialSync, D-107). */
+  githubToken?: () => Promise<GitHubTokenRecord | null>;
 }): void {
   manager?.dispose();
   const { commands, machines, configManager } = deps;
@@ -73,6 +76,7 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
     serviceUrl: process.env.PANE_CLOUD_URL || DEFAULT_PANE_CLOUD_URL,
     // This computer sends a new cloud Session its secrets (deps.sendSecrets), so the card says they come along.
     sendsSecrets: true,
+    githubToken: deps.githubToken,
     tokenFile: path.join(getAppDirectory(), 'pane-cloud', 'session.json'),
     // Pane's own allowlist (http, https, mailto) as well as the manager's web-address check.
     openExternal: (url) => openExternalUrl(url),

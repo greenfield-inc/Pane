@@ -8,7 +8,7 @@ import { SharedCredentialSync } from './sharedCredentialSync';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { registerSharedCredentialHandlers } from '../ipc/sharedCredentials';
-import { keychainSecretBackend, paneSecretValueBackend, PaneSecretStore, volumeSecretIndex } from './paneSecrets';
+import { keychainSecretBackend, localHostLabel, paneSecretValueBackend, PaneSecretStore, volumeSecretIndex } from './paneSecrets';
 import { FakeKeychain } from '../test/fakeKeychain';
 import { memoryConfig } from '../test/memorySecretStore';
 import type { AppServices } from '../ipc/types';
@@ -855,6 +855,28 @@ describe('Pane Cloud VMs', () => {
 
     await vi.waitFor(() => expect(vm.env.GH_TOKEN).toBe('gho_sealed'));
     await expect(fs.access(path.join(vm.volume ?? '', 'incoming', 'github-token.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('give a new cloud Session the GitHub token to seal, unless the person keeps it, or this computer, off cloud machines', async () => {
+    const { secrets, sync } = await desktop([]);
+    const fromGh = await sync.githubTokenForCloud();
+    expect(fromGh).toMatchObject({ token: 'gho_desktop', source: localHostLabel() });
+    expect(Number.isNaN(Date.parse(fromGh?.updatedAt ?? ''))).toBe(false);
+    // The same record later syncs send, so the VM never sees two versions of one token.
+    expect(await sync.githubTokenForCloud()).toEqual(fromGh);
+
+    await secrets.setCloudChoice({ excludedSecrets: ['pane-cloud/GH_TOKEN'], excludedMachines: [] });
+    expect(await sync.githubTokenForCloud()).toBeNull();
+    await secrets.setCloudChoice({ excludedSecrets: [], excludedMachines: [localHostLabel()] });
+    expect(await sync.githubTokenForCloud()).toBeNull();
+
+    // A GitHub token the person keeps as a Pane secret goes instead, with where it was set.
+    await secrets.setCloudChoice({ excludedSecrets: [], excludedMachines: [] });
+    await secrets.applyFromSync({ 'pane-cloud/GH_TOKEN': { value: 'gho_saved', updatedAt: '2026-11-20T00:00:00.000Z', source: 'mac-studio' } });
+    expect(await sync.githubTokenForCloud()).toEqual({ token: 'gho_saved', source: 'mac-studio', updatedAt: '2026-11-20T00:00:00.000Z' });
+
+    const signedOut = await desktop([], {}, { githubToken: async () => null });
+    expect(await signedOut.sync.githubTokenForCloud()).toBeNull();
   });
 
   it('refuse the send when the VM has no secrets volume, so the cloud Session is not started without its secrets', async () => {
