@@ -611,6 +611,22 @@ importers:
         specifier: 3.2.6
         version: 3.2.6(@types/debug@4.1.12)(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.51.0)(terser@5.51.2)(yaml@2.9.1)
 
+  packages/pane-cloud-contract:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.16.5
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.16.5)(lightningcss@1.33.0)(sass@1.51.0)(terser@5.51.2)
+
   packages/runpane:
     devDependencies:
       '@clack/prompts':
