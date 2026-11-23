@@ -5,7 +5,7 @@ import { isWebLink, linkDestination, openInPaneTab, opensLink, swapsDestination 
 import { copyTerminalText } from '../../utils/terminalClipboard';
 import { getModifierKeyName } from '../../utils/platformUtils';
 import { useConfigStore } from '../../stores/configStore';
-import { closeLinkPopover, keepLinkPopover, hoverLink, leaveLink, showLinkPopover, useLinkPopoverStore } from './linkPopoverState';
+import { closeLinkPopover, keepLinkPopover, hoverLink, leaveLink, leaveLinkPopover, showLinkPopover, useLinkPopoverStore } from './linkPopoverState';
 
 interface LinkUnderPointer {
   element: HTMLElement;
@@ -69,16 +69,19 @@ export function LinkPopoverHost({ actions = DESKTOP_ACTIONS }: { actions?: LinkA
     };
     const onContextMenu = (event: MouseEvent) => {
       const link = linkAt(event.target);
-      if (!link) return;
+      // A right-click inside selected text keeps the page's menu, with its Copy.
+      if (!link || window.getSelection()?.isCollapsed === false) return;
       event.preventDefault();
       showLinkPopover({ url: link.url, paneId: link.paneId, x: event.clientX, y: event.clientY });
     };
     const onClick = (event: MouseEvent) => {
       if (event.defaultPrevented || !opensLink(event)) return;
       const link = linkAt(event.target);
-      if (!link || !(link.element instanceof HTMLAnchorElement)) return;
-      event.preventDefault();
+      if (!link) return;
+      // A clicked link has done its job, so a hover popover waiting to show never does.
       closeLinkPopover();
+      if (!(link.element instanceof HTMLAnchorElement)) return;
+      event.preventDefault();
       const { url, paneId } = link;
       const opening = linkDestination(url, { paneId, openIn: useConfigStore.getState().config?.browser?.openLinksIn, swap: swapsDestination(event) }) === 'pane' && paneId
         // A link whose Pane tab can't open goes to the browser instead.
@@ -102,15 +105,18 @@ export function LinkPopoverHost({ actions = DESKTOP_ACTIONS }: { actions?: LinkA
     };
   }, []);
 
-  // Scrolling moves the link out from under the popover, so it closes. Escape closes it before the
-  // focused element sees the key: a terminal would send it to the program running there.
+  // Scrolling moves the link out from under the popover, so it closes. Escape closes it. A right-click
+  // popover keeps the key from the focused element (a terminal would send it to its program); a hover
+  // popover lets it through, so Escape still reaches what the person was typing into.
   useEffect(() => {
     if (!target) return;
     const close = () => closeLinkPopover();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopPropagation();
+      if (target.pinned) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
       closeLinkPopover();
     };
     document.addEventListener('scroll', close, { capture: true, passive: true });
@@ -134,7 +140,7 @@ export function LinkPopoverHost({ actions = DESKTOP_ACTIONS }: { actions?: LinkA
 
   return (
     <TerminalPopover visible x={target.x} y={target.y} flipY={target.flipY} onClose={closeLinkPopover} className="w-64"
-      onMouseEnter={keepLinkPopover} onMouseLeave={leaveLink}>
+      onMouseEnter={keepLinkPopover} onMouseLeave={leaveLinkPopover}>
       <div className="px-3 pb-1.5 pt-1" data-testid="link-popover">
         <div className="truncate text-xs text-text-secondary" title={url}>{url}</div>
         {inPane && <div className="text-xs text-text-tertiary">{getModifierKeyName()}-click opens in {swapped}</div>}

@@ -6,7 +6,7 @@ import type { Terminal } from '@xterm/xterm';
 import type { LinkProviderConfig } from '../linkProviders/types';
 import { registerAllLinkProviders } from '../linkProviders';
 import { openInPaneTab, openLink, opensLink, swapsDestination } from '../../../utils/openLink';
-import { hoverLink, hoveredLink, leaveLink, showLinkPopover } from '../../links/linkPopoverState';
+import { closeLinkPopover, hoverLink, hoveredLink, leaveLink, showLinkPopover } from '../../links/linkPopoverState';
 import { openFileInEditor } from '../../../services/openFileInEditor';
 import { isCopyOnSelectEnabled, useConfigStore } from '../../../stores/configStore';
 import { isMac } from '../../../utils/platformUtils';
@@ -43,13 +43,25 @@ interface SelectionPopoverState {
   text: string;
 }
 
+/** How long a click on a terminal link waits for a second click, which selects the word instead. */
+const DOUBLE_CLICK_MS = 300;
+let pendingOpen: ReturnType<typeof setTimeout> | undefined;
+
 /**
  * A click on a web link in a terminal opens it (Cmd/Ctrl-click in the other place). xterm activates
- * a link on the mouseup of any button, so a right-click, which shows the link popover, opens nothing.
+ * a link on the mouseup of any button and of any click, so a right-click (the link popover), a
+ * double-click (selecting the word) and a drag that leaves a selection open nothing.
  */
-export function openTerminalLink(url: string, paneId: string, event: MouseEvent): Promise<void> {
-  if (!opensLink(event)) return Promise.resolve();
-  return openLink(url, paneId, { swap: swapsDestination(event) });
+export function openTerminalLink(url: string, paneId: string, event: MouseEvent, terminal: Pick<Terminal, 'hasSelection'>): void {
+  if (!opensLink(event)) return;
+  closeLinkPopover();
+  clearTimeout(pendingOpen);
+  if (event.detail > 1 || terminal.hasSelection()) return;
+  const swap = swapsDestination(event);
+  pendingOpen = setTimeout(() => {
+    if (terminal.hasSelection()) return;
+    void openLink(url, paneId, { swap }).catch(error => console.error('[terminal] Could not open the link:', error));
+  }, DOUBLE_CLICK_MS);
 }
 
 /** The pointer rests on a web link in a terminal: the link popover shows just below the pointer. */
@@ -142,7 +154,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
         setFilePopover({ visible: true, x: event.clientX, y: event.clientY, ...path, line: line ?? 0 });
       },
       onOpenUrl: (url, event) => {
-        void openTerminalLink(url, config.sessionId, event);
+        openTerminalLink(url, config.sessionId, event, terminal);
       },
       onHoverUrl: (url, event) => hoverTerminalLink(url, config.sessionId, event),
       onLeaveUrl: leaveLink,

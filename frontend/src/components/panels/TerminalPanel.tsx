@@ -1168,9 +1168,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
                 void openPaneLink(uri).catch(error => console.error('[TerminalPanel] Failed to open Pane link:', error));
                 return;
               }
-              void openTerminalLink(uri, panel.sessionId, event).catch((error) => {
-                console.error('[TerminalPanel] Failed to open terminal link:', error);
-              });
+              if (terminal) openTerminalLink(uri, panel.sessionId, event, terminal);
             },
             hover: (event, uri) => {
               if (!uri.startsWith('pane://')) hoverTerminalLink(uri, panel.sessionId, event);
@@ -1352,7 +1350,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
               const isMac = navigator.platform.toUpperCase().includes('MAC');
               // A click opens the URL (Cmd/Ctrl-click in the other place); resting on it shows the link popover.
               const webLinksAddon = new WebLinksAddonImpl((event, uri) => {
-                void openTerminalLink(uri, panel.sessionId, event);
+                if (terminal) openTerminalLink(uri, panel.sessionId, event, terminal);
               }, {
                 hover: (event, uri) => hoverTerminalLink(uri, panel.sessionId, event),
                 leave: () => leaveLink(),

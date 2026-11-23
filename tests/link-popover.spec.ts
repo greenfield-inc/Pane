@@ -54,7 +54,7 @@ const panels = ['Bottom Terminal', 'Link Terminal'].map((title, index) => ({
   metadata: { createdAt: new Date(index).toISOString(), lastActiveAt: new Date(index).toISOString(), position: index, permanent: index === 0 },
 }));
 
-test('a terminal URL opens on click, shows the popover on hover and right-click, and right-click opens nothing', async ({ page }) => {
+test('a terminal URL opens on click (not on double-click), shows the popover on hover and right-click, and keeps it while the pointer is on it', async ({ page }) => {
   await installElectronApiMock(page, {
     initialProjects: [project], initialSessions: [session], initialPanels: panels,
     initialTerminalStates: { [panels[1].id]: { scrollbackBuffer: `See ${PR} for the fix\r\n` } },
@@ -98,7 +98,28 @@ test('a terminal URL opens on click, shows the popover on hover and right-click,
   await page.keyboard.press('Escape');
   await expect(popover).toHaveCount(0);
 
+  // The pointer can travel from the link onto the popover and use it.
+  await page.mouse.move(box.x + 400, box.y + 300);
+  await page.mouse.move(box.x + 120, box.y + 10, { steps: 3 });
+  await expect(popover).toBeVisible();
+  const menu = await popover.boundingBox();
+  if (!menu) throw new Error('Missing popover');
+  await page.mouse.move(menu.x + 20, menu.y + menu.height / 2, { steps: 5 });
+  await page.waitForTimeout(600);
+  await expect(popover).toBeVisible();
+  await page.mouse.move(box.x + 400, box.y + 300);
+  await expect(popover).toHaveCount(0);
+
+  // A double-click selects the URL and opens nothing.
+  await page.mouse.dblclick(box.x + 140, box.y + 10);
+  await page.waitForTimeout(600);
+  expect(await opened(page)).toEqual([]);
+  await page.mouse.click(box.x + 400, box.y + 300);
+
+  // xterm finds the link under the pointer as it arrives, so the pointer reaches it before the click.
+  await page.mouse.move(box.x + 140, box.y + 10, { steps: 3 });
   await page.mouse.click(box.x + 140, box.y + 10);
+  await expect.poll(() => opened(page)).toEqual([`runpane:panels:open ${session.id} ${PR}`]);
   await page.keyboard.down('Meta');
   await page.mouse.click(box.x + 140, box.y + 10);
   await page.keyboard.up('Meta');

@@ -49,7 +49,8 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
   // The demo's pages are sample files on the phone.
   if (isDemoProfile(profile)) return <OwnCopyBrowserTab panel={panel} />;
   const hostLocal = isHostLocalUrl(state?.currentUrl);
-  if (hostLocal || !choice.stream) {
+  // A sign-in popup always streams, even on a localhost callback: a copy would lose its opener.
+  if (!state?.signInPopup && (hostLocal || !choice.stream)) {
     const driver = state?.driver;
     return (
       <View style={styles.fill}>
@@ -382,7 +383,7 @@ function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBa
       </View>
       {view?.signIn && view.signIn.url !== signInOpened ? (
         <View testID="browser-sign-in" style={[styles.live, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
-          <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.shrink}>{`${view.signIn.site} doesn't allow sign-in inside apps.`}</Text>
+          <Text variant="footnote" tone="secondary" style={styles.shrink}>{`${view.signIn.site} doesn't allow sign-in inside apps.`}</Text>
           <Pressable accessibilityRole="button" hitSlop={6} onPress={() => { const { url } = view.signIn ?? {}; if (!url) return; setSignInOpened(url); void Linking.openURL(url); }}>
             <Text variant="footnote" style={{ color: colors.accentText }}>Open in your browser</Text>
           </Pressable>
