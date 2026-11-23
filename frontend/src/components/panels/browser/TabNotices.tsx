@@ -51,7 +51,8 @@ export const TabNotices: React.FC<TabNoticesProps> = ({ notices, onOpenApp, onOp
 export const SignInLine: React.FC<{ site: string; onOpen: () => void }> = ({ site, onOpen }) => (
   <>
     <LogIn className="h-3.5 w-3.5 flex-shrink-0 text-text-tertiary" />
-    <span className="min-w-0 flex-1 truncate" title={`${site} doesn't allow sign-in inside apps.`}>{site} doesn&apos;t allow sign-in inside apps.</span>
+    {/* The whole sentence is the message, so a narrow tab wraps it rather than cutting it. */}
+    <span className="min-w-0 flex-1">{site} doesn&apos;t allow sign-in inside apps.</span>
     <button type="button" className={ACTION} onClick={onOpen}>
       <span className="inline-flex items-center gap-1">Open in your browser <ExternalLink className="h-3 w-3" aria-hidden /></span>
     </button>
