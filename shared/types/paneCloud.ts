@@ -132,7 +132,8 @@ export interface PaneCloudCreateRequest {
 /** A cloud Session made: the saved computer it is, and the Session on it, to open. */
 export interface PaneCloudCreated {
   machineId: string;
-  sessionId: string;
+  /** Null for a Session created for a repo: its first terminal is the clone's Pane, and the Session joins it later (D-115). */
+  sessionId: string | null;
   vmId: string;
   snapshot: PaneCloudSnapshot;
 }

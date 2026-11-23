@@ -63,10 +63,14 @@ export interface PaneCloudManagerOptions {
   githubToken?: () => Promise<GitHubTokenRecord | null>;
   fetch?: typeof fetch;
   /** How often to re-read: while a VM changes state, and otherwise. */
-  pollMs?: { waiting: number; steady: number; cloning?: number };
+  pollMs?: { waiting: number; steady: number; creating?: number };
 }
 
-const POLL_MS = { waiting: 3_000, steady: 60_000, cloning: 1_000 };
+/**
+ * `creating` is how often a new cloud Session is read while it boots and clones: the app notices the
+ * VM running and the clone's Pane within it, since both are on the path to the first terminal (D-115).
+ */
+const POLL_MS = { waiting: 3_000, steady: 60_000, creating: 250 };
 /** A sealing key this close to expiring is not used; Pane asks for a new one. */
 const SEALING_KEY_MARGIN_MS = 30_000;
 /** How long a new VM may take to answer as running before New cloud Session gives up. */
@@ -174,7 +178,9 @@ export class PaneCloudManager {
 
   /**
    * New cloud Session: a VM in the person's organization, paired with this desktop, with the
-   * Session created on it. Throws a PaneCloudError-shaped error, also left in the snapshot.
+   * Session created on it. For a repo, the clone makes the first terminal's Pane, so the Session is
+   * created off that path and `sessionId` is null (D-115). Throws a PaneCloudError-shaped error, also
+   * left in the snapshot.
    */
   async createSession(input: JsonObject, repo: CloneRepo | null = null): Promise<PaneCloudCreated> {
     const name = (decodeOptionalBoundary(input, namedSchema)?.name.trim().slice(0, 64) ?? '') || UNNAMED;
@@ -187,7 +193,7 @@ export class PaneCloudManager {
       made = { client, vmId: vm.id, machineId: null };
       if (repo) this.repos.set(vm.id, repo);
       await this.load(client);
-      await this.waitUntilRunning(client, vm.id);
+      await this.waitUntilRunning(client, vm.id, { ...POLL_MS, ...this.options.pollMs }.creating);
 
       this.update({ creating: { name, step: 'pairing' } });
       const pairing = await client.pairVm(vm.id);
@@ -195,6 +201,11 @@ export class PaneCloudManager {
       made.machineId = machineId;
       await this.load(client);
 
+      if (repo) {
+        // The clone's Pane is the first terminal; the Session joins it without holding it up.
+        void this.options.startSession(machineId, input).catch((error: Error) => this.fail(error));
+        return { machineId, sessionId: null, vmId: vm.id, snapshot: this.update({ creating: null }) };
+      }
       this.update({ creating: { name, step: 'starting-session' } });
       const sessionId = await this.options.startSession(machineId, input);
       return { machineId, sessionId, vmId: vm.id, snapshot: this.update({ creating: null }) };
@@ -383,9 +394,8 @@ export class PaneCloudManager {
     return { client, account };
   }
 
-  private async waitUntilRunning(client: ServiceClient, vmId: string): Promise<void> {
+  private async waitUntilRunning(client: ServiceClient, vmId: string, everyMs = (this.options.pollMs ?? POLL_MS).waiting): Promise<void> {
     const deadline = Date.now() + BOOT_DEADLINE_MS;
-    const poll = this.options.pollMs ?? POLL_MS;
     for (;;) {
       const vm = await client.getVm(vmId);
       if (vm.state === 'running') return;
@@ -395,7 +405,7 @@ export class PaneCloudManager {
           next: 'Try New cloud Session again; if it keeps failing, write to Pane Cloud support.',
         });
       }
-      await new Promise((resolve) => setTimeout(resolve, poll.waiting));
+      await new Promise((resolve) => setTimeout(resolve, everyMs));
     }
   }
 
@@ -498,7 +508,7 @@ export class PaneCloudManager {
     }
     const poll = { ...POLL_MS, ...this.options.pollMs };
     // A clone's progress shows at least once a second (D-107).
-    const every = vms.some((vm) => vm.clone?.state === 'cloning') ? poll.cloning : vms.some((vm) => CHANGING.has(vm.state)) ? poll.waiting : poll.steady;
+    const every = vms.some((vm) => vm.clone?.state === 'cloning') ? poll.creating : vms.some((vm) => CHANGING.has(vm.state)) ? poll.waiting : poll.steady;
     if (this.watchTimer && every === this.watchPoll) return;
     this.stopWatching();
     this.watchPoll = every;
