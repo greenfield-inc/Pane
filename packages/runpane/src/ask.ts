@@ -11,7 +11,7 @@ import { RUNPANE_CONTRACT } from './generated/contract';
 import { paneListResultSchema, repoListResultSchema } from './localControl';
 import { quote } from './handoff';
 import { windowsBatchCommand } from './secrets';
-import { requireTailnet, resolveMachine, workspaceTarget } from './workspace';
+import { concreteMachine, requireTailnet, resolveMachine, workspaceTarget } from './workspace';
 
 /**
  * `runpane ask` runs one read-only agent turn headless and prints its answer; `runpane models`
@@ -165,11 +165,11 @@ function runHere(argv: string[], options: RunOptions): Promise<RunResult> {
 const machineInfoSchema = boundary.object({ shell: boundary.string, os: boundary.string });
 
 /** This machine, or the named one as a Place, ready to run commands. */
-async function placeFor(machineName: string | undefined, paneDir: string | undefined, environment: Place['environment'] = 'native'): Promise<Place> {
+async function placeFor(machineName: string | undefined, paneDir: string | undefined, environment: Place['environment'] = 'native', paneId?: string): Promise<Place> {
   const here: Place = { machine: thisMachineName(), environment };
   if (!machineName) return here;
   const tailnet = await requireTailnet(paneDir);
-  const machine = resolveMachine(machineName, [tailnet.self, ...tailnet.machines]);
+  const machine = await concreteMachine(resolveMachine(machineName, [tailnet.self, ...tailnet.machines]), { pane: paneId }, 'ask --pane <pane-id>');
   if (machine.self) return here;
   const remote = workspaceTarget(machine);
   const probe = decodeBoundary(await invokeRemoteDaemon(remote, 'runpane:machine:info', [], machineInfoSchema, 20_000), machineInfoSchema);
@@ -319,7 +319,7 @@ export async function runAsk(parsed: ParsedArgs): Promise<number> {
   if (!prompt?.trim()) throw new RunpaneError('ERR_ASK_PROMPT_REQUIRED', 'runpane ask needs a question: --prompt "<text>" or --prompt-file <path|->.', 'Add one and run it again.');
   const model = parsed.handoffModel;
   const started = Date.now();
-  const base = await placeFor(parsed.handoffMachine, parsed.paneDir);
+  const base = await placeFor(parsed.handoffMachine, parsed.paneDir, 'native', parsed.paneId);
   const { cwd, environment } = await resolveWorkingDirectory(base, parsed);
   const place = { ...base, environment: base.remote ? environment : 'native' as const };
   if (place.remote && place.environment === 'native' && /(?:powershell|pwsh)/i.test(place.shell ?? '') && prompt.length > WINDOWS_PROMPT_LIMIT) {

@@ -383,7 +383,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panes list`: List Pane sessions in a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
 - `workspace state`: Read one workspace snapshot of every Pane and CLI panel.
-- `workspace list`: List your computers saved in Pane and the machines on your tailnet, one entry per computer, and whether each answers workspaces.
+- `workspace list`: List your computers saved in Pane, the machines on your tailnet, and Pane Cloud with its cloud Sessions, one entry per computer, and whether each answers workspaces.
 - `workspace enable`: Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).
 - `workspace disable`: Take this machine off runpane workspace and remove its tailscale serve handler on port 8443.
 - `workspace read`: Print a file from another of your machines; any path form works (C:\..., /mnt/c/..., /home/..., ~/...).
@@ -563,9 +563,9 @@ runpane workspace state [--repo <selector>] [--json] [--pane-dir <path>]
 runpane workspace list [--json] [--pane-dir <path>]
 runpane workspace enable [--json] [--pane-dir <path>]
 runpane workspace disable [--json] [--pane-dir <path>]
-runpane workspace [<machine>] read <path> [--json]
-runpane workspace [<machine>] write <path> [--content <text>] [--json]
-runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>
+runpane workspace [<machine>] read <path> [--session <id|name>] [--json]
+runpane workspace [<machine>] write <path> [--session <id|name>] [--content <text>] [--json]
+runpane workspace <machine> exec [--session <id|name>] [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>
 runpane handoff --template
 runpane handoff "<destination>" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode|pi>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]
 runpane ask --agent <claude|codex|cursor|opencode> (--prompt "<question>" | --prompt-file <path|->) [--model <model>] [--machine <name>] [--repo <selector> | --pane <pane-id>] [--timeout <duration>] [--json]
