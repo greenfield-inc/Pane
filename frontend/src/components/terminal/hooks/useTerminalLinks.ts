@@ -155,14 +155,15 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     };
   }, [terminal, config.workingDirectory, config.sessionId, customLinks, githubRemoteUrl, pathContext]);
 
-  // Right-clicking a web link shows the link popover instead of the terminal's menu. This runs
+  // Right-clicking a web link shows the link popover instead of the terminal's menu, unless text is
+  // selected: then the menu's Copy and Paste stay, and it offers the URL's actions itself. This runs
   // before xterm's and SelectionPopover's handlers on the same element, so neither sees the click.
   useEffect(() => {
     const element = terminal?.element;
     if (!element) return;
     const onContextMenu = (event: MouseEvent) => {
       const link = hoveredLink();
-      if (!link) return;
+      if (!link || terminal.hasSelection()) return;
       event.preventDefault();
       event.stopPropagation();
       showLinkPopover({ ...link, x: event.clientX, y: event.clientY });
