@@ -118,10 +118,11 @@ describe('the GitHub token a new cloud VM is given before boot', () => {
   it('deletes what can\'t be read as a small file (a directory, a pipe, an oversized file), says why, and still exports the sign-ins', async () => {
     const odd = [
       async (drop: string) => fs.mkdir(drop, { recursive: true }),
-      async (drop: string) => {
+      // A named pipe; Windows has none, and cloud VMs run Linux.
+      ...(process.platform === 'win32' ? [] : [async (drop: string) => {
         await fs.mkdir(path.dirname(drop), { recursive: true });
         execFileSync('mkfifo', [drop]);
-      },
+      }]),
       async (drop: string) => {
         await fs.mkdir(path.dirname(drop), { recursive: true });
         await fs.writeFile(drop, JSON.stringify({ token: TOKEN, source: 'x', updatedAt: '2026-11-22T10:00:00.000Z', pad: 'p'.repeat(70_000) }));
