@@ -1,7 +1,8 @@
 /**
  * Secrets in cloud Sessions (D-58). The person's computers send their merged Pane secrets and the
  * GitHub and agent sign-ins to each cloud Session VM they hold a link to, never through Greenfield's
- * service. Secrets flow to a VM one way: nothing comes back from it.
+ * service, and a VM syncs back like any machine (D-91). The person's choice limits what reaches a VM
+ * and what is taken from one.
  */
 import { CONFIGURED_AGENT_IDS, configuredAgent, type ConfiguredAgentId } from '../agents';
 import { boundary, decodeBoundary, type BoundarySchema } from '../validation/boundaryDecoder';

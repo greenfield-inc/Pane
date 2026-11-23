@@ -14,6 +14,7 @@ import { refuseLocalCaller } from './paneSecrets';
 import { exportCloudSignIns, GITHUB_SIGN_IN_KEY, receiveCloudSecrets } from '../services/cloudSecrets';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import type { SharedCredentials } from '../../../shared/types/sharedCredentials';
+import { sendsToCloud } from '../../../shared/types/paneCloudSecrets';
 import type { AppServices } from './types';
 
 const trustedSchema = boundary.object({ clientId: boundary.nonEmptyString });
@@ -42,13 +43,20 @@ export function registerSharedCredentialHandlers(
     // The local socket passes a caller's own "trusted" argument, so only paired devices over HTTP may sync.
     refuseLocalCaller();
     decodeBoundary(trusted, trustedSchema);
-    const credentials = await readAll();
-    // A cloud VM syncs both ways like any machine (D-91), but its GitHub token is the sign-in a computer
-    // read from its own gh and carried here, not a secret of the person's to spread to every machine.
-    if (cloudVm && credentials.paneSecrets) delete credentials.paneSecrets[GITHUB_SIGN_IN_KEY];
-    // Says it is a cloud VM, so every device writes it, and reads from it, only what the person's choice allows.
-    if (cloudVm) credentials.cloudVm = true;
-    return credentials;
+    if (cloudVm) {
+      // A cloud VM answers every reader, old or new, only with Pane secrets the person's choice allows and the
+      // choice, and says it is one. Its GitHub token is a sign-in a computer carried here, not a secret to spread.
+      const choice = secrets.cloudChoice();
+      const records = await secrets.exportForSync();
+      const answer: SharedCredentials = {
+        cloudVm: true,
+        paneSecrets: Object.fromEntries(Object.entries(records).filter(([key, record]) => key !== GITHUB_SIGN_IN_KEY && sendsToCloud(choice, key, record.source))),
+      };
+      const choiceRecord = secrets.exportCloudChoiceForSync();
+      if (choiceRecord) answer.paneCloudSecretChoice = choiceRecord;
+      return answer;
+    }
+    return readAll();
   });
   commandRegistry.register('credentials:shared:apply', async (input: PaneCommandValue, trusted: PaneCommandValue) => {
     refuseLocalCaller();

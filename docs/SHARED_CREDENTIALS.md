@@ -36,11 +36,13 @@ directions. A cloud machine says it is one in its sync answer, so every device t
 syncs with it, a computer signed in to Pane Cloud or not and the phone app, writes it
 only the Pane secrets your choice below allows, with the choice itself. Integration keys,
 1Password references and secrets you turned off are never sent to it. In the other
-direction, devices take from a cloud machine only Pane secrets your choice allows: a
-record it holds for a secret you turned off, a value or a deletion, is ignored, and so
-are any integration keys it has. A computer signed in to Pane Cloud also writes each of
-your cloud machines the GitHub token from its own `gh auth token`, before a new Session
-starts and on every later sync; a cloud machine keeps that token to itself. Secrets
+direction, a cloud machine answers every device, whatever its Pane version, only with
+the Pane secrets your choice allows and the choice: no integration keys, no 1Password
+references, no record of a secret you turned off. Current devices also ignore a record
+from a cloud machine for a secret whose copy on your other machines was last set on a
+machine you turned off. A computer signed in to Pane Cloud also writes each of your
+cloud machines the GitHub token from its own `gh auth token`, before a new Session
+starts and whenever that token changes; a cloud machine keeps that token to itself. Secrets
 travel over each device's own connection, encrypted end to end to the cloud machine:
 Greenfield's relay passes them along and can't read them, and the Pane Cloud service
 never sees them. A device on a Pane from before cloud machines said so still sends

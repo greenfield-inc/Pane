@@ -77,6 +77,7 @@ export class SharedCredentialSync {
       throw new PaneError('ERR_CLOUD_SECRETS_NOT_SENT', 'Pane could not send your secrets: this computer has no connection to the cloud machine.', 'Try New cloud Session again.');
     }
     try {
+      await this.refreshGithubRecord();
       await vm.invoke('credentials:cloud:apply', [await this.cloudSecrets()]);
     } catch (error) {
       throw new PaneError('ERR_CLOUD_SECRETS_NOT_SENT', `Pane could not send your secrets to the cloud machine: ${reasonOf(error)}.`, 'Check this computer is online, then try New cloud Session again.');
@@ -150,7 +151,15 @@ export class SharedCredentialSync {
         read: async () => decodeBoundary(await peer.invoke('notify:switch:get', []), sharedNotifySwitchSchema),
         apply: async notifySwitch => { await peer.invoke('notify:switch:apply', [notifySwitch]); },
       }));
+      const githubChanged = cloud.size > 0 && await this.refreshGithubRecord();
       if (peers.length > 0) await Promise.all([syncSharedCredentials([local, ...peers]), syncSharedNotifySwitch([localSwitch, ...switchPeers])]);
+      // A new or changed GitHub token makes no Pane secret newer, so the sync above may not have written a VM.
+      if (githubChanged) {
+        const secrets = await this.cloudSecrets();
+        await Promise.all(remotes.filter((peer) => cloud.has(peer.id)).map((vm) => vm.invoke('credentials:cloud:apply', [secrets]).catch((error) => {
+          console.warn(`[SharedCredentials] Could not send the GitHub sign-in to cloud machine ${vm.id}: ${reasonOf(error)}`);
+        })));
+      }
     } catch (error) {
       console.warn('[SharedCredentials] Sync failed:', error instanceof Error ? error.message : String(error));
     } finally {
@@ -170,13 +179,22 @@ export class SharedCredentialSync {
    */
   private async forCloudVm(credentials: SharedCredentials): Promise<SharedCredentials> {
     const records = { ...credentials.paneSecrets };
-    const token = await this.githubToken();
-    if (token && this.githubRecord?.value !== token) this.githubRecord = { value: token, updatedAt: new Date().toISOString(), source: localHostLabel() };
-    if (token && this.githubRecord && records[GITHUB_SIGN_IN_KEY]?.value == null) records[GITHUB_SIGN_IN_KEY] = this.githubRecord;
+    if (this.githubRecord && records[GITHUB_SIGN_IN_KEY]?.value == null) records[GITHUB_SIGN_IN_KEY] = this.githubRecord;
     const choice = credentials.paneCloudSecretChoice ?? this.secrets().exportCloudChoiceForSync();
     const secrets: SharedCredentials = { paneSecrets: cloudSecretRecords(records, parseCloudChoice(choice) ?? this.secrets().cloudChoice()) };
     if (choice) secrets.paneCloudSecretChoice = choice;
     return secrets;
+  }
+
+  /**
+   * Reads the GitHub token from gh, and stamps a new record when it changed (or appeared, or went
+   * away). Returns whether it changed, so a sync sends it to the cloud VMs even when nothing else did.
+   */
+  private async refreshGithubRecord(): Promise<boolean> {
+    const token = await this.githubToken();
+    if ((token ?? null) === (this.githubRecord?.value ?? null)) return false;
+    this.githubRecord = token ? { value: token, updatedAt: new Date().toISOString(), source: localHostLabel() } : null;
+    return token !== null;
   }
 
   /** What a new cloud VM is sent before its first Session: this computer's merged set, as `forCloudVm` writes it. */

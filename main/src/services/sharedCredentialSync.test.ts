@@ -603,7 +603,7 @@ describe('Pane Cloud VMs', () => {
   }
 
   /** A desktop that saved `remotes`; Pane Cloud lists `cloud-vm` among them as one of the person's VMs. */
-  async function desktop(remotes: Array<{ id: string; invoke: (channel: string, args: unknown[]) => Promise<JsonValue | undefined> }>, config: Partial<AppConfig> = {}, { signedInToPaneCloud = true } = {}) {
+  async function desktop(remotes: Array<{ id: string; invoke: (channel: string, args: unknown[]) => Promise<JsonValue | undefined> }>, config: Partial<AppConfig> = {}, { signedInToPaneCloud = true, githubToken = async (): Promise<string | null> => 'gho_desktop' } = {}) {
     const dir = await folder('desktop');
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ anthropicApiKey: 'sk-ant-desktop', ...config }));
     vi.stubEnv('PANE_DIR', dir);
@@ -612,7 +612,7 @@ describe('Pane Cloud VMs', () => {
     setPaneRuntime({ eventSink: { send: sent }, getConfigManager: () => configManager, getPtyHostRuntime: () => null, getWebviewContextMap: () => new Map() });
     const secrets = new PaneSecretStore(configManager, keychainSecretBackend(new FakeKeychain(), 'Pane (test)'), () => 'this-mac');
     await secrets.set('web', 'NPM_TOKEN', 'npm-desktop');
-    const sync = new TrackedSync(configManager, { subscribe: () => () => undefined, remotes: () => remotes }, () => secrets, async () => 'gho_desktop', () => new Set(signedInToPaneCloud ? ['cloud-vm'] : []));
+    const sync = new TrackedSync(configManager, { subscribe: () => () => undefined, remotes: () => remotes }, () => secrets, () => githubToken(), () => new Set(signedInToPaneCloud ? ['cloud-vm'] : []));
     running.push(sync);
     return { configManager, secrets, sync };
   }
@@ -782,7 +782,7 @@ describe('Pane Cloud VMs', () => {
 
   it('can\'t write, overwrite or delete on the person\'s machines a secret the choice keeps off cloud machines, or pass on its integration keys', async () => {
     const vm = await cloudVm();
-    const { secrets, sync } = await desktop([vm]);
+    const { configManager, secrets, sync } = await desktop([vm]);
     await secrets.set('billing', 'STRIPE_LIVE_KEY', 'sk_live_desktop');
     await secrets.setCloudChoice({ excludedSecrets: ['billing/STRIPE_LIVE_KEY', 'web/NPM_TOKEN'], excludedMachines: [] });
     // An agent on the VM sets the turned-off secret there, deletes another, and a key lands in the VM's config.
@@ -796,6 +796,54 @@ describe('Pane Cloud VMs', () => {
 
     expect(await secrets.read('billing', 'STRIPE_LIVE_KEY')).toBe('sk_live_desktop');
     expect(await secrets.read('web', 'NPM_TOKEN')).toBe('npm-desktop');
+    expect(configManager.getConfig().openaiApiKey).toBeUndefined();
+  });
+
+  it('get a new or changed GitHub token on the next sync, even when no Pane secret changed', async () => {
+    const vm = await cloudVm();
+    let token: string | null = 'gho_desktop';
+    const { sync } = await desktop([vm], {}, { githubToken: async () => token });
+    await sync.sendToCloudVm('cloud-vm');
+    sync.start();
+    await settled();
+    expect(vm.env.GH_TOKEN).toBe('gho_desktop');
+
+    token = 'gho_rotated';
+    sync.resync();
+    await settled();
+
+    expect(vm.env.GH_TOKEN).toBe('gho_rotated');
+  });
+
+  it('answer any reader, a Pane from before cloudVm included, with only the Pane secrets the choice allows', async () => {
+    const vm = await cloudVm();
+    const { secrets, sync } = await desktop([vm]);
+    await secrets.setCloudChoice({ excludedSecrets: ['billing/STRIPE_LIVE_KEY'], excludedMachines: ['mac-studio'] });
+    await sync.sendToCloudVm('cloud-vm');
+    // An agent on the VM sets a turned-off secret and one recorded from a turned-off machine; a key lands in its config.
+    await vm.secrets.set('billing', 'STRIPE_LIVE_KEY', 'sk_live_from_vm');
+    await vm.secrets.applyFromSync({ 'aws/AWS_KEY': { value: 'AKIA-planted', updatedAt: '2099-01-01T00:00:00.000Z', source: 'mac-studio' } });
+    await vm.configManager.updateConfig({ openaiApiKey: 'sk-openai-vm' });
+
+    const answer = JSON.stringify(await vm.registry.invokeRemote('credentials:shared:get', [{}, { clientId: 'old-phone' }]));
+
+    expect(answer).toContain('npm-desktop');
+    expect(answer).toContain('"cloudVm":true');
+    expect(answer).not.toMatch(/sk_live_from_vm|AKIA-planted|sk-openai-vm|gho_desktop|paneSecretReferences|openaiApiKey/);
+  });
+
+  it('can\'t overwrite a secret the person turned off by machine, even under its own name', async () => {
+    const vm = await cloudVm();
+    const studio = machine('studio', { enabled: true, changedAt: 0 }, { paneSecrets: { 'aws/AWS_KEY': { value: 'AKIA-studio', updatedAt: '2026-11-01T00:00:00.000Z', source: 'mac-studio' } } });
+    const { secrets, sync } = await desktop([studio, vm]);
+    await secrets.setCloudChoice({ excludedSecrets: [], excludedMachines: ['mac-studio'] });
+    await vm.secrets.set('aws', 'AWS_KEY', 'AKIA-from-vm');
+
+    sync.start();
+    await settled();
+
+    expect(await secrets.read('aws', 'AWS_KEY')).toBe('AKIA-studio');
+    expect(JSON.stringify(studio.keys())).not.toContain('AKIA-from-vm');
   });
 
   it('refuse the send when the VM has no secrets volume, so the cloud Session is not started without its secrets', async () => {

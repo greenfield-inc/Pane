@@ -118,13 +118,16 @@ function forCloudVm(newest: SharedCredentials, choice: PaneCloudSecretChoice): S
 }
 
 /**
- * What the other hosts take from a cloud VM: its Pane secrets and deletions, less any the choice keeps
- * off cloud machines (a VM never holds those, so a record of one is not the person's), and the choice.
+ * What the other hosts take from a cloud VM: its Pane secrets and deletions, less any the choice keeps off
+ * cloud machines (a VM never holds those, so a record of one is not the person's), and the choice. A key the
+ * other hosts last had from a turned-off machine counts as turned off, whatever source the VM's record names.
  */
-function fromCloudVm(read: SharedCredentials, choice: PaneCloudSecretChoice): SharedCredentials {
-  const taken: SharedCredentials = {
-    paneSecrets: Object.fromEntries(Object.entries(read.paneSecrets ?? {}).filter(([key, record]) => sendsToCloud(choice, key, record.source))),
+function fromCloudVm(read: SharedCredentials, choice: PaneCloudSecretChoice, others: Record<string, SharedCredential>): SharedCredentials {
+  const allowed = ([key, record]: [string, SharedCredential]) => {
+    const theirs = others[key];
+    return sendsToCloud(choice, key, record.source) && !(theirs && choice.excludedMachines.includes(theirs.source));
   };
+  const taken: SharedCredentials = { paneSecrets: Object.fromEntries(Object.entries(read.paneSecrets ?? {}).filter(allowed)) };
   if (read.paneCloudSecretChoice) taken.paneCloudSecretChoice = read.paneCloudSecretChoice;
   return taken;
 }
@@ -141,7 +144,9 @@ export async function syncSharedCredentials(hosts: readonly SharedCredentialHost
   // The choice first, from every host, so what a cloud VM gives and gets is judged by the newest one.
   const choiceRecord = reached.reduce<SharedCredentials>((merged, read) => mergeSharedCredentials(merged, { paneCloudSecretChoice: read.credentials.paneCloudSecretChoice }).credentials, {}).paneCloudSecretChoice;
   const choice = parseCloudChoice(choiceRecord) ?? EMPTY_PANE_CLOUD_SECRET_CHOICE;
-  const taken = (read: { credentials: SharedCredentials }) => (read.credentials.cloudVm ? fromCloudVm(read.credentials, choice) : read.credentials);
+  const others = reached.filter(read => !read.credentials.cloudVm)
+    .reduce<SharedCredentials>((merged, read) => mergeSharedCredentials(merged, { paneSecrets: read.credentials.paneSecrets }).credentials, {}).paneSecrets ?? {};
+  const taken = (read: { credentials: SharedCredentials }) => (read.credentials.cloudVm ? fromCloudVm(read.credentials, choice, others) : read.credentials);
   const newest = reached.reduce<SharedCredentials>((merged, read) => mergeSharedCredentials(merged, taken(read)).credentials, {});
   const written = (read: { credentials: SharedCredentials }) => (read.credentials.cloudVm ? forCloudVm(newest, choice) : newest);
   const behind = reached.filter(read => {
