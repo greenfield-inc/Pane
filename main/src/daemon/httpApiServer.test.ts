@@ -1919,3 +1919,99 @@ describe('workspace identity mode', () => {
     expect(discovery.body).toMatchObject({ error: { code: 'ERR_WORKSPACE_DISCOVERY_OWNER_REQUIRED' } });
   });
 });
+
+describe('stopping with kept-alive clients', () => {
+  const agents: http.Agent[] = [];
+  afterEach(() => {
+    for (const agent of agents.splice(0)) agent.destroy();
+  });
+
+  /** An agent that keeps every socket open until the server closes it, as a browser or Node's global agent would. */
+  function keepAliveAgent(): http.Agent {
+    const agent = new http.Agent({ keepAlive: true });
+    agents.push(agent);
+    return agent;
+  }
+
+  function send(
+    server: PaneRemoteHttpApiServer,
+    agent: http.Agent,
+    method: 'GET' | 'POST',
+    path: string,
+    body?: JsonValue,
+  ): Promise<{ statusCode: number; body: string }> {
+    const address = server.getAddress();
+    if (!address) throw new Error('Remote HTTP API server is not listening');
+    return new Promise((resolve, reject) => {
+      const headers: RequestHeaders = { Authorization: 'Bearer secret-token' };
+      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      const request = http.request({ host: address.host, port: address.port, path, method, headers, agent }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('end', () => resolve({ statusCode: response.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }));
+        response.on('error', reject);
+      });
+      request.once('error', reject);
+      if (body !== undefined) request.write(JSON.stringify(body));
+      request.end();
+    });
+  }
+
+  async function timedStop(server: PaneRemoteHttpApiServer): Promise<number> {
+    const startedAt = Date.now();
+    await server.stop();
+    return Date.now() - startedAt;
+  }
+
+  it('returns promptly with a kept-alive client whose request already finished', async () => {
+    const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), createConfigManagerStub(createEnabledRemoteConfig()));
+    await server.start();
+    const agent = keepAliveAgent();
+    await expect(send(server, agent, 'GET', '/health')).resolves.toMatchObject({ statusCode: 200 });
+
+    expect(await timedStop(server)).toBeLessThan(1000);
+  });
+
+  it('lets a request that is running when stop() starts answer, then closes its connection', async () => {
+    const registry = new PaneCommandRegistry();
+    let finish = () => {};
+    const started = new Promise<void>((resolveStarted) => {
+      registry.register('sessions:get-all', () => new Promise((resolve) => {
+        finish = () => resolve([{ id: 'session-1' }]);
+        resolveStarted();
+      }));
+    });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    await server.start();
+    const answer = send(server, keepAliveAgent(), 'POST', '/invoke', { channel: 'sessions:get-all', args: [] });
+    await started;
+
+    const stopped = timedStop(server);
+    setTimeout(() => finish(), 100);
+    await expect(answer).resolves.toEqual({ statusCode: 200, body: JSON.stringify({ ok: true, result: [{ id: 'session-1' }] }) });
+    expect(await stopped).toBeLessThan(1000);
+  });
+
+  it('closes a connection whose request is still running once the grace period ends', async () => {
+    const registry = new PaneCommandRegistry();
+    const started = new Promise<void>((resolveStarted) => {
+      registry.register('sessions:get-all', () => {
+        resolveStarted();
+        return new Promise(() => {});
+      });
+    });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()), { stopGraceMs: 300 });
+    await server.start();
+    const answer = send(server, keepAliveAgent(), 'POST', '/invoke', { channel: 'sessions:get-all', args: [] });
+    const outcome = answer.then(() => 'answered', () => 'cut off');
+    await started;
+
+    const stopped = timedStop(server);
+    const early = await Promise.race([outcome, new Promise((resolve) => setTimeout(() => resolve('still open'), 150))]);
+    expect(early).toBe('still open');
+    const elapsed = await stopped;
+    expect(elapsed).toBeGreaterThanOrEqual(250);
+    expect(elapsed).toBeLessThan(1500);
+    await expect(outcome).resolves.toBe('cut off');
+  });
+});
