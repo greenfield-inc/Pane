@@ -97,11 +97,12 @@ runs `fleetContractCases`; Pane builds on `startServiceStub`. This package's own
 suites against both stubs: `pnpm --filter pane-cloud-contract test`.
 
 Some service cases need test-mode setup: pass `controls` to `serviceContractCases` with any of
-`pauseForReview`, `setCapacity`, `addMember`, `setPlan`, `setMemoryGiB` and `setClock`
+`pauseForReview`, `setCapacity`, `addMember`, `changeMember`, `replaceRelayKey`, `setPlan`, `setMemoryGiB` and `setClock`
 (`ServiceContractControls`). A case whose control is missing throws `SkipCase`; report it as
 skipped. `setClock` only moves forward, so run the cases in order. Without controls, the cases
 that need them are the review pause, `no_capacity`, a second organization with Full access and
-View only members, and agent-hour metering.
+View only members, agent-hour metering, pairing by a creator who lost Full access (`changeMember`)
+and `relay_key_changed` (`replaceRelayKey`).
 
 The service stub gives every account a personal organization on the Free plan, starts and stops
 VMs at once, and counts agent-hours from its clock (pass `now` to move it). Its controls are
@@ -144,10 +145,11 @@ Bearer token from device sign-in on every route except the two sign-in calls.
 | Account | `GET /v1/account` | `access: waitlisted` is "You're on the list"; `signupState` is the next sign-up step (`needs_phone`, `needs_card`, `ready`); the account's organizations, the personal one marked |
 | List Session VMs | `GET /v1/organizations/:organizationId/vms` | The caller's own in that organization, deleted ones left out |
 | Create | `POST /v1/organizations/:organizationId/vms` | `202`; an 8 GiB VM that starts at once; `not_org_member`, `view_only`, `not_invited`, `signup_incomplete`, `awake_limit_reached`, `no_capacity`; a retry with the same key in the same organization returns the first VM |
-| Get | `GET /v1/vms/:vmId` | State, why it last stopped, memory, Pane version |
+| Get | `GET /v1/vms/:vmId` | State, why it last stopped, memory, Pane version, and `relay`: the relay identity the service vouches for, from create on |
 | Start, stop | `POST /v1/vms/:vmId/start`, `/stop` | `202`; `invalid_state` if it is already running (start) or stopped (stop); start answers `under_review` for a VM paused for review, and `awake_limit_reached` or `no_capacity` like create |
 | Delete | `DELETE /v1/vms/:vmId` | `202`; deletes the disk |
 | Run an operation | `POST /v1/vms/:vmId/operations` | Only `update_pane` (`{ version? }`, latest release when omitted; the service looks up the checksum) and `collect_diagnostics` (`{}`); any other name is `operation_not_allowed` |
+| Pair a device | `POST /v1/vms/:vmId/pairing` | A one-time pairing link (10 minutes) and the VM's relay identity (`computerId`, key `fingerprint`, `domain`). The first call returns the link the host made before boot, so it answers while the VM is still creating or starting; later calls ask the running VM for a new one. The client pairs only with a VM that presents exactly that key. The service keeps the first identity a VM reports and answers `relay_key_changed` when it later reports another. Only the VM's creator, while they still have Full access in its organization: `view_only` or `not_org_member` otherwise. A later call on a VM that isn't running gets `invalid_state`; logged as `create_pairing_link`, without the link |
 | Action log | `GET /v1/vms/:vmId/operations` | Newest first, `?before=<id>&limit=`; every lifecycle step and operation with actor, reason and parameters |
 | Usage | `GET /v1/organizations/:organizationId/usage` | `?month=YYYY-MM`, this month by default: the plan, agent-hours used and the pooled limit, when they reset, and per member their hours, VMs awake now and awake limit |
 
@@ -170,13 +172,14 @@ Called only by the service. Every change to a VM is one signed operation.
 
 | Operation | Runs on | Parameters |
 | --- | --- | --- |
-| `create` | host | none; an 8 GiB, 4 vCPU VM, started |
+| `create` | host | none; an 8 GiB, 4 vCPU VM, started. Before the first boot the host makes the VM's relay key and a first one-time pairing secret, writes them onto the secrets volume (`PREBOOT_RELAY_FILES`: `relay/computer-key.pem`, and `relay/pairing.json` with the secret's SHA-256 and expiry; both owned by the guest's `pane` user, mode 0600, in a 0700 `relay/` directory), and returns the identity and the first link as the result (D-104) |
 | `start`, `delete` | host | none |
 | `stop` | host | `cause`: `user` or `review` (an automatic pause or a person's Suspend), recorded as the VM's `stateReason`; the disk is kept. The fleet's own stops (host maintenance, host loss) set their own reason |
 | `bootstrap` | guest | `release`: a published Pane `version`, `arch: arm64` and the `.deb`'s `debSha256` |
 | `update_pane` | guest | the same `release`; the host refuses a checksum that is not a published release |
 | `prepare_to_stop` | guest | none |
 | `collect_diagnostics` | guest | none; reads only `DIAGNOSTIC_FILES` |
+| `create_pairing_link` | guest | none; for a later pairing of a running VM, returns a one-time pairing link from the VM's Pane, good for at most 10 minutes, and its relay identity. The host keeps the link only to answer a retried `requestId`, and drops it when the operation's `expiresAt` passes |
 
 There is no shell command, file write or access grant, and every schema is strict, so an extra
 parameter is refused.

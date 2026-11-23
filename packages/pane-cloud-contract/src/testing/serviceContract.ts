@@ -31,6 +31,10 @@ export interface ServiceContractControls {
   setCapacity(capacity: number | null): Promise<void> | void;
   /** Adds a test account to an organization with a role, as an accepted invitation does. */
   addMember(who: Who, organizationId: string, role: 'full_access' | 'view_only'): Promise<void> | void;
+  /** Makes the VM's Pane lose its relay key and make a new one, so it reports another identity. */
+  replaceRelayKey(vmId: string): Promise<void> | void;
+  /** Changes a test account's role in an organization, or removes it from the organization with null. */
+  changeMember(who: Who, organizationId: string, role: 'full_access' | 'view_only' | null): Promise<void> | void;
   /** Puts an organization on a plan. */
   setPlan(organizationId: string, plan: Plan): Promise<void> | void;
   /** Gives a VM 16 GiB, as a resize does. */
@@ -205,6 +209,88 @@ export function serviceContractCases(target: ServiceContractTarget): ContractCas
           assert.equal(entry.operation, 'collect_diagnostics');
           assert.ok((await member.listActionLog(vm.id)).entries.some((e) => e.id === entry.id), 'the operation is in the action log');
         });
+      },
+    },
+    {
+      name: 'service: pairing a running Session VM gives a one-time link for the relay identity the service vouches for, the same identity after a stop and start, logged without the link',
+      async run() {
+        await withVm(async (member, vm) => {
+          assert.ok(vm.relay, 'the service vouches for the identity the host made before boot, from create on');
+          const first = await member.pairVm(vm.id);
+          const link = new URL(first.link);
+          const fragment = new URLSearchParams(link.hash.slice(1));
+          assert.equal(link.host, first.relay.domain, 'the link is under the relay domain');
+          assert.equal(fragment.get('c'), first.relay.computerId, 'the link names the vouched computer');
+          assert.ok(fragment.get('s'), 'the link carries a one-time secret');
+          assert.deepEqual(first.relay, vm.relay, 'the first link is for the identity vouched for at create');
+          assert.deepEqual((await member.getVm(vm.id)).relay, first.relay, 'the VM shows the identity the service vouches for');
+          await member.stopVm(vm.id);
+          await vmIn(member, vm.id, 'stopped');
+          await expectError('invalid_state', () => member.pairVm(vm.id));
+          await member.startVm(vm.id);
+          await vmIn(member, vm.id, 'running');
+          const second = await member.pairVm(vm.id);
+          assert.deepEqual(second.relay, first.relay, 'the relay identity survives a stop and start');
+          assert.notEqual(second.link, first.link, 'each pairing gets a new link');
+          const logged = (await member.listActionLog(vm.id)).entries.filter((e) => e.operation === 'create_pairing_link');
+          assert.equal(logged.length, 2, 'each pairing is in the action log');
+          const firstLogged = logged.at(-1);
+          assert.ok(firstLogged && Date.parse(first.expiresAt) - Date.parse(firstLogged.requestedAt) <= 10 * 60_000, 'the link lasts at most 10 minutes');
+          const secret = fragment.get('s') ?? '';
+          assert.ok(logged.every((e) => !JSON.stringify(e).includes(secret)), 'the action log never holds the link');
+          await expectError('vm_not_found', async () => (await as('waitlisted')).pairVm(vm.id));
+        });
+      },
+    },
+    {
+      name: 'service: the first pairing answers right after create, without waiting for the VM to run, with the identity made before boot (D-104)',
+      async run() {
+        const member = await as('member');
+        const { vm } = await member.createVm(await personalOrg(member), 'pairs while booting', randomUUID());
+        try {
+          const pairing = await member.pairVm(vm.id);
+          assert.equal(new URLSearchParams(new URL(pairing.link).hash.slice(1)).get('c'), pairing.relay.computerId);
+          assert.deepEqual((await member.getVm(vm.id)).relay, pairing.relay, 'the service vouches for the identity it handed out');
+        } finally {
+          await cleanUp(member, [vm.id]);
+        }
+      },
+    },
+    {
+      name: 'service: keeps the first relay identity a Session VM reported and refuses to pair one that reports another (relay_key_changed)',
+      async run() {
+        const replaceRelayKey = control('replaceRelayKey');
+        await withVm(async (member, vm) => {
+          const { relay } = await member.pairVm(vm.id);
+          await replaceRelayKey(vm.id);
+          await expectError('relay_key_changed', () => member.pairVm(vm.id));
+          assert.deepEqual((await member.getVm(vm.id)).relay, relay, 'the vouched identity stays the first one');
+        });
+      },
+    },
+    {
+      name: 'service: a creator who is now View only, or no longer a member, cannot pair a device with the Session VM',
+      async run() {
+        const addMember = control('addMember');
+        const changeMember = control('changeMember');
+        const member = await as('member');
+        const team = await personalOrg(await as('unverified'));
+        await addMember('member', team, 'full_access');
+        await changeMember('member', team, 'full_access');
+        const { vm } = await member.createVm(team, 'team pairing', randomUUID());
+        try {
+          await vmIn(member, vm.id, 'running');
+          await member.pairVm(vm.id);
+          await changeMember('member', team, 'view_only');
+          await expectError('view_only', () => member.pairVm(vm.id));
+          await changeMember('member', team, null);
+          await expectError('not_org_member', () => member.pairVm(vm.id));
+          assert.equal((await member.listActionLog(vm.id)).entries.filter((e) => e.operation === 'create_pairing_link').length, 1, 'a refused pairing is not logged as one');
+        } finally {
+          await addMember('member', team, 'full_access');
+          await changeMember('member', team, 'full_access');
+          await cleanUp(member, [vm.id]);
+        }
       },
     },
     {

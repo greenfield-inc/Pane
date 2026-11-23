@@ -57,6 +57,9 @@ const StopParameters = z.object({ cause: StopCause }).strict();
  * The allow-list. Lifecycle operations run on the host; guest operations run inside the VM through
  * the guest agent. Nothing else exists: no shell command, no file write, no access grant. `create`
  * makes an 8 GiB, 4 vCPU VM and starts it; `stop` keeps its disk; `start` boots it from that disk.
+ * `create` also makes the VM's relay identity and a first one-time pairing link before the VM boots
+ * (PREBOOT_RELAY_FILES) and returns them, so the service can vouch while the VM boots (D-104).
+ * `create_pairing_link` asks the running VM's Pane for another link, for a later pairing.
  */
 export const FLEET_OPERATIONS = {
   create: { runsOn: 'host', parameters: NoParameters },
@@ -67,6 +70,7 @@ export const FLEET_OPERATIONS = {
   update_pane: { runsOn: 'guest', parameters: ReleaseParameters },
   prepare_to_stop: { runsOn: 'guest', parameters: NoParameters },
   collect_diagnostics: { runsOn: 'guest', parameters: NoParameters },
+  create_pairing_link: { runsOn: 'guest', parameters: NoParameters },
 } as const;
 
 export type FleetOperationName = keyof typeof FLEET_OPERATIONS;
@@ -102,6 +106,7 @@ export const OperationPayload = z.discriminatedUnion('operation', [
   payloadFor('update_pane', FLEET_OPERATIONS.update_pane.parameters),
   payloadFor('prepare_to_stop', FLEET_OPERATIONS.prepare_to_stop.parameters),
   payloadFor('collect_diagnostics', FLEET_OPERATIONS.collect_diagnostics.parameters),
+  payloadFor('create_pairing_link', FLEET_OPERATIONS.create_pairing_link.parameters),
 ]);
 export type OperationPayload = z.infer<typeof OperationPayload>;
 
@@ -228,6 +233,78 @@ const DiagnosticsResult = z
   })
   .strict();
 
+const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
+const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+/** The relay computer id a key fingerprint names: its first 80 bits in lowercase base32 (Pane's relay/PROTOCOL.md). */
+export function relayComputerIdOf(fingerprint: string): string {
+  let value = 0;
+  let bits = 0;
+  let id = '';
+  for (const char of fingerprint.slice(0, 16)) {
+    value = ((value << 6) | BASE64URL.indexOf(char)) & 0x7ff;
+    bits += 6;
+    while (bits >= 5 && id.length < 16) {
+      id += BASE32[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  return id;
+}
+
+/**
+ * A Session VM's relay identity: the name clients reach it at, `https://<computerId>.<domain>`, and
+ * the key they pin. The VM's Pane makes the key on first use and keeps it on the Session disk.
+ */
+export const RelayIdentity = z
+  .object({
+    computerId: z.string().regex(/^[a-z2-7]{16}$/),
+    /** Base64url SHA-256 of the VM's relay public key (SubjectPublicKeyInfo DER). */
+    fingerprint: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+    /** The relay domain, `host[:port]`: runpane.net in production. */
+    domain: z.string().regex(/^[a-z0-9.-]+(:\d{1,5})?$/),
+  })
+  .strict()
+  .refine((relay) => relayComputerIdOf(relay.fingerprint) === relay.computerId, { message: 'computerId is not the id the fingerprint names', path: ['computerId'] });
+export type RelayIdentity = z.infer<typeof RelayIdentity>;
+
+/**
+ * A one-time link a device trades for its token on the VM (`https://<domain>/pair#s=…&c=<computerId>&n=…`),
+ * with the identity the VM's Pane reported. The link works once, within 10 minutes. The fleet keeps
+ * it only to answer a retried request, never in a log or an event.
+ */
+export const PairingLink = z
+  .object({
+    relay: RelayIdentity,
+    link: z.url({ protocol: /^https$/ }),
+    expiresAt: Timestamp,
+  })
+  .strict();
+export type PairingLink = z.infer<typeof PairingLink>;
+
+/**
+ * What the host writes onto a new VM's secrets volume at assignment, before the first boot (D-104),
+ * as paths under the volume's root (the guest's PANE_SECRETS_DIR). Pane uses this key as its relay
+ * key and accepts this one-time secret as a pairing link, so pairing needs no step after the
+ * daemon's socket appears. The host keeps the private key only on the volume, and the secret only
+ * as its hash there and in `create`'s result for the service.
+ *
+ * Ownership: both files and the `relay/` directory belong to the guest's Pane user (`pane`), the
+ * files with mode 0600 and the directory with mode 0700, written complete before the first boot. Pane
+ * treats a key file it can't read, or an empty one, as an error naming the file and never makes a
+ * key of its own in its place; only an absent file means "no host-made key".
+ */
+export const PREBOOT_RELAY_FILES = {
+  /** The VM's relay key: a P-256 private key, PKCS#8 PEM. Its public key's fingerprint is the identity `create` returns. */
+  key: 'relay/computer-key.pem',
+  /** The first pairing link's secret, as PrebootPairing JSON. */
+  pairing: 'relay/pairing.json',
+} as const;
+
+/** `relay/pairing.json`: the SHA-256 (hex) of the one-time secret in `create`'s link, and when the link expires. */
+export const PrebootPairing = z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), expiresAt: Timestamp }).strict();
+export type PrebootPairing = z.infer<typeof PrebootPairing>;
+
 export const OperationStatus = z
   .object({
     requestId: z.uuid(),
@@ -235,8 +312,8 @@ export const OperationStatus = z
     operation: FleetOperationName,
     status: z.enum(['accepted', 'running', 'succeeded', 'failed']),
     error: OperationError.nullable(),
-    /** Set for a finished collect_diagnostics; null for every other operation. */
-    result: DiagnosticsResult.nullable(),
+    /** Set for a finished create (the pre-boot identity and first link), collect_diagnostics or create_pairing_link; null for every other operation. */
+    result: z.union([DiagnosticsResult, PairingLink]).nullable(),
     acceptedAt: Timestamp,
     finishedAt: Timestamp.nullable(),
   })

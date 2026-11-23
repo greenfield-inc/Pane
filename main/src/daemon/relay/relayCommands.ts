@@ -20,6 +20,8 @@ const RELAY_COMMANDS = {
   linkPreview: 'relay:link-preview',
   /** Local only: `{link}` → `LinkRedeemResult`. The client asks the person first when `needsConfirm`. */
   redeemLink: 'relay:redeem-link',
+  /** Local only: a Pane Cloud `VouchedPairing` → `{computerId, name}`, the Session VM linked like any computer. */
+  redeemVouched: 'relay:redeem-vouched',
 } as const;
 
 const callerSchema = boundary.object({ clientId: boundary.nonEmptyString });
@@ -30,6 +32,10 @@ const previewTargetSchema = boundary.union(
 
 const peerRequestSchema = boundary.object({ peer: relayComputerSchema });
 const linkRequestSchema = boundary.object({ link: boundary.nonEmptyString });
+const vouchedPairingSchema = boundary.object({
+  link: boundary.nonEmptyString,
+  relay: boundary.object({ computerId: boundary.nonEmptyString, fingerprint: boundary.nonEmptyString, domain: boundary.nonEmptyString }),
+});
 const unlinkRequestSchema = boundary.object({ computerId: boundary.nonEmptyString });
 const forgetRequestSchema = boundary.object({ computerId: boundary.nonEmptyString, keep: boundary.optional(boundary.array(boundary.string)) });
 const pairingCodeSchema = boundary.optional(boundary.object({ expiresIn: boundary.optional(boundary.enumeration('10m', '1h', '24h')) }));
@@ -130,6 +136,12 @@ export function registerRelayCommands(
     const { link } = decodeBoundary(request, linkRequestSchema);
     await relayReady();
     return linking.redeem(link);
+  });
+  registry.register(RELAY_COMMANDS.redeemVouched, async (request: PaneCommandValue) => {
+    onThisComputerOnly();
+    const pairing = decodeBoundary(request, vouchedPairingSchema);
+    await relayReady();
+    return linking.redeemVouched(pairing);
   });
 
   // Called by paired phones and linked computers; the HTTP server supplies the caller.

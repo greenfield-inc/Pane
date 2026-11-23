@@ -182,6 +182,90 @@ function serviceContractCases(target) {
             },
         },
         {
+            name: 'service: pairing a running Session VM gives a one-time link for the relay identity the service vouches for, the same identity after a stop and start, logged without the link',
+            async run() {
+                await withVm(async (member, vm) => {
+                    strict_1.default.ok(vm.relay, 'the service vouches for the identity the host made before boot, from create on');
+                    const first = await member.pairVm(vm.id);
+                    const link = new URL(first.link);
+                    const fragment = new URLSearchParams(link.hash.slice(1));
+                    strict_1.default.equal(link.host, first.relay.domain, 'the link is under the relay domain');
+                    strict_1.default.equal(fragment.get('c'), first.relay.computerId, 'the link names the vouched computer');
+                    strict_1.default.ok(fragment.get('s'), 'the link carries a one-time secret');
+                    strict_1.default.deepEqual(first.relay, vm.relay, 'the first link is for the identity vouched for at create');
+                    strict_1.default.deepEqual((await member.getVm(vm.id)).relay, first.relay, 'the VM shows the identity the service vouches for');
+                    await member.stopVm(vm.id);
+                    await vmIn(member, vm.id, 'stopped');
+                    await (0, cases_1.expectError)('invalid_state', () => member.pairVm(vm.id));
+                    await member.startVm(vm.id);
+                    await vmIn(member, vm.id, 'running');
+                    const second = await member.pairVm(vm.id);
+                    strict_1.default.deepEqual(second.relay, first.relay, 'the relay identity survives a stop and start');
+                    strict_1.default.notEqual(second.link, first.link, 'each pairing gets a new link');
+                    const logged = (await member.listActionLog(vm.id)).entries.filter((e) => e.operation === 'create_pairing_link');
+                    strict_1.default.equal(logged.length, 2, 'each pairing is in the action log');
+                    const firstLogged = logged.at(-1);
+                    strict_1.default.ok(firstLogged && Date.parse(first.expiresAt) - Date.parse(firstLogged.requestedAt) <= 10 * 60_000, 'the link lasts at most 10 minutes');
+                    const secret = fragment.get('s') ?? '';
+                    strict_1.default.ok(logged.every((e) => !JSON.stringify(e).includes(secret)), 'the action log never holds the link');
+                    await (0, cases_1.expectError)('vm_not_found', async () => (await as('waitlisted')).pairVm(vm.id));
+                });
+            },
+        },
+        {
+            name: 'service: the first pairing answers right after create, without waiting for the VM to run, with the identity made before boot (D-104)',
+            async run() {
+                const member = await as('member');
+                const { vm } = await member.createVm(await personalOrg(member), 'pairs while booting', (0, node_crypto_1.randomUUID)());
+                try {
+                    const pairing = await member.pairVm(vm.id);
+                    strict_1.default.equal(new URLSearchParams(new URL(pairing.link).hash.slice(1)).get('c'), pairing.relay.computerId);
+                    strict_1.default.deepEqual((await member.getVm(vm.id)).relay, pairing.relay, 'the service vouches for the identity it handed out');
+                }
+                finally {
+                    await cleanUp(member, [vm.id]);
+                }
+            },
+        },
+        {
+            name: 'service: keeps the first relay identity a Session VM reported and refuses to pair one that reports another (relay_key_changed)',
+            async run() {
+                const replaceRelayKey = control('replaceRelayKey');
+                await withVm(async (member, vm) => {
+                    const { relay } = await member.pairVm(vm.id);
+                    await replaceRelayKey(vm.id);
+                    await (0, cases_1.expectError)('relay_key_changed', () => member.pairVm(vm.id));
+                    strict_1.default.deepEqual((await member.getVm(vm.id)).relay, relay, 'the vouched identity stays the first one');
+                });
+            },
+        },
+        {
+            name: 'service: a creator who is now View only, or no longer a member, cannot pair a device with the Session VM',
+            async run() {
+                const addMember = control('addMember');
+                const changeMember = control('changeMember');
+                const member = await as('member');
+                const team = await personalOrg(await as('unverified'));
+                await addMember('member', team, 'full_access');
+                await changeMember('member', team, 'full_access');
+                const { vm } = await member.createVm(team, 'team pairing', (0, node_crypto_1.randomUUID)());
+                try {
+                    await vmIn(member, vm.id, 'running');
+                    await member.pairVm(vm.id);
+                    await changeMember('member', team, 'view_only');
+                    await (0, cases_1.expectError)('view_only', () => member.pairVm(vm.id));
+                    await changeMember('member', team, null);
+                    await (0, cases_1.expectError)('not_org_member', () => member.pairVm(vm.id));
+                    strict_1.default.equal((await member.listActionLog(vm.id)).entries.filter((e) => e.operation === 'create_pairing_link').length, 1, 'a refused pairing is not logged as one');
+                }
+                finally {
+                    await addMember('member', team, 'full_access');
+                    await changeMember('member', team, 'full_access');
+                    await cleanUp(member, [vm.id]);
+                }
+            },
+        },
+        {
             name: "service: another account cannot read or change a member's Session VM or organization",
             async run() {
                 await withVm(async (member, vm) => {

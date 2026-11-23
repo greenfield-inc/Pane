@@ -25,6 +25,10 @@ export interface ServiceContractControls {
     setCapacity(capacity: number | null): Promise<void> | void;
     /** Adds a test account to an organization with a role, as an accepted invitation does. */
     addMember(who: Who, organizationId: string, role: 'full_access' | 'view_only'): Promise<void> | void;
+    /** Makes the VM's Pane lose its relay key and make a new one, so it reports another identity. */
+    replaceRelayKey(vmId: string): Promise<void> | void;
+    /** Changes a test account's role in an organization, or removes it from the organization with null. */
+    changeMember(who: Who, organizationId: string, role: 'full_access' | 'view_only' | null): Promise<void> | void;
     /** Puts an organization on a plan. */
     setPlan(organizationId: string, plan: Plan): Promise<void> | void;
     /** Gives a VM 16 GiB, as a resize does. */

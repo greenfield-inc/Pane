@@ -7,7 +7,7 @@
  */
 import { z } from 'zod';
 import { CloudApiError } from './errors';
-import { FleetVmState, OperationError, StateReason, VmId, VmMemoryGiB } from './fleet';
+import { FleetVmState, OperationError, PairingLink, RelayIdentity, StateReason, VmId, VmMemoryGiB } from './fleet';
 import { callRoute, type ClientConfig, route } from './http';
 
 const Timestamp = z.iso.datetime({ offset: true });
@@ -100,6 +100,11 @@ export const SessionVm = z
     stateReason: StateReason.nullable(),
     memoryGiB: VmMemoryGiB,
     paneVersion: z.string().nullable(),
+    /**
+     * The relay identity the host made before the VM's first boot (D-104), which the service vouches
+     * for from create on. Null only for a VM created before pre-boot identities.
+     */
+    relay: RelayIdentity.nullable(),
     createdAt: Timestamp,
     updatedAt: Timestamp,
   })
@@ -107,7 +112,7 @@ export const SessionVm = z
 export type SessionVm = z.infer<typeof SessionVm>;
 
 /** Lifecycle actions plus the allow-listed guest operations, as the VM's action log names them. */
-export const LoggedOperation = z.enum(['create', 'start', 'stop', 'delete', 'bootstrap', 'update_pane', 'prepare_to_stop', 'collect_diagnostics']);
+export const LoggedOperation = z.enum(['create', 'start', 'stop', 'delete', 'bootstrap', 'update_pane', 'prepare_to_stop', 'collect_diagnostics', 'create_pairing_link']);
 
 export const ActionLogEntry = z
   .object({
@@ -222,6 +227,15 @@ export const serviceRoutes = {
   stopVm: route({ id: 'service.stopVm', method: 'POST', path: '/v1/vms/:vmId/stop', auth: true, body: z.object({}).strict(), response: VmAction, status: 202 }),
   deleteVm: route({ id: 'service.deleteVm', method: 'DELETE', path: '/v1/vms/:vmId', auth: true, response: VmAction, status: 202 }),
   requestOperation: route({ id: 'service.requestOperation', method: 'POST', path: '/v1/vms/:vmId/operations', auth: true, body: SubmittedOperation, response: ActionLogEntry, status: 202 }),
+  /**
+   * A one-time link for pairing a device with the VM, and the relay identity the service vouches
+   * for. The first call returns the link the host made before boot, so it answers while the VM is
+   * still creating or starting; later calls ask the running VM for a new link (invalid_state
+   * otherwise). The client pairs only with a VM that presents exactly that key. A VM that reports
+   * a different identity than its first one is refused with relay_key_changed. Logged as
+   * create_pairing_link, without the link.
+   */
+  pairVm: route({ id: 'service.pairVm', method: 'POST', path: '/v1/vms/:vmId/pairing', auth: true, body: z.object({}).strict(), response: PairingLink }),
   listActionLog: route({
     id: 'service.listActionLog',
     method: 'GET',
@@ -256,6 +270,7 @@ export function createServiceClient(config: ClientConfig) {
     stopVm: (vmId: string) => callRoute(config, r.stopVm, { params: { vmId }, body: {} }),
     deleteVm: (vmId: string) => callRoute(config, r.deleteVm, { params: { vmId } }),
     requestOperation: (vmId: string, request: UserOperationRequest) => callRoute(config, r.requestOperation, { params: { vmId }, body: request }),
+    pairVm: (vmId: string) => callRoute(config, r.pairVm, { params: { vmId }, body: {} }),
     listActionLog: (vmId: string, page: { before?: string; limit?: number } = {}) => callRoute(config, r.listActionLog, { params: { vmId }, query: page }),
     getUsage: (organizationId: string, month?: string) => callRoute(config, r.getUsage, { params: { organizationId }, query: { month } }),
   };

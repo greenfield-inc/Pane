@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.startServiceStub = startServiceStub;
 const errors_1 = require("../errors");
 const service_1 = require("../service");
+const relayKey_1 = require("./relayKey");
 const server_1 = require("./server");
 const AWAKE = ['creating', 'starting', 'running'];
 const HOUR = 3_600_000;
@@ -191,10 +192,15 @@ async function startServiceStub(options) {
             requireRoomToWake(account);
             const id = nextId('vm');
             const record = {
-                vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, createdAt: iso(), updatedAt: iso() },
+                vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, relay: null, createdAt: iso(), updatedAt: iso() },
                 awake: [],
                 log: [],
+                relayKey: (0, relayKey_1.newRelayIdentity)('runpane.net'),
+                prebootLink: null,
             };
+            // The host makes the identity and a first link before boot (D-104); the service vouches from now on.
+            record.vm.relay = record.relayKey;
+            record.prebootLink = (0, relayKey_1.pairingLinkFor)(record.relayKey, body.name, now());
             vms.set(id, record);
             setState(record, 'running', null);
             const entry = log(record, 'create', account, 'You created this Session.');
@@ -244,6 +250,28 @@ async function startServiceStub(options) {
             }
             return log(record, 'collect_diagnostics', account, 'You collected diagnostics.');
         }),
+        (0, server_1.bind)(r.pairVm, ({ token, params }) => {
+            const account = caller(token);
+            const record = ownVm(account, params.vmId ?? '');
+            // Pairing hands a device control of the VM: its creator must still have Full access in its organization.
+            requireFullAccess(account, record.vm.organizationId);
+            // The first pairing uses the link made before boot, so it answers while the VM still boots.
+            const preboot = record.prebootLink;
+            if (preboot && Date.parse(preboot.expiresAt) > now().getTime() && AWAKE.includes(record.vm.state)) {
+                record.prebootLink = null;
+                log(record, 'create_pairing_link', account, 'You paired a device with this Session.');
+                return preboot;
+            }
+            requireState(record, 'running', 'Pairing');
+            const reported = record.relayKey;
+            const vouched = record.vm.relay;
+            if (vouched && (vouched.computerId !== reported.computerId || vouched.fingerprint !== reported.fingerprint || vouched.domain !== reported.domain)) {
+                throw new errors_1.CloudApiError('relay_key_changed', `This Session now reports relay key ${reported.computerId}, not ${vouched.computerId}, the one it paired with first, so no device was paired.`, 'Write to support with the Session name; its devices keep refusing the new key.');
+            }
+            record.vm.relay = reported;
+            log(record, 'create_pairing_link', account, 'You paired a device with this Session.');
+            return (0, relayKey_1.pairingLinkFor)(reported, record.vm.name, now());
+        }),
         (0, server_1.bind)(r.listActionLog, ({ token, params, query }) => {
             const all = ownVm(caller(token), params.vmId ?? '').log;
             const cursorAt = query.before ? all.findIndex((e) => e.id === query.before) : -1;
@@ -287,6 +315,14 @@ async function startServiceStub(options) {
             if (!account.organizations.some((m) => m.organizationId === organizationId))
                 account.organizations.push({ organizationId, name: `Organization ${organizationId}`, personal: false, role });
         },
+        changeMember(organizationId, email, role) {
+            const account = accounts.get(email.toLowerCase());
+            if (!account)
+                throw new Error(`stub: no account ${email}`);
+            const others = account.organizations.filter((m) => m.organizationId !== organizationId);
+            const current = account.organizations.find((m) => m.organizationId === organizationId);
+            account.organizations = role === null || !current ? others : [...others, { ...current, role }];
+        },
         setPlan(organizationId, plan) {
             plans.set(organizationId, plan);
         },
@@ -308,6 +344,12 @@ async function startServiceStub(options) {
                 throw new Error(`stub: no Session VM ${vmId}`);
             setState(record, 'stopped', 'review');
             log(record, 'stop', 'service', 'Paused while your usage is under review.', { cause: 'review' });
+        },
+        replaceRelayKey(vmId) {
+            const record = vms.get(vmId);
+            if (!record)
+                throw new Error(`stub: no Session VM ${vmId}`);
+            record.relayKey = (0, relayKey_1.newRelayIdentity)('runpane.net');
         },
     };
 }

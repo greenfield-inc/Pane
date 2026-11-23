@@ -33,6 +33,9 @@ export declare const StopCause: z.ZodEnum<{
  * The allow-list. Lifecycle operations run on the host; guest operations run inside the VM through
  * the guest agent. Nothing else exists: no shell command, no file write, no access grant. `create`
  * makes an 8 GiB, 4 vCPU VM and starts it; `stop` keeps its disk; `start` boots it from that disk.
+ * `create` also makes the VM's relay identity and a first one-time pairing link before the VM boots
+ * (PREBOOT_RELAY_FILES) and returns them, so the service can vouch while the VM boots (D-104).
+ * `create_pairing_link` asks the running VM's Pane for another link, for a later pairing.
  */
 export declare const FLEET_OPERATIONS: {
     readonly create: {
@@ -84,6 +87,10 @@ export declare const FLEET_OPERATIONS: {
         readonly runsOn: "guest";
         readonly parameters: z.ZodObject<{}, z.core.$strict>;
     };
+    readonly create_pairing_link: {
+        readonly runsOn: "guest";
+        readonly parameters: z.ZodObject<{}, z.core.$strict>;
+    };
 };
 export type FleetOperationName = keyof typeof FLEET_OPERATIONS;
 export declare const FleetOperationName: z.ZodEnum<{
@@ -95,6 +102,7 @@ export declare const FleetOperationName: z.ZodEnum<{
     update_pane: "update_pane";
     prepare_to_stop: "prepare_to_stop";
     collect_diagnostics: "collect_diagnostics";
+    create_pairing_link: "create_pairing_link";
 }>;
 export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     operation: z.ZodLiteral<"create">;
@@ -178,6 +186,15 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     expiresAt: z.ZodISODateTime;
 }, z.core.$strict>, z.ZodObject<{
     operation: z.ZodLiteral<"collect_diagnostics">;
+    parameters: z.ZodObject<{}, z.core.$strict>;
+    requestId: z.ZodUUID;
+    hostId: z.ZodString;
+    vmId: z.ZodString;
+    reason: z.ZodString;
+    issuedAt: z.ZodISODateTime;
+    expiresAt: z.ZodISODateTime;
+}, z.core.$strict>, z.ZodObject<{
+    operation: z.ZodLiteral<"create_pairing_link">;
     parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
     hostId: z.ZodString;
@@ -282,6 +299,15 @@ export declare const OperationEnvelope: z.ZodObject<{
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
         expiresAt: z.ZodISODateTime;
+    }, z.core.$strict>, z.ZodObject<{
+        operation: z.ZodLiteral<"create_pairing_link">;
+        parameters: z.ZodObject<{}, z.core.$strict>;
+        requestId: z.ZodUUID;
+        hostId: z.ZodString;
+        vmId: z.ZodString;
+        reason: z.ZodString;
+        issuedAt: z.ZodISODateTime;
+        expiresAt: z.ZodISODateTime;
     }, z.core.$strict>], "operation">;
     signature: z.ZodObject<{
         keyId: z.ZodString;
@@ -373,6 +399,57 @@ export declare const OperationError: z.ZodObject<{
     message: z.ZodString;
     next: z.ZodString;
 }, z.core.$strict>;
+/** The relay computer id a key fingerprint names: its first 80 bits in lowercase base32 (Pane's relay/PROTOCOL.md). */
+export declare function relayComputerIdOf(fingerprint: string): string;
+/**
+ * A Session VM's relay identity: the name clients reach it at, `https://<computerId>.<domain>`, and
+ * the key they pin. The VM's Pane makes the key on first use and keeps it on the Session disk.
+ */
+export declare const RelayIdentity: z.ZodObject<{
+    computerId: z.ZodString;
+    fingerprint: z.ZodString;
+    domain: z.ZodString;
+}, z.core.$strict>;
+export type RelayIdentity = z.infer<typeof RelayIdentity>;
+/**
+ * A one-time link a device trades for its token on the VM (`https://<domain>/pair#s=…&c=<computerId>&n=…`),
+ * with the identity the VM's Pane reported. The link works once, within 10 minutes. The fleet keeps
+ * it only to answer a retried request, never in a log or an event.
+ */
+export declare const PairingLink: z.ZodObject<{
+    relay: z.ZodObject<{
+        computerId: z.ZodString;
+        fingerprint: z.ZodString;
+        domain: z.ZodString;
+    }, z.core.$strict>;
+    link: z.ZodURL;
+    expiresAt: z.ZodISODateTime;
+}, z.core.$strict>;
+export type PairingLink = z.infer<typeof PairingLink>;
+/**
+ * What the host writes onto a new VM's secrets volume at assignment, before the first boot (D-104),
+ * as paths under the volume's root (the guest's PANE_SECRETS_DIR). Pane uses this key as its relay
+ * key and accepts this one-time secret as a pairing link, so pairing needs no step after the
+ * daemon's socket appears. The host keeps the private key only on the volume, and the secret only
+ * as its hash there and in `create`'s result for the service.
+ *
+ * Ownership: both files and the `relay/` directory belong to the guest's Pane user (`pane`), the
+ * files with mode 0600 and the directory with mode 0700, written complete before the first boot. Pane
+ * treats a key file it can't read, or an empty one, as an error naming the file and never makes a
+ * key of its own in its place; only an absent file means "no host-made key".
+ */
+export declare const PREBOOT_RELAY_FILES: {
+    /** The VM's relay key: a P-256 private key, PKCS#8 PEM. Its public key's fingerprint is the identity `create` returns. */
+    readonly key: "relay/computer-key.pem";
+    /** The first pairing link's secret, as PrebootPairing JSON. */
+    readonly pairing: "relay/pairing.json";
+};
+/** `relay/pairing.json`: the SHA-256 (hex) of the one-time secret in `create`'s link, and when the link expires. */
+export declare const PrebootPairing: z.ZodObject<{
+    sha256: z.ZodString;
+    expiresAt: z.ZodISODateTime;
+}, z.core.$strict>;
+export type PrebootPairing = z.infer<typeof PrebootPairing>;
 export declare const OperationStatus: z.ZodObject<{
     requestId: z.ZodUUID;
     vmId: z.ZodString;
@@ -385,6 +462,7 @@ export declare const OperationStatus: z.ZodObject<{
         update_pane: "update_pane";
         prepare_to_stop: "prepare_to_stop";
         collect_diagnostics: "collect_diagnostics";
+        create_pairing_link: "create_pairing_link";
     }>;
     status: z.ZodEnum<{
         running: "running";
@@ -397,13 +475,21 @@ export declare const OperationStatus: z.ZodObject<{
         message: z.ZodString;
         next: z.ZodString;
     }, z.core.$strict>>;
-    result: z.ZodNullable<z.ZodObject<{
+    result: z.ZodNullable<z.ZodUnion<readonly [z.ZodObject<{
         files: z.ZodArray<z.ZodObject<{
             path: z.ZodString;
             bytes: z.ZodNumber;
         }, z.core.$strict>>;
         archiveKey: z.ZodString;
-    }, z.core.$strict>>;
+    }, z.core.$strict>, z.ZodObject<{
+        relay: z.ZodObject<{
+            computerId: z.ZodString;
+            fingerprint: z.ZodString;
+            domain: z.ZodString;
+        }, z.core.$strict>;
+        link: z.ZodURL;
+        expiresAt: z.ZodISODateTime;
+    }, z.core.$strict>]>>;
     acceptedAt: z.ZodISODateTime;
     finishedAt: z.ZodNullable<z.ZodISODateTime>;
 }, z.core.$strict>;
@@ -469,6 +555,7 @@ export declare const fleetRoutes: {
             update_pane: "update_pane";
             prepare_to_stop: "prepare_to_stop";
             collect_diagnostics: "collect_diagnostics";
+            create_pairing_link: "create_pairing_link";
         }>;
         status: z.ZodEnum<{
             running: "running";
@@ -481,13 +568,21 @@ export declare const fleetRoutes: {
             message: z.ZodString;
             next: z.ZodString;
         }, z.core.$strict>>;
-        result: z.ZodNullable<z.ZodObject<{
+        result: z.ZodNullable<z.ZodUnion<readonly [z.ZodObject<{
             files: z.ZodArray<z.ZodObject<{
                 path: z.ZodString;
                 bytes: z.ZodNumber;
             }, z.core.$strict>>;
             archiveKey: z.ZodString;
-        }, z.core.$strict>>;
+        }, z.core.$strict>, z.ZodObject<{
+            relay: z.ZodObject<{
+                computerId: z.ZodString;
+                fingerprint: z.ZodString;
+                domain: z.ZodString;
+            }, z.core.$strict>;
+            link: z.ZodURL;
+            expiresAt: z.ZodISODateTime;
+        }, z.core.$strict>]>>;
         acceptedAt: z.ZodISODateTime;
         finishedAt: z.ZodNullable<z.ZodISODateTime>;
     }, z.core.$strict>>;
@@ -503,6 +598,7 @@ export declare const fleetRoutes: {
             update_pane: "update_pane";
             prepare_to_stop: "prepare_to_stop";
             collect_diagnostics: "collect_diagnostics";
+            create_pairing_link: "create_pairing_link";
         }>;
         status: z.ZodEnum<{
             running: "running";
@@ -515,13 +611,21 @@ export declare const fleetRoutes: {
             message: z.ZodString;
             next: z.ZodString;
         }, z.core.$strict>>;
-        result: z.ZodNullable<z.ZodObject<{
+        result: z.ZodNullable<z.ZodUnion<readonly [z.ZodObject<{
             files: z.ZodArray<z.ZodObject<{
                 path: z.ZodString;
                 bytes: z.ZodNumber;
             }, z.core.$strict>>;
             archiveKey: z.ZodString;
-        }, z.core.$strict>>;
+        }, z.core.$strict>, z.ZodObject<{
+            relay: z.ZodObject<{
+                computerId: z.ZodString;
+                fingerprint: z.ZodString;
+                domain: z.ZodString;
+            }, z.core.$strict>;
+            link: z.ZodURL;
+            expiresAt: z.ZodISODateTime;
+        }, z.core.$strict>]>>;
         acceptedAt: z.ZodISODateTime;
         finishedAt: z.ZodNullable<z.ZodISODateTime>;
     }, z.core.$strict>>;
@@ -599,7 +703,7 @@ export declare function createFleetClient(config: ClientConfig): {
     submitOperation: (envelope: OperationEnvelope) => Promise<{
         requestId: string;
         vmId: string;
-        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics";
+        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
         status: "running" | "failed" | "accepted" | "succeeded";
         error: {
             code: string;
@@ -607,6 +711,14 @@ export declare function createFleetClient(config: ClientConfig): {
             next: string;
         } | null;
         result: {
+            relay: {
+                computerId: string;
+                fingerprint: string;
+                domain: string;
+            };
+            link: string;
+            expiresAt: string;
+        } | {
             files: {
                 path: string;
                 bytes: number;
@@ -619,7 +731,7 @@ export declare function createFleetClient(config: ClientConfig): {
     getOperation: (requestId: string) => Promise<{
         requestId: string;
         vmId: string;
-        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics";
+        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
         status: "running" | "failed" | "accepted" | "succeeded";
         error: {
             code: string;
@@ -627,6 +739,14 @@ export declare function createFleetClient(config: ClientConfig): {
             next: string;
         } | null;
         result: {
+            relay: {
+                computerId: string;
+                fingerprint: string;
+                domain: string;
+            };
+            link: string;
+            expiresAt: string;
+        } | {
             files: {
                 path: string;
                 bytes: number;

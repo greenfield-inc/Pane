@@ -193,6 +193,39 @@ export function fleetContractCases(target: FleetContractTarget): ContractCase[] 
       },
     },
     {
+      name: 'fleet: create makes the relay identity and a first one-time link before boot, and create_pairing_link later reports the same identity (D-104)',
+      async run() {
+        const vmId = `contract-${randomUUID().slice(0, 8)}`;
+        const created = await run(vmId, 'create');
+        assert.ok(created.result && 'relay' in created.result, 'create returns the pre-boot identity and a first link');
+        assert.equal(new URLSearchParams(new URL(created.result.link).hash.slice(1)).get('c'), created.result.relay.computerId);
+        assert.ok(Date.parse(created.result.expiresAt) - Date.now() <= 10 * 60_000 + 30_000, 'the link lasts at most 10 minutes');
+        await vmIn(vmId, 'running');
+        const later = await run(vmId, 'create_pairing_link');
+        assert.ok(later.result && 'relay' in later.result);
+        assert.deepEqual(later.result.relay, created.result.relay, 'the running VM uses the key the host made before boot');
+        await run(vmId, 'delete');
+      },
+    },
+    {
+      name: "fleet: create_pairing_link returns a one-time link for the VM's relay identity, the same identity after a stop and start",
+      async run() {
+        const vmId = await newVm();
+        const first = await run(vmId, 'create_pairing_link');
+        assert.ok(first.result && 'relay' in first.result, 'create_pairing_link returns a link and the relay identity');
+        assert.equal(new URLSearchParams(new URL(first.result.link).hash.slice(1)).get('c'), first.result.relay.computerId);
+        assert.ok(Date.parse(first.result.expiresAt) - Date.now() <= 10 * 60_000 + 30_000, 'the link lasts at most 10 minutes');
+        await run(vmId, 'stop');
+        await vmIn(vmId, 'stopped');
+        await run(vmId, 'start');
+        await vmIn(vmId, 'running');
+        const second = await run(vmId, 'create_pairing_link');
+        assert.ok(second.result && 'relay' in second.result);
+        assert.deepEqual(second.result.relay, first.result.relay, 'the relay key lives on the VM disk and survives a stop and start');
+        await run(vmId, 'delete');
+      },
+    },
+    {
       name: "fleet: reports a VM's daily metrics, and every state change as an event with a cursor",
       async run() {
         const vmId = await newVm();

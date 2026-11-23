@@ -74,6 +74,16 @@ export interface RelayComputerOffer {
   token: string;
 }
 
+/**
+ * A pairing with a Pane Cloud Session VM, as Pane Cloud's `POST /v1/vms/:vmId/pairing` answers it: a
+ * one-time link, and the relay identity the service vouches for. Pane links with the VM as with any
+ * other computer, but only over connections pinned to exactly that key.
+ */
+export interface VouchedPairing {
+  link: string;
+  relay: { computerId: string; fingerprint: string; domain: string };
+}
+
 /** `POST /pair/exchange` body. `phoneId` is the app's stable install id, so "Remove from all your computers" finds the phone everywhere. */
 export interface RelayExchangeRequest {
   secret: string;

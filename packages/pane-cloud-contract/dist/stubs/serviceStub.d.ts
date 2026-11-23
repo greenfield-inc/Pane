@@ -26,10 +26,14 @@ export interface ServiceStub extends RunningStub {
     setCapacity(capacity: number | null): void;
     /** Adds an account to an organization, as an accepted invitation will. */
     addMember(organizationId: string, email: string, role: Exclude<OrgRole, 'owner'>): void;
+    /** Changes an account's role in an organization, or removes it from the organization with null. */
+    changeMember(organizationId: string, email: string, role: Exclude<OrgRole, 'owner'> | null): void;
     /** Puts an organization on a plan, as a subscription will. */
     setPlan(organizationId: string, plan: Plan): void;
     /** Gives a VM 16 GiB (or back to 8), as a resize will; its later awake hours count at the new rate. */
     setMemoryGiB(vmId: string, memoryGiB: SessionVm['memoryGiB']): void;
+    /** The VM's Pane losing its relay key and making a new one, so its next pairing reports another identity. */
+    replaceRelayKey(vmId: string): void;
 }
 /**
  * An in-memory Pane Cloud service that keeps the contract, for building Pane against and for the

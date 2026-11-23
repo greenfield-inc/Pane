@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { canonicalJson, ContractViolationError, operationSigningBytes, createFleetClient, createServiceClient } from './index';
+import { canonicalJson, ContractViolationError, operationSigningBytes, createFleetClient, createServiceClient, RelayIdentity } from './index';
 import { type FleetStub, type ServiceStub, startFleetStub, startServiceStub } from './stubs';
 import { createLocalSigner, fleetContractCases, serviceContractCases } from './testing';
 
@@ -32,6 +32,8 @@ describe('service stub passes the service contract', () => {
       pauseForReview: (vmId) => stub.pauseForReview(vmId),
       setCapacity: (capacity) => stub.setCapacity(capacity),
       addMember: (who, organizationId, role) => stub.addMember(organizationId, emails[who], role),
+      changeMember: (who, organizationId, role) => stub.changeMember(organizationId, emails[who], role),
+      replaceRelayKey: (vmId) => stub.replaceRelayKey(vmId),
       setPlan: (organizationId, plan) => stub.setPlan(organizationId, plan),
       setMemoryGiB: (vmId, memoryGiB) => stub.setMemoryGiB(vmId, memoryGiB),
       setClock: (at) => {
@@ -113,5 +115,16 @@ describe('operation signing bytes', () => {
 describe('canonical JSON, the bytes operation signatures cover', () => {
   it('sorts keys at every level, keeps array order, and drops whitespace', () => {
     expect(canonicalJson({ b: 1, a: { d: [2, { f: 'x', e: null }], c: true }, B: 'upper' })).toBe('{"B":"upper","a":{"c":true,"d":[2,{"e":null,"f":"x"}]},"b":1}');
+  });
+});
+
+describe('a relay identity', () => {
+  // The key in Pane's main/src/daemon/relay/computerKey.test.ts; fingerprint from openssl (sha256 of the SPKI DER, base64url).
+  const fingerprint = '_2LYTXWcyPSkG3xSGQAlvaKykmHRBHCLPvnDGq1ux_0';
+  it('accepts a computer id that is the one its key fingerprint names', () => {
+    expect(RelayIdentity.safeParse({ computerId: '75rnqtlvttepjja3', fingerprint, domain: 'runpane.net' }).success).toBe(true);
+  });
+  it('rejects a computer id that another key names', () => {
+    expect(RelayIdentity.safeParse({ computerId: '75rnqtlvttepjja4', fingerprint, domain: 'runpane.net' }).success).toBe(false);
   });
 });

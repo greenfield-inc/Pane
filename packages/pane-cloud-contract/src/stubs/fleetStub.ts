@@ -9,6 +9,8 @@ import {
   type PaneRelease,
   verifyOperation,
 } from '../fleet';
+import type { RelayIdentity } from '../fleet';
+import { newRelayIdentity, pairingLinkFor } from './relayKey';
 import { bind, createRouteServer, listen, type RunningStub } from './server';
 
 export interface FleetStubOptions {
@@ -39,6 +41,7 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
   const vms = new Map<string, FleetVm>();
   const cpu = new Map<string, number>();
   const hostId = options.hostId ?? 'stub-host-1';
+  const relayKeys = new Map<string, RelayIdentity>();
   const operations = new Map<string, { status: OperationStatus; payloadJson: string; refusal: CloudApiError | null }>();
   const events: FleetEvent[] = [];
 
@@ -72,6 +75,10 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
       if (existing && existing.state !== 'deleted') throw new CloudApiError('vm_exists', `VM ${payload.vmId} already exists.`, 'Use a new VM id, or start the existing VM.');
       const vm: FleetVm = { vmId: payload.vmId, state: 'running', stateReason: null, hostId, memoryGiB: 8, paneVersion: null, updatedAt: iso() };
       vms.set(vm.vmId, vm);
+      // Made before boot and written onto the secrets volume (PREBOOT_RELAY_FILES); returned for the service to vouch for.
+      const relay = newRelayIdentity('runpane.net');
+      relayKeys.set(vm.vmId, relay);
+      result = pairingLinkFor(relay, vm.vmId, now());
       record({ vmId: vm.vmId, kind: 'state_changed', state: 'running', reason: null, requestId: payload.requestId });
     } else {
       const vm = requireVm(payload.vmId);
@@ -101,6 +108,13 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
           requireState(vm, 'running', 'collect_diagnostics');
           result = { files: [{ path: '/var/log/pane-cloud/guest-agent.log', bytes: 0 }], archiveKey: `diagnostics/${vm.vmId}/${payload.requestId}.tar.gz` };
           break;
+        case 'create_pairing_link': {
+          requireState(vm, 'running', 'create_pairing_link');
+          const relay = relayKeys.get(vm.vmId);
+          if (!relay) throw notFound(vm.vmId);
+          result = pairingLinkFor(relay, vm.vmId, now());
+          break;
+        }
       }
     }
     return result;

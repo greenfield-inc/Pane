@@ -20,6 +20,7 @@ exports.ERROR_STATUS = {
     vm_exists: 409,
     awake_limit_reached: 409,
     wrong_host: 421,
+    relay_key_changed: 409,
     release_not_published: 422,
     internal: 500,
     no_capacity: 503,

@@ -152,6 +152,11 @@ export declare const SessionVm: z.ZodObject<{
     }>>;
     memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
     paneVersion: z.ZodNullable<z.ZodString>;
+    relay: z.ZodNullable<z.ZodObject<{
+        computerId: z.ZodString;
+        fingerprint: z.ZodString;
+        domain: z.ZodString;
+    }, z.core.$strict>>;
     createdAt: z.ZodISODateTime;
     updatedAt: z.ZodISODateTime;
 }, z.core.$strict>;
@@ -166,6 +171,7 @@ export declare const LoggedOperation: z.ZodEnum<{
     update_pane: "update_pane";
     prepare_to_stop: "prepare_to_stop";
     collect_diagnostics: "collect_diagnostics";
+    create_pairing_link: "create_pairing_link";
 }>;
 export declare const ActionLogEntry: z.ZodObject<{
     id: z.ZodString;
@@ -179,6 +185,7 @@ export declare const ActionLogEntry: z.ZodObject<{
         update_pane: "update_pane";
         prepare_to_stop: "prepare_to_stop";
         collect_diagnostics: "collect_diagnostics";
+        create_pairing_link: "create_pairing_link";
     }>;
     parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
     actor: z.ZodObject<{
@@ -367,6 +374,11 @@ export declare const serviceRoutes: {
             }>>;
             memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
             paneVersion: z.ZodNullable<z.ZodString>;
+            relay: z.ZodNullable<z.ZodObject<{
+                computerId: z.ZodString;
+                fingerprint: z.ZodString;
+                domain: z.ZodString;
+            }, z.core.$strict>>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>>;
@@ -399,6 +411,11 @@ export declare const serviceRoutes: {
             }>>;
             memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
             paneVersion: z.ZodNullable<z.ZodString>;
+            relay: z.ZodNullable<z.ZodObject<{
+                computerId: z.ZodString;
+                fingerprint: z.ZodString;
+                domain: z.ZodString;
+            }, z.core.$strict>>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>;
@@ -414,6 +431,7 @@ export declare const serviceRoutes: {
                 update_pane: "update_pane";
                 prepare_to_stop: "prepare_to_stop";
                 collect_diagnostics: "collect_diagnostics";
+                create_pairing_link: "create_pairing_link";
             }>;
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
@@ -464,6 +482,11 @@ export declare const serviceRoutes: {
         }>>;
         memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
         paneVersion: z.ZodNullable<z.ZodString>;
+        relay: z.ZodNullable<z.ZodObject<{
+            computerId: z.ZodString;
+            fingerprint: z.ZodString;
+            domain: z.ZodString;
+        }, z.core.$strict>>;
         createdAt: z.ZodISODateTime;
         updatedAt: z.ZodISODateTime;
     }, z.core.$strict>>;
@@ -492,6 +515,11 @@ export declare const serviceRoutes: {
             }>>;
             memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
             paneVersion: z.ZodNullable<z.ZodString>;
+            relay: z.ZodNullable<z.ZodObject<{
+                computerId: z.ZodString;
+                fingerprint: z.ZodString;
+                domain: z.ZodString;
+            }, z.core.$strict>>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>;
@@ -507,6 +535,7 @@ export declare const serviceRoutes: {
                 update_pane: "update_pane";
                 prepare_to_stop: "prepare_to_stop";
                 collect_diagnostics: "collect_diagnostics";
+                create_pairing_link: "create_pairing_link";
             }>;
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
@@ -558,6 +587,11 @@ export declare const serviceRoutes: {
             }>>;
             memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
             paneVersion: z.ZodNullable<z.ZodString>;
+            relay: z.ZodNullable<z.ZodObject<{
+                computerId: z.ZodString;
+                fingerprint: z.ZodString;
+                domain: z.ZodString;
+            }, z.core.$strict>>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>;
@@ -573,6 +607,7 @@ export declare const serviceRoutes: {
                 update_pane: "update_pane";
                 prepare_to_stop: "prepare_to_stop";
                 collect_diagnostics: "collect_diagnostics";
+                create_pairing_link: "create_pairing_link";
             }>;
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
@@ -624,6 +659,11 @@ export declare const serviceRoutes: {
             }>>;
             memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
             paneVersion: z.ZodNullable<z.ZodString>;
+            relay: z.ZodNullable<z.ZodObject<{
+                computerId: z.ZodString;
+                fingerprint: z.ZodString;
+                domain: z.ZodString;
+            }, z.core.$strict>>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>;
@@ -639,6 +679,7 @@ export declare const serviceRoutes: {
                 update_pane: "update_pane";
                 prepare_to_stop: "prepare_to_stop";
                 collect_diagnostics: "collect_diagnostics";
+                create_pairing_link: "create_pairing_link";
             }>;
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
@@ -680,6 +721,7 @@ export declare const serviceRoutes: {
             update_pane: "update_pane";
             prepare_to_stop: "prepare_to_stop";
             collect_diagnostics: "collect_diagnostics";
+            create_pairing_link: "create_pairing_link";
         }>;
         parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
         actor: z.ZodObject<{
@@ -705,6 +747,23 @@ export declare const serviceRoutes: {
         requestedAt: z.ZodISODateTime;
         finishedAt: z.ZodNullable<z.ZodISODateTime>;
     }, z.core.$strict>>;
+    /**
+     * A one-time link for pairing a device with the VM, and the relay identity the service vouches
+     * for. The first call returns the link the host made before boot, so it answers while the VM is
+     * still creating or starting; later calls ask the running VM for a new link (invalid_state
+     * otherwise). The client pairs only with a VM that presents exactly that key. A VM that reports
+     * a different identity than its first one is refused with relay_key_changed. Logged as
+     * create_pairing_link, without the link.
+     */
+    pairVm: import("./http").Route<z.ZodObject<{}, z.core.$strict>, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
+        relay: z.ZodObject<{
+            computerId: z.ZodString;
+            fingerprint: z.ZodString;
+            domain: z.ZodString;
+        }, z.core.$strict>;
+        link: z.ZodURL;
+        expiresAt: z.ZodISODateTime;
+    }, z.core.$strict>>;
     listActionLog: import("./http").Route<z.ZodUndefined, z.ZodObject<{
         before: z.ZodOptional<z.ZodString>;
         limit: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
@@ -721,6 +780,7 @@ export declare const serviceRoutes: {
                 update_pane: "update_pane";
                 prepare_to_stop: "prepare_to_stop";
                 collect_diagnostics: "collect_diagnostics";
+                create_pairing_link: "create_pairing_link";
             }>;
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
@@ -839,6 +899,11 @@ export declare function createServiceClient(config: ClientConfig): {
             stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
             memoryGiB: 8 | 16;
             paneVersion: string | null;
+            relay: {
+                computerId: string;
+                fingerprint: string;
+                domain: string;
+            } | null;
             createdAt: string;
             updatedAt: string;
         }[];
@@ -853,13 +918,18 @@ export declare function createServiceClient(config: ClientConfig): {
             stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
             memoryGiB: 8 | 16;
             paneVersion: string | null;
+            relay: {
+                computerId: string;
+                fingerprint: string;
+                domain: string;
+            } | null;
             createdAt: string;
             updatedAt: string;
         };
         operation: {
             id: string;
             vmId: string;
-            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics";
+            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
             parameters: Record<string, unknown>;
             actor: {
                 kind: "user" | "host" | "service";
@@ -885,6 +955,11 @@ export declare function createServiceClient(config: ClientConfig): {
         stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
         memoryGiB: 8 | 16;
         paneVersion: string | null;
+        relay: {
+            computerId: string;
+            fingerprint: string;
+            domain: string;
+        } | null;
         createdAt: string;
         updatedAt: string;
     }>;
@@ -898,13 +973,18 @@ export declare function createServiceClient(config: ClientConfig): {
             stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
             memoryGiB: 8 | 16;
             paneVersion: string | null;
+            relay: {
+                computerId: string;
+                fingerprint: string;
+                domain: string;
+            } | null;
             createdAt: string;
             updatedAt: string;
         };
         operation: {
             id: string;
             vmId: string;
-            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics";
+            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
             parameters: Record<string, unknown>;
             actor: {
                 kind: "user" | "host" | "service";
@@ -931,13 +1011,18 @@ export declare function createServiceClient(config: ClientConfig): {
             stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
             memoryGiB: 8 | 16;
             paneVersion: string | null;
+            relay: {
+                computerId: string;
+                fingerprint: string;
+                domain: string;
+            } | null;
             createdAt: string;
             updatedAt: string;
         };
         operation: {
             id: string;
             vmId: string;
-            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics";
+            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
             parameters: Record<string, unknown>;
             actor: {
                 kind: "user" | "host" | "service";
@@ -964,13 +1049,18 @@ export declare function createServiceClient(config: ClientConfig): {
             stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
             memoryGiB: 8 | 16;
             paneVersion: string | null;
+            relay: {
+                computerId: string;
+                fingerprint: string;
+                domain: string;
+            } | null;
             createdAt: string;
             updatedAt: string;
         };
         operation: {
             id: string;
             vmId: string;
-            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics";
+            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
             parameters: Record<string, unknown>;
             actor: {
                 kind: "user" | "host" | "service";
@@ -990,7 +1080,7 @@ export declare function createServiceClient(config: ClientConfig): {
     requestOperation: (vmId: string, request: UserOperationRequest) => Promise<{
         id: string;
         vmId: string;
-        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics";
+        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
         parameters: Record<string, unknown>;
         actor: {
             kind: "user" | "host" | "service";
@@ -1006,6 +1096,15 @@ export declare function createServiceClient(config: ClientConfig): {
         requestedAt: string;
         finishedAt: string | null;
     }>;
+    pairVm: (vmId: string) => Promise<{
+        relay: {
+            computerId: string;
+            fingerprint: string;
+            domain: string;
+        };
+        link: string;
+        expiresAt: string;
+    }>;
     listActionLog: (vmId: string, page?: {
         before?: string;
         limit?: number;
@@ -1013,7 +1112,7 @@ export declare function createServiceClient(config: ClientConfig): {
         entries: {
             id: string;
             vmId: string;
-            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics";
+            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
             parameters: Record<string, unknown>;
             actor: {
                 kind: "user" | "host" | "service";

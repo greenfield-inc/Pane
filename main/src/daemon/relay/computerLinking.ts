@@ -10,10 +10,12 @@ import {
   type RelayComputerOffer,
   type RelayExchangeRequest,
   type RelayPairedEvent,
+  type VouchedPairing,
 } from '../../../../shared/types/relay';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PairingRoute } from '../httpApiServer';
 import type { PairingExchangeRequest, PairingExchangeResult, PairingRefusal } from './pairingExchange';
+import { RelayKeyMismatch } from './keyPinning';
 import { relayComputerSchema, type CallComputer, type LinkedComputer, type PostToComputer, type RelayLinks } from './relayLinks';
 
 /** The relay service's side of a trade: checking and spending secrets, and this computer's relay identity. */
@@ -107,6 +109,11 @@ interface FetchedPreview {
   expiresAt: string;
 }
 
+/** A pinned request met another key: an impostor, or a computer that lost its key. Not a network failure, so not worth retrying. */
+function keyMismatch(name: string): PaneError {
+  return new PaneError('ERR_PAIRING_KEY_MISMATCH', `${name} presented a key other than the one Pane Cloud vouched for, so Pane sent it nothing and nothing was paired.`, 'Don\'t retry: write to Pane Cloud support with the Session name.');
+}
+
 function refusal(code: string, maker: string): PaneError {
   switch (code) {
     case 'ERR_PAIRING_CODE_USED':
@@ -146,8 +153,31 @@ export class ComputerLinking {
   }
 
   async redeem(text: string): Promise<LinkRedeemResult> {
+    const { linked } = await this.redeemLink(this.parse(text));
+    return { linked };
+  }
+
+  /**
+   * Links this computer with a Pane Cloud Session VM from the pairing Pane Cloud vouches for. The VM
+   * becomes a linked computer like any other; the only difference is that every request goes over
+   * a connection pinned to the vouched key, so the one-time secret never reaches another computer.
+   * Returns the VM's id in `client.computers`.
+   */
+  async redeemVouched(pairing: VouchedPairing): Promise<{ computerId: string; name: string }> {
+    try {
+      const { computerId, name } = await this.redeemLink(this.parse(pairing.link), pairing.relay.fingerprint);
+      return { computerId, name };
+    } catch (error) {
+      // A VM has no screen to copy a new link from: the next step is a new pairing from Pane Cloud.
+      if (!(error instanceof PaneError) || error.code === 'ERR_PAIRING_KEY_MISMATCH') throw error;
+      const next = error.code === 'ERR_RELAY_OFF' ? 'Open Settings › Remote Access › Add a device on this computer, which turns phone access on, then open the Session again.' : 'Open the Session again for a new pairing.';
+      throw new PaneError(error.code, error.message, next);
+    }
+  }
+
+  /** Redeems a link; with `pin`, only a computer presenting that key is contacted or accepted. */
+  private async redeemLink(link: RelayPairingLink, pin?: string): Promise<{ linked: string[]; computerId: string; name: string }> {
     const { links } = this.deps;
-    const link = this.parse(text);
     const self = this.deps.self();
     if (!self) {
       throw new PaneError('ERR_RELAY_OFF', `Phone access is off on this computer, so it was not linked with ${link.name}.`, 'Open Settings › Remote Access › Add a device on this computer, which turns phone access on, then open the link again.');
@@ -157,7 +187,7 @@ export class ComputerLinking {
         'Set the same Relay address in Settings › Remote Access › Phones and glasses on both computers, then copy a new link.');
     }
     if (link.computerId === self.id) throw new PaneError('ERR_RELAY_LINK_SELF', 'This is this computer\'s own link, so nothing was linked.', 'Open the link on another computer.');
-    const { group } = await this.fetchPreview(link);
+    const { group } = await this.fetchPreview(link, pin);
     const maker = group[0].name;
     const before = links.linked();
     const minted = await links.mintFor({ id: link.computerId, name: maker });
@@ -167,18 +197,18 @@ export class ComputerLinking {
       const routes = await this.deps.routesReport();
       if (routes) offer.routes = routes;
       const request: RelayExchangeRequest = { secret: link.secret, label: self.name, known: before.map((profile) => profile.relay.computerId), computer: offer };
-      answer = await this.deps.post(relayComputerAddress(link), '/pair/exchange', request, maker);
+      answer = await this.deps.post(relayComputerAddress(link), '/pair/exchange', request, maker, pin);
     } catch (error) {
       await links.dropClient(minted.clientId);
-      throw new PaneError('ERR_LINK_UNREACHABLE', `Can't reach ${maker}: ${reasonOf(error)}. Nothing was linked.`, `Check that Pane is open on ${maker} with phone access on, then open the link again.`);
+      throw error instanceof RelayKeyMismatch ? keyMismatch(maker) : new PaneError('ERR_LINK_UNREACHABLE', `Can't reach ${maker}: ${reasonOf(error)}. Nothing was linked.`, `Check that Pane is open on ${maker} with phone access on, then open the link again.`);
     }
     const result = decodeOptionalBoundary(answer.json, exchangeSchema);
-    if (!result || result.computer.id !== link.computerId || !isRelayComputerUnder(result.computer, link.domain)) {
+    if (!result || result.computer.id !== link.computerId || !isRelayComputerUnder(result.computer, link.domain) || (pin !== undefined && result.computer.fingerprint !== pin)) {
       await links.dropClient(minted.clientId);
       throw result ? new PaneError('ERR_PAIRING_WRONG_COMPUTER', `A different computer answered for ${maker}, so nothing was linked.`, `Copy a new link from Add a device › Computer on ${maker}.`)
         : refusal(decodeOptionalBoundary(answer.json, failureSchema)?.error.code ?? `HTTP_${answer.status}`, maker);
     }
-    await links.saveComputer({ computer: result.computer, token: result.token, routes: decodeComputerRoutesReport(result.routes) });
+    const computerId = await links.saveComputer({ computer: result.computer, token: result.token, routes: decodeComputerRoutesReport(result.routes) });
 
     // The maker's linked computers handed out tokens; each gets one to call this computer.
     const theirs: RelayComputer[] = [result.computer];
@@ -200,7 +230,7 @@ export class ComputerLinking {
     const theirIds = new Set(theirs.map((computer) => computer.id));
     const ours = await this.infoFor(before.filter((profile) => !theirIds.has(profile.relay.computerId)));
     await Promise.all(ours.flatMap(({ profile, computer }) => theirs.map((peer) => this.join(profile, computer, peer))));
-    return { linked: theirs.map((computer) => computer.name) };
+    return { linked: theirs.map((computer) => computer.name), computerId, name: result.computer.name };
   }
 
   private parse(text: string): RelayPairingLink {
@@ -211,12 +241,12 @@ export class ComputerLinking {
     return link;
   }
 
-  private async fetchPreview(link: RelayPairingLink): Promise<FetchedPreview> {
+  private async fetchPreview(link: RelayPairingLink, pin?: string): Promise<FetchedPreview> {
     let answer: { status: number; json: unknown };
     try {
-      answer = await this.deps.post(relayComputerAddress(link), '/pair/preview', { secret: link.secret }, link.name);
+      answer = await this.deps.post(relayComputerAddress(link), '/pair/preview', { secret: link.secret }, link.name, pin);
     } catch (error) {
-      throw new PaneError('ERR_LINK_UNREACHABLE', `Can't reach ${link.name}: ${reasonOf(error)}. Nothing was linked.`, `Check that Pane is open on ${link.name} with phone access on, then open the link again.`);
+      throw error instanceof RelayKeyMismatch ? keyMismatch(link.name) : new PaneError('ERR_LINK_UNREACHABLE', `Can't reach ${link.name}: ${reasonOf(error)}. Nothing was linked.`, `Check that Pane is open on ${link.name} with phone access on, then open the link again.`);
     }
     const preview = decodeOptionalBoundary(answer.json, previewSchema);
     if (!preview) throw refusal(decodeOptionalBoundary(answer.json, failureSchema)?.error.code ?? `HTTP_${answer.status}`, link.name);

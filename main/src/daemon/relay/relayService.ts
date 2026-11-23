@@ -109,6 +109,55 @@ export class RelayService {
         },
       } : undefined,
     });
+    const prepared = this.prebootPairing();
+    if (prepared) this.exchange.addPrepared(prepared.sha256, prepared.expiresAt);
+  }
+
+  /**
+   * A file Pane Cloud's host wrote onto a VM's secrets volume before its first boot (D-104), under
+   * `$PANE_SECRETS_DIR/relay/`. Pane Cloud's contract names the same paths (PREBOOT_RELAY_FILES).
+   */
+  private prebootFile(name: 'computer-key.pem' | 'pairing.json'): string | undefined {
+    const dir = this.env.PANE_SECRETS_DIR;
+    return dir ? path.join(dir, 'relay', name) : undefined;
+  }
+
+  /** The first pairing secret the host prepared, by its hash; undefined when there is none or it doesn't read. */
+  private prebootPairing(): { sha256: string; expiresAt: number } | undefined {
+    const text = readOptionalFile(this.prebootFile('pairing.json'))?.toString('utf8');
+    if (!text) return undefined;
+    try {
+      const prepared = decodeBoundary(JSON.parse(text), boundary.object({ sha256: boundary.nonEmptyString, expiresAt: boundary.nonEmptyString }));
+      const expiresAt = Date.parse(prepared.expiresAt);
+      if (/^[0-9a-f]{64}$/u.test(prepared.sha256) && Number.isFinite(expiresAt)) return { sha256: prepared.sha256, expiresAt };
+      this.deps.log?.('[relay] the pairing secret prepared before boot has no lowercase hex SHA-256 or no readable expiry, so pairing waits for a new link');
+      return undefined;
+    } catch (error) {
+      this.deps.log?.(`[relay] the pairing secret prepared before boot doesn't read, so pairing waits for a new link: ${reasonOf(error)}`);
+      return undefined;
+    }
+  }
+
+  /** The relay key: the one the host made before boot when there is one (D-104), else this computer's own. */
+  private relayKeyStore(): KeyStore {
+    const own = this.secretStore('relay/computer-key');
+    const file = this.prebootFile('computer-key.pem');
+    return {
+      // Only an absent file falls back to this computer's own key; an unreadable or empty one is an error naming it.
+      read: async () => {
+        if (!file) return own.read();
+        let pem: string;
+        try {
+          pem = readFileSync(file, 'utf8');
+        } catch (error) {
+          if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return own.read();
+          throw error;
+        }
+        if (!pem.trim()) throw new Error('the file is empty');
+        return pem;
+      },
+      write: (pem) => own.write(pem),
+    };
   }
 
   start(): void {
@@ -304,7 +353,16 @@ export class RelayService {
 
   private async startup(target: string): Promise<void> {
     this.lastError = null;
-    this.key ??= await loadComputerKey(this.secretStore('relay/computer-key'));
+    this.key ??= await loadComputerKey(this.relayKeyStore()).catch((cause: unknown) => {
+      const file = this.prebootFile('computer-key.pem');
+      if (!file || !existsSync(file)) throw cause;
+      throw new PaneError(
+        'ERR_RELAY_PREBOOT_KEY',
+        // The relay status shows only the message, so it carries the next step too.
+        `The relay key Pane Cloud's host wrote at ${file} doesn't read (${reasonOf(cause)}), so this VM can't be reached through the relay. Restart the Session from Pane Cloud`,
+        'Restart the Session from Pane Cloud; if it happens again, write to Pane Cloud support with the Session name.',
+      );
+    });
     const key = this.key;
     const { host, port } = target ? parseHostPort(target) : { host: await nearestRelay(PANE_RELAYS), port: 443 };
     this.relayHost = target || host;
