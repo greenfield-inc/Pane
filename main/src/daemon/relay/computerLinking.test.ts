@@ -470,4 +470,15 @@ describe('pairing with a cloud VM from the identity Pane Cloud vouches for', () 
     expect(result).toMatchObject({ ok: true, linked: [{ computer: expect.objectContaining({ id: vm.info.id }), token: expect.any(String) }] });
     expect(vm.config().host.clients).toContainEqual(expect.objectContaining({ phoneId: 'phone-1', label: 'Pixel 9', grantedBy: laptop.info.id }));
   });
+
+  it('tells the person to open the Session again when a vouched link was already used, since a VM has no screen to copy a new one from', async () => {
+    const net = network();
+    const laptop = net.add('Laptop', 'laplaplaplaplap0');
+    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0');
+    const pairing = await vouched(vm);
+    await laptop.redeemVouched(pairing);
+    const desk = net.add('Desk', 'desdesdesdesdes0');
+
+    await expect(desk.redeemVouched(pairing)).rejects.toMatchObject({ code: 'ERR_PAIRING_CODE_USED', next: 'Open the Session again for a new pairing.' });
+  });
 });

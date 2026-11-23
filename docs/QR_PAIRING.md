@@ -86,9 +86,11 @@ it links another of your machines, so the VM gets the same access: it reaches
 your other computers and they reach it. The only difference is how it pairs:
 Pane Cloud hands Pane the VM's one-time link and its key, and Pane connects
 only to a VM that presents exactly that key, so nothing else can stand in for
-it. To take that access away, unlink the VM like any computer (**Unlink from all
-your computers** in its row under Settings › Remote Access › Computers), or
-delete the Session, which deletes the VM and its disk.
+it. To take that access away, unlink the VM like any computer: **Unlink from all
+your computers** in its row under Settings › Remote Access › Computers.
+Archiving the Session does not do this by itself: an archived Session is
+hidden, and its disk, with the VM's tokens, is deleted 14 days later. Unlink
+the VM first if you want its access gone right away.
 
 **Settings › Remote Access › Computers** shows each computer once, with a
 pill for every route Pane can reach it on and a dot on the route in use.

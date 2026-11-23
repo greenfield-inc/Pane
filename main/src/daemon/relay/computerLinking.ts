@@ -164,8 +164,15 @@ export class ComputerLinking {
    * Returns the VM's id in `client.computers`.
    */
   async redeemVouched(pairing: VouchedPairing): Promise<{ computerId: string; name: string }> {
-    const { computerId, name } = await this.redeemLink(this.parse(pairing.link), pairing.relay.fingerprint);
-    return { computerId, name };
+    try {
+      const { computerId, name } = await this.redeemLink(this.parse(pairing.link), pairing.relay.fingerprint);
+      return { computerId, name };
+    } catch (error) {
+      // A VM has no screen to copy a new link from: the next step is a new pairing from Pane Cloud.
+      if (!(error instanceof PaneError) || error.code === 'ERR_PAIRING_KEY_MISMATCH') throw error;
+      const next = error.code === 'ERR_RELAY_OFF' ? 'Open Settings › Remote Access › Add a device on this computer, which turns phone access on, then open the Session again.' : 'Open the Session again for a new pairing.';
+      throw new PaneError(error.code, error.message, next);
+    }
   }
 
   /** Redeems a link; with `pin`, only a computer presenting that key is contacted or accepted. */
