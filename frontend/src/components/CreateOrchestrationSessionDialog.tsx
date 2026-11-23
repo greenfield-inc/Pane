@@ -23,6 +23,10 @@ import { Input, Textarea } from './ui/Input';
 import { Toggle } from './ui/Toggle';
 import { SessionLaunchFields } from './SessionLaunchFields';
 import { WhereItRuns, type PaneCloudGate, type Place, type PlaceMachine } from './WhereItRuns';
+import { MAC_WORK_DOCS_URL, placesForMacWork } from '../utils/macWork';
+import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import { useNavigationStore } from '../stores/navigationStore';
+import { useSessionStore } from '../stores/sessionStore';
 
 /** How long a newly paired cloud machine may take to reach the machine menu. */
 const LISTED_DEADLINE_MS = 15_000;
@@ -88,6 +92,31 @@ function usePlaceMachines(enabled: boolean, cloudSessions: readonly PaneCloudSes
       others: states.filter(state => state.id !== currentId && state.status === 'online' && !cloud.has(state.id)).map(state => named(state.id, state.label)),
     };
   }, [states, entries, cloudSessions]);
+}
+
+const xcodeAnswerSchema = boundary.object({ files: boundary.optional(boundary.array(boundary.json)) });
+
+/**
+ * Whether the project the window has open (the open Pane's, else the project page's) has an Xcode
+ * project, which iOS Simulator work needs and Pane Cloud's Linux machines can't run (D-85). Read on
+ * the window's machine, where the repo is.
+ */
+function useXcodeProject(enabled: boolean): boolean {
+  const paneProjectId = useSessionStore(state => state.sessions.find(session => session.id === state.activeSessionId)?.projectId);
+  const pageProjectId = useNavigationStore(state => state.activeProjectId);
+  const projectId = paneProjectId ?? pageProjectId;
+  const [xcode, setXcode] = useState(false);
+  useEffect(() => {
+    setXcode(false);
+    if (!enabled || projectId == null) return undefined;
+    let live = true;
+    const found = (pattern: string) => window.electronAPI.invoke('file:search', { projectId, pattern, limit: 1 })
+      .then(answer => (decodeOptionalBoundary(answer, xcodeAnswerSchema)?.files?.length ?? 0) > 0)
+      .catch(() => false);
+    void Promise.all([found('.xcodeproj'), found('.xcworkspace')]).then(([project, workspace]) => { if (live) setXcode(project || workspace); });
+    return () => { live = false; };
+  }, [enabled, projectId]);
+  return xcode;
 }
 
 function paneCloudGate({ signIn: account, usage, error }: PaneCloudSnapshot): PaneCloudGate | null {
@@ -211,8 +240,17 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
   const followCloud = usePaneCloudStore(state => state.follow);
   const signInToCloud = usePaneCloudStore(state => state.signIn);
   useEffect(() => (isOpen && offerPlaces ? followCloud() : undefined), [isOpen, offerPlaces, followCloud]);
-  useEffect(() => { if (isOpen) setChosenPlace('here'); }, [isOpen]);
-  const places = usePlaceMachines(isOpen && offerPlaces, cloud.sessions);
+  const userPickedPlace = useRef(false);
+  useEffect(() => { if (isOpen) { setChosenPlace('here'); userPickedPlace.current = false; } }, [isOpen]);
+  const listed = usePlaceMachines(isOpen && offerPlaces, cloud.sessions);
+  const xcode = useXcodeProject(isOpen && offerPlaces);
+  const macWork = placesForMacWork({ current: listed.current, others: listed.others, xcode });
+  const places = { current: listed.current, others: macWork.others };
+  // A repo with an Xcode project starts on one of the person's Macs, before they create the Session (D-85).
+  useEffect(() => {
+    if (macWork.preferred !== null && !userPickedPlace.current) setChosenPlace(macWork.preferred);
+  }, [macWork.preferred]);
+  const pickPlace = (next: Place) => { userPickedPlace.current = true; setChosenPlace(next); };
   // A machine that went offline after it was picked falls back to this one.
   const otherMachine = places.others.find(machine => machine.id === chosenPlace);
   const place: Place = chosenPlace === 'cloud' || otherMachine ? chosenPlace : 'here';
@@ -346,7 +384,8 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
             </div>
           </fieldset>
           {offerPlaces && (
-            <WhereItRuns value={place} onChange={setChosenPlace} current={places.current} others={places.others} cloudGate={cloudGate} sendsSecrets={cloud.sendsSecrets} disabled={isSubmitting}
+            <WhereItRuns value={place} onChange={pickPlace} current={places.current} others={places.others} cloudGate={cloudGate} sendsSecrets={cloud.sendsSecrets} disabled={isSubmitting}
+              onMacWorkDocs={xcode && !macWork.macAvailable ? () => void window.electronAPI.openExternal(MAC_WORK_DOCS_URL) : undefined}
               onCloudSignIn={() => void signInToCloud()} onCloudSignUp={() => { if (signupUrl) void window.electronAPI.openExternal(signupUrl); }} />
           )}
           {distributions.length > 0 && place === 'here' && (

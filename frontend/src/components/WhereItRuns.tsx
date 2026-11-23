@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Cloud, Cpu, Eye, KeyRound, MemoryStick, Monitor, Server } from 'lucide-react';
+import { Cloud, Cpu, Eye, KeyRound, Laptop, MemoryStick, Monitor, Server } from 'lucide-react';
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import type { MachineOs } from '../utils/machineList';
 import { cn } from '../utils/cn';
@@ -83,10 +83,12 @@ interface WhereItRunsProps {
   onCloudSignUp: () => void;
   /** Secrets sync (K1) reaches new cloud Sessions: only then does the card say they come along. */
   sendsSecrets: boolean;
+  /** The repo has an Xcode project and none of the person's Macs is online: the Mac line links to the docs. */
+  onMacWorkDocs?: () => void;
   disabled?: boolean;
 }
 
-export function WhereItRuns({ value, onChange, current, others, cloudGate, onCloudSignIn, onCloudSignUp, sendsSecrets, disabled }: WhereItRunsProps) {
+export function WhereItRuns({ value, onChange, current, others, cloudGate, onCloudSignIn, onCloudSignUp, sendsSecrets, onMacWorkDocs, disabled }: WhereItRunsProps) {
   const here = current.id === LOCAL_MACHINE_ID;
   const thisLabel = isMac() ? 'This Mac' : isWindows() ? 'This PC' : 'This computer';
   const cloudSelected = value === 'cloud';
@@ -118,8 +120,16 @@ export function WhereItRuns({ value, onChange, current, others, cloudGate, onClo
             {cloudGate.code && <span className="font-mono text-text-tertiary">{cloudGate.code}</span>}
             {cloudGate.action === 'sign-in' && <Button type="button" size="sm" variant="secondary" onClick={onCloudSignIn}>Sign in</Button>}
             {cloudGate.action === 'sign-up' && <Button type="button" size="sm" variant="secondary" onClick={onCloudSignUp}>Finish signing up</Button>}
+          </> : onMacWorkDocs ? <>
+            <span className="flex-1">This repo has an Xcode project, and none of your Macs is online.</span>
+            <Button type="button" size="sm" variant="secondary" onClick={onMacWorkDocs}>Run it on a Mac</Button>
           </> : undefined}
         >
+          {/* Pane Cloud machines run Linux (D-85): said whether or not the card is picked. */}
+          <span className="mt-1.5 flex items-start gap-2 text-xs text-text-secondary" data-testid="where-it-runs-mac-work">
+            <Laptop className="mt-0.5 h-[13px] w-[13px] shrink-0 text-text-tertiary" aria-hidden="true" />
+            <span>iOS Simulator work needs a Mac.</span>
+          </span>
           {cloudSelected && <>
             <span className="mt-2 flex flex-wrap gap-1">
               <Badge size="sm" className={SMALL_BADGE} icon={<Cpu className="h-2.5 w-2.5" aria-hidden="true" />}>4 vCPUs</Badge>
