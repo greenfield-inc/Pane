@@ -18,6 +18,7 @@ let computers: Map<string, string>;
 let started: Array<{ machineId: string; input: JsonObject }>;
 let forgotten: string[];
 let unlinked: string[];
+let notReached: string[];
 let archiving: Array<{ machineId: string; archived: boolean }>;
 const managers: PaneCloudManager[] = [];
 
@@ -42,8 +43,14 @@ function manager(overrides: Partial<ConstructorParameters<typeof PaneCloudManage
     unlink: async (machineId) => {
       unlinked.push(machineId);
       for (const [relayId, id] of computers) if (id === machineId) computers.delete(relayId);
+      return { notReached: [...notReached] };
     },
-    archiveSessions: async (machineId, archived) => { archiving.push({ machineId, archived }); },
+    // As for real: a machine's Sessions can be read and changed only while it runs.
+    archiveSessions: async (machineId, archived) => {
+      const running = managers.some((cloud) => cloud.snapshot().sessions.some((entry) => entry.machineId === machineId && entry.awake));
+      if (!running) throw new PaneError('ERR_CLOUD_SESSION_UNREACHABLE', 'This computer could not connect to the cloud machine.', 'Start it, then try again.');
+      archiving.push({ machineId, archived });
+    },
     pollMs: { waiting: 10, steady: 60_000 },
     ...overrides,
   });
@@ -70,6 +77,7 @@ beforeEach(async () => {
   started = [];
   forgotten = [];
   unlinked = [];
+  notReached = [];
   archiving = [];
   service = await startServiceStub({
     now: () => clock,
@@ -117,6 +125,16 @@ describe('Pane Cloud sign-in', () => {
     expect(opened).toEqual([]);
     expect(after.signIn).toEqual({ state: 'signed-out' });
     expect(after.error?.message).toMatch(/not a web address/);
+  });
+
+  it('says plainly when Sign in can\'t reach Pane Cloud', async () => {
+    const cloud = manager();
+    await service.close();
+
+    const after = await cloud.startSignIn();
+    expect(after.signIn).toEqual({ state: 'signed-out' });
+    expect(after.error).toMatchObject({ code: 'ERR_PANE_CLOUD_UNREACHABLE' });
+    expect(opened).toEqual([]);
   });
 
   it('forgets the session on sign-out', async () => {
@@ -283,6 +301,31 @@ describe('archiving a cloud Session (D-94)', () => {
     expect(unlinked).toEqual(['computer-1']);
     expect(after.sessions).toEqual([expect.objectContaining({ vmId, machineId: null, awake: false })]);
     expect(after.usage?.awakeNow).toBe(0);
+  });
+
+  it('archives a stopped cloud Session by starting it first, then stops it again', async () => {
+    const cloud = manager();
+    await signIn(cloud, 'maya@example.test');
+    const { snapshot } = await cloud.createSession(session('Docs'));
+    const vmId = snapshot.sessions[0].vmId;
+    await cloud.stop(vmId);
+
+    const after = await cloud.archive(vmId);
+    expect(after.error).toBeNull();
+    expect(archiving).toEqual([{ machineId: 'computer-1', archived: true }]);
+    expect(unlinked).toEqual(['computer-1']);
+    expect(after.sessions).toEqual([expect.objectContaining({ vmId, machineId: null, awake: false })]);
+  });
+
+  it('says which of the person\'s computers the unlink could not reach', async () => {
+    const cloud = manager();
+    await signIn(cloud, 'maya@example.test');
+    const { snapshot } = await cloud.createSession(session('Docs'));
+    notReached = ['Travel Laptop'];
+
+    const after = await cloud.archive(snapshot.sessions[0].vmId);
+    expect(after.sessions[0]).toMatchObject({ machineId: null });
+    expect(after.error?.message).toMatch(/Travel Laptop/);
   });
 
   it('restores it by starting the VM, pairing it again and bringing its Session back', async () => {

@@ -118,4 +118,7 @@ export interface PaneCloudCreated {
   snapshot: PaneCloudSnapshot;
 }
 
+/** `PaneCloudError.code` when Pane could not reach the Pane Cloud service at all. */
+export const PANE_CLOUD_UNREACHABLE = 'ERR_PANE_CLOUD_UNREACHABLE';
+
 export const SIGNED_OUT_PANE_CLOUD: PaneCloudSnapshot = { signIn: { state: 'signed-out' }, sessions: [], usage: null, creating: null, busy: [], error: null, sendsSecrets: false };

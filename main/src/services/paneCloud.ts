@@ -14,7 +14,7 @@ import type {
   PaneCloudSnapshot,
   PaneCloudUsage,
 } from '../../../shared/types/paneCloud';
-import { SIGNED_OUT_PANE_CLOUD } from '../../../shared/types/paneCloud';
+import { PANE_CLOUD_UNREACHABLE, SIGNED_OUT_PANE_CLOUD } from '../../../shared/types/paneCloud';
 
 /** The Pane Cloud service. PANE_CLOUD_URL points a dev build at a local stub or staging. */
 export const DEFAULT_PANE_CLOUD_URL = 'https://cloud.runpane.com';
@@ -34,7 +34,7 @@ export interface PaneCloudManagerOptions {
   /** Forgets the saved computer of a deleted VM. */
   forget(machineId: string): Promise<void>;
   /** Removes the saved computer from all of the person's computers at once (relay:unlink-computer-everywhere). */
-  unlink(machineId: string): Promise<void>;
+  unlink(machineId: string): Promise<{ notReached: string[] }>;
   /** Archives every Session on the machine (true), or brings back every archived one (false). The machine's own Pane Chat stays as it is. */
   archiveSessions(machineId: string, archived: boolean): Promise<void>;
   onChange?: (snapshot: PaneCloudSnapshot) => void;
@@ -74,6 +74,8 @@ export class PaneCloudManager {
   private signInAttempt = 0;
   /** A background re-read in flight; the next tick waits for it instead of stacking another. */
   private reading = false;
+  /** When the account, its cloud Sessions and usage were last read. */
+  private loadedAt = 0;
   private watchTimer: NodeJS.Timeout | null = null;
   private watchWaiting = false;
   private disposed = false;
@@ -84,6 +86,11 @@ export class PaneCloudManager {
 
   snapshot(): PaneCloudSnapshot {
     return this.state;
+  }
+
+  /** The snapshot when it was read within `maxAgeMs`, else a background re-read. */
+  async recent(maxAgeMs: number): Promise<PaneCloudSnapshot> {
+    return Date.now() - this.loadedAt < maxAgeMs ? this.state : this.refresh({ background: true });
   }
 
   /** Reads the account, its cloud Sessions and the month's usage. A background re-read keeps the last error on screen. */
@@ -200,14 +207,29 @@ export class PaneCloudManager {
    * person's computers at once, and it stops, so it spends no hours while nothing can reach it. The
    * service keeps the VM and its disk; a cloud Session no computer here pairs with reads as archived.
    */
-  archive(vmId: string): Promise<PaneCloudSnapshot> {
-    const session = this.state.sessions.find((candidate) => candidate.vmId === vmId);
-    return this.act(vmId, async (client) => {
-      if (session?.machineId) {
-        await this.options.archiveSessions(session.machineId, true);
-        await this.options.unlink(session.machineId);
+  async archive(vmId: string): Promise<PaneCloudSnapshot> {
+    const machineId = this.state.sessions.find((candidate) => candidate.vmId === vmId)?.machineId ?? null;
+    let notReached: string[] = [];
+    const after = await this.act(vmId, async (client) => {
+      // A stopped machine's Sessions can't be archived: it starts for the archive, then stops again.
+      if (!AWAKE.has((await client.getVm(vmId)).state)) {
+        await client.startVm(vmId);
+        await this.waitUntilRunning(client, vmId);
+        await this.load(client);
       }
-      if (session?.awake) await client.stopVm(vmId);
+      if (machineId) {
+        await this.options.archiveSessions(machineId, true);
+        ({ notReached } = await this.options.unlink(machineId));
+      }
+      await client.stopVm(vmId);
+    });
+    if (after.error || notReached.length === 0) return after;
+    const names = notReached.join(', ');
+    return this.update({
+      error: {
+        message: `Archived. Pane could not reach ${names}, so ${notReached.length === 1 ? 'it still lists' : 'they still list'} this cloud machine.`,
+        next: `Open Pane on ${names} to remove it there, or unlink it in Settings › Remote Access on ${notReached.length === 1 ? 'that computer' : 'each'}.`,
+      },
     });
   }
 
@@ -218,6 +240,7 @@ export class PaneCloudManager {
       await this.waitUntilRunning(client, vmId);
       const pairing = await client.pairVm(vmId);
       const machineId = await this.options.pair({ link: pairing.link, relay: pairing.relay });
+      await this.load(client);
       await this.options.archiveSessions(machineId, false);
     });
   }
@@ -333,6 +356,7 @@ export class PaneCloudManager {
     this.account = account;
     this.vms = vms;
     this.update({ signIn: this.signedIn(account), sessions: vms.map((vm) => this.sessionView(vm)), usage: usageView(usage, account) });
+    this.loadedAt = Date.now();
     this.watchWhile(account, vms);
   }
 
@@ -515,5 +539,6 @@ function describeError(error: unknown): PaneCloudError {
   return {
     message: `Pane could not reach Pane Cloud (${detail}).`,
     next: 'Check your connection and try again. Your other machines and this computer keep working without it.',
+    code: PANE_CLOUD_UNREACHABLE,
   };
 }
