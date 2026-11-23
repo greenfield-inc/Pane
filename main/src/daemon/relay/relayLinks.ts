@@ -612,9 +612,12 @@ export function createComputerCaller(options: ComputerDialOptions = {}): CallCom
 /** A body for a computer's unauthenticated pairing routes: `/pair/preview` takes the secret, `/pair/exchange` the whole request. */
 type PairingPostBody = { secret: string } | RelayExchangeRequest;
 
-/** Posts to a computer's pairing routes (`/pair/preview`, `/pair/exchange`) before its key is known; the public certificate is checked. */
-export type PostToComputer = (address: string, path: '/pair/preview' | '/pair/exchange', body: PairingPostBody, label: string) => Promise<{ status: number; json: unknown }>;
+/**
+ * Posts to a computer's pairing routes (`/pair/preview`, `/pair/exchange`). The public certificate is
+ * checked, and with a fingerprint (a key vouched for before pairing) any other key is refused.
+ */
+export type PostToComputer = (address: string, path: '/pair/preview' | '/pair/exchange', body: PairingPostBody, label: string, fingerprint?: string) => Promise<{ status: number; json: unknown }>;
 
 export function createComputerPoster(options: ComputerDialOptions = {}): PostToComputer {
-  return (address, path, body, label) => postJson(options, { url: new URL(path, address).toString(), label, body });
+  return (address, path, body, label, fingerprint) => postJson(options, { url: new URL(path, address).toString(), label, body, fingerprint });
 }

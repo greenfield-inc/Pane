@@ -4,7 +4,7 @@ import { PaneError } from '../../../../shared/paneError';
 import { RemoteRequestError } from '../../../../shared/remoteClient/remoteDaemonClient';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
 import type { ComputerRoutesReport, RemoteComputer } from '../../../../shared/types/remoteComputers';
-import type { RelayComputer, RelayLinkLifetime, RelayPairedEvent } from '../../../../shared/types/relay';
+import type { RelayComputer, RelayLinkLifetime, RelayPairedEvent, VouchedPairing } from '../../../../shared/types/relay';
 import { boundary, decodeBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import type { AppConfig } from '../../types/config';
 import { PaneCommandRegistry, type PaneCommandValue } from '../commandRegistry';
@@ -12,6 +12,7 @@ import type { PairingRoute } from '../httpApiServer';
 import { ComputerLinking, createPairingRoute } from './computerLinking';
 import { PairingExchange } from './pairingExchange';
 import { registerRelayCommands } from './relayCommands';
+import { RelayKeyMismatch } from './keyPinning';
 import { RelayLinks, type CallComputer, type PostToComputer } from './relayLinks';
 import { RelayPreviews } from './relayPreviews';
 
@@ -31,6 +32,7 @@ interface Computer {
   link(lifetime?: RelayLinkLifetime): Promise<string>;
   preview(link: string): Promise<PaneCommandValue>;
   redeem(link: string): Promise<PaneCommandValue>;
+  redeemVouched(pairing: VouchedPairing): Promise<PaneCommandValue>;
 }
 
 /**
@@ -59,8 +61,10 @@ function network() {
     return computer;
   };
 
-  const post: PostToComputer = async (address, path, body) => {
-    const { route } = at(address);
+  const post: PostToComputer = async (address, path, body, label, fingerprint) => {
+    const { route, info } = at(address);
+    // As the pinned TLS check does: a computer with another key never sees the request.
+    if (fingerprint && fingerprint !== info.fingerprint) throw new RelayKeyMismatch(`${label} presented a key it did not pair with, so Pane did not connect.`);
     // As the listener reads it: JSON off the wire.
     const request = decodeBoundary(JSON.parse(JSON.stringify(body)), boundary.jsonObject);
     const secret = String(request.secret);
@@ -148,6 +152,7 @@ function network() {
       link: async (lifetime) => decodeBoundary(await registry.invoke('relay:pairing-code', lifetime ? [{ expiresIn: lifetime }] : []), boundary.object({ url: boundary.string })).url,
       preview: (link) => registry.invoke('relay:link-preview', [{ link }]),
       redeem: (link) => registry.invoke('relay:redeem-link', [{ link }]),
+      redeemVouched: (pairing) => registry.invoke('relay:redeem-vouched', [{ ...pairing, relay: { ...pairing.relay } }]),
     };
     computers.set(id, computer);
     return computer;
@@ -400,5 +405,69 @@ describe('linking computers with a one-time link', () => {
     const secret = new URLSearchParams(new URL(await mac.link()).hash.slice(1)).get('s') ?? '';
     await mac.route.exchange({ secret, label: 'Pixel 9', source: '192.168.1.30' });
     expect(mac.paired).toEqual([{ kind: 'phone', label: 'Pixel 9' }]);
+  });
+});
+
+describe('pairing with a cloud VM from the identity Pane Cloud vouches for', () => {
+  /** What Pane Cloud answers for a VM: a one-time link and the identity the VM reported when first paired. */
+  async function vouched(vm: Computer, identity: Pick<RelayComputer, 'id' | 'fingerprint'> = vm.info): Promise<VouchedPairing> {
+    return { link: await vm.link(), relay: { computerId: identity.id, fingerprint: identity.fingerprint, domain: DOMAIN } };
+  }
+
+  it('links the VM like any other computer, without asking: each reaches the other', async () => {
+    const net = network();
+    const laptop = net.add('Laptop', 'laplaplaplaplap0');
+    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0');
+
+    const result = await laptop.redeemVouched(await vouched(vm));
+
+    expect(result).toEqual({ computerId: laptop.config().client.computers[0].id, name: 'Cloud Session' });
+    expect(await net.reaches(laptop, vm)).toBe(true);
+    expect(await net.reaches(vm, laptop)).toBe(true);
+    expect(laptop.listed()).toEqual(['Cloud Session']);
+    expect(vm.listed()).toEqual(['Laptop']);
+  });
+
+  it('refuses a VM that presents a key other than the vouched one, sends it nothing, and the link stays unused', async () => {
+    const net = network();
+    const laptop = net.add('Laptop', 'laplaplaplaplap0');
+    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0');
+    const pairing = await vouched(vm);
+    const vouchedKey = vm.info.fingerprint;
+    vm.info.fingerprint = relayIdentity('another key').fingerprint;
+
+    await expect(laptop.redeemVouched(pairing)).rejects.toMatchObject({ code: 'ERR_PAIRING_KEY_MISMATCH' });
+    expect(laptop.listed()).toEqual([]);
+    expect(laptop.config().host.clients).toEqual([]);
+    expect(vm.config().host.clients).toEqual([]);
+
+    vm.info.fingerprint = vouchedKey;
+    await expect(laptop.redeemVouched(pairing)).resolves.toMatchObject({ name: 'Cloud Session' });
+  });
+
+  it('refuses a pairing whose link leads to a computer other than the vouched key, and pairs nothing', async () => {
+    const net = network();
+    const laptop = net.add('Laptop', 'laplaplaplaplap0');
+    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0');
+    const other = net.add('Other', 'othothothothoth0');
+
+    await expect(laptop.redeemVouched(await vouched(vm, other.info))).rejects.toMatchObject({ code: 'ERR_PAIRING_KEY_MISMATCH' });
+    await expect(laptop.redeemVouched(await vouched(vm, { id: vm.info.id, fingerprint: other.info.fingerprint }))).rejects.toMatchObject({ code: 'ERR_PAIRING_KEY_MISMATCH' });
+    expect(laptop.listed()).toEqual([]);
+    expect(vm.config().host.clients).toEqual([]);
+    expect(other.config().host.clients).toEqual([]);
+  });
+
+  it('gives a phone paired by QR from the desktop a token for the VM', async () => {
+    const net = network();
+    const laptop = net.add('Laptop', 'laplaplaplaplap0');
+    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0');
+    await laptop.redeemVouched(await vouched(vm));
+
+    const secret = new URLSearchParams(new URL(await laptop.link()).hash.slice(1)).get('s') ?? '';
+    const result = await laptop.route.exchange({ secret, label: 'Pixel 9', phoneId: 'phone-1', source: '192.168.1.30' });
+
+    expect(result).toMatchObject({ ok: true, linked: [{ computer: expect.objectContaining({ id: vm.info.id }), token: expect.any(String) }] });
+    expect(vm.config().host.clients).toContainEqual(expect.objectContaining({ phoneId: 'phone-1', label: 'Pixel 9', grantedBy: laptop.info.id }));
   });
 });
