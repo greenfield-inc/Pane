@@ -10,7 +10,7 @@ import { ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX } from '../../../shared/types/
 import type { RunpanePaneCreateRequest } from '../../../shared/types/runpaneOrchestration';
 import { PaneError } from '../../../shared/paneError';
 import { FOLDER_TRUST_PROMPT } from '../services/agents/folderTrustPrompt';
-import { isPlainAgentCommand, tokenizeShellCommand } from '../services/agents/agentIdentity';
+import { isPlainAgentCommand, normalizeProcessName, tokenizeShellCommand } from '../services/agents/agentIdentity';
 import { agentLabel, agentTerminalCommand, configuredAgentSchema } from '../../../shared/agents';
 
 const LOOP_CHANNELS = [
@@ -283,34 +283,45 @@ function agentExecutable(agent: LoopAgent): string {
 /**
  * The unattended flags a launched command lacks, read as shell words, so a flag
  * named inside a quoted argument does not count. A shell's `-c` command string
- * (as a WSL launch is wrapped) is read as words too. A flag counts as given
- * directly or passed through Agent Farm as `--native-arg=<flag>`.
+ * (as a WSL launch is wrapped) is read as words too. In an `agent-farm run`
+ * launch, `--native-arg=<flag>` before Agent Farm's `--` counts as the flag.
  */
 function missingUnattendedFlags(command: string, agent: LoopAgent): string[] {
   const words = tokenizeShellCommand(command, process.platform) ?? [];
-  const nested = words.flatMap((word, index) => /^-[a-z]*c$/i.test(word) && words[index + 1] ? tokenizeShellCommand(words[index + 1], process.platform) ?? [] : []);
-  const all = new Set([...words, ...nested].map(word => word.replace(/^--native-arg=/, '')));
+  const nested = words.flatMap((word, index) => /^-[a-z]*c$/i.test(word) && words[index + 1] ? [tokenizeShellCommand(words[index + 1], process.platform) ?? []] : []);
+  const all = new Set([words, ...nested].flatMap(givenFlags));
   return unattendedFlags(agent).filter(flag => !all.has(flag));
 }
 
-/** True for a plain `agent-farm run …` launch, which passes flags to its agent as `--native-arg=<flag>`. */
-function isAgentFarmRun(command: string): boolean {
-  const words = tokenizeShellCommand(command, process.platform);
-  return isPlainAgentCommand(command, 'agent-farm') && words?.[1] === 'run';
+/** The words of one command as the flags its agent gets: Agent Farm's `--native-arg=<flag>` options become `<flag>`. */
+function givenFlags(words: string[]): string[] {
+  if (!isAgentFarmRunWords(words)) return words;
+  const end = words.indexOf('--');
+  const options = end < 0 ? words : words.slice(0, end);
+  const forwarded = options.flatMap(word => word.startsWith(NATIVE_ARG) ? [word.slice(NATIVE_ARG.length)] : []);
+  return end < 0 ? forwarded : [...forwarded, ...words.slice(end + 1)];
+}
+
+const NATIVE_ARG = '--native-arg=';
+
+function isAgentFarmRunWords(words: string[]): boolean {
+  return words.length > 1 && normalizeProcessName(words[0]) === 'agent-farm' && words[1] === 'run';
 }
 
 /**
  * A Session's custom launch command with the agent's unattended flags added
- * right after the agent's program, or after `agent-farm run` as
- * `--native-arg=<flag>`. Only a plain invocation of the agent or of
- * `agent-farm run` can be changed safely: a wrapper (`sh -c`, `env`, a variable
- * assignment) or a compound command (`&&`, `;`, a pipe or redirect) is refused.
+ * right after the agent's program. An `agent-farm run` launch gets them as
+ * `--native-arg=<flag>` right after its profile (after `run` when options come
+ * first), so the profile stays the word after `run`, where Session Move and chat
+ * tabs read it. Only a plain invocation of the agent or of `agent-farm run` can
+ * be changed safely: a wrapper (`sh -c`, `env`, a variable assignment) or a
+ * compound command (`&&`, `;`, a pipe or redirect) is refused.
  */
 function unattendedLaunchCommand(sessionName: string, command: string, agent: LoopAgent): string {
   const spans: Array<{ start: number; end: number }> = [];
-  tokenizeShellCommand(command, process.platform, spans);
+  const words = tokenizeShellCommand(command, process.platform, spans) ?? [];
   const program = agentExecutable(agent);
-  const agentFarm = isAgentFarmRun(command);
+  const agentFarm = isPlainAgentCommand(command, 'agent-farm') && isAgentFarmRunWords(words);
   if (!agentFarm && !isPlainAgentCommand(command, program)) {
     throw new PaneError(
       'ERR_LOOP_INVALID',
@@ -320,8 +331,8 @@ function unattendedLaunchCommand(sessionName: string, command: string, agent: Lo
   }
   const missing = missingUnattendedFlags(command, agent);
   if (missing.length === 0) return command;
-  const end = spans[agentFarm ? 1 : 0].end;
-  const added = agentFarm ? missing.map(flag => `--native-arg=${flag}`) : missing;
+  const end = spans[agentFarm ? (words[2] && !words[2].startsWith('-') ? 2 : 1) : 0].end;
+  const added = agentFarm ? missing.map(flag => `${NATIVE_ARG}${flag}`) : missing;
   return `${command.slice(0, end)} ${added.join(' ')}${command.slice(end)}`;
 }
 
@@ -337,6 +348,7 @@ export async function prepareLoopSession(
   commandRegistry: PaneCommandRegistry,
   target: string,
   loop: { name: string; agent: LoopAgent },
+  context: { isChatTab: (panelId: string) => boolean } = { isChatTab: () => false },
 ): Promise<string> {
   // An empty launch command means the template, whatever the app's default Session command is.
   const session = target === LOOP_NEW_SESSION
@@ -344,6 +356,16 @@ export async function prepareLoopSession(
     : await getLoopSession(commandRegistry, target);
   if (session.archived) {
     throw new PaneError('ERR_LOOP_INVALID', `Session ${session.name} is archived. Nothing was saved.`, 'Restore the Session first, or pick another one.');
+  }
+  // An Agent Farm Session can already run its agent in a chat tab, which a loop cannot drive yet.
+  const command = session.launchCommand?.trim() ?? '';
+  if (isLoopAgent(session.agent) && session.agent === loop.agent && isAgentFarmRunWords(tokenizeShellCommand(command, process.platform) ?? [])
+    && context.isChatTab(session.panelIds[session.agent])) {
+    throw new PaneError(
+      'ERR_LOOP_INVALID',
+      `Session ${session.name} runs its Agent Farm agent in a chat tab, which loops cannot send prompts to yet. Nothing was saved.`,
+      'Pick a Session whose agent runs in a terminal tab, or a new Session for this loop.',
+    );
   }
   // A loop's Session lives under Loops, never in the pinned list.
   if (session.isPinned) {
@@ -356,8 +378,7 @@ export async function prepareLoopSession(
   // Changing the agent drops the old command, so the new agent launches its template.
   if (session.agent !== loop.agent) {
     await commandRegistry.invoke('runpane:sessions:update', [{ selector: { sessionId: session.id }, input: { agent: loop.agent, source: 'user' } }]);
-  } else if (session.launchCommand?.trim()) {
-    const command = session.launchCommand.trim();
+  } else if (command) {
     const unattended = unattendedLaunchCommand(session.name, command, loop.agent);
     if (unattended !== command) {
       await commandRegistry.invoke('runpane:sessions:update', [{ selector: { sessionId: session.id }, input: { launchCommand: unattended, source: 'user' } }]);

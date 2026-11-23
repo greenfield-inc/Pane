@@ -457,7 +457,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     startRun: (loop, slotAtMs) => startLoopRun(commandRegistry, loop, slotAtMs, { launchedCommand: panelId => terminalPanelManager.launchedCommand(panelId) }),
     archiveRun: sessionId => archiveLoopRun(commandRegistry, sessionId),
     projectExists: projectId => Boolean(databaseService.getProject(projectId)),
-    prepareSession: (target, loop) => prepareLoopSession(commandRegistry, target, loop),
+    prepareSession: (target, loop) => prepareLoopSession(commandRegistry, target, loop, { isChatTab: panelId => panelManager.getPanel(panelId)?.type === 'chat' }),
     ask: async (card, signal) => {
       const queue = services.notifyService?.queue;
       if (!queue) return null;

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { StoredLoop } from '../services/loops/loopRepository';
+import { agentFarmProfileOf } from '../services/sessionMove/rules';
 import { prepareLoopSession, startLoopRun } from './loops';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -345,12 +346,32 @@ describe('prepareLoopSession', () => {
     } } });
   });
 
-  it('passes the missing flag through an Agent Farm launch as a native argument', async () => {
+  it('passes the missing flag through an Agent Farm launch as a native argument after its profile, where Session Move reads it', async () => {
     const { registry, calls } = sessionRegistry({ session: { launchCommand: 'agent-farm run greenfield/seo-orchestrator:claude --directory ~/repos/site' } });
     await prepareLoopSession(registry, SESSION_ID, { name: 'SEO', agent: 'claude' });
-    expect(calls[1]).toEqual({ channel: 'runpane:sessions:update', request: { selector: { sessionId: SESSION_ID }, input: {
-      launchCommand: 'agent-farm run --native-arg=--dangerously-skip-permissions greenfield/seo-orchestrator:claude --directory ~/repos/site', source: 'user',
-    } } });
+    const launchCommand = 'agent-farm run greenfield/seo-orchestrator:claude --native-arg=--dangerously-skip-permissions --directory ~/repos/site';
+    expect(calls[1]).toEqual({ channel: 'runpane:sessions:update', request: { selector: { sessionId: SESSION_ID }, input: { launchCommand, source: 'user' } } });
+    expect(agentFarmProfileOf(launchCommand)).toBe('greenfield/seo-orchestrator');
+  });
+
+  it('counts a native-arg spelling as the flag only among Agent Farm\'s own options', async () => {
+    for (const [launchCommand, expected] of [
+      ['codex -- --native-arg=--yolo', 'codex --yolo -- --native-arg=--yolo'],
+      ['agent-farm run greenfield/implementer:codex -- --native-arg=--yolo', 'agent-farm run greenfield/implementer:codex --native-arg=--yolo -- --native-arg=--yolo'],
+    ]) {
+      const { registry, calls } = sessionRegistry({ session: { agent: 'codex', launchCommand } });
+      await prepareLoopSession(registry, SESSION_ID, { name: 'Standup', agent: 'codex' });
+      expect(calls[1]).toEqual({ channel: 'runpane:sessions:update', request: { selector: { sessionId: SESSION_ID }, input: { launchCommand: expected, source: 'user' } } });
+    }
+  });
+
+  it('refuses an Agent Farm Session whose agent already runs in a chat tab, and changes nothing', async () => {
+    const { registry, calls } = sessionRegistry({ session: { isPinned: true, launchCommand: 'agent-farm run greenfield/seo-orchestrator' } });
+    await expect(prepareLoopSession(registry, SESSION_ID, { name: 'SEO', agent: 'claude' }, { isChatTab: () => true })).rejects.toMatchObject({
+      code: 'ERR_LOOP_INVALID',
+      message: 'Session Standups runs its Agent Farm agent in a chat tab, which loops cannot send prompts to yet. Nothing was saved.',
+    });
+    expect(calls.map(call => call.channel)).toEqual(['runpane:sessions:get']);
   });
 
   it('leaves an Agent Farm launch that already passes the flag, in either form, alone', async () => {
