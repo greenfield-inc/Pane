@@ -1,7 +1,8 @@
 import path from 'path';
 import type { IpcMain } from 'electron';
 import { openExternalUrl } from '../utils/openExternalUrl';
-import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import { isRemotePaneCommand, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
+import { PANE_CLOUD_MACHINE_CHANNEL, paneCloudMachine } from '../../../shared/utils/paneCloudMachine';
 import type { MachineConnections } from '../services/machineConnections';
 import type { ConfigManager } from '../services/configManager';
 import { DEFAULT_PANE_CLOUD_URL, PaneCloudFailure, PaneCloudManager } from '../services/paneCloud';
@@ -29,7 +30,7 @@ let manager: PaneCloudManager | null = null;
  * service session, pairing and the saved computers are this desktop's.
  */
 export function registerPaneCloudHandlers(ipcMain: IpcMain, deps: {
-  commands: Pick<PaneCommandRegistry, 'invoke'>;
+  commands: Pick<PaneCommandRegistry, 'invoke' | 'register'>;
   machines: Pick<MachineConnections, 'machineState' | 'run'>;
   configManager: Pick<ConfigManager, 'getConfig' | 'updateConfigWith'>;
   send: (channel: string, snapshot: PaneCloudSnapshot) => void;
@@ -69,6 +70,15 @@ export function registerPaneCloudHandlers(ipcMain: IpcMain, deps: {
   manager = cloud;
 
   const vmId = (value: PaneCommandValue) => decodeBoundary(value, boundary.nonEmptyString);
+  // The "Pane Cloud" machine (D-90): runpane and the pane MCP name a person's cloud Session VMs by it.
+  // It answers on this computer only, where the Pane Cloud sign-in and the paired computers are.
+  commands.register(PANE_CLOUD_MACHINE_CHANNEL, async () => {
+    if (isRemotePaneCommand()) {
+      throw new PaneError('ERR_PANE_CLOUD_HERE_ONLY', 'Pane Cloud answers only on the computer signed in to it, so another computer can\'t read its machines.', 'Run this on the computer signed in to Pane Cloud.');
+    }
+    const machine = paneCloudMachine((await cloud.refresh({ background: true })).sessions);
+    return machine === null ? null : { id: machine.id, name: machine.name, members: machine.members.map((member) => ({ ...member })) };
+  });
   ipcMain.handle('pane-cloud:get', () => answer(() => cloud.refresh()));
   ipcMain.handle('pane-cloud:sign-in', () => answer(() => cloud.startSignIn()));
   ipcMain.handle('pane-cloud:sign-out', () => answer(() => cloud.signOut()));
