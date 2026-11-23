@@ -1,6 +1,9 @@
+import { promises as fs } from 'fs';
+import path from 'path';
 import type { PaneSecretStore } from './paneSecrets';
 import { githubCliToken } from './githubWatchClient';
 import { PaneError } from '../../../shared/paneError';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { paneSecretKey, type PaneSecretSummary } from '../../../shared/types/paneSecrets';
 import type { SharedCredentials } from '../../../shared/types/sharedCredentials';
 import {
@@ -50,7 +53,7 @@ export function describeCloudSecrets(secrets: readonly PaneSecretSummary[], choi
  * On a cloud VM, puts the sign-ins it holds into `env`, which agent panels inherit, and takes out
  * any that were removed. Git uses the GitHub token through the GitHub CLI.
  */
-export async function exportCloudSignIns(secrets: Pick<PaneSecretStore, 'has' | 'read'>, env: NodeJS.ProcessEnv): Promise<void> {
+async function exportCloudSignIns(secrets: Pick<PaneSecretStore, 'has' | 'read'>, env: NodeJS.ProcessEnv): Promise<void> {
   for (const name of CLOUD_SIGN_IN_ENVS) {
     const value = secrets.has(CLOUD_SIGN_IN_PROJECT, name) ? await secrets.read(CLOUD_SIGN_IN_PROJECT, name).catch(() => null) : null;
     if (value) env[name] = value;
@@ -60,6 +63,58 @@ export async function exportCloudSignIns(secrets: Pick<PaneSecretStore, 'has' | 
     env.GIT_CONFIG_COUNT = '1';
     env.GIT_CONFIG_KEY_0 = 'credential.https://github.com.helper';
     env.GIT_CONFIG_VALUE_0 = '!gh auth git-credential';
+  }
+}
+
+/** The token file a cloud VM's unseal unit leaves on its secrets volume before the daemon starts (D-107). */
+const TOKEN_DROP = path.join('incoming', 'github-token.json');
+
+const tokenDropSchema = boundary.object({
+  token: boundary.nonEmptyString,
+  source: boundary.nonEmptyString,
+  updatedAt: boundary.nonEmptyString,
+});
+
+function invalidTokenDrop(): PaneError {
+  // Never the file's text or a parser's message: either can quote the token.
+  return new PaneError(
+    'ERR_CLOUD_TOKEN_DROP_INVALID',
+    'The GitHub token this cloud machine was given at creation was not readable, so Pane deleted it and this machine has no GitHub sign-in yet.',
+    'It arrives with the next sync from a computer signed in to gh; or create the cloud Session again.',
+  );
+}
+
+/**
+ * At daemon start on a machine with a secrets volume: imports the GitHub token the guest left in
+ * `incoming/github-token.json`, through the same path as a sync (newest wins, the person's choice
+ * applied), deletes the file whatever happened to it, then puts the sign-ins in the agents' environment.
+ * A file that doesn't decode is deleted and reported with a PaneError that never quotes it.
+ */
+export async function startCloudSignIns(secrets: Pick<PaneSecretStore, 'applyFromSync' | 'cloudChoice' | 'has' | 'read'>, volume: string | undefined, env: NodeJS.ProcessEnv): Promise<void> {
+  const drop = volume === undefined ? null : path.join(volume, TOKEN_DROP);
+  let text: string | null = null;
+  if (drop) {
+    try {
+      text = await fs.readFile(drop, 'utf8');
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+    }
+  }
+  try {
+    if (drop && text !== null) {
+      await fs.rm(drop, { force: true });
+      let parsed: { token: string; source: string; updatedAt: string };
+      try {
+        parsed = decodeBoundary(JSON.parse(text), tokenDropSchema);
+      } catch {
+        throw invalidTokenDrop();
+      }
+      if (Number.isNaN(Date.parse(parsed.updatedAt))) throw invalidTokenDrop();
+      const record = { [GITHUB_SIGN_IN_KEY]: { value: parsed.token, updatedAt: parsed.updatedAt, source: parsed.source } };
+      await secrets.applyFromSync(cloudSecretRecords(record, secrets.cloudChoice()));
+    }
+  } finally {
+    await exportCloudSignIns(secrets, env);
   }
 }
 

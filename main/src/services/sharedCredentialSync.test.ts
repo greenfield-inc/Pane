@@ -582,7 +582,7 @@ describe('Pane Cloud VMs', () => {
    * A cloud VM as the guest image starts it: its secrets volume at PANE_SECRETS_DIR, and the environment
    * its agents inherit. Without the volume it is like any other machine to Pane.
    */
-  async function cloudVm({ withVolume = true } = {}) {
+  async function cloudVm({ withVolume = true, tokenDrop }: { withVolume?: boolean; tokenDrop?: string } = {}) {
     const paneDir = await folder('vm');
     vi.stubEnv('PANE_DIR', paneDir);
     const configManager = new ConfigManager();
@@ -593,8 +593,12 @@ describe('Pane Cloud VMs', () => {
       : new PaneSecretStore(configManager, keychainSecretBackend(new FakeKeychain(), 'Pane (test)'), () => 'pane-1a2b3c4d');
     const env: NodeJS.ProcessEnv = {};
     const registry = new PaneCommandRegistry();
+    if (volume && tokenDrop) {
+      await fs.mkdir(path.join(volume, 'incoming'), { mode: 0o700 });
+      await fs.writeFile(path.join(volume, 'incoming', 'github-token.json'), tokenDrop, { mode: 0o600 });
+    }
     // SAFETY: These handlers read only configManager from the services bag.
-    registerSharedCredentialHandlers({ configManager } as AppServices, registry, secrets, volume ? { env } : null);
+    registerSharedCredentialHandlers({ configManager } as AppServices, registry, secrets, volume ? { env, volume } : null);
     const invoke = vi.fn(async (channel: string, args: unknown[]) => {
       const input: PaneCommandValue = JSON.parse(JSON.stringify(args[0] ?? null));
       return overTheWire(await registry.invokeRemote(channel, [input, { clientId: 'desktop' }]));
@@ -844,6 +848,13 @@ describe('Pane Cloud VMs', () => {
 
     expect(await secrets.read('aws', 'AWS_KEY')).toBe('AKIA-studio');
     expect(JSON.stringify(studio.keys())).not.toContain('AKIA-from-vm');
+  });
+
+  it('start with the GitHub token they were given at creation, before any computer syncs with them', async () => {
+    const vm = await cloudVm({ tokenDrop: JSON.stringify({ token: 'gho_sealed', source: 'this-mac', updatedAt: '2026-11-22T10:00:00.000Z' }) });
+
+    await vi.waitFor(() => expect(vm.env.GH_TOKEN).toBe('gho_sealed'));
+    await expect(fs.access(path.join(vm.volume ?? '', 'incoming', 'github-token.json'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('refuse the send when the VM has no secrets volume, so the cloud Session is not started without its secrets', async () => {

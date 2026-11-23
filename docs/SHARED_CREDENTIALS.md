@@ -42,7 +42,11 @@ references, no record of a secret you turned off. Current devices also ignore a 
 from a cloud machine for a secret whose copy on your other machines was last set on a
 machine you turned off. A computer signed in to Pane Cloud also writes each of your
 cloud machines the GitHub token from its own `gh auth token`, before a new Session
-starts and whenever that token changes; a cloud machine keeps that token to itself. Secrets
+starts and whenever that token changes; a cloud machine keeps that token to itself.
+A new cloud machine can also be given that token sealed at creation: its guest leaves it
+in `incoming/github-token.json` on the secrets volume before Pane starts, and Pane imports
+it at start like a sync (newest wins, your choice applied), deletes the file and never
+logs the token. Secrets
 travel over each device's own connection, encrypted end to end to the cloud machine:
 Greenfield's relay passes them along and can't read them, and the Pane Cloud service
 never sees them. A device on a Pane from before cloud machines said so still sends
