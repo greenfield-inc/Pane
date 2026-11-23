@@ -157,6 +157,7 @@ import { runRemoteSetupCli } from './daemon/setupRemoteHostCli';
 import { PowerSaveManager } from './services/powerSaveManager';
 import { warmShellPath } from './utils/shellPath';
 import { routeWebviewPopups } from './services/webviewPopups';
+import { popupTabFor, refuseSignIn } from './services/browser/browserHost';
 import { openExternalUrl } from './utils/openExternalUrl';
 import { offerAppLink, openOfferedAppLink } from './services/browser/appLinks';
 import { PaneError, paneErrorText } from '../../shared/paneError';
@@ -677,10 +678,8 @@ async function createWindow() {
       openExternal: url => wvContents.session === session.fromPartition(DOCS_BROWSER_PARTITION) ? mainWindow?.webContents.send('docs:open-link', url) : openOutside(url),
       openPaneLink,
       offerApp: ({ url, panelId }) => offerAppLink(url, panelId, sendTabNotice),
-      sendOut: ({ url, site, panelId }) => {
-        openOutside(url);
-        if (panelId) sendTabNotice(panelId, { kind: 'sent-out', site });
-      },
+      refuseSignIn: ({ url, site, panelId }) => { if (panelId) refuseSignIn(panelId, site, url); },
+      popupTab: popupTabFor,
     });
 
     wvContents.setBackgroundThrottling(true);

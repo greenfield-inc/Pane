@@ -148,7 +148,7 @@ function HostStream({ adapter, panel, hostName, ownCopy, onBack, onInput }: { ad
       </div>
       <LiveChip host={host} onBack={onBack} />
       {error && <div className="border-b border-border-primary px-3 py-1 text-xs text-status-error">{error}</div>}
-      <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} phone={touchScreen} keyboardRef={keyboard} onPersonInput={onInput} />
+      <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} phone={touchScreen} keyboardRef={keyboard} onPersonInput={onInput} openOutside={url => { window.open(url, '_blank', 'noopener,noreferrer'); }} />
       {phone && (
         <div className="flex flex-shrink-0 items-center gap-1 border-t border-border-primary bg-bg-chrome px-2 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
           {controls}

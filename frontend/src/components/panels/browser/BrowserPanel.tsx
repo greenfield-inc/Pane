@@ -617,7 +617,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive, onViewLive
     return () => window.removeEventListener('browser-panel:file-refused', handler);
   }, [panel.id]);
 
-  // Main's lines for this tab: an app link to confirm, a sign-in sent out, a finished download.
+  // Main's lines for this tab: an app link to confirm, a sign-in that refuses apps, a finished download.
   // The newest few stay until the person acts on them.
   useEffect(() => {
     const handler = (e: Event) => {
@@ -625,7 +625,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive, onViewLive
       const { panelId, notice } = (e as CustomEvent<{ panelId: string; notice: BrowserTabNotice }>).detail;
       if (panelId !== panel.id) return;
       setNotices(current => {
-        const next = [...current, { key: crypto.randomUUID(), notice }];
+        // A sign-in stopped again (a link, then its redirect) keeps one line.
+        const kept = notice.kind === 'sign-in' ? current.filter(shown => shown.notice.kind !== 'sign-in') : current;
+        const next = [...kept, { key: crypto.randomUUID(), notice }];
         // Over the limit, the oldest notice goes, but never an app bar still waiting for Open or Cancel.
         while (next.length > MAX_NOTICES) {
           const oldest = next.findIndex(shown => shown.notice.kind !== 'app');
@@ -672,6 +674,12 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive, onViewLive
     dismissNotice(key);
     void window.electronAPI.invoke('browser-panel:open-app-link', id).then((result: { success: boolean; error?: string }) => {
       if (!result.success) setUrlError(result.error || 'Pane could not open the app.');
+    });
+  }, [dismissNotice]);
+  const openSignIn = useCallback((key: string, url: string) => {
+    dismissNotice(key);
+    void window.electronAPI.openExternal(url).then(result => {
+      if (!result.success) setUrlError(result.error || 'Pane could not open your browser.');
     });
   }, [dismissNotice]);
   const showInFolder = useCallback((file: string) => {
@@ -903,7 +911,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive, onViewLive
         </div>
       )}
       {refusals.length > 0 && <RefusedFilesNotice refusals={refusals} onDismiss={() => setRefusals([])} />}
-      <TabNotices notices={notices} onOpenApp={openApp} onShowInFolder={showInFolder} onDismiss={dismissNotice} />
+      <TabNotices notices={notices} onOpenApp={openApp} onOpenSignIn={openSignIn} onShowInFolder={showInFolder} onDismiss={dismissNotice} />
 
       {/* Content area */}
       {!url ? (

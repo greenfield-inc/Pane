@@ -24,7 +24,8 @@ export function useStreamChoice(panelId: string, state: BrowserPanelState | unde
     return () => clearTimeout(timer);
   }, [panelId, next]);
   return {
-    stream: choice.stream,
+    // A sign-in popup's page exists only on the host: there is no own copy to go back to.
+    stream: choice.stream || state?.signInPopup === true,
     back: () => dispatch({ kind: 'back' }),
     live: () => dispatch({ kind: 'live' }),
     input: () => dispatch({ kind: 'input', at: Date.now() }),

@@ -58,8 +58,9 @@ export interface BrowserHost {
   personDownloads(): string;
   /** Where downloads an agent's call caused go: the Pane's scratch folder, deleted with the Pane. */
   agentDownloads(paneId: string): Promise<string>;
-  /** Tells the tab a file finished downloading: "Downloaded <name> · Show in folder". */
-  /** Shows the download's notice in the tab; `agent` names the agent whose call caused it. */
+  /** Calls `listener` when a tab stops a sign-in that refuses to run inside apps (Google, AWS). */
+  onSignInRefused(listener: (panelId: string, signIn: { site: string; url: string }) => void): void;
+  /** Shows the download's notice in the tab ("Downloaded <name> · Show in folder"); `agent` names the agent whose call caused it. */
   showDownload(panelId: string, file: string, agent?: string): void;
 }
 
@@ -135,7 +136,7 @@ const driverSchema = boundary.optional(boundary.union(
   boundary.object({ by: boundary.literal('person'), agentWaiting: boundary.optional(boundary.string) }),
 ));
 const pageSizeSchema = boundary.object({ width: boundary.number, height: boundary.number, mobile: boundary.boolean, scale: boundary.optional(boundary.number) });
-const tabStateSchema = boundary.object({ currentUrl: boundary.optional(boundary.string), isPopup: boundary.optional(boundary.boolean), driver: driverSchema, pageSize: boundary.optional(pageSizeSchema), agentUse: boundary.optional(boundary.enumeration('used', 'typed')) });
+const tabStateSchema = boundary.object({ currentUrl: boundary.optional(boundary.string), isPopup: boundary.optional(boundary.boolean), signInPopup: boundary.optional(boundary.literal(true)), driver: driverSchema, pageSize: boundary.optional(pageSizeSchema), agentUse: boundary.optional(boundary.enumeration('used', 'typed')) });
 /** What a screen showing a tab reports (`browser:watch`); null when it stops showing it. */
 const watchReportSchema = boundary.optional(boundary.object({
   kind: boundary.enumeration('desktop', 'phone', 'web'),
@@ -893,9 +894,12 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
 
   /** The frame size the screens watching from afar need: the largest of them, in device pixels. */
   function settingsFor(tabId: string): ScreencastSettings {
-    const remote = holds.viewers(tabId).filter(viewer => viewer.kind !== 'host');
-    const shown = remote.filter(viewer => viewer.onScreen);
-    const far = shown.length ? shown : remote;
+    const viewers = holds.viewers(tabId);
+    const remote = viewers.filter(viewer => viewer.kind !== 'host');
+    // A sign-in popup's tab streams to this computer's own window too, when nobody afar watches it.
+    const watching = remote.length ? remote : viewers;
+    const shown = watching.filter(viewer => viewer.onScreen);
+    const far = shown.length ? shown : watching;
     const maxWidth = Math.round(Math.max(320, ...far.map(viewer => viewer.width * Math.min(viewer.scale ?? 1, 3))));
     const maxHeight = Math.round(Math.max(320, ...far.map(viewer => viewer.height * Math.min(viewer.scale ?? 1, 3))));
     return { maxWidth, maxHeight, quality: FRAME_QUALITY };
@@ -1070,6 +1074,12 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   const pointers = new Map<string, string>();
   /** Downloads that saved on this computer, by tab, for other screens' notices. */
   const tabDownloads = new Map<string, Array<{ name: string; at: number; agent?: string }>>();
+  /** The sign-in each tab stopped, until its page navigates, for other screens' line. */
+  const signIns = new Map<string, { site: string; url: string }>();
+  host.onSignInRefused((tabId, signIn) => {
+    signIns.set(tabId, signIn);
+    changedView(tabId);
+  });
 
   function viewOf(tabId: string) {
     let view = views.get(tabId);
@@ -1102,6 +1112,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (view.pages.has(page.id)) return;
     view.pages.add(page.id);
     const changed = () => changedView(tabId);
+    // The page moved on (the person went elsewhere, or signed in another way): the sign-in line goes.
+    page.on('did-navigate', () => { signIns.delete(tabId); });
     for (const event of ['did-navigate', 'did-navigate-in-page', 'page-title-updated', 'did-start-loading', 'did-stop-loading'] as const) page.on(event, changed);
     page.on('cursor-changed', (_event, type) => {
       const css = CSS_CURSOR.get(type) ?? type;
@@ -1143,6 +1155,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (cursor) view.agentCursor = cursor;
     if (driver?.pendingDialog) view.dialog = driver.pendingDialog;
     if (driver?.pendingChooser) view.fileChooser = driver.pendingChooser;
+    const signIn = signIns.get(tabId);
+    if (signIn) view.signIn = signIn;
     if (live) view.page = `${HOST_RUN}-${live.id}`;
     if (!live) view.stopped = holds.isAsleep(tabId) ? 'asleep' : 'gone';
     return view;

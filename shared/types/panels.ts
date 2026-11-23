@@ -352,6 +352,13 @@ export interface BrowserPanelState {
    * uploaded or pressed into, back to `used` when the page loads a new document. Only main writes it.
    */
   agentUse?: 'used' | 'typed';
+  /**
+   * The tab is a sign-in popup another tab opened while nobody saw it on this computer (another
+   * screen streamed the opener, or the host has no window). Its page lives only on the host, still
+   * linked to its opener, so every screen streams it, the host's own window included, and the tab
+   * closes when the popup does. Only main writes it.
+   */
+  signInPopup?: true;
 }
 
 /** A browser tab page's size in CSS pixels; `mobile` gives it a phone's layout and touch. */

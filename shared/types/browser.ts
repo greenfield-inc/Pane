@@ -15,8 +15,8 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = { agentTools: true, ope
 export type BrowserTabNotice =
   /** "This page wants to open <app>. Open · Cancel": the page asked for an app link (zoommtg:). */
   | { kind: 'app'; id: string; app: string | null; scheme: string }
-  /** A sign-in that fails in an embedded browser went to the system browser instead. */
-  | { kind: 'sent-out'; site: string }
+  /** "<site> doesn't allow sign-in inside apps. Open in your browser": the tab stopped a sign-in that refuses embedded browsers. */
+  | { kind: 'sign-in'; site: string; url: string }
   /** "Downloaded <name> · Show in folder", or "<agent> downloaded <name>" for a file in the Pane's scratch folder. */
   | { kind: 'downloaded'; name: string; file: string; agent?: string };
 

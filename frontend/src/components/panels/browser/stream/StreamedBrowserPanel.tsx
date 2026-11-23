@@ -28,6 +28,8 @@ export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: Tool
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const state = panel.state.customState as BrowserPanelState | undefined;
   const choice = useStreamChoice(panel.id, state);
+  // A sign-in popup's page exists only on the host, linked to its opener: there is no copy to show.
+  if (state?.signInPopup) return <HostStreamPanel panel={panel} isActive={isActive} ownCopy={ownCopy} onInput={choice.input} />;
   const hostLocal = isHostLocalUrl(state?.currentUrl);
   if (hostLocal || !choice.stream) return <>{ownCopy(state?.agentUse && !hostLocal ? choice.live : undefined)}</>;
   return <HostStreamPanel panel={panel} isActive={isActive} ownCopy={ownCopy} onBack={choice.back} onInput={choice.input} />;
@@ -37,7 +39,7 @@ export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: Tool
  * The host's page as a stream: this desktop draws its frames and sends input back. A host on an
  * older Pane streams nothing: `ownCopy` then renders this desktop's own copy.
  */
-function HostStreamPanel({ panel, isActive, ownCopy, onBack, onInput }: { panel: ToolPanel; isActive: boolean; ownCopy: (onViewLive?: () => void) => ReactNode; onBack(): void; onInput(): void }) {
+function HostStreamPanel({ panel, isActive, ownCopy, onBack, onInput }: { panel: ToolPanel; isActive: boolean; ownCopy?: (onViewLive?: () => void) => ReactNode; onBack?: () => void; onInput(): void }) {
   const client = useMemo(() => streamClient((channel, ...args) => window.electronAPI.invoke(channel, ...args)), []);
   const stream = useBrowserStream(client, panel.id, isActive);
   // This desktop reports the stream's own box (below the address bar), so a Take over sizes the page to it.
@@ -68,7 +70,7 @@ function HostStreamPanel({ panel, isActive, ownCopy, onBack, onInput }: { panel:
     return () => window.removeEventListener(BROWSER_NAVIGATE_EVENT, onNavigate);
   }, [client, panel.id, panel.sessionId]);
 
-  if (stream.stop === 'older') {
+  if (stream.stop === 'older' && ownCopy) {
     return (
       <div className="flex h-full flex-col">
         <p role="status" className="border-b border-border-primary bg-bg-chrome px-3 py-1 text-xs text-text-tertiary">{stopLine('older', host)}</p>
@@ -123,9 +125,9 @@ function HostStreamPanel({ panel, isActive, ownCopy, onBack, onInput }: { panel:
           {copied ? <Check className="h-3.5 w-3.5 text-status-success" /> : <Copy className="h-3.5 w-3.5" />}
         </button>
       </div>
-      <LiveChip host={host} onBack={onBack} />
+      {onBack && <LiveChip host={host} onBack={onBack} />}
       {error && <div className="border-b border-border-primary bg-bg-primary px-2 py-1 text-xs text-status-error">{error}</div>}
-      <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} onPersonInput={onInput} />
+      <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} onPersonInput={onInput} openOutside={url => { void window.electronAPI.openExternal(url).then(result => { if (!result.success) setError(result.error || 'Pane could not open your browser.'); }); }} />
     </div>
   );
 }

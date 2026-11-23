@@ -6,6 +6,7 @@ import { DriverChip } from '../../device/DeviceToolViews';
 import { browserInputQueue, clickCounter, fitFrame, keyboardField, modifiersOf, movesFocus, pagePoint, PhoneControl } from '../../../../../../shared/utils/browserStreamInput';
 import type { BrowserStream, StreamStop } from './useBrowserStream';
 import type { BrowserStreamClient } from './streamClient';
+import { SignInLine } from '../TabNotices';
 
 /** How long the agent's cursor stays at a click before it fades (as on the host's own tab). */
 const CURSOR_SHOWN_MS = 1_200;
@@ -53,6 +54,8 @@ interface BrowserStreamViewProps {
   keyboardRef?: { current: (() => void) | null };
   /** Hears each click, key, scroll or chip press the person sends (not hover), which keeps the stream shown. */
   onPersonInput?: () => void;
+  /** Opens a URL in this screen's own browser (Open in your browser). */
+  openOutside: (url: string) => void;
 }
 
 /**
@@ -61,7 +64,7 @@ interface BrowserStreamViewProps {
  * and goes to the host in order. Shows who drives, the agent's cursor, the page's dialogs and file
  * pickers, downloads and why the stream stopped.
  */
-export function BrowserStreamView({ client, panelId, stream, hostName, phone = false, keyboardRef, onPersonInput }: BrowserStreamViewProps) {
+export function BrowserStreamView({ client, panelId, stream, hostName, phone = false, keyboardRef, onPersonInput, openOutside }: BrowserStreamViewProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keysRef = useRef<HTMLInputElement>(null);
@@ -378,6 +381,8 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   const cursorShown = cursor !== undefined && agentDriving && Date.now() - cursorSeenAt < CURSOR_SHOWN_MS && page !== undefined;
   const [lastAgent, setLastAgent] = useState<string | undefined>(undefined);
   useEffect(() => { if (view?.driver?.by === 'agent') setLastAgent(view.driver.agent); }, [view?.driver]);
+  const signIn = view?.signIn;
+  const [signInDismissed, setSignInDismissed] = useState<string | undefined>(undefined);
   const download = view?.downloads.at(-1);
   const [downloadSeenAt, setDownloadSeenAt] = useState(0);
   const firstDownload = useRef<number | undefined | null>(null);
@@ -443,6 +448,11 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
           />
         )}
       </div>
+      {signIn && signIn.url !== signInDismissed && (
+        <div role="status" className="absolute inset-x-0 top-0 flex items-center gap-1.5 border-b border-border-primary bg-bg-primary px-2 py-1 text-xs text-text-secondary" onPointerDown={event => event.stopPropagation()} data-testid="browser-stream-sign-in">
+          <SignInLine site={signIn.site} onOpen={() => { setSignInDismissed(signIn.url); openOutside(signIn.url); }} />
+        </div>
+      )}
       {stop && stop !== 'older' && (
         <div role="status" className="absolute inset-x-0 bottom-0 flex justify-center p-3">
           <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">{stopLine(stop, host, phone)}</p>
