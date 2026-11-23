@@ -457,7 +457,8 @@ replace an unrelated selection.
 Pane Cloud (invite-only beta) runs a Session on its own cloud machine, which
 keeps working when this computer is closed. In **New Session**, pick **Pane
 Cloud** under **Where it runs**, then **Create Session on Pane Cloud**. The first time,
-**Sign in** opens the Pane Cloud page in your browser. Pane creates the
+**Sign in** opens the Pane Cloud page in your browser. Pane Cloud is invite-only
+for now: without an invite, the card offers **Join the waitlist**. Pane creates the
 machine, pairs this computer with it over the relay (phone access turns on if
 it was off), and starts the Session there.
 
@@ -469,10 +470,11 @@ Macs first and picks one; with none online, **Run it on a Mac** opens
 
 A cloud Session sits in the Sessions list like any other. Its ⋯ menu has
 **Stop**, **Start**, **Archive Session** and **Delete…**; Delete removes the
-machine and its disk. Archive Session archives it, removes its machine from all
-your computers at once and stops it; it then shows under **Archived**, where
-Restore starts it, pairs it with this computer again and brings the Session
-back. You can have 5 cloud Sessions running at once on the Free plan.
+machine and its disk. Archive Session archives it, unlinks its machine from each
+of your computers Pane can reach, and stops it. A computer that is off at the
+time keeps the machine until you unlink it there, and Pane says which computers
+it didn't reach. The Session then shows under **Archived**, where Restore starts
+it, pairs it with this computer again and brings the Session back. You can have 5 cloud Sessions running at once on the Free plan.
 **Settings › Usage & Limits** shows your plan, agent-hours this month of the
 plan's amount, and how many Sessions are running.
 
