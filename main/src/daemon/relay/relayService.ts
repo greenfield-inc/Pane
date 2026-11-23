@@ -129,7 +129,9 @@ export class RelayService {
     try {
       const prepared = decodeBoundary(JSON.parse(text), boundary.object({ sha256: boundary.nonEmptyString, expiresAt: boundary.nonEmptyString }));
       const expiresAt = Date.parse(prepared.expiresAt);
-      return /^[0-9a-f]{64}$/u.test(prepared.sha256) && Number.isFinite(expiresAt) ? { sha256: prepared.sha256, expiresAt } : undefined;
+      if (/^[0-9a-f]{64}$/u.test(prepared.sha256) && Number.isFinite(expiresAt)) return { sha256: prepared.sha256, expiresAt };
+      this.deps.log?.('[relay] the pairing secret prepared before boot has no lowercase hex SHA-256 or no readable expiry, so pairing waits for a new link');
+      return undefined;
     } catch (error) {
       this.deps.log?.(`[relay] the pairing secret prepared before boot doesn't read, so pairing waits for a new link: ${reasonOf(error)}`);
       return undefined;
@@ -339,7 +341,16 @@ export class RelayService {
 
   private async startup(target: string): Promise<void> {
     this.lastError = null;
-    this.key ??= await loadComputerKey(this.relayKeyStore());
+    this.key ??= await loadComputerKey(this.relayKeyStore()).catch((cause: unknown) => {
+      const file = this.prebootFile('computer-key.pem');
+      if (!file || !existsSync(file)) throw cause;
+      throw new PaneError(
+        'ERR_RELAY_PREBOOT_KEY',
+        // The relay status shows only the message, so it carries the next step too.
+        `The relay key Pane Cloud's host wrote at ${file} doesn't read (${reasonOf(cause)}), so this VM can't be reached through the relay. Restart the Session from Pane Cloud`,
+        'Restart the Session from Pane Cloud; if it happens again, write to Pane Cloud support with the Session name.',
+      );
+    });
     const key = this.key;
     const { host, port } = target ? parseHostPort(target) : { host: await nearestRelay(PANE_RELAYS), port: 443 };
     this.relayHost = target || host;

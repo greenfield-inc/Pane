@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, readFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import net from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -11,6 +11,30 @@ import { letsEncryptLimit, startRefusingCa } from './__fixtures__/refusingCa';
 afterEach(() => { vi.useRealTimers(); });
 
 describe('relay service', () => {
+  it('names the file and the next step when the relay key Pane Cloud\'s host wrote before boot does not read', async () => {
+    const secretsDir = mkdtempSync(join(tmpdir(), 'pane-relay-preboot-'));
+    mkdirSync(join(secretsDir, 'relay'));
+    writeFileSync(join(secretsDir, 'relay', 'computer-key.pem'), 'not a key');
+    const service = new RelayService({
+      settings: () => ({ enabled: true, relayAddress: `${RELAY_HOST}:1` }),
+      onSettingsChanged: () => () => {},
+      secrets: { read: async () => null, write: async () => {} },
+      dataDir: mkdtempSync(join(tmpdir(), 'pane-relay-service-')),
+      pairingListener: () => ({ port: 1 }),
+      previewPort: () => null,
+      displayName: () => 'Cloud Session',
+      addClient: async () => {},
+      env: { PANE_SECRETS_DIR: secretsDir, PANE_DIRECT_BIN: join(tmpdir(), 'no-pane-direct-here') },
+    });
+    try {
+      service.start();
+      await vi.waitFor(() => expect(service.getStatus().lastError).toContain(join(secretsDir, 'relay', 'computer-key.pem')), { timeout: 10_000 });
+      expect(service.getStatus().lastError).toContain('Restart the Session from Pane Cloud');
+    } finally {
+      await service.stop();
+    }
+  });
+
   it('a computer Let\'s Encrypt turns away says until when, asks again only then, and Try again asks at once', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
     const relay = await startFakeRelay();
