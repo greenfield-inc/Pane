@@ -22,9 +22,10 @@ const SETUP_FAILED = "Pane's servers didn't answer. Check this computer's intern
  * Pairing while `open`: turns phone access on if it is off and waits for this computer to be ready.
  * With `showCode` it keeps one current 10-minute pairing code; a used code (`relay:paired`) or an
  * expired one is replaced at once. Phone access it turned on is turned off again if it closes before
- * ever being ready.
+ * ever being ready. `dialogOpen` (default `open`) is how long one opening of the dialog lasts, for
+ * its pairing report: switching to a tab that doesn't use the relay and back is the same opening.
  */
-export function useRelayPairing(open: boolean, showCode = true) {
+export function useRelayPairing(open: boolean, showCode = true, dialogOpen = open) {
   const [status, setStatus] = useState<RelayStatus | null>(null);
   const [code, setCode] = useState<RelayPairingInfo | null>(null);
   const [failure, setFailure] = useState<{ message: string; cause: 'relay' | 'code' } | null>(null);
@@ -141,20 +142,20 @@ export function useRelayPairing(open: boolean, showCode = true) {
   else if (status?.phase === 'certificate') view = { step: 'preparing', label: 'Getting a certificate…' };
   else view = { step: 'preparing', label: 'Connecting to Pane…' };
 
-  // Each opening reports once (PairingReport), across tab switches; only the Phone tab shows a code.
+  // Each opening of the dialog reports once (PairingReport), across tab switches; only the Phone tab shows a code.
   const report = useRef<PairingReport | null>(null);
   useEffect(() => {
-    if (!open) return;
+    if (!dialogOpen) return;
     const opening = new PairingReport(capture);
     report.current = opening;
     return () => {
       opening.close();
       report.current = null;
     };
-  }, [open]);
+  }, [dialogOpen]);
   useEffect(() => {
-    if (fresh && showCode) report.current?.observe(view);
-  }, [fresh, showCode, view]);
+    if (open && fresh && showCode) report.current?.observe(view);
+  }, [open, fresh, showCode, view]);
 
   return { view, ready, paired, renewal, retry, relay: status?.relay ?? null };
 }

@@ -4,9 +4,9 @@ import type { AnalyticsManager } from './analyticsManager';
 export type PairingDevice = 'phone' | 'computer' | 'glasses';
 /**
  * How the pairing request reached this computer: through Pane relay, over a direct path the relay
- * set up, from the same network, or over Tailscale.
+ * set up, from the same network, over Tailscale, or through a loopback tunnel such as SSH (`other`).
  */
-export type PairingRouteKind = 'relay' | 'direct' | 'lan' | 'tailscale';
+export type PairingRouteKind = 'relay' | 'direct' | 'lan' | 'tailscale' | 'other';
 
 type Sink = Pick<AnalyticsManager, 'track'>;
 

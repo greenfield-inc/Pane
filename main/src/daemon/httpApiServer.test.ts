@@ -595,11 +595,19 @@ describe('PaneRemoteHttpApiServer', () => {
     await server.start();
     const sent: Array<[string, object | undefined]> = [];
     setPairingAnalytics({ track: (name, properties) => { sent.push([name, properties]); } });
+    const pair = (label: string, headers?: Record<string, string>) =>
+      requestJson(server, 'POST', '/pair/exchange', { secret: exchange.createSecret().secret, label }, undefined, headers);
     try {
-      // A phone on the same network reaches this listener straight from its own address.
-      await requestJson(server, 'POST', '/pair/exchange', { secret: exchange.createSecret().secret, label: 'Ana’s iPhone' });
+      // This listener is on loopback: phones on the network and the relay reach it through this
+      // computer's TLS server, which says how each one came in.
+      forwarded = { address: '192.168.1.24', route: 'lan' };
+      await pair('Ana’s iPhone');
       forwarded = { address: '203.0.113.7', route: 'relay' };
-      await requestJson(server, 'POST', '/pair/exchange', { secret: exchange.createSecret().secret, label: 'Ben’s Pixel' });
+      await pair('Ben’s Pixel');
+      forwarded = null;
+      // Tailscale Serve names the tailnet caller; anything else on loopback is a tunnel such as SSH.
+      await pair('Cy’s iPad', { 'Tailscale-User-Login': 'cy@example.com', 'X-Forwarded-For': '100.101.102.103' });
+      await pair('Di’s Pixel');
       // A wrong code pairs nothing and reports nothing.
       await requestJson(server, 'POST', '/pair/exchange', { secret: 'guess', label: 'Ben’s Pixel' });
     } finally {
@@ -609,6 +617,8 @@ describe('PaneRemoteHttpApiServer', () => {
     expect(sent).toEqual([
       ['pairing_completed', { device: 'phone', route: 'lan' }],
       ['pairing_completed', { device: 'phone', route: 'relay' }],
+      ['pairing_completed', { device: 'phone', route: 'tailscale' }],
+      ['pairing_completed', { device: 'phone', route: 'other' }],
     ]);
   });
 

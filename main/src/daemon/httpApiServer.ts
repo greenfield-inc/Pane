@@ -1534,13 +1534,21 @@ export class PaneRemoteHttpApiServer {
     return this.pairing?.forwardedClient(remoteAddress, remotePort)?.address ?? remoteAddress ?? 'unknown';
   }
 
-  /** How a pairing request reached this computer. The workspace listener is Tailscale's. */
+  /**
+   * How a pairing request reached this computer. The workspace listener is Tailscale's. Otherwise a
+   * request this computer's TLS server didn't forward came from Tailscale Serve (which names the
+   * caller in its headers), straight from the network when the listener is bound beyond loopback,
+   * or through a loopback tunnel such as SSH (`other`).
+   */
   private pairingRoute(request: IncomingMessage): PairingRouteKind {
     if (this.workspace) return 'tailscale';
     const { remoteAddress, remotePort } = request.socket;
     const forwarded = this.pairing?.forwardedClient(remoteAddress, remotePort);
     if (forwarded) return forwarded.route;
-    return isTailscaleAddress(remoteAddress ?? '') ? 'tailscale' : 'lan';
+    const address = (remoteAddress ?? '').replace(/^::ffff:/u, '');
+    const forwardedFor = getSingleHeaderValue(request.headers['x-forwarded-for'])?.split(',')[0]?.trim() ?? '';
+    if (isTailscaleAddress(address) || isTailscaleAddress(forwardedFor) || getSingleHeaderValue(request.headers['tailscale-user-login'])) return 'tailscale';
+    return address === '127.0.0.1' || address === '::1' ? 'other' : 'lan';
   }
 
   private authenticateRequest(request: IncomingMessage, token?: string | null): RemoteRequestAuthResult {
