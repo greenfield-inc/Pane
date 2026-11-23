@@ -14,8 +14,6 @@ export interface ServiceStubOptions {
     paneVersions?: string[];
     /** VMs the stub's one host holds awake at once; past it, create and start answer no_capacity. Default unlimited. */
     capacity?: number;
-    /** The relay domain the stub's VMs report. Default runpane.net. */
-    relayDomain?: string;
     now?: () => Date;
 }
 export interface ServiceStub extends RunningStub {
