@@ -1,7 +1,7 @@
 import type { Place, PlaceMachine } from '../components/WhereItRuns';
 
-/** The Pane Cloud docs page, which says which work needs a Mac and how to run that Session on one (D-85). */
-export const MAC_WORK_DOCS_URL = 'https://runpane.com/docs/pane-cloud';
+/** The docs section on work that needs a Mac and how to run that Session on one (D-85); the site keeps a pointer under this heading if the section moves. */
+export const MAC_WORK_DOCS_URL = 'https://runpane.com/docs/security#work-that-needs-a-mac';
 
 /** Where it runs, arranged for the repo. */
 export interface MacWorkPlaces {

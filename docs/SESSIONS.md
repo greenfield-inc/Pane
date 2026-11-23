@@ -464,8 +464,8 @@ it was off), and starts the Session there.
 Pane Cloud machines run Linux, so iOS Simulator and Xcode work needs one of
 your Macs; the Pane Cloud card says so. When the project you have open has an
 Xcode project (`.xcodeproj` or `.xcworkspace`), **Where it runs** lists your
-Macs first and picks one; with none online, **Run it on a Mac** opens the Pane
-Cloud docs.
+Macs first and picks one; with none online, **Run it on a Mac** opens
+[Work that needs a Mac](https://runpane.com/docs/security#work-that-needs-a-mac).
 
 A cloud Session sits in the Sessions list like any other. Its ⋯ menu has
 **Stop**, **Start** and **Delete…**; Delete removes the machine and its disk.
