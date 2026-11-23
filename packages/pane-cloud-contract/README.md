@@ -172,7 +172,7 @@ Called only by the service. Every change to a VM is one signed operation.
 
 | Operation | Runs on | Parameters |
 | --- | --- | --- |
-| `create` | host | none; an 8 GiB, 4 vCPU VM, started. Before the first boot the host makes the VM's relay key and a first one-time pairing secret, writes them onto the secrets volume (`PREBOOT_RELAY_FILES`: `relay/computer-key.pem`, and `relay/pairing.json` with the secret's SHA-256 and expiry), and returns the identity and the first link as the result (D-104) |
+| `create` | host | none; an 8 GiB, 4 vCPU VM, started. Before the first boot the host makes the VM's relay key and a first one-time pairing secret, writes them onto the secrets volume (`PREBOOT_RELAY_FILES`: `relay/computer-key.pem`, and `relay/pairing.json` with the secret's SHA-256 and expiry; both owned by the guest's `pane` user, mode 0600, in a 0700 `relay/` directory), and returns the identity and the first link as the result (D-104) |
 | `start`, `delete` | host | none |
 | `stop` | host | `cause`: `user` or `review` (an automatic pause or a person's Suspend), recorded as the VM's `stateReason`; the disk is kept. The fleet's own stops (host maintenance, host loss) set their own reason |
 | `bootstrap` | guest | `release`: a published Pane `version`, `arch: arm64` and the `.deb`'s `debSha256` |

@@ -288,6 +288,11 @@ export type PairingLink = z.infer<typeof PairingLink>;
  * key and accepts this one-time secret as a pairing link, so pairing needs no step after the
  * daemon's socket appears. The host keeps the private key only on the volume, and the secret only
  * as its hash there and in `create`'s result for the service.
+ *
+ * Ownership: both files and the `relay/` directory belong to the guest's Pane user (`pane`), the
+ * files with mode 0600 and the directory with mode 0700, written complete before the first boot. Pane
+ * treats a key file it can't read, or an empty one, as an error naming the file and never makes a
+ * key of its own in its place; only an absent file means "no host-made key".
  */
 export const PREBOOT_RELAY_FILES = {
   /** The VM's relay key: a P-256 private key, PKCS#8 PEM. Its public key's fingerprint is the identity `create` returns. */
