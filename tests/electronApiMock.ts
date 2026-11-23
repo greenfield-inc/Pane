@@ -24,6 +24,7 @@ import type { PaneSecretsOverview, SecretLeaseStartRequest } from '../shared/typ
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 import type { RelayPairingInfo, RelayStatus } from '../shared/types/relay';
 import type { PaneCloudAction, PaneCloudSnapshot } from '../shared/types/paneCloud';
+import type { PaneCloudSecretChoice, PaneCloudSecrets } from '../shared/types/paneCloudSecrets';
 import type { OrchestrationSessionCreateInput } from '../shared/types/orchestrationSession';
 import type { ComputerRoute, ComputerRoutesReport, RemoteComputer } from '../shared/types/remoteComputers';
 import type { AutopilotDocument } from '../shared/types/autopilot';
@@ -1417,7 +1418,42 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     /** Stop, Start, Delete and Update Pane calls, by VM id. */
     const paneCloudCalls: Array<{ action: 'stop' | 'start' | 'remove' | 'updatePane' | 'archive' | 'restore'; vmId: string }> = [];
     const paneCloudCall = (action: 'stop' | 'start' | 'remove' | 'updatePane' | 'archive' | 'restore') => (vmId: string) => { paneCloudCalls.push({ action, vmId }); return paneCloudAnswer(); };
+    // "Choose what to send": frame B2's machines and secrets, names only.
+    let paneCloudSecrets: PaneCloudSecrets = {
+      machines: [
+        { name: "Maya's MacBook Pro", thisComputer: true, secrets: [
+          { key: 'agents/ANTHROPIC_API_KEY', name: 'ANTHROPIC_API_KEY', label: 'Agents' },
+          { key: 'pane-cloud/GH_TOKEN', name: 'GH_TOKEN', label: 'GitHub' },
+          { key: 'packages/NPM_TOKEN', name: 'NPM_TOKEN', label: 'Packages' },
+          { key: 'billing/STRIPE_LIVE_KEY', name: 'STRIPE_LIVE_KEY', label: 'billing' },
+        ] },
+        { name: 'mac-studio', thisComputer: false, secrets: [
+          { key: 'deploy/AWS_ACCESS_KEY_ID', name: 'AWS_ACCESS_KEY_ID', label: 'Deploy' },
+          { key: 'monitoring/SENTRY_AUTH_TOKEN', name: 'SENTRY_AUTH_TOKEN', label: 'Monitoring' },
+        ] },
+        { name: 'build-box', thisComputer: false, secrets: [
+          { key: 'ci/BUILDKITE_TOKEN', name: 'BUILDKITE_TOKEN', label: 'ci' },
+          { key: 'ci/DOCKER_TOKEN', name: 'DOCKER_TOKEN', label: 'ci' },
+          { key: 'ci/SIGNING_KEY', name: 'SIGNING_KEY', label: 'ci' },
+        ] },
+      ],
+      choice: { excludedSecrets: [], excludedMachines: [] },
+      missingTokens: [],
+    };
+    const paneCloudSecretChoices: PaneCloudSecretChoice[] = [];
+    const tokens: Array<{ agentId: string; token: string }> = [];
     const paneCloudApi = {
+      secrets: () => Promise.resolve({ success: true, data: clone(paneCloudSecrets) }),
+      chooseSecrets: (choice: PaneCloudSecretChoice) => {
+        paneCloudSecretChoices.push(clone(choice));
+        paneCloudSecrets = { ...paneCloudSecrets, choice: clone(choice) };
+        return Promise.resolve({ success: true });
+      },
+      saveToken: (agentId: string, token: string) => {
+        tokens.push({ agentId, token });
+        paneCloudSecrets = { ...paneCloudSecrets, missingTokens: paneCloudSecrets.missingTokens.filter((agent) => agent.id !== agentId) };
+        return Promise.resolve({ success: true });
+      },
       get: paneCloudAnswer,
       signIn: paneCloudAnswer,
       signOut: paneCloudAnswer,
@@ -2474,6 +2510,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           paneCloudSnapshot = { ...paneCloudSnapshot, ...clone(parts) };
           Object.assign(window.electronAPI, { paneCloud: paneCloudApi });
           emit('pane-cloud:changed', clone(paneCloudSnapshot));
+        },
+        /** Replaces what "Choose what to send" lists. */
+        setPaneCloudSecrets(parts: Partial<PaneCloudSecrets>) {
+          paneCloudSecrets = { ...paneCloudSecrets, ...clone(parts) };
+        },
+        /** Every choice saved with Done, and every agent sign-in token saved, in order. */
+        getPaneCloudSecretWrites() {
+          return clone({ choices: paneCloudSecretChoices, tokens });
         },
         /** Serves this action log for the cloud Session on `vmId`. */
         setPaneCloudActions(vmId: string, actions: PaneCloudAction[]) {

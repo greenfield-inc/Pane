@@ -1,10 +1,12 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { memoryConfig } from '../test/memorySecretStore';
 import { macKeychain, type SecurityRunner } from './keychain';
-import { fileSecretBackend, keychainSecretBackend, PaneSecretStore, type SecretEncryption } from './paneSecrets';
+import { fileSecretBackend, keychainSecretBackend, paneSecretStore, paneSecretValueBackend, PaneSecretStore, secretLeaseStore, secretsVolume, type SecretEncryption } from './paneSecrets';
+import { ConfigManager } from './configManager';
+import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 
 const tempDirs: string[] = [];
 
@@ -134,6 +136,18 @@ function fakeSecurity() {
   return { items, run, refuse: (when: typeof refuses) => { refuses = when; } };
 }
 
+describe('Pane secrets on a Pane Cloud VM', () => {
+  it('keep their values on the secrets volume', async () => {
+    const pane = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-vm-'));
+    const volume = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-vm-secrets-'));
+    tempDirs.push(pane, volume);
+    const onVolume = new PaneSecretStore(memoryConfig(), paneSecretValueBackend(pane, secretsVolume({ PANE_SECRETS_DIR: volume })), () => 'pane-1a2b3c4d');
+    await onVolume.set('web', 'NPM_TOKEN', 'npm_canary');
+    expect(await fs.readFile(path.join(volume, 'secrets.json'), 'utf8')).toContain('npm_canary');
+    expect(await fs.readdir(pane)).toEqual([]);
+  });
+});
+
 describe('Pane secrets in the macOS keychain', () => {
   // A 2,303-character service-account JSON with line breaks and non-ASCII text, as a person pastes it.
   const longValue = `{"type":"service_account","private_key":"-----BEGIN PRIVATE KEY-----\n${'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC'.repeat(70)}\n-----END PRIVATE KEY-----\n","note":"café"}`;
@@ -239,5 +253,35 @@ describe('PaneSecretStore 1Password references', () => {
 
     expect(store.referenceOf('stripe', 'EDITED')).toBeNull();
     expect(store.listReferences().map(reference => reference.name)).toEqual(['STRIPE_KEY']);
+  });
+});
+
+describe("A Pane Cloud VM's own secret store", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('keeps names, source machines, the cloud choice and lease records on the secrets volume, never in config.json', async () => {
+    const paneDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-vm-dir-'));
+    const volume = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-vm-volume-'));
+    tempDirs.push(paneDir, volume);
+    vi.stubEnv('PANE_DIR', paneDir);
+    vi.stubEnv('PANE_SECRETS_DIR', volume);
+    const configManager = new ConfigManager();
+    await configManager.initialize();
+    setPaneRuntime({ eventSink: { send: () => undefined }, getConfigManager: () => configManager, getPtyHostRuntime: () => null, getWebviewContextMap: () => new Map() });
+    const store = paneSecretStore();
+
+    await store.applyFromSync({ 'billing/STRIPE_LIVE_KEY': { value: 'sk_live_canary', updatedAt: '2026-11-21T00:00:00.000Z', source: 'mac-studio' } });
+    await store.setCloudChoice({ excludedSecrets: ['web/NPM_TOKEN'], excludedMachines: ['build-box'] });
+    await secretLeaseStore().grant({ project: 'billing', secrets: [{ name: 'LEASED_KEY', value: 'lease_canary' }], expiresInMs: 60_000, requestedBy: 'agent', grantedOn: 'pane-1a2b3c4d' });
+
+    const onDisk = await fs.readFile(path.join(paneDir, 'config.json'), 'utf8').catch(() => '');
+    expect(onDisk).not.toMatch(/STRIPE_LIVE_KEY|mac-studio|NPM_TOKEN|build-box|LEASED_KEY|canary/);
+    expect((await fs.readdir(paneDir)).filter((file) => file.startsWith('secret-leases'))).toEqual([]);
+    expect(await fs.readFile(path.join(volume, 'secret-leases.log'), 'utf8')).toContain('LEASED_KEY');
+    expect(await fs.readFile(path.join(volume, 'index.json'), 'utf8')).toMatch(/billing\/STRIPE_LIVE_KEY[\s\S]*mac-studio[\s\S]*build-box/);
+    expect(await fs.readdir(volume)).toEqual(expect.arrayContaining(['index.json', 'secrets.json']));
+    resetPaneRuntimeForTests();
   });
 });

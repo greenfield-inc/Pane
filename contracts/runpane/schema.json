@@ -786,6 +786,29 @@
             "minLength": 1
           }
         },
+        "signInToken": {
+          "description": "A long-lived token that signs the CLI in on a machine that can't keep the CLI's own sign-in (a Pane Cloud VM). The person makes it once on a desktop by running the agent's executable with `args`; the machine passes it in the environment variable `env`.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "env",
+            "args"
+          ],
+          "properties": {
+            "env": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "args": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
         "onboarding": {
           "description": "Offered on the first-run screen.",
           "type": "boolean"

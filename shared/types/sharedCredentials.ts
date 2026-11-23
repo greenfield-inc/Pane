@@ -1,4 +1,5 @@
 import type { NotifyCardsOn } from './notify';
+import { cloudSecretRecords, EMPTY_PANE_CLOUD_SECRET_CHOICE, parseCloudChoice, sendsToCloud, type PaneCloudSecretChoice } from './paneCloudSecrets';
 
 /** Integration keys a host shares with the other hosts its paired devices reach. */
 export const SHARED_CREDENTIAL_IDS = ['anthropicApiKey', 'openaiApiKey', 'deepgramApiKey', 'falApiKey', 'openRouterApiKey', 'apns'] as const;
@@ -21,6 +22,18 @@ export type SharedCredentials = Partial<Record<SharedCredentialId, SharedCredent
    * A field of its own, so hosts, desktops and phones from before references drop it whole and never read one as a tombstone.
    */
   paneSecretReferences?: Record<string, SharedCredential>;
+  /**
+   * What "Choose what to send" keeps off cloud Sessions: `value` is the choice as JSON (names only, never a
+   * secret value). One record for all the person's computers and their cloud VMs, so every sender and every
+   * VM reads the same choice. Hosts from before it drop the field.
+   */
+  paneCloudSecretChoice?: SharedCredential;
+  /**
+   * Set in a host's own answer when it is a Pane Cloud VM (it has a secrets volume). Every device that
+   * syncs with it then writes it only the Pane secrets the person's choice allows, and takes from it
+   * only Pane secrets the choice allows. Hosts from before it drop the field.
+   */
+  cloudVm?: true;
 };
 
 /** The per-key maps that merge by newest copy. */
@@ -53,7 +66,7 @@ function isNewerCredential(candidate: SharedCredential, current: SharedCredentia
 export interface SharedCredentialMerge {
   credentials: SharedCredentials;
   changed: SharedCredentialId[];
-  /** Pane secret and reference keys (`<project>/<NAME>`) that changed. */
+  /** Pane secret and reference keys (`<project>/<NAME>`) that changed, and `paneCloudSecretChoice` when it did. */
   changedSecrets: string[];
 }
 
@@ -83,6 +96,11 @@ export function mergeSharedCredentials(current: SharedCredentials, incoming: Sha
     }
     if (changedHere || current[field]) credentials[field] = merged;
   }
+  const choice = incoming.paneCloudSecretChoice;
+  if (choice && isNewerCredential(choice, credentials.paneCloudSecretChoice)) {
+    credentials.paneCloudSecretChoice = choice;
+    changedSecrets.push('paneCloudSecretChoice');
+  }
   return { credentials, changed, changedSecrets };
 }
 
@@ -92,20 +110,50 @@ export interface SharedCredentialHost {
   apply(credentials: SharedCredentials): Promise<void>;
 }
 
+/** What a cloud VM is written from the merged set: the Pane secrets `choice` allows, and the choice itself. */
+function forCloudVm(newest: SharedCredentials, choice: PaneCloudSecretChoice): SharedCredentials {
+  const written: SharedCredentials = { paneSecrets: cloudSecretRecords(newest.paneSecrets ?? {}, choice) };
+  if (newest.paneCloudSecretChoice) written.paneCloudSecretChoice = newest.paneCloudSecretChoice;
+  return written;
+}
+
+/**
+ * What the other hosts take from a cloud VM: its Pane secrets and deletions, less any the choice keeps off
+ * cloud machines (a VM never holds those, so a record of one is not the person's), and the choice. A key the
+ * other hosts last had from a turned-off machine counts as turned off, whatever source the VM's record names.
+ */
+function fromCloudVm(read: SharedCredentials, choice: PaneCloudSecretChoice, others: Record<string, SharedCredential>): SharedCredentials {
+  const allowed = ([key, record]: [string, SharedCredential]) => {
+    const theirs = others[key];
+    return sendsToCloud(choice, key, record.source) && !(theirs && choice.excludedMachines.includes(theirs.source));
+  };
+  const taken: SharedCredentials = { paneSecrets: Object.fromEntries(Object.entries(read.paneSecrets ?? {}).filter(allowed)) };
+  if (read.paneCloudSecretChoice) taken.paneCloudSecretChoice = read.paneCloudSecretChoice;
+  return taken;
+}
+
 /**
  * Reads every reachable host, then writes the newest copy of each key to the
  * hosts that hold an older one. Unreachable hosts and hosts too old to share
- * keys are skipped; they catch up on a later sync.
+ * keys are skipped; they catch up on a later sync. A host that says it is a
+ * cloud VM is written, and read, only through the person's newest choice.
  */
 export async function syncSharedCredentials(hosts: readonly SharedCredentialHost[]): Promise<{ reached: number; updated: number }> {
   const reads = await Promise.all(hosts.map(host => host.read().then(credentials => ({ host, credentials }), () => null)));
   const reached = reads.filter(read => read !== null);
-  const newest = reached.reduce<SharedCredentials>((merged, read) => mergeSharedCredentials(merged, read.credentials).credentials, {});
+  // The choice first, from every host, so what a cloud VM gives and gets is judged by the newest one.
+  const choiceRecord = reached.reduce<SharedCredentials>((merged, read) => mergeSharedCredentials(merged, { paneCloudSecretChoice: read.credentials.paneCloudSecretChoice }).credentials, {}).paneCloudSecretChoice;
+  const choice = parseCloudChoice(choiceRecord) ?? EMPTY_PANE_CLOUD_SECRET_CHOICE;
+  const others = reached.filter(read => !read.credentials.cloudVm)
+    .reduce<SharedCredentials>((merged, read) => mergeSharedCredentials(merged, { paneSecrets: read.credentials.paneSecrets }).credentials, {}).paneSecrets ?? {};
+  const taken = (read: { credentials: SharedCredentials }) => (read.credentials.cloudVm ? fromCloudVm(read.credentials, choice, others) : read.credentials);
+  const newest = reached.reduce<SharedCredentials>((merged, read) => mergeSharedCredentials(merged, taken(read)).credentials, {});
+  const written = (read: { credentials: SharedCredentials }) => (read.credentials.cloudVm ? forCloudVm(newest, choice) : newest);
   const behind = reached.filter(read => {
-    const merge = mergeSharedCredentials(read.credentials, newest);
+    const merge = mergeSharedCredentials(read.credentials, written(read));
     return merge.changed.length + merge.changedSecrets.length > 0;
   });
-  const applied = await Promise.all(behind.map(read => read.host.apply(newest).then(() => true, () => false)));
+  const applied = await Promise.all(behind.map(read => read.host.apply(written(read)).then(() => true, () => false)));
   return { reached: reached.length, updated: applied.filter(Boolean).length };
 }
 

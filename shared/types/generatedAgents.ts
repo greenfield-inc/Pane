@@ -37,6 +37,12 @@ export const AGENTS_CONFIG = {
         "auth",
         "login"
       ],
+      "signInToken": {
+        "env": "CLAUDE_CODE_OAUTH_TOKEN",
+        "args": [
+          "setup-token"
+        ]
+      },
       "onboarding": true,
       "onboardingPanelId": "__pane_chat_terminal__",
       "chat": {

@@ -6,10 +6,13 @@ import type { OrchestrationSessionCreateInput } from '../shared/types/orchestrat
 import type { PaneCloudAction, PaneCloudSnapshot } from '../shared/types/paneCloud';
 import type { RemoteComputer } from '../shared/types/remoteComputers';
 import { notifyFixture } from './fixtures/notifySnapshot';
+import type { PaneCloudSecretChoice, PaneCloudSecrets } from '../shared/types/paneCloudSecrets';
 
 type MockWindow = typeof window & {
   __paneTestElectronMock: {
     setPaneCloud(parts: Partial<PaneCloudSnapshot>): void;
+    setPaneCloudSecrets(parts: Partial<PaneCloudSecrets>): void;
+    getPaneCloudSecretWrites(): { choices: PaneCloudSecretChoice[]; tokens: Array<{ agentId: string; token: string }> };
     getPaneCloudCreates(): OrchestrationSessionCreateInput[];
     getPaneCloudCalls(): Array<{ action: string; vmId: string }>;
     setPaneCloudActions(vmId: string, actions: PaneCloudAction[]): void;
@@ -25,18 +28,19 @@ const SECRETS = /Your secrets come along/;
 /** Design screenshots are written only when asked for, so a test run leaves nothing behind. */
 const screenshotPath = (name: string) => (process.env.PANE_CLOUD_SCREENSHOTS ? `${process.env.PANE_CLOUD_SCREENSHOTS}/${name}` : undefined);
 
-async function openCreateSession(page: Page, cloud: Partial<PaneCloudSnapshot> = {}) {
+async function openCreateSession(page: Page, cloud: Partial<PaneCloudSnapshot> = {}, secrets: Partial<PaneCloudSecrets> = {}) {
   await installSessionsFixture(page, [], [], { initialConfig: { appearanceMode: 'fixed', theme: 'dark' } });
-  await page.addInitScript((parts) => {
+  await page.addInitScript(({ parts, secretParts }) => {
     // SAFETY: installElectronApiMock's init script, registered first, defines this test-only API.
     const mock = (window as MockWindow).__paneTestElectronMock;
     mock.setPaneCloud(parts);
+    mock.setPaneCloudSecrets(secretParts);
     mock.emitMachineEvent({ type: 'machines', machines: [
       { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
       { id: 'studio', label: 'mac-studio', kind: 'remote', status: 'online', offlineSince: null },
       { id: 'laptop', label: 'old-laptop', kind: 'remote', status: 'offline', offlineSince: '2026-11-20T00:00:00.000Z' },
     ] });
-  }, cloud);
+  }, { parts: cloud, secretParts: secrets });
   await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
@@ -72,6 +76,54 @@ test('creates a Session on Pane Cloud from Where it runs', async ({ page }) => {
     expect.objectContaining({ name: 'Docs site migration', nameFromFirstMessage: false, agent: 'claude' }),
   ]);
   await expect(dialog).toBeHidden();
+});
+
+const secretWrites = (page: Page) => page.evaluate(() => (
+  // SAFETY: installElectronApiMock defines this test-only API before navigation.
+  window as MockWindow
+).__paneTestElectronMock.getPaneCloudSecretWrites());
+
+test('Choose what to send turns off a secret and a whole machine, and remembers it', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 1100 });
+  const dialog = await openCreateSession(page, { sendsSecrets: true });
+  await dialog.getByTestId('where-it-runs-cloud').click();
+  await dialog.getByRole('button', { name: 'Choose what to send', exact: true }).click();
+  const chooser = page.getByRole('dialog', { name: 'Choose what to send', exact: true });
+  await expect(chooser).toBeVisible();
+  await expect(chooser.getByTestId('pane-cloud-secrets-summary')).toHaveText('9 of 9 secrets, from 3 of 3 machines');
+
+  await chooser.getByRole('checkbox', { name: 'Send STRIPE_LIVE_KEY (billing)', exact: true }).uncheck();
+  await chooser.getByRole('checkbox', { name: "Send build-box's secrets", exact: true }).uncheck();
+  await expect(chooser.getByText('Paired · 3 secrets · left out', { exact: true })).toBeVisible();
+  await expect(chooser.getByText('Left out', { exact: true })).toBeVisible();
+  await expect(chooser.getByTestId('pane-cloud-secrets-summary')).toHaveText('5 of 9 secrets, from 2 of 3 machines');
+  await expect(chooser.getByText("Greenfield's relay passes them along and can't read them", { exact: false })).toBeVisible();
+  await expect(chooser.getByText('removes it from cloud Sessions that already have it', { exact: false })).toBeVisible();
+  await chooser.screenshot({ path: screenshotPath('frame-B2-built.png') });
+
+  await chooser.getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(chooser).toBeHidden();
+  expect((await secretWrites(page)).choices).toEqual([{ excludedSecrets: ['billing/STRIPE_LIVE_KEY'], excludedMachines: ['build-box'] }]);
+
+  // Reopened, it shows the remembered choice; Cancel saves nothing.
+  await dialog.getByRole('button', { name: 'Choose what to send', exact: true }).click();
+  await expect(chooser.getByTestId('pane-cloud-secrets-summary')).toHaveText('5 of 9 secrets, from 2 of 3 machines');
+  await chooser.getByRole('checkbox', { name: "Send mac-studio's secrets", exact: true }).uncheck();
+  await chooser.getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect((await secretWrites(page)).choices).toHaveLength(1);
+});
+
+test('asks once for a Claude Code token for cloud Sessions', async ({ page }) => {
+  const claude = { id: 'claude', title: 'Claude Code', env: 'CLAUDE_CODE_OAUTH_TOKEN', command: 'claude setup-token' } as const;
+  const dialog = await openCreateSession(page, { sendsSecrets: true }, { missingTokens: [claude] });
+  await dialog.getByTestId('where-it-runs-cloud').click();
+  const prompt = dialog.getByTestId('cloud-token-claude');
+  await expect(prompt).toContainText('Run claude setup-token in a terminal');
+
+  await prompt.getByLabel('Claude Code token', { exact: true }).fill('sk-ant-oat01-example');
+  await prompt.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(prompt).toBeHidden();
+  expect((await secretWrites(page)).tokens).toEqual([{ agentId: 'claude', token: 'sk-ant-oat01-example' }]);
 });
 
 test('Pane Cloud at the awake limit says so and cannot create', async ({ page }) => {

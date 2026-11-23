@@ -141,7 +141,7 @@ import { startSecretLeases } from './services/secretLeaseRuntime';
 import { MachineConnections, remoteMachineAccess } from './services/machineConnections';
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
-import { registerPaneCloudHandlers } from './ipc/paneCloud';
+import { cloudMachineIds, registerPaneCloudHandlers } from './ipc/paneCloud';
 import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
 import { prepareProfileRunnerForQuit } from './services/profiles/profileRunnerHost';
 import { LeaderboardService } from './services/leaderboardService';
@@ -1293,6 +1293,11 @@ async function initializeServices() {
     commands: commandRegistry,
     machines: machineConnections,
     configManager,
+    sendSecrets: async (machineId) => {
+      if (!sharedCredentialSync) throw new PaneError('ERR_CLOUD_SECRETS_NOT_SENT', 'Pane could not send your secrets: it is still starting.', 'Try New cloud Session again in a moment.');
+      await sharedCredentialSync.sendToCloudVm(machineId);
+    },
+    onCloudMachinesChanged: () => sharedCredentialSync?.resync(),
     send: (channel, snapshot) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, snapshot); },
   });
   setDeviceMachines(machineConnections);
@@ -1675,7 +1680,7 @@ if (launchRemoteSetup) {
   // Share integration keys with the hosts this desktop has paired with.
   if (machineConnections) {
     machineConnections.start();
-    sharedCredentialSync = new SharedCredentialSync(configManager, machineConnections);
+    sharedCredentialSync = new SharedCredentialSync(configManager, machineConnections, undefined, undefined, cloudMachineIds);
     sharedCredentialSync.start();
     // Secret leases: renewal reminders, and pushing a lease again to a machine that lost it.
     startSecretLeases({ configManager, machines: machineConnections, notifyQueue: () => paneDaemonHost?.services.notifyService?.queue, packaged: app.isPackaged });

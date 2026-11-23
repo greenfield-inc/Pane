@@ -1,7 +1,7 @@
 import type { DeviceSettings } from '../../../shared/types/devices';
 import type { BrowserSettings } from '../../../shared/types/browser';
 import type { MachineHealthSettings } from '../../../shared/types/machineHealth';
-import type { PaneSecretMeta, PaneSecretReferenceMeta } from '../services/paneSecrets';
+import type { PaneCloudSecretChoiceMeta, PaneSecretMeta, PaneSecretReferenceMeta } from '../services/paneSecrets';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { CustomLink } from '../../../shared/types/customLinks';
@@ -87,6 +87,8 @@ export interface AppConfig {
   secretLeaseLengths?: Record<string, number>;
   /** The 1Password vault "Move to 1Password" writes into. */
   onePasswordMoveVault?: string;
+  /** What "Choose what to send" keeps off cloud Sessions. Syncs to the person's computers and cloud VMs, newest wins. */
+  paneCloudSecretChoice?: PaneCloudSecretChoiceMeta;
   voiceTranscriptionMode?: VoiceTranscriptionMode;
   // Legacy fields for backward compatibility
   gitRepoPath?: string;

@@ -31,7 +31,7 @@ const quoted = [...new Set([
   ...agents.flatMap((agent) => [agent.chat?.fullAccess?.mode, ...(agent.chat?.riskyModes ?? []), agent.chat?.minimumVersion]),
 ].filter(Boolean))];
 // Env var names, matched as words anywhere (a property access or a string).
-const envNames = [...new Set(agents.flatMap((agent) => [agent.chat?.adapter?.executableEnv, ...(agent.chat?.apiKeyEnv ?? [])]).filter(Boolean))];
+const envNames = [...new Set(agents.flatMap((agent) => [agent.chat?.adapter?.executableEnv, ...(agent.chat?.apiKeyEnv ?? []), agent.signInToken?.env]).filter(Boolean))];
 const literal = new RegExp(`(['"\`])(?:${quoted.map(escape).join('|')})\\1|\\b(?:${envNames.map(escape).join('|')})\\b`, 'gu');
 const allowlist = JSON.parse(fs.readFileSync(path.join(root, ALLOWLIST_PATH), 'utf8'));
 

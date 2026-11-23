@@ -13,7 +13,10 @@ import { normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon'
 import type { PaneCloudSnapshot } from '../../../shared/types/paneCloud';
 import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestrationSession';
 import { RELAY_DEVICE_COMMANDS } from '../../../shared/types/relay';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
+import { CLOUD_SIGN_IN_PROJECT, CLOUD_TOKEN_AGENTS, GITHUB_SIGN_IN_ENV, type PaneCloudSecretChoice } from '../../../shared/types/paneCloudSecrets';
+import { describeCloudSecrets, readGithubToken } from '../services/cloudSecrets';
+import { localHostLabel, paneSecretStore } from '../services/paneSecrets';
 
 /** How long a newly paired VM may take to answer on its saved connection. */
 const CONNECT_DEADLINE_MS = 60_000;
@@ -34,6 +37,18 @@ const createdSchema = boundary.object({
 });
 
 let manager: PaneCloudManager | null = null;
+let knownCloudMachines: string[] = [];
+
+/** The saved computers in the "Pane Cloud" machine (D-90), sorted. */
+const machineIdsOf = (snapshot: PaneCloudSnapshot) => (paneCloudMachine(snapshot.sessions)?.members ?? []).map((member) => member.computerId).sort();
+
+/**
+ * The saved machines that are the person's cloud VMs, as Pane Cloud lists them: each VM's relay id
+ * mapped to the computer this desktop saved for it. Empty while signed out or before Pane Cloud answers.
+ */
+export function cloudMachineIds(): ReadonlySet<string> {
+  return new Set(manager ? machineIdsOf(manager.snapshot()) : []);
+}
 
 /**
  * Pane Cloud's channels. They run on this computer even while the window shows another one: the
@@ -43,12 +58,18 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
   commands: Pick<PaneCommandRegistry, 'invoke' | 'register'>;
   machines: Pick<MachineConnections, 'machineState' | 'run' | 'invokeOn'>;
   configManager: Pick<ConfigManager, 'getConfig' | 'updateConfigWith'>;
+  /** Sends the person's chosen secrets to a newly paired cloud VM (SharedCredentialSync, D-58). */
+  sendSecrets: (machineId: string) => Promise<void>;
+  /** Called when the saved machines that are the person's cloud VMs change (`cloudMachineIds`). */
+  onCloudMachinesChanged?: () => void;
   send: (channel: string, snapshot: PaneCloudSnapshot) => void;
 }): void {
   manager?.dispose();
   const { commands, machines, configManager } = deps;
   const cloud = new PaneCloudManager({
     serviceUrl: process.env.PANE_CLOUD_URL || DEFAULT_PANE_CLOUD_URL,
+    // This computer sends a new cloud Session its secrets (deps.sendSecrets), so the card says they come along.
+    sendsSecrets: true,
     tokenFile: path.join(getAppDirectory(), 'pane-cloud', 'session.json'),
     // Pane's own allowlist (http, https, mailto) as well as the manager's web-address check.
     openExternal: (url) => openExternalUrl(url),
@@ -59,6 +80,8 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
     computerFor: (relayId) => normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon).client.computers.find((computer) => computerRelayId(computer) === relayId)?.id ?? null,
     startSession: async (machineId, input) => {
       await waitUntilOnline(machines, machineId);
+      // Before the Session, so its first agent starts signed in.
+      await deps.sendSecrets(machineId);
       const { data } = await machines.run(machineId, { type: 'create-session', input });
       const reply = decodeBoundary(data, createdSchema);
       if (!reply.success || !reply.data) {
@@ -84,7 +107,14 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
         await machines.invokeOn(machineId, 'orchestration-sessions:update', [{ sessionId: session.id }, { archived }], SESSION_CALL_MS);
       }
     },
-    onChange: (snapshot) => deps.send('pane-cloud:changed', snapshot),
+    onChange: (snapshot) => {
+      deps.send('pane-cloud:changed', snapshot);
+      const ids = machineIdsOf(snapshot);
+      if (ids.join('\n') !== knownCloudMachines.join('\n')) {
+        knownCloudMachines = ids;
+        deps.onCloudMachinesChanged?.();
+      }
+    },
   });
   manager = cloud;
 
@@ -111,7 +141,33 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
   ipcMain.handle('pane-cloud:actions', async (_event, id: PaneCommandValue) => answer(() => cloud.actions(vmId(id))));
   ipcMain.handle('pane-cloud:create', async (_event, input: PaneCommandValue) =>
     answer(() => cloud.createSession(decodeBoundary(input, boundary.jsonObject))));
+
+  // "Choose what to send": this computer's secrets by name only, and the person's choice.
+  ipcMain.handle('pane-cloud:secrets', async () => answer(async () => {
+    const thisComputer = localHostLabel();
+    const store = paneSecretStore();
+    const secrets = store.list();
+    if (!secrets.some((secret) => secret.project === CLOUD_SIGN_IN_PROJECT && secret.name === GITHUB_SIGN_IN_ENV) && await readGithubToken()) {
+      secrets.push({ project: CLOUD_SIGN_IN_PROJECT, name: GITHUB_SIGN_IN_ENV, updatedAt: new Date().toISOString(), machine: thisComputer });
+    }
+    return describeCloudSecrets(secrets, store.cloudChoice(), thisComputer);
+  }));
+  // Saved with a time, so it reaches the person's other computers and every cloud VM, and wins there.
+  ipcMain.handle('pane-cloud:secrets:choose', async (_event, choice: PaneCommandValue) => answer(async () => {
+    await paneSecretStore().setCloudChoice(decodeBoundary(choice, secretChoiceSchema));
+  }));
+  // A token an agent's CLI made for machines that can't keep its own sign-in (`claude setup-token`), kept as a Pane secret.
+  ipcMain.handle('pane-cloud:secrets:token', async (_event, agentId: PaneCommandValue, token: PaneCommandValue) => answer(async () => {
+    const agent = CLOUD_TOKEN_AGENTS.find((candidate) => candidate.id === decodeBoundary(agentId, boundary.nonEmptyString));
+    if (!agent) throw new PaneError('ERR_CLOUD_TOKEN_AGENT', 'That agent has no sign-in token for cloud Sessions, so nothing was saved.', 'Update Pane, then try again.');
+    await paneSecretStore().set(CLOUD_SIGN_IN_PROJECT, agent.env, decodeBoundary(token, boundary.nonEmptyString).trim());
+  }));
 }
+
+const secretChoiceSchema: BoundarySchema<PaneCloudSecretChoice> = boundary.object({
+  excludedSecrets: boundary.array(boundary.nonEmptyString),
+  excludedMachines: boundary.array(boundary.nonEmptyString),
+});
 
 /** A call's IPC answer: its data, or what failed and the next step. */
 async function answer<T>(call: () => Promise<T>) {

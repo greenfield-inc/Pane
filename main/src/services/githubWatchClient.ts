@@ -31,6 +31,11 @@ interface Options {
 }
 
 /** One bounded request lane, per-host quota, and credentials shared by all PR watches. */
+/** The GitHub CLI's token for `host` on this computer; throws when gh is missing (ENOENT) or can't answer. */
+export async function githubCliToken(host = 'github.com'): Promise<string> {
+  return (await execFileAsync('gh', ['auth', 'token', '--hostname', host], { timeout: 10_000, maxBuffer: 65536 })).stdout.trim();
+}
+
 export class GithubWatchClient {
   private readonly credentials = new Map<string, { value: string; expires: number }>();
   private readonly waits = new Map<string, number>();
@@ -138,8 +143,7 @@ export class GithubWatchClient {
     let credential = this.credentials.get(host);
     if (!credential || credential.expires <= this.now()) {
       try {
-        const value = this.options.token ? await this.options.token(host)
-          : (await execFileAsync('gh', ['auth', 'token', '--hostname', host], { timeout: 10_000, maxBuffer: 65536 })).stdout.trim();
+        const value = this.options.token ? await this.options.token(host) : await githubCliToken(host);
         if (!value) throw new Error('empty credential');
         credential = { value, expires: this.now() + TOKEN_TTL_MS };
         this.credentials.set(host, credential);
