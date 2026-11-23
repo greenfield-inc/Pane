@@ -196,7 +196,7 @@ test('a cloud row shows its approvals count, as any Session row does', async ({ 
   await expect(row.getByTestId('session-approvals-count')).toHaveText('1');
 });
 
-test('on a cloud Session, this computer\'s Sessions keep their menu, and its Pane Chat stays its own', async ({ page }) => {
+test('on a cloud Session, this computer\'s Sessions keep their menu, and the list shows that machine\'s Pane Chat as any machine\'s would', async ({ page }) => {
   const remoteDaemon = {
     host: { config: { enabled: false, listenHost: '127.0.0.1', listenPort: 42137, pairingRequired: true, allowInsecureHttpOnLoopback: true }, clients: [] },
     client: {
@@ -235,8 +235,9 @@ test('on a cloud Session, this computer\'s Sessions keep their menu, and its Pan
   const local = list.getByRole('button', { name: 'Open Session Checkout redesign', exact: true });
   await expect(local).toBeVisible();
   await expect(list.getByRole('button', { name: 'Open Session T-7 Fix the footer', exact: true })).toHaveCount(0);
-  await expect(list.getByText('Onboarding', { exact: true })).toHaveCount(0);
-  await expect(list.getByRole('button', { name: 'Open Session Pane Chat', exact: true })).toBeVisible();
+  // The window's machine shows its own Pane Chat, as a paired machine's window does (D-88); this computer's stays in its own window.
+  await expect(list.getByText('Onboarding', { exact: true })).toBeVisible();
+  await expect(list.getByRole('button', { name: 'Open Session Pane Chat', exact: true })).toHaveCount(0);
 
   await local.click({ button: 'right' });
   await expect(page.getByRole('menuitem', { name: 'Rename…', exact: true })).toBeVisible();
@@ -245,4 +246,42 @@ test('on a cloud Session, this computer\'s Sessions keep their menu, and its Pan
     // SAFETY: installElectronApiMock defines this test-only API before navigation.
     window as MockWindow
   ).__paneTestElectronMock.getMachineRuns())).toContainEqual({ machineId: 'local', command: { type: 'archive', target: { kind: 'session', id: 'checkout' } } });
+});
+
+/** Opens Create Session from a project's page, on a Windows PC with one Mac online. */
+async function openCreateSessionForRepo(page: Page, projectFiles: string[], machines: Array<{ id: string; label: string; os?: string }>) {
+  await installSessionsFixture(page, [], [], { initialConfig: { appearanceMode: 'fixed', theme: 'dark' }, projectFiles });
+  await page.addInitScript((list) => {
+    // SAFETY: installElectronApiMock's init script, registered first, defines this test-only API.
+    const mock = (window as MockWindow).__paneTestElectronMock;
+    mock.setPaneCloud({});
+    mock.emitMachineEvent({ type: 'machines', machines: [
+      { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+      ...list.map((machine) => ({ id: machine.id, label: machine.label, kind: 'remote' as const, status: 'online' as const, offlineSince: null })),
+    ] });
+  }, machines);
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+  // Open the project's page, so the dialog reads that repo.
+  await page.getByRole('button', { name: 'Project actions for Pane fixtures', exact: true }).click();
+  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByTestId('new-orchestration-session').click();
+  const dialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+test('the Pane Cloud card always says iOS Simulator work needs a Mac', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 1100 });
+  const dialog = await openCreateSession(page);
+  await expect(dialog.getByTestId('where-it-runs-mac-work')).toHaveText('iOS Simulator work needs a Mac.');
+  await dialog.screenshot({ path: screenshotPath('frame-B-mac-line.png') });
+});
+
+test('journey 25: for a repo with an Xcode project with no Mac online, the Mac line links to the docs before anything is created', async ({ page }) => {
+  const dialog = await openCreateSessionForRepo(page, ['ios/App.xcodeproj'], []);
+  const placesList = dialog.getByTestId('where-it-runs-cloud');
+  await expect(placesList.getByRole('button', { name: 'Run it on a Mac', exact: true })).toBeVisible();
+  await expect(placesList).toContainText('This repo has an Xcode project, and none of your Macs is online.');
+  await placesList.screenshot({ path: screenshotPath('frame-B-xcode-no-mac.png') });
 });

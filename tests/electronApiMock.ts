@@ -205,6 +205,8 @@ export type ElectronApiMockOptions = {
   paneSecrets?: Partial<PaneSecretsOverview>;
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
+  /** Paths in every project, as `file:search` finds them. Absent: none. */
+  projectFiles?: string[];
   /** The window's connection at start: a saved machine it shows instead of this computer. Absent: local. */
   remoteConnection?: Partial<RemotePaneConnectionState>;
   /** machines:latency answers by machine, in ms, over the route its machine state names; `pending` never answers. Absent: null (no answer). */
@@ -892,6 +894,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           shells: mockOptions.platform === 'win32' ? clone(mockOptions.availableShells ?? []) : [],
           preferredShell: configState.preferredShell ?? 'auto',
         });
+      }
+      if (channel === 'file:search') {
+        // SAFETY: the renderer sends file:search a { pattern } request.
+        const pattern = String((args[0] as { pattern?: string }).pattern ?? '').toLowerCase();
+        const files = (mockOptions.projectFiles ?? []).filter((file) => file.toLowerCase().includes(pattern)).map((file) => ({ path: file, isDirectory: true, name: file.split('/').pop() ?? file }));
+        return Promise.resolve({ success: true, files });
       }
       if (channel === 'terminal:set-preferred-shell') {
         configState.preferredShell = String(args[0]);
