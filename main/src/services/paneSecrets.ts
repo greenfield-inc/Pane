@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { PaneError, reasonOf } from '../../../shared/paneError';
-import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
   paneSecretKey,
   paneSecretNameProblem,

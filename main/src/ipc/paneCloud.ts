@@ -39,7 +39,8 @@ const createdSchema = boundary.object({
 let manager: PaneCloudManager | null = null;
 let knownCloudMachines: string[] = [];
 
-const machineIdsOf = (snapshot: PaneCloudSnapshot) => snapshot.sessions.flatMap((session) => (session.machineId ? [session.machineId] : [])).sort();
+/** The saved computers in the "Pane Cloud" machine (D-90), sorted. */
+const machineIdsOf = (snapshot: PaneCloudSnapshot) => (paneCloudMachine(snapshot.sessions)?.members ?? []).map((member) => member.computerId).sort();
 
 /**
  * The saved machines that are the person's cloud VMs, as Pane Cloud lists them: each VM's relay id
