@@ -2,7 +2,7 @@ import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from
 import { Pin } from 'lucide-react';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { nextOrchestrationSessionName, type OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
-import type { PaneCloudCreateStep, PaneCloudSession, PaneCloudSnapshot } from '../../../shared/types/paneCloud';
+import { PANE_CLOUD_UNREACHABLE, type PaneCloudCreateStep, type PaneCloudSession, type PaneCloudSnapshot } from '../../../shared/types/paneCloud';
 import { LOCAL_MACHINE_ID, type MachineState } from '../../../shared/types/machineConnections';
 import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
@@ -57,6 +57,9 @@ function until(ready: () => boolean): Promise<void> {
     });
   });
 }
+
+/** The Pane Cloud waitlist; `from` tells it the person came from the app (D-102). */
+const PANE_CLOUD_WAITLIST_URL = 'https://runpane.com/cloud?from=pane-app';
 
 const ENVIRONMENT_BY_OS = { macOS: 'macos', Windows: 'windows', Linux: 'linux' } satisfies Record<MachineOs, ProjectEnvironment>;
 
@@ -121,11 +124,15 @@ function useXcodeProject(enabled: boolean): boolean {
 }
 
 function paneCloudGate({ signIn: account, usage, error }: PaneCloudSnapshot): PaneCloudGate | null {
-  if (account.state === 'signed-out') return { line: error?.message ?? 'Sign in to Pane Cloud to create Sessions there.', action: 'sign-in' };
+  // Pane Cloud is invite-only (D-102): someone not signed in sees the waitlist, and Sign in for an invite.
+  if (account.state === 'signed-out') {
+    if (error?.code === PANE_CLOUD_UNREACHABLE) return { line: "Pane can't reach Pane Cloud right now, so you can't sign in. Pane Cloud is invite-only for now.", actions: ['waitlist', 'sign-in'] };
+    return { line: error?.message ?? 'Pane Cloud is invite-only for now. Join the waitlist, or sign in if you have an invite.', actions: ['waitlist', 'sign-in'] };
+  }
   if (account.state === 'unavailable') return { line: error ? [error.message, error.next].filter(Boolean).join(' ') : 'Pane cannot reach Pane Cloud right now.' };
   if (account.state === 'pending') return { line: 'Finish signing in in your browser.', code: account.userCode };
-  if (account.access === 'waitlisted') return { line: "You're on the list. Pane Cloud is invite-only for now." };
-  if (account.signupState !== 'ready') return { line: 'Finish signing up to create cloud Sessions.', action: 'sign-up' };
+  if (account.access === 'waitlisted') return { line: "You're on the waitlist. Pane Cloud is invite-only for now; your invite arrives by email." };
+  if (account.signupState !== 'ready') return { line: 'Finish signing up to create cloud Sessions.', actions: ['sign-up'] };
   if (usage && usage.awakeNow >= usage.awakeLimit) return { line: `You have ${usage.awakeNow} of ${usage.awakeLimit} Sessions awake. Stop one to create another.` };
   return null;
 }
@@ -395,7 +402,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
           {offerPlaces && (
             <WhereItRuns value={place} onChange={pickPlace} current={places.current} others={places.others} cloudGate={cloudGate} sendsSecrets={cloud.sendsSecrets} turnsOnPhoneAccess={phoneAccessOff} disabled={isSubmitting}
               onMacWorkDocs={xcode && !macWork.macAvailable ? () => void window.electronAPI.openExternal(MAC_WORK_DOCS_URL) : undefined}
-              onCloudSignIn={() => void signInToCloud()} onCloudSignUp={() => { if (signupUrl) void window.electronAPI.openExternal(signupUrl); }} />
+              onCloudSignIn={() => void signInToCloud()} onCloudWaitlist={() => void window.electronAPI.openExternal(PANE_CLOUD_WAITLIST_URL)} onCloudSignUp={() => { if (signupUrl) void window.electronAPI.openExternal(signupUrl); }} />
           )}
           {distributions.length > 0 && place === 'here' && (
             <div className="space-y-2">
