@@ -55,6 +55,11 @@ describe('the Sessions list rows for other machines', () => {
     expect(names(cloudSessionRows({ cloud, activeId: 'cloud-1', lists, waitingCount: waiting }))).toContain('Hourly triage');
   });
 
+  it('leaves an archived cloud Session, which no computer here pairs with, to the Archived section', () => {
+    const rows = cloudSessionRows({ cloud: { sessions: [vm({ vmId: 'vm-9', name: 'Old spike', machineId: null, awake: false })], busy: [] }, activeId: 'local', lists, waitingCount: () => 0 });
+    expect(rows).toEqual([]);
+  });
+
   it('shows a cloud Session not read yet as one row, stopped when its machine is', () => {
     const rows = cloudSessionRows({ cloud: { sessions: [vm({ vmId: 'vm-2', name: 'Pricing page copy', machineId: 'cloud-2', awake: false })], busy: [] }, activeId: 'local', lists, waitingCount: () => 0 });
     expect(rows).toEqual([expect.objectContaining({ name: 'Pricing page copy', sessionId: null, stopped: true })]);

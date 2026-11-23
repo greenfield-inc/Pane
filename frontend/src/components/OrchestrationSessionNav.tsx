@@ -1,7 +1,7 @@
 import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Square, Terminal } from 'lucide-react';
-import { CloudSessionRows, stopCloudSession } from './CloudSessionRows';
+import { CloudSessionRows, archiveCloudSession, stopCloudSession } from './CloudSessionRows';
 import { useCloudSessionRows } from '../hooks/useCloudSessionRows';
 import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { usePaneCloudStore } from '../stores/paneCloudStore';
@@ -383,12 +383,17 @@ export function OrchestrationSessionNav({
     const { sessionId, sessionName } = sessionMenu;
     setSessionMenu(null);
     setActionError(null);
+    // On a cloud Session's own machine, archiving it unlinks the machine from every computer (D-94).
+    if (cloudHere && sessionId !== LEGACY_ORCHESTRATION_SESSION_ID) {
+      await archiveCloudSession(cloudHere.vmId, cloudHere.machineId);
+      return;
+    }
     try {
       await archiveOrchestrationSession(sessionId, sessionName);
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Failed to archive Session');
     }
-  }, [sessionMenu]);
+  }, [sessionMenu, cloudHere]);
 
   const undoArchive = useCallback(async () => {
     if (!archivedToast) return;

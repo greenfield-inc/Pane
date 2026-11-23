@@ -152,6 +152,9 @@ function CloudSessionMenu({ row, x, y, onClose, onDelete, onRename }: { row: Clo
             <span className="flex items-center gap-2"><Square className="h-4 w-4" />Stop</span>
           </PopoverButton>
         )}
+        <PopoverButton role="menuitem" onClick={() => { onClose(); void archiveCloudSession(vmId, row.machineId); }}>
+          <span className="flex items-center gap-2"><Archive className="h-4 w-4" />Archive Session</span>
+        </PopoverButton>
         <PopoverButton role="menuitem" variant="danger" onClick={onDelete}>
           <span className="flex items-center gap-2"><Trash2 className="h-4 w-4" />Delete…</span>
         </PopoverButton>
@@ -172,6 +175,19 @@ export async function stopCloudSession(vmId: string, machineId: string | null): 
     await usePaneCloudStore.getState().stop(vmId);
   } catch (error) {
     showActionError('Could not stop the cloud Session', error);
+  }
+}
+
+/**
+ * Archives a cloud Session (D-94): its Session is archived, its machine is unlinked from all of the
+ * person's computers at once and stops. It shows under Archived, where Restore pairs it again.
+ */
+export async function archiveCloudSession(vmId: string, machineId: string | null): Promise<void> {
+  try {
+    await leaveIfOn(machineId);
+    await usePaneCloudStore.getState().archive(vmId);
+  } catch (error) {
+    showActionError('Could not archive the cloud Session', error);
   }
 }
 
