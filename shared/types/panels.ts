@@ -157,6 +157,12 @@ export interface TerminalPanelState {
 
   // Auto-resume state (for graceful shutdown/restart)
   wasInterrupted?: boolean;          // Whether this terminal was active when app shutdown occurred
+  /**
+   * An agent launched in this tab and has not ended on purpose. Written with the launch state and
+   * cleared only by a deliberate end (the agent exits to its shell, the tab closes or pauses), so
+   * when Pane dies without a clean quit the next start still offers the tab for resume.
+   */
+  agentLive?: boolean;
   /** Set by Pause and cleared only by an explicit resume; while set, nothing starts this tab. Host-owned. */
   paused?: TerminalPausedMark;
   updateResumeHold?: string;         // Update operation that stopped the panel; released by explicit resume, or when the panel starts after that update ended.

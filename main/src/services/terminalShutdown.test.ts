@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
 import type { ToolPanel } from '../../../shared/types/panels';
-import { markTerminalPanelsInterrupted } from './terminalShutdown';
+import { markAgentsInterruptedForQuit, markTerminalPanelsInterrupted } from './terminalShutdown';
 
 function panel(id: string, sessionId: string, customState: JsonObject): ToolPanel {
   return {
@@ -68,5 +68,28 @@ describe('markTerminalPanelsInterrupted', () => {
     expect(interrupted).toEqual(new Map([['session-farm', ['farm']]]));
     expect(panels[0].state.customState).toMatchObject({ wasInterrupted: true });
     expect(panels[0].state.customState).not.toHaveProperty('customResume');
+  });
+});
+
+describe('markAgentsInterruptedForQuit', () => {
+  it('marks live agent tabs and their Panes, but not a tab whose agent already ended on purpose', async () => {
+    const panels = [
+      panel('live', 'pane-live', { agentType: 'claude', initialCommand: 'claude', agentLive: true }),
+      // Saved before Pane kept a live mark: treated as live, as quit always has.
+      panel('older', 'pane-older', { agentType: 'codex', initialCommand: 'codex' }),
+      panel('ended', 'pane-ended', { agentType: 'claude', initialCommand: 'claude', agentLive: false }),
+    ];
+    const getPanel = (id: string) => panels.find(candidate => candidate.id === id);
+    const updatePanel = vi.fn(async (id: string, updates: Partial<ToolPanel>) => {
+      const found = getPanel(id);
+      if (found && updates.state) found.state = updates.state;
+    });
+    const interruptedPanes: string[] = [];
+
+    await markAgentsInterruptedForQuit(panels.map(candidate => candidate.id), getPanel, updatePanel, paneId => interruptedPanes.push(paneId));
+
+    expect(interruptedPanes).toEqual(['pane-live', 'pane-older']);
+    expect(panels[0].state.customState).toMatchObject({ wasInterrupted: true });
+    expect(panels[2].state.customState).not.toHaveProperty('wasInterrupted');
   });
 });

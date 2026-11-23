@@ -162,7 +162,10 @@ carrying do not offer pi yet.
 `main/src/services/agents/agentResume.ts` → `resolveResumeId` maps the agent to the
 resume id shown in the resume dialog. `sessionManager.resumeInterruptedSessions` and
 the `index.ts` graceful-shutdown path are agent-generic once the classifier knows the
-binary.
+binary. So is crash recovery: every CLI launch saves `agentLive` with its launch
+state, a deliberate end (the agent or its shell exits on its own, Pause) clears it,
+and the next start turns a tab still marked live into an interrupted one, so a Pane
+that crashed or was killed is offered for resume like one that quit cleanly.
 
 ## 3. Status manifest
 

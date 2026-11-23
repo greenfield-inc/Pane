@@ -373,6 +373,8 @@ interface TerminalProcess {
   initialInputHeld?: boolean;
   /** When Pane wrote the panel's launch command to its shell. */
   launchCommandWrittenAt?: number;
+  /** A check whether this tab's live agent exited to its shell is running. */
+  agentExitCheckInFlight?: boolean;
   /** The command line Pane last wrote to launch the panel's program, after resume rewriting. */
   launchedCommand?: string;
   /** While no agent is identified: when the held starting message last had a reason to keep waiting. */
@@ -443,6 +445,10 @@ interface CliLaunchResolution {
 
 export class TerminalPanelManager extends EventEmitter {
   private terminals = new Map<string, TerminalProcess>();
+  /** Pane is quitting: agents its quit stops did not end on purpose, so they keep their live mark. */
+  private quitting = false;
+  /** Tabs whose process Pane stopped (Resources): their agent keeps its live mark until it launches again. */
+  private readonly stoppedByPane = new Set<string>();
   /** When a terminal last exited or closed, in ms since the epoch; 0 before any has. */
   private lastRetiredAt = 0;
   /** Panels that had a process in this run; their next spawn is a relaunch. */
@@ -562,6 +568,11 @@ export class TerminalPanelManager extends EventEmitter {
     }
     // Only a tab that holds a live token gets the flag: a relaunch in a shell spawned without one stays on stdio.
     if (direct) resolution.commandToRun = withPaneMcpConfig(panelId, state.agentType, resolution.commandToRun, shellType);
+    // Saved with the launch identity, so a Pane that dies from here on still offers this agent for resume.
+    if (resolution.isCliCommand) {
+      resolution.customState = { ...resolution.customState, agentLive: true };
+      this.stoppedByPane.delete(panelId);
+    }
     return resolution;
   }
 
@@ -2452,6 +2463,7 @@ export class TerminalPanelManager extends EventEmitter {
       } finally {
         if (!retired) terminal.screenEmulator?.dispose();
       }
+      this.endLiveAgent(terminal.panelId);
       void this.persistExitScreenText(terminal);
 
       // Notify frontend (include signal for crash detection)
@@ -2969,6 +2981,7 @@ export class TerminalPanelManager extends EventEmitter {
         if (!emulator) continue;
 
         this.endStaleProgramRecords(terminal);
+        this.endExitedAgent(terminal);
         // The pushed screen is at most ~50 ms old, well inside this poll's cadence.
         // The emulator only pushes a new object when the screen changed, so an
         // idle panel reuses its last detection instead of rescanning.
@@ -3063,6 +3076,35 @@ export class TerminalPanelManager extends EventEmitter {
     void this.isOwnShellInForeground(terminal).then((exited) => {
       terminal.programExitCheckAfter = exited ? 0 : Date.now() + PROGRAM_EXIT_RECHECK_MS;
       if (exited && this.terminals.get(terminal.panelId) === terminal && !terminal.destroying) emulator.dropProgramStatus('running');
+    });
+  }
+
+  /**
+   * A live agent whose launch command exited back to Pane's own shell ended on purpose: its tab's
+   * live mark goes, and comes back when an agent takes the foreground again. Windows, WSL and ptyHost terminals cannot name their foreground, so there the
+   * mark ends only with the shell or the tab.
+   */
+  private endExitedAgent(terminal: TerminalProcess): void {
+    if (this.quitting || this.stoppedByPane.has(terminal.panelId) || terminal.agentExitCheckInFlight || terminal.launchCommandWrittenAt === undefined) return;
+    if (Date.now() - terminal.launchCommandWrittenAt < LAUNCH_EXIT_GRACE_MS) return;
+    const name = this.readForegroundProcessName(terminal);
+    if (!name) return;
+    const panel = panelManager.getPanel(terminal.panelId);
+    if (!panel) return;
+    const customState = terminalCustomState(panel.state);
+    // The person started the agent again by hand in the same shell: it is live again.
+    if (customState.agentLive === false && !pausedMarkOf(panel) && (resolveAgentTypeFromProcessName(name) || isVersionedExecutableName(name))) {
+      panel.state.customState = { ...customState, agentLive: true };
+      void panelManager.updatePanel(terminal.panelId, { state: panel.state }).catch(error => {
+        console.warn(`[TerminalPanelManager] Could not restore the live-agent mark for panel ${terminal.panelId}:`, error);
+      });
+      return;
+    }
+    if (customState.agentLive !== true || !this.isInteractiveShellProcess(terminal, name)) return;
+    terminal.agentExitCheckInFlight = true;
+    void this.isOwnShellInForeground(terminal).then((exited) => {
+      terminal.agentExitCheckInFlight = false;
+      if (exited && this.terminals.get(terminal.panelId) === terminal && !terminal.destroying) this.endLiveAgent(terminal.panelId);
     });
   }
 
@@ -3291,6 +3333,7 @@ export class TerminalPanelManager extends EventEmitter {
       isCliReady: true,
       launchMode: 'wrapped',
       launchCommand: customState.launchCommand ?? customState.initialCommand,
+      agentLive: true,
     };
     void panelManager.updatePanel(terminal.panelId, { state: panel.state }).catch(error => {
       console.warn(`[TerminalPanelManager] Failed to persist detected ${agentType} for panel ${terminal.panelId}:`, error);
@@ -3609,6 +3652,30 @@ export class TerminalPanelManager extends EventEmitter {
       this.emit('pause-changed', { panelIds: paused, paneIds, paused: false });
     }
     return paused;
+  }
+
+  /** Called first when Pane quits: from here on an exiting agent or shell keeps its tab's live mark. */
+  prepareForQuit(): void {
+    this.quitting = true;
+  }
+
+  /** Resources is stopping these tabs' processes: their agents did not end on purpose. */
+  keepResumable(panelIds: readonly string[]): void {
+    for (const panelId of panelIds) this.stoppedByPane.add(panelId);
+  }
+
+  /**
+   * The agent in this tab ended on purpose (its shell or the agent exited on its own): it is no
+   * longer offered for resume if Pane dies later. An agent that Pane's own quit or Resources stopped keeps it.
+   */
+  private endLiveAgent(panelId: string): void {
+    if (this.quitting || this.stoppedByPane.has(panelId)) return;
+    const panel = panelManager.getPanel(panelId);
+    if (!panel || terminalCustomState(panel.state).agentLive !== true) return;
+    panel.state.customState = { ...terminalCustomState(panel.state), agentLive: false };
+    void panelManager.updatePanel(panelId, { state: panel.state }).catch(error => {
+      console.warn(`[TerminalPanelManager] Could not clear the live-agent mark for panel ${panelId}:`, error);
+    });
   }
 
   /**

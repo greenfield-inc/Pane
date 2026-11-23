@@ -979,6 +979,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     now: () => Date.now(),
     paneName: paneId => databaseService.getSession(paneId)?.name ?? paneId,
     stop: identities => stopProcessIdentities(identities),
+    keepResumable: panelIds => terminalPanelManager.keepResumable(panelIds),
     idlePanes: hours => autoPauser.idlePanes(hours),
     pauseIdle: (hours, paneIds) => autoPauser.pauseIdleNow(hours, paneIds),
     pinned: paneId => !!databaseService.getSession(paneId)?.is_favorite,
@@ -990,6 +991,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   services.otherApps = new OtherApps({
     platform: process.platform,
     selfPid: process.pid,
+    selfExecutable: process.execPath,
     now: () => Date.now(),
     read: readAppProcesses,
     paneProcesses: () => new Set(machineHealth.latestSnapshot()?.panes.flatMap(pane => pane.processes.map(proc => proc.pid)) ?? []),

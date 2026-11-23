@@ -131,7 +131,7 @@ import type { CliManagerFactory } from './services/cliManagerFactory';
 import { setupConsoleWrapper } from './utils/consoleWrapper';
 import * as fs from 'fs';
 import { terminalPanelManager } from './services/terminalPanelManager';
-import { markTerminalPanelsInterrupted } from './services/terminalShutdown';
+import { markAgentsInterruptedForQuit } from './services/terminalShutdown';
 import { panelManager } from './services/panelManager';
 import { worktreePoolManager } from './services/worktreePoolManager';
 import { removePaneFsmonitorConfig } from './services/gitPerformanceConfig';
@@ -1778,7 +1778,24 @@ if (launchRemoteSetup) {
     app.exit(1);
   }, 30_000);
 
+  // Agents this quit stops did not end on purpose. Mark them resumable before any step that can
+  // stall: the safety net above may cut the rest short.
+  terminalPanelManager.prepareForQuit();
+  const markAgentsInterrupted = async (phase: string) => {
+    const interruptedPanels = await markAgentsInterruptedForQuit(
+      terminalPanelManager.getAllPanelIds(),
+      panelId => panelManager.getPanel(panelId),
+      (panelId, updates) => panelManager.updatePanel(panelId, updates),
+      paneId => databaseService?.updateSession(paneId, { status: 'interrupted' }),
+    );
+    const panelCount = [...interruptedPanels.values()].reduce((sum, panelIds) => sum + panelIds.length, 0);
+    logToFile(`${phase}: marked ${panelCount} agent tab(s) in ${interruptedPanels.size} Pane(s) interrupted`);
+    console.log(`[Main] Graceful shutdown (${phase}): marked ${panelCount} agent tab(s) in ${interruptedPanels.size} Pane(s) interrupted`);
+  };
+
   try {
+    await markAgentsInterrupted('first step').catch(error => console.error('[Main] Could not mark agent tabs interrupted; continuing shutdown:', error));
+
     // Step tabs that Pane's quit stops are not steps finishing: no profile run moves on them.
     prepareProfileRunnerForQuit();
     if (paneDaemonHost?.paneDaemonServer) {
@@ -1815,39 +1832,11 @@ if (launchRemoteSetup) {
       logToFile('2s wait complete');
     }
 
-    // Phase 2: Save terminal states and mark CLI agent terminals as interrupted
+    // Phase 2: Save terminal states and refresh the interrupted marks made at the start of the quit
     logToFile('Phase 2: saving terminal states');
     console.log('[Main] Saving terminal states...');
     await terminalPanelManager.saveAllTerminalStates();
-
-    // Find all terminal panels running supported CLI agents and mark them as interrupted.
-    // Each panel is decoded independently so malformed legacy state cannot abort cleanup.
-    const allTerminalPanelIds = terminalPanelManager.getAllPanelIds();
-    const interruptedPanels = await markTerminalPanelsInterrupted(
-      allTerminalPanelIds,
-      panelId => panelManager.getPanel(panelId),
-      (panelId, updates) => panelManager.updatePanel(panelId, updates),
-    );
-    for (const panelIds of interruptedPanels.values()) {
-      for (const panelId of panelIds) {
-        logToFile(`Marked terminal panel ${panelId} as interrupted`);
-        console.log(`[Main] Marked terminal panel ${panelId} as interrupted`);
-      }
-    }
-
-    logToFile(`Found ${interruptedPanels.size} session(s) with interrupted terminals`);
-
-    console.log(`[Main] Graceful shutdown: found ${interruptedPanels.size} session(s) with interrupted terminals`);
-
-    // Phase 3: Mark sessions as interrupted in DB
-    for (const [sessionId, panelIds] of interruptedPanels) {
-      if (databaseService) {
-        databaseService.updateSession(sessionId, { status: 'interrupted' });
-        console.log(`[Main] Marked session ${sessionId} as interrupted (${panelIds.length} panel${panelIds.length > 1 ? 's' : ''})`);
-      }
-    }
-
-    console.log(`[Main] Graceful shutdown: marked ${interruptedPanels.size} session${interruptedPanels.size !== 1 ? 's' : ''} as interrupted`);
+    await markAgentsInterrupted('Phase 2');
 
     // After terminal states are saved, so slow devices never cost agents their resume: device_run
     // jobs stop, the devices Pane booted shut down (here and on linked Macs), then the device helpers

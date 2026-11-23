@@ -11,6 +11,8 @@ export interface MemoryReliefDeps {
   paneName: (paneId: string) => string;
   /** Asks each process to stop, then forces it, only while pid and start time still match; resolves with those still running. */
   stop: (identities: readonly ProcessIdentity[]) => Promise<ProcessIdentity[]>;
+  /** An agent stopped here did not end on purpose: these tabs stay resumable if Pane dies later. */
+  keepResumable?: (panelIds: readonly string[]) => void;
   /** Panes auto-pause would pause after `hours` idle, with its skips (focused, waiting on you, open card, update hold). */
   idlePanes: (hours: number) => string[];
   /** Pauses those of `paneIds` that are still idle for `hours`, with the same skips; resolves with the ones it paused. */
@@ -89,6 +91,8 @@ export class MemoryRelief {
 
   /** Stops the named processes, when the person asks, if they still run with the same start time. */
   async stopProcesses(processes: readonly HealthProcess[], source: CleanupSource): Promise<CleanupRun> {
+    const panelIds = [...new Set(processes.flatMap(proc => (proc.panelId ? [proc.panelId] : [])))];
+    if (panelIds.length > 0) this.deps.keepResumable?.(panelIds);
     const running = await this.deps.stop(processes.map(proc => ({ pid: proc.pid, started: proc.started })));
     const stillRunning = new Set(running.map(identity => `${identity.pid}:${identity.started}`));
     const entry = (proc: HealthProcess) => ({ id: `${proc.pid}:${proc.started}`, kind: 'leftover-process' as const, path: `${proc.name} (${this.deps.paneName(proc.sessionId)})`, sizeBytes: Math.round(proc.rssMB * 1024 * 1024) });

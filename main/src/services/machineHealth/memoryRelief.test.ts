@@ -78,3 +78,15 @@ describe('MemoryRelief', () => {
     expect(runs).toEqual([expect.objectContaining({ removed: [], skipped: [expect.objectContaining({ reason: 'It did not stop.' })] })]);
   });
 });
+
+describe('MemoryRelief.stopProcesses', () => {
+  it("keeps the resume mark of every tab whose process it stops, before stopping it", async () => {
+    const order: string[] = [];
+    const { relief: r } = relief({
+      keepResumable: panelIds => { order.push(`keep ${panelIds.join(',')}`); },
+      stop: async identities => { order.push(`stop ${identities.map(identity => identity.pid).join(',')}`); return []; },
+    });
+    await r.stopProcesses([{ ...proc(1, 'pane-a', false), panelId: 'tab-a' }, proc(2, 'pane-b', true)], 'ui');
+    expect(order).toEqual(['keep tab-a', 'stop 1,2']);
+  });
+});
