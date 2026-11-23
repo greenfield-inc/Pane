@@ -33,13 +33,14 @@ export function isOrchestrationInternalSessionId(sessionId: string): boolean {
 }
 
 /** Default name for a new Session: "New chat", then "New chat 2", "New chat 3", ... */
-export function nextOrchestrationSessionName(sessions: readonly { name: string }[]): string {
+export function nextOrchestrationSessionName(sessions: readonly { name: string }[], base = 'New chat'): string {
   const existingNames = new Set(sessions.map(session => session.name.trim().toLocaleLowerCase()));
-  if (!existingNames.has('new chat')) return 'New chat';
+  const normalizedBase = base.toLocaleLowerCase();
+  if (!existingNames.has(normalizedBase)) return base;
 
   let suffix = 2;
-  while (existingNames.has(`new chat ${suffix}`)) suffix += 1;
-  return `New chat ${suffix}`;
+  while (existingNames.has(`${normalizedBase} ${suffix}`)) suffix += 1;
+  return `${base} ${suffix}`;
 }
 
 export type OrchestrationSessionStatus = 'working' | 'blocked' | 'idle' | 'unknown' | 'unassociated';
@@ -124,6 +125,8 @@ export interface OrchestrationSessionRecord {
   /** Set while the Session's chat and every Pane in it are paused. Computed when read, never stored. */
   paused?: TerminalPausedMark;
   agent: PaneChatAgent;
+  /** When present, the Session opens a terminal. Empty opens an interactive shell. */
+  terminalCommand?: string;
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;
   customResume?: CustomCommandResume | null;
@@ -142,7 +145,7 @@ export interface OrchestrationSessionRecord {
   /** Hidden detached Pane session that owns the durable terminal conversation. */
   internalSessionId: string;
   /** Deterministic terminal panel for each supported agent. */
-  panelIds: Record<PaneChatAgent, string>;
+  panelIds: Record<PaneChatAgent, string> & { terminal?: string };
   goal: string;
   context: string;
   decisions: string[];
@@ -265,6 +268,7 @@ export interface OrchestrationSessionCreateInput {
   /** The to-do (T-n) this Session is created for; see `OrchestrationSessionRecord.todoNumber`. */
   todoNumber?: number;
   agent?: PaneChatAgent;
+  terminalCommand?: string;
   launchCommand?: string;
   customResume?: CustomCommandResume | null;
   /**
@@ -285,6 +289,10 @@ export interface OrchestrationSessionCreateInput {
   nextAction?: string;
   evidence?: OrchestrationLink[];
   outputs?: OrchestrationLink[];
+}
+
+export function orchestrationSessionPanelId(session: OrchestrationSessionRecord): string {
+  return (session.terminalCommand !== undefined ? session.panelIds.terminal : undefined) ?? session.panelIds[session.agent];
 }
 
 export interface OrchestrationSessionUpdateInput {

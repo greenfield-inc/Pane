@@ -103,6 +103,8 @@ export interface AppConfig {
   // Open IDE command for every project without its own, e.g. `idea .`
   defaultIdeCommand?: string;
   defaultSessionCommand?: string;
+  /** Empty opens a shell; null or omitted selects the saved chat agent. */
+  defaultSessionTerminalCommand?: string | null;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
   defaultSessionPinned?: boolean;
@@ -287,6 +289,8 @@ export interface UpdateConfigRequest {
   defaultOrchestratorAgent?: PaneChatAgent;
   defaultIdeCommand?: string;
   defaultSessionCommand?: string;
+  /** Empty opens a shell; null or omitted selects the saved chat agent. */
+  defaultSessionTerminalCommand?: string | null;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
   defaultSessionPinned?: boolean;

@@ -23,7 +23,7 @@ import { SessionBeside } from '../PaneChatView';
 import { ApprovalColumn, ApprovalChip, ApprovalKeyTip } from './ApprovalColumn';
 import { cardChip } from './approvalCard';
 import { approvalStatus } from '../../../../shared/approvalStatus';
-import { APPROVALS_SORTS, approvalIdsInListOrder, approvalRowLines, besideOf, connectedOf, groupApprovals, groupCountText, offlineRowText, readApprovalsSort, saveApprovalsSort, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
+import { APPROVALS_SORTS, approvalIdsInListOrder, approvalRowLines, besideOf, connectedOf, groupApprovals, groupCountText, offlineRowText, readApprovalsSort, saveApprovalsSort, sessionApprovalPanelId, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
 import { MachineContext } from './MachineContext';
 import { handleApprovalsEscape } from './approvalsNavigation';
 import { toggleApprovals } from './approvalsNavigation';
@@ -363,9 +363,8 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const orchestratorPanelId = useOrchestrationSessionStore((state) => {
     if (beside.kind !== 'session' || !selected) return undefined;
     // Autopilot's item about a Session asks from Autopilot's own tab, not one of the Session's.
-    if (!selected.relay && !selected.source.autopilot && selected.source.panelId) return selected.source.panelId;
     const record = state.sessions.find((session) => session.id === beside.sessionId);
-    return record ? record.panelIds[record.agent] : undefined;
+    return sessionApprovalPanelId(selected, record);
   });
   const sessionPaneId = beside.kind === 'session' ? beside.paneId : undefined;
   const shownItemId = selected?.id;

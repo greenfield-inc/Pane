@@ -463,6 +463,7 @@ const orchestrationSessionCreateSchema = boundary.object({
   name: boundary.nonEmptyString,
   isPinned: boundary.optional(boundary.boolean),
   agent: boundary.optional(configuredAgentSchema),
+  terminalCommand: boundary.optional(orchestrationTextSchema),
   launchCommand: boundary.optional(orchestrationTextSchema),
   resume: boundary.optional(boundary.nonEmptyString),
   profile: boundary.optional(orchestrationTextSchema),

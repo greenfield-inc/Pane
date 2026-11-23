@@ -33,6 +33,7 @@ const createSchema = boundary.object({
   nameFromFirstMessage: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
   agent: boundary.optional(configuredAgentSchema),
+  terminalCommand: boundary.optional(orchestrationTextSchema),
   launchCommand: boundary.optional(orchestrationTextSchema),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
   openingPrompt: boundary.optional(orchestrationTextSchema),

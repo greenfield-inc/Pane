@@ -38,7 +38,7 @@ export default function Welcome({ isOpen, onClose }: WelcomeProps) {
           Run multiple agentic coding sessions in parallel, each in its own git worktree.
         </p>
         <p className="text-xs text-text-muted mt-3">
-          Make sure your CLI tool (Claude Code, Codex, etc.) is installed and authenticated.
+          If you choose a chat agent, make sure its CLI is installed and signed in.
         </p>
       </div>
 

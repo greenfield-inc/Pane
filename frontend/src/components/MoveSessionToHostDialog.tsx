@@ -140,7 +140,9 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
   const sessionId = moving?.kind === 'machine' ? moving.session.id : hereId;
   const machineId = moving?.kind === 'machine' ? moving.machineId : null;
   const remoteDaemon = useConfigStore(state => state.config?.remoteDaemon);
-  const [mode, setMode] = useState<'move' | 'note'>('move');
+  const [requestedMode, setMode] = useState<'move' | 'note'>('move');
+  const canHandOff = session !== undefined && session.terminalCommand === undefined;
+  const mode = canHandOff ? requestedMode : 'move';
   const [targets, setTargets] = useState<MoveTargetList | null>(null);
   const [peers, setPeers] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -201,17 +203,17 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
     return () => { cancelled = true; };
   }, [isOpen, sessionId, machineId, hostKey, where]);
 
-  const shown = mode === 'move' && targets ? wholeMoveTargets(targets, peers) : targets;
+  const shown = mode === 'move' && targets ? wholeMoveTargets(targets, peers, canHandOff) : targets;
   // The list waits for the machines, and in a move also for whether one is already running.
   const machinesHold = useSkeletonHold(sessionHost.kind !== 'paired' && ((!targets && !error) || (mode === 'move' && !statusKnown)));
 
   // The first machine that can take the Session starts selected, in each mode.
   useEffect(() => {
-    const list = mode === 'move' && targets ? wholeMoveTargets(targets, peers) : targets;
+    const list = mode === 'move' && targets ? wholeMoveTargets(targets, peers, canHandOff) : targets;
     if (!list?.ok) return;
     if (selected && list.targets.some(target => target.name === selected && target.available)) return;
     setSelected(list.targets.find(target => target.available)?.name ?? null);
-  }, [targets, peers, mode, selected]);
+  }, [targets, peers, mode, selected, canHandOff]);
 
   // Choosing a machine runs its checks at once; nothing stops.
   useEffect(() => {
@@ -503,7 +505,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
     );
     footer = (
       <>
-        <Button type="button" variant="ghost" className="mr-auto" disabled={busy || fixing !== null || sessionHost.kind === 'paired'} onClick={() => { setMode('note'); setError(null); }}>Hand off with a note…</Button>
+        <Button type="button" variant="ghost" className="mr-auto" disabled={busy || fixing !== null || sessionHost.kind === 'paired' || !canHandOff} onClick={() => { setMode('note'); setError(null); }}>Hand off with a note…</Button>
         <Button type="button" variant="secondary" disabled={busy} onClick={close}>Cancel</Button>
         <Button type="button" disabled={busy || checking || !ready || !destination || !session} onClick={startMove}>{busy ? 'Starting…' : 'Move'}</Button>
       </>
@@ -514,7 +516,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
     <Modal isOpen={isOpen} onClose={close} ariaLabel="Move Session to another machine" closeOnOverlayClick={!running}>
       <form onSubmit={event => {
         event.preventDefault();
-        if (mode !== 'note' || !moving || !session || !destination || busy) return;
+        if (mode !== 'note' || !canHandOff || !moving || !session || !destination || busy) return;
         setBusy(true); setError(null);
         void submitToAgent(moving, session.panelIds[session.agent], moveToHostPrompt(session.agent, destination.name))
           .then(() => { onClose(); onMoved(session.id); })

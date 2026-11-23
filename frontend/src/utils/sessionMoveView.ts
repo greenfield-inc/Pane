@@ -34,10 +34,10 @@ export function formatMoveBytes(bytes: number): string {
  * The machines a whole-Session move can go to: the handoff list with teammates' machines
  * disabled (they get a note instead), plus loopback test machines the host offers.
  */
-export function wholeMoveTargets(list: MoveTargetList, peers: readonly string[]): MoveTargetList {
+export function wholeMoveTargets(list: MoveTargetList, peers: readonly string[], canHandOff = true): MoveTargetList {
   if (!list.ok) return list;
   const targets: MoveTarget[] = list.targets.map(target => (
-    target.owner ? { ...target, available: false, reason: TEAMMATE_REASON } : target
+    target.owner ? { ...target, available: false, reason: canHandOff ? TEAMMATE_REASON : "a teammate’s machine cannot receive this Session" } : target
   ));
   const known = new Set(targets.map(target => target.name.toLowerCase()));
   for (const peer of peers) {

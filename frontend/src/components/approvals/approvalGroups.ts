@@ -1,5 +1,5 @@
 import type { NotifyConnected, NotifyItem, NotifySession, NotifySource } from '../../../../shared/types/notify';
-import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
+import { orchestrationSessionPanelId, type OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
 import { decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
 import { countsAsWaiting } from '../../stores/notifyStore';
 import { approvalHolder, type ApprovalHolder } from '../../../../shared/approvalStatus';
@@ -261,6 +261,12 @@ export type Beside =
   | { kind: 'machine'; machineId: string; machine: string; connected: NotifyConnected }
   | { kind: 'autopilot' }
   | { kind: 'none'; name?: string };
+
+/** The asking panel wins when it belongs to the Session. Relays use the Session's primary tab. */
+export function sessionApprovalPanelId(item: NotifyItem, session?: OrchestrationSessionRecord): string | undefined {
+  if (!item.relay && !item.source.autopilot && item.source.panelId) return item.source.panelId;
+  return session && orchestrationSessionPanelId(session);
+}
 
 /**
  * An orchestrator's item (and an older machine's mirror of a worker's question) shows its Session,

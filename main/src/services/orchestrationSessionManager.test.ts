@@ -822,6 +822,24 @@ describe('OrchestrationSessionManager', () => {
     expect(wrapped.panel.state.customState).toMatchObject({ preserveLaunchCommand: true });
   });
 
+  it.each(['', 'echo terminal-only'])('restores a terminal Session with the saved command %j', async terminalCommand => {
+    const fixture = createFixture();
+    Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true, defaultSessionCommand: 'claude --model default' });
+    const created = await fixture.manager.create({ name: 'Terminal workspace', terminalCommand, nameFromFirstMessage: true });
+    expect(created.session.nameIsDefault).toBeUndefined();
+    expect(created.panel).toMatchObject({ id: created.session.panelIds.terminal, type: 'terminal' });
+    expect(created.panel.state.customState).toMatchObject({
+      initialCommand: terminalCommand || undefined,
+      orchestrationSessionId: created.session.id,
+    });
+    expect(created.panel.state.customState).not.toHaveProperty('agentType');
+    const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+    const reopened = await restarted.getView({ sessionId: created.session.id });
+    expect(reopened.session.terminalCommand).toBe(terminalCommand);
+    expect(reopened.panel.id).toBe(created.panel.id);
+  });
+
   it('uses the requested agent over a default command for another agent and rejects a conflicting command', async () => {
     const fixture = createFixture();
     Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: 'claude --model default' });

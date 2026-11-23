@@ -47,6 +47,7 @@ const loopSessionSchema = boundary.object({
     name: boundary.string,
     // Any Session agent, so one loops cannot run gets its own refusal instead of a decode error.
     agent: configuredAgentSchema,
+    terminalCommand: boundary.optional(boundary.string),
     launchCommand: boundary.optional(boundary.string),
     archived: boundary.optional(boundary.boolean),
     isPinned: boundary.optional(boundary.boolean),
@@ -205,6 +206,9 @@ async function readyLoopSession(commandRegistry: PaneCommandRegistry, loop: Stor
     const created = await createLoopSession(commandRegistry, loop.name, loop.agent);
     return { session: created, recovered: { kind: 'recreated', ...recoveredSession(created) } };
   }
+  if (session.terminalCommand !== undefined) {
+    throw new Error(`Session ${session.name} opens a terminal. The loop's prompt was not sent. Pick a Session with a chat agent.`);
+  }
   if (!session.archived) return { session };
   await commandRegistry.invoke('runpane:sessions:update', [{ selector: { sessionId: session.id }, input: { archived: false, isPinned: false, source: 'user' } }]);
   return { session: { ...session, archived: false }, recovered: { kind: 'restored', ...recoveredSession(session) } };
@@ -331,6 +335,9 @@ export async function prepareLoopSession(
   const session = target === LOOP_NEW_SESSION
     ? await createLoopSession(commandRegistry, loop.name, loop.agent)
     : await getLoopSession(commandRegistry, target);
+  if (session.terminalCommand !== undefined) {
+    throw new PaneError('ERR_LOOP_INVALID', `Session ${session.name} opens a terminal. Nothing was saved.`, 'Pick a Session with a chat agent, or a new Session for this loop.');
+  }
   if (session.archived) {
     throw new PaneError('ERR_LOOP_INVALID', `Session ${session.name} is archived. Nothing was saved.`, 'Restore the Session first, or pick another one.');
   }

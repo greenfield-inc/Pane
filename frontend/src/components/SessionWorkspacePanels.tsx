@@ -10,6 +10,7 @@ import { readPaneLayout, rememberPaneLayout } from '../utils/paneLayoutMemory';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { usePanelStore } from '../stores/panelStore';
 import { PanelContainer } from './panels/PanelContainer';
+import { OpenPlainTerminalContext } from './chatTab/openPlainTerminal';
 import { PanelTabStrip } from './panels/PanelTabStrip';
 import { SplitLayout } from './panels/SplitLayout';
 import type { PanelTabPresentationResolver } from '../types/panelComponents';
@@ -477,6 +478,10 @@ export function SessionWorkspacePanels({
     }
   }, [sessionId, applyLayout]);
 
+  const openPlainTerminal = useCallback(() => {
+    void addTool({ type: 'terminal', title: 'Terminal' });
+  }, [addTool]);
+
   const renderGroupAddTool = useCallback((groupId: string) => (
     <SessionAddToolMenu disabled={!loaded} onAdd={tool => { void addTool(tool, groupId); }} />
   ), [loaded, addTool]);
@@ -770,15 +775,17 @@ export function SessionWorkspacePanels({
                 {closeLabel => approval.render(closeLabel, approval.onClose, approvalFocused)}
               </SplitApprovalOverlay>
             )}
-            {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={focusWithin ? layout.focusedGroupId ?? primaryGroup(layout.root).id : ''}
-              hidden={hidden} onToggleMaximize={toggleMaximize}
-              isMainRepo={false} onSizesChange={resizeSplit} onPanelSelect={selectPanel} onPanelClose={handleClose}
-              onFocusGroup={focusGroup} alwaysShowClose keepPermanentTabsInGroups
-              renderAddTool={renderGroupAddTool}
-              isTabDragging={draggedPanelId !== null} draggedPanelId={draggedPanelId} dropZones={dropZones}
-              onDropZoneChange={handleDropZoneChange} onDropTab={handleDropTab} onDragStart={setDraggedPanelId}
-              onDragEnd={endTabDrag} onStripDrop={handleStripDrop}
-              renderPanelContent={renderPanelContent} getPanelTabPresentation={tabPresentation} />}
+            {layout && <OpenPlainTerminalContext.Provider value={openPlainTerminal}>
+              <SplitLayout layout={layout} panels={tabs} focusedGroupId={focusWithin ? layout.focusedGroupId ?? primaryGroup(layout.root).id : ''}
+                hidden={hidden} onToggleMaximize={toggleMaximize}
+                isMainRepo={false} onSizesChange={resizeSplit} onPanelSelect={selectPanel} onPanelClose={handleClose}
+                onFocusGroup={focusGroup} alwaysShowClose keepPermanentTabsInGroups
+                renderAddTool={renderGroupAddTool}
+                isTabDragging={draggedPanelId !== null} draggedPanelId={draggedPanelId} dropZones={dropZones}
+                onDropZoneChange={handleDropZoneChange} onDropTab={handleDropTab} onDragStart={setDraggedPanelId}
+                onDragEnd={endTabDrag} onStripDrop={handleStripDrop}
+                renderPanelContent={renderPanelContent} getPanelTabPresentation={tabPresentation} />
+            </OpenPlainTerminalContext.Provider>}
           </div>
           <div ref={terminalRegionRef} data-focus-region="terminal" data-region-open={showTerminal && Boolean(terminal)} className="flex flex-shrink-0 flex-col border-t border-border-primary" style={{ height: showTerminal ? '35%' : 32 }}>
             <button type="button" disabled={!loaded} aria-label={showTerminal ? 'Collapse terminal' : 'Expand terminal'}

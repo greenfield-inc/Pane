@@ -114,10 +114,18 @@ test('creates a loop that messages a Session', async ({ page }) => {
       goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [], associations: [], activity: [],
       revision: 1, createdAt: at, updatedAt: at,
     }];
+    const chat = sessions[0];
     Object.assign(window.electronAPI, {
       orchestrationSessions: {
-        list: async () => ({ success: true, data: { sessions, selectedSessionId: undefined } }),
-        select: async () => ({ success: true, data: { sessions, selectedSessionId: sessions[0].id } }),
+        list: async () => ({ success: true, data: {
+          sessions: [
+            chat,
+            { ...chat, id: 'shell', name: 'Plain shell', terminalCommand: '' },
+            { ...chat, id: 'custom', name: 'Custom terminal', terminalCommand: 'custom-cli' },
+          ],
+          selectedSessionId: undefined,
+        } }),
+        select: async () => ({ success: true, data: { sessions, selectedSessionId: chat.id } }),
       },
     });
   });
@@ -136,6 +144,8 @@ test('creates a loop that messages a Session', async ({ page }) => {
   await shoot(page, '10-drawer-session-new');
 
   await drawer.getByRole('combobox', { name: 'Session' }).click();
+  await expect(page.getByRole('option', { name: 'Plain shell', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: 'Custom terminal', exact: true })).toHaveCount(0);
   await page.getByRole('option', { name: 'Standups', exact: true }).click();
   await expect(drawer.getByRole('note')).toHaveText('This Session\'s agent will skip permission prompts for every message it gets, not only loop runs. If it is running now, runs wait until you restart it; Pane never restarts it for you.');
   // The existing Session keeps its own agent.

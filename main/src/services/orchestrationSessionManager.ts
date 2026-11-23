@@ -50,6 +50,7 @@ import {
   type OrchestrationSessionListResult,
   type OrchestrationSessionOverview,
   type OrchestrationSessionRecord,
+  orchestrationSessionPanelId,
   type OrchestrationSessionSelector,
   type OrchestrationSessionStatus,
   type OrchestrationSessionStoreData,
@@ -384,6 +385,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       const id = `${ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX}${randomUUID()}__`;
       const internalSessionId = `${id}terminal__`;
       const config = this.configManager.getConfig();
+      const terminalCommand = input.terminalCommand?.trim();
       const explicitAgent = input.agent ? normalizePaneChatAgent(input.agent) : undefined;
       // App defaults apply only when they fit the agent the caller asked for. OpenCode Sessions refuse
       // wrappers and custom resume, so such a default is left out instead of refusing the create.
@@ -393,9 +395,9 @@ export class OrchestrationSessionManager extends EventEmitter {
         return !explicitAgent || commandAgent === undefined || commandAgent === explicitAgent;
       };
       const defaultCommand = config.defaultSessionCommand ?? '';
-      const launchCommand = sourceState?.agentType ? sourceState.initialCommand!
+      const launchCommand = terminalCommand !== undefined ? '' : sourceState?.agentType ? sourceState.initialCommand!
         : input.launchCommand ?? (fits(defaultCommand) ? defaultCommand : '');
-      const customResume = sourcePanel ? sourceState?.customResume
+      const customResume = terminalCommand !== undefined ? undefined : sourcePanel ? sourceState?.customResume
         : input.customResume !== undefined ? input.customResume
           // A resumed native conversation is the agent's own; no custom resume command applies.
           : input.resume ? null
@@ -403,20 +405,23 @@ export class OrchestrationSessionManager extends EventEmitter {
       const defaultAgent = normalizePaneChatAgent(config.defaultOrchestratorAgent);
       const agent = explicitAgent ?? launchAgent(launchCommand.trim() || agentTerminalCommand(defaultAgent), customResume)
         ?? defaultAgent;
-      resolveSessionAgent(agent, launchCommand, customResume);
-      this.assertAgentSupported(agent, input.runtime);
+      if (terminalCommand === undefined) {
+        resolveSessionAgent(agent, launchCommand, customResume);
+        this.assertAgentSupported(agent, input.runtime);
+      }
       const record: OrchestrationSessionRecord = {
         // Omitted runtime is the native host; 'windows' is a legacy name for it.
         runtime: input.runtime === 'wsl' ? 'wsl' : undefined,
         wslDistribution: input.wslDistribution,
         id,
         name,
-        nameIsDefault: !sourcePanel && input.nameFromFirstMessage ? true : undefined,
+        nameIsDefault: terminalCommand === undefined && !sourcePanel && input.nameFromFirstMessage ? true : undefined,
         promotedFrom: sourcePanel && sourcePane ? { paneId: sourcePane.id, panelId: sourcePanel.id } : undefined,
         archived: false,
         isPinned: input.isPinned ?? false,
         todoNumber: input.todoNumber,
         agent,
+        terminalCommand,
         launchCommand,
         customResume,
         resume: input.resume,
@@ -441,6 +446,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         createdAt: now,
         updatedAt: now,
       };
+      if (terminalCommand !== undefined) record.panelIds.terminal = `__orchestration_panel_${id}_terminal`;
       const next: OrchestrationSessionStoreData = {
         ...data,
         selectedSessionId: record.id,
@@ -476,7 +482,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         // back only when no resource was published and the write is otherwise
         // an unrecoverable duplicate-name orphan.
         const ownerExists = this.sessionManager.getSession(record.internalSessionId) !== undefined;
-        const panelExists = panelManager.getPanel(record.panelIds[record.agent]) !== undefined;
+        const panelExists = panelManager.getPanel(orchestrationSessionPanelId(record)) !== undefined;
         if (!ownerExists && !panelExists && discardSessionScaffold(record)) {
           this.store.write(data);
           throw error;
@@ -499,20 +505,22 @@ export class OrchestrationSessionManager extends EventEmitter {
       }
       const name = input.name?.trim() ?? current.name;
       // A new agent drops the previous agent's command and resume settings.
-      const agentChanging = input.agent !== undefined && input.agent !== current.agent;
+      const terminalCommand = input.agent === undefined ? current.terminalCommand : undefined;
+      const agentChanging = input.agent !== undefined && (input.agent !== current.agent || current.terminalCommand !== undefined);
       const launchCommand = input.launchCommand ?? (agentChanging ? '' : current.launchCommand);
       const customResume = input.customResume !== undefined ? input.customResume : agentChanging ? undefined : current.customResume;
       // The resumed conversation belongs to the previous agent.
       const resume = agentChanging ? undefined : current.resume;
       const command = launchCommand?.trim() || agentTerminalCommand(input.agent ?? current.agent);
       const agent = input.agent ?? launchAgent(command, customResume) ?? current.agent;
-      resolveSessionAgent(agent, command, customResume);
+      if (terminalCommand === undefined) resolveSessionAgent(agent, command, customResume);
       const nextRecord: OrchestrationSessionRecord = {
         ...current,
         name,
         archived: input.archived ?? current.archived === true,
         isPinned: input.isPinned ?? current.isPinned === true,
         agent,
+        terminalCommand,
         launchCommand,
         customResume,
         resume,
@@ -538,8 +546,8 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (input.name !== undefined && data.sessions.some(session => session.id !== current.id && normalizeSessionName(session.name) === normalizeSessionName(nextRecord.name))) {
         throw new Error(`A Session named ${nextRecord.name} already exists`);
       }
-      this.assertAgentSupported(nextRecord.agent, nextRecord.runtime);
-      if (nextRecord.archived === true && nextRecord.agent !== current.agent) {
+      if (terminalCommand === undefined) this.assertAgentSupported(nextRecord.agent, nextRecord.runtime);
+      if (nextRecord.archived === true && agentChanging) {
         throw new Error(`Session ${current.name} is archived; restore it before changing its agent`);
       }
       const renamed = input.name !== undefined && nextRecord.name !== current.name;
@@ -604,7 +612,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
-      const record = data.sessions.find(session => session.panelIds[session.agent] === fromPanelId);
+      const record = data.sessions.find(session => session.terminalCommand === undefined && orchestrationSessionPanelId(session) === fromPanelId);
       if (!record) return { owner: 'chat' };
       const target = panelManager.getPanel(toPanelId);
       if (!target) return { owner: 'terminal', chatReleased: true, reason: `chat tab ${toPanelId} is missing` };
@@ -642,7 +650,7 @@ export class OrchestrationSessionManager extends EventEmitter {
 
   /** The launch a Session saved for its agent tab `panelId` (its template's when none was set); undefined for any other tab. */
   agentLaunchCommand(panelId: string): string | undefined {
-    const record = this.store.read().sessions.find(session => session.panelIds[session.agent] === panelId);
+    const record = this.store.read().sessions.find(session => session.terminalCommand === undefined && orchestrationSessionPanelId(session) === panelId);
     if (!record) return undefined;
     return record.launchCommand?.trim() || agentTerminalCommand(record.agent);
   }
@@ -1114,14 +1122,16 @@ export class OrchestrationSessionManager extends EventEmitter {
         if (record.archived !== true && !Object.values(record.panelIds).some(id => this.agentStarted(id))) {
           prepareSessionWorkspace(record.id, record.profile, record);
         }
+        const terminal = record.terminalCommand !== undefined && panelManager.getPanel(orchestrationSessionPanelId(record));
+        if (terminal) await this.refreshPanelLaunchState(terminal, record);
         for (const agent of PANE_CHAT_AGENTS) {
           const panel = panelManager.getPanel(record.panelIds[agent]);
           if (panel) {
             // Inactive agents retain their own command and transcript identity.
             // SAFETY: Session-owned terminal panels persist TerminalPanelState exclusively.
             const state = panel.state.customState as TerminalPanelState | undefined;
-            await this.refreshPanelLaunchState(panel, agent === record.agent ? record : {
-              ...record, agent, launchCommand: state?.initialCommand, customResume: state?.customResume,
+            await this.refreshPanelLaunchState(panel, agent === record.agent && record.terminalCommand === undefined ? record : {
+              ...record, terminalCommand: undefined, agent, launchCommand: state?.initialCommand, customResume: state?.customResume,
             });
           }
         }
@@ -1335,7 +1345,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       prepareSessionWorkspace(record.id, record.profile, record);
     }
     await this.finishPromotion(record);
-    const panelId = record.panelIds[record.agent];
+    const panelId = orchestrationSessionPanelId(record);
     const existing = panelManager.getPanel(panelId);
     // A chat-tab orchestrator keeps its conversation in its own state; there is no terminal launch to refresh.
     if (existing?.type === 'chat') return existing;
@@ -1361,7 +1371,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       id: panelId,
       sessionId: record.internalSessionId,
       type: 'terminal',
-      title: `${record.name} · ${configuredAgent(record.agent).title}`,
+      title: record.terminalCommand === undefined ? `${record.name} · ${configuredAgent(record.agent).title}` : sessionTerminalTitle(record),
       initialState: this.buildTerminalState(record),
       metadata: { permanent: true },
     });
@@ -1373,7 +1383,7 @@ export class OrchestrationSessionManager extends EventEmitter {
    * custom resume, or launch a wrapper keep their terminal (`sessionChatLaunch` says why).
    */
   private chatLaunch(record: OrchestrationSessionRecord) {
-    if (this.configManager.getConfig().chatTabsEnabled !== true) return undefined;
+    if (record.terminalCommand !== undefined || this.configManager.getConfig().chatTabsEnabled !== true) return undefined;
     return sessionChatLaunch({
       agent: record.agent, runtime: record.runtime, resume: record.resume, promoted: !!record.promotedFrom, customResume: record.customResume,
       launchCommand: record.launchCommand?.trim() || agentTerminalCommand(record.agent),
@@ -1383,7 +1393,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   /** Why a Session with chat tabs on runs in a terminal, for its overview. */
   private terminalReason(record: OrchestrationSessionRecord): string | undefined {
     const result = this.chatLaunch(record);
-    if (!result || panelManager.getPanel(record.panelIds[record.agent])?.type !== 'terminal') return undefined;
+    if (!result || panelManager.getPanel(orchestrationSessionPanelId(record))?.type !== 'terminal') return undefined;
     return 'terminalReason' in result ? result.terminalReason : 'It started in a terminal, because Chat tabs were off then or a Pane app that cannot show chat tabs created it, and a Session keeps the kind of tab it started with.';
   }
 
@@ -1406,6 +1416,11 @@ export class OrchestrationSessionManager extends EventEmitter {
     // TerminalPanelState custom state; resume ids and terminal buffers are
     // retained by spreading this previously validated state below.
     const current = panel.state.customState as TerminalPanelState | undefined;
+    if (record.terminalCommand !== undefined) {
+      const title = sessionTerminalTitle(record);
+      if (panel.title !== title) await panelManager.updatePanel(panel.id, { title });
+      return;
+    }
     // Validate saved OpenCode metadata before record overlays can erase an
     // incompatible wrapper/resume setting or reset the conversation selector.
     if (record.agent === 'opencode' || current?.agentType === 'opencode'
@@ -1468,6 +1483,15 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   private buildTerminalState(record: OrchestrationSessionRecord): TerminalPanelState {
+    if (record.terminalCommand !== undefined) {
+      return {
+        initialCommand: record.terminalCommand || undefined,
+        preserveLaunchCommand: Boolean(record.terminalCommand),
+        orchestrationSessionId: record.id,
+        orchestrationWorkspace: sessionRuntimePath(sessionWorkspacePath(record.id), record),
+        orchestrationProfile: record.profile,
+      };
+    }
     const command = record.launchCommand?.trim() || agentTerminalCommand(record.agent);
     const initialCommand = record.launchCommand?.trim()
       || (record.runtime === 'wsl' ? command : this.skillCacheManager?.launchCommand(record.agent)) || command;
@@ -1520,7 +1544,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     }
     if (record.id !== LEGACY_ORCHESTRATION_SESSION_ID) return undefined;
     // SAFETY: Session-owned terminal panels persist TerminalPanelState as their custom state.
-    const current = panelManager.getPanel(record.panelIds[record.agent])?.state.customState as TerminalPanelState | undefined;
+    const current = panelManager.getPanel(orchestrationSessionPanelId(record))?.state.customState as TerminalPanelState | undefined;
     return paneChatFirstPrompt(record.agent, current, this.skillCacheManager?.paneChatSkillsRoot);
   }
 
@@ -1745,8 +1769,15 @@ function openCodeSessionLaunchError(cause: unknown): PaneError {
   );
 }
 
+function sessionTerminalTitle(record: OrchestrationSessionRecord): string {
+  return `${record.name} · Terminal`;
+}
+
 function validateCreateInput(input: OrchestrationSessionCreateInput): void {
   if (!input.name || input.name.trim().length === 0) throw new Error('Session name is required');
+  if (input.terminalCommand !== undefined && (input.agent || input.launchCommand || input.resume || input.customResume || input.openingPrompt)) {
+    throw new PaneError('ERR_SESSION_TERMINAL_LAUNCH', 'The Session was not created because terminal and agent launch settings were combined.', 'Choose a terminal command or an agent.');
+  }
   if (input.customResume) validateCustomCommandResume(input.customResume);
   if (input.todoNumber !== undefined && !(Number.isInteger(input.todoNumber) && input.todoNumber > 0)) {
     throw new PaneError('ERR_SESSION_TODO_NUMBER', `A Session's to-do number must be a positive whole number, not ${input.todoNumber}; the Session was not created.`, 'Pass the to-do\'s number (12 for T-12), or leave it out.');

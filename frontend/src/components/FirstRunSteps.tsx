@@ -1,5 +1,7 @@
-import { ExternalLink } from 'lucide-react';
+import { useState } from 'react';
+import { ExternalLink, Terminal } from 'lucide-react';
 import { Button } from './ui/Button';
+import { Input } from './ui/Input';
 import { getCliBrandIcon } from './ui/brandIconRegistry';
 import { AGENT_LAUNCH_PRESETS } from '../../../shared/constants/agentLaunchPresets';
 import { CONFIGURED_AGENT_IDS, configuredAgent } from '../../../shared/agents';
@@ -28,14 +30,19 @@ interface AgentStepProps {
   agents: FirstRunAgent[] | null;
   disabled: boolean;
   onPick: (agent: PaneChatAgent) => void;
+  onPickTerminal: (command: string) => void;
 }
 
 /** Step 1: one row per agent this platform supports; an agent whose CLI is missing links to its install page. */
-export function AgentStep({ agents, disabled, onPick }: AgentStepProps) {
+const launchChoiceClass = 'flex h-10 w-full items-center gap-2.5 rounded-lg border border-border-secondary bg-surface-secondary px-3 text-left text-sm font-medium text-text-primary transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive disabled:opacity-50';
+
+export function AgentStep({ agents, disabled, onPick, onPickTerminal }: AgentStepProps) {
+  const [command, setCommand] = useState('');
   return (
     <div className="space-y-3">
+      <h2 className="text-label font-medium text-text-primary">Chat</h2>
       <SkeletonSwap loading={agents === null} skeleton={
-        <div role="group" aria-label="Agents" aria-busy="true" className="min-h-[132px]">
+        <div role="group" aria-label="Chat" aria-busy="true" className="min-h-[132px]">
           <Skeleton className="space-y-1.5">
             {LOADING_ROWS.map(agent => (
               <div key={agent.id} className="flex h-10 items-center gap-2.5 rounded-lg border border-border-secondary bg-surface-secondary px-3 text-sm font-medium leading-none">
@@ -46,7 +53,7 @@ export function AgentStep({ agents, disabled, onPick }: AgentStepProps) {
           </Skeleton>
         </div>
       }>
-        <div role="group" aria-label="Agents" className="min-h-[132px] space-y-1.5">
+        <div role="group" aria-label="Chat" className="min-h-[132px] space-y-1.5">
           {agents?.map(agent => {
             const preset = AGENT_LAUNCH_PRESETS.find(candidate => candidate.id === agent.id);
             const title = preset?.title ?? agent.id;
@@ -56,7 +63,7 @@ export function AgentStep({ agents, disabled, onPick }: AgentStepProps) {
                 type="button"
                 disabled={disabled}
                 onClick={() => onPick(agent.id)}
-                className="flex h-10 w-full items-center gap-2.5 rounded-lg border border-border-secondary bg-surface-secondary px-3 text-left text-sm font-medium text-text-primary transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive disabled:cursor-default disabled:opacity-50"
+                className={launchChoiceClass}
               >
                 {getCliBrandIcon(preset?.iconKey ?? agent.id, 'h-4 w-4 flex-shrink-0')}
                 {title}
@@ -79,7 +86,24 @@ export function AgentStep({ agents, disabled, onPick }: AgentStepProps) {
           })}
         </div>
       </SkeletonSwap>
-      <p className="text-sm text-text-secondary">Pane runs it for you, with its permission prompts off. You can change it later in Settings.</p>
+      <p className="text-sm text-text-secondary">Pane runs chat agents with permission prompts off.</p>
+      <div role="group" aria-label="Terminal" className="space-y-2">
+        <h2 className="text-label font-medium text-text-primary">Terminal</h2>
+        <button type="button" disabled={disabled} onClick={() => onPickTerminal('')} className={launchChoiceClass}>
+          <Terminal className="h-4 w-4" aria-hidden="true" />
+          Use a plain terminal
+        </button>
+        <details className="space-y-2">
+          <summary className="cursor-pointer text-sm text-text-primary">Add a custom CLI command…</summary>
+          <form className="space-y-2" onSubmit={event => {
+            event.preventDefault();
+            if (!disabled && command.trim()) onPickTerminal(command.trim());
+          }}>
+            <Input label="Command to run when a Session starts" fullWidth value={command} disabled={disabled} onChange={event => setCommand(event.target.value)} />
+            <Button type="submit" disabled={disabled || !command.trim()}>Use this command</Button>
+          </form>
+        </details>
+      </div>
     </div>
   );
 }

@@ -112,6 +112,14 @@ describe('ConfigManager appearance persistence', () => {
     expect(JSON.parse(await fs.readFile(configPath, 'utf8')).defaultOrchestratorAgent).toBe('opencode');
   });
 
+  it.each(['', 'echo custom tool', null])('persists the new Session terminal default %j alongside the chat default', async terminalCommand => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    await manager.updateConfig({ defaultOrchestratorAgent: 'opencode', defaultSessionTerminalCommand: terminalCommand });
+    await manager.reloadFromDisk();
+    expect(manager.getConfig()).toMatchObject({ defaultOrchestratorAgent: 'opencode', defaultSessionTerminalCommand: terminalCommand });
+  });
+
   it('ships agent-neutral terminal shortcuts and keeps awake only while sessions are active', async () => {
     const manager = new ConfigManager();
     await manager.initialize();

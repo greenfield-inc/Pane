@@ -5,6 +5,7 @@ import type { FirstRunAgent, FoundRepo, HostRepos, WslRepos } from '../shared/ty
 import type { ImportSession, SessionImportScan } from '../shared/types/sessionImport';
 import type { OrchestrationSessionCreateInput, OrchestrationSessionSelector } from '../shared/types/orchestrationSession';
 import { gotoApp, installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
+import { sessionFixture } from './orchestrationSessionsFixture';
 
 // The renderer's Content-Security-Policy only lets analytics reach the default host.
 const POSTHOG_HOST = 'https://runpane.com/api/c';
@@ -133,13 +134,13 @@ async function openFirstRun(page: Page, finder: FinderSetup, options: ElectronAp
   await page.locator('#pane-launch-outline').waitFor({ state: 'detached' });
   if (finder.done) return page.getByRole('heading', { name: 'Get Started', exact: true });
   if (finder.atFirstStep) {
-    const first = page.getByRole('dialog', { name: 'Which agent do you use?' });
+    const first = page.getByRole('dialog', { name: 'How would you like to start new Sessions?' });
     await expect(first).toBeVisible();
     return first;
   }
   if (finder.gitInstalled !== false) {
     // Nothing is found by default, so picking an agent goes straight to "Open your project".
-    await page.getByRole('dialog', { name: 'Which agent do you use?' }).getByRole('button', { name: 'Claude Code' }).click();
+    await page.getByRole('dialog', { name: 'How would you like to start new Sessions?' }).getByRole('button', { name: 'Claude Code' }).click();
   }
   const dialog = page.getByRole('dialog', { name: 'Open your project' });
   await expect(dialog).toBeVisible();
@@ -244,7 +245,7 @@ test('step 1 lists the agents this computer supports and links a missing one to 
   await expect(dialog.getByRole('button', { name: 'Codex' })).toHaveCount(0);
   await expect(dialog.getByText('Not found on this computer')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Install' })).toBeVisible();
-  await expect(dialog.getByText('Pane runs it for you, with its permission prompts off. You can change it later in Settings.')).toBeVisible();
+  await expect(dialog.getByText('Pane runs chat agents with permission prompts off.')).toBeVisible();
 });
 
 test('step 2 counts the sessions from the last 7 days, and Yes opens the Onboarding Session (J1)', async ({ page }) => {
@@ -315,7 +316,7 @@ test('without Git, only the Git Required message shows and step 1 never appears 
 
   await expect(dialog.getByText('Git Required')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Install Git' })).toBeVisible();
-  await expect(page.getByRole('dialog', { name: 'Which agent do you use?' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'How would you like to start new Sessions?' })).toHaveCount(0);
 });
 
 test('loading, empty and three results share one dialog height', async ({ page }) => {
@@ -479,7 +480,7 @@ test("Home's \"Start a Session\" reopens the first-run screen, and Yes asks for 
   });
   const reopen = async (agent: string) => {
     await page.getByRole('button', { name: 'Start a Session', exact: true }).click();
-    await page.getByRole('dialog', { name: 'Which agent do you use?' }).getByRole('button', { name: agent }).click();
+    await page.getByRole('dialog', { name: 'How would you like to start new Sessions?' }).getByRole('button', { name: agent }).click();
     return page.getByRole('dialog', { name: 'Bring your 4 sessions into Pane?' });
   };
   // SAFETY: the evaluate above installed __homeFirstRun.
@@ -506,4 +507,46 @@ test("Home's \"Start a Session\" reopens the first-run screen, and Yes asks for 
   // The pick is only for the new Session, and onboarding's saved answer stays as it was.
   expect(agentChanges).toEqual([]);
   expect(await preferences(page)).not.toHaveProperty('onboarding_handoff');
+});
+
+test('terminal onboarding retries a saved Session after a partial failure and ignores repeated Skip', async ({ page }) => {
+  const first = await openFirstRun(page, { atFirstStep: true });
+  await page.evaluate(fixture => {
+    const requests: OrchestrationSessionCreateInput[] = [];
+    const opened: string[] = [];
+    let release: (() => void) | undefined;
+    const saved = { ...fixture, terminalCommand: '', panelIds: { ...fixture.panelIds, terminal: 'shell' } };
+    const list = () => ({ success: true, data: { sessions: requests.length ? [saved] : [] } });
+    Object.assign(window, { terminalRetry: { requests, opened, release: () => release?.() } });
+    Object.assign(window.electronAPI, {
+      orchestrationSessions: {
+        list: async () => list(),
+        create: async (request: OrchestrationSessionCreateInput) => {
+          requests.push(request);
+          await new Promise<void>(resolve => { release = resolve; });
+          return { success: false, error: 'Session was saved but could not be opened' };
+        },
+        get: async (selector: OrchestrationSessionSelector) => {
+          if (selector.sessionId) opened.push(selector.sessionId);
+          return { success: true };
+        },
+        select: async () => list(),
+      },
+    });
+  }, sessionFixture('terminal-saved', 'Terminal', '', '', new Date(0).toISOString()));
+  await first.getByRole('button', { name: 'Use a plain terminal' }).click();
+  const project = page.getByRole('dialog', { name: 'Open your project' });
+  const skip = project.getByRole('button', { name: 'Skip', exact: true });
+  await skip.evaluate(button => { button.click(); button.click(); });
+  await expect(skip).toBeDisabled();
+  // SAFETY: the mock above installs this test control.
+  const calls = () => page.evaluate(() => (window as Window & { terminalRetry: { requests: OrchestrationSessionCreateInput[]; opened: string[] } }).terminalRetry);
+  await expect.poll(async () => (await calls()).requests.length).toBe(1);
+  // SAFETY: the same test control releases the in-flight response after the simulated save.
+  await page.evaluate(() => (window as Window & { terminalRetry: { release: () => void } }).terminalRetry.release());
+  await expect(project.getByRole('alert')).toContainText('Session was saved but could not be opened');
+  await skip.click();
+  await expect(page.getByRole('dialog', { name: 'Take your agents with you' })).toBeVisible();
+  expect((await calls()).requests).toEqual([{ name: 'Terminal', terminalCommand: '' }]);
+  expect((await calls()).opened).toContain('terminal-saved');
 });

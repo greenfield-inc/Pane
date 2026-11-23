@@ -188,7 +188,7 @@ machine-readable output. The same commands are MCP tools: `loops_list`,
 
 A Session loop targets a Session instead of a project. In the app, choose
 **Runs in: Session**, then pick **New Session for this loop** (named after the
-loop) or an existing Session. From the CLI, pass `--session` instead of `--repo`,
+loop) or an existing Session with a supported agent. From the CLI, pass `--session` instead of `--repo`,
 with a Session id, its name, or `new`:
 
 ```bash

@@ -555,3 +555,12 @@ test('Hand off with a note… keeps the agent handoff, teammates’ machines inc
   expect(submitted[0].panelId).toBe('__orchestration_panel_alpha_claude');
   expect(submitted[0].input).toContain('runpane handoff "claude on studio-b"');
 });
+
+test('terminal Sessions can move without offering an agent handoff', async ({ page }) => {
+  await openSidebar(page, 'light', [sessionRecord('alpha', 'Terminal workspace', { terminalCommand: '' })]);
+  await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: /Move to machine/ }).click();
+  const dialog = dialogOf(page);
+  await expect(dialog.getByRole('button', { name: /Hand off with a note/ })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Move', exact: true })).toBeEnabled();
+});

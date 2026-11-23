@@ -11,10 +11,11 @@ import { formatTimeAgo } from '../utils/timestampUtils';
 import { cn } from '../utils/cn';
 import type { FirstRunAgent, FoundRepo, HostRepos, WslRepos } from '../../../shared/types/onboarding';
 import { FIRST_RUN_MIGRATE_SESSION_OPENING, ONBOARDING_HANDOFF_PREFERENCE, firstRunMigratePrompt, type OnboardingHandoff, type PaneChatAgent } from '../../../shared/types/paneChat';
-import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestrationSession';
+import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
 import type { ImportSession } from '../../../shared/types/sessionImport';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useConfigStore } from '../stores/configStore';
 import { AgentStep, PhoneStepBody, SessionsStepBody, SessionsStepFooter } from './FirstRunSteps';
 import { PairPhoneDialog } from './PairPhoneDialog';
 import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from './ui/Skeleton';
@@ -351,6 +352,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   const [step, setStep] = useState<FirstRunStep>('agent');
   const [agents, setAgents] = useState<FirstRunAgent[] | null>(null);
   const [isPicking, setIsPicking] = useState(false);
+  const terminalChoice = useRef<string | undefined>(undefined);
   const [pickedAgent, setPickedAgent] = useState<PaneChatAgent | null>(null);
   // null while the scan runs.
   const [bringIn, setBringIn] = useState<ImportSession[] | null>(null);
@@ -367,6 +369,8 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   const [isOpening, setIsOpening] = useState(false);
   // Set once the dialog is done, so a sample setup that outlives a Skip doesn't navigate.
   const closedRef = useRef(false);
+  const handoffPending = useRef<symbol | undefined>(undefined);
+  const terminalSessionName = useRef<string | undefined>(undefined);
   const titleRef = useRef<HTMLHeadingElement>(null);
   // Repos already added by an Open that partly failed, keyed by path, so the next Open still counts them.
   const openedRef = useRef(new Map<string, { repo: FoundRepo; projectId: number }>());
@@ -376,12 +380,15 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   useEffect(() => {
     if (!isOpen) return;
     closedRef.current = false;
+    handoffPending.current = undefined;
+    terminalSessionName.current = undefined;
     openedRef.current.clear();
     let cancelled = false;
     // Each opening starts fresh: a reopen from Home follows an earlier hand-off in the same run.
     setStep('agent');
     setIsPicking(false);
     setPickedAgent(null);
+    terminalChoice.current = undefined;
     setBringIn(null);
     setIsHandingOff(false);
     setError(null);
@@ -447,7 +454,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   const isLoading = host === null || awaitingWsl;
   const nothingFound = !isLoading && allRepos.length === 0;
   const gitMissing = env !== null && !env.gitInstalled;
-  const isBusy = isOpening || sample.status === 'running';
+  const isBusy = isOpening || isHandingOff || sample.status === 'running';
 
   /**
    * Saves the answer, then completes onboarding and opens the Onboarding
@@ -455,7 +462,34 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
    * the Session would get no task, so a failed save keeps this screen open to
    * try again. Returns whether it handed off.
    */
-  const handOff = async (handoff: OnboardingHandoff): Promise<boolean> => {
+  const openChosenSession = async (handoff: OnboardingHandoff): Promise<boolean> => {
+    const terminalCommand = terminalChoice.current;
+    if (terminalCommand !== undefined) {
+      try {
+        const store = useOrchestrationSessionStore.getState();
+        await store.refresh({ throwOnError: true });
+        const { sessions } = useOrchestrationSessionStore.getState();
+        const saved = sessions.find(session => session.name === terminalSessionName.current && session.terminalCommand === terminalCommand);
+        if (saved) {
+          const selector = { sessionId: saved.id };
+          const opened = await API.orchestrationSessions.get(selector);
+          if (!opened.success) throw new Error(opened.error);
+          await store.select(selector);
+        } else {
+          const name = nextOrchestrationSessionName(sessions, 'Terminal');
+          terminalSessionName.current = name;
+          await store.create({ name, terminalCommand });
+        }
+      } catch (cause) {
+        setError(`Couldn't open the Terminal Session: ${reasonText(cause instanceof Error ? cause.message : undefined, 'Pane could not create it')}. Try again.`);
+        return false;
+      }
+      closedRef.current = true;
+      if (!fromHome) await markOnboardingComplete();
+      void useSessionStore.getState().setActiveSession(null);
+      navigateToPaneChat();
+      return true;
+    }
     if (fromHome) {
       // Reopened from Home: onboarding is already done and its answer stays as it was.
       if (handoff === 'migrate') return startMigrateSession();
@@ -509,6 +543,21 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
     setStep('phone');
   };
 
+  const handOff = async (handoff: OnboardingHandoff): Promise<boolean> => {
+    if (closedRef.current || handoffPending.current) return false;
+    const attempt = Symbol('onboarding handoff');
+    handoffPending.current = attempt;
+    setIsHandingOff(true);
+    try {
+      return await openChosenSession(handoff);
+    } finally {
+      if (handoffPending.current === attempt) {
+        handoffPending.current = undefined;
+        setIsHandingOff(false);
+      }
+    }
+  };
+
   const complete = async (properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }): Promise<boolean> => {
     if (!(await handOff(properties.entry === 'migrate_sessions' ? 'migrate' : 'project'))) return false;
     track('onboarding_completed', properties);
@@ -519,6 +568,20 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   const openProject = async (_projectId: number, properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }): Promise<boolean> => {
     window.dispatchEvent(new Event('project-changed'));
     return complete(properties);
+  };
+
+  const pickTerminal = async (command: string) => {
+    setIsPicking(true);
+    setError(null);
+    try {
+      await useConfigStore.getState().updateConfig({ defaultSessionTerminalCommand: command });
+      terminalChoice.current = command;
+      setStep('project');
+    } catch (cause) {
+      setError(`Couldn't save your terminal choice: ${reasonText(cause instanceof Error ? cause.message : undefined, 'the save failed')}. Try again.`);
+    } finally {
+      setIsPicking(false);
+    }
   };
 
   const pickAgent = async (agent: PaneChatAgent) => {
@@ -534,6 +597,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
           const switched = await API.orchestrationSessions.setAgent({ sessionId: LEGACY_ORCHESTRATION_SESSION_ID }, agent);
           if (!switched.success) throw new Error(switched.error);
         }
+        await useConfigStore.getState().updateConfig({ defaultSessionTerminalCommand: null });
       } catch (cause) {
         setError(`Couldn't switch to that agent: ${reasonText(cause instanceof Error ? cause.message : undefined, 'Pane could not save it')}. Pick it again, or change it later in Settings.`);
         setIsPicking(false);
@@ -555,9 +619,8 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
 
   const bringSessionsIn = async () => {
     if (!bringIn) return;
-    setIsHandingOff(true);
     setError(null);
-    if (!(await complete({ entry: 'migrate_sessions', wsl: false, session_count: bringIn.length }))) setIsHandingOff(false);
+    await complete({ entry: 'migrate_sessions', wsl: false, session_count: bringIn.length });
   };
 
   const declineSessions = () => {
@@ -673,6 +736,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   };
 
   const handleSkip = async () => {
+    if (closedRef.current || handoffPending.current || isOpening) return;
     track('onboarding_skipped', { step: env ? getEnvironmentStatus(env) : 'detecting' });
     setError(null);
     if (await handOff('project')) finish();
@@ -721,7 +785,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   // Git is checked before step 1, so without it the screen shows only the Git Required message.
   const view: FirstRunStep | 'detecting' = env === null ? 'detecting' : gitMissing ? 'project' : step;
   const title = view === 'detecting' ? 'Welcome to Pane'
-    : view === 'agent' ? 'Which agent do you use?'
+    : view === 'agent' ? 'How would you like to start new Sessions?'
       : view === 'sessions' ? (bringIn === null ? 'Looking for your sessions…' : `Bring your ${bringIn.length} ${bringIn.length === 1 ? 'session' : 'sessions'} into Pane?`)
         : 'Open your project';
 
@@ -754,7 +818,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
             // One AgentStep across detecting and agent, so its skeleton swap holds and fades.
             <>
               {view === 'detecting' && <LoadingStatus label="Checking this computer" />}
-              <AgentStep agents={view === 'detecting' ? null : agents} disabled={view === 'detecting' || isPicking} onPick={agent => void pickAgent(agent)} />
+              <AgentStep agents={view === 'detecting' ? null : agents} disabled={view === 'detecting' || isPicking} onPick={agent => void pickAgent(agent)} onPickTerminal={command => void pickTerminal(command)} />
             </>
           ) : (
             <SessionsStepBody sessions={bringIn} />
@@ -776,7 +840,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
     <Modal
       ariaLabel="Open your project"
       isOpen={isOpen}
-      onClose={fromHome ? onClose : () => {}}
+      onClose={() => { if (fromHome && !handoffPending.current) onClose(); }}
       size={wslDistro ? 'lg' : 'md'}
       initialFocusRef={titleRef}
       closeOnOverlayClick={false}
@@ -873,7 +937,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
       </ModalBody>
 
       <ModalFooter className="flex justify-between items-center">
-        <Button onClick={() => void handleSkip()} variant="ghost" disabled={isOpening}>Skip</Button>
+        <Button onClick={() => void handleSkip()} variant="ghost" disabled={isOpening || isHandingOff}>Skip</Button>
         {gitMissing ? (
           <Button onClick={() => window.electronAPI.openExternal('https://git-scm.com/downloads')} variant="primary" icon={<ExternalLink className="h-4 w-4" />}>
             Install Git

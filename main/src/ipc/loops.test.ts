@@ -198,6 +198,12 @@ function sessionRegistry(options: {
 describe('startLoopRun for a Session loop', () => {
   const standup: StoredLoop = { ...nightly, projectId: undefined, orchestrationSessionId: SESSION_ID, initialInput: 'Post the standup.' };
 
+  it.each(['', 'custom-cli'])('refuses to run a stored loop targeting an archived terminal Session (%j)', async terminalCommand => {
+    const { registry, calls } = sessionRegistry({ session: { terminalCommand, archived: true } });
+    await expect(startLoopRun(registry, standup, slotAtMs, noLaunches)).rejects.toThrow('opens a terminal');
+    expect(calls.map(call => call.channel)).toEqual(['runpane:sessions:get']);
+  });
+
   it('starts the Session agent tab and sends the prompt there, with no new Pane', async () => {
     const { registry, calls } = sessionRegistry();
     await expect(startLoopRun(registry, standup, slotAtMs, noLaunches)).resolves.toEqual({ sessionId: null });
@@ -313,6 +319,12 @@ describe('startLoopRun for a Session loop', () => {
 });
 
 describe('prepareLoopSession', () => {
+  it.each(['', 'custom-cli'])('refuses to save a loop for a pinned terminal Session (%j)', async terminalCommand => {
+    const { registry, calls } = sessionRegistry({ session: { terminalCommand, isPinned: true } });
+    await expect(prepareLoopSession(registry, SESSION_ID, { name: 'Standup', agent: 'codex' })).rejects.toMatchObject({ code: 'ERR_LOOP_INVALID', message: expect.stringContaining('opens a terminal') });
+    expect(calls.map(call => call.channel)).toEqual(['runpane:sessions:get']);
+  });
+
   it('creates a new Session named after the loop, already unattended by its default command', async () => {
     const { registry, calls } = sessionRegistry();
     await expect(prepareLoopSession(registry, 'new', { name: 'Morning standup', agent: 'claude' })).resolves.toBe('__orchestration_session_2222__');
