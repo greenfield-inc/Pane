@@ -262,3 +262,48 @@ test('a person who goes elsewhere first finds their text waiting in the launch c
   // SAFETY: installElectronApiMock defines this test-only bridge.
   expect(await page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getChatSends: () => unknown[] } }).__paneTestElectronMock.getChatSends())).toEqual([]);
 });
+
+// #1384: a click on the open Pane's own sidebar row, during or after the restore, keeps the chat.
+const expanded: ElectronApiMockOptions = { ...fixture, initialUiState: { expandedProjects: [project.id] } };
+test('clicking the restored Pane in the sidebar keeps its chat mounted and focused', async ({ page }) => {
+  await installElectronApiMock(page, expanded);
+  await page.goto('/');
+  await expect(chatBox(page)).toBeFocused();
+  // A test-only mark on the mounted message box: a remounted box would not carry it.
+  await chatBox(page).evaluate(element => { element.setAttribute('data-test-mounted', 'launch'); });
+  const row = page.getByRole('button', { name: 'chat-pane', exact: true });
+  await expect(row).toHaveAttribute('aria-current', 'page');
+  // Straight back to the message box, as a person does: the first keystroke lands there.
+  await row.click();
+  await chatBox(page).click();
+  await page.keyboard.type('h');
+  await expect(chatBox(page)).toHaveValue('h');
+  await page.waitForTimeout(300);
+  // The same element: selecting the open Pane does not reload its panels and remount the chat.
+  await expect(chatBox(page)).toHaveAttribute('data-test-mounted', 'launch');
+});
+
+test('clicking the restored Pane in the sidebar before its chat shows still hands the chat focus', async ({ page }) => {
+  await installElectronApiMock(page, expanded);
+  // The launch Pane's tabs arrive late, so the click lands while the Pane is open but its chat is not.
+  await page.addInitScript(() => {
+    const panels = window.electronAPI.panels;
+    const getSessionPanels = panels.getSessionPanels.bind(panels);
+    let delayed = false;
+    panels.getSessionPanels = async (sessionId: string) => {
+      if (sessionId === 'chat-a' && !delayed) {
+        delayed = true;
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+      return getSessionPanels(sessionId);
+    };
+  });
+  await page.goto('/');
+  const row = page.getByRole('button', { name: 'chat-pane', exact: true });
+  await expect(row).toHaveAttribute('aria-current', 'page');
+  await expect(chatBox(page)).toHaveCount(0);
+  await row.click();
+  await expect(chatBox(page)).toBeFocused();
+  await page.keyboard.type('h');
+  await expect(chatBox(page)).toHaveValue('h');
+});
