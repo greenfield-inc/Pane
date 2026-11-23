@@ -6,17 +6,26 @@ type OpenHandler = (details: Pick<HandlerDetails, 'url' | 'disposition'>) => Win
 
 type NavigateHandler = (event: { preventDefault: () => void }, url: string, isInPlace?: boolean, isMainFrame?: boolean) => void;
 
+/** The members of a popup's BrowserWindow that routeWebviewPopups uses. */
+interface PopupWindow {
+  isDestroyed(): boolean;
+  close(): void;
+  webContents: { on(event: string, listener: NavigateHandler): void };
+}
+
 function setup(registered: boolean, pageUrl = 'https://example.com/', extra: Partial<Parameters<typeof routeWebviewPopups>[1]> = {}) {
   let handler: OpenHandler | undefined;
   let navigate: NavigateHandler | undefined;
   let redirect: NavigateHandler | undefined;
+  let createdWindow: ((window: PopupWindow) => void) | undefined;
   const wvContents = {
     id: 7,
     getURL: () => pageUrl,
     setWindowOpenHandler: (next: OpenHandler) => { handler = next; },
-    on: vi.fn((event: string, listener: NavigateHandler) => {
+    on: vi.fn((event: string, listener: NavigateHandler & ((window: PopupWindow) => void)) => {
       if (event === 'will-navigate') navigate = listener;
       if (event === 'will-redirect') redirect = listener;
+      if (event === 'did-create-window') createdWindow = listener;
     }),
     once: vi.fn(),
   };
@@ -45,8 +54,24 @@ function setup(registered: boolean, pageUrl = 'https://example.com/', extra: Par
     redirected({ preventDefault: () => { prevented = true; } }, url, false, isMainFrame);
     return !prevented;
   };
-  return { open: handler, follow, redirectTo, routing };
+  /** Chromium made a popup window; returns its navigation, which says whether it went ahead, and whether it closed. */
+  const popupWindow = () => {
+    const listeners = new Map<string, NavigateHandler>();
+    const window = { isDestroyed: () => false, close: vi.fn(), webContents: { on: (event: string, listener: NavigateHandler) => { listeners.set(event, listener); } } };
+    createdWindow?.(window);
+    const navigateTo = (url: string): boolean => {
+      let prevented = false;
+      listeners.get('will-navigate')?.({ preventDefault: () => { prevented = true; } }, url);
+      return !prevented;
+    };
+    return { navigateTo, close: window.close };
+  };
+  return { open: handler, follow, redirectTo, popupWindow, routing };
 }
+
+const GOOGLE_REFUSED = 'https://accounts.google.com/v3/signin/rejected?rrk=46&hl=en';
+// Google's OAuth error page for an embedded browser; authError is base64 of the error, code first.
+const GOOGLE_DISALLOWED = 'https://accounts.google.com/signin/oauth/error?authError=ChNkaXNhbGxvd2VkX3VzZXJhZ2VudBJkR29vZ2xl&client_id=1';
 
 describe('routeWebviewPopups', () => {
   it('opens an https link as a browser tab', () => {
@@ -97,26 +122,56 @@ describe('routeWebviewPopups', () => {
     expect(routing.openExternal).not.toHaveBeenCalled();
   });
 
-  it('keeps a Google sign-in out of the tab and offers the system browser, from a link, a redirect or a popup', () => {
-    const { follow, redirectTo, open, routing } = setup(true);
+  it('lets Google sign in inside the tab and in its popups, as Continue with Google does', () => {
+    const { follow, redirectTo, open, routing } = setup(true, 'https://www.reddit.com/login/');
     const signIn = 'https://accounts.google.com/v3/signin/identifier?continue=https://mail.google.com';
-    expect(follow(signIn)).toBe(false);
-    expect(redirectTo(signIn, true)).toBe(false);
-    expect(open({ url: signIn, disposition: 'new-window' })).toEqual({ action: 'deny' });
-    expect(routing.refuseSignIn).toHaveBeenCalledTimes(3);
-    expect(routing.refuseSignIn).toHaveBeenCalledWith({ url: signIn, site: 'Google', panelId: 'panel-1' });
-    // The person chooses: nothing opens until they press Open in your browser.
+    expect(follow(signIn)).toBe(true);
+    expect(redirectTo('https://accounts.google.com/o/oauth2/v2/auth?client_id=1&display=popup', true)).toBe(true);
+    expect(open({ url: 'https://accounts.google.com/gsi/select?client_id=1', disposition: 'new-window' }).action).toBe('allow');
+    expect(routing.refuseSignIn).not.toHaveBeenCalled();
     expect(routing.openExternal).not.toHaveBeenCalled();
+  });
+
+  it.each([GOOGLE_REFUSED, GOOGLE_DISALLOWED])('stops at Google\'s refusal %s and offers the page the tab is on', (refusal) => {
+    const { follow, redirectTo, routing } = setup(true, 'https://www.reddit.com/login/');
+    expect(follow(refusal)).toBe(false);
+    expect(redirectTo(refusal, true)).toBe(false);
+    expect(routing.refuseSignIn).toHaveBeenCalledWith({ url: 'https://www.reddit.com/login/', site: 'Google', panelId: 'panel-1' });
+    // The person chooses: nothing opens until they press Open this page in your browser.
+    expect(routing.openExternal).not.toHaveBeenCalled();
+  });
+
+  it('lets Google\'s other sign-in errors show in the tab', () => {
+    const { follow, routing } = setup(true);
+    expect(follow('https://accounts.google.com/signin/oauth/error?authError=Cg9pbnZhbGlkX3JlcXVlc3Q&client_id=1')).toBe(true);
+    expect(routing.refuseSignIn).not.toHaveBeenCalled();
+  });
+
+  it('closes a sign-in popup Google refuses and offers its opener\'s page, never the popup\'s', () => {
+    const { open, popupWindow, routing } = setup(true, 'https://www.reddit.com/login/');
+    expect(open({ url: 'https://accounts.google.com/gsi/select?client_id=1', disposition: 'new-window' }).action).toBe('allow');
+    const popup = popupWindow();
+    expect(popup.navigateTo('https://accounts.google.com/v3/signin/identifier?client_id=1')).toBe(true);
+    expect(popup.close).not.toHaveBeenCalled();
+    expect(popup.navigateTo(GOOGLE_REFUSED)).toBe(false);
+    expect(popup.close).toHaveBeenCalled();
+    expect(routing.refuseSignIn).toHaveBeenCalledWith({ url: 'https://www.reddit.com/login/', site: 'Google', panelId: 'panel-1' });
+  });
+
+  it('offers the refused sign-in itself when the tab opened straight onto it', () => {
+    const { follow, routing } = setup(true, 'about:blank');
+    expect(follow(GOOGLE_REFUSED)).toBe(false);
+    expect(routing.refuseSignIn).toHaveBeenCalledWith({ url: GOOGLE_REFUSED, site: 'Google', panelId: 'panel-1' });
   });
 
   it.each([
     ['https://signin.aws.amazon.com/signin?redirect_uri=https%3A%2F%2Fconsole.aws.amazon.com', 'AWS'],
     ['https://us-east-1.signin.aws/platform/login', 'AWS'],
     ['https://example.com/auth/callback?error=disallowed_useragent', 'Google'],
-  ])('names %s as a sign-in %s refuses inside apps', (url, site) => {
+  ])('names %s as a sign-in %s refuses inside apps, offering the page the tab is on', (url, site) => {
     const { follow, routing } = setup(true);
     expect(follow(url)).toBe(false);
-    expect(routing.refuseSignIn).toHaveBeenCalledWith({ url, site, panelId: 'panel-1' });
+    expect(routing.refuseSignIn).toHaveBeenCalledWith({ url: 'https://example.com/', site, panelId: 'panel-1' });
   });
 
   it('opens a sign-in popup as a tab beside its opener when the opener\'s popups become tabs', () => {
@@ -127,7 +182,7 @@ describe('routeWebviewPopups', () => {
     if (answer.action !== 'allow' || !answer.createWindow) throw new Error(`expected a popup Pane creates itself, got ${JSON.stringify(answer)}`);
     const options = { width: 500, height: 600 };
     expect(answer.createWindow(options)).toBe(popupPage);
-    expect(createPopup).toHaveBeenCalledWith({ url: 'https://accounts.example.com/authorize', options, opener: { panelId: 'panel-1', sessionId: 'session-1' } });
+    expect(createPopup).toHaveBeenCalledWith({ url: 'https://accounts.example.com/authorize', options, opener: { panelId: 'panel-1', sessionId: 'session-1' }, openerUrl: 'https://example.com/' });
     expect(routing.openBrowserTab).not.toHaveBeenCalled();
   });
 

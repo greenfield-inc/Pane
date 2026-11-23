@@ -170,7 +170,7 @@ export function popupTabFor(opener: { panelId: string }): ((request: PopupTabReq
  * in a hidden window here, so it keeps its opener and can report the sign-in back; every screen
  * streams it. The tab closes when the popup closes itself or its opener goes.
  */
-function openPopupTab({ url, options, opener }: PopupTabRequest): WebContents {
+function openPopupTab({ url, options, opener, openerUrl }: PopupTabRequest): WebContents {
   const webPreferences = { ...options.webPreferences };
   hardenWebviewPreferences(webPreferences);
   const window = new BrowserWindow({
@@ -194,9 +194,10 @@ function openPopupTab({ url, options, opener }: PopupTabRequest): WebContents {
   };
   window.once('closed', closeTab);
   routeHiddenPage(page, {
-    // A sign-in the popup reaches that refuses apps closes the popup; its opener says so.
-    refuseSignIn: ({ url: signIn, site }) => {
-      refuseSignIn(opener.panelId, site, signIn);
+    // A sign-in the popup reaches that refuses apps closes the popup; its opener says so, offering
+    // the opener's page, since the popup's own page needs its opener.
+    refuseSignIn: ({ site }) => {
+      refuseSignIn(opener.panelId, site, openerUrl);
       if (!window.isDestroyed()) window.close();
     },
   });

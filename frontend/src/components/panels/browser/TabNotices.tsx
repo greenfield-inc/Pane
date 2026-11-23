@@ -10,7 +10,7 @@ export interface ShownTabNotice {
 interface TabNoticesProps {
   notices: ShownTabNotice[];
   onOpenApp: (key: string, id: string) => void;
-  /** Open in your browser: the sign-in the tab stopped. */
+  /** Open this page in your browser: the page whose sign-in refused Pane. */
   onOpenSignIn: (key: string, url: string) => void;
   onShowInFolder: (file: string) => void;
   onDismiss: (key: string) => void;
@@ -47,14 +47,14 @@ export const TabNotices: React.FC<TabNoticesProps> = ({ notices, onOpenApp, onOp
   </>
 );
 
-/** "<site> doesn't allow sign-in inside apps. Open in your browser": a tab's own line, and a stream's. */
+/** "<site> won't sign in here. Open this page in your browser": a tab's own line, and a stream's. */
 export const SignInLine: React.FC<{ site: string; onOpen: () => void }> = ({ site, onOpen }) => (
   <>
     <LogIn className="h-3.5 w-3.5 flex-shrink-0 text-text-tertiary" />
     {/* The whole sentence is the message, so a narrow tab wraps it rather than cutting it. */}
-    <span className="min-w-0 flex-1">{site} doesn&apos;t allow sign-in inside apps.</span>
+    <span className="min-w-0 flex-1">{site} won&apos;t sign in here.</span>
     <button type="button" className={ACTION} onClick={onOpen}>
-      <span className="inline-flex items-center gap-1">Open in your browser <ExternalLink className="h-3 w-3" aria-hidden /></span>
+      <span className="inline-flex items-center gap-1">Open this page in your browser <ExternalLink className="h-3 w-3" aria-hidden /></span>
     </button>
   </>
 );

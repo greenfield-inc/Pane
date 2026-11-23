@@ -174,7 +174,7 @@ export let mainWindow: BrowserWindow | null = null;
 // Populated by browser-panel:register-webview IPC, consumed by did-attach-webview handler.
 export const webviewContextMap = new Map<number, PaneWebviewContext>();
 
-/** Shows a line under a browser tab's address bar: an app link to confirm, a sign-in sent out, a download. */
+/** Shows a line under a browser tab's address bar: an app link to confirm, a sign-in that refused Pane, a download. */
 function sendTabNotice(panelId: string, notice: BrowserTabNotice): void {
   mainWindow?.webContents.send(BROWSER_TAB_NOTICE_CHANNEL, { panelId, notice });
 }

@@ -46,6 +46,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive, onViewLive
   const [urlError, setUrlError] = useState('');
   const [refusals, setRefusals] = useState<FileRefusal[]>([]);
   const [notices, setNotices] = useState<ShownTabNotice[]>([]);
+  // Pages whose sign-in line the person dismissed or used: a repeat refusal stays quiet until the page loads again.
+  const signInsHandledRef = useRef(new Set<string>());
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
@@ -531,6 +533,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive, onViewLive
     const onDidNavigateDocument = () => {
       setUrlError('');
       setRefusals([]);
+      // A sign-in line belongs to the page it offers; a new page starts without it.
+      signInsHandledRef.current.clear();
+      setNotices(current => current.filter(shown => shown.notice.kind !== 'sign-in'));
     };
     const onDidStartLoading = () => setIsLoading(true);
     const onDidFailLoad = (event: Electron.DidFailLoadEvent) => {
@@ -624,6 +629,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive, onViewLive
       // SAFETY: The preload bridge is the only sender of this event.
       const { panelId, notice } = (e as CustomEvent<{ panelId: string; notice: BrowserTabNotice }>).detail;
       if (panelId !== panel.id) return;
+      if (notice.kind === 'sign-in' && signInsHandledRef.current.has(notice.url)) return;
       setNotices(current => {
         // A sign-in stopped again (a link, then its redirect) keeps one line.
         const kept = notice.kind === 'sign-in' ? current.filter(shown => shown.notice.kind !== 'sign-in') : current;
@@ -669,7 +675,11 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive, onViewLive
     window.addEventListener(BROWSER_VIEW_LIVE_CHANNEL, handler);
     return () => window.removeEventListener(BROWSER_VIEW_LIVE_CHANNEL, handler);
   }, [panel.id]);
-  const dismissNotice = useCallback((key: string) => setNotices(current => current.filter(shown => shown.key !== key)), []);
+  const dismissNotice = useCallback((key: string) => setNotices(current => current.filter(shown => {
+    if (shown.key !== key) return true;
+    if (shown.notice.kind === 'sign-in') signInsHandledRef.current.add(shown.notice.url);
+    return false;
+  })), []);
   const openApp = useCallback((key: string, id: string) => {
     dismissNotice(key);
     void window.electronAPI.invoke('browser-panel:open-app-link', id).then((result: { success: boolean; error?: string }) => {
