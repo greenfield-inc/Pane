@@ -13,6 +13,7 @@ import { ConfigManager } from '../services/configManager';
 import { Logger } from '../utils/logger';
 import { DatabaseService } from '../database/database';
 import { AnalyticsManager } from '../services/analyticsManager';
+import { setPairingAnalytics } from '../services/pairingAnalytics';
 import { SessionManager } from '../services/sessionManager';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
 import { ArchiveCleanupManager } from '../services/archiveCleanupManager';
@@ -235,6 +236,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   databaseService.initialize();
 
   const analyticsManager = new AnalyticsManager(configManager);
+  setPairingAnalytics(analyticsManager);
   const sessionManager = new SessionManager(databaseService, analyticsManager);
   sessionManager.initializeFromDatabase();
 

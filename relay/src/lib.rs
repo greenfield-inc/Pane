@@ -15,8 +15,10 @@ pub mod registry;
 mod sni;
 mod state;
 mod tls;
+mod usage;
 
 pub use config::Config;
+pub use state::Counts;
 
 use crate::io::{BoxStream, Prefixed};
 use crate::sni::{Hello, parse_client_hello};
@@ -29,7 +31,6 @@ use std::time::{Duration, SystemTime};
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -45,15 +46,27 @@ pub struct Relay {
     pub direct_quic_addr: Option<SocketAddr>,
     /// The self-signed certificate's PEM file in --dev mode.
     pub dev_cert: Option<PathBuf>,
-    shutdown: CancellationToken,
+    state: Arc<State>,
+    usage_log: Arc<usage::UsageLog>,
     task: JoinHandle<()>,
     direct: iroh_relay::server::Server,
 }
 
 impl Relay {
-    /// Stops accepting, sends `close shutdown` to computers, and waits up to 3 s for them.
+    /// What the hourly `relay usage` line reports.
+    pub fn counts(&self) -> Counts {
+        self.state.counts()
+    }
+
+    /// Logs the last `relay usage` line, stops accepting, sends `close shutdown` to
+    /// computers, and waits up to 3 s for them.
     pub async fn shutdown(self) {
-        self.shutdown.cancel();
+        let _ = tokio::time::timeout(
+            Duration::from_secs(3),
+            log_usage(&self.state, &self.usage_log, "shutdown"),
+        )
+        .await;
+        self.state.shutdown.cancel();
         let _ = self.task.await;
         let _ = self.direct.shutdown().await;
     }
@@ -129,6 +142,7 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
     let blocklist = cfg.blocklist.clone();
     let alerts = alerts::Alerts::load(&cfg)?;
     let eab = eab::Eab::load(&cfg)?;
+    let usage_log = Arc::new(usage::UsageLog::load(&cfg)?);
     let direct = direct::spawn(cfg.direct_quic, &tls).await?;
     let direct_addr = direct.http_addr().ok_or("iroh relay has no address")?;
     let direct_quic_addr = direct.quic_addr();
@@ -152,11 +166,12 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
     }
     tokio::spawn(maintenance(state.clone(), blocklist, blocklist_mtime));
     tokio::spawn(resync(state.clone()));
+    tokio::spawn(hourly_usage(state.clone(), usage_log.clone()));
     if let Some(a) = acme {
         tokio::spawn(acme::run(state.clone(), cert, a));
     }
 
-    let shutdown = state.shutdown.clone();
+    let relay_state = state.clone();
     let task = tokio::spawn(async move {
         loop {
             let (tcp, peer) = tokio::select! {
@@ -183,7 +198,8 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
         dns_addr,
         direct_quic_addr,
         dev_cert,
-        shutdown,
+        state: relay_state,
+        usage_log,
         task,
         direct,
     })
@@ -297,6 +313,39 @@ async fn resync(state: Arc<State>) {
         tokio::select! {
             _ = state.shutdown.cancelled() => return,
             _ = tick.tick() => state.registry.resync(&state.cfg.region, &state.connected_ids()),
+        }
+    }
+}
+
+/// One `relay usage` line with this relay's counts: in its own log, and in Cloud Logging
+/// with --usage-project, where relay/deploy/usage.mjs reads it.
+async fn log_usage(state: &State, usage_log: &usage::UsageLog, reason: &str) {
+    let c = state.counts();
+    let region = &state.cfg.region;
+    tracing::info!(
+        region = %region,
+        reason,
+        computers = c.computers,
+        computers_seen_24h = c.computers_seen_24h,
+        clients = c.clients,
+        client_connections = c.client_connections,
+        computers_with_clients = c.computers_with_clients,
+        "relay usage"
+    );
+    if let Err(e) = usage_log.write(region, reason, c).await {
+        tracing::warn!(error = %e, "relay usage line not written to Cloud Logging");
+    }
+}
+
+async fn hourly_usage(state: Arc<State>, usage_log: Arc<usage::UsageLog>) {
+    // A deploy kills the container without a shutdown line; this one marks the restart.
+    log_usage(&state, &usage_log, "start").await;
+    let period = Duration::from_secs(state.cfg.usage_period_secs.max(1));
+    let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    loop {
+        tokio::select! {
+            _ = state.shutdown.cancelled() => return,
+            _ = tick.tick() => log_usage(&state, &usage_log, "hourly").await,
         }
     }
 }

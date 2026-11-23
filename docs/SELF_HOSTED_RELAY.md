@@ -224,6 +224,9 @@ and its devices, at `https://us.relay.relay.example.com/` on the same port
 
 Which computer each connection is for (the TLS server name), IP addresses,
 timing and byte counts. It never decrypts traffic: each computer ends TLS
-with its own key. It logs no payloads, tokens or URLs. Packets on direct
-paths are encrypted between the two ends; the relay sees their iroh endpoint
-ids, IP addresses and byte counts.
+with its own key. It logs no payloads, tokens or URLs. Once an hour it also
+logs a `relay usage` line of counts: computers and clients connected, and
+computers seen in the last 24 hours. Its logs stay on your machine, except
+that with `--usage-project` it writes that one line to Cloud Logging.
+Packets on direct paths are encrypted between the two ends; the relay sees
+their iroh endpoint ids, IP addresses and byte counts.

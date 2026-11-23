@@ -49,7 +49,7 @@ export function AddDeviceDialog({ isOpen, tab, onTabChange, onClose }: {
   onClose: () => void;
 }) {
   const usesRelay = isOpen && (tab === 'phone' || tab === 'computer');
-  const { view, ready, paired, renewal, retry } = useRelayPairing(usesRelay, tab === 'phone');
+  const { view, ready, paired, renewal, retry } = useRelayPairing(usesRelay, tab === 'phone', isOpen);
   const domain = useRelayDomain(isOpen && tab === 'wearables');
   const limitUntil = view.step === 'limited' ? view.until : null;
   // Tailscale pairs devices without Pane relay's certificates, so it works while the relay is paused.

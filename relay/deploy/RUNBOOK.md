@@ -31,6 +31,7 @@ Merging the PR to `main` does not release the desktop app.
 | Android app links (`assetlinks.json`) | The SHA-256 of the Play app signing certificate (Play Console › App integrity) |
 | iOS universal links | Team id and bundle id `com.dcouple.pane.mobile` |
 | Android alerts | `pane-push-sender` with Firebase Cloud Messaging send rights, and `roles/artifactregistry.reader` on the `pane-preview` repository so the VMs can pull the relay image |
+| Usage counts in Cloud Logging | `pane-push-sender` granted `roles/logging.logWriter` on the project (once, by hand). `deploy.sh` enables `logging.googleapis.com` and passes `--usage-project` |
 | Google Trust Services EAB keys | `publicca.googleapis.com` enabled (`deploy.sh` enables it) and `pane-push-sender` granted `roles/publicca.externalAccountKeyCreator` on the project (once, by hand: done 2026-11-20). The VMs already have the `cloud-platform` scope |
 
 ## Steps
@@ -99,7 +100,23 @@ own within 30 seconds. To roll back, run it from the earlier commit.
 
 - Uptime checks `pane-relay-us`, `-eu`, `-asia`, `-west` in Cloud Monitoring.
 - Logs: `gcloud compute ssh pane-relay-us --zone us-central1-a -- docker logs pane-relay`.
-  They show ids, IP addresses, byte counts and close reasons, never payloads.
+  They show ids, IP addresses, byte counts and close reasons, never payloads,
+  and stay on the VM until the next deploy replaces the container.
+- Usage: when it starts, once an hour, and when it stops cleanly, each relay
+  writes a `relay usage` line to Cloud Logging (log `pane-relay-usage`, kept
+  30 days). It holds counts only: `computers` connected now,
+  `computers_seen_24h`, `clients` (distinct computer and client address
+  pairs with a connection through this relay: devices reaching a computer
+  through it, never same-network or Tailscale ones; the relay can't tell a
+  phone from glasses), `client_connections` and `computers_with_clients`. A
+  restart starts the counts again. Deploys set `google-logging-enabled=false`
+  on every VM, so the container's own logs never reach Cloud Logging. New
+  computers are PostHog's `certificate_issued` events with `renewal: false`.
+  For a daily table of online peak, computers seen and clients per computer:
+
+  ```sh
+  node relay/deploy/usage.mjs --account <you@example.com> [--days 7]
+  ```
 - Block a computer: add its id to the blocklist file and pass `--blocklist`
   (see [relay/README.md](../README.md)).
 - Google Trust Services keys: the logs show each key minted (`EAB key minted`,

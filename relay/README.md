@@ -89,6 +89,7 @@ Every flag also reads the environment variable in brackets.
 | `--fcm-service-account` [`PANE_RELAY_FCM_SERVICE_ACCOUNT`] | | Firebase service account JSON key |
 | `--fcm-project` [`PANE_RELAY_FCM_PROJECT`] | | Firebase project id. Alone, Android alerts use the access token of the service account attached to the Google Compute Engine VM, from the metadata server, with no key file. With `--fcm-service-account`, overrides that key's project. With neither flag, Android alerts answer `unconfigured` |
 | `--eab-project` [`PANE_RELAY_EAB_PROJECT`] | | Google Cloud project whose Public CA API mints computers' one-time EAB keys for Google Trust Services, the CA computers fall back to when Let's Encrypt refuses. Needs `--acme-email`, which computers register their accounts with. Uses the VM's service account through the metadata server, which needs `roles/publicca.externalAccountKeyCreator` and the `cloud-platform` scope. Without it, `eab` frames answer `unconfigured` |
+| `--usage-project` [`PANE_RELAY_USAGE_PROJECT`] | | Google Cloud project whose Cloud Logging gets the hourly `relay usage` line (log `pane-relay-usage`), written with the VM's service account through the metadata server, which needs `roles/logging.logWriter`. Without it the line goes to the relay's own log only |
 | `--limit-eab-per-day` [`PANE_RELAY_LIMIT_EAB_PER_DAY`] | 3 | EAB keys per computer a day; then `throttled`. A failed mint doesn't count |
 | `--limit-eab-per-hour` [`PANE_RELAY_LIMIT_EAB_PER_HOUR`] | 20 | EAB keys an hour across this relay's computers; then `throttled`. Four relays at the default stay under Google Trust Services' 100 new accounts an hour per project |
 | `--limit-alerts-per-hour` | 60 | Per computer, over a sliding hour; then `throttled` |
@@ -107,3 +108,10 @@ port 443 or 53 as non-root works with Docker's default network (it allows
 unprivileged low ports); with host networking, grant `CAP_NET_BIND_SERVICE` or
 listen on a high port behind a port forward. On SIGTERM the relay sends
 `close shutdown` to every computer before exiting.
+
+When it starts, once an hour, and at shutdown, the relay logs a
+`relay usage` line with counts only: computers connected and seen in the
+last 24 hours, and the devices and connections that reach them through it.
+With `--usage-project` it also writes that line, and nothing else, to Cloud
+Logging; see
+[deploy/RUNBOOK.md](deploy/RUNBOOK.md#watch).

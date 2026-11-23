@@ -215,7 +215,7 @@ describe('Add a device › Phone without a code', () => {
   const noCertificate = "Phones can't reach this computer yet: it needs a security certificate, and the service that issues them is turning away new computers for now. Pane asks again at 2:16 PM by itself; keep Pane open and the code appears then.";
 
   it('says why there is no code and what happens next, with "Try again"', () => {
-    const html = renderToStaticMarkup(<PhoneTab view={{ step: 'error', message: noCertificate }} paired={null} renewed={false} onRetry={() => undefined} onSetUpTailscale={() => undefined} />);
+    const html = renderToStaticMarkup(<PhoneTab view={{ step: 'error', message: noCertificate, cause: 'relay' }} paired={null} renewed={false} onRetry={() => undefined} onSetUpTailscale={() => undefined} />);
     expect(text(html)).toContain('be paired right now');
     expect(text(html)).toContain('Pane asks again at 2:16 PM by itself');
     expect(text(html)).not.toContain('internet connection');

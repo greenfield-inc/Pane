@@ -103,7 +103,12 @@ describe('falling back to Google Trust Services', () => {
       const certificateStore = memory();
       const gts = googleTrustServices(gtsCa.directoryUrl, [async () => ({ keyId: 'kid-1', hmacKey: 'c2VjcmV0LTE=', email: 'certificates@pane.example' })]);
       const txt: string[][] = [];
-      const options = { key, domain: 'relay.test', certificateStore, setTxt: async (values: string[]) => { txt.push(values); } };
+      const issued: Array<{ issuer: string; renewal: boolean }> = [];
+      const options = {
+        key, domain: 'relay.test', certificateStore,
+        setTxt: async (values: string[]) => { txt.push(values); },
+        onIssued: (event: { issuer: string; renewal: boolean }) => { issued.push(event); },
+      };
       const certificate = new ComputerCertificate({ ...options, authorities: [letsEncrypt(letsEncryptCa.directoryUrl), gts.authority] });
 
       await certificate.ensure();
@@ -129,6 +134,7 @@ describe('falling back to Google Trust Services', () => {
       expect(gtsCa.orders()).toBe(2);
       expect(letsEncryptCa.orders()).toBe(1);
       expect(gts.asked()).toBe(1);
+      expect(issued).toEqual([{ issuer: 'Google Trust Services', renewal: false }, { issuer: 'Google Trust Services', renewal: true }]);
       expect(gtsCa.accounts()).toHaveLength(1);
     } finally {
       await letsEncryptCa.close();

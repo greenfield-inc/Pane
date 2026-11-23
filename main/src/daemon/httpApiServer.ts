@@ -53,6 +53,8 @@ import type { VoiceStreamErrorCode } from '../../../shared/voice/deepgramLive';
 import { voiceKeyProblem } from '../../../shared/voice/voiceKeys';
 import { streamWorktreePreview } from '../services/mediaStream';
 import { RecentWrites, type InvokeAnswer } from './recentWrites';
+import type { ForwardedClient } from './relay/computerTlsServer';
+import { trackPairingCompleted, type PairingRouteKind } from '../services/pairingAnalytics';
 import { REMOTE_WRITES_BUSY_CODE } from '../../../shared/remoteClient/readChannels';
 
 interface RemoteHttpAddress {
@@ -300,8 +302,8 @@ type PairingPreviewResult = { ok: true; group: Array<{ id: string; name: string 
 export interface PairingRoute {
   exchange(request: PairingRequest): Promise<PairingRouteResult>;
   preview(request: { secret: string; source: string }): Promise<PairingPreviewResult>;
-  /** The client IP behind a connection the relay's TLS terminator forwarded here; null for any other connection. */
-  clientAddress(remoteAddress: string | undefined, remotePort: number | undefined): string | null;
+  /** The client behind a connection the relay's TLS terminator forwarded here; null for any other connection. */
+  forwardedClient(remoteAddress: string | undefined, remotePort: number | undefined): ForwardedClient | null;
 }
 
 const pairingBodySchema = boundary.object({
@@ -931,6 +933,7 @@ export class PaneRemoteHttpApiServer {
       return;
     }
     const { client, ...rest } = result;
+    trackPairingCompleted(exchangeRequest.computer === undefined ? 'phone' : 'computer', this.pairingRoute(request));
     this.writeJson(response, 200, { ...rest, clientId: client.id });
   }
 
@@ -995,7 +998,7 @@ export class PaneRemoteHttpApiServer {
         this.writeJson(response, refusal?.statusCode ?? 403, { ok: false, error: refusal?.error ?? GLASSES_OWNER_REQUIRED } satisfies RemoteInvokeErrorPayload);
         return;
       }
-      await this.pairGlasses(response, this.glasses, invokeRequest, admission);
+      await this.pairGlasses(request, response, this.glasses, invokeRequest, admission);
       return;
     }
 
@@ -1402,7 +1405,7 @@ export class PaneRemoteHttpApiServer {
     }
 
     if (channel === GLASSES_COMMANDS.pair) {
-      await this.pairGlasses(response, glasses, invokeRequest, admission);
+      await this.pairGlasses(request, response, glasses, invokeRequest, admission);
       return;
     }
     if (!admission.client) {
@@ -1488,7 +1491,7 @@ export class PaneRemoteHttpApiServer {
   }
 
   /** Trades the glasses' pairing secret for their device token. */
-  private async pairGlasses(response: ServerResponse, glasses: GlassesAccess, invokeRequest: RemoteInvokeRequest, admission: GlassesAdmission): Promise<void> {
+  private async pairGlasses(request: IncomingMessage, response: ServerResponse, glasses: GlassesAccess, invokeRequest: RemoteInvokeRequest, admission: GlassesAdmission): Promise<void> {
     const refuse = (statusCode: number, code: string, message: string, next?: string) => {
       this.writeJson(response, statusCode, { ok: false, error: next ? { message, code, next } : { message, code } } satisfies RemoteInvokeErrorPayload);
     };
@@ -1505,6 +1508,7 @@ export class PaneRemoteHttpApiServer {
         'Make a new code in the Pane app: Settings › Glasses › Pair glasses, then paste it again.');
       return;
     }
+    trackPairingCompleted('glasses', this.pairingRoute(request));
     this.writeJson(response, 200, { ok: true, result: paired } satisfies RemoteInvokeSuccessPayload);
   }
 
@@ -1527,7 +1531,24 @@ export class PaneRemoteHttpApiServer {
   /** The caller's IP on the paired listener: the client behind the relay's TLS terminator, else the socket's own. */
   private sourceAddress(request: IncomingMessage): string {
     const { remoteAddress, remotePort } = request.socket;
-    return this.pairing?.clientAddress(remoteAddress, remotePort) ?? remoteAddress ?? 'unknown';
+    return this.pairing?.forwardedClient(remoteAddress, remotePort)?.address ?? remoteAddress ?? 'unknown';
+  }
+
+  /**
+   * How a pairing request reached this computer. The workspace listener is Tailscale's. Otherwise a
+   * request this computer's TLS server didn't forward came from Tailscale Serve (which names the
+   * caller in its headers), straight from the network when the listener is bound beyond loopback,
+   * or through a loopback tunnel such as SSH (`other`).
+   */
+  private pairingRoute(request: IncomingMessage): PairingRouteKind {
+    if (this.workspace) return 'tailscale';
+    const { remoteAddress, remotePort } = request.socket;
+    const forwarded = this.pairing?.forwardedClient(remoteAddress, remotePort);
+    if (forwarded) return forwarded.route;
+    const address = (remoteAddress ?? '').replace(/^::ffff:/u, '');
+    const forwardedFor = getSingleHeaderValue(request.headers['x-forwarded-for'])?.split(',')[0]?.trim() ?? '';
+    if (isTailscaleAddress(address) || isTailscaleAddress(forwardedFor) || getSingleHeaderValue(request.headers['tailscale-user-login'])) return 'tailscale';
+    return address === '127.0.0.1' || address === '::1' ? 'other' : 'lan';
   }
 
   private authenticateRequest(request: IncomingMessage, token?: string | null): RemoteRequestAuthResult {
@@ -2160,4 +2181,11 @@ function firstNonEmpty(...values: Array<string | undefined>): string | undefined
 
 function isTcpAddress(address: string | AddressInfo | null): address is AddressInfo {
   return address !== null && 'port' in Object(address);
+}
+
+/** Tailscale's addresses: 100.64.0.0/10 and fd7a:115c:a1e0::/48. */
+function isTailscaleAddress(address: string): boolean {
+  const ip = address.replace(/^::ffff:/u, '');
+  const [first, second] = ip.split('.').map(Number);
+  return (first === 100 && second >= 64 && second < 128) || ip.toLowerCase().startsWith('fd7a:115c:a1e0:');
 }

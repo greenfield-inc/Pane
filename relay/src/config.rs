@@ -267,6 +267,19 @@ pub struct Config {
     #[arg(long, env = "PANE_RELAY_LIMIT_EAB_PER_HOUR", default_value_t = 20)]
     pub limit_eab_per_hour: u64,
 
+    /// Google Cloud project whose Cloud Logging gets the hourly `relay usage` line (counts only),
+    /// written with the VM's attached service account (GCE metadata server), which needs
+    /// `roles/logging.logWriter`. Without it the line goes to the relay's own log only.
+    #[arg(long, env = "PANE_RELAY_USAGE_PROJECT")]
+    pub usage_project: Option<String>,
+
+    #[arg(long, hide = true, default_value = "https://logging.googleapis.com")]
+    pub logging_url: String,
+
+    /// How often the relay logs its `relay usage` line (tests).
+    #[arg(long, hide = true, default_value_t = 3600)]
+    pub usage_period_secs: u64,
+
     #[arg(long, hide = true, default_value = "https://publicca.googleapis.com")]
     pub publicca_url: String,
 
@@ -277,7 +290,7 @@ pub struct Config {
     )]
     pub publicca_staging_url: String,
 
-    /// The metadata server's token URL for keyless FCM and EAB keys (tests).
+    /// The metadata server's token URL for keyless FCM, EAB keys and usage lines (tests).
     #[arg(
         long,
         hide = true,
