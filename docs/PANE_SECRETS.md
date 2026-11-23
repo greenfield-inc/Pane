@@ -249,8 +249,8 @@ A reference syncs, but its value never does: only a lease you start sends values
 and only to the machines on its card. An older host or phone ignores references and
 never receives a lease value.
 
-A Pane Cloud Session's machine gets typed secrets one way, from your computers, less
-what you turned off in **Choose what to send**, and never sends any back
+A Pane Cloud Session's machine syncs typed secrets both ways like any host, but only
+receives what you didn't turn off in **Choose what to send**
 ([Pane Cloud Sessions](SHARED_CREDENTIALS.md#pane-cloud-sessions)).
 
 ## Who can read a secret

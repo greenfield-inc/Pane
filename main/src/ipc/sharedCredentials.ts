@@ -11,7 +11,7 @@ import {
 } from '../services/sharedCredentials';
 import { paneSecretStore, secretsVolume, type PaneSecretStore } from '../services/paneSecrets';
 import { refuseLocalCaller } from './paneSecrets';
-import { exportCloudSignIns, receiveCloudSecrets } from '../services/cloudSecrets';
+import { exportCloudSignIns, GITHUB_SIGN_IN_KEY, receiveCloudSecrets } from '../services/cloudSecrets';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import type { SharedCredentials } from '../../../shared/types/sharedCredentials';
 import type { AppServices } from './types';
@@ -42,9 +42,11 @@ export function registerSharedCredentialHandlers(
     // The local socket passes a caller's own "trusted" argument, so only paired devices over HTTP may sync.
     refuseLocalCaller();
     decodeBoundary(trusted, trustedSchema);
-    // A cloud VM's secrets come one way, from the person's computers, and none leave it.
-    if (cloudVm) return {};
-    return readAll();
+    const credentials = await readAll();
+    // A cloud VM syncs both ways like any machine (D-91), but its GitHub token is the sign-in a computer
+    // read from its own gh and carried here, not a secret of the person's to spread to every machine.
+    if (cloudVm && credentials.paneSecrets) delete credentials.paneSecrets[GITHUB_SIGN_IN_KEY];
+    return credentials;
   });
   commandRegistry.register('credentials:shared:apply', async (input: PaneCommandValue, trusted: PaneCommandValue) => {
     refuseLocalCaller();
@@ -55,7 +57,7 @@ export function registerSharedCredentialHandlers(
       // sent them. Integration keys live in config.json, which there is the Session disk the scans read (D-55).
       const changedSecrets = await receiveCloudSecrets(secrets, incoming, cloudVm.env);
       if (changedSecrets.length > 0) getPaneEventSink().send('remote:settings-changed');
-      return {};
+      return readSharedCredentials(configManager.getConfig());
     }
     const { changed } = await applySharedCredentials(configManager, incoming);
     const changedSecrets = [
@@ -87,8 +89,6 @@ export function registerSharedCredentialHandlers(
   // The Approvals on/off switch, with the same callers. Their own commands, so a host too old for them refuses them plainly.
   commandRegistry.register('notify:switch:get', (_input: PaneCommandValue, trusted: PaneCommandValue) => {
     decodeBoundary(trusted, trustedSchema);
-    // A cloud VM answers with a switch that never wins, so a device that syncs with it takes nothing back.
-    if (cloudVm) return { enabled: true, changedAt: 0 };
     return readNotifySwitch(configManager.getConfig());
   });
   commandRegistry.register('notify:switch:apply', async (input: PaneCommandValue, trusted: PaneCommandValue) => {

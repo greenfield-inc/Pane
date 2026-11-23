@@ -10,7 +10,7 @@ import {
   sharedNotifySwitchSchema,
 } from './sharedCredentials';
 import { localHostLabel, paneSecretStore, type PaneSecretStore } from './paneSecrets';
-import { cloudSecretRecords, GITHUB_SIGN_IN_KEY, readGithubToken } from './cloudSecrets';
+import { cloudSecretRecords, GITHUB_SIGN_IN_KEY, parseCloudChoice, readGithubToken } from './cloudSecrets';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
@@ -29,8 +29,8 @@ const SYNC_DEBOUNCE_MS = 500;
  * Shares integration keys and the Approvals on/off switch between this host and
  * every host the desktop has saved, over the desktop's one connection to each.
  * Syncs on start, when either changes here, when a saved host (re)connects, and
- * when it reports a settings change. No timer. A Pane Cloud VM only receives:
- * the person's choice of Pane secrets, their GitHub token and the Approvals switch, never read back.
+ * when it reports a settings change. No timer. A Pane Cloud VM syncs like any
+ * machine, except that it is written only the person's choice of Pane secrets, with their GitHub token.
  */
 export class SharedCredentialSync {
   private timer: NodeJS.Timeout | null = null;
@@ -132,35 +132,24 @@ export class SharedCredentialSync {
       };
       const remotes = this.machines.remotes();
       const cloud = this.cloudMachines();
-      const isCloudVm = (peer: { id: string }) => cloud.has(peer.id);
-      // A cloud VM is sent the person's choice of secrets below and never read.
-      const peers = remotes.filter((peer) => !isCloudVm(peer)).map((peer): SharedCredentialHost => ({
+      // Every saved machine syncs both ways, cloud VMs included (D-91). A cloud VM is written only the
+      // person's choice of secrets, through the command a machine without a secrets volume refuses.
+      const peers = remotes.map((peer): SharedCredentialHost => ({
         read: async () => decodeBoundary(await peer.invoke('credentials:shared:get', []), sharedCredentialsSchema),
-        apply: async credentials => { await peer.invoke('credentials:shared:apply', [credentials]); },
+        apply: cloud.has(peer.id)
+          ? async credentials => { await peer.invoke('credentials:cloud:apply', [await this.forCloudVm(credentials)]); }
+          : async credentials => { await peer.invoke('credentials:shared:apply', [credentials]); },
       }));
       const localSwitch: SharedNotifySwitchHost = {
         read: async () => readNotifySwitch(this.configManager.getConfig()),
         apply: async notifySwitch => { await applyNotifySwitch(this.configManager, notifySwitch); },
       };
       // A machine too old for these commands refuses them and is skipped; its keys still sync.
-      const switchPeers = remotes.filter((peer) => !isCloudVm(peer)).map((peer): SharedNotifySwitchHost => ({
+      const switchPeers = remotes.map((peer): SharedNotifySwitchHost => ({
         read: async () => decodeBoundary(await peer.invoke('notify:switch:get', []), sharedNotifySwitchSchema),
         apply: async notifySwitch => { await peer.invoke('notify:switch:apply', [notifySwitch]); },
       }));
-      if (peers.length > 0) await syncSharedCredentials([local, ...peers]);
-      if (switchPeers.length > 0) await syncSharedNotifySwitch([localSwitch, ...switchPeers]);
-      const cloudVms = remotes.filter(isCloudVm);
-      if (cloudVms.length > 0) {
-        const secrets = await this.cloudSecrets();
-        // The Approvals switch goes to a cloud VM too, and its own is never read back.
-        const notifySwitch = readNotifySwitch(this.configManager.getConfig());
-        await Promise.all(cloudVms.map((vm) => Promise.all([
-          vm.invoke('credentials:cloud:apply', [secrets]),
-          vm.invoke('notify:switch:apply', [notifySwitch]),
-        ]).catch((error) => {
-          console.warn(`[SharedCredentials] Could not send secrets to cloud machine ${vm.id}: ${reasonOf(error)}`);
-        })));
-      }
+      if (peers.length > 0) await Promise.all([syncSharedCredentials([local, ...peers]), syncSharedNotifySwitch([localSwitch, ...switchPeers])]);
     } catch (error) {
       console.warn('[SharedCredentials] Sync failed:', error instanceof Error ? error.message : String(error));
     } finally {
@@ -174,19 +163,24 @@ export class SharedCredentialSync {
   }
 
   /**
-   * What a cloud VM gets: this computer's merged Pane secrets and the GitHub token from gh, less what
-   * the person turned off, and the choice itself, which the VM applies to every sender. No integration
-   * keys and no 1Password references: a VM keeps only values, and only on its secrets volume.
+   * What a cloud VM is written, from the merged set `credentials`: its Pane secrets less what the
+   * person's choice (the newest one, which goes along) turns off, plus the GitHub token from gh. No
+   * integration keys and no 1Password references: a VM keeps only values, and only on its secrets volume.
    */
-  private async cloudSecrets(): Promise<SharedCredentials> {
-    const records = await this.secrets().exportForSync();
+  private async forCloudVm(credentials: SharedCredentials): Promise<SharedCredentials> {
+    const records = { ...credentials.paneSecrets };
     const token = await this.githubToken();
     if (token && this.githubRecord?.value !== token) this.githubRecord = { value: token, updatedAt: new Date().toISOString(), source: localHostLabel() };
     if (token && this.githubRecord && records[GITHUB_SIGN_IN_KEY]?.value == null) records[GITHUB_SIGN_IN_KEY] = this.githubRecord;
-    const secrets: SharedCredentials = { paneSecrets: cloudSecretRecords(records, this.secrets().cloudChoice()) };
-    const choice = this.secrets().exportCloudChoiceForSync();
+    const choice = credentials.paneCloudSecretChoice ?? this.secrets().exportCloudChoiceForSync();
+    const secrets: SharedCredentials = { paneSecrets: cloudSecretRecords(records, parseCloudChoice(choice) ?? this.secrets().cloudChoice()) };
     if (choice) secrets.paneCloudSecretChoice = choice;
     return secrets;
+  }
+
+  /** What a new cloud VM is sent before its first Session: this computer's merged set, as `forCloudVm` writes it. */
+  private async cloudSecrets(): Promise<SharedCredentials> {
+    return this.forCloudVm({ paneSecrets: await this.secrets().exportForSync(), paneCloudSecretChoice: this.secrets().exportCloudChoiceForSync() });
   }
 
   /** Changes when any shared key or Pane secret here is set or cleared, or the switch changes; never contains a value. */

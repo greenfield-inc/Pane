@@ -24,6 +24,7 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { KeychainItemMissing, paneKeychainService, systemKeychain, type Keychain } from './keychain';
 import { readFileSync } from 'fs';
 import { EMPTY_PANE_CLOUD_SECRET_CHOICE, sendsToCloud, type PaneCloudSecretChoice } from '../../../shared/types/paneCloudSecrets';
+import { parseCloudChoice } from './cloudSecrets';
 
 /** Index record for one secret, kept in config.json. Never holds the value. */
 export interface PaneSecretMeta {
@@ -366,11 +367,6 @@ export function volumeSecretIndex(directory: string, base: () => Pick<AppConfig,
   };
 }
 
-const cloudChoiceSchema: BoundarySchema<PaneCloudSecretChoice> = boundary.object({
-  excludedSecrets: boundary.array(boundary.nonEmptyString),
-  excludedMachines: boundary.array(boundary.nonEmptyString),
-});
-
 function isNewer(candidate: SharedCredential, current: Pick<PaneSecretMeta, 'updatedAt'> | undefined): boolean {
   return !current || Date.parse(candidate.updatedAt) > Date.parse(current.updatedAt);
 }
@@ -604,12 +600,8 @@ export class PaneSecretStore {
       if (record.value === null || !isNewer(record, this.config.getConfig().paneCloudSecretChoice)) return false;
       // A stamp from the future would win every later change; no real host's clock is that far ahead.
       if (Date.parse(record.updatedAt) > this.now().getTime() + MAX_CLOCK_AHEAD_MS) return false;
-      let choice: PaneCloudSecretChoice;
-      try {
-        choice = decodeBoundary(JSON.parse(record.value), cloudChoiceSchema);
-      } catch {
-        return false;
-      }
+      const choice = parseCloudChoice(record);
+      if (!choice) return false;
       await this.config.updateConfigWith(() => ({ paneCloudSecretChoice: { ...choice, updatedAt: record.updatedAt, source: record.source } }));
       return true;
     });

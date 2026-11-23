@@ -30,17 +30,17 @@ A host that is offline keeps its own copy and catches up on the next sync. Hosts
 
 ## Pane Cloud Sessions
 
-A Pane Cloud Session's machine only receives secrets. A computer signed in to Pane
-Cloud knows which of its saved machines are your cloud machines (Pane Cloud lists each
-one's relay id) and sends each your Pane secrets (the merged set from all your
-machines), your GitHub token from `gh auth token` and your Claude Code token, before
-the Session starts and again on every later sync. They travel over that computer's own
-connection, encrypted end to end to the cloud machine: Greenfield's relay passes them
-along and can't read them, and the Pane Cloud service never sees them. Integration keys
-and 1Password references are not sent. Any other device that syncs with a cloud machine,
-such as the phone app, treats it like any computer, and the cloud machine gives nothing
-back: it answers `credentials:shared:get` with nothing and the Approvals switch read
-with a value that never wins.
+A Pane Cloud Session's machine syncs secrets like any of your machines, both ways:
+a secret you set there reaches your other machines, and deletions travel in both
+directions. What reaches it is filtered by your choice below. A computer signed in to
+Pane Cloud knows which saved machines are your cloud machines (Pane Cloud lists each
+one's relay id) and writes each only your chosen Pane secrets, plus the GitHub token
+from its own `gh auth token`, before a new Session starts and on every later sync.
+Secrets travel over each device's own connection, encrypted end to end to the cloud
+machine: Greenfield's relay passes them along and can't read them, and the Pane Cloud
+service never sees them. Integration keys and 1Password references don't go to cloud
+machines, and a cloud machine's GitHub token stays on it: it is the sign-in a computer
+carried there, not a secret to share.
 
 On the cloud machine everything about secrets sits on its secrets volume
 (`PANE_SECRETS_DIR`), which the abuse checks and Greenfield staff never open: the values
@@ -58,7 +58,8 @@ last set on one machine. The choice (`paneCloudSecretChoice`) syncs like a secre
 the latest change wins on all your computers and every cloud machine. Each cloud
 machine applies it to whatever reaches it, from any computer or phone, and removes
 what it turns off, so a secret you turn off leaves cloud Sessions that already have it
-the next time one of your computers reaches them. Turning it back on sends it again.
+the next time one of your devices reaches them, without deleting it anywhere else.
+Turning it back on sends it again.
 Agents already running keep the GitHub and Claude Code sign-ins they started with.
 
 Claude Code renews its own sign-in, so copying it would sign your computer out.

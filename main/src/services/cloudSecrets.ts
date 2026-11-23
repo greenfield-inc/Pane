@@ -1,6 +1,7 @@
 import type { PaneSecretStore } from './paneSecrets';
 import { githubCliToken } from './githubWatchClient';
 import { PaneError } from '../../../shared/paneError';
+import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { paneSecretKey, type PaneSecretSummary } from '../../../shared/types/paneSecrets';
 import type { SharedCredential, SharedCredentials } from '../../../shared/types/sharedCredentials';
 import {
@@ -20,6 +21,21 @@ export const GITHUB_SIGN_IN_KEY = paneSecretKey(CLOUD_SIGN_IN_PROJECT, GITHUB_SI
 function signInLabel(key: string): string | null {
   if (key === GITHUB_SIGN_IN_KEY) return 'GitHub';
   return CLOUD_TOKEN_AGENTS.find((agent) => paneSecretKey(CLOUD_SIGN_IN_PROJECT, agent.env) === key)?.title ?? null;
+}
+
+const cloudChoiceSchema: BoundarySchema<PaneCloudSecretChoice> = boundary.object({
+  excludedSecrets: boundary.array(boundary.nonEmptyString),
+  excludedMachines: boundary.array(boundary.nonEmptyString),
+});
+
+/** The choice a sync record carries, or null when there is none or it doesn't decode. */
+export function parseCloudChoice(record: SharedCredential | undefined): PaneCloudSecretChoice | null {
+  if (!record?.value) return null;
+  try {
+    return decodeBoundary(JSON.parse(record.value), cloudChoiceSchema);
+  } catch {
+    return null;
+  }
 }
 
 /** The person's GitHub token from the GitHub CLI on this computer, or null when gh is missing or signed out. */

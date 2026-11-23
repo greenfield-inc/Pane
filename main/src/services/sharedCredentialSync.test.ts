@@ -627,7 +627,7 @@ describe('Pane Cloud VMs', () => {
     throw new Error('Each sync set off another for 10 rounds.');
   };
 
-  it('get every paired machine\'s secrets and the GitHub token on the secrets volume, and send nothing back', async () => {
+  it('sync both ways like any machine: every machine\'s secrets and the GitHub token land on the volume, and a secret set on the VM reaches the others', async () => {
     const vm = await cloudVm();
     await vm.secrets.set('scratch', 'MADE_ON_VM', 'vm-only');
     const studio = { ...machine('studio', { enabled: true, changedAt: 0 }, { paneSecrets: { 'deploy/AWS_ACCESS_KEY_ID': STUDIO_SECRET } }) };
@@ -650,23 +650,37 @@ describe('Pane Cloud VMs', () => {
     // Agents on the VM start with the GitHub sign-in, and git uses it through gh.
     expect(vm.env).toMatchObject({ GH_TOKEN: 'gho_desktop', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-desktop', GIT_CONFIG_KEY_0: 'credential.https://github.com.helper', GIT_CONFIG_VALUE_0: '!gh auth git-credential' });
 
-    // One way: the VM's own secret reaches neither the desktop nor another machine, and the VM is never read.
-    expect(secrets.has('scratch', 'MADE_ON_VM')).toBe(false);
-    expect(JSON.stringify(studio.keys())).not.toContain('MADE_ON_VM');
-    expect(vm.invoke.mock.calls.map(call => call[0])).not.toContain('credentials:shared:get');
-    // The Approvals switch reaches it the same way, and the VM's own is never read.
-    expect(vm.invoke.mock.calls.map(call => call[0])).toContain('notify:switch:apply');
-    expect(vm.invoke.mock.calls.map(call => call[0])).not.toContain('notify:switch:get');
-    // And a paired machine is not sent the GitHub token: only cloud VMs get it.
+    // Both ways (D-91): a secret set on the VM reaches the desktop and, through it, mac-studio.
+    expect(await secrets.read('scratch', 'MADE_ON_VM')).toBe('vm-only');
+    expect(JSON.stringify(studio.keys())).toContain('vm-only');
+    // The VM's GitHub token is a sign-in carried to it, not the person's secret: it goes to no other machine.
+    expect(secrets.has('pane-cloud', 'GH_TOKEN')).toBe(false);
     expect(JSON.stringify(studio.keys())).not.toContain('gho_desktop');
   });
 
-  it('answer an older device that reads them with nothing', async () => {
+  it('carry a deletion either way: one made on the VM, and one made on a computer', async () => {
     const vm = await cloudVm();
+    const { secrets, sync } = await desktop([vm]);
+    sync.start();
+    await settled();
     await vm.secrets.set('scratch', 'MADE_ON_VM', 'vm-only');
+    sync.resync();
+    await settled();
+    expect(secrets.has('scratch', 'MADE_ON_VM')).toBe(true);
 
-    expect(await vm.registry.invokeRemote('credentials:shared:get', [{}, { clientId: 'old-phone' }])).toEqual({});
-    await vm.registry.invokeRemote('credentials:shared:apply', [{ openaiApiKey: { value: 'sk-openai', updatedAt: '2026-11-01T00:00:00.000Z', source: 'old-phone' } }, { clientId: 'old-phone' }]);
+    await vm.secrets.delete('scratch', 'MADE_ON_VM');
+    await secrets.delete('web', 'NPM_TOKEN');
+    sync.resync();
+    await settled();
+
+    expect(secrets.has('scratch', 'MADE_ON_VM')).toBe(false);
+    expect(vm.secrets.has('web', 'NPM_TOKEN')).toBe(false);
+    expect(await fs.readFile(path.join(vm.volume ?? '', 'secrets.json'), 'utf8')).not.toContain('npm-desktop');
+  });
+
+  it('keep integration keys off the VM, whoever sends them', async () => {
+    const vm = await cloudVm();
+    await vm.registry.invokeRemote('credentials:shared:apply', [{ openaiApiKey: { value: 'sk-openai', updatedAt: '2026-11-01T00:00:00.000Z', source: 'phone' } }, { clientId: 'phone' }]);
     expect(vm.configManager.getConfig().openaiApiKey).toBeUndefined();
   });
 
