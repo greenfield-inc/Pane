@@ -461,6 +461,12 @@ Cloud** under **Where it runs**, then **Create on Pane Cloud**. The first time,
 machine, pairs this computer with it over the relay (phone access turns on if
 it was off), and starts the Session there.
 
+Pane Cloud machines run Linux, so iOS Simulator and Xcode work needs one of
+your Macs; the Pane Cloud card says so. When the project you have open has an
+Xcode project (`.xcodeproj` or `.xcworkspace`), **Where it runs** lists your
+Macs first and picks one; with none online, **Run it on a Mac** opens the Pane
+Cloud docs.
+
 A cloud Session sits in the Sessions list like any other. Its ⋯ menu has
 **Stop**, **Start** and **Delete…**; Delete removes the machine and its disk.
 You can have 5 cloud Sessions running at once on the Free plan. **Settings ›
@@ -469,7 +475,8 @@ and how many Sessions are running. Each cloud Session's page under **Settings �
 Remote Access** lists every operation you or Pane Cloud asked for on it, with
 who asked and why. If Pane Cloud stops answering or your sign-in ends while
 Pane is open, your cloud Sessions stay in the list and keep running. If Pane
-starts while Pane Cloud can't be reached, they appear once it answers.
+starts while Pane Cloud can't be reached, they appear once Pane reaches it
+again, such as when you open **Usage & Limits** and choose **Try again**.
 
 `PANE_CLOUD_URL` points a dev build at another Pane Cloud service, such as the
 stub in `packages/pane-cloud-contract`.
