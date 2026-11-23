@@ -1299,6 +1299,7 @@ async function initializeServices() {
     },
     onCloudMachinesChanged: () => sharedCredentialSync?.resync(),
     send: (channel, snapshot) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, snapshot); },
+    projectPath: (projectId) => databaseService.getProject(projectId)?.path ?? null,
   });
   setDeviceMachines(machineConnections);
   const machines = machineConnections;

@@ -7,7 +7,7 @@
  */
 import { z } from 'zod';
 import { CloudApiError } from './errors';
-import { FleetVmState, OperationError, PairingLink, RelayIdentity, StateReason, VmId, VmMemoryGiB } from './fleet';
+import { CloneRepo, CloneStatus, FleetVmState, isGitHubRepo, OperationError, PairingLink, RelayIdentity, SealedSecret, SealingKeyId, SealingPublicKey, StateReason, VmId, VmMemoryGiB } from './fleet';
 import { callRoute, type ClientConfig, route } from './http';
 
 const Timestamp = z.iso.datetime({ offset: true });
@@ -105,6 +105,8 @@ export const SessionVm = z
      * vouches for from then on; null before the first pairing.
      */
     relay: RelayIdentity.nullable(),
+    /** The clone of the repo the Session was created for, as the guest reports it; null without one (D-107). */
+    clone: CloneStatus.nullable().default(null),
     createdAt: Timestamp,
     updatedAt: Timestamp,
   })
@@ -112,7 +114,7 @@ export const SessionVm = z
 export type SessionVm = z.infer<typeof SessionVm>;
 
 /** Lifecycle actions plus the allow-listed guest operations, as the VM's action log names them. */
-export const LoggedOperation = z.enum(['create', 'start', 'stop', 'delete', 'bootstrap', 'update_pane', 'prepare_to_stop', 'collect_diagnostics', 'create_pairing_link']);
+export const LoggedOperation = z.enum(['create', 'start', 'stop', 'delete', 'bootstrap', 'update_pane', 'prepare_to_stop', 'collect_diagnostics', 'create_pairing_link', 'retry_clone']);
 
 export const ActionLogEntry = z
   .object({
@@ -156,6 +158,43 @@ const UserOperationName = z.enum(USER_OPERATIONS);
 /** What requestOperation accepts before parseUserOperation checks it. */
 export const SubmittedOperation = z.object({ operation: z.string(), parameters: z.record(z.string(), z.json()) }).strict();
 export type SubmittedOperation = z.infer<typeof SubmittedOperation>;
+
+// ---------- A new Session's repo and the sealed GitHub token (D-107) ----------
+
+/**
+ * A key to seal the person's GitHub token to (sealGitHubToken). Pane asks for one when the create
+ * dialog opens: it reserves a free slot until `expiresAt`, and a create naming it after that answers
+ * sealing_key_expired, so Pane asks again and seals again.
+ */
+export const SealingKey = z.object({ keyId: SealingKeyId, publicKey: SealingPublicKey, expiresAt: Timestamp }).strict();
+export type SealingKey = z.infer<typeof SealingKey>;
+
+/**
+ * createVm's body. With `repo`, the VM clones it at boot and reports the clone on the VM. A private
+ * repo's token goes sealed, to the key `sealingKeyId` names; the service passes it to the host and
+ * never stores, logs or returns it. Pane sends no token when the person keeps it from this machine.
+ */
+export const CreateVmRequest = z
+  .object({
+    name: z.string().min(1).max(64),
+    idempotencyKey: z.string().min(8).max(128),
+    repo: CloneRepo.optional(),
+    sealingKeyId: SealingKeyId.optional(),
+    sealedGitHubToken: SealedSecret.optional(),
+  })
+  .strict()
+  .refine((body) => !body.sealedGitHubToken || (body.sealingKeyId && body.repo && isGitHubRepo(body.repo)), {
+    message: 'A sealed GitHub token goes only with a github.com repo and the sealing key it was sealed to',
+    path: ['sealedGitHubToken'],
+  });
+export type CreateVmRequest = z.input<typeof CreateVmRequest>;
+
+/** retryClone's body: a fresh sealed token, sealed to a key from createVmSealingKey, after a sign-in error. */
+export const RetryCloneRequest = z
+  .object({ sealingKeyId: SealingKeyId.optional(), sealedGitHubToken: SealedSecret.optional() })
+  .strict()
+  .refine((body) => !body.sealedGitHubToken || body.sealingKeyId, { message: 'A sealed GitHub token goes with the sealing key it was sealed to', path: ['sealedGitHubToken'] });
+export type RetryCloneRequest = z.input<typeof RetryCloneRequest>;
 
 // ---------- Usage ----------
 
@@ -218,10 +257,16 @@ export const serviceRoutes = {
     method: 'POST',
     path: '/v1/organizations/:organizationId/vms',
     auth: true,
-    body: z.object({ name: z.string().min(1).max(64), idempotencyKey: z.string().min(8).max(128) }).strict(),
+    body: CreateVmRequest,
     response: VmAction,
     status: 202,
   }),
+  /** A key for the GitHub token of the next create in this organization; needs the same access a create does. */
+  createSealingKey: route({ id: 'service.createSealingKey', method: 'POST', path: '/v1/organizations/:organizationId/sealing-keys', auth: true, body: z.object({}).strict(), response: SealingKey, status: 201 }),
+  /** A key for a fresh GitHub token for a running VM's retryClone. */
+  createVmSealingKey: route({ id: 'service.createVmSealingKey', method: 'POST', path: '/v1/vms/:vmId/sealing-key', auth: true, body: z.object({}).strict(), response: SealingKey, status: 201 }),
+  /** Runs a failed clone again; invalid_state unless the VM is running and its clone failed. Logged as retry_clone, without the token. */
+  retryClone: route({ id: 'service.retryClone', method: 'POST', path: '/v1/vms/:vmId/clone/retry', auth: true, body: RetryCloneRequest, response: VmAction, status: 202 }),
   getVm: route({ id: 'service.getVm', method: 'GET', path: '/v1/vms/:vmId', auth: true, response: SessionVm }),
   startVm: route({ id: 'service.startVm', method: 'POST', path: '/v1/vms/:vmId/start', auth: true, body: z.object({}).strict(), response: VmAction, status: 202 }),
   stopVm: route({ id: 'service.stopVm', method: 'POST', path: '/v1/vms/:vmId/stop', auth: true, body: z.object({}).strict(), response: VmAction, status: 202 }),
@@ -262,7 +307,11 @@ export function createServiceClient(config: ClientConfig) {
     signOut: () => callRoute(config, r.signOut, { body: {} }),
     getAccount: () => callRoute(config, r.getAccount),
     listVms: (organizationId: string) => callRoute(config, r.listVms, { params: { organizationId } }),
-    createVm: (organizationId: string, name: string, idempotencyKey: string) => callRoute(config, r.createVm, { params: { organizationId }, body: { name, idempotencyKey } }),
+    createVm: (organizationId: string, name: string, idempotencyKey: string, clone: Omit<CreateVmRequest, 'name' | 'idempotencyKey'> = {}) =>
+      callRoute(config, r.createVm, { params: { organizationId }, body: { name, idempotencyKey, ...clone } }),
+    createSealingKey: (organizationId: string) => callRoute(config, r.createSealingKey, { params: { organizationId }, body: {} }),
+    createVmSealingKey: (vmId: string) => callRoute(config, r.createVmSealingKey, { params: { vmId }, body: {} }),
+    retryClone: (vmId: string, request: RetryCloneRequest = {}) => callRoute(config, r.retryClone, { params: { vmId }, body: request }),
     getVm: (vmId: string) => callRoute(config, r.getVm, { params: { vmId } }),
     startVm: (vmId: string) => callRoute(config, r.startVm, { params: { vmId }, body: {} }),
     stopVm: (vmId: string) => callRoute(config, r.stopVm, { params: { vmId }, body: {} }),

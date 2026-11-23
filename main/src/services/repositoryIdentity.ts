@@ -7,6 +7,11 @@ import { getWSLContextFromProject, type WSLContext } from '../utils/wslUtils';
  * Null for a remote that is a local path, or that names no repository.
  */
 export function repositoryIdentityFromRemote(remote: string): string | null {
+  return repositoryAddressFromRemote(remote)?.toLowerCase() ?? null;
+}
+
+/** The remote as `host/owner/repo`, in its own case: the identity before it is lower-cased. */
+export function repositoryAddressFromRemote(remote: string): string | null {
   const url = remote.trim();
   if (!url || url.startsWith('/') || url.startsWith('.') || /^[a-z]:[\\/]/i.test(url) || /^file:/i.test(url)) return null;
 
@@ -30,7 +35,7 @@ export function repositoryIdentityFromRemote(remote: string): string | null {
 
   const repository = path.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '');
   if (!host || !repository) return null;
-  return `${host}/${repository}`.toLowerCase();
+  return `${host}/${repository}`;
 }
 
 interface ProjectLocation {

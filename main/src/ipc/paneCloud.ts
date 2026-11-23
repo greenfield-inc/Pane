@@ -6,6 +6,7 @@ import { PANE_CLOUD_MACHINE_CHANNEL, paneCloudMachine } from '../../../shared/ut
 import type { MachineConnections } from '../services/machineConnections';
 import type { ConfigManager } from '../services/configManager';
 import { DEFAULT_PANE_CLOUD_URL, PaneCloudFailure, PaneCloudManager } from '../services/paneCloud';
+import { cloneRepoOf } from '../services/paneCloudRepo';
 import { getAppDirectory } from '../utils/appDirectory';
 import { PaneError } from '../../../shared/paneError';
 import { computerRelayId } from '../../../shared/types/remoteComputers';
@@ -63,6 +64,8 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
   /** Called when the saved machines that are the person's cloud VMs change (`cloudMachineIds`). */
   onCloudMachinesChanged?: () => void;
   send: (channel: string, snapshot: PaneCloudSnapshot) => void;
+  /** The folder of a project on this computer, for the repo a new cloud Session clones. */
+  projectPath?: (projectId: number) => string | null;
 }): void {
   manager?.dispose();
   const { commands, machines, configManager } = deps;
@@ -139,8 +142,13 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
   ipcMain.handle('pane-cloud:restore', (_event, id: PaneCommandValue) => answer(() => cloud.restore(vmId(id))));
   ipcMain.handle('pane-cloud:update-pane', (_event, id: PaneCommandValue) => answer(() => cloud.updatePane(vmId(id))));
   ipcMain.handle('pane-cloud:actions', async (_event, id: PaneCommandValue) => answer(() => cloud.actions(vmId(id))));
-  ipcMain.handle('pane-cloud:create', async (_event, input: PaneCommandValue) =>
-    answer(() => cloud.createSession(decodeBoundary(input, boundary.jsonObject))));
+  ipcMain.handle('pane-cloud:prepare-create', () => answer(async () => cloud.prepareCreate()));
+  ipcMain.handle('pane-cloud:retry-clone', (_event, id: PaneCommandValue) => answer(() => cloud.retryClone(vmId(id))));
+  ipcMain.handle('pane-cloud:create', async (_event, input: PaneCommandValue, projectId?: PaneCommandValue) =>
+    answer(async () => {
+      const folder = projectId === undefined || projectId === null ? null : deps.projectPath?.(decodeBoundary(projectId, boundary.number)) ?? null;
+      return cloud.createSession(decodeBoundary(input, boundary.jsonObject), folder ? await cloneRepoOf(folder) : null);
+    }));
 
   // "Choose what to send": this computer's secrets by name only, and the person's choice.
   ipcMain.handle('pane-cloud:secrets', async () => answer(async () => {

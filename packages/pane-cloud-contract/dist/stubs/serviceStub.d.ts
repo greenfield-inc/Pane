@@ -1,4 +1,5 @@
 import { type Account, type OrgRole, type Plan, type SessionVm } from '../service';
+import type { GitHubTokenRecord } from '../sealing';
 import { type RunningStub } from './server';
 export interface StubAccount {
     email: string;
@@ -34,6 +35,13 @@ export interface ServiceStub extends RunningStub {
     setMemoryGiB(vmId: string, memoryGiB: SessionVm['memoryGiB']): void;
     /** The VM's Pane losing its relay key and making a new one, so its next pairing reports another identity. */
     replaceRelayKey(vmId: string): void;
+    /** The VM's clone failing now with git's message, as a sign-in or network error does. */
+    failClone(vmId: string, message: string): void;
+    /**
+     * The GitHub token the host opened for this VM's secrets volume, from its create or its latest
+     * retry: what the stub's host received, never something the service keeps.
+     */
+    hostGitHubToken(vmId: string): GitHubTokenRecord | null;
 }
 /**
  * An in-memory Pane Cloud service that keeps the contract, for building Pane against and for the

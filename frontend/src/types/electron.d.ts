@@ -877,7 +877,11 @@ interface ElectronAPI {
     signIn: () => Promise<IPCResponse<PaneCloudSnapshot>>;
     signOut: () => Promise<IPCResponse<PaneCloudSnapshot>>;
     /** New cloud Session: the VM, the pairing and the Session on it; `details` carries the next step on failure. */
-    create: (input: OrchestrationSessionCreateInput) => Promise<IPCResponse<PaneCloudCreated>>;
+    /** New cloud Session; with `projectId`, the VM clones that project's repo (D-107). */
+    create: (input: OrchestrationSessionCreateInput, projectId?: number) => Promise<IPCResponse<PaneCloudCreated>>;
+    /** Asks for a sealing key ahead of Create, when the create dialog opens. */
+    prepareCreate: () => Promise<IPCResponse>;
+    retryClone: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
     stop: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
     start: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
     remove: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;

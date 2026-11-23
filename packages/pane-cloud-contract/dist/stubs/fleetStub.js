@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.startFleetStub = startFleetStub;
 const errors_1 = require("../errors");
 const fleet_1 = require("../fleet");
+const clone_1 = require("./clone");
 const relayKey_1 = require("./relayKey");
 const server_1 = require("./server");
 const notFound = (vmId) => new errors_1.CloudApiError('vm_not_found', `The fleet has no VM ${vmId}.`, 'Create the VM first, or check its id.');
@@ -19,6 +20,17 @@ async function startFleetStub(options) {
     const relayKeys = new Map();
     const operations = new Map();
     const events = [];
+    const sealingKeys = new clone_1.StubSealingKeys(hostId, now);
+    const clones = new Map();
+    const volumeTokens = new Map();
+    let panes = 0;
+    /** The VM as a read sees it: each read moves its clone one step. */
+    const view = (vm) => {
+        const clone = clones.get(vm.vmId);
+        if (clone)
+            vm.clone = clone.read();
+        return vm;
+    };
     const record = (event) => events.push({ ...event, id: String(events.length + 1), at: iso() });
     const setState = (vm, state, reason, requestId = null) => {
         vm.state = state;
@@ -43,13 +55,22 @@ async function startFleetStub(options) {
             throw new errors_1.CloudApiError('release_not_published', `Pane ${release.version} with that checksum is not a published release.`, 'Name a published release and its exact .deb checksum.');
     };
     /** Runs a checked operation; throws CloudApiError when the VM's state or the release refuses it. */
-    const runOperation = (payload) => {
+    const runOperation = async (payload, sealed) => {
         let result = null;
         if (payload.operation === 'create') {
             const existing = vms.get(payload.vmId);
             if (existing && existing.state !== 'deleted')
                 throw new errors_1.CloudApiError('vm_exists', `VM ${payload.vmId} already exists.`, 'Use a new VM id, or start the existing VM.');
-            const vm = { vmId: payload.vmId, state: 'running', stateReason: null, hostId, memoryGiB: 8, paneVersion: null, updatedAt: iso() };
+            const { sealingKeyId, repo } = payload.parameters;
+            const opened = sealingKeyId ? await sealingKeys.use(sealingKeyId, 'slot', sealed?.githubToken) : null;
+            const vm = { vmId: payload.vmId, state: 'running', stateReason: null, hostId, memoryGiB: 8, paneVersion: null, clone: null, updatedAt: iso() };
+            if (repo) {
+                panes += 1;
+                const clone = new clone_1.StubClone(repo, iso, `pane_${panes}`);
+                clones.set(vm.vmId, clone);
+                vm.clone = clone.status;
+            }
+            volumeTokens.set(vm.vmId, opened);
             vms.set(vm.vmId, vm);
             relayKeys.set(vm.vmId, (0, relayKey_1.newRelayIdentity)('runpane.net'));
             record({ vmId: vm.vmId, kind: 'state_changed', state: 'running', reason: null, requestId: payload.requestId });
@@ -90,13 +111,31 @@ async function startFleetStub(options) {
                     result = (0, relayKey_1.pairingLinkFor)(relay, vm.vmId, now());
                     break;
                 }
+                case 'retry_clone': {
+                    requireState(vm, 'running', 'retry_clone');
+                    const clone = clones.get(vm.vmId);
+                    if (!clone || clone.status.state !== 'failed')
+                        throw new errors_1.CloudApiError('invalid_state', `retry_clone needs a failed clone; ${vm.vmId}'s is ${clone?.status.state ?? 'absent'}.`, 'Read the VM and retry only a failed clone.');
+                    const { sealingKeyId } = payload.parameters;
+                    if (sealingKeyId)
+                        volumeTokens.set(vm.vmId, await sealingKeys.use(sealingKeyId, `vm:${vm.vmId}`, sealed?.githubToken));
+                    vm.clone = clone.restart();
+                    break;
+                }
             }
         }
         return result;
     };
     const server = (0, server_1.createRouteServer)([
-        (0, server_1.bind)(fleet_1.fleetRoutes.submitOperation, ({ body }) => {
-            const { payload } = (0, fleet_1.verifyOperation)(body, options.trustedKeys, hostId, now());
+        (0, server_1.bind)(fleet_1.fleetRoutes.reserveSealingKey, () => sealingKeys.make('slot')),
+        (0, server_1.bind)(fleet_1.fleetRoutes.createVmSealingKey, ({ params }) => {
+            const vm = requireVm(params.vmId ?? '');
+            requireState(vm, 'running', 'A sealing key');
+            return sealingKeys.make(`vm:${vm.vmId}`);
+        }),
+        (0, server_1.bind)(fleet_1.fleetRoutes.submitOperation, async ({ body }) => {
+            const envelope = (0, fleet_1.verifyOperation)(body, options.trustedKeys, hostId, now());
+            const { payload } = envelope;
             const payloadJson = (0, fleet_1.canonicalJson)(payload);
             const seen = operations.get(payload.requestId);
             if (seen) {
@@ -108,7 +147,7 @@ async function startFleetStub(options) {
             }
             const status = { requestId: payload.requestId, vmId: payload.vmId, operation: payload.operation, status: 'succeeded', error: null, result: null, acceptedAt: iso(), finishedAt: null };
             try {
-                status.result = runOperation(payload);
+                status.result = await runOperation(payload, (0, fleet_1.requireSealedSecrets)(envelope));
             }
             catch (error) {
                 if (!(error instanceof errors_1.CloudApiError))
@@ -131,7 +170,7 @@ async function startFleetStub(options) {
             const vm = vms.get(params.vmId ?? '');
             if (!vm)
                 throw notFound(params.vmId ?? '');
-            return vm;
+            return view(vm);
         }),
         (0, server_1.bind)(fleet_1.fleetRoutes.getMetrics, ({ params, query }) => {
             const vm = requireVm(params.vmId ?? '');
@@ -161,6 +200,16 @@ async function startFleetStub(options) {
         hostStop(vmId, reason) {
             const vm = requireVm(vmId);
             setState(vm, 'stopped', reason);
+        },
+        failClone(vmId, message) {
+            const clone = clones.get(vmId);
+            const vm = requireVm(vmId);
+            if (!clone)
+                throw new Error(`stub: VM ${vmId} has no clone`);
+            vm.clone = clone.fail(message);
+        },
+        secretsVolumeToken(vmId) {
+            return volumeTokens.get(vmId) ?? null;
         },
         setCpuSecondsUsed(vmId, seconds) {
             requireVm(vmId);

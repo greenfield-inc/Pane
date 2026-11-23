@@ -40,9 +40,11 @@
     "node": "^22.23.4 || ^24.22.1 || ^26.12.1"
   },
   "dependencies": {
+    "libsodium-wrappers": "0.7.15",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/libsodium-wrappers": "0.7.14",
     "@types/node": "^22.10.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

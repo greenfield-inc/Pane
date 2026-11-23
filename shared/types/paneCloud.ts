@@ -44,6 +44,24 @@ export interface PaneCloudSession {
   machineId: string | null;
   paneVersion: string | null;
   createdAt: string;
+  /** The clone of the repo it was created for (D-107); null without one. */
+  clone: PaneCloudClone | null;
+}
+
+/** A new cloud Session's clone, as its VM reports it: progress, then the Pane to open, or git's error. */
+export interface PaneCloudClone {
+  /** `owner/repo`. */
+  repo: string;
+  state: 'cloning' | 'ready' | 'failed';
+  phase: 'receiving' | 'resolving' | 'checking_out' | 'creating_pane' | null;
+  percent: number | null;
+  /** git's last progress line. */
+  line: string | null;
+  startedAt: string;
+  /** git's error, for a failed clone. */
+  error: string | null;
+  /** The Pane the clone made, once ready. */
+  paneId: string | null;
 }
 
 export interface PaneCloudMemberUsage {
@@ -73,7 +91,7 @@ export interface PaneCloudUsage {
 }
 
 /** Lifecycle steps and allow-listed operations, as a cloud Session's action log names them. */
-export type PaneCloudOperation = 'create' | 'start' | 'stop' | 'delete' | 'bootstrap' | 'update_pane' | 'prepare_to_stop' | 'collect_diagnostics' | 'create_pairing_link';
+export type PaneCloudOperation = 'create' | 'start' | 'stop' | 'delete' | 'bootstrap' | 'update_pane' | 'prepare_to_stop' | 'collect_diagnostics' | 'create_pairing_link' | 'retry_clone';
 
 /** One entry of a cloud Session's action log: every lifecycle step and operation, with who and why (D-6). */
 export interface PaneCloudAction {
@@ -115,6 +133,7 @@ export interface PaneCloudCreateRequest {
 export interface PaneCloudCreated {
   machineId: string;
   sessionId: string;
+  vmId: string;
   snapshot: PaneCloudSnapshot;
 }
 

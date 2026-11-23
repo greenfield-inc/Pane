@@ -7,7 +7,7 @@ import type { PaneCloudSession } from '../../../shared/types/paneCloud';
 const record = (fields: Partial<OrchestrationSessionRecord> & { id: string; name: string }) => fields as OrchestrationSessionRecord;
 
 const vm = (fields: Partial<PaneCloudSession> & { vmId: string; name: string }): PaneCloudSession => ({
-  awake: true, underReview: false, machineId: null, paneVersion: '2.4.249', createdAt: '2026-11-20T10:00:00.000Z', ...fields,
+  awake: true, underReview: false, machineId: null, paneVersion: '2.4.249', createdAt: '2026-11-20T10:00:00.000Z', clone: null, ...fields,
 });
 
 const lists = {
