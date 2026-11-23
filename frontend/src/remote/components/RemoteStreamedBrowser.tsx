@@ -32,7 +32,8 @@ export function RemoteStreamedBrowser({ adapter, panel, hostName, ownCopy }: { a
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const state = panel.state.customState as BrowserPanelState | undefined;
   const choice = useStreamChoice(panel.id, state);
-  if (isHostLocalUrl(state?.currentUrl) || !choice.stream) {
+  // A sign-in popup always streams, even on a localhost callback: a copy would lose its opener.
+  if (!state?.signInPopup && (isHostLocalUrl(state?.currentUrl) || !choice.stream)) {
     const driver = state?.driver;
     const onViewLive = state?.agentUse && !isHostLocalUrl(state.currentUrl) ? choice.live : undefined;
     if (driver?.by !== 'person') return <>{ownCopy(onViewLive)}</>;

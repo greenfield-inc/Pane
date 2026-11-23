@@ -1270,10 +1270,11 @@ export function RemotePwaApp() {
             </PortalContainerProvider>
             {/* Inside the drawer while it is open, or the scrim would cover it. */}
             {archivedSessionToastElement}
-            {linkActions && <LinkPopoverHost actions={linkActions} />}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+      {/* Once for the whole app, outside the drawer: links in chats need it whether or not the drawer is open. */}
+      {linkActions && <LinkPopoverHost actions={linkActions} />}
 
       <RemoteSidebar
         loading={loading}

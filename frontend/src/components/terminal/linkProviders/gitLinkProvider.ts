@@ -17,8 +17,9 @@ export function createGitLinkProvider(config: LinkProviderConfig): ILinkProvider
   }
 
   // Regex patterns for git-related content
-  // A commit hash has at least one letter: an all-digit run (a timestamp, a port) opens nothing on click.
-  const GIT_SHA = /\b(?=[0-9]*[a-f])([0-9a-f]{7,40})\b/gi;
+  // A commit hash stands alone and mixes letters and digits: a timestamp, a word like "deadbeef", a
+  // UUID part, or hex inside a path or URL is no commit, and a plain click on one would open a 404.
+  const GIT_SHA = /(?<![\w./-])(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])([0-9a-f]{7,40})(?![\w./-])/gi;
   const ISSUE_REF = /(?:^|[\s(])#(\d+)\b/g;
   const CROSS_REPO_ISSUE = /([a-z0-9_-]+\/[a-z0-9_-]+)#(\d+)/gi;
 

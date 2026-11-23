@@ -110,9 +110,9 @@ describe('routeWebviewPopups', () => {
   });
 
   it.each([
-    ['https://signin.aws.amazon.com/oauth?client_id=arn', 'AWS'],
+    ['https://signin.aws.amazon.com/signin?redirect_uri=https%3A%2F%2Fconsole.aws.amazon.com', 'AWS'],
     ['https://us-east-1.signin.aws/platform/login', 'AWS'],
-    ['https://example.com/oauth/error?authError=Error+403:+disallowed_useragent', 'Google'],
+    ['https://example.com/auth/callback?error=disallowed_useragent', 'Google'],
   ])('names %s as a sign-in %s refuses inside apps', (url, site) => {
     const { follow, routing } = setup(true);
     expect(follow(url)).toBe(false);
@@ -129,6 +129,18 @@ describe('routeWebviewPopups', () => {
     expect(answer.createWindow(options)).toBe(popupPage);
     expect(createPopup).toHaveBeenCalledWith({ url: 'https://accounts.example.com/authorize', options, opener: { panelId: 'panel-1', sessionId: 'session-1' } });
     expect(routing.openBrowserTab).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    // Console federation and the OAuth hop after a sign-in carry no sign-in form.
+    'https://signin.aws.amazon.com/federation?Action=login',
+    'https://signin.aws.amazon.com/oauth?code=abc',
+    // A page that only mentions Google's error is not that error.
+    'https://example.com/search?q=disallowed_useragent',
+  ])('lets %s load', (url) => {
+    const { follow, routing } = setup(true);
+    expect(follow(url)).toBe(true);
+    expect(routing.refuseSignIn).not.toHaveBeenCalled();
   });
 
   it('leaves a Google sign-in button inside another site\'s page alone', () => {

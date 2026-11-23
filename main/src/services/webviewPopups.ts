@@ -35,10 +35,11 @@ export interface PopupTabRequest {
  * Sign-ins that refuse to run inside apps, by host, with the name the tab's line uses. The tab stays
  * where it was and offers the system browser (docs/BROWSER_AGENTS.md).
  */
-const IN_APP_REFUSED_SIGN_INS: ReadonlyArray<{ site: string; host: (hostname: string) => boolean }> = [
+const IN_APP_REFUSED_SIGN_INS: ReadonlyArray<{ site: string; matches: (url: URL) => boolean }> = [
   // Google refuses sign-in in embedded browsers ("This browser or app may not be secure", disallowed_useragent).
-  { site: 'Google', host: hostname => hostname === 'accounts.google.com' },
-  { site: 'AWS', host: hostname => hostname === 'signin.aws.amazon.com' || hostname === 'signin.aws' || hostname.endsWith('.signin.aws') },
+  { site: 'Google', matches: url => url.hostname === 'accounts.google.com' || url.searchParams.get('error') === 'disallowed_useragent' },
+  // AWS's sign-in forms; console federation and the OAuth hop after a sign-in load normally.
+  { site: 'AWS', matches: url => (url.hostname === 'signin.aws.amazon.com' && url.pathname.startsWith('/signin')) || url.hostname === 'signin.aws' || url.hostname.endsWith('.signin.aws') },
 ];
 
 /** The name of the sign-in `url` belongs to when it refuses to run inside apps. */
@@ -46,9 +47,7 @@ function refusedSignIn(url: string): string | undefined {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:') return undefined;
-    // Google's own error for an embedded browser, wherever a sign-in sends it.
-    if (/disallowed_useragent/i.test(decodeURIComponent(parsed.search))) return 'Google';
-    return IN_APP_REFUSED_SIGN_INS.find(entry => entry.host(parsed.hostname))?.site;
+    return IN_APP_REFUSED_SIGN_INS.find(entry => entry.matches(parsed))?.site;
   } catch {
     return undefined;
   }
