@@ -533,7 +533,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive, onViewLive
     const onDidNavigateDocument = () => {
       setUrlError('');
       setRefusals([]);
+      // A sign-in line belongs to the page it offers; a new page starts without it.
       signInsHandledRef.current.clear();
+      setNotices(current => current.filter(shown => shown.notice.kind !== 'sign-in'));
     };
     const onDidStartLoading = () => setIsLoading(true);
     const onDidFailLoad = (event: Electron.DidFailLoadEvent) => {

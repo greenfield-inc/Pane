@@ -255,7 +255,7 @@ test('on a remote desktop, Open in your browser waits for a forwarded port', asy
   await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally)).toEqual(['http://localhost:5173/']);
 });
 
-test('a sign-in Google refuses shows one line per page, which opens that page in your browser', async ({ page }) => {
+test('a sign-in Google refuses shows one line for its page, which opens that page in your browser', async ({ page }) => {
   await openBrowserPanel(page, 'https://www.reddit.com/login/');
   await loadConfig(page, 'local');
   await guestEvent(page, 'did-navigate', 'https://www.reddit.com/login/');
@@ -279,4 +279,8 @@ test('a sign-in Google refuses shows one line per page, which opens that page in
   await guestEvent(page, 'did-navigate', 'https://www.reddit.com/login/');
   await refuse();
   await expect(line).toHaveCount(1);
+
+  // The line belongs to its page: moving on drops it.
+  await guestEvent(page, 'did-navigate', 'https://accounts.google.com/v3/signin/identifier');
+  await expect(line).toHaveCount(0);
 });
