@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Prints a daily table of Pane relay usage from the "relay usage" lines each relay writes to
-// Cloud Logging once an hour and when it stops (pane-relay --usage-project).
+// Cloud Logging when it starts, once an hour and when it stops (pane-relay --usage-project).
 //
 //   node relay/deploy/usage.mjs --account <gcloud account> [--project pane-pwa-preview] [--days 7]
 //
@@ -8,11 +8,13 @@
 //   online peak    most computers connected at once, summed over the relays (hourly samples)
 //   seen 24h       each relay's most computers seen in the 24 h before one of its lines that
 //                  day, summed over the relays (a computer that moved regions counts once per relay)
-//   new            computers the relays' registries didn't know when they connected
-//   clients peak   most client devices at once (distinct computer and client address pairs)
+//   clients peak   most devices reaching computers through the relays at once (distinct
+//                  computer and client address pairs; same-network and Tailscale devices don't
+//                  pass through a relay)
 //   per computer   clients per computer that had any, averaged over the day's samples
-// A * marks a day a relay restarted: its counts start again from zero, and a computer that
-// was offline across the restart counts as new when it comes back.
+// A * marks a day a relay started: its counts start again from zero.
+// New computers aren't here: the relays keep no history across restarts. They are PostHog's
+// certificate_issued events with renewal false (docs/ANALYTICS_INVARIANTS.md).
 import { execFileSync } from 'node:child_process';
 
 const RETENTION_DAYS = 30;
@@ -49,7 +51,7 @@ const hour = (ts) => ts.slice(0, 13);
 const sum = (items, pick) => items.reduce((n, item) => n + pick(item), 0);
 
 function table(lines, firstDay, lastDay) {
-  // The largest sample per relay and hour: a restart's shutdown line and the hourly line can share an hour.
+  // The largest sample per relay and hour: a restart's start line and the hourly line can share an hour.
   const samples = new Map();
   for (const line of lines) {
     const key = `${hour(line.timestamp)} ${line.region}`;
@@ -79,24 +81,22 @@ function table(lines, firstDay, lastDay) {
       samples: perHour.length,
       onlinePeak: Math.max(0, ...perHour.map((h) => h.computers)),
       seen24h: sum([...seenPerRelay.values()], (n) => n),
-      new: sum(dayLines, (line) => line.new_computers),
       clientsPeak: Math.max(0, ...perHour.map((h) => h.clients)),
       perComputer: withClients ? sum(perHour, (h) => h.clients) / withClients : null,
-      restarted: dayLines.some((line) => line.reason === 'shutdown'),
+      restarted: dayLines.some((line) => line.reason === 'start'),
     });
   }
   return rows;
 }
 
 function print(rows) {
-  const head = ['day', 'online peak', 'seen 24h', 'new', 'clients peak', 'per computer'];
+  const head = ['day', 'online peak', 'seen 24h', 'clients peak', 'per computer'];
   const body = rows.map((r) => (r.samples === 0
-    ? [r.day, '-', '-', '-', '-', '-']
+    ? [r.day, '-', '-', '-', '-']
     : [
       r.day + (r.restarted ? ' *' : ''),
       r.onlinePeak,
       r.seen24h,
-      r.new,
       r.clientsPeak,
       r.perComputer === null ? '-' : r.perComputer.toFixed(1),
     ].map(String)));
@@ -104,17 +104,15 @@ function print(rows) {
   for (const row of [head, ...body]) {
     console.log(row.map((cell, i) => (i === 0 ? cell.padEnd(widths[i]) : cell.padStart(widths[i]))).join('  '));
   }
-  if (rows.some((r) => r.restarted)) console.log('* a relay restarted that day: its counts started again from zero');
+  if (rows.some((r) => r.restarted)) console.log('* a relay started that day: its counts started again from zero');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  try {
-    const args = parseArgs(process.argv.slice(2));
-    const today = new Date().toISOString().slice(0, 10);
-    const firstDay = new Date(Date.parse(`${today}T00:00:00Z`) - (args.days - 1) * DAY_MS).toISOString().slice(0, 10);
-    print(table(readLines(args, new Date(`${firstDay}T00:00:00Z`)), firstDay, today));
-  } catch (e) {
-    console.error(`usage.mjs: ${e.message}`);
-    process.exit(1);
-  }
+try {
+  const args = parseArgs(process.argv.slice(2));
+  const today = new Date().toISOString().slice(0, 10);
+  const firstDay = new Date(Date.parse(`${today}T00:00:00Z`) - (args.days - 1) * DAY_MS).toISOString().slice(0, 10);
+  print(table(readLines(args, new Date(`${firstDay}T00:00:00Z`)), firstDay, today));
+} catch (e) {
+  console.error(`usage.mjs: ${e.message}`);
+  process.exit(1);
 }

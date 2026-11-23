@@ -109,8 +109,9 @@ unprivileged low ports); with host networking, grant `CAP_NET_BIND_SERVICE` or
 listen on a high port behind a port forward. On SIGTERM the relay sends
 `close shutdown` to every computer before exiting.
 
-Once an hour, and at shutdown, the relay logs a `relay usage` line with
-counts only: computers connected, seen in the last 24 hours and new to it,
-and client devices and connections. With `--usage-project` it also writes
-that line, and nothing else, to Cloud Logging; see
+When it starts, once an hour, and at shutdown, the relay logs a
+`relay usage` line with counts only: computers connected and seen in the
+last 24 hours, and the devices and connections that reach them through it.
+With `--usage-project` it also writes that line, and nothing else, to Cloud
+Logging; see
 [deploy/RUNBOOK.md](deploy/RUNBOOK.md#watch).

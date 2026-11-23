@@ -2618,7 +2618,7 @@ async fn wait_counts(env: &Env, want: pane_relay::Counts) {
 
 #[tokio::test]
 async fn usage_counts_computers_their_clients_and_computers_seen_today() {
-    let env = Env::start(&["--usage-settle-secs", "0"]).await;
+    let env = Env::start(&[]).await;
     let a = Agent::connect(&env, &SigningKey::generate()).await;
     let b = Agent::connect(&env, &SigningKey::generate()).await;
     let host = format!("{}.{D}", a.id);
@@ -2630,7 +2630,6 @@ async fn usage_counts_computers_their_clients_and_computers_seen_today() {
         pane_relay::Counts {
             computers: 2,
             computers_seen_24h: 2,
-            new_computers: 2,
             clients: 1,
             client_connections: 2,
             computers_with_clients: 1,
@@ -2646,7 +2645,6 @@ async fn usage_counts_computers_their_clients_and_computers_seen_today() {
         pane_relay::Counts {
             computers: 1,
             computers_seen_24h: 2,
-            new_computers: 2,
             clients: 0,
             client_connections: 0,
             computers_with_clients: 0,
@@ -2675,8 +2673,6 @@ async fn usage_counts_go_to_cloud_logging_without_ids_or_addresses() {
         "pane-usage",
         "--usage-period-secs",
         "1",
-        "--usage-settle-secs",
-        "0",
         "--metadata-url",
         &metadata_url,
         "--logging-url",
@@ -2685,6 +2681,9 @@ async fn usage_counts_go_to_cloud_logging_without_ids_or_addresses() {
         logging.ca.to_str().unwrap(),
     ])
     .await;
+    // A deploy kills the relay without a shutdown line, so a start line marks each restart.
+    let (_, body) = next_usage_entry(&mut logging, "start").await;
+    assert_eq!(body["entries"][0]["jsonPayload"]["computers"], 0);
     let agent = Agent::connect(&env, &SigningKey::generate()).await;
 
     let (request, body) = loop {
@@ -2702,7 +2701,7 @@ async fn usage_counts_go_to_cloud_logging_without_ids_or_addresses() {
     assert_eq!(
         body["entries"][0]["jsonPayload"],
         json!({"region": "us", "reason": "hourly", "computers": 1, "computers_seen_24h": 1,
-            "new_computers": 1, "clients": 0, "client_connections": 0, "computers_with_clients": 0})
+            "clients": 0, "client_connections": 0, "computers_with_clients": 0})
     );
     let text = String::from_utf8_lossy(&request.body);
     assert!(
@@ -2710,9 +2709,7 @@ async fn usage_counts_go_to_cloud_logging_without_ids_or_addresses() {
         "{text}"
     );
 
-    // The next line counts only computers new since the last one; stopping sends a last line.
-    let (_, body) = next_usage_entry(&mut logging, "hourly").await;
-    assert_eq!(body["entries"][0]["jsonPayload"]["new_computers"], 0);
+    // Stopping cleanly sends a last line.
     env.relay.take().unwrap().shutdown().await;
     let (_, body) = next_usage_entry(&mut logging, "shutdown").await;
     assert_eq!(body["entries"][0]["jsonPayload"]["computers"], 1);

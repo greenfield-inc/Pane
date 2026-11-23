@@ -102,15 +102,17 @@ own within 30 seconds. To roll back, run it from the earlier commit.
 - Logs: `gcloud compute ssh pane-relay-us --zone us-central1-a -- docker logs pane-relay`.
   They show ids, IP addresses, byte counts and close reasons, never payloads,
   and stay on the VM until the next deploy replaces the container.
-- Usage: once an hour, and when it stops, each relay writes a `relay usage`
-  line to Cloud Logging (log `pane-relay-usage`, kept 30 days). It holds
-  counts only: `computers` connected now, `computers_seen_24h`,
-  `new_computers` (unknown to the relay's registry when they connected, since
-  the last line), `clients` (distinct computer and client address pairs,
-  roughly devices; the relay can't tell a phone from glasses),
-  `client_connections` and `computers_with_clients`. A restart starts the
-  counts again. For a daily table of online peak, new computers and clients
-  per computer:
+- Usage: when it starts, once an hour, and when it stops cleanly, each relay
+  writes a `relay usage` line to Cloud Logging (log `pane-relay-usage`, kept
+  30 days). It holds counts only: `computers` connected now,
+  `computers_seen_24h`, `clients` (distinct computer and client address
+  pairs with a connection through this relay: devices reaching a computer
+  through it, never same-network or Tailscale ones; the relay can't tell a
+  phone from glasses), `client_connections` and `computers_with_clients`. A
+  restart starts the counts again. Deploys set `google-logging-enabled=false`
+  on every VM, so the container's own logs never reach Cloud Logging. New
+  computers are PostHog's `certificate_issued` events with `renewal: false`.
+  For a daily table of online peak, computers seen and clients per computer:
 
   ```sh
   node relay/deploy/usage.mjs --account <you@example.com> [--days 7]

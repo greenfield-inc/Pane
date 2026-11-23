@@ -320,14 +320,13 @@ async fn resync(state: Arc<State>) {
 /// One `relay usage` line with this relay's counts: in its own log, and in Cloud Logging
 /// with --usage-project, where relay/deploy/usage.mjs reads it.
 async fn log_usage(state: &State, usage_log: &usage::UsageLog, reason: &str) {
-    let c = state.take_counts();
+    let c = state.counts();
     let region = &state.cfg.region;
     tracing::info!(
         region = %region,
         reason,
         computers = c.computers,
         computers_seen_24h = c.computers_seen_24h,
-        new_computers = c.new_computers,
         clients = c.clients,
         client_connections = c.client_connections,
         computers_with_clients = c.computers_with_clients,
@@ -339,6 +338,8 @@ async fn log_usage(state: &State, usage_log: &usage::UsageLog, reason: &str) {
 }
 
 async fn hourly_usage(state: Arc<State>, usage_log: Arc<usage::UsageLog>) {
+    // A deploy kills the container without a shutdown line; this one marks the restart.
+    log_usage(&state, &usage_log, "start").await;
     let period = Duration::from_secs(state.cfg.usage_period_secs.max(1));
     let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
     loop {

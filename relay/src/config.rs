@@ -280,11 +280,6 @@ pub struct Config {
     #[arg(long, hide = true, default_value_t = 3600)]
     pub usage_period_secs: u64,
 
-    /// Computers that connect this soon after the relay starts don't count as new: they are
-    /// reconnecting after the restart (tests).
-    #[arg(long, hide = true, default_value_t = 600)]
-    pub usage_settle_secs: u64,
-
     #[arg(long, hide = true, default_value = "https://publicca.googleapis.com")]
     pub publicca_url: String,
 

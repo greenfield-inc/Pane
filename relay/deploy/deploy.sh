@@ -101,6 +101,9 @@ US_IP="$IP_us" EU_IP="$IP_eu"
 # 3. The VMs. The startup script reads secrets from Secret Manager with the VM's
 #    own identity and (re)starts the container; rerunning it updates the image.
 #    gcloud reads it from a file: --metadata splits its value on commas.
+#    google-logging-enabled=false keeps COS from sending the container's logs,
+#    which name computers and client addresses, to Cloud Logging; the relay
+#    writes only its counts there itself (--usage-project).
 startup_file=$(mktemp)
 trap 'rm -f "$startup_file"' EXIT
 for line in "${RELAYS[@]}"; do
@@ -165,7 +168,7 @@ EOF
 )
   printf '%s\n' "$startup" >"$startup_file"
   if exists compute instances describe "pane-relay-$name" --zone "$zone"; then
-    gc compute instances add-metadata "pane-relay-$name" --zone "$zone" --metadata-from-file "startup-script=$startup_file"
+    gc compute instances add-metadata "pane-relay-$name" --zone "$zone" --metadata google-logging-enabled=false --metadata-from-file "startup-script=$startup_file"
     gc compute instances reset "pane-relay-$name" --zone "$zone"
   else
     # Secret Manager accepts only the cloud-platform scope, so the scope stays
@@ -173,7 +176,7 @@ EOF
     gc compute instances create "pane-relay-$name" --zone "$zone" --machine-type "$MACHINE" \
       --image-family cos-stable --image-project cos-cloud --tags pane-relay \
       --address "pane-relay-$name" --service-account "$SA" --scopes cloud-platform \
-      --metadata-from-file "startup-script=$startup_file"
+      --metadata google-logging-enabled=false --metadata-from-file "startup-script=$startup_file"
   fi
 done
 

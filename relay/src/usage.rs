@@ -47,7 +47,6 @@ impl UsageLog {
                     "reason": reason,
                     "computers": c.computers,
                     "computers_seen_24h": c.computers_seen_24h,
-                    "new_computers": c.new_computers,
                     "clients": c.clients,
                     "client_connections": c.client_connections,
                     "computers_with_clients": c.computers_with_clients,
