@@ -112,8 +112,8 @@ const NO_IDS: ReadonlySet<string> = new Set();
 /**
  * The rows for Sessions on other machines, filtered as the Sessions list filters its own: a to-do's
  * Session never shows (its record carries the to-do's number), a loop's only while a card waits.
- * This computer keeps its own Pane Chat row; a cloud machine's own Pane Chat (Onboarding) Session is
- * not one the person made, so it gets none. A cloud Session not read yet is one row named for it.
+ * A machine's Pane Chat shows only in its own window's list, as for any paired machine (D-88). A cloud
+ * Session not read yet is one row named for it.
  */
 export function cloudSessionRows({ cloud, activeId, lists, waitingCount }: {
   cloud: Pick<PaneCloudSnapshot, 'sessions' | 'busy'>;
@@ -126,7 +126,7 @@ export function cloudSessionRows({ cloud, activeId, lists, waitingCount }: {
     const read = lists[machineId];
     if (!read) return null;
     const visible = visibleOrchestrationSessions(read.sessions, { todoSessionIds: NO_IDS, loopSessionIds: new Set(read.loopSessionIds), waitingCount: (sessionId) => waitingCount(machineId, sessionId) })
-      .filter((session) => vmId === null || session.id !== LEGACY_ORCHESTRATION_SESSION_ID);
+      .filter((session) => session.id !== LEGACY_ORCHESTRATION_SESSION_ID);
     return visible.map((session) => {
       const activity = read.activity.find((entry) => entry.sessionId === session.id);
       return {

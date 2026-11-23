@@ -42,10 +42,10 @@ describe('the Sessions list rows for other machines', () => {
     expect(rows[0]).toMatchObject({ machineId: 'cloud-1', vmId: 'vm-1', sessionId: 'docs', cloudName: 'Docs site migration' });
   });
 
-  it('on a cloud Session: lists this computer\'s Sessions as its own list would, Pane Chat included', () => {
+  it('on a cloud Session: lists this computer\'s Sessions as its own list would, leaving its Pane Chat to its own window', () => {
     const rows = cloudSessionRows({ cloud: { sessions: [vm({ vmId: 'vm-1', name: 'Docs site migration', machineId: 'cloud-1' })], busy: [] }, activeId: 'cloud-1', lists, waitingCount: () => 0 });
-    expect(names(rows)).toEqual(['Pane Chat', 'Checkout redesign']);
-    expect(rows[1]).toMatchObject({ machineId: 'local', vmId: null, isPinned: true, activity: 'working', workingPanes: 2 });
+    expect(names(rows)).toEqual(['Checkout redesign']);
+    expect(rows[0]).toMatchObject({ machineId: 'local', vmId: null, isPinned: true, activity: 'working', workingPanes: 2 });
   });
 
   it('on a cloud Session: lists this computer\'s loop Session only while a card from it waits', () => {
