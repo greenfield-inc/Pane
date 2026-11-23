@@ -53,9 +53,11 @@ test('creates a Session on Pane Cloud from Where it runs', async ({ page }) => {
   await dialog.getByTestId('where-it-runs-cloud').click();
   await expect(dialog.getByRole('radio', { name: 'Pane Cloud', exact: true })).toBeChecked();
   await expect(dialog.getByText(INSPECTION, { exact: true })).toBeVisible();
+  // Phone access is off in this mock: creating turns it on in place, and the card says so first (D-88).
+  await expect(dialog.getByTestId('where-it-runs-phone-access')).toBeVisible();
   // Secrets sync (K1) isn't here yet, so the card makes no claim about secrets.
   await expect(dialog.getByText(SECRETS)).toHaveCount(0);
-  const submit = dialog.getByRole('button', { name: 'Create on Pane Cloud', exact: true });
+  const submit = dialog.getByRole('button', { name: 'Create Session on Pane Cloud', exact: true });
   await expect(submit).toBeEnabled();
   await dialog.screenshot({ path: screenshotPath('frame-B-built.png') });
 
@@ -75,7 +77,7 @@ test('Pane Cloud at the awake limit says so and cannot create', async ({ page })
   });
   await dialog.getByTestId('where-it-runs-cloud').click();
   await expect(dialog.getByText('You have 5 of 5 Sessions awake. Stop one to create another.', { exact: true })).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Create on Pane Cloud', exact: true })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Create Session on Pane Cloud', exact: true })).toBeDisabled();
 });
 
 const CLOUD_SESSIONS: Partial<PaneCloudSnapshot> = {

@@ -456,7 +456,7 @@ replace an unrelated selection.
 
 Pane Cloud (invite-only beta) runs a Session on its own cloud machine, which
 keeps working when this computer is closed. In **New Session**, pick **Pane
-Cloud** under **Where it runs**, then **Create on Pane Cloud**. The first time,
+Cloud** under **Where it runs**, then **Create Session on Pane Cloud**. The first time,
 **Sign in** opens the Pane Cloud page in your browser. Pane creates the
 machine, pairs this computer with it over the relay (phone access turns on if
 it was off), and starts the Session there.
