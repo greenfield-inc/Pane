@@ -12,6 +12,8 @@ import { userMarkdown } from '@shared/chatTabMarkdown';
 import { monoFontFamily, useTheme } from '@/theme';
 import { Icon, Skeleton, Text } from '@/ui';
 
+import { useLinkRenderer } from '../links/LinkMenu';
+
 import type { ChatRow } from './chatRows';
 
 export interface ChatRowActions {
@@ -27,7 +29,8 @@ export interface ChatRowActions {
 
 function Markdown({ text }: { text: string }) {
   const theme = useTheme();
-  const content = useMarkdown(text, { colorScheme: theme.scheme, styles: {
+  const renderer = useLinkRenderer();
+  const content = useMarkdown(text, { colorScheme: theme.scheme, renderer, styles: {
     text: { color: theme.chat.foreground, fontSize: 16, lineHeight: 24 },
     link: { color: theme.chat.foreground, textDecorationLine: 'underline' },
     codespan: { color: theme.chat.foreground, backgroundColor: theme.chat.muted, fontFamily: monoFontFamily },
