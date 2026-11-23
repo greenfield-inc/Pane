@@ -269,6 +269,30 @@ gate above applies; the renderer's go through `capture`. Relay-side counts
 (computers online, clients per computer) come from the relays' own logs, not
 PostHog: see [relay/deploy/RUNBOOK.md](../relay/deploy/RUNBOOK.md#watch).
 
+## Repository Reuse on `session_created`
+
+`session_created` fires once per Pane. Besides its enum and count properties it
+carries two repository properties, read after the Pane is created
+(`main/src/services/repoAnalytics.ts`), so creating a Pane does not wait on them:
+
+| Property | Value |
+|---|---|
+| `repo_key` | 16 hex characters: HMAC-SHA256 of the normalised `origin` URL (scheme, credentials, trailing slashes and `.git` removed, host lowercased) under the install's secret. Left out when the repository has no `origin`. |
+| `repo_size` | `under_10mb`, `10_50mb`, `50_200mb` or `over_200mb` (MB = 1,000,000 bytes): the total size of the files in `HEAD`. Left out when git cannot list them. |
+
+The same repository on one install always gets the same key, so PostHog can
+count how often a person returns to a repository and how long since. The key
+differs on every install, so it cannot be matched across people or machines.
+
+- The secret is 32 random bytes in `<PANE_DIR>/repo-key-secret`, created the
+  first time a repository with an `origin` gets a key. It never leaves the
+  install: no event, log, error, config file or setup export contains it.
+- No event, log or error ever contains a repository name, owner, URL, path,
+  branch or commit.
+- The Privacy switch, `DO_NOT_TRACK=1` and `RUNPANE_TELEMETRY_DISABLED` turn
+  these off with everything else: Pane then runs no git command for them and
+  creates no secret.
+
 ## Failure Volume and Error Privacy
 
 Keep core desktop activity (`app_opened`, `app_closed`, `session_created`,
@@ -349,6 +373,7 @@ or add coverage in:
 
 - `main/src/services/analyticsIdentity.test.ts`
 - `main/src/services/analyticsManager.test.ts` (error events and the heartbeat)
+- `main/src/services/sessionManager.repoReuse.test.ts` (`repo_key` and `repo_size`)
 - `main/src/utils/analyticsEnvironment.test.ts` (environment tags)
 - `frontend/src/services/posthog.test.ts` (aliases and environment tags on events)
 - `main/src/services/pairingAnalytics.test.ts` and `frontend/src/hooks/pairingReport.test.ts` (pairing and certificate events)
