@@ -235,6 +235,8 @@ test('on a cloud Session, this computer\'s Sessions keep their menu, and the lis
   await gotoApp(page);
   await dismissStartupDialogs(page);
 
+  // The machine pill names the cloud machine by its Session, not its computer name (D-90).
+  await expect(page.locator('[data-sidebar-key="machine-switcher"]')).toContainText('Docs site migration');
   const list = page.locator('#orchestration-sessions-list');
   const local = list.getByRole('button', { name: 'Open Session Checkout redesign', exact: true });
   await expect(local).toBeVisible();
