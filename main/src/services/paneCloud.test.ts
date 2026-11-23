@@ -287,6 +287,17 @@ describe('a cloud Session', () => {
     expect(actions[0]).toMatchObject({ operation: 'stop', actor: 'you', failed: false });
     expect(actions.at(-1)).toMatchObject({ operation: 'create', actor: 'you' });
   });
+
+  it('updates Pane on the VM through Pane Cloud, which installs the newest published release (D-105)', async () => {
+    const cloud = manager();
+    await signIn(cloud, 'maya@example.test');
+    const { vmId } = await cloud.createSession(session('Docs'));
+
+    const after = await cloud.updatePane(vmId);
+
+    expect(after.error).toBeNull();
+    expect((await cloud.actions(vmId))[0]).toMatchObject({ operation: 'update_pane', actor: 'you', reason: 'You updated Pane to 2.4.215.' });
+  });
 });
 
 describe('archiving a cloud Session (D-94)', () => {
@@ -398,5 +409,96 @@ describe('background re-reads', () => {
     await cloud.createSession(session('Docs'));
     const afterCreate = calls;
     await vi.waitFor(() => expect(calls).toBeGreaterThan(afterCreate), { timeout: 2_000 });
+  });
+});
+
+describe('a new cloud Session for a repo (D-107)', () => {
+  const repo = { url: 'https://github.com/expressjs/express', branch: 'master' };
+  const record = { token: 'gho_maya_desktop_token', source: 'Maya’s MacBook Pro', updatedAt: '2026-12-09T08:00:00.000Z' };
+
+  it('seals the GitHub token with its source and date to the slot\'s key, and puts it in no snapshot or log', async () => {
+    const logged = (['log', 'info', 'warn', 'error', 'debug'] as const).map((level) => vi.spyOn(console, level).mockImplementation(() => undefined));
+    const snapshots: string[] = [];
+    const cloud = manager({ githubToken: async () => record, onChange: (snapshot) => snapshots.push(JSON.stringify(snapshot)) });
+    await signIn(cloud, 'maya@example.test');
+    cloud.prepareCreate();
+
+    const created = await cloud.createSession(session('Docs site migration'), repo);
+
+    expect(service.hostGitHubToken(created.vmId)).toEqual(record);
+    const written = [...snapshots, JSON.stringify(created), ...logged.flatMap((spy) => spy.mock.calls.map((call) => JSON.stringify(call)))];
+    expect(written.filter((text) => text.includes(record.token))).toEqual([]);
+    expect(JSON.stringify(await cloud.actions(created.vmId))).not.toContain(record.token);
+  });
+
+  it('sends no token when the person keeps it from cloud machines, and none with a repo off GitHub', async () => {
+    const asked = vi.fn(async () => record);
+    const kept = manager({ githubToken: async () => null });
+    await signIn(kept, 'maya@example.test');
+    const withoutToken = await kept.createSession(session('Public repo'), repo);
+    expect(service.hostGitHubToken(withoutToken.vmId)).toBeNull();
+    expect(kept.snapshot().sessions.find((entry) => entry.vmId === withoutToken.vmId)?.clone).toMatchObject({ repo: 'expressjs/express', state: 'cloning' });
+
+    const gitlab = manager({ githubToken: asked });
+    await signIn(gitlab, 'maya@example.test');
+    const offGitHub = await gitlab.createSession(session('GitLab repo'), { url: 'https://gitlab.com/example/site', branch: 'main' });
+    expect(service.hostGitHubToken(offGitHub.vmId)).toBeNull();
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it('reads the clone at least once a second until it names the Pane to open', async () => {
+    const cloud = manager({ pollMs: { waiting: 10, steady: 60_000, creating: 20 } });
+    await signIn(cloud, 'maya@example.test');
+    const phases = new Set<string>();
+    const created = await cloud.createSession(session('Clone'), repo);
+    await vi.waitFor(() => {
+      const clone = cloud.snapshot().sessions.find((entry) => entry.vmId === created.vmId)?.clone;
+      if (clone?.phase) phases.add(clone.phase);
+      expect(clone).toMatchObject({ state: 'ready', paneId: expect.any(String) });
+    }, { timeout: 15_000, interval: 5 });
+    expect(phases.has('receiving')).toBe(true);
+  });
+
+  it('shows git\'s error for a failed clone, keeps the VM, and retries with a freshly sealed token', async () => {
+    let current = record;
+    const cloud = manager({ githubToken: async () => current });
+    await signIn(cloud, 'maya@example.test');
+    const created = await cloud.createSession(session('Private repo'), repo);
+    service.failClone(created.vmId, "remote: Invalid username or token.\nfatal: Authentication failed for 'https://github.com/expressjs/express/'");
+    await cloud.refresh();
+    expect(cloud.snapshot().sessions.find((entry) => entry.vmId === created.vmId)).toMatchObject({
+      awake: true,
+      clone: { state: 'failed', paneId: null, error: expect.stringContaining('Authentication failed') },
+    });
+
+    current = { ...record, token: 'gho_maya_signed_in_again', updatedAt: '2026-12-10T11:59:00.000Z' };
+    const after = await cloud.retryClone(created.vmId);
+
+    expect(service.hostGitHubToken(created.vmId)).toEqual(current);
+    expect(after.sessions.find((entry) => entry.vmId === created.vmId)?.clone?.state).toBe('cloning');
+    expect(JSON.stringify(after)).not.toContain(current.token);
+  });
+});
+
+describe('the path to the first terminal (D-115)', () => {
+  it('makes one create request and pairs, and starts the Session off the path to the clone\'s Pane', async () => {
+    const requests: string[] = [];
+    const recorded: typeof fetch = (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if ((init?.method ?? 'GET') !== 'GET') requests.push(`${init?.method} ${url.pathname}`);
+      return fetch(input, init);
+    };
+    let sessionStarts = 0;
+    const cloud = manager({ fetch: recorded, startSession: () => { sessionStarts += 1; return new Promise<string>(() => undefined); } });
+    await signIn(cloud, 'maya@example.test');
+    cloud.prepareCreate();
+    await vi.waitFor(() => expect(requests.some((request) => request.endsWith('/sealing-keys'))).toBe(true));
+    requests.length = 0;
+
+    const created = await cloud.createSession(session('Docs'), { url: 'https://github.com/expressjs/express', branch: 'master' });
+
+    expect(created).toMatchObject({ machineId: 'computer-1', sessionId: null });
+    expect(requests).toEqual([`POST /v1/organizations/org_1/vms`, `POST /v1/vms/${created.vmId}/pairing`]);
+    expect(sessionStarts).toBe(1);
   });
 });

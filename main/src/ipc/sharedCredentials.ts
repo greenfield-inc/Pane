@@ -11,8 +11,8 @@ import {
 } from '../services/sharedCredentials';
 import { paneSecretStore, secretsVolume, type PaneSecretStore } from '../services/paneSecrets';
 import { refuseLocalCaller } from './paneSecrets';
-import { exportCloudSignIns, GITHUB_SIGN_IN_KEY, receiveCloudSecrets } from '../services/cloudSecrets';
-import { PaneError, reasonOf } from '../../../shared/paneError';
+import { GITHUB_SIGN_IN_KEY, receiveCloudSecrets, startCloudSignIns } from '../services/cloudSecrets';
+import { PaneError } from '../../../shared/paneError';
 import type { SharedCredentials } from '../../../shared/types/sharedCredentials';
 import { sendsToCloud } from '../../../shared/types/paneCloudSecrets';
 import type { AppServices } from './types';
@@ -28,11 +28,19 @@ export function registerSharedCredentialHandlers(
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
   secrets: PaneSecretStore = paneSecretStore(),
-  /** On a machine with a secrets volume (a Pane Cloud VM): the environment its agent panels inherit, which gets the sign-ins it holds. */
-  cloudVm: { env: NodeJS.ProcessEnv } | null = secretsVolume() ? { env: process.env } : null,
+  /**
+   * On a machine with a secrets volume (a Pane Cloud VM): the volume, and the environment its agent panels
+   * inherit, which gets the sign-ins it holds.
+   */
+  cloudVm: { env: NodeJS.ProcessEnv; volume?: string } | null = secretsVolume() ? { env: process.env, volume: secretsVolume() } : null,
 ): void {
   const { configManager } = services;
-  if (cloudVm) void exportCloudSignIns(secrets, cloudVm.env).catch((error) => console.warn('[SharedCredentials] Could not export the cloud sign-ins:', reasonOf(error)));
+  // The GitHub token the machine was given at creation first, then the sign-ins it holds (D-107).
+  if (cloudVm) void startCloudSignIns(secrets, cloudVm.volume, cloudVm.env).catch((error: Error) => {
+    // A PaneError's text never quotes the token file; for anything else only its code, never its message.
+    const code = error instanceof Error && 'code' in error ? String(error.code) : 'unknown error';
+    console.warn('[SharedCredentials] Could not start the cloud sign-ins:', error instanceof PaneError ? `${error.code}: ${error.message}` : code);
+  });
   const readAll = async (): Promise<SharedCredentials> => ({
     ...readSharedCredentials(configManager.getConfig()),
     paneSecrets: await secrets.exportForSync(),

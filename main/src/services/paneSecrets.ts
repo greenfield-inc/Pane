@@ -63,7 +63,7 @@ export interface SecretEncryption {
 
 const MAX_VALUE_BYTES = 64 * 1024;
 /** How far ahead of this host's clock a synced reference's time may be. */
-const MAX_CLOCK_AHEAD_MS = 5 * 60_000;
+export const MAX_CLOCK_AHEAD_MS = 5 * 60_000;
 
 function localHostLabel(): string {
   return os.hostname().replace(/\.local$/i, '');

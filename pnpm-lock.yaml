@@ -619,10 +619,16 @@ importers:
 
   packages/pane-cloud-contract:
     dependencies:
+      libsodium-wrappers:
+        specifier: 0.7.15
+        version: 0.7.15
       zod:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@types/libsodium-wrappers':
+        specifier: 0.7.14
+        version: 0.7.14
       '@types/node':
         specifier: ^22.10.2
         version: 22.16.5
@@ -5382,6 +5388,9 @@ packages:
   '@types/keyv@3.1.4':
     resolution: {integrity: sha512-BQ5aZNSCpj7D6K2ksrRCTmKRLEpnPvWDiLPfoGyhZ++8YtiK9d/3DBKPJgry359X/P1PfruyYwvnvwFjuEiEIg==}
 
+  '@types/libsodium-wrappers@0.7.14':
+    resolution: {integrity: sha512-5Kv68fXuXK0iDuUir1WPGw2R9fOZUlYlSAa0ztMcL0s0BfIDTqg9GXz8K30VJpPP3sxWhbolnQma2x+/TfkzDQ==}
+
   '@types/mdast@4.0.4':
     resolution: {integrity: sha512-kGaNbPh1k7AFzgpud/gMdvIm5xuECykRR+JnWKQno9TAXVa6WIVCGTPvYGekIDL4uwCZQSYbUxNBSb1aUo79oA==}
 
@@ -8158,6 +8167,12 @@ packages:
   leven@3.1.0:
     resolution: {integrity: sha512-qsda+H8jTaUaN/x5vzW2rzc+8Rw4TAQ/4KjB46IwK5VH+IlVeeeje/EoZRpiXvIqjFgK84QffqPztGI3VBLG1A==}
     engines: {node: '>=6'}
+
+  libsodium-wrappers@0.7.15:
+    resolution: {integrity: sha512-E4anqJQwcfiC6+Yrl01C1m8p99wEhLmJSs0VQqST66SbQXXBoaJY0pF4BNjRYa/sOQAxx6lXAaAFIlx+15tXJQ==}
+
+  libsodium@0.7.16:
+    resolution: {integrity: sha512-3HrzSPuzm6Yt9aTYCDxYEG8x8/6C0+ag655Y7rhhWZM9PT4NpdnbqlzXhGZlDnkgR6MeSTnOt/VIyHLs9aSf+Q==}
 
   lighthouse-logger@1.4.2:
     resolution: {integrity: sha512-gPWxznF6TKmUHrOQjlVo2UbaL2EJ71mb2CCeRs/2qBpi4L/g4LUVc9+3lKQ6DTUZwJswfM7ainGrLO1+fOqa2g==}
@@ -16357,6 +16372,8 @@ snapshots:
     dependencies:
       '@types/node': 22.16.5
 
+  '@types/libsodium-wrappers@0.7.14': {}
+
   '@types/mdast@4.0.4':
     dependencies:
       '@types/unist': 3.0.3
@@ -19425,6 +19442,12 @@ snapshots:
   lazy-val@1.0.5: {}
 
   leven@3.1.0: {}
+
+  libsodium-wrappers@0.7.15:
+    dependencies:
+      libsodium: 0.7.16
+
+  libsodium@0.7.16: {}
 
   lighthouse-logger@1.4.2:
     dependencies:

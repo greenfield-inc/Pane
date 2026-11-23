@@ -8,7 +8,7 @@ import { SharedCredentialSync } from './sharedCredentialSync';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { registerSharedCredentialHandlers } from '../ipc/sharedCredentials';
-import { keychainSecretBackend, paneSecretValueBackend, PaneSecretStore, volumeSecretIndex } from './paneSecrets';
+import { keychainSecretBackend, localHostLabel, paneSecretValueBackend, PaneSecretStore, volumeSecretIndex } from './paneSecrets';
 import { FakeKeychain } from '../test/fakeKeychain';
 import { memoryConfig } from '../test/memorySecretStore';
 import type { AppServices } from '../ipc/types';
@@ -582,7 +582,7 @@ describe('Pane Cloud VMs', () => {
    * A cloud VM as the guest image starts it: its secrets volume at PANE_SECRETS_DIR, and the environment
    * its agents inherit. Without the volume it is like any other machine to Pane.
    */
-  async function cloudVm({ withVolume = true } = {}) {
+  async function cloudVm({ withVolume = true, tokenDrop }: { withVolume?: boolean; tokenDrop?: string } = {}) {
     const paneDir = await folder('vm');
     vi.stubEnv('PANE_DIR', paneDir);
     const configManager = new ConfigManager();
@@ -593,8 +593,12 @@ describe('Pane Cloud VMs', () => {
       : new PaneSecretStore(configManager, keychainSecretBackend(new FakeKeychain(), 'Pane (test)'), () => 'pane-1a2b3c4d');
     const env: NodeJS.ProcessEnv = {};
     const registry = new PaneCommandRegistry();
+    if (volume && tokenDrop) {
+      await fs.mkdir(path.join(volume, 'incoming'), { mode: 0o700 });
+      await fs.writeFile(path.join(volume, 'incoming', 'github-token.json'), tokenDrop, { mode: 0o600 });
+    }
     // SAFETY: These handlers read only configManager from the services bag.
-    registerSharedCredentialHandlers({ configManager } as AppServices, registry, secrets, volume ? { env } : null);
+    registerSharedCredentialHandlers({ configManager } as AppServices, registry, secrets, volume ? { env, volume } : null);
     const invoke = vi.fn(async (channel: string, args: unknown[]) => {
       const input: PaneCommandValue = JSON.parse(JSON.stringify(args[0] ?? null));
       return overTheWire(await registry.invokeRemote(channel, [input, { clientId: 'desktop' }]));
@@ -844,6 +848,46 @@ describe('Pane Cloud VMs', () => {
 
     expect(await secrets.read('aws', 'AWS_KEY')).toBe('AKIA-studio');
     expect(JSON.stringify(studio.keys())).not.toContain('AKIA-from-vm');
+  });
+
+  it('start with the GitHub token they were given at creation, before any computer syncs with them', async () => {
+    const vm = await cloudVm({ tokenDrop: JSON.stringify({ token: 'gho_sealed', source: 'this-mac', updatedAt: '2026-11-22T10:00:00.000Z' }) });
+
+    await vi.waitFor(() => expect(vm.env.GH_TOKEN).toBe('gho_sealed'));
+    await expect(fs.access(path.join(vm.volume ?? '', 'incoming', 'github-token.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('give a new cloud Session the GitHub token to seal, unless the person keeps it, or this computer, off cloud machines', async () => {
+    const { secrets, sync } = await desktop([]);
+    const fromGh = await sync.githubTokenForCloud();
+    expect(fromGh).toMatchObject({ token: 'gho_desktop', source: localHostLabel() });
+    expect(Number.isNaN(Date.parse(fromGh?.updatedAt ?? ''))).toBe(false);
+    // The same record later syncs send, so the VM never sees two versions of one token.
+    expect(await sync.githubTokenForCloud()).toEqual(fromGh);
+
+    await secrets.setCloudChoice({ excludedSecrets: ['pane-cloud/GH_TOKEN'], excludedMachines: [] });
+    expect(await sync.githubTokenForCloud()).toBeNull();
+    await secrets.setCloudChoice({ excludedSecrets: [], excludedMachines: [localHostLabel()] });
+    expect(await sync.githubTokenForCloud()).toBeNull();
+
+    // A GitHub token the person keeps as a Pane secret goes instead, with where it was set.
+    await secrets.setCloudChoice({ excludedSecrets: [], excludedMachines: [] });
+    await secrets.applyFromSync({ 'pane-cloud/GH_TOKEN': { value: 'gho_saved', updatedAt: '2026-11-20T00:00:00.000Z', source: 'mac-studio' } });
+    expect(await sync.githubTokenForCloud()).toEqual({ token: 'gho_saved', source: 'mac-studio', updatedAt: '2026-11-20T00:00:00.000Z' });
+
+    const signedOut = await desktop([], {}, { githubToken: async () => null });
+    expect(await signedOut.sync.githubTokenForCloud()).toBeNull();
+  });
+
+  it('log a malformed token file at start without the token in the log', async () => {
+    const warned: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warned.push(args.map(String).join(' ')); });
+    const vm = await cloudVm({ tokenDrop: '{"token": gho_LOGCANARY123}' });
+
+    await vi.waitFor(() => expect(warned.join('\n')).toContain('ERR_CLOUD_TOKEN_DROP_INVALID'));
+    // JSON.parse's message would quote only the token's first characters.
+    expect(warned.join('\n')).not.toContain('gho_LO');
+    await expect(fs.access(path.join(vm.volume ?? '', 'incoming', 'github-token.json'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('refuse the send when the VM has no secrets volume, so the cloud Session is not started without its secrets', async () => {

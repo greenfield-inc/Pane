@@ -6,9 +6,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.serviceContractCases = serviceContractCases;
 const strict_1 = __importDefault(require("node:assert/strict"));
 const node_crypto_1 = require("node:crypto");
+const errors_1 = require("../errors");
 const http_1 = require("../http");
+const sealing_1 = require("../sealing");
 const service_1 = require("../service");
 const cases_1 = require("./cases");
+/** A small public repo every clone case can reach. */
+const PUBLIC_REPO = { url: 'https://github.com/expressjs/express', branch: 'master' };
 /** The service API contract: what the service must do for Pane. */
 function serviceContractCases(target) {
     const timeoutMs = target.timeoutMs ?? 180_000;
@@ -325,6 +329,101 @@ function serviceContractCases(target) {
                 }
                 finally {
                     await cleanUp(member, created);
+                }
+            },
+        },
+        {
+            name: 'service: a sealing key is an X25519 key good for one create; a waitlisted account gets none, and a used or unknown key answers sealing_key_expired',
+            async run() {
+                await (0, cases_1.expectError)('not_invited', async () => (await as('waitlisted')).createSealingKey(await personalOrg(await as('waitlisted'))));
+                const member = await as('member');
+                const organizationId = await personalOrg(member);
+                const key = await member.createSealingKey(organizationId);
+                strict_1.default.equal(Buffer.from(key.publicKey, 'base64url').length, 32, 'a raw X25519 public key');
+                const created = [];
+                try {
+                    created.push((await member.createVm(organizationId, 'sealing key', (0, node_crypto_1.randomUUID)(), { repo: PUBLIC_REPO, sealingKeyId: key.keyId })).vm.id);
+                    await (0, cases_1.expectError)('sealing_key_expired', () => member.createVm(organizationId, 'reused key', (0, node_crypto_1.randomUUID)(), { repo: PUBLIC_REPO, sealingKeyId: key.keyId }));
+                    await (0, cases_1.expectError)('sealing_key_expired', () => member.createVm(organizationId, 'unknown key', (0, node_crypto_1.randomUUID)(), { repo: PUBLIC_REPO, sealingKeyId: 'seal_unknown' }));
+                }
+                finally {
+                    await cleanUp(member, created);
+                }
+            },
+        },
+        {
+            name: "service: a create with a repo clones it and reports progress until the Pane id; the sealed GitHub token is in no answer, refusal or action log entry",
+            async run() {
+                const member = await as('member');
+                const organizationId = await personalOrg(member);
+                const token = `gho_contract${(0, node_crypto_1.randomUUID)().replaceAll('-', '')}`;
+                const record = { token, source: 'contract-desktop', updatedAt: new Date().toISOString() };
+                const key = await member.createSealingKey(organizationId);
+                const sealed = await (0, sealing_1.sealGitHubToken)(key.publicKey, record);
+                const leaks = (text) => text.includes(token) || text.includes(sealed);
+                const refused = async (call) => {
+                    try {
+                        await call();
+                    }
+                    catch (error) {
+                        strict_1.default.ok(error instanceof errors_1.CloudApiError && error.code === 'invalid_request', `expected invalid_request, got ${String(error)}`);
+                        strict_1.default.ok(!leaks(`${error.message} ${error.next}`), 'a refusal never repeats the token');
+                        return;
+                    }
+                    strict_1.default.fail('expected the create to be refused');
+                };
+                await refused(() => member.createVm(organizationId, 'not github', (0, node_crypto_1.randomUUID)(), { repo: { url: 'https://gitlab.com/example/repo', branch: 'main' }, sealingKeyId: key.keyId, sealedGitHubToken: sealed }));
+                await refused(() => member.createVm(organizationId, 'no key', (0, node_crypto_1.randomUUID)(), { repo: PUBLIC_REPO, sealedGitHubToken: sealed }));
+                await refused(() => member.createVm(organizationId, 'credentials in url', (0, node_crypto_1.randomUUID)(), { repo: { url: `https://x-access-token:${token}@github.com/expressjs/express`, branch: 'master' } }));
+                const created = await member.createVm(organizationId, 'clone', (0, node_crypto_1.randomUUID)(), { repo: PUBLIC_REPO, sealingKeyId: key.keyId, sealedGitHubToken: sealed });
+                try {
+                    strict_1.default.ok(!leaks(JSON.stringify(created)), 'the create answer never holds the token');
+                    strict_1.default.equal(created.vm.clone?.repo, 'expressjs/express');
+                    const reads = [];
+                    const ready = await (0, cases_1.waitFor)(async () => {
+                        const read = await member.getVm(created.vm.id);
+                        reads.push(read);
+                        return read;
+                    }, (v) => v.clone?.state === 'ready' || v.clone?.state === 'failed', 'the clone to finish', timeoutMs);
+                    strict_1.default.equal(ready.clone?.state, 'ready', `the clone failed: ${ready.clone?.error?.message ?? ''}`);
+                    strict_1.default.ok(ready.clone?.paneId, 'a finished clone names the Pane it made');
+                    strict_1.default.ok(reads.some((v) => v.clone?.state === 'cloning' && v.clone.phase !== null), 'reads during the clone show its phase');
+                    await (0, cases_1.expectError)('invalid_state', () => member.retryClone(created.vm.id));
+                    const everything = [reads, await member.listVms(organizationId), await member.listActionLog(created.vm.id)];
+                    strict_1.default.ok(!leaks(JSON.stringify(everything)), 'no VM read, list or action log entry holds the token');
+                    const logged = (await member.listActionLog(created.vm.id)).entries.find((e) => e.operation === 'create');
+                    strict_1.default.deepEqual(logged?.parameters, { repo: PUBLIC_REPO }, 'the action log shows the repo and nothing sealed');
+                }
+                finally {
+                    await cleanUp(member, [created.vm.id]);
+                }
+            },
+        },
+        {
+            name: "service: a clone that fails shows git's error and no Pane, and retryClone runs it again with a freshly sealed token",
+            async run() {
+                const member = await as('member');
+                const organizationId = await personalOrg(member);
+                const repo = { url: 'https://github.com/greenfield-inc/does-not-exist-pane-contract', branch: 'main' };
+                const { vm } = await member.createVm(organizationId, 'failed clone', (0, node_crypto_1.randomUUID)(), { repo });
+                try {
+                    const failed = await (0, cases_1.waitFor)(() => member.getVm(vm.id), (v) => v.clone?.state === 'failed', 'the clone to fail', timeoutMs);
+                    strict_1.default.ok(failed.clone?.error?.message, "a failed clone carries git's message");
+                    strict_1.default.equal(failed.clone?.paneId, null, 'a failed clone makes no Pane');
+                    strict_1.default.equal(failed.state, 'running', 'the VM stays up for a retry');
+                    const key = await member.createVmSealingKey(vm.id);
+                    const token = `gho_retry${(0, node_crypto_1.randomUUID)().replaceAll('-', '')}`;
+                    await (0, cases_1.expectError)('invalid_request', async () => member.retryClone(vm.id, { sealedGitHubToken: await (0, sealing_1.sealGitHubToken)(key.publicKey, { token, source: 'contract-desktop', updatedAt: new Date().toISOString() }) }));
+                    const sealed = await (0, sealing_1.sealGitHubToken)(key.publicKey, { token, source: 'contract-desktop', updatedAt: new Date().toISOString() });
+                    const retried = await member.retryClone(vm.id, { sealingKeyId: key.keyId, sealedGitHubToken: sealed });
+                    strict_1.default.equal(retried.operation.operation, 'retry_clone');
+                    strict_1.default.deepEqual(retried.operation.parameters, {}, 'the retry is logged without the token');
+                    strict_1.default.ok(!JSON.stringify([retried, await member.listActionLog(vm.id)]).includes(token), 'no answer holds the token');
+                    strict_1.default.ok(!JSON.stringify(retried).includes(sealed));
+                    await (0, cases_1.waitFor)(() => member.getVm(vm.id), (v) => v.clone?.state === 'failed', 'the retried clone to fail again', timeoutMs);
+                }
+                finally {
+                    await cleanUp(member, [vm.id]);
                 }
             },
         },

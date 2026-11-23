@@ -1,12 +1,27 @@
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { CloudApiError, createServiceClient, PLANS, type Account, type ActionLogEntry, type OrganizationUsage, type ServiceClient, type SessionVm } from 'pane-cloud-contract';
+import {
+  CloudApiError,
+  createServiceClient,
+  isGitHubRepo,
+  PLANS,
+  sealGitHubToken,
+  type Account,
+  type ActionLogEntry,
+  type CloneRepo,
+  type GitHubTokenRecord,
+  type OrganizationUsage,
+  type SealingKey,
+  type ServiceClient,
+  type SessionVm,
+} from 'pane-cloud-contract';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 import type { VouchedPairing } from '../../../shared/types/relay';
 import type {
   PaneCloudAction,
+  PaneCloudClone,
   PaneCloudCreated,
   PaneCloudError,
   PaneCloudSession,
@@ -40,12 +55,24 @@ export interface PaneCloudManagerOptions {
   onChange?: (snapshot: PaneCloudSnapshot) => void;
   /** Secrets sync (K1) carries this desktop's secrets to new cloud Sessions; the card says so only then. */
   sendsSecrets?: boolean;
+  /**
+   * The person's GitHub token for a new cloud Session's private repo, as `{ token, source, updatedAt }`,
+   * or null when there is none or the person keeps it from cloud machines. Sealed to the slot's key
+   * before it leaves this computer (D-107). Without it, only public repos clone.
+   */
+  githubToken?: () => Promise<GitHubTokenRecord | null>;
   fetch?: typeof fetch;
   /** How often to re-read: while a VM changes state, and otherwise. */
-  pollMs?: { waiting: number; steady: number };
+  pollMs?: { waiting: number; steady: number; creating?: number };
 }
 
-const POLL_MS = { waiting: 3_000, steady: 60_000 };
+/**
+ * `creating` is how often a new cloud Session is read while it boots and clones: the app notices the
+ * VM running and the clone's Pane within it, since both are on the path to the first terminal (D-115).
+ */
+const POLL_MS = { waiting: 3_000, steady: 60_000, creating: 250 };
+/** A sealing key this close to expiring is not used; Pane asks for a new one. */
+const SEALING_KEY_MARGIN_MS = 30_000;
 /** How long a new VM may take to answer as running before New cloud Session gives up. */
 const BOOT_DEADLINE_MS = 3 * 60_000;
 const AWAKE = new Set<SessionVm['state']>(['creating', 'starting', 'running']);
@@ -77,8 +104,12 @@ export class PaneCloudManager {
   /** When the account, its cloud Sessions and usage were last read. */
   private loadedAt = 0;
   private watchTimer: NodeJS.Timeout | null = null;
-  private watchWaiting = false;
+  private watchPoll = 0;
   private disposed = false;
+  /** A free slot's sealing key, asked for when the create dialog opens; each works for one create. */
+  private sealingKey: Promise<SealingKey | null> | null = null;
+  /** Each new cloud Session's repo, so a retry knows whether a GitHub token may go with it. */
+  private readonly repos = new Map<string, CloneRepo>();
 
   constructor(private readonly options: PaneCloudManagerOptions) {
     this.state = { ...SIGNED_OUT_PANE_CLOUD, sendsSecrets: options.sendsSecrets ?? false };
@@ -147,19 +178,22 @@ export class PaneCloudManager {
 
   /**
    * New cloud Session: a VM in the person's organization, paired with this desktop, with the
-   * Session created on it. Throws a PaneCloudError-shaped error, also left in the snapshot.
+   * Session created on it. For a repo, the clone makes the first terminal's Pane, so the Session is
+   * created off that path and `sessionId` is null (D-115). Throws a PaneCloudError-shaped error, also
+   * left in the snapshot.
    */
-  async createSession(input: JsonObject): Promise<PaneCloudCreated> {
+  async createSession(input: JsonObject, repo: CloneRepo | null = null): Promise<PaneCloudCreated> {
     const name = (decodeOptionalBoundary(input, namedSchema)?.name.trim().slice(0, 64) ?? '') || UNNAMED;
     let made: { client: ServiceClient; vmId: string; machineId: string | null } | null = null;
     try {
       const { client, account } = await this.readyToCreate();
       this.update({ creating: { name, step: 'creating' }, error: null });
       const organizationId = personalOrganization(account);
-      const { vm } = await client.createVm(organizationId, name, randomUUID());
+      const vm = await this.createVm(client, organizationId, name, repo);
       made = { client, vmId: vm.id, machineId: null };
+      if (repo) this.repos.set(vm.id, repo);
       await this.load(client);
-      await this.waitUntilRunning(client, vm.id);
+      await this.waitUntilRunning(client, vm.id, { ...POLL_MS, ...this.options.pollMs }.creating);
 
       this.update({ creating: { name, step: 'pairing' } });
       const pairing = await client.pairVm(vm.id);
@@ -167,9 +201,14 @@ export class PaneCloudManager {
       made.machineId = machineId;
       await this.load(client);
 
+      if (repo) {
+        // The clone's Pane is the first terminal; the Session joins it without holding it up.
+        void this.options.startSession(machineId, input).catch((error: Error) => this.fail(error));
+        return { machineId, sessionId: null, vmId: vm.id, snapshot: this.update({ creating: null }) };
+      }
       this.update({ creating: { name, step: 'starting-session' } });
       const sessionId = await this.options.startSession(machineId, input);
-      return { machineId, sessionId, snapshot: this.update({ creating: null }) };
+      return { machineId, sessionId, vmId: vm.id, snapshot: this.update({ creating: null }) };
     } catch (error) {
       // A VM without its Session would count toward the awake limit with nothing on it, so it goes.
       if (made) await this.discard(made).catch((cleanup) => console.warn('[PaneCloud] Could not delete the half-made cloud Session:', cleanup));
@@ -177,6 +216,49 @@ export class PaneCloudManager {
       this.update({ creating: null });
       throw snapshot.error ? new PaneCloudFailure(snapshot.error) : error;
     }
+  }
+
+  /**
+   * Asks for a free slot's sealing key ahead of a create, when the create dialog opens, so sealing
+   * adds no round trip to Create. Quiet on failure: the create asks again.
+   */
+  prepareCreate(): void {
+    this.sealingKey = this.readyToCreate()
+      .then(({ client, account }) => client.createSealingKey(personalOrganization(account)))
+      .catch(() => null);
+  }
+
+  /** Creates the VM, with the repo and, for a private GitHub repo, the person's token sealed to a slot's key. */
+  private async createVm(client: ServiceClient, organizationId: string, name: string, repo: CloneRepo | null): Promise<SessionVm> {
+    if (!repo) return (await client.createVm(organizationId, name, randomUUID())).vm;
+    for (let attempt = 0; ; attempt += 1) {
+      const held = await this.sealingKey;
+      this.sealingKey = null;
+      const key = held && Date.parse(held.expiresAt) - Date.now() > SEALING_KEY_MARGIN_MS ? held : await client.createSealingKey(organizationId);
+      try {
+        return (await client.createVm(organizationId, name, randomUUID(), { repo, ...(await this.sealedToken(key, repo)) })).vm;
+      } catch (error) {
+        // A key another create used, or one that ran out, is replaced once.
+        if (attempt > 0 || !(error instanceof CloudApiError && error.code === 'sealing_key_expired')) throw error;
+      }
+    }
+  }
+
+  /** The person's GitHub token sealed to `key`, when the repo is on GitHub and they let it go to cloud machines. */
+  private async sealedToken(key: SealingKey, repo: CloneRepo): Promise<{ sealingKeyId: string; sealedGitHubToken?: string }> {
+    const token = isGitHubRepo(repo) ? await this.options.githubToken?.() : null;
+    return token ? { sealingKeyId: key.keyId, sealedGitHubToken: await sealGitHubToken(key.publicKey, token) } : { sealingKeyId: key.keyId };
+  }
+
+  /** Runs a failed clone again, with a freshly sealed token (a sign-in error is the usual cause). */
+  retryClone(vmId: string): Promise<PaneCloudSnapshot> {
+    const repo = this.repos.get(vmId);
+    return this.act(vmId, async (client) => {
+      const token = repo && isGitHubRepo(repo) ? await this.options.githubToken?.() : null;
+      if (!token) return client.retryClone(vmId);
+      const key = await client.createVmSealingKey(vmId);
+      return client.retryClone(vmId, { sealingKeyId: key.keyId, sealedGitHubToken: await sealGitHubToken(key.publicKey, token) });
+    });
   }
 
   private async discard({ client, vmId, machineId }: { client: ServiceClient; vmId: string; machineId: string | null }): Promise<void> {
@@ -281,9 +363,8 @@ export class PaneCloudManager {
     return { client, account };
   }
 
-  private async waitUntilRunning(client: ServiceClient, vmId: string): Promise<void> {
+  private async waitUntilRunning(client: ServiceClient, vmId: string, everyMs = (this.options.pollMs ?? POLL_MS).waiting): Promise<void> {
     const deadline = Date.now() + BOOT_DEADLINE_MS;
-    const poll = this.options.pollMs ?? POLL_MS;
     for (;;) {
       const vm = await client.getVm(vmId);
       if (vm.state === 'running') return;
@@ -293,7 +374,7 @@ export class PaneCloudManager {
           next: 'Try New cloud Session again; if it keeps failing, write to Pane Cloud support.',
         });
       }
-      await new Promise((resolve) => setTimeout(resolve, poll.waiting));
+      await new Promise((resolve) => setTimeout(resolve, everyMs));
     }
   }
 
@@ -369,6 +450,7 @@ export class PaneCloudManager {
       machineId: vm.relay ? this.options.computerFor(vm.relay.computerId) : null,
       paneVersion: vm.paneVersion,
       createdAt: vm.createdAt,
+      clone: vm.clone ? cloneView(vm.clone) : null,
     };
   }
 
@@ -393,12 +475,13 @@ export class PaneCloudManager {
       this.stopWatching();
       return;
     }
-    const waiting = vms.some((vm) => CHANGING.has(vm.state));
-    if (this.watchTimer && waiting === this.watchWaiting) return;
+    const poll = { ...POLL_MS, ...this.options.pollMs };
+    // A clone's progress shows at least once a second (D-107).
+    const every = vms.some((vm) => vm.clone?.state === 'cloning') ? poll.creating : vms.some((vm) => CHANGING.has(vm.state)) ? poll.waiting : poll.steady;
+    if (this.watchTimer && every === this.watchPoll) return;
     this.stopWatching();
-    this.watchWaiting = waiting;
-    const poll = this.options.pollMs ?? POLL_MS;
-    this.watchTimer = setInterval(() => { void this.refresh({ background: true }); }, waiting ? poll.waiting : poll.steady);
+    this.watchPoll = every;
+    this.watchTimer = setInterval(() => { void this.refresh({ background: true }); }, every);
     this.watchTimer.unref?.();
   }
 
@@ -512,6 +595,19 @@ function usageView(usage: OrganizationUsage, account: Account): PaneCloudUsage {
       awakeNow: member.awakeNow,
       awakeLimit: member.awakeLimit,
     })),
+  };
+}
+
+function cloneView(clone: NonNullable<SessionVm['clone']>): PaneCloudClone {
+  return {
+    repo: clone.repo,
+    state: clone.state,
+    phase: clone.phase,
+    percent: clone.percent,
+    line: clone.line,
+    startedAt: clone.startedAt,
+    error: clone.error?.message ?? null,
+    paneId: clone.paneId,
   };
 }
 

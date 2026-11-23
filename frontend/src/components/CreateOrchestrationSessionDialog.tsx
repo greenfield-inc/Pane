@@ -12,7 +12,7 @@ import type { AppConfig } from '../types/config';
 import { useConfigStore } from '../stores/configStore';
 import { useAllMachinesStore } from '../stores/allMachinesStore';
 import { PaneCloudCallError, usePaneCloudStore } from '../stores/paneCloudStore';
-import { openOnMachine, type MachineTarget } from '../utils/machineRowActions';
+import { openOnMachine } from '../utils/machineRowActions';
 import type { MachineOs } from '../utils/machineList';
 import { createSessionOn, readSessionNames } from '../utils/newOnMachine';
 import { visibleAgentPresets } from '../utils/agentPresets';
@@ -30,35 +30,6 @@ import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { PaneCloudSecretsDialog } from './PaneCloudSecretsDialog';
 import { CloudSignInTokens } from './CloudSignInTokens';
-
-/** How long a newly paired cloud machine may take to reach the machine menu. */
-const LISTED_DEADLINE_MS = 15_000;
-
-/**
- * Opens the new cloud Session. The machine menu lists the VM only after main's config push, and the
- * switch restores the VM's own last-shown Session, so once the window is on the VM it opens the new
- * one again, in place.
- */
-async function openNewCloudSession(machineId: string, target: MachineTarget): Promise<void> {
-  await until(() => useAllMachinesStore.getState().entries.some((entry) => entry.id === machineId));
-  await openOnMachine(machineId, target);
-  await until(() => useAllMachinesStore.getState().entries.some((entry) => entry.id === machineId && entry.active));
-  await openOnMachine(machineId, target);
-}
-
-/** Resolves once `ready` holds for the machine menu, or after a while regardless. */
-function until(ready: () => boolean): Promise<void> {
-  if (ready()) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => { stop(); resolve(); }, LISTED_DEADLINE_MS);
-    const stop = useAllMachinesStore.subscribe(() => {
-      if (!ready()) return;
-      clearTimeout(timer);
-      stop();
-      resolve();
-    });
-  });
-}
 
 /** The Pane Cloud waitlist; `from` tells it the person came from the app (D-102). */
 const PANE_CLOUD_WAITLIST_URL = 'https://runpane.com/cloud?from=pane-app';
@@ -107,10 +78,14 @@ const xcodeAnswerSchema = boundary.object({ files: boundary.optional(boundary.ar
  * project, which iOS Simulator work needs and Pane Cloud's Linux machines can't run (D-85). Read on
  * the window's machine, where the repo is.
  */
-function useXcodeProject(enabled: boolean): boolean {
+/** The project the window is on: the open Pane's, else the open project page's. */
+function useActiveProjectId(): number | null {
   const paneProjectId = useSessionStore(state => state.sessions.find(session => session.id === state.activeSessionId)?.projectId);
   const pageProjectId = useNavigationStore(state => state.activeProjectId);
-  const projectId = paneProjectId ?? pageProjectId;
+  return paneProjectId ?? pageProjectId ?? null;
+}
+
+function useXcodeProject(enabled: boolean, projectId: number | null): boolean {
   const [xcode, setXcode] = useState(false);
   useEffect(() => {
     setXcode(false);
@@ -254,7 +229,13 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
   const userPickedPlace = useRef(false);
   useEffect(() => { if (isOpen) { setChosenPlace('here'); userPickedPlace.current = false; } }, [isOpen]);
   const listed = usePlaceMachines(isOpen && offerPlaces, cloud.sessions);
-  const xcode = useXcodeProject(isOpen && offerPlaces);
+  const projectId = useActiveProjectId();
+  const xcode = useXcodeProject(isOpen && offerPlaces, projectId);
+  const readyForCloud = cloud.signIn.state === 'signed-in' && cloud.signIn.access === 'invited' && cloud.signIn.signupState === 'ready';
+  // A sealing key is asked for while the dialog is open, so Create waits on nothing extra (D-107).
+  useEffect(() => {
+    if (isOpen && offerPlaces && readyForCloud) usePaneCloudStore.getState().prepareCreate();
+  }, [isOpen, offerPlaces, readyForCloud]);
   // Pairing the new machine turns phone access on in place, as linking any machine does (D-88); the card says so first.
   const [phoneAccessOff, setPhoneAccessOff] = useState(false);
   useEffect(() => {
@@ -338,9 +319,15 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
       };
       if (place === 'cloud') {
         const sessionName = request.name || nextOrchestrationSessionName(cloud.sessions);
-        const created = await usePaneCloudStore.getState().create({ ...request, name: sessionName, nameFromFirstMessage: !request.name });
+        // The waking view (frame D2) shows at once; it opens the repo's Pane when the clone makes it.
+        const store = usePaneCloudStore.getState();
+        const waking = { name: sessionName, startedAt: Date.now(), vmId: null, machineId: null, sessionId: null, error: null };
+        store.setWaking(waking);
         onClose();
-        void openNewCloudSession(created.machineId, { kind: 'session', id: created.sessionId, name: sessionName });
+        void store.create({ ...request, name: sessionName, nameFromFirstMessage: !request.name }, projectId ?? undefined).then(
+          (created) => store.setWaking({ ...waking, vmId: created.vmId, machineId: created.machineId, sessionId: created.sessionId }),
+          (cause) => store.setWaking({ ...waking, error: cause instanceof PaneCloudCallError ? { message: cause.message, next: cause.next } : { message: cause instanceof Error ? cause.message : String(cause), next: null } }),
+        );
       } else if (otherMachine) {
         const sessionName = request.name || nextOrchestrationSessionName(await readSessionNames(otherMachine));
         const sessionId = await createSessionOn(otherMachine, { ...request, name: sessionName, nameFromFirstMessage: !request.name });

@@ -19,6 +19,7 @@ const OPERATION_LABELS = {
   prepare_to_stop: 'Prepared to stop',
   collect_diagnostics: 'Collected diagnostics',
   create_pairing_link: 'Paired a device',
+  retry_clone: 'Retried the clone',
 } satisfies Record<PaneCloudOperation, string>;
 
 /** One logged operation and the cloud Session it ran on. */
@@ -93,7 +94,7 @@ export function PaneCloudMachinePage({ onBack }: { onBack: () => void }) {
       </RemoteGroup>
 
       <RemoteGroup title="Pane">
-        <Row label="Pane" detail="Updates each running Session to a published release, checked against its checksum.">
+        <Row label="Pane" detail="Brings each running Session to the newest Pane.">
           <Button type="button" variant="ghost" size="sm" disabled={awake.length === 0} loading={busy} onClick={updatePane}>Update Pane</Button>
         </Row>
         {actionError && <p className={`text-sm text-status-error ${CARD_ROW}`} role="alert">{[actionError.message, actionError.next].filter(Boolean).join(' ')}</p>}

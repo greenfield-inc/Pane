@@ -74,9 +74,9 @@ export declare const Account: z.ZodObject<{
         waitlisted: "waitlisted";
     }>;
     signupState: z.ZodEnum<{
+        ready: "ready";
         needs_phone: "needs_phone";
         needs_card: "needs_card";
-        ready: "ready";
     }>;
     organizations: z.ZodArray<z.ZodObject<{
         organizationId: z.ZodString;
@@ -111,9 +111,9 @@ export declare const DeviceTokenResult: z.ZodDiscriminatedUnion<[z.ZodObject<{
             waitlisted: "waitlisted";
         }>;
         signupState: z.ZodEnum<{
+            ready: "ready";
             needs_phone: "needs_phone";
             needs_card: "needs_card";
-            ready: "ready";
         }>;
         organizations: z.ZodArray<z.ZodObject<{
             organizationId: z.ZodString;
@@ -144,11 +144,11 @@ export declare const SessionVm: z.ZodObject<{
         deleted: "deleted";
     }>;
     stateReason: z.ZodNullable<z.ZodEnum<{
+        failed: "failed";
         user: "user";
         review: "review";
         host_maintenance: "host_maintenance";
         host_lost: "host_lost";
-        failed: "failed";
     }>>;
     memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
     paneVersion: z.ZodNullable<z.ZodString>;
@@ -157,6 +157,29 @@ export declare const SessionVm: z.ZodObject<{
         fingerprint: z.ZodString;
         domain: z.ZodString;
     }, z.core.$strict>>;
+    clone: z.ZodDefault<z.ZodNullable<z.ZodObject<{
+        repo: z.ZodString;
+        branch: z.ZodString;
+        state: z.ZodEnum<{
+            cloning: "cloning";
+            ready: "ready";
+            failed: "failed";
+        }>;
+        phase: z.ZodNullable<z.ZodEnum<{
+            receiving: "receiving";
+            resolving: "resolving";
+            checking_out: "checking_out";
+            creating_pane: "creating_pane";
+        }>>;
+        percent: z.ZodNullable<z.ZodNumber>;
+        line: z.ZodNullable<z.ZodString>;
+        startedAt: z.ZodISODateTime;
+        finishedAt: z.ZodNullable<z.ZodISODateTime>;
+        error: z.ZodNullable<z.ZodObject<{
+            message: z.ZodString;
+        }, z.core.$strict>>;
+        paneId: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>>>;
     createdAt: z.ZodISODateTime;
     updatedAt: z.ZodISODateTime;
 }, z.core.$strict>;
@@ -172,6 +195,7 @@ export declare const LoggedOperation: z.ZodEnum<{
     prepare_to_stop: "prepare_to_stop";
     collect_diagnostics: "collect_diagnostics";
     create_pairing_link: "create_pairing_link";
+    retry_clone: "retry_clone";
 }>;
 export declare const ActionLogEntry: z.ZodObject<{
     id: z.ZodString;
@@ -186,6 +210,7 @@ export declare const ActionLogEntry: z.ZodObject<{
         prepare_to_stop: "prepare_to_stop";
         collect_diagnostics: "collect_diagnostics";
         create_pairing_link: "create_pairing_link";
+        retry_clone: "retry_clone";
     }>;
     parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
     actor: z.ZodObject<{
@@ -198,8 +223,8 @@ export declare const ActionLogEntry: z.ZodObject<{
     }, z.core.$strict>;
     reason: z.ZodString;
     status: z.ZodEnum<{
-        running: "running";
         failed: "failed";
+        running: "running";
         accepted: "accepted";
         succeeded: "succeeded";
     }>;
@@ -234,6 +259,39 @@ export declare const SubmittedOperation: z.ZodObject<{
     parameters: z.ZodRecord<z.ZodString, z.ZodJSONSchema>;
 }, z.core.$strict>;
 export type SubmittedOperation = z.infer<typeof SubmittedOperation>;
+/**
+ * A key to seal the person's GitHub token to (sealGitHubToken). Pane asks for one when the create
+ * dialog opens: it reserves a free slot until `expiresAt`, and a create naming it after that answers
+ * sealing_key_expired, so Pane asks again and seals again.
+ */
+export declare const SealingKey: z.ZodObject<{
+    keyId: z.ZodString;
+    publicKey: z.ZodString;
+    expiresAt: z.ZodISODateTime;
+}, z.core.$strict>;
+export type SealingKey = z.infer<typeof SealingKey>;
+/**
+ * createVm's body. With `repo`, the VM clones it at boot and reports the clone on the VM. A private
+ * repo's token goes sealed, to the key `sealingKeyId` names; the service passes it to the host and
+ * never stores, logs or returns it. Pane sends no token when the person keeps it from this machine.
+ */
+export declare const CreateVmRequest: z.ZodObject<{
+    name: z.ZodString;
+    idempotencyKey: z.ZodString;
+    repo: z.ZodOptional<z.ZodObject<{
+        url: z.ZodURL;
+        branch: z.ZodString;
+    }, z.core.$strict>>;
+    sealingKeyId: z.ZodOptional<z.ZodString>;
+    sealedGitHubToken: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+export type CreateVmRequest = z.input<typeof CreateVmRequest>;
+/** retryClone's body: a fresh sealed token, sealed to a key from createVmSealingKey, after a sign-in error. */
+export declare const RetryCloneRequest: z.ZodObject<{
+    sealingKeyId: z.ZodOptional<z.ZodString>;
+    sealedGitHubToken: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+export type RetryCloneRequest = z.input<typeof RetryCloneRequest>;
 export declare const MemberUsage: z.ZodObject<{
     accountId: z.ZodString;
     name: z.ZodNullable<z.ZodString>;
@@ -306,9 +364,9 @@ export declare const serviceRoutes: {
                 waitlisted: "waitlisted";
             }>;
             signupState: z.ZodEnum<{
+                ready: "ready";
                 needs_phone: "needs_phone";
                 needs_card: "needs_card";
-                ready: "ready";
             }>;
             organizations: z.ZodArray<z.ZodObject<{
                 organizationId: z.ZodString;
@@ -334,9 +392,9 @@ export declare const serviceRoutes: {
             waitlisted: "waitlisted";
         }>;
         signupState: z.ZodEnum<{
+            ready: "ready";
             needs_phone: "needs_phone";
             needs_card: "needs_card";
-            ready: "ready";
         }>;
         organizations: z.ZodArray<z.ZodObject<{
             organizationId: z.ZodString;
@@ -366,11 +424,11 @@ export declare const serviceRoutes: {
                 deleted: "deleted";
             }>;
             stateReason: z.ZodNullable<z.ZodEnum<{
+                failed: "failed";
                 user: "user";
                 review: "review";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
-                failed: "failed";
             }>>;
             memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
             paneVersion: z.ZodNullable<z.ZodString>;
@@ -379,6 +437,29 @@ export declare const serviceRoutes: {
                 fingerprint: z.ZodString;
                 domain: z.ZodString;
             }, z.core.$strict>>;
+            clone: z.ZodDefault<z.ZodNullable<z.ZodObject<{
+                repo: z.ZodString;
+                branch: z.ZodString;
+                state: z.ZodEnum<{
+                    cloning: "cloning";
+                    ready: "ready";
+                    failed: "failed";
+                }>;
+                phase: z.ZodNullable<z.ZodEnum<{
+                    receiving: "receiving";
+                    resolving: "resolving";
+                    checking_out: "checking_out";
+                    creating_pane: "creating_pane";
+                }>>;
+                percent: z.ZodNullable<z.ZodNumber>;
+                line: z.ZodNullable<z.ZodString>;
+                startedAt: z.ZodISODateTime;
+                finishedAt: z.ZodNullable<z.ZodISODateTime>;
+                error: z.ZodNullable<z.ZodObject<{
+                    message: z.ZodString;
+                }, z.core.$strict>>;
+                paneId: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>>>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>>;
@@ -386,6 +467,12 @@ export declare const serviceRoutes: {
     createVm: import("./http").Route<z.ZodObject<{
         name: z.ZodString;
         idempotencyKey: z.ZodString;
+        repo: z.ZodOptional<z.ZodObject<{
+            url: z.ZodURL;
+            branch: z.ZodString;
+        }, z.core.$strict>>;
+        sealingKeyId: z.ZodOptional<z.ZodString>;
+        sealedGitHubToken: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
         vm: z.ZodObject<{
             id: z.ZodString;
@@ -403,11 +490,11 @@ export declare const serviceRoutes: {
                 deleted: "deleted";
             }>;
             stateReason: z.ZodNullable<z.ZodEnum<{
+                failed: "failed";
                 user: "user";
                 review: "review";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
-                failed: "failed";
             }>>;
             memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
             paneVersion: z.ZodNullable<z.ZodString>;
@@ -416,6 +503,29 @@ export declare const serviceRoutes: {
                 fingerprint: z.ZodString;
                 domain: z.ZodString;
             }, z.core.$strict>>;
+            clone: z.ZodDefault<z.ZodNullable<z.ZodObject<{
+                repo: z.ZodString;
+                branch: z.ZodString;
+                state: z.ZodEnum<{
+                    cloning: "cloning";
+                    ready: "ready";
+                    failed: "failed";
+                }>;
+                phase: z.ZodNullable<z.ZodEnum<{
+                    receiving: "receiving";
+                    resolving: "resolving";
+                    checking_out: "checking_out";
+                    creating_pane: "creating_pane";
+                }>>;
+                percent: z.ZodNullable<z.ZodNumber>;
+                line: z.ZodNullable<z.ZodString>;
+                startedAt: z.ZodISODateTime;
+                finishedAt: z.ZodNullable<z.ZodISODateTime>;
+                error: z.ZodNullable<z.ZodObject<{
+                    message: z.ZodString;
+                }, z.core.$strict>>;
+                paneId: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>>>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>;
@@ -432,6 +542,7 @@ export declare const serviceRoutes: {
                 prepare_to_stop: "prepare_to_stop";
                 collect_diagnostics: "collect_diagnostics";
                 create_pairing_link: "create_pairing_link";
+                retry_clone: "retry_clone";
             }>;
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
@@ -444,8 +555,120 @@ export declare const serviceRoutes: {
             }, z.core.$strict>;
             reason: z.ZodString;
             status: z.ZodEnum<{
-                running: "running";
                 failed: "failed";
+                running: "running";
+                accepted: "accepted";
+                succeeded: "succeeded";
+            }>;
+            error: z.ZodNullable<z.ZodObject<{
+                code: z.ZodString;
+                message: z.ZodString;
+                next: z.ZodString;
+            }, z.core.$strict>>;
+            requestedAt: z.ZodISODateTime;
+            finishedAt: z.ZodNullable<z.ZodISODateTime>;
+        }, z.core.$strict>;
+    }, z.core.$strict>>;
+    /** A key for the GitHub token of the next create in this organization; needs the same access a create does. */
+    createSealingKey: import("./http").Route<z.ZodObject<{}, z.core.$strict>, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
+        keyId: z.ZodString;
+        publicKey: z.ZodString;
+        expiresAt: z.ZodISODateTime;
+    }, z.core.$strict>>;
+    /** A key for a fresh GitHub token for a running VM's retryClone. */
+    createVmSealingKey: import("./http").Route<z.ZodObject<{}, z.core.$strict>, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
+        keyId: z.ZodString;
+        publicKey: z.ZodString;
+        expiresAt: z.ZodISODateTime;
+    }, z.core.$strict>>;
+    /** Runs a failed clone again; invalid_state unless the VM is running and its clone failed. Logged as retry_clone, without the token. */
+    retryClone: import("./http").Route<z.ZodObject<{
+        sealingKeyId: z.ZodOptional<z.ZodString>;
+        sealedGitHubToken: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
+        vm: z.ZodObject<{
+            id: z.ZodString;
+            organizationId: z.ZodString;
+            createdByAccountId: z.ZodString;
+            name: z.ZodString;
+            state: z.ZodEnum<{
+                error: "error";
+                creating: "creating";
+                running: "running";
+                stopping: "stopping";
+                stopped: "stopped";
+                starting: "starting";
+                deleting: "deleting";
+                deleted: "deleted";
+            }>;
+            stateReason: z.ZodNullable<z.ZodEnum<{
+                failed: "failed";
+                user: "user";
+                review: "review";
+                host_maintenance: "host_maintenance";
+                host_lost: "host_lost";
+            }>>;
+            memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
+            paneVersion: z.ZodNullable<z.ZodString>;
+            relay: z.ZodNullable<z.ZodObject<{
+                computerId: z.ZodString;
+                fingerprint: z.ZodString;
+                domain: z.ZodString;
+            }, z.core.$strict>>;
+            clone: z.ZodDefault<z.ZodNullable<z.ZodObject<{
+                repo: z.ZodString;
+                branch: z.ZodString;
+                state: z.ZodEnum<{
+                    cloning: "cloning";
+                    ready: "ready";
+                    failed: "failed";
+                }>;
+                phase: z.ZodNullable<z.ZodEnum<{
+                    receiving: "receiving";
+                    resolving: "resolving";
+                    checking_out: "checking_out";
+                    creating_pane: "creating_pane";
+                }>>;
+                percent: z.ZodNullable<z.ZodNumber>;
+                line: z.ZodNullable<z.ZodString>;
+                startedAt: z.ZodISODateTime;
+                finishedAt: z.ZodNullable<z.ZodISODateTime>;
+                error: z.ZodNullable<z.ZodObject<{
+                    message: z.ZodString;
+                }, z.core.$strict>>;
+                paneId: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>>>;
+            createdAt: z.ZodISODateTime;
+            updatedAt: z.ZodISODateTime;
+        }, z.core.$strict>;
+        operation: z.ZodObject<{
+            id: z.ZodString;
+            vmId: z.ZodString;
+            operation: z.ZodEnum<{
+                create: "create";
+                start: "start";
+                stop: "stop";
+                delete: "delete";
+                bootstrap: "bootstrap";
+                update_pane: "update_pane";
+                prepare_to_stop: "prepare_to_stop";
+                collect_diagnostics: "collect_diagnostics";
+                create_pairing_link: "create_pairing_link";
+                retry_clone: "retry_clone";
+            }>;
+            parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
+            actor: z.ZodObject<{
+                kind: z.ZodEnum<{
+                    user: "user";
+                    host: "host";
+                    service: "service";
+                }>;
+                accountId: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>;
+            reason: z.ZodString;
+            status: z.ZodEnum<{
+                failed: "failed";
+                running: "running";
                 accepted: "accepted";
                 succeeded: "succeeded";
             }>;
@@ -474,11 +697,11 @@ export declare const serviceRoutes: {
             deleted: "deleted";
         }>;
         stateReason: z.ZodNullable<z.ZodEnum<{
+            failed: "failed";
             user: "user";
             review: "review";
             host_maintenance: "host_maintenance";
             host_lost: "host_lost";
-            failed: "failed";
         }>>;
         memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
         paneVersion: z.ZodNullable<z.ZodString>;
@@ -487,6 +710,29 @@ export declare const serviceRoutes: {
             fingerprint: z.ZodString;
             domain: z.ZodString;
         }, z.core.$strict>>;
+        clone: z.ZodDefault<z.ZodNullable<z.ZodObject<{
+            repo: z.ZodString;
+            branch: z.ZodString;
+            state: z.ZodEnum<{
+                cloning: "cloning";
+                ready: "ready";
+                failed: "failed";
+            }>;
+            phase: z.ZodNullable<z.ZodEnum<{
+                receiving: "receiving";
+                resolving: "resolving";
+                checking_out: "checking_out";
+                creating_pane: "creating_pane";
+            }>>;
+            percent: z.ZodNullable<z.ZodNumber>;
+            line: z.ZodNullable<z.ZodString>;
+            startedAt: z.ZodISODateTime;
+            finishedAt: z.ZodNullable<z.ZodISODateTime>;
+            error: z.ZodNullable<z.ZodObject<{
+                message: z.ZodString;
+            }, z.core.$strict>>;
+            paneId: z.ZodNullable<z.ZodString>;
+        }, z.core.$strict>>>;
         createdAt: z.ZodISODateTime;
         updatedAt: z.ZodISODateTime;
     }, z.core.$strict>>;
@@ -507,11 +753,11 @@ export declare const serviceRoutes: {
                 deleted: "deleted";
             }>;
             stateReason: z.ZodNullable<z.ZodEnum<{
+                failed: "failed";
                 user: "user";
                 review: "review";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
-                failed: "failed";
             }>>;
             memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
             paneVersion: z.ZodNullable<z.ZodString>;
@@ -520,6 +766,29 @@ export declare const serviceRoutes: {
                 fingerprint: z.ZodString;
                 domain: z.ZodString;
             }, z.core.$strict>>;
+            clone: z.ZodDefault<z.ZodNullable<z.ZodObject<{
+                repo: z.ZodString;
+                branch: z.ZodString;
+                state: z.ZodEnum<{
+                    cloning: "cloning";
+                    ready: "ready";
+                    failed: "failed";
+                }>;
+                phase: z.ZodNullable<z.ZodEnum<{
+                    receiving: "receiving";
+                    resolving: "resolving";
+                    checking_out: "checking_out";
+                    creating_pane: "creating_pane";
+                }>>;
+                percent: z.ZodNullable<z.ZodNumber>;
+                line: z.ZodNullable<z.ZodString>;
+                startedAt: z.ZodISODateTime;
+                finishedAt: z.ZodNullable<z.ZodISODateTime>;
+                error: z.ZodNullable<z.ZodObject<{
+                    message: z.ZodString;
+                }, z.core.$strict>>;
+                paneId: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>>>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>;
@@ -536,6 +805,7 @@ export declare const serviceRoutes: {
                 prepare_to_stop: "prepare_to_stop";
                 collect_diagnostics: "collect_diagnostics";
                 create_pairing_link: "create_pairing_link";
+                retry_clone: "retry_clone";
             }>;
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
@@ -548,8 +818,8 @@ export declare const serviceRoutes: {
             }, z.core.$strict>;
             reason: z.ZodString;
             status: z.ZodEnum<{
-                running: "running";
                 failed: "failed";
+                running: "running";
                 accepted: "accepted";
                 succeeded: "succeeded";
             }>;
@@ -579,11 +849,11 @@ export declare const serviceRoutes: {
                 deleted: "deleted";
             }>;
             stateReason: z.ZodNullable<z.ZodEnum<{
+                failed: "failed";
                 user: "user";
                 review: "review";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
-                failed: "failed";
             }>>;
             memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
             paneVersion: z.ZodNullable<z.ZodString>;
@@ -592,6 +862,29 @@ export declare const serviceRoutes: {
                 fingerprint: z.ZodString;
                 domain: z.ZodString;
             }, z.core.$strict>>;
+            clone: z.ZodDefault<z.ZodNullable<z.ZodObject<{
+                repo: z.ZodString;
+                branch: z.ZodString;
+                state: z.ZodEnum<{
+                    cloning: "cloning";
+                    ready: "ready";
+                    failed: "failed";
+                }>;
+                phase: z.ZodNullable<z.ZodEnum<{
+                    receiving: "receiving";
+                    resolving: "resolving";
+                    checking_out: "checking_out";
+                    creating_pane: "creating_pane";
+                }>>;
+                percent: z.ZodNullable<z.ZodNumber>;
+                line: z.ZodNullable<z.ZodString>;
+                startedAt: z.ZodISODateTime;
+                finishedAt: z.ZodNullable<z.ZodISODateTime>;
+                error: z.ZodNullable<z.ZodObject<{
+                    message: z.ZodString;
+                }, z.core.$strict>>;
+                paneId: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>>>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>;
@@ -608,6 +901,7 @@ export declare const serviceRoutes: {
                 prepare_to_stop: "prepare_to_stop";
                 collect_diagnostics: "collect_diagnostics";
                 create_pairing_link: "create_pairing_link";
+                retry_clone: "retry_clone";
             }>;
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
@@ -620,8 +914,8 @@ export declare const serviceRoutes: {
             }, z.core.$strict>;
             reason: z.ZodString;
             status: z.ZodEnum<{
-                running: "running";
                 failed: "failed";
+                running: "running";
                 accepted: "accepted";
                 succeeded: "succeeded";
             }>;
@@ -651,11 +945,11 @@ export declare const serviceRoutes: {
                 deleted: "deleted";
             }>;
             stateReason: z.ZodNullable<z.ZodEnum<{
+                failed: "failed";
                 user: "user";
                 review: "review";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
-                failed: "failed";
             }>>;
             memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
             paneVersion: z.ZodNullable<z.ZodString>;
@@ -664,6 +958,29 @@ export declare const serviceRoutes: {
                 fingerprint: z.ZodString;
                 domain: z.ZodString;
             }, z.core.$strict>>;
+            clone: z.ZodDefault<z.ZodNullable<z.ZodObject<{
+                repo: z.ZodString;
+                branch: z.ZodString;
+                state: z.ZodEnum<{
+                    cloning: "cloning";
+                    ready: "ready";
+                    failed: "failed";
+                }>;
+                phase: z.ZodNullable<z.ZodEnum<{
+                    receiving: "receiving";
+                    resolving: "resolving";
+                    checking_out: "checking_out";
+                    creating_pane: "creating_pane";
+                }>>;
+                percent: z.ZodNullable<z.ZodNumber>;
+                line: z.ZodNullable<z.ZodString>;
+                startedAt: z.ZodISODateTime;
+                finishedAt: z.ZodNullable<z.ZodISODateTime>;
+                error: z.ZodNullable<z.ZodObject<{
+                    message: z.ZodString;
+                }, z.core.$strict>>;
+                paneId: z.ZodNullable<z.ZodString>;
+            }, z.core.$strict>>>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>;
@@ -680,6 +997,7 @@ export declare const serviceRoutes: {
                 prepare_to_stop: "prepare_to_stop";
                 collect_diagnostics: "collect_diagnostics";
                 create_pairing_link: "create_pairing_link";
+                retry_clone: "retry_clone";
             }>;
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
@@ -692,8 +1010,8 @@ export declare const serviceRoutes: {
             }, z.core.$strict>;
             reason: z.ZodString;
             status: z.ZodEnum<{
-                running: "running";
                 failed: "failed";
+                running: "running";
                 accepted: "accepted";
                 succeeded: "succeeded";
             }>;
@@ -722,6 +1040,7 @@ export declare const serviceRoutes: {
             prepare_to_stop: "prepare_to_stop";
             collect_diagnostics: "collect_diagnostics";
             create_pairing_link: "create_pairing_link";
+            retry_clone: "retry_clone";
         }>;
         parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
         actor: z.ZodObject<{
@@ -734,8 +1053,8 @@ export declare const serviceRoutes: {
         }, z.core.$strict>;
         reason: z.ZodString;
         status: z.ZodEnum<{
-            running: "running";
             failed: "failed";
+            running: "running";
             accepted: "accepted";
             succeeded: "succeeded";
         }>;
@@ -779,6 +1098,7 @@ export declare const serviceRoutes: {
                 prepare_to_stop: "prepare_to_stop";
                 collect_diagnostics: "collect_diagnostics";
                 create_pairing_link: "create_pairing_link";
+                retry_clone: "retry_clone";
             }>;
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
@@ -791,8 +1111,8 @@ export declare const serviceRoutes: {
             }, z.core.$strict>;
             reason: z.ZodString;
             status: z.ZodEnum<{
-                running: "running";
                 failed: "failed";
+                running: "running";
                 accepted: "accepted";
                 succeeded: "succeeded";
             }>;
@@ -862,7 +1182,7 @@ export declare function createServiceClient(config: ClientConfig): {
             email: string;
             name: string | null;
             access: "invited" | "waitlisted";
-            signupState: "needs_phone" | "needs_card" | "ready";
+            signupState: "ready" | "needs_phone" | "needs_card";
             organizations: {
                 organizationId: string;
                 name: string;
@@ -879,7 +1199,7 @@ export declare function createServiceClient(config: ClientConfig): {
         email: string;
         name: string | null;
         access: "invited" | "waitlisted";
-        signupState: "needs_phone" | "needs_card" | "ready";
+        signupState: "ready" | "needs_phone" | "needs_card";
         organizations: {
             organizationId: string;
             name: string;
@@ -894,7 +1214,7 @@ export declare function createServiceClient(config: ClientConfig): {
             createdByAccountId: string;
             name: string;
             state: "error" | "creating" | "running" | "stopping" | "stopped" | "starting" | "deleting" | "deleted";
-            stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
+            stateReason: "failed" | "user" | "review" | "host_maintenance" | "host_lost" | null;
             memoryGiB: 8 | 16;
             paneVersion: string | null;
             relay: {
@@ -902,24 +1222,52 @@ export declare function createServiceClient(config: ClientConfig): {
                 fingerprint: string;
                 domain: string;
             } | null;
+            clone: {
+                repo: string;
+                branch: string;
+                state: "cloning" | "ready" | "failed";
+                phase: "receiving" | "resolving" | "checking_out" | "creating_pane" | null;
+                percent: number | null;
+                line: string | null;
+                startedAt: string;
+                finishedAt: string | null;
+                error: {
+                    message: string;
+                } | null;
+                paneId: string | null;
+            } | null;
             createdAt: string;
             updatedAt: string;
         }[];
     }>;
-    createVm: (organizationId: string, name: string, idempotencyKey: string) => Promise<{
+    createVm: (organizationId: string, name: string, idempotencyKey: string, clone?: Omit<CreateVmRequest, "name" | "idempotencyKey">) => Promise<{
         vm: {
             id: string;
             organizationId: string;
             createdByAccountId: string;
             name: string;
             state: "error" | "creating" | "running" | "stopping" | "stopped" | "starting" | "deleting" | "deleted";
-            stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
+            stateReason: "failed" | "user" | "review" | "host_maintenance" | "host_lost" | null;
             memoryGiB: 8 | 16;
             paneVersion: string | null;
             relay: {
                 computerId: string;
                 fingerprint: string;
                 domain: string;
+            } | null;
+            clone: {
+                repo: string;
+                branch: string;
+                state: "cloning" | "ready" | "failed";
+                phase: "receiving" | "resolving" | "checking_out" | "creating_pane" | null;
+                percent: number | null;
+                line: string | null;
+                startedAt: string;
+                finishedAt: string | null;
+                error: {
+                    message: string;
+                } | null;
+                paneId: string | null;
             } | null;
             createdAt: string;
             updatedAt: string;
@@ -927,14 +1275,76 @@ export declare function createServiceClient(config: ClientConfig): {
         operation: {
             id: string;
             vmId: string;
-            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
+            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link" | "retry_clone";
             parameters: Record<string, unknown>;
             actor: {
                 kind: "user" | "host" | "service";
                 accountId: string | null;
             };
             reason: string;
-            status: "running" | "failed" | "accepted" | "succeeded";
+            status: "failed" | "running" | "accepted" | "succeeded";
+            error: {
+                code: string;
+                message: string;
+                next: string;
+            } | null;
+            requestedAt: string;
+            finishedAt: string | null;
+        };
+    }>;
+    createSealingKey: (organizationId: string) => Promise<{
+        keyId: string;
+        publicKey: string;
+        expiresAt: string;
+    }>;
+    createVmSealingKey: (vmId: string) => Promise<{
+        keyId: string;
+        publicKey: string;
+        expiresAt: string;
+    }>;
+    retryClone: (vmId: string, request?: RetryCloneRequest) => Promise<{
+        vm: {
+            id: string;
+            organizationId: string;
+            createdByAccountId: string;
+            name: string;
+            state: "error" | "creating" | "running" | "stopping" | "stopped" | "starting" | "deleting" | "deleted";
+            stateReason: "failed" | "user" | "review" | "host_maintenance" | "host_lost" | null;
+            memoryGiB: 8 | 16;
+            paneVersion: string | null;
+            relay: {
+                computerId: string;
+                fingerprint: string;
+                domain: string;
+            } | null;
+            clone: {
+                repo: string;
+                branch: string;
+                state: "cloning" | "ready" | "failed";
+                phase: "receiving" | "resolving" | "checking_out" | "creating_pane" | null;
+                percent: number | null;
+                line: string | null;
+                startedAt: string;
+                finishedAt: string | null;
+                error: {
+                    message: string;
+                } | null;
+                paneId: string | null;
+            } | null;
+            createdAt: string;
+            updatedAt: string;
+        };
+        operation: {
+            id: string;
+            vmId: string;
+            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link" | "retry_clone";
+            parameters: Record<string, unknown>;
+            actor: {
+                kind: "user" | "host" | "service";
+                accountId: string | null;
+            };
+            reason: string;
+            status: "failed" | "running" | "accepted" | "succeeded";
             error: {
                 code: string;
                 message: string;
@@ -950,13 +1360,27 @@ export declare function createServiceClient(config: ClientConfig): {
         createdByAccountId: string;
         name: string;
         state: "error" | "creating" | "running" | "stopping" | "stopped" | "starting" | "deleting" | "deleted";
-        stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
+        stateReason: "failed" | "user" | "review" | "host_maintenance" | "host_lost" | null;
         memoryGiB: 8 | 16;
         paneVersion: string | null;
         relay: {
             computerId: string;
             fingerprint: string;
             domain: string;
+        } | null;
+        clone: {
+            repo: string;
+            branch: string;
+            state: "cloning" | "ready" | "failed";
+            phase: "receiving" | "resolving" | "checking_out" | "creating_pane" | null;
+            percent: number | null;
+            line: string | null;
+            startedAt: string;
+            finishedAt: string | null;
+            error: {
+                message: string;
+            } | null;
+            paneId: string | null;
         } | null;
         createdAt: string;
         updatedAt: string;
@@ -968,7 +1392,7 @@ export declare function createServiceClient(config: ClientConfig): {
             createdByAccountId: string;
             name: string;
             state: "error" | "creating" | "running" | "stopping" | "stopped" | "starting" | "deleting" | "deleted";
-            stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
+            stateReason: "failed" | "user" | "review" | "host_maintenance" | "host_lost" | null;
             memoryGiB: 8 | 16;
             paneVersion: string | null;
             relay: {
@@ -976,20 +1400,34 @@ export declare function createServiceClient(config: ClientConfig): {
                 fingerprint: string;
                 domain: string;
             } | null;
+            clone: {
+                repo: string;
+                branch: string;
+                state: "cloning" | "ready" | "failed";
+                phase: "receiving" | "resolving" | "checking_out" | "creating_pane" | null;
+                percent: number | null;
+                line: string | null;
+                startedAt: string;
+                finishedAt: string | null;
+                error: {
+                    message: string;
+                } | null;
+                paneId: string | null;
+            } | null;
             createdAt: string;
             updatedAt: string;
         };
         operation: {
             id: string;
             vmId: string;
-            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
+            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link" | "retry_clone";
             parameters: Record<string, unknown>;
             actor: {
                 kind: "user" | "host" | "service";
                 accountId: string | null;
             };
             reason: string;
-            status: "running" | "failed" | "accepted" | "succeeded";
+            status: "failed" | "running" | "accepted" | "succeeded";
             error: {
                 code: string;
                 message: string;
@@ -1006,7 +1444,7 @@ export declare function createServiceClient(config: ClientConfig): {
             createdByAccountId: string;
             name: string;
             state: "error" | "creating" | "running" | "stopping" | "stopped" | "starting" | "deleting" | "deleted";
-            stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
+            stateReason: "failed" | "user" | "review" | "host_maintenance" | "host_lost" | null;
             memoryGiB: 8 | 16;
             paneVersion: string | null;
             relay: {
@@ -1014,20 +1452,34 @@ export declare function createServiceClient(config: ClientConfig): {
                 fingerprint: string;
                 domain: string;
             } | null;
+            clone: {
+                repo: string;
+                branch: string;
+                state: "cloning" | "ready" | "failed";
+                phase: "receiving" | "resolving" | "checking_out" | "creating_pane" | null;
+                percent: number | null;
+                line: string | null;
+                startedAt: string;
+                finishedAt: string | null;
+                error: {
+                    message: string;
+                } | null;
+                paneId: string | null;
+            } | null;
             createdAt: string;
             updatedAt: string;
         };
         operation: {
             id: string;
             vmId: string;
-            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
+            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link" | "retry_clone";
             parameters: Record<string, unknown>;
             actor: {
                 kind: "user" | "host" | "service";
                 accountId: string | null;
             };
             reason: string;
-            status: "running" | "failed" | "accepted" | "succeeded";
+            status: "failed" | "running" | "accepted" | "succeeded";
             error: {
                 code: string;
                 message: string;
@@ -1044,7 +1496,7 @@ export declare function createServiceClient(config: ClientConfig): {
             createdByAccountId: string;
             name: string;
             state: "error" | "creating" | "running" | "stopping" | "stopped" | "starting" | "deleting" | "deleted";
-            stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
+            stateReason: "failed" | "user" | "review" | "host_maintenance" | "host_lost" | null;
             memoryGiB: 8 | 16;
             paneVersion: string | null;
             relay: {
@@ -1052,20 +1504,34 @@ export declare function createServiceClient(config: ClientConfig): {
                 fingerprint: string;
                 domain: string;
             } | null;
+            clone: {
+                repo: string;
+                branch: string;
+                state: "cloning" | "ready" | "failed";
+                phase: "receiving" | "resolving" | "checking_out" | "creating_pane" | null;
+                percent: number | null;
+                line: string | null;
+                startedAt: string;
+                finishedAt: string | null;
+                error: {
+                    message: string;
+                } | null;
+                paneId: string | null;
+            } | null;
             createdAt: string;
             updatedAt: string;
         };
         operation: {
             id: string;
             vmId: string;
-            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
+            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link" | "retry_clone";
             parameters: Record<string, unknown>;
             actor: {
                 kind: "user" | "host" | "service";
                 accountId: string | null;
             };
             reason: string;
-            status: "running" | "failed" | "accepted" | "succeeded";
+            status: "failed" | "running" | "accepted" | "succeeded";
             error: {
                 code: string;
                 message: string;
@@ -1078,14 +1544,14 @@ export declare function createServiceClient(config: ClientConfig): {
     requestOperation: (vmId: string, request: UserOperationRequest) => Promise<{
         id: string;
         vmId: string;
-        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
+        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link" | "retry_clone";
         parameters: Record<string, unknown>;
         actor: {
             kind: "user" | "host" | "service";
             accountId: string | null;
         };
         reason: string;
-        status: "running" | "failed" | "accepted" | "succeeded";
+        status: "failed" | "running" | "accepted" | "succeeded";
         error: {
             code: string;
             message: string;
@@ -1110,14 +1576,14 @@ export declare function createServiceClient(config: ClientConfig): {
         entries: {
             id: string;
             vmId: string;
-            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
+            operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link" | "retry_clone";
             parameters: Record<string, unknown>;
             actor: {
                 kind: "user" | "host" | "service";
                 accountId: string | null;
             };
             reason: string;
-            status: "running" | "failed" | "accepted" | "succeeded";
+            status: "failed" | "running" | "accepted" | "succeeded";
             error: {
                 code: string;
                 message: string;

@@ -1298,7 +1298,9 @@ async function initializeServices() {
       await sharedCredentialSync.sendToCloudVm(machineId);
     },
     onCloudMachinesChanged: () => sharedCredentialSync?.resync(),
+    githubToken: async () => (sharedCredentialSync ? sharedCredentialSync.githubTokenForCloud() : null),
     send: (channel, snapshot) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, snapshot); },
+    projectPath: (projectId) => databaseService.getProject(projectId)?.path ?? null,
   });
   setDeviceMachines(machineConnections);
   const machines = machineConnections;
