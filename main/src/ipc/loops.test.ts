@@ -270,6 +270,9 @@ describe('startLoopRun for a Session loop', () => {
 
     const restarted = sessionRegistry();
     await expect(startLoopRun(restarted.registry, standup, slotAtMs, { launchedCommand: () => 'claude --dangerously-skip-permissions --resume 5f0c' })).resolves.toEqual({ sessionId: null });
+
+    const agentFarm = sessionRegistry();
+    await expect(startLoopRun(agentFarm.registry, standup, slotAtMs, { launchedCommand: () => 'agent-farm run --native-arg=--dangerously-skip-permissions greenfield/seo' })).resolves.toEqual({ sessionId: null });
   });
 
   it('warns when the prompt was not confirmed', async () => {
@@ -342,8 +345,27 @@ describe('prepareLoopSession', () => {
     } } });
   });
 
+  it('passes the missing flag through an Agent Farm launch as a native argument', async () => {
+    const { registry, calls } = sessionRegistry({ session: { launchCommand: 'agent-farm run greenfield/seo-orchestrator:claude --directory ~/repos/site' } });
+    await prepareLoopSession(registry, SESSION_ID, { name: 'SEO', agent: 'claude' });
+    expect(calls[1]).toEqual({ channel: 'runpane:sessions:update', request: { selector: { sessionId: SESSION_ID }, input: {
+      launchCommand: 'agent-farm run --native-arg=--dangerously-skip-permissions greenfield/seo-orchestrator:claude --directory ~/repos/site', source: 'user',
+    } } });
+  });
+
+  it('leaves an Agent Farm launch that already passes the flag, in either form, alone', async () => {
+    for (const launchCommand of ['agent-farm run greenfield/implementer:codex --native-arg=--yolo', 'agent-farm run greenfield/implementer:codex -- --yolo']) {
+      const { registry, calls } = sessionRegistry({ session: { agent: 'codex', launchCommand } });
+      await prepareLoopSession(registry, SESSION_ID, { name: 'Standup', agent: 'codex' });
+      expect(calls.map(call => call.channel)).toEqual(['runpane:sessions:get']);
+    }
+  });
+
   it('refuses a wrapped or compound launch command it cannot change safely, and changes nothing', async () => {
-    for (const launchCommand of ["sh -c 'codex --model gpt-5'", 'codex --model gpt-5 && say done', 'OPENAI_API_KEY=x codex', 'npx codex']) {
+    for (const launchCommand of [
+      "sh -c 'codex --model gpt-5'", 'codex --model gpt-5 && say done', 'OPENAI_API_KEY=x codex', 'npx codex',
+      'npx agent-farm run greenfield/implementer:codex', 'agent-farm run greenfield/implementer:codex; say done', 'agent-farm ui',
+    ]) {
       const { registry, calls } = sessionRegistry({ session: { agent: 'codex', launchCommand } });
       await expect(prepareLoopSession(registry, SESSION_ID, { name: 'Standup', agent: 'codex' })).rejects.toMatchObject({
         code: 'ERR_LOOP_INVALID',

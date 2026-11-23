@@ -283,35 +283,46 @@ function agentExecutable(agent: LoopAgent): string {
 /**
  * The unattended flags a launched command lacks, read as shell words, so a flag
  * named inside a quoted argument does not count. A shell's `-c` command string
- * (as a WSL launch is wrapped) is read as words too.
+ * (as a WSL launch is wrapped) is read as words too. A flag counts as given
+ * directly or passed through Agent Farm as `--native-arg=<flag>`.
  */
 function missingUnattendedFlags(command: string, agent: LoopAgent): string[] {
   const words = tokenizeShellCommand(command, process.platform) ?? [];
   const nested = words.flatMap((word, index) => /^-[a-z]*c$/i.test(word) && words[index + 1] ? tokenizeShellCommand(words[index + 1], process.platform) ?? [] : []);
-  const all = new Set([...words, ...nested]);
+  const all = new Set([...words, ...nested].map(word => word.replace(/^--native-arg=/, '')));
   return unattendedFlags(agent).filter(flag => !all.has(flag));
+}
+
+/** True for a plain `agent-farm run …` launch, which passes flags to its agent as `--native-arg=<flag>`. */
+function isAgentFarmRun(command: string): boolean {
+  const words = tokenizeShellCommand(command, process.platform);
+  return isPlainAgentCommand(command, 'agent-farm') && words?.[1] === 'run';
 }
 
 /**
  * A Session's custom launch command with the agent's unattended flags added
- * right after the agent's program. Only a plain invocation of the agent can be
- * changed safely: a wrapper (`sh -c`, `env`, a variable assignment) or a
- * compound command (`&&`, `;`, a pipe or redirect) is refused.
+ * right after the agent's program, or after `agent-farm run` as
+ * `--native-arg=<flag>`. Only a plain invocation of the agent or of
+ * `agent-farm run` can be changed safely: a wrapper (`sh -c`, `env`, a variable
+ * assignment) or a compound command (`&&`, `;`, a pipe or redirect) is refused.
  */
 function unattendedLaunchCommand(sessionName: string, command: string, agent: LoopAgent): string {
   const spans: Array<{ start: number; end: number }> = [];
   tokenizeShellCommand(command, process.platform, spans);
   const program = agentExecutable(agent);
-  if (!isPlainAgentCommand(command, program)) {
+  const agentFarm = isAgentFarmRun(command);
+  if (!agentFarm && !isPlainAgentCommand(command, program)) {
     throw new PaneError(
       'ERR_LOOP_INVALID',
       `Session ${sessionName} launches its agent with \`${command}\`, which Pane cannot safely change to skip permission prompts. Nothing was saved.`,
-      `Set the Session's launch command to a plain \`${program} …\` command with no wrapper or shell operators, or clear it to use the default, then save the loop again.`,
+      `Set the Session's launch command to a plain \`${program} …\` or \`agent-farm run …\` command with no wrapper or shell operators, or clear it to use the default, then save the loop again.`,
     );
   }
   const missing = missingUnattendedFlags(command, agent);
   if (missing.length === 0) return command;
-  return `${command.slice(0, spans[0].end)} ${missing.join(' ')}${command.slice(spans[0].end)}`;
+  const end = spans[agentFarm ? 1 : 0].end;
+  const added = agentFarm ? missing.map(flag => `--native-arg=${flag}`) : missing;
+  return `${command.slice(0, end)} ${added.join(' ')}${command.slice(end)}`;
 }
 
 /**
