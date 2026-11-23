@@ -32,23 +32,28 @@ A host that is offline keeps its own copy and catches up on the next sync. Hosts
 
 A Pane Cloud Session's machine syncs secrets like any of your machines, both ways:
 a secret you set there reaches your other machines, and deletions travel in both
-directions. What reaches it is filtered by your choice below. A computer signed in to
-Pane Cloud knows which saved machines are your cloud machines (Pane Cloud lists each
-one's relay id) and writes each only your chosen Pane secrets, plus the GitHub token
-from its own `gh auth token`, before a new Session starts and on every later sync.
-Secrets travel over each device's own connection, encrypted end to end to the cloud
-machine: Greenfield's relay passes them along and can't read them, and the Pane Cloud
-service never sees them. Integration keys and 1Password references don't go to cloud
-machines, and a cloud machine's GitHub token stays on it: it is the sign-in a computer
-carried there, not a secret to share.
+directions. A cloud machine says it is one in its sync answer, so every device that
+syncs with it, a computer signed in to Pane Cloud or not and the phone app, writes it
+only the Pane secrets your choice below allows, with the choice itself. Integration keys,
+1Password references and secrets you turned off are never sent to it. In the other
+direction, devices take from a cloud machine only Pane secrets your choice allows: a
+record it holds for a secret you turned off, a value or a deletion, is ignored, and so
+are any integration keys it has. A computer signed in to Pane Cloud also writes each of
+your cloud machines the GitHub token from its own `gh auth token`, before a new Session
+starts and on every later sync; a cloud machine keeps that token to itself. Secrets
+travel over each device's own connection, encrypted end to end to the cloud machine:
+Greenfield's relay passes them along and can't read them, and the Pane Cloud service
+never sees them. A device on a Pane from before cloud machines said so still sends
+everything it holds; the cloud machine keeps only what your choice allows.
 
 On the cloud machine everything about secrets sits on its secrets volume
 (`PANE_SECRETS_DIR`), which the abuse checks and Greenfield staff never open: the values
 (`secrets.json`), the list of names with the machines they came from and the choice
 below (`index.json`), and lease records. Its `config.json`, on the Session disk, holds
-nothing about secrets. A machine without the volume refuses what a computer sends it as
-a cloud machine (`credentials:cloud:apply`), so a new cloud Session is not created
-without its secrets. The GitHub and
+nothing about secrets. A machine without the volume doesn't say it is a cloud machine
+and is treated like any other; New cloud Session refuses one (`credentials:cloud:apply`),
+so a cloud Session is never created on a machine that would keep secrets on its
+Session disk. The GitHub and
 Claude Code tokens are the Pane secrets `pane-cloud/GH_TOKEN` and
 `pane-cloud/CLAUDE_CODE_OAUTH_TOKEN`; the machine puts them in its agents' environment,
 and git signs in to GitHub through `gh`.

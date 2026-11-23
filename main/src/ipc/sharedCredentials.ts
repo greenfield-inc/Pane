@@ -46,6 +46,8 @@ export function registerSharedCredentialHandlers(
     // A cloud VM syncs both ways like any machine (D-91), but its GitHub token is the sign-in a computer
     // read from its own gh and carried here, not a secret of the person's to spread to every machine.
     if (cloudVm && credentials.paneSecrets) delete credentials.paneSecrets[GITHUB_SIGN_IN_KEY];
+    // Says it is a cloud VM, so every device writes it, and reads from it, only what the person's choice allows.
+    if (cloudVm) credentials.cloudVm = true;
     return credentials;
   });
   commandRegistry.register('credentials:shared:apply', async (input: PaneCommandValue, trusted: PaneCommandValue) => {

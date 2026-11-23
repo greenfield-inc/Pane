@@ -10,7 +10,8 @@ import {
   sharedNotifySwitchSchema,
 } from './sharedCredentials';
 import { localHostLabel, paneSecretStore, type PaneSecretStore } from './paneSecrets';
-import { cloudSecretRecords, GITHUB_SIGN_IN_KEY, parseCloudChoice, readGithubToken } from './cloudSecrets';
+import { GITHUB_SIGN_IN_KEY, readGithubToken } from './cloudSecrets';
+import { cloudSecretRecords, parseCloudChoice } from '../../../shared/types/paneCloudSecrets';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';

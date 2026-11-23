@@ -603,7 +603,7 @@ describe('Pane Cloud VMs', () => {
   }
 
   /** A desktop that saved `remotes`; Pane Cloud lists `cloud-vm` among them as one of the person's VMs. */
-  async function desktop(remotes: Array<{ id: string; invoke: (channel: string, args: unknown[]) => Promise<JsonValue | undefined> }>, config: Partial<AppConfig> = {}) {
+  async function desktop(remotes: Array<{ id: string; invoke: (channel: string, args: unknown[]) => Promise<JsonValue | undefined> }>, config: Partial<AppConfig> = {}, { signedInToPaneCloud = true } = {}) {
     const dir = await folder('desktop');
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ anthropicApiKey: 'sk-ant-desktop', ...config }));
     vi.stubEnv('PANE_DIR', dir);
@@ -612,7 +612,7 @@ describe('Pane Cloud VMs', () => {
     setPaneRuntime({ eventSink: { send: sent }, getConfigManager: () => configManager, getPtyHostRuntime: () => null, getWebviewContextMap: () => new Map() });
     const secrets = new PaneSecretStore(configManager, keychainSecretBackend(new FakeKeychain(), 'Pane (test)'), () => 'this-mac');
     await secrets.set('web', 'NPM_TOKEN', 'npm-desktop');
-    const sync = new TrackedSync(configManager, { subscribe: () => () => undefined, remotes: () => remotes }, () => secrets, async () => 'gho_desktop', () => new Set(['cloud-vm']));
+    const sync = new TrackedSync(configManager, { subscribe: () => () => undefined, remotes: () => remotes }, () => secrets, async () => 'gho_desktop', () => new Set(signedInToPaneCloud ? ['cloud-vm'] : []));
     running.push(sync);
     return { configManager, secrets, sync };
   }
@@ -762,6 +762,40 @@ describe('Pane Cloud VMs', () => {
     await sync.sendToCloudVm('cloud-vm');
     expect(await vm.secrets.read('web', 'NPM_TOKEN')).toBe('npm-desktop');
     expect(vm.env.GH_TOKEN).toBe('gho_desktop');
+  });
+
+  it('get only the chosen Pane secrets from a computer that doesn\'t know it is a cloud VM (not signed in to Pane Cloud, or before it answers)', async () => {
+    const vm = await cloudVm();
+    const { secrets, sync } = await desktop([vm], {}, { signedInToPaneCloud: false });
+    await secrets.set('billing', 'STRIPE_LIVE_KEY', 'sk_live_desktop');
+    await secrets.setReference('vault', 'OP_KEY', 'op://Private/Item/field');
+    await secrets.setCloudChoice({ excludedSecrets: ['billing/STRIPE_LIVE_KEY'], excludedMachines: [] });
+
+    sync.start();
+    await settled();
+
+    const sent = JSON.stringify(vm.invoke.mock.calls.filter(call => String(call[0]).endsWith(':apply')).map(call => call[1]));
+    expect(sent).toContain('npm-desktop');
+    expect(sent).not.toMatch(/sk_live_desktop|sk-ant-desktop|op:\/\/Private/);
+    expect(await vm.secrets.read('web', 'NPM_TOKEN')).toBe('npm-desktop');
+  });
+
+  it('can\'t write, overwrite or delete on the person\'s machines a secret the choice keeps off cloud machines, or pass on its integration keys', async () => {
+    const vm = await cloudVm();
+    const { secrets, sync } = await desktop([vm]);
+    await secrets.set('billing', 'STRIPE_LIVE_KEY', 'sk_live_desktop');
+    await secrets.setCloudChoice({ excludedSecrets: ['billing/STRIPE_LIVE_KEY', 'web/NPM_TOKEN'], excludedMachines: [] });
+    // An agent on the VM sets the turned-off secret there, deletes another, and a key lands in the VM's config.
+    await vm.secrets.set('billing', 'STRIPE_LIVE_KEY', 'sk_live_from_vm');
+    await vm.secrets.set('web', 'NPM_TOKEN', 'npm-vm');
+    await vm.secrets.delete('web', 'NPM_TOKEN');
+    await vm.configManager.updateConfig({ openaiApiKey: 'sk-openai-vm' });
+
+    sync.start();
+    await settled();
+
+    expect(await secrets.read('billing', 'STRIPE_LIVE_KEY')).toBe('sk_live_desktop');
+    expect(await secrets.read('web', 'NPM_TOKEN')).toBe('npm-desktop');
   });
 
   it('refuse the send when the VM has no secrets volume, so the cloud Session is not started without its secrets', async () => {

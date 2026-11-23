@@ -1,15 +1,14 @@
 import type { PaneSecretStore } from './paneSecrets';
 import { githubCliToken } from './githubWatchClient';
 import { PaneError } from '../../../shared/paneError';
-import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { paneSecretKey, type PaneSecretSummary } from '../../../shared/types/paneSecrets';
-import type { SharedCredential, SharedCredentials } from '../../../shared/types/sharedCredentials';
+import type { SharedCredentials } from '../../../shared/types/sharedCredentials';
 import {
   CLOUD_SIGN_IN_ENVS,
   CLOUD_SIGN_IN_PROJECT,
   CLOUD_TOKEN_AGENTS,
   GITHUB_SIGN_IN_ENV,
-  sendsToCloud,
+  cloudSecretRecords,
   type PaneCloudSecretChoice,
   type PaneCloudSecretItem,
   type PaneCloudSecrets,
@@ -23,32 +22,9 @@ function signInLabel(key: string): string | null {
   return CLOUD_TOKEN_AGENTS.find((agent) => paneSecretKey(CLOUD_SIGN_IN_PROJECT, agent.env) === key)?.title ?? null;
 }
 
-const cloudChoiceSchema: BoundarySchema<PaneCloudSecretChoice> = boundary.object({
-  excludedSecrets: boundary.array(boundary.nonEmptyString),
-  excludedMachines: boundary.array(boundary.nonEmptyString),
-});
-
-/** The choice a sync record carries, or null when there is none or it doesn't decode. */
-export function parseCloudChoice(record: SharedCredential | undefined): PaneCloudSecretChoice | null {
-  if (!record?.value) return null;
-  try {
-    return decodeBoundary(JSON.parse(record.value), cloudChoiceSchema);
-  } catch {
-    return null;
-  }
-}
-
 /** The person's GitHub token from the GitHub CLI on this computer, or null when gh is missing or signed out. */
 export function readGithubToken(): Promise<string | null> {
   return githubCliToken().then((token) => token || null, () => null);
-}
-
-/**
- * The secrets a cloud VM gets: every Pane secret and deletion the person's choice allows. A deletion
- * always goes, so a VM never keeps a secret that was deleted everywhere else.
- */
-export function cloudSecretRecords(records: Record<string, SharedCredential>, choice: PaneCloudSecretChoice): Record<string, SharedCredential> {
-  return Object.fromEntries(Object.entries(records).filter(([key, record]) => record.value === null || sendsToCloud(choice, key, record.source)));
 }
 
 /** What "Choose what to send" lists: live secrets by name, grouped by the machine each was last set on, this one first. */

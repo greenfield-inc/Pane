@@ -4,6 +4,8 @@
  * service. Secrets flow to a VM one way: nothing comes back from it.
  */
 import { CONFIGURED_AGENT_IDS, configuredAgent, type ConfiguredAgentId } from '../agents';
+import { boundary, decodeBoundary, type BoundarySchema } from '../validation/boundaryDecoder';
+import type { SharedCredential } from './sharedCredentials';
 
 /** The Pane secret project that holds the sign-ins a cloud VM exports to its agents. */
 export const CLOUD_SIGN_IN_PROJECT = 'pane-cloud';
@@ -65,4 +67,27 @@ export interface PaneCloudSecrets {
 /** Whether the person's choice sends a secret last set on `machine`. */
 export function sendsToCloud(choice: PaneCloudSecretChoice, key: string, machine: string): boolean {
   return !choice.excludedSecrets.includes(key) && !choice.excludedMachines.includes(machine);
+}
+
+/**
+ * The secrets a cloud VM gets: every Pane secret and deletion the person's choice allows. A deletion
+ * always goes, so a VM never keeps a secret that was deleted everywhere else.
+ */
+export function cloudSecretRecords(records: Record<string, SharedCredential>, choice: PaneCloudSecretChoice): Record<string, SharedCredential> {
+  return Object.fromEntries(Object.entries(records).filter(([key, record]) => record.value === null || sendsToCloud(choice, key, record.source)));
+}
+
+const cloudChoiceSchema: BoundarySchema<PaneCloudSecretChoice> = boundary.object({
+  excludedSecrets: boundary.array(boundary.nonEmptyString),
+  excludedMachines: boundary.array(boundary.nonEmptyString),
+});
+
+/** The choice a sync record carries, or null when there is none or it doesn't decode. */
+export function parseCloudChoice(record: SharedCredential | undefined): PaneCloudSecretChoice | null {
+  if (!record?.value) return null;
+  try {
+    return decodeBoundary(JSON.parse(record.value), cloudChoiceSchema);
+  } catch {
+    return null;
+  }
 }

@@ -23,8 +23,7 @@ import { getPaneEventSink, getRuntimeConfigManager } from '../core/runtime';
 import { getAppDirectory } from '../utils/appDirectory';
 import { KeychainItemMissing, paneKeychainService, systemKeychain, type Keychain } from './keychain';
 import { readFileSync } from 'fs';
-import { EMPTY_PANE_CLOUD_SECRET_CHOICE, sendsToCloud, type PaneCloudSecretChoice } from '../../../shared/types/paneCloudSecrets';
-import { parseCloudChoice } from './cloudSecrets';
+import { EMPTY_PANE_CLOUD_SECRET_CHOICE, parseCloudChoice, sendsToCloud, type PaneCloudSecretChoice } from '../../../shared/types/paneCloudSecrets';
 
 /** Index record for one secret, kept in config.json. Never holds the value. */
 export interface PaneSecretMeta {
