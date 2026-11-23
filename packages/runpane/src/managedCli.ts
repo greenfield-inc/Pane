@@ -5,7 +5,7 @@ import { runForwardingSignals } from './forwardedChild';
 import { resolvePaneDirectory } from './daemonClient';
 import { findNpm, runNpm } from './updatePackage';
 import { findUpdateRuntime } from './updatePreflight';
-import { getWrapperVersion } from './version';
+import { compareVersions, getWrapperVersion } from './version';
 
 /** Written by Pane into every `runpane` shim it owns (main/src/services/runpaneShim.ts). */
 const MANAGED_SHIM_MARKER = 'pane-managed-runpane-shim v1';
@@ -238,17 +238,6 @@ function describeInstall(file: string, real: string): RunpaneInstall {
     return prefix ? { path: file, origin: 'npm', version, npmPrefix: prefix } : { path: file, origin: 'other', version };
   }
   return { path: file, origin: 'other' };
-}
-
-/** Numeric `major.minor.patch` order; prerelease tags are ignored, and unparsable versions compare equal. */
-function compareVersions(left: string, right: string): number {
-  const parse = (value: string) => value.replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
-  const [a, b] = [parse(left), parse(right)];
-  if (!a || !b) return 0;
-  for (let index = 0; index < 3; index += 1) {
-    if (a[index] !== b[index]) return a[index] - b[index];
-  }
-  return 0;
 }
 
 function pathDirectories(): string[] {

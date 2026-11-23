@@ -6,6 +6,17 @@ import { boundary, decodeBoundary } from './boundaryDecoder';
 const PANE_VERSION_TIMEOUT_MS = 2_000;
 const POWERSHELL_TIMEOUT_MS = 2_000;
 
+export /** Numeric `major.minor.patch` order; prerelease tags are ignored, and unparsable versions compare equal. */
+function compareVersions(left: string, right: string): number {
+  const parse = (value: string) => value.replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
+  const [a, b] = [parse(left), parse(right)];
+  if (!a || !b) return 0;
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] !== b[index]) return a[index] - b[index];
+  }
+  return 0;
+}
+
 export function getWrapperVersion(): string {
   // Pane's single-file bundle (main/build-runpane-cli.js) has no package.json
   // beside it; its build replaces this expression with the package version.

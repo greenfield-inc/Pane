@@ -4,8 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import { agentConfig, CONFIGURED_AGENT_IDS } from '../../../../shared/agents';
-import { readUpdateJournal } from '../../../../packages/runpane/src/updateOperation';
-import type { UpdateRecord } from './reclaimRules';
 import type { OtherToolPath } from './storageInventory';
 import type { CommandRunner } from '../../utils/commandRunner';
 
@@ -20,27 +18,6 @@ export function agentTempRoots(platform: NodeJS.Platform = process.platform): st
   const uid = platform === 'win32' ? '' : String(os.userInfo().uid);
   return CONFIGURED_AGENT_IDS.flatMap(id => agentConfig(id)?.tempDirs ?? [])
     .map(template => path.normalize(template.replace('{tmp}', tmp).replace('{uid}', uid)));
-}
-
-/** Updates recorded under `<paneDir>/updates`; a folder with no readable journal is left out, so it is never removed. */
-export async function readUpdateRecords(paneDir: string): Promise<UpdateRecord[]> {
-  const root = path.join(paneDir, 'updates');
-  let names: string[];
-  try {
-    names = await readdir(root);
-  } catch {
-    return [];
-  }
-  const records: UpdateRecord[] = [];
-  for (const id of names) {
-    try {
-      const journal = readUpdateJournal(path.join(root, id, 'status.json'));
-      records.push({ id, phase: journal.phase, updatedAt: Date.parse(journal.updatedAt) });
-    } catch {
-      // Not an update folder, or one still being written.
-    }
-  }
-  return records;
 }
 
 /** Folders git ignores in a worktree (build outputs, dependencies), relative and `/`-separated. Runs through the project's runner, so WSL works. */

@@ -66,6 +66,7 @@ describe('snapshot capacity before downtime', () => {
     write(path.join('notes', 'clone', 'README.md'), 'repository file');
     write(path.join('projects', 'Pane', 'README.md'), 'repository file');
     write(path.join('remediation', 'Firefox.exe'), "someone else's file");
+    write(path.join('builds', 'Pane.dmg'), 'an agent\'s build output');
     write(path.join('updates', 'status.json'), '{}');
     write(path.join('bin', 'runpane.cjs'), 'rebuilt at startup');
     const open = fs.openSync;
@@ -77,12 +78,35 @@ describe('snapshot capacity before downtime', () => {
     fs.mkdirSync(install);
     expect(() => assertUpdateCapacity(data, { paneDir: data, userData: install }, install)).not.toThrow();
     vi.restoreAllMocks();
-    expect(updateSnapshotSkips(data).sort()).toEqual([path.join(data, 'notes', 'clone'), path.join(data, 'remediation')]);
+    expect(updateSnapshotSkips(data).sort()).toEqual([path.join(data, 'builds'), path.join(data, 'notes', 'clone'), path.join(data, 'remediation')]);
     const snapshot = path.join(directory, 'snapshot');
     copyUpdateSnapshot(data, snapshot, true);
     expect(fs.readFileSync(path.join(snapshot, 'sessions.db'), 'utf8')).toBe('pane state');
     expect(fs.readFileSync(path.join(snapshot, 'notes', 'today.md'), 'utf8')).toBe('pane state');
-    for (const skipped of [path.join('notes', 'clone'), 'projects', 'remediation', 'updates', 'bin']) expect(fs.existsSync(path.join(snapshot, skipped)), skipped).toBe(false);
+    for (const skipped of [path.join('notes', 'clone'), 'projects', 'remediation', 'builds', 'updates', 'bin']) expect(fs.existsSync(path.join(snapshot, skipped)), skipped).toBe(false);
+  });
+
+  it('leaves Chromium caches out of the profile snapshot and its size', async () => {
+    const { assertUpdateCapacity, copyUpdateSnapshot } = await import('../../../packages/runpane/src/updateCapacity');
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-capacity-'));
+    directories.push(directory);
+    const profile = path.join(directory, 'profile');
+    const write = (file: string) => { fs.mkdirSync(path.dirname(path.join(profile, file)), { recursive: true }); fs.writeFileSync(path.join(profile, file), file); };
+    for (const file of ['Cookies', path.join('Local Storage', 'leveldb', '000003.log'), path.join('Cache', 'Cache_Data', 'data_0'), path.join('Code Cache', 'js', 'index'), path.join('GPUCache', 'data_1')]) write(file);
+    const open = fs.openSync;
+    vi.spyOn(fs, 'openSync').mockImplementation((...args) => {
+      if (/Cache/.test(String(args[0]))) throw Object.assign(new Error(`Opened ${String(args[0])}`), { code: 'EACCES' });
+      return open(...args);
+    });
+    const install = path.join(directory, 'install');
+    fs.mkdirSync(install);
+    expect(() => assertUpdateCapacity(directory, { paneDir: install, userData: profile }, install)).not.toThrow();
+    vi.restoreAllMocks();
+    const snapshot = path.join(directory, 'snapshot');
+    copyUpdateSnapshot(profile, snapshot, false);
+    expect(fs.readFileSync(path.join(snapshot, 'Cookies'), 'utf8')).toBe('Cookies');
+    expect(fs.existsSync(path.join(snapshot, 'Local Storage', 'leveldb', '000003.log'))).toBe(true);
+    for (const cache of ['Cache', 'Code Cache', 'GPUCache']) expect(fs.existsSync(path.join(snapshot, cache)), cache).toBe(false);
   });
 
   it('rejects a snapshot that exceeds actual available capacity', async () => {
