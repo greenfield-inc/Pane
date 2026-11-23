@@ -109,6 +109,7 @@ import { handOffToManagedCli } from './managedCli';
 import { assertSupportedCliRuntime } from './nodeRuntime';
 import {
   readWorkspaceSummary,
+  concreteMachine,
   requireTailnet,
   resolveMachine,
   runWorkspaceExec,
@@ -189,7 +190,9 @@ async function runOnMachine(machineQuery: string, command: string[]): Promise<nu
     throw new Error(`runpane ${parsed.command} runs on this machine only. On ${machineQuery}, use: runpane workspace ${machineQuery} exec -- runpane ${command.join(' ')}`);
   }
   const tailnet = await requireTailnet(parsed.paneDir);
-  const machine = resolveMachine(machineQuery, [tailnet.self, ...tailnet.machines]);
+  const named = resolveMachine(machineQuery, [tailnet.self, ...tailnet.machines]);
+  // On "Pane Cloud", the Session, Pane or tab the command names picks the VM it runs on (D-90).
+  const machine = await concreteMachine(named, { session: parsed.sessionId, pane: parsed.paneId, panel: parsed.panelId }, `${command.join(' ')} --session "<name>"`);
   routeDaemonCallsTo(workspaceTarget(machine), machine.self);
   try {
     return await main(command);

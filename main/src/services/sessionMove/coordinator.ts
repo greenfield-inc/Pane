@@ -12,6 +12,8 @@ import {
   SESSION_MOVE_MANIFEST_VERSION,
   SESSION_MOVE_TARGET_CHANNELS,
   type SessionMoveCheck,
+  type SessionMoveFix,
+  type SessionMoveMark,
   type SessionMovePreflight,
   type SessionMoveProgress,
   type SessionMoveStep,
@@ -19,6 +21,7 @@ import {
   type SessionMoveWaitingTab,
 } from '../../../../shared/types/sessionMove';
 import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
+import type { PaneCloudSnapshot } from '../../../../shared/types/paneCloud';
 import type { TerminalPausedMark, ToolPanel } from '../../../../shared/types/panels';
 import { configuredAgent, isConfiguredAgent } from '../../../../shared/agents';
 import { isFileStoreAgent } from '../../../../packages/runpane/src/nativeSession';
@@ -82,14 +85,33 @@ const targetStatusSchema = boundary.object({
 });
 const doctorSchema = boundary.object({ daemon: boundary.optional(boundary.object({ features: boundary.optional(boundary.array(boundary.string)) })) });
 
-export const moveRequestSchema = boundary.object({ sessionId: boundary.nonEmptyString, target: boundary.nonEmptyString });
+export const moveRequestSchema = boundary.object({
+  sessionId: boundary.nonEmptyString,
+  target: boundary.nonEmptyString,
+  /** A saved computer reached over its own routes (Pane relay, same network, public URL) instead of Tailscale. */
+  computerId: boundary.optional(boundary.nonEmptyString),
+  /** A move to Pane Cloud: the move creates the cloud machine before it stops any tab. */
+  cloud: boundary.optional(boundary.boolean),
+});
 export const statusRequestSchema = boundary.object({ sessionId: boundary.nonEmptyString, recheck: boundary.optional(boundary.boolean) });
 export const sessionRequestSchema = boundary.object({ sessionId: boundary.nonEmptyString });
-export const fixRequestSchema = boundary.object({ sessionId: boundary.nonEmptyString, target: boundary.nonEmptyString, fix: sessionMoveFixSchema });
-export type MoveRequest = ReturnType<typeof moveRequestSchema.decode>;
+export const fixRequestSchema = boundary.object({ sessionId: boundary.nonEmptyString, target: boundary.nonEmptyString, computerId: boundary.optional(boundary.nonEmptyString), fix: sessionMoveFixSchema });
+export interface MoveRequest { sessionId: string; target: string; computerId?: string; cloud?: boolean }
 export type StatusRequest = ReturnType<typeof statusRequestSchema.decode>;
 export type SessionRequest = ReturnType<typeof sessionRequestSchema.decode>;
-export type FixRequest = ReturnType<typeof fixRequestSchema.decode>;
+export interface FixRequest { sessionId: string; target: string; computerId?: string; fix: SessionMoveFix }
+
+/** Makes and deletes the cloud machine a move to Pane Cloud lands on (PaneCloudManager). */
+export interface MoveCloud {
+  /** Creates a cloud machine and pairs it with this computer; `machineId` is its saved computer id. */
+  createMachine(name: string): Promise<{ vmId: string; machineId: string }>;
+  remove(vmId: string): Promise<PaneCloudSnapshot>;
+}
+
+/** What the dialog names a move to Pane Cloud by. */
+const PANE_CLOUD_TARGET = 'Pane Cloud';
+/** Rounds of automatic Clone and Trust on a new cloud machine before what still blocks fails the move. */
+const CLOUD_FIX_ROUNDS = 3;
 
 interface MovedTab {
   panel: ToolPanel;
@@ -106,6 +128,10 @@ interface MovedTab {
 interface SourceJob {
   progress: SessionMoveProgress;
   peer: MovePeer;
+  /** The saved computer the peer is, persisted in the move mark so a restart reaches the same one. */
+  computerId?: string;
+  /** A move to Pane Cloud: the cloud machine it made, deleted if the move doesn't happen. */
+  cloud?: { vmId?: string };
   record: OrchestrationSessionRecord;
   paneIds: string[];
   tabs: MovedTab[];
@@ -130,6 +156,7 @@ interface SourceJob {
 }
 
 const STEP_TITLES = {
+  machine: 'Create a cloud machine',
   stop: 'Stop tabs',
   pack: 'Pack Panes, conversations and the Session folder',
   send: 'Send',
@@ -138,8 +165,8 @@ const STEP_TITLES = {
 } satisfies Record<SessionMoveStepId, string>;
 const STEP_ORDER: readonly SessionMoveStepId[] = ['stop', 'pack', 'send', 'build', 'start'];
 
-function steps(): SessionMoveStep[] {
-  return STEP_ORDER.map(id => ({ id, state: 'pending', title: STEP_TITLES[id] }));
+function steps(cloud = false): SessionMoveStep[] {
+  return (cloud ? ['machine' as const, ...STEP_ORDER] : STEP_ORDER).map(id => ({ id, state: 'pending', title: STEP_TITLES[id] }));
 }
 
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -167,7 +194,13 @@ function queuedMessages(panel: ToolPanel): number {
 export class MoveCoordinator {
   private readonly jobs = new Map<string, SourceJob>();
 
-  constructor(private readonly services: AppServices, private readonly registry: PaneCommandRegistry) {}
+  constructor(private readonly services: AppServices, private readonly registry: PaneCommandRegistry, private readonly cloud: () => MoveCloud | null = () => null) {}
+
+  private moveCloud(): MoveCloud {
+    const cloud = this.cloud();
+    if (!cloud) throw new PaneError('ERR_MOVE_NO_CLOUD', 'Pane Cloud is not available on this computer, so the Session can\'t move there.', 'Sign in to Pane Cloud in Create Session, then try again.');
+    return cloud;
+  }
 
   private manager() {
     const manager = this.services.orchestrationSessionManager;
@@ -327,12 +360,41 @@ export class MoveCoordinator {
 
   // ── Preflight ──────────────────────────────────────────────────────────
 
-  async check({ sessionId, target }: MoveRequest): Promise<SessionMovePreflight> {
+  async check({ sessionId, target, computerId, cloud }: MoveRequest): Promise<SessionMovePreflight> {
     const record = await this.manager().get({ sessionId });
     if (record.archived || record.move) {
       throw new PaneError('ERR_MOVE_SESSION_STATE', `Session “${record.name}” is ${record.archived ? 'archived' : record.move?.state ?? 'busy'}, so it can't move.`, record.archived ? 'Restore it first.' : 'Wait for the current move to finish.');
     }
-    const peer = resolvePeer(target, this.services.configManager);
+    if (cloud) return this.cloudCheck(record);
+    return this.preflight(record, resolvePeer(target, this.services.configManager, computerId));
+  }
+
+  /**
+   * A move to Pane Cloud, checked before its machine exists: what holds the Session back here, and
+   * each repository the cloud machine can't clone. The machine's own checks run when the move starts.
+   */
+  private async cloudCheck(record: OrchestrationSessionRecord): Promise<SessionMovePreflight> {
+    this.moveCloud();
+    const { manifest } = await this.manifest(record, randomUUID());
+    const checks: SessionMoveCheck[] = [];
+    for (const pane of manifest.panes) {
+      if (!pane.repo || pane.repo.remote) continue;
+      checks.push({ id: `remote:${pane.id}`, level: 'block', title: `${pane.repo.name} has no origin remote`, detail: `Pane “${pane.name}” uses it, and a cloud machine gets each repository by cloning its origin. Add an origin remote and push branch ${pane.branch ?? 'HEAD'}, then check again.` });
+    }
+    checks.push(...this.heldBackChecks(record));
+    checks.push({ id: 'cloud-machine', level: 'ok', title: `Pane makes a cloud machine named “${record.name}” when the Session moves`, detail: 'It clones each repository there before any tab stops. If the move doesn\'t happen, Pane deletes the machine.' });
+    return { target: PANE_CLOUD_TARGET, ready: !checks.some(check => check.level === 'block'), checks, ...await this.counts(manifest) };
+  }
+
+  private async counts(manifest: MoveManifest): Promise<Pick<SessionMovePreflight, 'paneCount' | 'tabCount' | 'bytes'>> {
+    // Tabs as the person counts them: terminals and chats (Explorer and Diff come along on their own).
+    const tabCount = manifest.panes.reduce((sum, pane) => sum + pane.tabs.filter(tab => tab.type === 'terminal' || tab.type === 'chat').length, 0);
+    return { paneCount: manifest.panes.filter(pane => pane.role === 'member').length, tabCount, bytes: await this.estimate(manifest) };
+  }
+
+  /** Every check on the target machine and here; stops nothing. */
+  private async preflight(record: OrchestrationSessionRecord, peer: MovePeer): Promise<SessionMovePreflight> {
+    const target = peer.name;
     const checks: SessionMoveCheck[] = [];
     // An older Pane on the target says so before anything else is asked of it.
     try {
@@ -358,10 +420,7 @@ export class MoveCoordinator {
       }
     }
     checks.push(...this.heldBackChecks(record));
-    // Tabs as the person counts them: terminals and chats (Explorer and Diff come along on their own).
-    const tabCount = manifest.panes.reduce((sum, pane) => sum + pane.tabs.filter(tab => tab.type === 'terminal' || tab.type === 'chat').length, 0);
-    const bytes = await this.estimate(manifest);
-    return { target, ready: !checks.some(check => check.level === 'block'), checks, paneCount: manifest.panes.filter(pane => pane.role === 'member').length, tabCount, bytes };
+    return { target, ready: !checks.some(check => check.level === 'block'), checks, ...await this.counts(manifest) };
   }
 
   private heldBackChecks(record: OrchestrationSessionRecord, stopped = false): SessionMoveCheck[] {
@@ -384,19 +443,19 @@ export class MoveCoordinator {
     return bytes;
   }
 
-  async fix({ sessionId, target, fix }: FixRequest): Promise<SessionMovePreflight> {
-    const peer = resolvePeer(target, this.services.configManager);
-    // Setup-heavy: a clone can take minutes.
-    await peer.invoke(SESSION_MOVE_TARGET_CHANNELS.fix, [{ fix }], boundary.json, 10 * 60_000);
-    return this.check({ sessionId, target });
+  async fix({ sessionId, target, computerId, fix }: FixRequest): Promise<SessionMovePreflight> {
+    await runFix(resolvePeer(target, this.services.configManager, computerId), fix);
+    return this.check({ sessionId, target, computerId });
   }
 
   // ── The move ───────────────────────────────────────────────────────────
 
-  async start({ sessionId, target }: MoveRequest): Promise<SessionMoveProgress> {
+  async start(request: MoveRequest): Promise<SessionMoveProgress> {
+    const { sessionId, computerId, cloud } = request;
+    const target = cloud ? PANE_CLOUD_TARGET : request.target;
     const existing = this.jobs.get(sessionId);
     if (existing && !['done', 'failed', 'cancelled'].includes(existing.progress.phase)) return { ...existing.progress };
-    const preflight = await this.check({ sessionId, target });
+    const preflight = await this.check({ sessionId, target, computerId, cloud });
     if (!preflight.ready) {
       const block = preflight.checks.find(check => check.level === 'block');
       // Open approvals and waiting messages are this Session's, not the target's.
@@ -411,15 +470,18 @@ export class MoveCoordinator {
     const moveId = randomUUID();
     const tabs = this.tabsOf(record);
     const job: SourceJob = {
-      record, peer: resolvePeer(target, this.services.configManager), paneIds: [record.internalSessionId, ...this.memberPaneIds(record)], tabs,
+      // A move to Pane Cloud has no machine to call until its first step makes one.
+      record, peer: cloud ? noMachineYet(target) : resolvePeer(target, this.services.configManager, computerId), computerId, cloud: cloud ? {} : undefined,
+      paneIds: [record.internalSessionId, ...this.memberPaneIds(record)], tabs,
       stopNow: false, cancelled: false, scripts: [], snapshotRefs: [], heldApprovals: [], approvalsStayed: [], outDir: path.join(getAppDirectory(), 'moves-out', moveId), lastHeard: Date.now(),
       progress: {
-        moveId, sessionId, sessionName: record.name, target, phase: 'waiting', waiting: [], stoppedTabs: 0, totalTabs: tabs.length,
-        steps: steps(), frozen: false, updatedAt: new Date().toISOString(),
+        moveId, sessionId, sessionName: record.name, target, phase: cloud ? 'moving' : 'waiting', waiting: [], stoppedTabs: 0, totalTabs: tabs.length,
+        steps: steps(cloud), frozen: false, updatedAt: new Date().toISOString(),
       },
     };
+    if (computerId) job.progress.computerId = computerId;
     this.jobs.set(sessionId, job);
-    this.setStep(job, 'stop', 'running');
+    this.setStep(job, cloud ? 'machine' : 'stop', 'running');
     void this.run(job).catch(error => this.fail(job, error));
     return { ...job.progress };
   }
@@ -447,7 +509,7 @@ export class MoveCoordinator {
       running: tab.running || tab.kind === 'chat' || !!readTabFields(toJsonObject(tab.panel.state.customState ?? {})).agentId,
     }));
     const job: SourceJob = {
-      record, peer: resolvePeer(record.move.machine, this.services.configManager), paneIds: [record.internalSessionId, ...this.memberPaneIds(record)],
+      record, peer: resolvePeer(record.move.machine, this.services.configManager, record.move.computerId), computerId: record.move.computerId, paneIds: [record.internalSessionId, ...this.memberPaneIds(record)],
       tabs, stopNow: false, cancelled: false, scripts: [], snapshotRefs: [], heldApprovals: [], approvalsStayed: [], outDir: path.join(getAppDirectory(), 'moves-out', record.move.moveId), lastHeard: Date.now(),
       progress: {
         moveId: record.move.moveId, sessionId, sessionName: record.name, target: record.move.machine, phase: 'confirming', waiting: [], stoppedTabs: tabs.length, totalTabs: tabs.length,
@@ -455,6 +517,7 @@ export class MoveCoordinator {
         error: { message: `Asking ${record.move.machine} whether the move finished.`, next: `The Session stays paused here until ${record.move.machine} answers, so it never runs twice.` },
       },
     };
+    if (record.move.computerId) job.progress.computerId = record.move.computerId;
     this.jobs.set(sessionId, job);
     this.settle(job);
     return job;
@@ -501,8 +564,13 @@ export class MoveCoordinator {
   }
 
   private async run(job: SourceJob): Promise<void> {
+    if (job.cloud) await this.makeMachine(job, job.cloud);
     // Held before any tab stops, with any card its tabs post meanwhile: a stopping tab would otherwise end them (T-44).
     job.heldApprovals = this.services.notifyService?.holdMovingApprovals(job.progress.moveId, this.approvalsOf(job.record).carried.map(item => item.id), this.panelIdsOf(job.record)) ?? [];
+    if (job.cloud) {
+      this.setStep(job, 'stop', 'running');
+      this.touch(job, { phase: 'waiting' });
+    }
     await this.stopTabs(job);
     this.checkCancelled(job);
     this.setStep(job, 'stop', 'done', this.stoppedSummary(job));
@@ -554,12 +622,59 @@ export class MoveCoordinator {
     this.setStep(job, 'build', 'done');
 
     // The freeze: from here the source never restarts by itself.
-    await this.manager().setMoveMark(job.record.id, { state: 'moving', machine: job.progress.target, moveId: job.progress.moveId, at: new Date().toISOString() }, `Moving to ${job.progress.target}.`);
+    await this.manager().setMoveMark(job.record.id, moveMark(job, 'moving'), `Moving to ${job.progress.target}.`);
     this.touch(job, { frozen: true });
     this.setStep(job, 'start', 'running');
     await this.callTarget(job, SESSION_MOVE_TARGET_CHANNELS.start).catch(() => undefined);
     this.settle(job, built);
     await job.settling;
+  }
+
+  /**
+   * A move to Pane Cloud's first step, before any tab stops: creates the cloud machine, clones and
+   * trusts what the Session needs there (the person chose a fresh machine, so the dialog's Clone and
+   * Trust run on their own), and checks it like any target. Whatever still blocks fails the move,
+   * and `fail` deletes the machine.
+   */
+  private async makeMachine(job: SourceJob, cloud: NonNullable<SourceJob['cloud']>): Promise<void> {
+    const target = job.progress.target;
+    const made = await this.moveCloud().createMachine(job.record.name);
+    cloud.vmId = made.vmId;
+    job.computerId = made.machineId;
+    this.touch(job, { computerId: made.machineId });
+    job.peer = resolvePeer(target, this.services.configManager, made.machineId);
+    this.checkCancelled(job);
+    for (let round = 0; ; round += 1) {
+      this.setStep(job, 'machine', 'running', 'Checking the cloud machine');
+      const preflight = await this.preflight(await this.manager().get({ sessionId: job.record.id }), job.peer);
+      this.checkCancelled(job);
+      const blocks = preflight.checks.filter(check => check.level === 'block');
+      const fixes = blocks.flatMap(check => check.fix ? [check.fix] : []);
+      if (!blocks.length) break;
+      if (!fixes.length || round === CLOUD_FIX_ROUNDS) {
+        const here = blocks[0].id === 'approvals' || blocks[0].id.startsWith('queue:');
+        throw new PaneError('ERR_MOVE_NOT_READY', here ? `The Session can't move yet: ${blocks[0].title}.` : `The cloud machine isn't ready: ${blocks[0].title}.`, blocks[0].detail ?? 'Fix it, then move again.');
+      }
+      for (const fix of fixes) {
+        this.setStep(job, 'machine', 'running', fix.kind === 'clone' ? `Cloning ${fix.remote}` : `Trusting ${path.basename(fix.path)}`);
+        await runFix(job.peer, fix);
+        this.checkCancelled(job);
+      }
+    }
+    this.setStep(job, 'machine', 'done');
+  }
+
+  /** Deletes the cloud machine a move made and didn't use; says what happened to it. */
+  private async discardMachine(cloud: NonNullable<SourceJob['cloud']>): Promise<string> {
+    // createMachine deletes a machine it couldn't finish (pairing failed), so none is left either way.
+    if (!cloud.vmId) return 'No cloud machine is left from the move.';
+    try {
+      await this.moveCloud().remove(cloud.vmId);
+      return 'Pane deleted the cloud machine it made for the move.';
+    } catch (error) {
+      console.warn('[SessionMove] The cloud machine made for the move was not deleted:', error);
+      return `Pane couldn't delete the cloud machine it made for the move (${reasonOf(error)}); delete it from the Pane Cloud machine in the sidebar.`;
+    }
   }
 
   /** Check again after the freeze: a target whose start failed before any tab started is asked to start again. */
@@ -649,7 +764,7 @@ export class MoveCoordinator {
   /** Archives the moved Panes here; returns what stayed behind instead, for the summary. */
   private async retire(job: SourceJob): Promise<string[]> {
     const manager = this.manager();
-    await manager.setMoveMark(job.record.id, { state: 'moved', machine: job.progress.target, moveId: job.progress.moveId, at: new Date().toISOString() }, `Moved to ${job.progress.target}.`);
+    await manager.setMoveMark(job.record.id, moveMark(job, 'moved'), `Moved to ${job.progress.target}.`);
     // Archiving removes the worktrees; the snapshot refs stay in each repository for Restore, and
     // ignored files (which never travel) are kept beside them.
     const kept: string[] = [];
@@ -852,17 +967,40 @@ export class MoveCoordinator {
       this.touch(job, { phase: 'confirming', error: { message: reasonOf(error), next: `The Session stays paused here so it never runs twice. Check again, or open it on ${job.progress.target}.` } });
       return;
     }
-    const cleaned = await this.restartHere(job);
+    // A cloud machine made for this move goes with everything on it, so nothing there needs asking.
+    const cleaned = await this.restartHere(job, !job.cloud);
     const running = job.progress.steps.find(step => step.state === 'running');
     if (running) this.setStep(job, running.id, 'failed');
-    const there = cleaned
+    const there = job.cloud ? await this.discardMachine(job.cloud) : cleaned
       ? `${job.progress.target} removed everything it had set up.`
       : `${job.progress.target} didn't answer; it removes what it had set up on its own once the move stops arriving.`;
+    // The cloud machine is gone, so advice to fix something on it no longer applies.
+    const cloudNext = job.cloud ? 'Fix what the message names here (such as a repository its origin can\'t serve), then move to Pane Cloud again; each move makes a new cloud machine.' : undefined;
     const failure = error instanceof PaneError
-      ? { message: `${error.message} ${there} The Session is running here again, unchanged.`, next: error.next ?? 'Try again.' }
-      : { message: `${reasonOf(error)}. ${there} The Session is running here again, unchanged.`, next: 'Try again.' };
+      ? { message: `${error.message} ${there} The Session is running here again, unchanged.`, next: cloudNext ?? error.next ?? 'Try again.' }
+      : { message: `${reasonOf(error)}. ${there} The Session is running here again, unchanged.`, next: cloudNext ?? 'Try again.' };
     this.touch(job, cancelled ? { phase: 'cancelled', error: undefined } : { phase: 'failed', error: failure });
   }
+}
+
+/** The source's move mark; its saved computer id lets a restart here reach the same target. */
+function moveMark(job: SourceJob, state: 'moving' | 'moved'): SessionMoveMark {
+  const mark: SessionMoveMark = { state, machine: job.progress.target, moveId: job.progress.moveId, at: new Date().toISOString() };
+  if (job.computerId) mark.computerId = job.computerId;
+  return mark;
+}
+
+/** A move to Pane Cloud's peer until its machine exists: nothing to call yet. */
+function noMachineYet(name: string): MovePeer {
+  return {
+    name,
+    invoke: () => Promise.reject(new PaneError('ERR_MOVE_NO_MACHINE_YET', 'The cloud machine isn\'t made yet.', 'Wait for the move to create it.')),
+  };
+}
+
+/** Runs one Clone or Trust on the target. Setup-heavy: a clone can take minutes. */
+async function runFix(peer: MovePeer, fix: SessionMoveFix): Promise<void> {
+  await peer.invoke(SESSION_MOVE_TARGET_CHANNELS.fix, [{ fix }], boundary.json, 10 * 60_000);
 }
 
 /** The approvals a move took from this machine, saved in its outbox before they left. */

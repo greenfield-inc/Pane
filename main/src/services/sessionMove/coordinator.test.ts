@@ -1,14 +1,18 @@
 import { execFileSync } from 'child_process';
 import fs from 'fs';
+import http from 'http';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SessionMovePreflight, SessionMoveProgress } from '../../../../shared/types/sessionMove';
+import type { SessionMoveCheck, SessionMovePreflight, SessionMoveProgress } from '../../../../shared/types/sessionMove';
 import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
 import { PaneCommandRegistry } from '../../daemon/commandRegistry';
 import type { AppServices } from '../../ipc/types';
 import { MoveCoordinator } from './coordinator';
 import { createSnapshot } from './gitSnapshot';
+import { SIGNED_OUT_PANE_CLOUD } from '../../../../shared/types/paneCloud';
+import { normalizeRemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
+import { boundary, decodeBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 /**
  * The source side of a move against a real git worktree and the test PANE_DIR, with the move's
@@ -140,5 +144,90 @@ describe('MoveCoordinator.resume (T-44)', () => {
     expect(adopted).toEqual(['1', '2']);
     expect(fs.existsSync(lost)).toBe(false);
     expect(fs.existsSync(done)).toBe(false);
+  });
+});
+
+describe('MoveCoordinator: a move to Pane Cloud', () => {
+  /** The new cloud machine's Pane: a local HTTP server that records each fix the move runs there. */
+  let server: http.Server;
+  let fixes: JsonValue[];
+  beforeEach(async () => {
+    fixes = [];
+    server = http.createServer((request, response) => {
+      let text = '';
+      request.on('data', chunk => { text += chunk; });
+      request.on('end', () => {
+        const body = decodeBoundary(JSON.parse(text), boundary.object({ channel: boundary.string, args: boundary.array(boundary.jsonObject) }));
+        if (body.channel === 'runpane:move:fix') fixes.push(body.args[0].fix ?? null);
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ ok: true, result: null }));
+      });
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  });
+  afterEach(async () => { await new Promise(resolve => server.close(resolve)); });
+
+  const clone = { kind: 'clone' as const, label: 'Clone', remote: 'git@example.invalid:team/app.git', path: '/home/pane/app' };
+
+  /** A coordinator whose cloud machine answers on the test server, with the target's checks given by `checks`. */
+  function cloudMove(checks: () => SessionMoveCheck[]) {
+    const made: string[] = [];
+    const removed: string[] = [];
+    const baseUrl = `http://127.0.0.1:${decodeBoundary(server.address(), boundary.object({ port: boundary.number })).port}`;
+    const computers = [{ id: 'vm-computer', label: 'Fix login', routes: [{ id: `public:${baseUrl}`, kind: 'public', source: 'link', baseUrl, token: 't' }] }];
+    const recordFixture = { id: 'session', name: 'Fix login', internalSessionId: 'owner', associations: [] };
+    // SAFETY: the coordinator reads only these record fields on the path this test drives.
+    const record = recordFixture as OrchestrationSessionRecord;
+    const servicesFixture = {
+      configManager: { getConfig: () => ({ remoteDaemon: normalizeRemoteDaemonConfig({ client: { mode: 'local', computers } }) }) },
+      orchestrationSessionManager: { get: async () => record },
+      sessionManager: { getSession: () => undefined },
+    };
+    const cloud = {
+      createMachine: async (name: string) => { made.push(name); return { vmId: 'vm-1', machineId: 'vm-computer' }; },
+      remove: async (vmId: string) => { removed.push(vmId); return SIGNED_OUT_PANE_CLOUD; },
+    };
+    // SAFETY: the fixture supplies the exact AppServices members a move to Pane Cloud reads before its pack.
+    const coordinator = new MoveCoordinator(servicesFixture as AppServices, new PaneCommandRegistry(), () => cloud);
+    Object.assign(coordinator, {
+      check: async (): Promise<SessionMovePreflight> => ({ target: 'Pane Cloud', ready: true, checks: [], paneCount: 1, tabCount: 0, bytes: 0 }),
+      tabsOf: () => [],
+      // The target's preflight: its checks, as the cloud machine answers them now.
+      preflight: async (): Promise<SessionMovePreflight> => {
+        const found = checks();
+        return { target: 'Pane Cloud', ready: !found.some(check => check.level === 'block'), checks: found, paneCount: 1, tabCount: 0, bytes: 0 };
+      },
+      // The pack breaks, as a full disk would: the move fails before the freeze.
+      manifest: async () => { throw new Error('No space left on device'); },
+    });
+    return { coordinator, made, removed };
+  }
+
+  it('makes the machine named after the Session, clones what it lacks there, and deletes it when the move fails before the freeze', async () => {
+    const { coordinator, made, removed } = cloudMove(() => fixes.length
+      ? [{ id: 'repo:app', level: 'ok', title: 'team/app is on Pane Cloud' }]
+      : [{ id: 'repo:app', level: 'block', title: 'team/app isn\'t on Pane Cloud', fix: clone }]);
+    const started = await coordinator.start({ sessionId: 'session', target: 'Pane Cloud', cloud: true });
+    expect(started.steps.map(step => step.id)).toEqual(['machine', 'stop', 'pack', 'send', 'build', 'start']);
+
+    await vi.waitFor(async () => expect((await coordinator.status({ sessionId: 'session' }))?.phase).toBe('failed'));
+    const progress = await coordinator.status({ sessionId: 'session' });
+    expect(made).toEqual(['Fix login']);
+    expect(fixes).toEqual([clone]);
+    expect(progress?.steps.find(step => step.id === 'machine')?.state).toBe('done');
+    expect(progress?.computerId).toBe('vm-computer');
+    expect(progress?.error?.message).toContain('Pane deleted the cloud machine it made for the move.');
+    expect(removed).toEqual(['vm-1']);
+  });
+
+  it('deletes the machine and stops no tab when a check without a fix still blocks', async () => {
+    const { coordinator, removed } = cloudMove(() => [{ id: 'version', level: 'block', title: 'Update Pane on Pane Cloud', detail: 'Pane there is too old.' }]);
+    await coordinator.start({ sessionId: 'session', target: 'Pane Cloud', cloud: true });
+
+    await vi.waitFor(async () => expect((await coordinator.status({ sessionId: 'session' }))?.phase).toBe('failed'));
+    const progress = await coordinator.status({ sessionId: 'session' });
+    expect(progress?.error?.message).toContain('Update Pane on Pane Cloud');
+    expect(progress?.steps.find(step => step.id === 'stop')?.state).toBe('pending');
+    expect(removed).toEqual(['vm-1']);
   });
 });

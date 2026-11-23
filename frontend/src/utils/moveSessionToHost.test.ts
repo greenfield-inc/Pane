@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { moveBlockedReason, moveTargets, moveToHostPrompt, sessionHostFor, sessionHostForMachine } from './moveSessionToHost';
+import { linkedMoveTargets, moveBlockedReason, moveTargets, moveToHostPrompt, sessionHostFor, sessionHostForMachine } from './moveSessionToHost';
 import type { TailnetMachine, TailnetMachineList } from '../../../shared/types/workspaceAccess';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { ComputerRoute, RemoteComputer } from '../../../shared/types/remoteComputers';
+import { SIGNED_OUT_PANE_CLOUD, type PaneCloudSignIn, type PaneCloudSnapshot } from '../../../shared/types/paneCloud';
 
 function machine(name: string, overrides: Partial<TailnetMachine> = {}): TailnetMachine {
   return {
@@ -172,5 +173,42 @@ describe('moveTargets', () => {
   it('passes on why Tailscale cannot list machines', () => {
     expect(moveTargets({ machines: { ok: false, reason: 'Tailscale is signed out', fix: 'Sign in to Tailscale.' }, sessionHost: { kind: 'local' } }))
       .toEqual({ ok: false, reason: 'Tailscale is signed out', fix: 'Sign in to Tailscale.' });
+  });
+});
+
+describe('linkedMoveTargets', () => {
+  const signedIn = (overrides: Partial<Extract<PaneCloudSignIn, { state: 'signed-in' }>> = {}): PaneCloudSignIn => ({
+    state: 'signed-in', email: 'tyler@example.invalid', name: null, access: 'invited', signupState: 'ready', signupUrl: 'https://cloud.example.invalid/signup', organizationId: 'org', ...overrides,
+  });
+  const cloudVm = (id: string, name: string, machineId: string | null) => ({ vmId: id, name, awake: true, underReview: false, machineId, paneVersion: null, createdAt: '2026-11-01T00:00:00Z', clone: null });
+  const snapshot = (signIn: PaneCloudSignIn, sessions: PaneCloudSnapshot['sessions'] = []): PaneCloudSnapshot => ({ ...SIGNED_OUT_PANE_CLOUD, signIn, sessions });
+  const relayComputer = (id: string, label: string): RemoteComputer => ({ id, label, routes: [{ ...relayRoute, id: `relay:${id}`, relay: { computerId: id, fingerprint: 'f' } }] });
+
+  it('lists computers linked through Pane relay by label, folds cloud machines into one Pane Cloud target, and skips Tailscale computers', () => {
+    const computers = [mini([tailscaleRoute]), relayComputer('studio', 'Studio'), relayComputer('vm-a', 'Cloud A'), relayComputer('vm-b', 'Cloud B')];
+    const cloud = snapshot(signedIn(), [cloudVm('vm-1', 'Fix login', 'vm-a'), cloudVm('vm-2', 'Docs', 'vm-b')]);
+    expect(linkedMoveTargets(computers, cloud)).toEqual([
+      { name: 'Studio', available: true, via: { computerId: 'studio' } },
+      { name: 'Pane Cloud', available: true, via: { cloud: true } },
+    ]);
+  });
+
+  it('offers Pane Cloud only to an account that can create cloud machines', () => {
+    expect(linkedMoveTargets([], snapshot({ state: 'signed-out' }))).toEqual([]);
+    expect(linkedMoveTargets([], snapshot(signedIn({ access: 'waitlisted' })))).toEqual([]);
+    expect(linkedMoveTargets([], snapshot(signedIn({ signupState: 'needs_card' })))).toEqual([]);
+  });
+
+  it('lists them beside Tailscale machines for a Session on this computer, and without Tailscale too', () => {
+    const linked = [{ name: 'Studio', available: true, via: { computerId: 'studio' } }];
+    const withTailnet = moveTargets({ machines: list(machine('build-box')), sessionHost: { kind: 'local' }, linked });
+    expect(withTailnet.ok && withTailnet.targets.map(target => target.name)).toEqual(['build-box', 'Studio']);
+    const without = moveTargets({ machines: { ok: false, reason: 'Tailscale is signed out', fix: 'Sign in to Tailscale.' }, sessionHost: { kind: 'local' }, linked });
+    expect(without.ok && without.targets.map(target => target.name)).toEqual(['Studio']);
+  });
+
+  it('leaves them out for a Session on another machine, which reaches its own computers', () => {
+    const result = moveTargets({ machines: list(machine('build-box')), sessionHost: { kind: 'tailnet', machine: 'tylers-mac-mini' }, linked: [{ name: 'Studio', available: true, via: { computerId: 'studio' } }] });
+    expect(result.ok && result.targets.map(target => target.name)).toEqual(['build-box']);
   });
 });

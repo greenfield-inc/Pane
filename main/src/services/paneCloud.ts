@@ -219,6 +219,37 @@ export class PaneCloudManager {
   }
 
   /**
+   * A cloud machine for a Session that arrives by Session Move: created and paired as New cloud
+   * Session does, with no Session started on it, since the move brings the Session and its repos.
+   */
+  async createMachine(name: string): Promise<{ vmId: string; machineId: string }> {
+    const label = name.trim().slice(0, 64) || UNNAMED;
+    let made: { client: ServiceClient; vmId: string; machineId: string | null } | null = null;
+    try {
+      const { client, account } = await this.readyToCreate();
+      this.update({ creating: { name: label, step: 'creating' }, error: null });
+      const vm = await this.createVm(client, personalOrganization(account), label, null);
+      made = { client, vmId: vm.id, machineId: null };
+      await this.load(client);
+      await this.waitUntilRunning(client, vm.id);
+
+      this.update({ creating: { name: label, step: 'pairing' } });
+      const pairing = await client.pairVm(vm.id);
+      const machineId = await this.options.pair({ link: pairing.link, relay: pairing.relay });
+      made.machineId = machineId;
+      await this.load(client);
+      this.update({ creating: null });
+      return { vmId: vm.id, machineId };
+    } catch (error) {
+      // An unused machine would count toward the awake limit with nothing on it, so it goes.
+      if (made) await this.discard(made).catch((cleanup) => console.warn('[PaneCloud] Could not delete the half-made cloud machine:', cleanup));
+      const snapshot = await this.fail(error);
+      this.update({ creating: null });
+      throw snapshot.error ? new PaneCloudFailure(snapshot.error) : error;
+    }
+  }
+
+  /**
    * Asks for a free slot's sealing key ahead of a create, when the create dialog opens, so sealing
    * adds no round trip to Create. Quiet on failure: the create asks again.
    */

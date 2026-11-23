@@ -1423,7 +1423,7 @@ const CONTRACT_SECTION_11 = [
   },
   {
     "name": "workspace list",
-    "summary": "List your computers saved in Pane and the machines on your tailnet, one entry per computer, and whether each answers workspaces.",
+    "summary": "List your computers saved in Pane, the machines on your tailnet, and Pane Cloud with its cloud Sessions, one entry per computer, and whether each answers workspaces.",
     "usage": [
       "runpane workspace list [--json] [--pane-dir <path>]"
     ],
@@ -1468,7 +1468,7 @@ const CONTRACT_SECTION_11 = [
     "name": "workspace read",
     "summary": "Print a file from another of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
     "usage": [
-      "runpane workspace [<machine>] read <path> [--json]"
+      "runpane workspace [<machine>] read <path> [--session <id|name>] [--json]"
     ],
     "wrappers": [
       "npm"
@@ -1487,7 +1487,7 @@ const CONTRACT_SECTION_11 = [
     "name": "workspace write",
     "summary": "Write --content or stdin to a file on another of your machines, creating parent folders.",
     "usage": [
-      "runpane workspace [<machine>] write <path> [--content <text>] [--json]"
+      "runpane workspace [<machine>] write <path> [--session <id|name>] [--content <text>] [--json]"
     ],
     "mutates": true,
     "wrappers": [
@@ -1507,7 +1507,7 @@ const CONTRACT_SECTION_11 = [
     "name": "workspace exec",
     "summary": "Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.",
     "usage": [
-      "runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>"
+      "runpane workspace <machine> exec [--session <id|name>] [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>"
     ],
     "mutates": true,
     "wrappers": [
@@ -20075,7 +20075,7 @@ const CONTRACT_SECTION_16 = {
     "properties": {
       "name": {
         "type": "string",
-        "description": "Machine name; pass it as `machine`."
+        "description": "Machine name; pass it as `machine`. \"Pane Cloud\" stands for all of your cloud Sessions."
       },
       "dnsName": {
         "type": "string"
@@ -20263,6 +20263,31 @@ const CONTRACT_SECTION_16 = {
                   "answered": {
                     "type": "boolean",
                     "description": "This route answered the check."
+                  }
+                }
+              }
+            },
+            "sessions": {
+              "type": "array",
+              "description": "On \"Pane Cloud\" only: its cloud Sessions, newest first, each with the machine it runs on. Pass a name as `session`.",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "awake",
+                  "machine"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "awake": {
+                    "type": "boolean",
+                    "description": "Running; a stopped cloud Session is started in Pane."
+                  },
+                  "machine": {
+                    "type": "object",
+                    "description": "The cloud Session's own machine, as other machines are listed."
                   }
                 }
               }
@@ -28893,8 +28918,8 @@ const CONTRACT_SECTION_17 = {
     },
     "workspace list": {
       "name": "workspace list",
-      "summary": "List your computers saved in Pane and the machines on your tailnet, one entry per computer, and whether each answers workspaces.",
-      "details": "Shows this machine's workspace state, then one entry per computer: those saved in Pane (Settings › Remote Access › Computers) with their routes in the order runpane tries them, and the other Mac, Windows, and Linux machines on your tailnet. Each shows its OS, online state, shell, and the route that answered. Your own machines come first; other people's machines carry their owner's login and answer only when their owner lets you in.",
+      "summary": "List your computers saved in Pane, the machines on your tailnet, and Pane Cloud with its cloud Sessions, one entry per computer, and whether each answers workspaces.",
+      "details": "Shows this machine's workspace state, then one entry per computer: those saved in Pane (Settings › Remote Access › Computers) with their routes in the order runpane tries them, and the other Mac, Windows, and Linux machines on your tailnet. Each shows its OS, online state, shell, and the route that answered. Your own machines come first; other people's machines carry their owner's login and answer only when their owner lets you in. All of your cloud Sessions show as one machine, \"Pane Cloud\", with each Session under it; each still runs on its own machine, reached over Pane relay.",
       "requiresPaneDaemon": false,
       "mutates": false,
       "arguments": [
@@ -28965,12 +28990,18 @@ const CONTRACT_SECTION_17 = {
         {
           "name": "<machine>",
           "required": false,
-          "description": "A name from `runpane workspace list`, a unique prefix, an id it is saved under in Pane (such as its relay id), a MagicDNS name, or a Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+          "description": "A name from `runpane workspace list`, a unique prefix, an id it is saved under in Pane (such as its relay id), a MagicDNS name, or a Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits. \"Pane Cloud\" is all of your cloud Sessions as one machine: name the Session with --session."
         },
         {
           "name": "<path>",
           "required": true,
           "description": "Absolute path in any form; ~ is that machine's home."
+        },
+        {
+          "name": "--session",
+          "value": "<id|name>",
+          "required": false,
+          "description": "On \"Pane Cloud\", the cloud Session (its name or id) whose machine runs this. Other machines ignore it."
         },
         {
           "name": "--json",
@@ -28999,12 +29030,18 @@ const CONTRACT_SECTION_17 = {
         {
           "name": "<machine>",
           "required": false,
-          "description": "A name from `runpane workspace list`, a unique prefix, an id it is saved under in Pane (such as its relay id), a MagicDNS name, or a Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+          "description": "A name from `runpane workspace list`, a unique prefix, an id it is saved under in Pane (such as its relay id), a MagicDNS name, or a Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits. \"Pane Cloud\" is all of your cloud Sessions as one machine: name the Session with --session."
         },
         {
           "name": "<path>",
           "required": true,
           "description": "Absolute path in any form."
+        },
+        {
+          "name": "--session",
+          "value": "<id|name>",
+          "required": false,
+          "description": "On \"Pane Cloud\", the cloud Session (its name or id) whose machine runs this. Other machines ignore it."
         },
         {
           "name": "--content",
@@ -29038,7 +29075,13 @@ const CONTRACT_SECTION_17 = {
         {
           "name": "<machine>",
           "required": false,
-          "description": "A name from `runpane workspace list`, a unique prefix, an id it is saved under in Pane (such as its relay id), a MagicDNS name, or a Tailscale IP. Omit it to let a --cwd that cannot exist here pick the one joined machine it fits."
+          "description": "A name from `runpane workspace list`, a unique prefix, an id it is saved under in Pane (such as its relay id), a MagicDNS name, or a Tailscale IP. Omit it to let a --cwd that cannot exist here pick the one joined machine it fits. \"Pane Cloud\" is all of your cloud Sessions as one machine: name the Session with --session."
+        },
+        {
+          "name": "--session",
+          "value": "<id|name>",
+          "required": false,
+          "description": "On \"Pane Cloud\", the cloud Session (its name or id) whose machine runs this. Other machines ignore it."
         },
         {
           "name": "--cwd",
@@ -29064,7 +29107,8 @@ const CONTRACT_SECTION_17 = {
         }
       ],
       "examples": [
-        "runpane workspace parsa-devbox exec --json -- git -C C:\\src\\app status --short"
+        "runpane workspace parsa-devbox exec --json -- git -C C:\\src\\app status --short",
+        "runpane workspace \"Pane Cloud\" exec --session \"Fix login\" -- git status"
       ],
       "notes": [
         "This is SSH-level power: a local agent's sandbox and permission prompts see only runpane workspace exec, not what runs on the other machine.",

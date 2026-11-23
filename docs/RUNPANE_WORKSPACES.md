@@ -20,6 +20,26 @@ Each computer is one entry. A computer saved in Pane is matched with its tailnet
 
 `runpane workspace list` shows your own machines first, then other people's machines on the tailnet labeled with their owner's login (`tylers-mac-mini (macOS, online, owner tbrownio@github)`). A saved computer lists its routes and the one that answered (`parsa-devbox (Windows, online) [Tailscale, Pane relay]: joined through Pane relay, shell bash`), or why none did (`studio-mac (OS unknown, offline) [Pane relay]: not reachable: Could not reach Pane on studio-mac (…): …`). The first line says how others reach this machine: through Pane relay once phone access is ready (or, while both certificate services, Let's Encrypt and Google Trust Services, turn away new computers, that it accepts no new phone pairings there until a given time), and through Tailscale workspaces (`parsas-macbook-air (this machine, macOS): reachable through Pane relay (https://<id>.runpane.net). Tailscale: off (…)`). A Mac whose host name is a network-assigned one such as `Mac.localdomain` goes by its LocalHostName, as on Tailscale, so a computer that links with it lists its relay and tailnet entries as one. A computer linked before keeps the name it saved until they link again. Each machine decides who it lets in. A machine set to "Only me" refuses other logins, and the error says how its owner can change that. A path shaped like another OS's (`C:\...` on a Mac) routes only to your own machines; reach someone else's machine by name.
 
+### Pane Cloud
+
+All of your cloud Sessions are one machine, **Pane Cloud**, in `runpane workspace list`, the MCP's `workspace_list` and the app. Each cloud Session still runs on its own machine, which Pane reaches over Pane relay, so Tailscale can be off. The list shows each Session under it:
+
+```
+Pane Cloud (2 cloud Sessions, each on its own machine; name one with --session):
+  "Fix login": joined through Pane relay, shell bash
+  "Docs": stopped
+```
+
+A command for Pane Cloud goes to the machine of the Session it names. `--session` takes the Session's id or its name on its own machine (each awake machine is asked, so a rename there counts); a command that names a Pane (`--pane`) or a tab (`--panel`) goes to the Session that holds it. A command that names none of them, such as `exec`, is refused with the list of your cloud Sessions, and nothing is sent. A stopped cloud Session is started in Pane first.
+
+```
+runpane workspace "Pane Cloud" exec --session "Fix login" -- git status
+runpane workspace "Pane Cloud" panes create --session "Fix login" --repo pane --name tests --agent claude
+runpane workspace "Pane Cloud" panels output --panel <panel-id>
+```
+
+The MCP's `workspace_read`, `workspace_write` and `workspace_exec` take `machine: "Pane Cloud"` with `session`. `ask --machine "Pane Cloud"` takes the `--pane` it runs in. A cloud Session's own machine still answers to its saved id.
+
 Agents can call them as MCP tools too: `workspace_list`, `workspace_read`, `workspace_write`, and `workspace_exec` are in the [Pane MCP server](PANE_MCP.md#toolsets)'s default toolset. `workspace_write` requires `content`, since a tool call has no stdin, and file contents and command output come back exactly as the CLI's `--json` prints them.
 
 ## Link a computer from the command line

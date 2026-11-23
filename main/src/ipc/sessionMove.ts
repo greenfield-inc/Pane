@@ -7,6 +7,7 @@ import { fixRequestSchema as coordinatorFixSchema, MoveCoordinator, moveRequestS
 import { fixRequestSchema, MoveImporter, moveIdRequestSchema, preflightRequestSchema, refuseTeammateMove } from '../services/sessionMove/importer';
 import { writeRequestSchema } from '../services/sessionMove/transfer';
 import { testPeers } from '../services/sessionMove/peer';
+import { paneCloudForMoves } from './paneCloud';
 
 /** How long after Pane starts an interrupted move resumes. */
 const RESUME_AFTER_START_MS = 10_000;
@@ -20,7 +21,7 @@ const SOURCE_CHANNELS = Object.values(SESSION_MOVE_CHANNELS);
  * over the Pane-to-Pane connection.
  */
 export function registerSessionMoveHandlers(ipcMain: IpcMain, services: AppServices, commandRegistry: PaneCommandRegistry): void {
-  const coordinator = new MoveCoordinator(services, commandRegistry);
+  const coordinator = new MoveCoordinator(services, commandRegistry, () => paneCloudForMoves());
   const importer = new MoveImporter(services, commandRegistry);
   const moveId = (request: PaneCommandValue) => decodeBoundary(request, moveIdRequestSchema).moveId;
 

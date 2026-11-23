@@ -43,7 +43,28 @@ export interface TailnetMachine {
   aliases?: string[];
   /** Why a saved computer did not answer when runpane asked it. */
   unreachable?: string;
+  /** Set on the one "Pane Cloud" machine: its cloud Sessions, each on its own VM (D-90). */
+  cloudSessions?: CloudSession[];
 }
+
+/** One cloud Session of the "Pane Cloud" machine, and the saved computer its VM is. */
+interface CloudSession {
+  name: string;
+  awake: boolean;
+  machine: TailnetMachine;
+}
+
+/** What all of a person's cloud VMs are called together, as desktop Pane names them (shared/utils/paneCloudMachine.ts). */
+const PANE_CLOUD_NAME = 'Pane Cloud';
+/** The daemon command answering desktop Pane's "Pane Cloud" machine, or null; this package cannot import shared/. */
+const PANE_CLOUD_MACHINE_CHANNEL = 'pane-cloud:machine';
+const paneCloudMachineSchema = boundary.nullable(boundary.object({
+  members: boundary.array(boundary.object({
+    computerId: boundary.nonEmptyString,
+    sessionName: boundary.string,
+    awake: boundary.boolean,
+  })),
+}));
 
 export type Tailnet =
   /** `httpsCertificates` is the tailnet-wide setting that workspaces need on every machine. */
@@ -215,7 +236,9 @@ function namesWithIds(machines: readonly TailnetMachine[]): string {
 
 export function resolveMachine(query: string, machines: readonly TailnetMachine[]): TailnetMachine {
   const wanted = query.trim().toLowerCase().replace(/\.$/, '');
-  const exact = machines.filter((machine) => machine.name === wanted || machine.dnsName.toLowerCase() === wanted
+  // A cloud Session's VM is listed under "Pane Cloud", and still answers to its own name and ids.
+  const vms = machines.flatMap((machine) => machine.cloudSessions?.map((session) => session.machine) ?? []);
+  const exact = [...machines, ...vms].filter((machine) => machine.name.toLowerCase() === wanted || machine.dnsName.toLowerCase() === wanted
     || machine.ips.includes(wanted) || machine.aliases?.includes(wanted));
   const matches = exact.length ? exact : machines.filter((machine) => machine.name.startsWith(wanted));
   if (matches.length === 1) return matches[0];
@@ -273,6 +296,7 @@ function tailscaleRoute(dnsName: string): RemoteRoute {
 
 /** A saved computer's routes in order; a Tailscale machine Pane has not saved is reached by its MagicDNS name and login. */
 export function workspaceTarget(machine: TailnetMachine): RemoteDaemonTarget {
+  if (machine.cloudSessions) throw new Error(`${PANE_CLOUD_NAME} runs each Session on its own machine: pick one with cloudSessionMachine first.`);
   return { machine: machine.name, routes: machine.routes ?? [tailscaleRoute(machine.dnsName)] };
 }
 
@@ -442,14 +466,26 @@ async function withOs(machine: TailnetMachine, known: boolean): Promise<TailnetM
  * its routes, and the tailnet's other machines. A saved computer on the tailnet is one entry.
  */
 async function readMachines(paneDir?: string): Promise<Tailnet> {
-  const [tailnet, computers] = await Promise.all([readTailnet(), readSavedComputers(paneDir)]);
+  const [tailnet, computers, cloud] = await Promise.all([readTailnet(), readSavedComputers(paneDir), readPaneCloud(paneDir)]);
   const peers = tailnet.ok ? tailnet.machines : [];
   const merged = new Set<TailnetMachine>();
-  const saved = await Promise.all(computers.map((computer) => {
+  const members = new Map((cloud?.members ?? []).map((member) => [member.computerId, member]));
+  const vms: CloudSession[] = [];
+  const saved = (await Promise.all(computers.map(async (computer) => {
     const peer = peerOf(computer, computers, peers);
     if (peer) merged.add(peer);
-    return withOs(computerMachine(computer, peer), Boolean(computer.os ?? peer?.os));
-  }));
+    const machine = await withOs(computerMachine(computer, peer), Boolean(computer.os ?? peer?.os));
+    const member = members.get(computer.id);
+    if (!member) return [machine];
+    vms.push({ name: member.sessionName, awake: member.awake, machine });
+    return [];
+  }))).flat();
+  if (vms.length) {
+    // In the order desktop Pane lists them: newest first.
+    const order = [...members.keys()].map((id) => id.toLowerCase());
+    vms.sort((left, right) => order.indexOf(machineIdOf(left.machine)) - order.indexOf(machineIdOf(right.machine)));
+    saved.push(paneCloudGroup(vms));
+  }
   const machines = [...saved, ...peers.filter((peer) => !merged.has(peer))]
     .sort((left, right) => Number(right.mine) - Number(left.mine) || Number(right.online) - Number(left.online)
       || left.name.localeCompare(right.name));
@@ -462,6 +498,89 @@ async function readMachines(paneDir?: string): Promise<Tailnet> {
   };
   return { ok: true, self, machines, httpsCertificates: true };
 }
+
+/** The saved computer id a machine was built from (its first alias). */
+function machineIdOf(machine: TailnetMachine): string {
+  return machine.aliases?.[0] ?? machine.name;
+}
+
+/** Desktop Pane's "Pane Cloud" machine: its paired cloud Sessions, newest first. Null without one, or from a Pane before it. */
+async function readPaneCloud(paneDir?: string): Promise<ReturnType<typeof paneCloudMachineSchema.decode>> {
+  try {
+    return await invokeDaemon(PANE_CLOUD_MACHINE_CHANNEL, [], paneCloudMachineSchema, { paneDir, timeoutMs: LOCAL_STATUS_TIMEOUT_MS * 4 });
+  } catch {
+    return null;
+  }
+}
+
+/** All cloud VMs as one machine (D-90). It has no route of its own: a command reaches one of its Sessions. */
+function paneCloudGroup(sessions: CloudSession[]): TailnetMachine {
+  return {
+    name: PANE_CLOUD_NAME, dnsName: 'pane-cloud', os: 'Linux',
+    online: sessions.some((session) => session.machine.online), ips: [], self: false, owner: 'you', mine: true,
+    aliases: ['pane cloud', 'pane-cloud'], cloudSessions: sessions,
+  };
+}
+
+function describeCloudSessions(machine: TailnetMachine): string {
+  return (machine.cloudSessions ?? []).map((session) => `"${session.name}"${session.awake ? '' : ' (stopped)'}`).join(', ');
+}
+
+/** What names a cloud Session in a command: the Session itself, or a Pane or tab in it. */
+export interface CloudSelector {
+  session?: string;
+  pane?: string;
+  panel?: string;
+}
+
+/**
+ * `example` is the command line after the machine, with `--session "<name>"` where it belongs.
+ * The VM a command for "Pane Cloud" goes to: the cloud Session it names by its id or its name on that VM, or the one
+ * holding the Pane or tab it names. A command that names none of them is refused, listing the Sessions.
+ */
+async function cloudSessionMachine(group: TailnetMachine, selector: CloudSelector, example: string): Promise<TailnetMachine> {
+  const sessions = group.cloudSessions ?? [];
+  const named = selector.session?.trim();
+  // Each awake machine says whether it holds the Session (by its id or its name there), Pane or tab. The service's
+  // name for a cloud Session dates from its creation and misses a rename, so it is never matched against.
+  let found: CloudSession[] = [];
+  if (named || selector.pane || selector.panel) {
+    const probe = named
+      ? (target: RemoteDaemonTarget) => invokeRemoteDaemon(target, 'runpane:sessions:get', [{ sessionId: named }], boundary.json, PROBE_TIMEOUT_MS).then(() => true)
+      : selector.pane
+        ? async (target: RemoteDaemonTarget) => {
+          const list = await invokeRemoteDaemon(target, 'runpane:panes:list', [{}], paneIdsSchema, PROBE_TIMEOUT_MS);
+          return list.panes.some((pane) => pane.id === selector.pane || pane.paneId === selector.pane);
+        }
+        : (target: RemoteDaemonTarget) => invokeRemoteDaemon(target, 'runpane:panels:output', [{ panelId: selector.panel, limit: 1 }], boundary.json, PROBE_TIMEOUT_MS).then(() => true);
+    const answers = await Promise.all(sessions.filter((session) => session.awake && session.machine.online)
+      .map(async (session) => ((await probe(workspaceTarget(session.machine)).catch(() => false)) ? session : null)));
+    found = answers.filter((session): session is CloudSession => session !== null);
+  }
+  const list = describeCloudSessions(group);
+  if (found.length > 1) {
+    throw new RunpaneError('ERR_WORKSPACE_CLOUD_SESSION_AMBIGUOUS', `Several cloud Sessions match: ${found.map((session) => `"${session.name}"`).join(', ')}. Nothing was sent.`, 'Name the Session by its id with --session <id>.');
+  }
+  if (found.length === 1) return found[0].machine;
+  // A stopped machine can't be asked; its listed name is enough to say why nothing was sent.
+  const stopped = named ? sessions.find((session) => !session.awake && session.name.toLowerCase() === named.toLowerCase()) : undefined;
+  if (stopped) {
+    throw new RunpaneError('ERR_WORKSPACE_CLOUD_SESSION_STOPPED', `Cloud Session "${stopped.name}" is stopped, so nothing was sent.`, 'Start it in Pane (Settings › Pane Cloud), then try again.');
+  }
+  // A stopped Session's machine can't be asked, so an id of one reads as unknown: say so.
+  const asleep = sessions.some((session) => !session.awake) ? ', or it is a stopped Session (start it in Pane)' : '';
+  const what = named ? `No awake cloud Session is called "${named}" or has that id${asleep}` : selector.pane ? `No awake cloud Session has Pane ${selector.pane}`
+    : selector.panel ? `No awake cloud Session has tab ${selector.panel}` : `${PANE_CLOUD_NAME} runs each Session on its own machine, so this command needs --session`;
+  throw new RunpaneError('ERR_WORKSPACE_CLOUD_SESSION_REQUIRED', `${what}. Your cloud Sessions: ${list || 'none'}. Nothing was sent.`,
+    `Name one: runpane workspace "${PANE_CLOUD_NAME}" ${example}`);
+}
+
+/** A machine a command can reach: the machine itself, or for "Pane Cloud" the VM of the Session the command names. */
+export function concreteMachine(machine: TailnetMachine, selector: CloudSelector, example: string): Promise<TailnetMachine> {
+  return machine.cloudSessions ? cloudSessionMachine(machine, selector, example) : Promise.resolve(machine);
+}
+
+const paneIdsSchema = boundary.object({ panes: boundary.array(boundary.object({ id: boundary.string, paneId: boundary.string })) });
 
 const NOT_ANSWERING = 'Pane is not answering there; it needs a Pane with workspaces running and signed in to Tailscale';
 /** With the tailnet-wide setting off, no machine can answer, so name the setting instead of the machine. */
@@ -515,38 +634,57 @@ export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
   const tailnet = await requireTailnet(parsed.paneDir);
   const [local, relay] = await Promise.all([readLocalStatus(parsed.paneDir), readRelayStatus(parsed.paneDir)]);
   // Offline machines need no probe, so only online ones count toward the limit; mine come first.
-  const probed = new Set(tailnet.machines.filter((machine) => machine.online).slice(0, MAX_PROBED_MACHINES));
-  const rows = await Promise.all(tailnet.machines.map(async (machine) => {
+  const reachable = tailnet.machines.flatMap((machine) => machine.cloudSessions?.map((session) => session.machine) ?? [machine]);
+  const probed = new Set(reachable.filter((machine) => machine.online).slice(0, MAX_PROBED_MACHINES));
+  const check = async (machine: TailnetMachine) => {
     const target = workspaceTarget(machine);
     const probe = probed.has(machine) || !machine.online
       ? await probeMachine(machine, target, tailnet.httpsCertificates || machine.routes ? NOT_ANSWERING : CERTIFICATES_OFF)
       : { error: `not checked (Pane checks the first ${MAX_PROBED_MACHINES} online machines)` };
     return { machine, probe, route: answeringRoute(target) };
-  }));
+  };
+  type Row = Awaited<ReturnType<typeof check>>;
+  const rows = await Promise.all(tailnet.machines.map(async (machine) => ({
+    machine,
+    row: machine.cloudSessions ? null : await check(machine),
+    sessions: machine.cloudSessions ? await Promise.all(machine.cloudSessions.map(async (session) => ({ session, row: await check(session.machine) }))) : null,
+  })));
+  // Route tokens stay internal: the list names where each route goes and which key it holds.
+  const entry = ({ machine: { routes, aliases, unreachable: _unreachable, cloudSessions: _sessions, ...machine }, probe, route }: Row) => ({
+    ...machine,
+    ids: aliases,
+    routes: routes?.map((candidate) => ({ kind: candidate.kind, baseUrl: candidate.baseUrl, fingerprint: candidate.fingerprint, answered: candidate === route })),
+    joined: Boolean(probe.info),
+    info: probe.info,
+    error: probe.error,
+  });
   if (parsed.json) {
     console.log(JSON.stringify({
       ok: true,
       self: { ...tailnet.self, workspace: local, relay },
-      // Route tokens stay internal: the list names where each route goes and which key it holds.
-      machines: rows.map(({ machine: { routes, aliases, unreachable: _unreachable, ...machine }, probe, route }) => ({
-        ...machine,
-        ids: aliases,
-        routes: routes?.map((candidate) => ({ kind: candidate.kind, baseUrl: candidate.baseUrl, fingerprint: candidate.fingerprint, answered: candidate === route })),
-        joined: Boolean(probe.info),
-        info: probe.info,
-        error: probe.error,
+      machines: rows.map(({ machine, row, sessions }) => (row ? entry(row) : {
+        ...entry({ machine, probe: sessions?.some(({ row: vm }) => vm.probe.info) ? { info: undefined } : { error: 'no cloud Session answers' }, route: undefined }),
+        joined: Boolean(sessions?.some(({ row: vm }) => vm.probe.info)),
+        sessions: sessions?.map(({ session, row: vm }) => ({ name: session.name, awake: session.awake, machine: entry(vm) })),
       })),
     }, null, 2));
     return 0;
   }
+  const state = ({ machine, probe, route }: Row) => {
+    const through = route && machine.routes ? ` through ${routeLabel(route.kind)}` : '';
+    const offline = machine.unreachable ? `not reachable: ${machine.unreachable}` : 'offline';
+    return machine.online ? (probe.info ? `joined${through}, shell ${probe.info.shell}` : `not reachable: ${probe.error}`) : offline;
+  };
   const tailscale = local ? describeLocalStatus(local) : 'off (Pane is not running)';
   console.log(`${tailnet.self.name} (this machine, ${tailnet.self.os}): ${relay?.enabled ? `${describeRelay(relay)}. Tailscale: ${tailscale}` : tailscale}`);
-  for (const { machine, probe, route } of rows) {
-    const through = route && machine.routes ? ` through ${routeLabel(route.kind)}` : '';
-    const state = probe.info ? `joined${through}, shell ${probe.info.shell}` : `not reachable: ${probe.error}`;
-    const routes = machine.routes ? ` [${machine.routes.map((candidate) => routeLabel(candidate.kind)).join(', ')}]` : '';
-    const offline = machine.unreachable ? `not reachable: ${machine.unreachable}` : 'offline';
-    console.log(`${describeMachine(machine)}${routes}: ${machine.online ? state : offline}`);
+  for (const { machine, row, sessions } of rows) {
+    if (row) {
+      const routes = machine.routes ? ` [${machine.routes.map((candidate) => routeLabel(candidate.kind)).join(', ')}]` : '';
+      console.log(`${describeMachine(machine)}${routes}: ${state(row)}`);
+      continue;
+    }
+    console.log(`${PANE_CLOUD_NAME} (${sessions?.length ?? 0} cloud Session${sessions?.length === 1 ? '' : 's'}, each on its own machine; name one with --session):`);
+    for (const { session, row: vm } of sessions ?? []) console.log(`  "${session.name}": ${session.awake ? state(vm) : 'stopped'}`);
   }
   console.log(REACH_LINE);
   return 0;
@@ -589,7 +727,7 @@ export async function runWorkspaceExec(parsed: ParsedArgs): Promise<number> {
   let machine: TailnetMachine;
   if (parsed.workspaceMachine) {
     const tailnet = await requireTailnet(parsed.paneDir);
-    machine = resolveMachine(parsed.workspaceMachine, [tailnet.self, ...tailnet.machines]);
+    machine = await concreteMachine(resolveMachine(parsed.workspaceMachine, [tailnet.self, ...tailnet.machines]), { session: parsed.sessionId }, 'exec --session "<name>" -- <command>');
   } else if (parsed.cwd && foreignPathSystems(parsed.cwd, process.platform).length > 0) {
     machine = await routePath(parsed.cwd, `exec --cwd ${quoteArg(parsed.cwd)} --`, parsed.paneDir);
   } else {
@@ -627,7 +765,7 @@ function requirePath(parsed: ParsedArgs, verb: string): string {
 async function pickMachine(parsed: ParsedArgs, target: string, verb: string): Promise<TailnetMachine | null> {
   if (parsed.workspaceMachine) {
     const tailnet = await requireTailnet(parsed.paneDir);
-    return resolveMachine(parsed.workspaceMachine, [tailnet.self, ...tailnet.machines]);
+    return concreteMachine(resolveMachine(parsed.workspaceMachine, [tailnet.self, ...tailnet.machines]), { session: parsed.sessionId }, `${verb} ${quoteArg(target)} --session "<name>"`);
   }
   return foreignPathSystems(target, process.platform).length > 0 ? routePath(target, verb, parsed.paneDir) : null;
 }

@@ -16,7 +16,16 @@ type SessionMoveChannel = typeof SESSION_MOVE_CHANNELS[keyof typeof SESSION_MOVE
 type SessionMoveRequest =
   | Record<string, never>
   | { sessionId: string; recheck?: true }
-  | { sessionId: string; target: string; fix?: SessionMoveFix };
+  | ({ sessionId: string; target: string; fix?: SessionMoveFix } & SessionMoveVia);
+
+/**
+ * How the Session's host reaches a target that isn't a Tailscale machine: a saved computer by id
+ * (Pane relay, same network, public URL), or Pane Cloud, whose machine the move creates.
+ */
+export interface SessionMoveVia {
+  computerId?: string;
+  cloud?: true;
+}
 
 /** The `machines:run` command that carries a move call to the Session's machine. */
 type MoveSessionCommand = { type: 'move-session'; channel: SessionMoveChannel; request: SessionMoveRequest };
@@ -47,6 +56,7 @@ const progressSchema: BoundarySchema<SessionMoveProgress> = boundary.object({
   sessionId: boundary.string,
   sessionName: boundary.string,
   target: boundary.string,
+  computerId: boundary.optional(boundary.string),
   phase: boundary.enumeration('waiting', 'moving', 'confirming', 'done', 'failed', 'cancelled'),
   waiting: boundary.array(boundary.object({
     panelId: boundary.string,
@@ -57,7 +67,7 @@ const progressSchema: BoundarySchema<SessionMoveProgress> = boundary.object({
   stoppedTabs: boundary.number,
   totalTabs: boundary.number,
   steps: boundary.array(boundary.object({
-    id: boundary.enumeration('stop', 'pack', 'send', 'build', 'start'),
+    id: boundary.enumeration('machine', 'stop', 'pack', 'send', 'build', 'start'),
     state: boundary.enumeration('pending', 'running', 'done', 'failed'),
     title: boundary.string,
     detail: boundary.optional(boundary.string),
@@ -104,17 +114,17 @@ async function call<Value>(where: SessionMoveWhere, channel: SessionMoveChannel,
 }
 
 /** Runs every check on `target`; stops nothing. */
-export function checkSessionMove(where: SessionMoveWhere, sessionId: string, target: string): Promise<SessionMovePreflight> {
-  return call(where, SESSION_MOVE_CHANNELS.check, { sessionId, target }, preflightSchema);
+export function checkSessionMove(where: SessionMoveWhere, sessionId: string, target: string, via: SessionMoveVia = {}): Promise<SessionMovePreflight> {
+  return call(where, SESSION_MOVE_CHANNELS.check, { sessionId, target, ...via }, preflightSchema);
 }
 
 /** Runs one fix on `target`, then every check again. */
-export function fixSessionMove(where: SessionMoveWhere, sessionId: string, target: string, fix: SessionMoveFix): Promise<SessionMovePreflight> {
-  return call(where, SESSION_MOVE_CHANNELS.fix, { sessionId, target, fix }, preflightSchema);
+export function fixSessionMove(where: SessionMoveWhere, sessionId: string, target: string, fix: SessionMoveFix, via: SessionMoveVia = {}): Promise<SessionMovePreflight> {
+  return call(where, SESSION_MOVE_CHANNELS.fix, { sessionId, target, fix, ...via }, preflightSchema);
 }
 
-export function startSessionMove(where: SessionMoveWhere, sessionId: string, target: string): Promise<SessionMoveProgress> {
-  return call(where, SESSION_MOVE_CHANNELS.start, { sessionId, target }, progressSchema);
+export function startSessionMove(where: SessionMoveWhere, sessionId: string, target: string, via: SessionMoveVia = {}): Promise<SessionMoveProgress> {
+  return call(where, SESSION_MOVE_CHANNELS.start, { sessionId, target, ...via }, progressSchema);
 }
 
 /** The move's progress, or null when the Session has no move. `recheck` asks a silent target again. */
