@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactElement, type ReactNode } from 'react';
-import { Plus, Radio, Settings } from 'lucide-react';
+import { Cloud, Plus, Radio, Settings } from 'lucide-react';
 import { Dropdown, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
 import { MachineMarkEditor } from './machines/MachineMarkEditor';
 import { RoutePillView } from './settings/computers/RoutePills';
 import { useAddDeviceStore } from './addDevice/addDeviceStore';
 import { showActionError } from '../stores/errorStore';
+import { usePaneCloudStore } from '../stores/paneCloudStore';
+import { groupPaneCloud, paneCloudMachine, PANE_CLOUD_MACHINE } from '../../../shared/utils/paneCloudMachine';
 import { cn } from '../utils/cn';
 import { Bone, Skeleton, SkeletonSwap } from './ui/Skeleton';
 import type { HostingSummary, MachineEntry, RoutePill } from '../utils/machineList';
@@ -27,6 +29,8 @@ interface RemoteHostSwitcherProps {
 }
 
 const ALL_MACHINES_ID = 'all-machines';
+/** The "Pane Cloud" row that heads its Sessions; it cannot be picked. */
+const PANE_CLOUD_HEADER_ID = `group:${PANE_CLOUD_MACHINE.id}`;
 
 /** Offline, Owner only and Pane not open cannot be picked; the active machine stays pickable to retry. */
 function unpickable(machine: MachineEntry): boolean {
@@ -160,18 +164,34 @@ export function RemoteHostSwitcher({
     }
   }, [open, machines]);
 
-  const items: DropdownItem[] = machines.map((machine) => ({
+  const sessions = usePaneCloudStore((state) => state.snapshot.sessions);
+  useEffect(() => usePaneCloudStore.getState().follow(), []);
+  // All cloud Session VMs show as one machine, "Pane Cloud", with a row per Session under it (D-90).
+  const cloud = paneCloudMachine(sessions);
+  const grouped = groupPaneCloud(machines, cloud, (machine) => machine.id);
+  const machineItem = (machine: MachineEntry, name: string, indent: boolean): DropdownItem => ({
     id: machine.id,
     // The name has line one to itself; the route in use and its latency lead line two.
-    label: <span className="block truncate font-medium">{machine.name}</span>,
+    label: <span className="block truncate font-medium">{name}</span>,
     description: <MachineLine machine={machine} latencies={latencies} />,
     // A disabled row dims its mark and name, so the mark stays solid inside it.
-    leading: <MachineMark letters={machine.letters} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
+    leading: <span className={cn('flex', indent && 'pl-3')}><MachineMark letters={machine.letters} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" /></span>,
     // Its letters and colour can change on this computer, whether or not it can be picked now.
     trailing: <MachineMarkEditor machine={machine} />,
     disabled: switching || unpickable(machine),
     onClick: () => void pick(machine),
-  }));
+  });
+  const items: DropdownItem[] = grouped.machines.map((machine) => machineItem(machine, machine.name, false));
+  if (grouped.members.length > 0) {
+    items.push({
+      id: PANE_CLOUD_HEADER_ID,
+      label: <span className="font-medium">{PANE_CLOUD_MACHINE.name}</span>,
+      description: grouped.members.length === 1 ? '1 Session' : `${grouped.members.length} Sessions`,
+      leading: <span className="flex h-7 w-7 items-center justify-center"><Cloud className="h-4 w-4 stroke-[1.5] text-text-secondary" aria-hidden="true" /></span>,
+      disabled: true,
+    });
+    for (const { machine, member } of grouped.members) items.push(machineItem(machine, member.sessionName, true));
+  }
   if (allMachines) {
     items.unshift({
       id: ALL_MACHINES_ID,
@@ -185,7 +205,8 @@ export function RemoteHostSwitcher({
   const active = machines.find((machine) => machine.active);
 
   // While the switcher is open, 0 picks All machines and 1 to 9 the machines
-  // in its order (P6), by choosing that row as a click would.
+  // in its order (P6), by choosing that row as a click would. The Pane Cloud header takes no digit.
+  const digitRows = items.flatMap((item, index) => (item.id === ALL_MACHINES_ID || item.id === PANE_CLOUD_HEADER_ID ? [] : [index]));
   useEffect(() => {
     if (!open) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -193,7 +214,7 @@ export function RemoteHostSwitcher({
       if (typingTarget(event.target)) return;
       const digit = /^(?:Digit|Numpad)([0-9])$/.exec(event.code)?.[1];
       if (digit === undefined) return;
-      const index = digit === '0' ? (allMachines ? 0 : -1) : (allMachines ? 0 : -1) + Number(digit);
+      const index = digit === '0' ? (allMachines ? 0 : -1) : (digitRows[Number(digit) - 1] ?? -1);
       const row = items[index];
       if (!row || row.disabled) return;
       event.preventDefault();
@@ -205,7 +226,7 @@ export function RemoteHostSwitcher({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [open, items, allMachines]);
+  }, [open, items, allMachines, digitRows]);
 
   return (
     <Dropdown

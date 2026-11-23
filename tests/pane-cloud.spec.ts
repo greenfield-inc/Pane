@@ -1,9 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
-import { gotoApp } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import { dismissStartupDialogs, installSessionsFixture, sessionFixture } from './orchestrationSessionsFixture';
 import type { MachineConnectionsEvent } from '../shared/types/machineConnections';
 import type { OrchestrationSessionCreateInput } from '../shared/types/orchestrationSession';
-import type { PaneCloudSnapshot } from '../shared/types/paneCloud';
+import type { PaneCloudAction, PaneCloudSnapshot } from '../shared/types/paneCloud';
+import type { RemoteComputer } from '../shared/types/remoteComputers';
 import { notifyFixture } from './fixtures/notifySnapshot';
 
 type MockWindow = typeof window & {
@@ -11,6 +12,7 @@ type MockWindow = typeof window & {
     setPaneCloud(parts: Partial<PaneCloudSnapshot>): void;
     getPaneCloudCreates(): OrchestrationSessionCreateInput[];
     getPaneCloudCalls(): Array<{ action: string; vmId: string }>;
+    setPaneCloudActions(vmId: string, actions: PaneCloudAction[]): void;
     getMachineRuns(): Array<{ machineId: string; command: { type: string } }>;
     emitMachineEvent(event: MachineConnectionsEvent): void;
   };
@@ -286,4 +288,82 @@ test('journey 25: for a repo with an Xcode project with no Mac online, the Mac l
   await expect(placesList.getByRole('button', { name: 'Run it on a Mac', exact: true })).toBeVisible();
   await expect(placesList).toContainText('This repo has an Xcode project, and none of your Macs is online.');
   await placesList.screenshot({ path: screenshotPath('frame-B-xcode-no-mac.png') });
+});
+
+/** A saved computer that is a cloud Session's VM, under the label its pairing gave it. */
+const cloudComputer = (id: string): RemoteComputer => ({
+  id, label: id, os: 'Linux',
+  routes: [{ id: `relay:https://${id}.runpane.net`, kind: 'relay', source: 'link', baseUrl: `https://${id}.runpane.net`, token: 'synthetic', relay: { computerId: `relay-${id}`, fingerprint: 'f' } }],
+});
+
+/** Two paired cloud Sessions (CLOUD_SESSIONS) whose VMs are the saved computers cloud-1 and cloud-2. */
+async function openWithCloudMachines(page: Page) {
+  await installElectronApiMock(page, {
+    initialConfig: { appearanceMode: 'fixed', theme: 'dark' },
+    computers: [cloudComputer('cloud-1'), cloudComputer('cloud-2')],
+    tailnetMachines: { ok: false, reason: 'Tailscale is signed out', fix: 'Sign in to Tailscale.' },
+    machineConnections: {
+      machines: [
+        { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+        { id: 'cloud-1', label: 'cloud-1', kind: 'remote', status: 'online', offlineSince: null, routeId: 'relay:https://cloud-1.runpane.net' },
+        { id: 'cloud-2', label: 'cloud-2', kind: 'remote', status: 'offline', offlineSince: '2026-11-21T09:00:00.000Z' },
+      ],
+      reads: {},
+    },
+  });
+  await page.addInitScript((parts) => {
+    // SAFETY: installElectronApiMock's init script, registered first, defines this test-only API.
+    const mock = (window as MockWindow).__paneTestElectronMock;
+    mock.setPaneCloud(parts);
+    mock.setPaneCloudActions('vm-1', [{ id: 'a-1', operation: 'update_pane', actor: 'you', reason: 'Update Pane from the machine page', failed: false, error: null, requestedAt: '2026-11-21T12:00:00.000Z' }]);
+    mock.setPaneCloudActions('vm-2', [{ id: 'a-1', operation: 'stop', actor: 'Pane Cloud', reason: 'Idle for 30 minutes', failed: false, error: null, requestedAt: '2026-11-21T08:00:00.000Z' }]);
+  }, CLOUD_SESSIONS);
+  await gotoApp(page);
+}
+
+test('D-90: the machine switcher shows cloud Sessions as one Pane Cloud machine with its Sessions under it', async ({ page }) => {
+  await openWithCloudMachines(page);
+  await page.getByRole('button', { name: 'Agents run on devbox. Switch machine', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'Agents run on' });
+  const header = menu.getByRole('menuitemradio', { name: /^Pane Cloud/ });
+  await expect(header).toHaveCount(1);
+  await expect(header).toContainText('2 Sessions');
+  await expect(header).toBeDisabled();
+  await expect(menu.getByRole('menuitemradio', { name: /Docs site migration/ })).toHaveCount(1);
+  await expect(menu.getByRole('menuitemradio', { name: /Pricing page copy/ })).toHaveCount(1);
+  await expect(menu.getByRole('menuitemradio', { name: /cloud-1|cloud-2/ })).toHaveCount(0);
+  await menu.screenshot({ path: screenshotPath('d90-switcher.png') });
+});
+
+test('D-90: Your computers lists one Pane Cloud group, and its Details opens the Pane Cloud page', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await openWithCloudMachines(page);
+  await page.getByRole('button', { name: 'Settings' }).first().click();
+  await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Computers · 2' })).toBeVisible();
+
+  const group = page.getByTestId('machine-group-pane-cloud');
+  await expect(group).toHaveCount(1);
+  await expect(group).toContainText('2 Sessions');
+  await expect(group.getByTestId('machine-Docs site migration')).toBeVisible();
+  await expect(group.getByTestId('machine-Pricing page copy')).toBeVisible();
+  await expect(page.getByTestId('machine-cloud-1')).toHaveCount(0);
+  await page.locator('[data-setting-id="remote-machines"]').screenshot({ path: screenshotPath('d90-your-computers.png') });
+
+  await group.getByRole('button', { name: 'Pane Cloud details', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Pane Cloud', exact: true })).toBeVisible();
+  const sessions = page.getByRole('list', { name: 'Sessions' });
+  await expect(sessions.getByRole('listitem')).toHaveText([/Docs site migration.*Running/, /Pricing page copy.*Stopped/]);
+  const actions = page.getByRole('list', { name: 'Recent actions' }).getByRole('listitem');
+  await expect(actions).toHaveCount(2);
+  await expect(actions.first()).toContainText('Updated Pane · Docs site migration');
+  await expect(actions.nth(1)).toContainText('Stopped · Pricing page copy');
+  await page.screenshot({ path: screenshotPath('d90-page.png'), fullPage: true });
+
+  // Only the running Session can take an update.
+  await page.getByRole('button', { name: 'Update Pane', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (
+    // SAFETY: installElectronApiMock defines this test-only API before navigation.
+    window as MockWindow
+  ).__paneTestElectronMock.getPaneCloudCalls())).toEqual([{ action: 'updatePane', vmId: 'vm-1' }]);
 });

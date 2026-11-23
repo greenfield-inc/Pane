@@ -468,12 +468,19 @@ Macs first and picks one; with none online, **Run it on a Mac** opens
 [Work that needs a Mac](https://runpane.com/docs/security#work-that-needs-a-mac).
 
 A cloud Session sits in the Sessions list like any other. Its ⋯ menu has
-**Stop**, **Start** and **Delete…**; Delete removes the machine and its disk.
-You can have 5 cloud Sessions running at once on the Free plan. **Settings ›
-Usage & Limits** shows your plan, agent-hours this month of the plan's amount,
-and how many Sessions are running. Each cloud Session's page under **Settings ›
-Remote Access** lists every operation you or Pane Cloud asked for on it, with
-who asked and why. If Pane Cloud stops answering or your sign-in ends while
+**Stop**, **Start**, **Archive Session** and **Delete…**; Delete removes the
+machine and its disk. Archive Session archives it, removes its machine from all
+your computers at once and stops it; it then shows under **Archived**, where
+Restore starts it, pairs it with this computer again and brings the Session
+back. You can have 5 cloud Sessions running at once on the Free plan.
+**Settings › Usage & Limits** shows your plan, agent-hours this month of the
+plan's amount, and how many Sessions are running.
+
+All your cloud Sessions' machines show as one machine, **Pane Cloud**, in the
+machine switcher and **Settings › Remote Access**, with each Session under it;
+picking one opens that Session's machine. The Pane Cloud page lists its
+Sessions, updates Pane on each with **Update Pane**, and lists every operation
+you or Pane Cloud asked for on them, with who asked and why. If Pane Cloud stops answering or your sign-in ends while
 Pane is open, your cloud Sessions stay in the list and keep running. If Pane
 starts while Pane Cloud can't be reached, they appear once Pane reaches it
 again, such as when you open **Usage & Limits** and choose **Try again**.

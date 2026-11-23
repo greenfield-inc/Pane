@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ChevronDown, ExternalLink, Monitor, Plus, RefreshCw, Server, Smartphone, Terminal, Trash2, X } from 'lucide-react';
+import { ChevronDown, Cloud, ExternalLink, Monitor, Plus, RefreshCw, Server, Smartphone, Terminal, Trash2, X } from 'lucide-react';
 import { Button, IconButton } from '../../ui/Button';
 import { Input, Textarea } from '../../ui/Input';
 import { SettingRow } from '../SettingRow';
@@ -14,6 +14,8 @@ import { RelayLimitNotice } from '../../addDevice/RelayLimitNotice';
 import { useRelayCertificateLimit } from '../../../hooks/useRelayPairing';
 import { useMachines } from '../../../hooks/useMachines';
 import { useConfigStore } from '../../../stores/configStore';
+import { usePaneCloudStore } from '../../../stores/paneCloudStore';
+import { groupPaneCloud, paneCloudMachine, PANE_CLOUD_MACHINE } from '../../../../../shared/utils/paneCloudMachine';
 import { THIS_COMPUTER, type MachineEntry } from '../../../utils/machineList';
 import { cn } from '../../../utils/cn';
 import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
@@ -88,6 +90,10 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
   const [unlinkOutcome, setUnlinkOutcome] = useState<string | null>(null);
   const handledPasswordRequest = useRef<number | null>(null);
   const handledSettingRequest = useRef<number | null>(null);
+  const cloudSessions = usePaneCloudStore((state) => state.snapshot.sessions);
+  useEffect(() => usePaneCloudStore.getState().follow(), []);
+  // All cloud Session VMs show as one machine, "Pane Cloud", with its Sessions under it (D-90).
+  const grouped = groupPaneCloud(machines, paneCloudMachine(cloudSessions), (machine) => machine.id);
 
   const local = machines[0];
   const here = local.name === THIS_COMPUTER ? 'this computer' : local.name;
@@ -157,8 +163,36 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
       });
   };
 
+  /** One computer's row; a Pane Cloud member shows its Session's name and opens the Pane Cloud page. */
+  const computerRow = (machine: MachineEntry, name: string, onDetails: () => void) => (
+    <ComputerRow
+      key={machine.id}
+      machine={name === machine.name ? machine : { ...machine, name }}
+      expanded={expanded === machine.id}
+      onToggle={() => setExpanded((current) => (current === machine.id ? null : machine.id))}
+      disabled={switchingId !== null}
+      busy={switchingId === machine.id}
+      password={password?.id === machine.id ? password.value : null}
+      onPasswordChange={(value) => setPassword({ id: machine.id, value })}
+      onPasswordCancel={() => setPassword(null)}
+      onPick={(withPassword) => void pick(machine, withPassword)}
+      onLink={() => openAddDevice('computer', { computerId: machine.computer?.id })}
+      onAddRoute={() => openAddDevice('computer', { computerId: machine.computer?.id })}
+      onReorder={(routeIds) => (machine.computer ? reorder(machine.computer.id, routeIds) : Promise.resolve(null))}
+      onUnlink={() => unlink(machine)}
+      onDetails={onDetails}
+      localDetail={machine.kind === 'local'
+        ? <PublicUrlField saved={controller.config.host.publicUrl ?? ''} onSaved={controller.reload} />
+        : undefined}
+      footer={machine.active && machine.kind !== 'local' && connectionState.lastError
+        ? <ConnectionError message={connectionState.lastError} controller={controller} />
+        : undefined}
+    />
+  );
+
   const tabs: Array<{ id: RemoteAccessTab; label: string; count?: number }> = [
-    { id: 'computers', label: 'Computers', count: machines.length },
+    // Pane Cloud counts as one machine, however many Sessions it holds.
+    { id: 'computers', label: 'Computers', count: grouped.machines.length + (grouped.members.length > 0 ? 1 : 0) },
     { id: 'devices', label: 'Phones and glasses', count: devices },
     { id: 'tailscale', label: 'Tailscale' },
   ];
@@ -225,31 +259,26 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
                 tabIndex={-1}
                 className="divide-y divide-border-secondary overflow-hidden rounded-lg border border-border-secondary bg-surface-primary outline-none"
               >
-                {machines.map((machine) => (
-                  <ComputerRow
-                    key={machine.id}
-                    machine={machine}
-                    expanded={expanded === machine.id}
-                    onToggle={() => setExpanded((current) => (current === machine.id ? null : machine.id))}
-                    disabled={switchingId !== null}
-                    busy={switchingId === machine.id}
-                    password={password?.id === machine.id ? password.value : null}
-                    onPasswordChange={(value) => setPassword({ id: machine.id, value })}
-                    onPasswordCancel={() => setPassword(null)}
-                    onPick={(withPassword) => void pick(machine, withPassword)}
-                    onLink={() => openAddDevice('computer', { computerId: machine.computer?.id })}
-                    onAddRoute={() => openAddDevice('computer', { computerId: machine.computer?.id })}
-                    onReorder={(routeIds) => (machine.computer ? reorder(machine.computer.id, routeIds) : Promise.resolve(null))}
-                    onUnlink={() => unlink(machine)}
-                    onDetails={() => onOpenMachine(machine.id)}
-                    localDetail={machine.kind === 'local'
-                      ? <PublicUrlField saved={controller.config.host.publicUrl ?? ''} onSaved={controller.reload} />
-                      : undefined}
-                    footer={machine.active && machine.kind !== 'local' && connectionState.lastError
-                      ? <ConnectionError message={connectionState.lastError} controller={controller} />
-                      : undefined}
-                  />
-                ))}
+                {grouped.machines.map((machine) => computerRow(machine, machine.name, () => onOpenMachine(machine.id)))}
+                {grouped.members.length > 0 && (
+                  <div data-testid="machine-group-pane-cloud" className="divide-y divide-border-secondary">
+                    <div className={cn('flex items-center justify-between gap-3', CARD_ROW)}>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-surface-secondary">
+                          <Cloud className="h-4 w-4 text-text-secondary" aria-hidden="true" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-text-primary">{PANE_CLOUD_MACHINE.name}</p>
+                          <p className="truncate text-xs text-text-tertiary">{grouped.members.length === 1 ? '1 Session' : `${grouped.members.length} Sessions`}</p>
+                        </div>
+                      </div>
+                      <Button type="button" variant="ghost" size="sm" aria-label={`${PANE_CLOUD_MACHINE.name} details`} onClick={() => onOpenMachine(PANE_CLOUD_MACHINE.id)}>Details</Button>
+                    </div>
+                    {grouped.members.map(({ machine, member }) => (
+                      <div key={machine.id} className="pl-6">{computerRow(machine, member.sessionName, () => onOpenMachine(PANE_CLOUD_MACHINE.id))}</div>
+                    ))}
+                  </div>
+                )}
                 {unlinkOutcome && <p className={`text-xs text-text-secondary ${CARD_ROW}`} role="status">{unlinkOutcome}</p>}
               </div>
               <p className="px-0.5 text-xs text-text-tertiary">

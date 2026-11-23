@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, ChevronLeft, Copy } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { RemoteGroup } from './RemoteGroup';
-import { PaneCloudMachineGroups } from './PaneCloudMachineGroups';
 import { CARD_ROW, errorMessage, phoneAddress } from './CodelessRemoteSettings';
 import { MachineMark, machineColorVar } from '../machines/MachineMark';
 import { useMachines } from '../../hooks/useMachines';
@@ -109,8 +108,6 @@ export function MachineDetails({ machineId, controller, onBack, onNeedsPassword 
         )}
       </RemoteGroup>
 
-      <PaneCloudMachineGroups machineId={machine.id} />
-
       <RemoteGroup title="Colour">
         <div className={`flex items-center gap-3 ${CARD_ROW}`}>
           <span className="h-4 w-4 flex-none rounded-full" style={{ backgroundColor: machineColorVar(machine.slot) }} aria-hidden="true" />
@@ -145,7 +142,8 @@ export function MachineDetails({ machineId, controller, onBack, onNeedsPassword 
   );
 }
 
-function DetailsFrame({ onBack, children }: { onBack: () => void; children: ReactNode }) {
+/** A machine page: the way back to Computers above its content. */
+export function DetailsFrame({ onBack, children }: { onBack: () => void; children: ReactNode }) {
   return (
     <section className="mx-auto w-full max-w-3xl space-y-6 pb-8">
       <button type="button" className="flex items-center gap-1 text-sm text-interactive-text hover:underline" onClick={onBack}>

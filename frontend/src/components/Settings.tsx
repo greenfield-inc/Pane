@@ -27,6 +27,8 @@ import { AutopilotSettings } from './settings/categories/AutopilotSettings';
 import { UsageView, type UsageTab } from './usage/UsageView';
 import { RemoteAccessWorkflows } from './settings/RemoteAccessWorkflows';
 import { MachineDetails } from './settings/MachineDetails';
+import { PaneCloudMachinePage } from './settings/PaneCloudMachineGroups';
+import { PANE_CLOUD_MACHINE } from '../../../shared/utils/paneCloudMachine';
 import { useSettingsPersistence } from './settings/useSettingsPersistence';
 import { useDirtySettingsForms } from './settings/useDirtySettingsForms';
 import { registerSettingsExit } from '../utils/settingsExit';
@@ -221,6 +223,9 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       case 'remote-access':
         if (remoteSubview) {
           return <RemoteAccessWorkflows subview={remoteSubview} controller={remote} onBack={() => requestTransition(() => setRemoteSubview(undefined))} {...sharedDirtyProps} />;
+        }
+        if (remoteMachineId === PANE_CLOUD_MACHINE.id) {
+          return <PaneCloudMachinePage onBack={() => setRemoteMachineId(undefined)} />;
         }
         if (remoteMachineId) {
           return <MachineDetails machineId={remoteMachineId} controller={remote} onBack={() => setRemoteMachineId(undefined)} onNeedsPassword={askMachinePassword} />;
