@@ -49,11 +49,6 @@ export interface RelayComputer {
   fingerprint: string;
   /** The computer's direct QUIC endpoint (`pane-direct`); absent while it has none. */
   direct?: RelayDirectEndpoint;
-  /**
-   * Set on a Pane Cloud VM: other devices may call it, and it holds no token for any other
-   * computer. Linking with it mints a token on it for the other side and never one for it.
-   */
-  receiveOnly?: boolean;
 }
 
 /** Where `pane-direct connect` finds a computer: its node id, its addresses, and the relays that introduce the two ends. */
@@ -72,34 +67,12 @@ export interface RelayComputerGrant {
   token: string;
 }
 
-/**
- * A computer redeeming a link: who it is, its routes, and a token it made for the link's maker to
- * call it. Without a token the maker records the computer as a client only and can't call it back:
- * a desktop pairing with a cloud VM.
- */
+/** A computer redeeming a link: who it is, its routes, and a token it made for the link's maker to call it. */
 export interface RelayComputerOffer {
   computer: RelayComputer;
   routes?: ComputerRoutesReport;
-  token?: string;
+  token: string;
 }
-
-/**
- * A pairing with a cloud VM, as Pane Cloud's `POST /v1/vms/:vmId/pairing` answers it: a one-time
- * link, and the relay identity the service vouches for. Pane pairs only with a VM that presents
- * exactly that key.
- */
-export interface VouchedPairing {
-  link: string;
-  relay: { computerId: string; fingerprint: string; domain: string };
-}
-
-/**
- * What a device on a release that keeps the receive-only mark presents when it pairs or asks for
- * linked computers. A Pane Cloud VM pairs only with a device that presents it, and a desktop hands
- * a grant for a VM it marked only to such a device, so a device too old to keep the mark never holds
- * a VM pairing. Pane Cloud's `pairVm` takes the same string in `clientCapabilities`.
- */
-export const RELAY_RECEIVE_ONLY_CAPABILITY = 'relay-receive-only-v1';
 
 /** `POST /pair/exchange` body. `phoneId` is the app's stable install id, so "Remove from all your computers" finds the phone everywhere. */
 export interface RelayExchangeRequest {
@@ -108,13 +81,7 @@ export interface RelayExchangeRequest {
   phoneId?: string;
   /** Computer ids the app already has a token for. Linked computers among them hand out no new token, which would replace the app's. */
   known?: string[];
-  /** What this device's release enforces; `RELAY_RECEIVE_ONLY_CAPABILITY` when it keeps the receive-only mark. */
-  capabilities?: string[];
-  /**
-   * Set when a computer redeems the link: the maker records it as a computer, not a phone. With a
-   * token the maker saves it to call back; without one (accepted only by a Pane Cloud VM) the pairing
-   * is one way.
-   */
+  /** Set when a computer redeems the link: the maker saves it as a computer, not a phone. */
   computer?: RelayComputerOffer;
 }
 
@@ -151,10 +118,7 @@ export interface LinkRedeemResult {
 export interface RelayPairedEvent {
   kind: 'phone' | 'computer';
   label: string;
-  /**
-   * A computer this one saved: its id in `client.computers`, for "Not you? Unlink". Absent for a
-   * phone, and on a Pane Cloud VM for a desktop that paired one way (the VM saves nothing to call).
-   */
+  /** Computers only: its id in `client.computers`, for "Not you? Unlink". */
   computerId?: string;
 }
 
@@ -169,10 +133,7 @@ export const RELAY_CLIENT_COMMANDS = {
   previewAddress: 'relay:client:preview-address',
   /** → `RelayComputer` for this computer. */
   computer: 'relay:client:computer',
-  /**
-   * `{known: string[], capabilities?: string[]}` → `RelayComputerGrant[]`: linked computers, with new
-   * tokens for those not in `known`. A Pane Cloud VM only with `RELAY_RECEIVE_ONLY_CAPABILITY`.
-   */
+  /** `{known: string[]}` → `RelayComputerGrant[]`: linked computers, with new tokens for those not in `known`. */
   computers: 'relay:client:computers',
   /** `{peer: RelayComputer}` → `{token}`: a token the peer computer uses to call this one. */
   mintLink: 'relay:client:mint-link',

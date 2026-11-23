@@ -212,19 +212,6 @@ function serviceContractCases(target) {
             },
         },
         {
-            name: 'service: refuses to pair a client that does not say it keeps the receive-only mark (client_update_required), and logs nothing',
-            async run() {
-                await withVm(async (member, vm) => {
-                    const raw = async (body) => (0, http_1.callRoute)({ baseUrl: target.baseUrl, token: await tokenFor('member') }, service_1.serviceRoutes.pairVm, { params: { vmId: vm.id }, body });
-                    await (0, cases_1.expectError)('client_update_required', () => raw({}));
-                    await (0, cases_1.expectError)('client_update_required', () => raw({ clientCapabilities: ['some-other-capability'] }));
-                    strict_1.default.equal((await member.listActionLog(vm.id)).entries.filter((e) => e.operation === 'create_pairing_link').length, 0, 'a refused pairing is not logged');
-                    strict_1.default.equal((await member.getVm(vm.id)).relay, null, 'a refused pairing vouches for nothing');
-                    await member.pairVm(vm.id);
-                });
-            },
-        },
-        {
             name: 'service: keeps the first relay identity a Session VM reported and refuses to pair one that reports another (relay_key_changed)',
             async run() {
                 const replaceRelayKey = control('replaceRelayKey');

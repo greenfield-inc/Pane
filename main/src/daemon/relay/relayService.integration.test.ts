@@ -12,7 +12,6 @@ import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../
 import { PaneCommandRegistry } from '../commandRegistry';
 import { PaneRemoteHttpApiServer } from '../httpApiServer';
 import { RelayService } from './relayService';
-import { RelayKeyMismatch } from './keyPinning';
 import { createComputerCaller, createComputerPoster, RelayLinks, relayComputerSchema } from './relayLinks';
 import { ComputerLinking, createPairingRoute } from './computerLinking';
 import { computerRelayId } from '../../../../shared/types/remoteComputers';
@@ -76,11 +75,9 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
   let extraCa = '';
   let studio: Computer;
   let laptop: Computer;
-  let folder = '';
-  const started: Computer[] = [];
 
   beforeAll(async () => {
-    folder = mkdtempSync(join(tmpdir(), 'pane-relay-it-'));
+    const folder = mkdtempSync(join(tmpdir(), 'pane-relay-it-'));
     relayPort = await freePort();
     const dnsPort = await freePort();
     const relay = spawn(RELAY_BIN ?? '', ['--dev', '--domain', DOMAIN, '--listen', `127.0.0.1:${relayPort}`, '--dns', `127.0.0.1:${dnsPort}`, '--public-ip', '127.0.0.1'], {
@@ -136,7 +133,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
   }, 60_000);
 
   afterAll(async () => {
-    for (const computer of [studio, laptop, ...started]) {
+    for (const computer of [studio, laptop]) {
       await computer?.service.stop();
       await computer?.server.stop();
     }
@@ -153,7 +150,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     setListenerDown(down: boolean): void;
   }
 
-  async function startComputer(name: string, dataDir: string, options: { receiveOnly?: boolean } = {}): Promise<Computer> {
+  async function startComputer(name: string, dataDir: string): Promise<Computer> {
     let config = createDefaultRemoteDaemonConfig();
     config.host.config = { ...config.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0 };
     config.relay = { enabled: true, relayAddress: `us.relay.${DOMAIN}:${relayPort}` };
@@ -182,7 +179,6 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
       previewPort: () => null,
       displayName: () => name,
       addClient: (record) => links.addClient(record),
-      receiveOnly: options.receiveOnly,
       env,
     });
     const call = createComputerCaller({ dial, extraCa });
@@ -192,7 +188,6 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
       call,
       disconnect: (ids) => server?.disconnectClients(ids),
       connectedClientIds: () => new Set(),
-      receiveOnly: options.receiveOnly,
     });
     const linking = new ComputerLinking({ links, self: () => service.computerInfo(), routesReport: () => undefined, post: createComputerPoster({ dial, extraCa }), call });
     const registry = new PaneCommandRegistry();
@@ -355,27 +350,5 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     const relink = await invoke(b.host, String(again.json.token), 'relay:client:mint-link', [{ peer: studioInfo }]);
     expect(relink.json).toMatchObject({ ok: false, error: { code: 'ERR_RELAY_ALREADY_LINKED' } });
     expect((await invoke(b.host, String(studioToLaptop), 'sessions:get-all-with-projects')).status).toBe(200);
-  }, 90_000);
-
-  it('pairs a laptop with a cloud VM one way from the vouched identity, and sends the secret only to the vouched key', async () => {
-    const vm = await startComputer('Cloud Session', join(folder, 'vm'), { receiveOnly: true });
-    started.push(vm);
-    const self = vm.service.computerInfo();
-    if (!self) throw new Error('the VM has no relay identity');
-    expect(self.receiveOnly).toBe(true);
-    const pairing = { link: vm.service.createPairingCode().url, relay: { computerId: self.id, fingerprint: self.fingerprint, domain: self.domain } };
-
-    const poster = createComputerPoster({ dial, extraCa });
-    const studioKey = studio.service.computerInfo()?.fingerprint;
-    await expect(poster(self.address, '/pair/preview', { secret: 'unused' }, 'Cloud Session', studioKey)).rejects.toBeInstanceOf(RelayKeyMismatch);
-
-    expect(await laptop.registry.invoke('relay:redeem-vouched', [pairing])).toMatchObject({ name: 'Cloud Session' });
-    const saved = laptop.links.linked().find((profile) => profile.relay.computerId === self.id);
-    expect(saved?.relay.fingerprint).toBe(self.fingerprint);
-    if (!saved) throw new Error('the laptop did not save the VM');
-    const answer = await createComputerCaller({ dial, extraCa })(saved, 'sessions:get-all-with-projects', []);
-    expect(answer).toEqual([{ id: 'Cloud Session session' }]);
-    expect(vm.links.linked()).toEqual([]);
-    expect(vm.config().host.clients).toEqual([expect.objectContaining({ kind: 'computer', computerId: laptop.service.computerInfo()?.id })]);
   }, 90_000);
 });

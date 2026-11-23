@@ -123,11 +123,6 @@ export interface RemoteRelayProfile {
   fingerprint: string;
   /** Shown as "Linked by <name>" when a phone's scan linked it. */
   linkedBy?: string;
-  /**
-   * A Pane Cloud VM, as this device recorded when it paired with or learned of it. Kept on the
-   * device, so a VM that later claims otherwise is never sent a token for another computer.
-   */
-  receiveOnly?: boolean;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -297,12 +292,6 @@ export interface RemoteDaemonClientSettings {
   profiles: RemotePaneConnectionProfile[];
   activeProfileId: string | null;
   mode: RemoteDaemonClientMode;
-  /**
-   * Relay ids of computers this one paired with as Pane Cloud VMs: it never sends or mints a token
-   * for them. Kept apart from `computers`, so nothing a computer reports about itself (its routes,
-   * its install id, its own word) removes one. Only ever added to.
-   */
-  receiveOnly?: string[];
 }
 
 export interface RemoteDaemonConfig {
@@ -642,7 +631,6 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
     computerId: boundary.nonEmptyString,
     fingerprint: boundary.nonEmptyString,
     linkedBy: boundary.optional(boundary.nonEmptyString),
-    receiveOnly: boundary.optional(boundary.boolean),
   })),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */
@@ -827,8 +815,6 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
       mode: activeProfileId && client.mode === 'remote' ? 'remote' : 'local',
     },
   };
-  const receiveOnly = readJsonArray(client.receiveOnly).flatMap((id) => readOptionalString(id) ?? []);
-  if (receiveOnly.length) normalized.client.receiveOnly = [...new Set(receiveOnly)];
   const relay = readJsonObject(config.relay);
   if (relay) {
     const relaySettings: RemoteRelaySettings = { enabled: readBoolean(relay.enabled, false) };

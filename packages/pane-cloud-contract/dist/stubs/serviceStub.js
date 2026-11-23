@@ -247,12 +247,9 @@ async function startServiceStub(options) {
             }
             return log(record, 'collect_diagnostics', account, 'You collected diagnostics.');
         }),
-        (0, server_1.bind)(r.pairVm, ({ token, params, body }) => {
+        (0, server_1.bind)(r.pairVm, ({ token, params }) => {
             const account = caller(token);
             const record = ownVm(account, params.vmId ?? '');
-            if (!body.clientCapabilities?.includes(service_1.PAIRING_CAPABILITY)) {
-                throw new errors_1.CloudApiError('client_update_required', 'This version of Pane can\'t pair with a Pane Cloud Session.', 'Update Pane, then open the Session again.');
-            }
             // Pairing hands a device control of the VM: its creator must still have Full access in its organization.
             requireFullAccess(account, record.vm.organizationId);
             requireState(record, 'running', 'Pairing');

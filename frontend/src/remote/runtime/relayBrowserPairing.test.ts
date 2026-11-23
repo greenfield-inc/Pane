@@ -53,7 +53,7 @@ describe('pairing the browser app from "Continue in browser"', () => {
 
     expect(fetch).toHaveBeenCalledWith('https://6cphy4hwgmwpp4nl.runpane.net/pair/exchange', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ secret: 's3cret', label: 'Pane PWA on iPhone', phoneId: 'runtime-1', capabilities: ['relay-receive-only-v1'] }),
+      body: JSON.stringify({ secret: 's3cret', label: 'Pane PWA on iPhone', phoneId: 'runtime-1' }),
     }));
     expect(profiles).toEqual([
       {

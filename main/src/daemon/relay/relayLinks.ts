@@ -55,7 +55,6 @@ export const relayComputerSchema: BoundarySchema<RelayComputer> = boundary.objec
   address: boundary.nonEmptyString,
   local: boundary.array(boundary.string),
   fingerprint: boundary.nonEmptyString,
-  receiveOnly: boundary.optional(boundary.boolean),
 });
 
 /** A linked computer's `/invoke` answer. */
@@ -75,8 +74,6 @@ export interface RelayLinksDeps {
   /** Drops live connections of revoked clients. */
   disconnect(clientIds: string[]): void;
   connectedClientIds(): ReadonlySet<string>;
-  /** A Pane Cloud VM (`onCloudVm`), read once at start: it never keeps a token for another computer. */
-  receiveOnly?: boolean;
   log?(line: string): void;
 }
 
@@ -275,8 +272,6 @@ export class RelayLinks {
    * earlier record here, and that record's open connections close.
    */
   async addClient(record: RemoteDaemonClientRecord): Promise<void> {
-    // Every token this computer mints for another computer is stored here.
-    if (record.kind === 'computer' && record.computerId) this.refuseTokenFor({ id: record.computerId, name: record.label });
     const replaces = (client: RemoteDaemonClientRecord) => (record.kind === 'computer'
       ? client.kind === 'computer' && client.computerId === record.computerId
       : client.kind === undefined && record.kind === undefined && record.phoneId !== undefined && client.phoneId === record.phoneId);
@@ -315,9 +310,8 @@ export class RelayLinks {
    * reported, on its record in `client.computers` (a computer saved already gains the routes).
    * Returns the record's id.
    */
-  async saveComputer(peer: { computer: RelayComputer; token: string; routes?: ComputerRoutesReport; linkedBy?: string; receiveOnly?: boolean }): Promise<string> {
+  async saveComputer(peer: { computer: RelayComputer; token: string; routes?: ComputerRoutesReport; linkedBy?: string }): Promise<string> {
     const { computer, token, linkedBy } = peer;
-    this.refuseIfReceiveOnly(computer.name);
     // A report about another relay id is not this computer's.
     const report = peer.routes && (!peer.routes.relay || peer.routes.relay.id === computer.id) ? peer.routes : undefined;
     const linkRoute: ComputerRoute = {
@@ -343,51 +337,10 @@ export class RelayLinks {
         routes: [...(report ? foundRoutes(report, token) : []), linkRoute],
       });
       id = saved.id;
-      const client = { ...remote.client, computers: saved.computers };
-      // Marked by this computer, or by the device that passed it on; a mark is never removed.
-      if (peer.receiveOnly || computer.receiveOnly) client.receiveOnly = [...new Set([...(remote.client.receiveOnly ?? []), computer.id])];
-      return { ...remote, client };
+      return { ...remote, client: { ...remote.client, computers: saved.computers } };
     });
     this.deps.log?.(`[relay] linked with ${computer.name} (${computer.id})${linkedBy ? `, linked by ${linkedBy}` : ''}`);
     return id;
-  }
-
-  /** Whether this computer marked a computer receive-only: it paired with it as a Pane Cloud VM, or was told so by a device that did. */
-  markedReceiveOnly(relayId: string): boolean {
-    return this.remote().client.receiveOnly?.includes(relayId) === true;
-  }
-
-  /**
-   * The one rule for sending or minting a token for another computer: never for a Pane Cloud VM.
-   * This computer's own mark decides; the computer's own word can only add a refusal.
-   */
-  mayGetToken(computer: Pick<RelayComputer, 'id' | 'receiveOnly'>): boolean {
-    return computer.receiveOnly !== true && !this.markedReceiveOnly(computer.id);
-  }
-
-  /** Refuses, before anything is minted or sent, to give a Pane Cloud VM a token. */
-  refuseTokenFor(computer: Pick<RelayComputer, 'id' | 'name' | 'receiveOnly'>): void {
-    if (this.mayGetToken(computer)) return;
-    throw new PaneError(
-      'ERR_RELAY_RECEIVE_ONLY',
-      `${computer.name} is a Pane Cloud VM, which never gets a way to call your other computers, so nothing was linked.`,
-      `To reach ${computer.name}, open its Session in Pane: it pairs one way.`,
-    );
-  }
-
-  /** Whether this computer is a Pane Cloud VM that holds no token for any other computer. */
-  receiveOnly(): boolean {
-    return this.deps.receiveOnly === true;
-  }
-
-  /** On a receive-only computer, refuses to keep a way to call `peer`. */
-  refuseIfReceiveOnly(peer: string): void {
-    if (!this.receiveOnly()) return;
-    throw new PaneError(
-      'ERR_RELAY_RECEIVE_ONLY',
-      `This is a Pane Cloud VM, which never keeps a way to call other computers, so it did not save one for ${peer}.`,
-      `Nothing to do: ${peer} can still reach this VM. Update the device that sent it to a Pane release that links cloud VMs one way.`,
-    );
   }
 
   /** A phone or linked computer hands this computer the token to call a peer it just linked. */
@@ -422,23 +375,18 @@ export class RelayLinks {
     return { token };
   }
 
-  /**
-   * Tokens on every linked computer for a phone that just paired here, skipping those it has. A
-   * Pane Cloud VM is left out unless the phone's release keeps the receive-only mark (`keepsMark`).
-   */
-  grantsFor(phone: { label: string; phoneId?: string }, known: readonly string[], keepsMark: boolean): Promise<RelayComputerGrant[]> {
-    return this.grants(RELAY_COMPUTER_COMMANDS.grantPhone, phone, known, keepsMark);
+  /** Tokens on every linked computer for a phone that just paired here, skipping those it has. */
+  grantsFor(phone: { label: string; phoneId?: string }, known: readonly string[]): Promise<RelayComputerGrant[]> {
+    return this.grants(RELAY_COMPUTER_COMMANDS.grantPhone, phone, known);
   }
 
   /** Tokens on every linked computer for a computer that just redeemed this computer's link, skipping those it has. */
-  computerGrantsFor(peer: RelayComputer, known: readonly string[], keepsMark: boolean): Promise<RelayComputerGrant[]> {
-    return this.grants(RELAY_COMPUTER_COMMANDS.grantComputer, { peer }, [...known, peer.id], keepsMark);
+  computerGrantsFor(peer: RelayComputer, known: readonly string[]): Promise<RelayComputerGrant[]> {
+    return this.grants(RELAY_COMPUTER_COMMANDS.grantComputer, { peer }, [...known, peer.id]);
   }
 
-  private async grants(channel: string, request: { label: string; phoneId?: string } | { peer: RelayComputer }, known: readonly string[], keepsMark: boolean): Promise<RelayComputerGrant[]> {
-    // A device too old to keep the receive-only mark never gets a Pane Cloud VM (D-79).
-    const offered = this.linked().filter((profile) => !known.includes(profile.relay.computerId) && (keepsMark || !this.markedReceiveOnly(profile.relay.computerId)));
-    const grants = await Promise.all(offered.map(async (profile) => {
+  private async grants(channel: string, request: { label: string; phoneId?: string } | { peer: RelayComputer }, known: readonly string[]): Promise<RelayComputerGrant[]> {
+    const grants = await Promise.all(this.linked().filter((profile) => !known.includes(profile.relay.computerId)).map(async (profile) => {
       try {
         const [result, computer] = await Promise.all([
           this.deps.call(profile, channel, [request]),
@@ -447,8 +395,6 @@ export class RelayLinks {
         const token = decodeOptionalBoundary(result, grantedTokenSchema)?.token;
         const info = decodeOptionalBoundary(computer, relayComputerSchema);
         if (token === undefined || !info || info.id !== profile.relay.computerId) return null;
-        // This computer's own mark, not the VM's word, tells the device the grant goes to.
-        if (this.markedReceiveOnly(info.id)) info.receiveOnly = true;
         return { computer: info, token };
       } catch (error) {
         this.deps.log?.(`[relay] ${profile.label} did not hand out a token: ${error instanceof Error ? error.message : String(error)}`);
@@ -459,10 +405,10 @@ export class RelayLinks {
   }
 
   /** A paired phone's "Your computers" refresh. */
-  computersFor(callerClientId: string, known: readonly string[], keepsMark: boolean): Promise<RelayComputerGrant[]> {
+  computersFor(callerClientId: string, known: readonly string[]): Promise<RelayComputerGrant[]> {
     // A phone only: a token handed to a linked computer would outlive that computer's removal.
     const phone = this.callerPhone(callerClientId);
-    return this.grantsFor({ label: phone.label, phoneId: phone.phoneId }, known, keepsMark);
+    return this.grantsFor({ label: phone.label, phoneId: phone.phoneId }, known);
   }
 
   /** Revokes a phone here, by its install id. */
@@ -666,12 +612,9 @@ export function createComputerCaller(options: ComputerDialOptions = {}): CallCom
 /** A body for a computer's unauthenticated pairing routes: `/pair/preview` takes the secret, `/pair/exchange` the whole request. */
 type PairingPostBody = { secret: string } | RelayExchangeRequest;
 
-/**
- * Posts to a computer's pairing routes (`/pair/preview`, `/pair/exchange`). The public certificate is
- * checked, and with a fingerprint (a key vouched for before pairing) any other key is refused.
- */
-export type PostToComputer = (address: string, path: '/pair/preview' | '/pair/exchange', body: PairingPostBody, label: string, fingerprint?: string) => Promise<{ status: number; json: unknown }>;
+/** Posts to a computer's pairing routes (`/pair/preview`, `/pair/exchange`) before its key is known; the public certificate is checked. */
+export type PostToComputer = (address: string, path: '/pair/preview' | '/pair/exchange', body: PairingPostBody, label: string) => Promise<{ status: number; json: unknown }>;
 
 export function createComputerPoster(options: ComputerDialOptions = {}): PostToComputer {
-  return (address, path, body, label, fingerprint) => postJson(options, { url: new URL(path, address).toString(), label, body, fingerprint });
+  return (address, path, body, label) => postJson(options, { url: new URL(path, address).toString(), label, body });
 }

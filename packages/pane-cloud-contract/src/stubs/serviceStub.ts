@@ -6,7 +6,6 @@ import {
   type DeviceTokenResult,
   type OrganizationUsage,
   type OrgRole,
-  PAIRING_CAPABILITY,
   parseUserOperation,
   type Plan,
   PLANS,
@@ -307,12 +306,9 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       }
       return log(record, 'collect_diagnostics', account, 'You collected diagnostics.');
     }),
-    bind(r.pairVm, ({ token, params, body }) => {
+    bind(r.pairVm, ({ token, params }) => {
       const account = caller(token);
       const record = ownVm(account, params.vmId ?? '');
-      if (!body.clientCapabilities?.includes(PAIRING_CAPABILITY)) {
-        throw new CloudApiError('client_update_required', 'This version of Pane can\'t pair with a Pane Cloud Session.', 'Update Pane, then open the Session again.');
-      }
       // Pairing hands a device control of the VM: its creator must still have Full access in its organization.
       requireFullAccess(account, record.vm.organizationId);
       requireState(record, 'running', 'Pairing');

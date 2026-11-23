@@ -157,22 +157,6 @@ const UserOperationName = z.enum(USER_OPERATIONS);
 export const SubmittedOperation = z.object({ operation: z.string(), parameters: z.record(z.string(), z.json()) }).strict();
 export type SubmittedOperation = z.infer<typeof SubmittedOperation>;
 
-// ---------- Pairing ----------
-
-/**
- * What a client on a release that keeps the receive-only mark sends in `pairVm`'s
- * `clientCapabilities` (D-79). The service pairs only such a client, so a device too old to keep the
- * mark never holds a cloud VM pairing. Pane's `RELAY_RECEIVE_ONLY_CAPABILITY` is the same string.
- */
-export const PAIRING_CAPABILITY = 'relay-receive-only-v1';
-
-export const PairVmRequest = z
-  .object({
-    /** Must include PAIRING_CAPABILITY; without it the service answers client_update_required. */
-    clientCapabilities: z.array(z.string().min(1).max(64)).max(32).optional(),
-  })
-  .strict();
-
 // ---------- Usage ----------
 
 const Month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
@@ -246,11 +230,10 @@ export const serviceRoutes = {
   /**
    * A one-time link for pairing a device with a running VM, and the relay identity the service
    * vouches for. The client pairs only with a VM that presents exactly that key. A VM that reports
-   * a different identity than its first one is refused with relay_key_changed. A client that doesn't
-   * send PAIRING_CAPABILITY in clientCapabilities gets client_update_required. Logged as
+   * a different identity than its first one is refused with relay_key_changed. Logged as
    * create_pairing_link, without the link.
    */
-  pairVm: route({ id: 'service.pairVm', method: 'POST', path: '/v1/vms/:vmId/pairing', auth: true, body: PairVmRequest, response: PairingLink }),
+  pairVm: route({ id: 'service.pairVm', method: 'POST', path: '/v1/vms/:vmId/pairing', auth: true, body: z.object({}).strict(), response: PairingLink }),
   listActionLog: route({
     id: 'service.listActionLog',
     method: 'GET',
@@ -285,7 +268,7 @@ export function createServiceClient(config: ClientConfig) {
     stopVm: (vmId: string) => callRoute(config, r.stopVm, { params: { vmId }, body: {} }),
     deleteVm: (vmId: string) => callRoute(config, r.deleteVm, { params: { vmId } }),
     requestOperation: (vmId: string, request: UserOperationRequest) => callRoute(config, r.requestOperation, { params: { vmId }, body: request }),
-    pairVm: (vmId: string) => callRoute(config, r.pairVm, { params: { vmId }, body: { clientCapabilities: [PAIRING_CAPABILITY] } }),
+    pairVm: (vmId: string) => callRoute(config, r.pairVm, { params: { vmId }, body: {} }),
     listActionLog: (vmId: string, page: { before?: string; limit?: number } = {}) => callRoute(config, r.listActionLog, { params: { vmId }, query: page }),
     getUsage: (organizationId: string, month?: string) => callRoute(config, r.getUsage, { params: { organizationId }, query: { month } }),
   };

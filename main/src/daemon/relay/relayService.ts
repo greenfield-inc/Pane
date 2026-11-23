@@ -53,8 +53,6 @@ export interface RelayServiceDeps {
   addClient(record: RemoteDaemonClientRecord): Promise<void>;
   /** Environment overrides for development and self-tests; `process.env` by default. */
   env?: NodeJS.ProcessEnv;
-  /** A Pane Cloud VM (`onCloudVm`): it says so to the devices that link with it. */
-  receiveOnly?: boolean;
   /** A development build orders from Let's Encrypt's and Google Trust Services' staging CAs, so test computers never spend the real ones' limits. */
   developmentBuild?: boolean;
   log?(line: string): void;
@@ -260,7 +258,6 @@ export class RelayService {
       fingerprint: createHash('sha256').update(this.key.spki).digest('base64url'),
     };
     if (this.directEndpoint) computer.direct = this.directEndpoint;
-    if (this.deps.receiveOnly) computer.receiveOnly = true;
     return computer;
   }
 

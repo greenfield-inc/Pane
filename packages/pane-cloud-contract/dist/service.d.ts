@@ -234,15 +234,6 @@ export declare const SubmittedOperation: z.ZodObject<{
     parameters: z.ZodRecord<z.ZodString, z.ZodJSONSchema>;
 }, z.core.$strict>;
 export type SubmittedOperation = z.infer<typeof SubmittedOperation>;
-/**
- * What a client on a release that keeps the receive-only mark sends in `pairVm`'s
- * `clientCapabilities` (D-79). The service pairs only such a client, so a device too old to keep the
- * mark never holds a cloud VM pairing. Pane's `RELAY_RECEIVE_ONLY_CAPABILITY` is the same string.
- */
-export declare const PAIRING_CAPABILITY = "relay-receive-only-v1";
-export declare const PairVmRequest: z.ZodObject<{
-    clientCapabilities: z.ZodOptional<z.ZodArray<z.ZodString>>;
-}, z.core.$strict>;
 export declare const MemberUsage: z.ZodObject<{
     accountId: z.ZodString;
     name: z.ZodNullable<z.ZodString>;
@@ -759,13 +750,10 @@ export declare const serviceRoutes: {
     /**
      * A one-time link for pairing a device with a running VM, and the relay identity the service
      * vouches for. The client pairs only with a VM that presents exactly that key. A VM that reports
-     * a different identity than its first one is refused with relay_key_changed. A client that doesn't
-     * send PAIRING_CAPABILITY in clientCapabilities gets client_update_required. Logged as
+     * a different identity than its first one is refused with relay_key_changed. Logged as
      * create_pairing_link, without the link.
      */
-    pairVm: import("./http").Route<z.ZodObject<{
-        clientCapabilities: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    }, z.core.$strict>, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
+    pairVm: import("./http").Route<z.ZodObject<{}, z.core.$strict>, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
         relay: z.ZodObject<{
             computerId: z.ZodString;
             fingerprint: z.ZodString;
