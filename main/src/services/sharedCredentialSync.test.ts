@@ -578,27 +578,32 @@ describe('Pane Cloud VMs', () => {
     return dir;
   };
 
-  /** A cloud VM as the guest image starts it: its secrets volume at PANE_SECRETS_DIR, and the environment its agents inherit. */
+  /**
+   * A cloud VM as the guest image starts it: its secrets volume at PANE_SECRETS_DIR, and the environment
+   * its agents inherit. Without the volume it is like any other machine to Pane.
+   */
   async function cloudVm({ withVolume = true } = {}) {
     const paneDir = await folder('vm');
     vi.stubEnv('PANE_DIR', paneDir);
     const configManager = new ConfigManager();
     await configManager.initialize();
-    const volume = withVolume ? await folder('volume') : null;
-    const index = volumeSecretIndex(volume, () => configManager.getConfig());
-    const secrets = new PaneSecretStore(index, paneSecretValueBackend('', volume), () => 'pane-1a2b3c4d');
+    const volume = withVolume ? await folder('volume') : undefined;
+    const secrets = volume
+      ? new PaneSecretStore(volumeSecretIndex(volume, () => configManager.getConfig()), paneSecretValueBackend('', volume), () => 'pane-1a2b3c4d')
+      : new PaneSecretStore(configManager, keychainSecretBackend(new FakeKeychain(), 'Pane (test)'), () => 'pane-1a2b3c4d');
     const env: NodeJS.ProcessEnv = {};
     const registry = new PaneCommandRegistry();
     // SAFETY: These handlers read only configManager from the services bag.
-    registerSharedCredentialHandlers({ configManager } as AppServices, registry, secrets, { env });
+    registerSharedCredentialHandlers({ configManager } as AppServices, registry, secrets, volume ? { env } : null);
     const invoke = vi.fn(async (channel: string, args: unknown[]) => {
       const input: PaneCommandValue = JSON.parse(JSON.stringify(args[0] ?? null));
       return overTheWire(await registry.invokeRemote(channel, [input, { clientId: 'desktop' }]));
     });
-    return { id: 'cloud-vm', receiveOnly: true, invoke, configManager, secrets, env, volume, registry, paneDir };
+    return { id: 'cloud-vm', invoke, configManager, secrets, env, volume, registry, paneDir };
   }
 
-  async function desktop(remotes: Array<{ id: string; receiveOnly: boolean; invoke: (channel: string, args: unknown[]) => Promise<JsonValue | undefined> }>, config: Partial<AppConfig> = {}) {
+  /** A desktop that saved `remotes`; Pane Cloud lists `cloud-vm` among them as one of the person's VMs. */
+  async function desktop(remotes: Array<{ id: string; invoke: (channel: string, args: unknown[]) => Promise<JsonValue | undefined> }>, config: Partial<AppConfig> = {}) {
     const dir = await folder('desktop');
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ anthropicApiKey: 'sk-ant-desktop', ...config }));
     vi.stubEnv('PANE_DIR', dir);
@@ -607,7 +612,7 @@ describe('Pane Cloud VMs', () => {
     setPaneRuntime({ eventSink: { send: sent }, getConfigManager: () => configManager, getPtyHostRuntime: () => null, getWebviewContextMap: () => new Map() });
     const secrets = new PaneSecretStore(configManager, keychainSecretBackend(new FakeKeychain(), 'Pane (test)'), () => 'this-mac');
     await secrets.set('web', 'NPM_TOKEN', 'npm-desktop');
-    const sync = new TrackedSync(configManager, { subscribe: () => () => undefined, remotes: () => remotes }, () => secrets, async () => 'gho_desktop');
+    const sync = new TrackedSync(configManager, { subscribe: () => () => undefined, remotes: () => remotes }, () => secrets, async () => 'gho_desktop', () => new Set(['cloud-vm']));
     running.push(sync);
     return { configManager, secrets, sync };
   }
@@ -625,7 +630,7 @@ describe('Pane Cloud VMs', () => {
   it('get every paired machine\'s secrets and the GitHub token on the secrets volume, and send nothing back', async () => {
     const vm = await cloudVm();
     await vm.secrets.set('scratch', 'MADE_ON_VM', 'vm-only');
-    const studio = { ...machine('studio', { enabled: true, changedAt: 0 }, { paneSecrets: { 'deploy/AWS_ACCESS_KEY_ID': STUDIO_SECRET } }), receiveOnly: false };
+    const studio = { ...machine('studio', { enabled: true, changedAt: 0 }, { paneSecrets: { 'deploy/AWS_ACCESS_KEY_ID': STUDIO_SECRET } }) };
     const { secrets, sync } = await desktop([studio, vm]);
     await secrets.set('pane-cloud', 'CLAUDE_CODE_OAUTH_TOKEN', 'sk-ant-oat01-desktop');
 
@@ -645,7 +650,7 @@ describe('Pane Cloud VMs', () => {
     // Agents on the VM start with the GitHub sign-in, and git uses it through gh.
     expect(vm.env).toMatchObject({ GH_TOKEN: 'gho_desktop', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-desktop', GIT_CONFIG_KEY_0: 'credential.https://github.com.helper', GIT_CONFIG_VALUE_0: '!gh auth git-credential' });
 
-    // Receive-only: the VM's own secret reaches neither the desktop nor another machine, and the VM is never read.
+    // One way: the VM's own secret reaches neither the desktop nor another machine, and the VM is never read.
     expect(secrets.has('scratch', 'MADE_ON_VM')).toBe(false);
     expect(JSON.stringify(studio.keys())).not.toContain('MADE_ON_VM');
     expect(vm.invoke.mock.calls.map(call => call[0])).not.toContain('credentials:shared:get');
@@ -667,7 +672,7 @@ describe('Pane Cloud VMs', () => {
 
   it('leave out a secret or a whole machine the person turned off, on every later sync too', async () => {
     const vm = await cloudVm();
-    const studio = { ...machine('studio', { enabled: true, changedAt: 0 }, { paneSecrets: { 'deploy/AWS_ACCESS_KEY_ID': STUDIO_SECRET } }), receiveOnly: false };
+    const studio = { ...machine('studio', { enabled: true, changedAt: 0 }, { paneSecrets: { 'deploy/AWS_ACCESS_KEY_ID': STUDIO_SECRET } }) };
     const { secrets, sync } = await desktop([studio, vm]);
     await secrets.setCloudChoice({ excludedSecrets: ['web/NPM_TOKEN'], excludedMachines: ['mac-studio'] });
 
@@ -691,7 +696,7 @@ describe('Pane Cloud VMs', () => {
 
     expect(await vm.secrets.read('web', 'NPM_TOKEN')).toBe('npm-desktop');
     expect(vm.env.GH_TOKEN).toBe('gho_desktop');
-    await expect(sync.sendToCloudVm('studio')).rejects.toMatchObject({ code: 'ERR_CLOUD_SECRETS_NOT_SENT' });
+    await expect(sync.sendToCloudVm('nowhere')).rejects.toMatchObject({ code: 'ERR_CLOUD_SECRETS_NOT_SENT' });
   });
 
   it('keep a secret the person turned off out whoever sends it: another computer of theirs, or a phone from before the choice', async () => {

@@ -152,6 +152,8 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'remote:settings:update',
   'credentials:shared:get',
   'credentials:shared:apply',
+  // A computer sends a cloud VM its chosen secrets.
+  'credentials:cloud:apply',
   'notify:switch:get',
   'notify:switch:apply',
   // A desktop pushes, ends and lists secret leases on the machines it saved.

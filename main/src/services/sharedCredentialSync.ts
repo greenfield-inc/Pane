@@ -57,19 +57,26 @@ export class SharedCredentialSync {
     private readonly machines: Pick<MachineConnections, 'subscribe' | 'remotes'>,
     private readonly secrets: () => PaneSecretStore = paneSecretStore,
     private readonly githubToken: () => Promise<string | null> = readGithubToken,
+    /** Saved machines that are the person's Pane Cloud VMs, as Pane Cloud lists them (a VM's relay id mapped to its saved computer). */
+    private readonly cloudMachines: () => ReadonlySet<string> = () => new Set(),
   ) {}
+
+  /** Syncs again soon, as when Pane Cloud's list of the person's VMs changes. */
+  resync(): void {
+    this.request();
+  }
 
   /**
    * Sends the person's secrets to a newly paired cloud VM now, before its first Session starts, so
    * the Session's agents begin signed in. Throws when the VM can't be reached.
    */
   async sendToCloudVm(machineId: string): Promise<void> {
-    const vm = this.machines.remotes().find((remote) => remote.id === machineId && remote.receiveOnly);
+    const vm = this.machines.remotes().find((remote) => remote.id === machineId);
     if (!vm) {
-      throw new PaneError('ERR_CLOUD_SECRETS_NOT_SENT', 'Pane could not send your secrets: the cloud machine is not among this computer\'s paired cloud machines.', 'Try New cloud Session again.');
+      throw new PaneError('ERR_CLOUD_SECRETS_NOT_SENT', 'Pane could not send your secrets: this computer has no connection to the cloud machine.', 'Try New cloud Session again.');
     }
     try {
-      await vm.invoke('credentials:shared:apply', [await this.cloudSecrets()]);
+      await vm.invoke('credentials:cloud:apply', [await this.cloudSecrets()]);
     } catch (error) {
       throw new PaneError('ERR_CLOUD_SECRETS_NOT_SENT', `Pane could not send your secrets to the cloud machine: ${reasonOf(error)}.`, 'Check this computer is online, then try New cloud Session again.');
     }
@@ -124,8 +131,10 @@ export class SharedCredentialSync {
         },
       };
       const remotes = this.machines.remotes();
-      // A cloud VM is receive-only (D-75): it is sent the person's choice of secrets below and never read.
-      const peers = remotes.filter((peer) => !peer.receiveOnly).map((peer): SharedCredentialHost => ({
+      const cloud = this.cloudMachines();
+      const isCloudVm = (peer: { id: string }) => cloud.has(peer.id);
+      // A cloud VM is sent the person's choice of secrets below and never read.
+      const peers = remotes.filter((peer) => !isCloudVm(peer)).map((peer): SharedCredentialHost => ({
         read: async () => decodeBoundary(await peer.invoke('credentials:shared:get', []), sharedCredentialsSchema),
         apply: async credentials => { await peer.invoke('credentials:shared:apply', [credentials]); },
       }));
@@ -134,19 +143,19 @@ export class SharedCredentialSync {
         apply: async notifySwitch => { await applyNotifySwitch(this.configManager, notifySwitch); },
       };
       // A machine too old for these commands refuses them and is skipped; its keys still sync.
-      const switchPeers = remotes.filter((peer) => !peer.receiveOnly).map((peer): SharedNotifySwitchHost => ({
+      const switchPeers = remotes.filter((peer) => !isCloudVm(peer)).map((peer): SharedNotifySwitchHost => ({
         read: async () => decodeBoundary(await peer.invoke('notify:switch:get', []), sharedNotifySwitchSchema),
         apply: async notifySwitch => { await peer.invoke('notify:switch:apply', [notifySwitch]); },
       }));
       if (peers.length > 0) await syncSharedCredentials([local, ...peers]);
       if (switchPeers.length > 0) await syncSharedNotifySwitch([localSwitch, ...switchPeers]);
-      const cloudVms = remotes.filter((peer) => peer.receiveOnly);
+      const cloudVms = remotes.filter(isCloudVm);
       if (cloudVms.length > 0) {
         const secrets = await this.cloudSecrets();
-        // The Approvals switch goes to a cloud VM too, and its own is never read back (D-75).
+        // The Approvals switch goes to a cloud VM too, and its own is never read back.
         const notifySwitch = readNotifySwitch(this.configManager.getConfig());
         await Promise.all(cloudVms.map((vm) => Promise.all([
-          vm.invoke('credentials:shared:apply', [secrets]),
+          vm.invoke('credentials:cloud:apply', [secrets]),
           vm.invoke('notify:switch:apply', [notifySwitch]),
         ]).catch((error) => {
           console.warn(`[SharedCredentials] Could not send secrets to cloud machine ${vm.id}: ${reasonOf(error)}`);

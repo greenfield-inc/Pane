@@ -37,6 +37,17 @@ const createdSchema = boundary.object({
 });
 
 let manager: PaneCloudManager | null = null;
+let knownCloudMachines: string[] = [];
+
+const machineIdsOf = (snapshot: PaneCloudSnapshot) => snapshot.sessions.flatMap((session) => (session.machineId ? [session.machineId] : [])).sort();
+
+/**
+ * The saved machines that are the person's cloud VMs, as Pane Cloud lists them: each VM's relay id
+ * mapped to the computer this desktop saved for it. Empty while signed out or before Pane Cloud answers.
+ */
+export function cloudMachineIds(): ReadonlySet<string> {
+  return new Set(manager ? machineIdsOf(manager.snapshot()) : []);
+}
 
 /**
  * Pane Cloud's channels. They run on this computer even while the window shows another one: the
@@ -48,6 +59,8 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
   configManager: Pick<ConfigManager, 'getConfig' | 'updateConfigWith'>;
   /** Sends the person's chosen secrets to a newly paired cloud VM (SharedCredentialSync, D-58). */
   sendSecrets: (machineId: string) => Promise<void>;
+  /** Called when the saved machines that are the person's cloud VMs change (`cloudMachineIds`). */
+  onCloudMachinesChanged?: () => void;
   send: (channel: string, snapshot: PaneCloudSnapshot) => void;
 }): void {
   manager?.dispose();
@@ -93,7 +106,14 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
         await machines.invokeOn(machineId, 'orchestration-sessions:update', [{ sessionId: session.id }, { archived }], SESSION_CALL_MS);
       }
     },
-    onChange: (snapshot) => deps.send('pane-cloud:changed', snapshot),
+    onChange: (snapshot) => {
+      deps.send('pane-cloud:changed', snapshot);
+      const ids = machineIdsOf(snapshot);
+      if (ids.join('\n') !== knownCloudMachines.join('\n')) {
+        knownCloudMachines = ids;
+        deps.onCloudMachinesChanged?.();
+      }
+    },
   });
   manager = cloud;
 

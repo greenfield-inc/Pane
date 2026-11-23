@@ -137,17 +137,13 @@ function fakeSecurity() {
 }
 
 describe('Pane secrets on a Pane Cloud VM', () => {
-  it('keep their values on the secrets volume, and none at all when the volume is missing', async () => {
+  it('keep their values on the secrets volume', async () => {
     const pane = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-vm-'));
     const volume = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-vm-secrets-'));
     tempDirs.push(pane, volume);
-    const onVolume = new PaneSecretStore(memoryConfig(), paneSecretValueBackend(pane, volume), () => 'pane-1a2b3c4d');
+    const onVolume = new PaneSecretStore(memoryConfig(), paneSecretValueBackend(pane, secretsVolume({ PANE_SECRETS_DIR: volume })), () => 'pane-1a2b3c4d');
     await onVolume.set('web', 'NPM_TOKEN', 'npm_canary');
     expect(await fs.readFile(path.join(volume, 'secrets.json'), 'utf8')).toContain('npm_canary');
-
-    const noVolume = new PaneSecretStore(memoryConfig(), paneSecretValueBackend(pane, secretsVolume({}, true)), () => 'pane-1a2b3c4d');
-    await expect(noVolume.set('web', 'NPM_TOKEN', 'npm_canary')).rejects.toMatchObject({ code: 'SECRET_WRITE_FAILED' });
-    expect(noVolume.has('web', 'NPM_TOKEN')).toBe(false);
     expect(await fs.readdir(pane)).toEqual([]);
   });
 });
@@ -270,7 +266,6 @@ describe("A Pane Cloud VM's own secret store", () => {
     const volume = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-vm-volume-'));
     tempDirs.push(paneDir, volume);
     vi.stubEnv('PANE_DIR', paneDir);
-    vi.stubEnv('PANE_CLOUD_VM', '1');
     vi.stubEnv('PANE_SECRETS_DIR', volume);
     const configManager = new ConfigManager();
     await configManager.initialize();

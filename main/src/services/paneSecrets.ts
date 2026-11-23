@@ -22,7 +22,6 @@ import type { AppConfig } from '../types/config';
 import { getPaneEventSink, getRuntimeConfigManager } from '../core/runtime';
 import { getAppDirectory } from '../utils/appDirectory';
 import { KeychainItemMissing, paneKeychainService, systemKeychain, type Keychain } from './keychain';
-import { onCloudVm } from '../daemon/relay/cloudVm';
 import { readFileSync } from 'fs';
 import { EMPTY_PANE_CLOUD_SECRET_CHOICE, sendsToCloud, type PaneCloudSecretChoice } from '../../../shared/types/paneCloudSecrets';
 
@@ -261,25 +260,19 @@ export function systemSecretBackend(appDirectory: string, platform: string = pro
 }
 
 /**
- * On a Pane Cloud VM, the folder that holds everything about Pane secrets (values, the index of
- * names and machines, the cloud choice and leases): the secrets volume the guest mounts and names in
- * PANE_SECRETS_DIR, which scans and staff never open (D-55, D-58). null on a VM without one, which
- * then keeps no secret and no record of one. undefined on any other host without PANE_SECRETS_DIR,
- * which keeps values in the OS store and the index in config.json.
+ * The secrets volume, when this machine has one: a Pane Cloud VM's guest mounts it and names it in
+ * PANE_SECRETS_DIR. Everything about Pane secrets is kept there (values, the index of names and
+ * machines, the cloud choice, leases), never on the Session disk, which scans and staff can open
+ * (D-55, D-58, D-84). Other machines keep values in the OS store and the index in config.json.
  */
-export function secretsVolume(env: NodeJS.ProcessEnv = process.env, cloudVm: boolean = onCloudVm(env)): string | null | undefined {
-  const directory = env.PANE_SECRETS_DIR?.trim();
-  if (directory) return directory;
-  return cloudVm ? null : undefined;
+export function secretsVolume(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.PANE_SECRETS_DIR?.trim() || undefined;
 }
 
-/** A folder nothing can be created under, for a cloud VM without its secrets volume: every write there fails. */
-const NOWHERE = path.join(os.devNull, 'pane-secrets');
-
 /** Where Pane secrets and leases keep their values: on the secrets volume when there is one (`secretsVolume`). */
-export function paneSecretValueBackend(appDirectory: string, volume: string | null | undefined = secretsVolume()): SecretValueBackend {
+export function paneSecretValueBackend(appDirectory: string, volume: string | undefined = secretsVolume()): SecretValueBackend {
   if (volume === undefined) return systemSecretBackend(appDirectory);
-  return fileSecretBackend(path.join(volume ?? NOWHERE, 'secrets.json'), electronSecretEncryption());
+  return fileSecretBackend(path.join(volume, 'secrets.json'), electronSecretEncryption());
 }
 
 /**
@@ -341,17 +334,16 @@ const volumeIndexSchema = boundary.object({
 /**
  * The index in one 0600 file in `directory`, a cloud VM's secrets volume, so secret names and the
  * machines they came from stay off the Session disk (D-84). `workspaces` still comes from config.json.
- * Without a volume (`directory` null) it starts empty and refuses every write.
  */
-export function volumeSecretIndex(directory: string | null, base: () => Pick<AppConfig, 'workspaces'>): SecretIndexStore {
-  const file = path.join(directory ?? NOWHERE, 'index.json');
+export function volumeSecretIndex(directory: string, base: () => Pick<AppConfig, 'workspaces'>): SecretIndexStore {
+  const file = path.join(directory, 'index.json');
   type Stored = Omit<SecretIndex, 'workspaces'>;
   let index: Stored = {};
   try {
     index = decodeBoundary(JSON.parse(readFileSync(file, 'utf8')), volumeIndexSchema);
   } catch (error) {
     const code = error instanceof Error && 'code' in error ? error.code : undefined;
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') console.warn(`[PaneSecrets] The secrets index on the secrets volume could not be read, so it starts empty: ${reasonOf(error)}`);
+    if (code !== 'ENOENT') console.warn(`[PaneSecrets] The secrets index on the secrets volume could not be read, so it starts empty: ${reasonOf(error)}`);
   }
   let queue: Promise<unknown> = Promise.resolve();
   const current = (): SecretIndex => ({ ...index, workspaces: base().workspaces });
@@ -747,7 +739,7 @@ export function secretLeaseStore(): SecretLeaseStore {
   // On a cloud VM the lease records and log name secrets, so they live on the secrets volume too.
   const volume = secretsVolume();
   sharedLeases ??= new SecretLeaseStore({
-    directory: volume === undefined ? getAppDirectory() : volume ?? NOWHERE,
+    directory: volume ?? getAppDirectory(),
     values: hostValueBackend(),
     onChange: () => getPaneEventSink().send('pane-secrets:changed'),
   });
