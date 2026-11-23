@@ -43,7 +43,8 @@ export declare function isGitHubRepo(repo: CloneRepo): boolean;
 export declare function sealedSecretDigest(sealed: string): string;
 /**
  * The clone of a new Session's repo, as the guest reports it. It starts at boot, beside the daemon:
- * a blobless clone, then `runpane panes create --no-fetch`, whose Pane id the app opens. `line` is
+ * a shallow clone, then `runpane panes create --no-fetch`, whose Pane id the app opens; the full
+ * history arrives afterwards at low priority, with the status staying `ready`. `line` is
  * git's last progress line and `error` git's own message; the guest strips anything that looks like a
  * credential from both. A failed clone creates no Pane and leaves the VM running for retry_clone.
  */
