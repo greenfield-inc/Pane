@@ -36,7 +36,7 @@ let manager: PaneCloudManager | null = null;
  * Pane Cloud's channels. They run on this computer even while the window shows another one: the
  * service session, pairing and the saved computers are this desktop's.
  */
-export function registerPaneCloudHandlers(ipcMain: IpcMain, deps: {
+export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps: {
   commands: Pick<PaneCommandRegistry, 'invoke' | 'register'>;
   machines: Pick<MachineConnections, 'machineState' | 'run' | 'invokeOn'>;
   configManager: Pick<ConfigManager, 'getConfig' | 'updateConfigWith'>;
