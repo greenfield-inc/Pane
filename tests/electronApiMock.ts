@@ -23,7 +23,7 @@ import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/
 import type { PaneSecretsOverview, SecretLeaseStartRequest } from '../shared/types/paneSecrets';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 import type { RelayPairingInfo, RelayStatus } from '../shared/types/relay';
-import type { PaneCloudSnapshot } from '../shared/types/paneCloud';
+import type { PaneCloudAction, PaneCloudSnapshot } from '../shared/types/paneCloud';
 import type { OrchestrationSessionCreateInput } from '../shared/types/orchestrationSession';
 import type { ComputerRoute, ComputerRoutesReport, RemoteComputer } from '../shared/types/remoteComputers';
 import type { AutopilotDocument } from '../shared/types/autopilot';
@@ -1411,10 +1411,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       sendsSecrets: false,
     };
     const paneCloudCreates: OrchestrationSessionCreateInput[] = [];
+    /** Each cloud Session's action log, by VM id; empty until a spec sets one. */
+    const paneCloudActions = new Map<string, PaneCloudAction[]>();
     const paneCloudAnswer = () => Promise.resolve({ success: true, data: clone(paneCloudSnapshot) });
-    /** Stop, Start and Delete calls, by VM id. */
-    const paneCloudCalls: Array<{ action: 'stop' | 'start' | 'remove'; vmId: string }> = [];
-    const paneCloudCall = (action: 'stop' | 'start' | 'remove') => (vmId: string) => { paneCloudCalls.push({ action, vmId }); return paneCloudAnswer(); };
+    /** Stop, Start, Delete and Update Pane calls, by VM id. */
+    const paneCloudCalls: Array<{ action: 'stop' | 'start' | 'remove' | 'updatePane'; vmId: string }> = [];
+    const paneCloudCall = (action: 'stop' | 'start' | 'remove' | 'updatePane') => (vmId: string) => { paneCloudCalls.push({ action, vmId }); return paneCloudAnswer(); };
     const paneCloudApi = {
       get: paneCloudAnswer,
       signIn: paneCloudAnswer,
@@ -1422,8 +1424,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       stop: paneCloudCall('stop'),
       start: paneCloudCall('start'),
       remove: paneCloudCall('remove'),
-      updatePane: paneCloudAnswer,
-      actions: () => Promise.resolve({ success: true, data: [] }),
+      updatePane: paneCloudCall('updatePane'),
+      actions: (vmId: string) => Promise.resolve({ success: true, data: clone(paneCloudActions.get(vmId) ?? []) }),
       create: (input: OrchestrationSessionCreateInput) => {
         paneCloudCreates.push(clone(input));
         return Promise.resolve({ success: true, data: { machineId: 'cloud-1', sessionId: 's-1', snapshot: clone(paneCloudSnapshot) } });
@@ -2471,7 +2473,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           Object.assign(window.electronAPI, { paneCloud: paneCloudApi });
           emit('pane-cloud:changed', clone(paneCloudSnapshot));
         },
-        /** Every Stop, Start and Delete of a cloud Session, in order. */
+        /** Serves this action log for the cloud Session on `vmId`. */
+        setPaneCloudActions(vmId: string, actions: PaneCloudAction[]) {
+          paneCloudActions.set(vmId, clone(actions));
+        },
+        /** Every Stop, Start, Delete and Update Pane of a cloud Session, in order. */
         getPaneCloudCalls() {
           return clone(paneCloudCalls);
         },
