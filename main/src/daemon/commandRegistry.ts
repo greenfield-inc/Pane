@@ -28,6 +28,9 @@ export function paneCommandCaller(): PaneDaemonCaller | undefined {
   return callerInvocation.getStore();
 }
 
+/** Whether a command may run before the daemon's startup work ends (see `holdUntil`). */
+export type PaneCommandEarlyCheck = (channel: string, args: readonly PaneCommandValue[]) => boolean;
+
 /** Runs before every command; throws to refuse it (Autopilot's D-66 refusal). */
 export type PaneCommandGuard = (channel: string, args: readonly PaneCommandValue[], caller: PaneDaemonCaller | undefined) => void;
 
@@ -84,6 +87,20 @@ export class PaneCommandRegistry {
 
   private readonly handlers = new Map<string, RegisteredPaneCommandHandler>();
   private readonly guards: PaneCommandGuard[] = [];
+  private startupHold: { done: Promise<void>; runsEarly: PaneCommandEarlyCheck } | null = null;
+
+  /**
+   * Holds every command until `done` settles, however it settles, except those `runsEarly`
+   * accepts. The daemon listens before its slower startup work (skills, Pane Chat, Session
+   * restore), and only requests that need none of it are answered while that work runs.
+   */
+  holdUntil(done: Promise<void>, runsEarly: PaneCommandEarlyCheck): void {
+    const hold = { done: done.then(() => undefined, () => undefined), runsEarly };
+    this.startupHold = hold;
+    void hold.done.then(() => {
+      if (this.startupHold === hold) this.startupHold = null;
+    });
+  }
 
   /** Adds a check every command passes first, whatever route it came by. */
   addGuard(guard: PaneCommandGuard): () => void {
@@ -116,6 +133,9 @@ export class PaneCommandRegistry {
   }
 
   async invoke(channel: string, args: readonly PaneCommandValue[] = []): Promise<PaneCommandValue> {
+    // Before the handler lookup: a held command may be registered after startup work began.
+    const hold = this.startupHold;
+    if (hold && !hold.runsEarly(channel, args)) await hold.done;
     const handler = this.handlers.get(channel);
     if (!handler) {
       throw new PaneError(

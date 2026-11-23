@@ -340,7 +340,7 @@ export class PtyHostSupervisor extends EventEmitter {
     }
 
     // Capture whether this was a restart before arming the stability timer. The
-    // `ready-after-restart` event is the hook the index.ts listener uses to
+    // `ready-after-restart` event is the hook the desktop.ts listener uses to
     // drive per-manager `respawnAll()` — firing it on the initial boot would
     // re-enter empty maps and waste work.
     const wasRestart = this.restartCount > 0;
@@ -586,7 +586,7 @@ export class PtyHostSupervisor extends EventEmitter {
 
   /**
    * Stand up the per-BrowserWindow port pair and deliver the renderer end to
-   * the window. Called from `index.ts` on `did-finish-load`. The port carries
+   * the window. Called from `desktop.ts` on `did-finish-load`. The port carries
    * ack/write frames from the renderer and exit frames to it; terminal bytes
    * reach `TerminalPanel.tsx` over `terminal:output`.
    *

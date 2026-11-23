@@ -8,10 +8,9 @@ import os from 'os';
 import fs from 'fs';
 import path from 'path';
 import { nativeImage, powerMonitor, type App, type BrowserWindow } from 'electron';
-import { runStartupRetentionSweep, startupPanelBufferMigration } from '../services/database';
+import { databaseService, runStartupRetentionSweep, startupPanelBufferMigration } from '../services/database';
 import { ConfigManager } from '../services/configManager';
 import { Logger } from '../utils/logger';
-import { DatabaseService } from '../database/database';
 import { AnalyticsManager } from '../services/analyticsManager';
 import { setPairingAnalytics } from '../services/pairingAnalytics';
 import { SessionManager } from '../services/sessionManager';
@@ -87,7 +86,7 @@ import { PaneError } from '../../../shared/paneError';
 import { appScratchDirectory, appScratchRoot } from '../services/archiveRetention';
 import { panePausedMark } from '../../../shared/types/panels';
 import { MACHINE_HEALTH_CHANGED_EVENT, MACHINE_HEALTH_FINISHED_CHANGED_EVENT, MACHINE_HEALTH_INVENTORY_CHANGED_EVENT, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, type LeakWarning } from '../../../shared/types/machineHealth';
-import type { PaneCommandRegistry } from './commandRegistry';
+import type { PaneCommandRegistry, PaneCommandValue } from './commandRegistry';
 import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
 import { pausedMarkOf, type TerminalPanelState } from '../../../shared/types/panels';
@@ -175,6 +174,44 @@ function megabytes(bytes: number | null): string {
   return bytes === null ? 'unknown' : `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
 
+/** What makes a terminal more than a shell: a command to run, an agent, or a Session's tab. */
+const terminalLaunch = boundary.object({
+  initialCommand: boundary.optional(boundary.json),
+  launchCommand: boundary.optional(boundary.json),
+  agentType: boundary.optional(boundary.json),
+  orchestrationSessionId: boundary.optional(boundary.json),
+});
+const plainTerminalCreate = boundary.object({
+  type: boundary.literal('terminal'),
+  initialState: boundary.optional(boundary.json),
+});
+const wrappedState = boundary.object({ customState: boundary.optional(boundary.json) });
+/** The requests that open and drive a plain terminal; panels:initialize starts its shell. */
+const PLAIN_TERMINAL_CHANNELS = new Set(['panels:initialize', 'terminal:setVisibility', 'terminal:input', 'terminal:resize', 'terminal:ack']);
+
+function isPlainShell(state: PaneCommandValue): boolean {
+  const launch = decodeOptionalBoundary(state ?? {}, terminalLaunch);
+  return !!launch && Object.values(launch).every(value => value === undefined);
+}
+
+/**
+ * The commands answered while the daemon's startup work (skills, Pane Chat, Session restore) still
+ * runs: those that open and drive a plain shell terminal, which needs none of it. An agent's or a
+ * Session's tab waits, since restore repairs its launch command first.
+ */
+function runsBeforeStartupWork(channel: string, args: readonly PaneCommandValue[]): boolean {
+  if (channel === 'panels:create') {
+    const request = decodeOptionalBoundary(args[0], plainTerminalCreate);
+    if (!request) return false;
+    // Callers send the panel's state directly or as { customState }; either may name a launch.
+    const initial = request.initialState ?? null;
+    return isPlainShell(initial) && isPlainShell(decodeOptionalBoundary(initial ?? {}, wrappedState)?.customState ?? null);
+  }
+  const panelId = PLAIN_TERMINAL_CHANNELS.has(channel) ? decodeOptionalBoundary(args[0], boundary.string) : undefined;
+  const panel = panelId === undefined ? undefined : panelManager.getPanel(panelId);
+  return panel?.type === 'terminal' && isPlainShell(panel.state.customState ?? null);
+}
+
 /** Leftover processes the person chose to keep (pid:start), so a restart does not ask about them again. */
 const KEPT_PROCESSES_PREFERENCE = 'machine_health_kept_processes';
 
@@ -231,9 +268,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     );
   }
 
-  const dbPath = configManager.getDatabasePath();
-  const databaseService = new DatabaseService(dbPath);
-  databaseService.initialize();
+  // services/database.ts opened and migrated sessions.db (the same file: configManager.getDatabasePath())
+  // when it loaded; every service shares that one connection.
 
   const analyticsManager = new AnalyticsManager(configManager);
   setPairingAnalytics(analyticsManager);
@@ -335,10 +371,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   paneMcpEndpoint.attach();
   setPaneMcpEndpoint(paneMcpEndpoint);
   const skillCacheManager = new SkillCacheManager();
-  await skillCacheManager.start().catch(error => {
-    logger.warn('[SkillCache] Failed to install Pane Chat skills', error instanceof Error ? error : undefined);
-  });
-  await skillCacheManager.syncHomeSkill(configManager.getConfig(), databaseService.getAllProjects());
   // T-39: turning To-dos on or off rewrites what Pane installed for agents (the bundled and home skills, the
   // repo's managed AGENTS.md section) with or without their To-dos parts. Session folders follow on their next open.
   let todosWereOn = todosEnabled(configManager.getConfig());
@@ -353,10 +385,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
         : Promise.resolve(true),
     ]).catch(error => logger.warn('[Todos] Could not rewrite agent instructions after To-dos was turned on or off', error instanceof Error ? error : undefined));
   });
-  // Bundled profiles: set up greenfield and the other bundled plugins in Pane's own Agent Farm
-  // config root, without delaying startup. It never touches the person's own Agent Farm.
-  // The Profiles page shows the install's state, so it reads the library again when it ends.
-  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) }).then(() => getPaneEventSink().send('profiles:changed'));
   if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {
     // Retry until all saved repositories are available, without delaying startup.
     const migrationConfig = configManager.getConfig();
@@ -370,9 +398,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     }).catch(error => console.warn('[AgentContext] Could not finish startup cleanup:', error));
   }
   const paneChatManager = new PaneChatManager(configManager, sessionManager, skillCacheManager);
-  await paneChatManager.getOrCreate().catch(error => {
-    logger.warn('[PaneChat] Failed to ensure startup Pane Chat session', error instanceof Error ? error : undefined);
-  });
   const orchestrationSessionManager = new OrchestrationSessionManager(
     configManager,
     sessionManager,
@@ -381,12 +406,31 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     gitStatusManager,
   );
   orchestrationSessionManager.liveActivity.start();
-  await orchestrationSessionManager.initialize().catch(error => {
-    // Keep the rest of Pane available when a previously-written Session store
-    // cannot be read. Session APIs retry and return the exact failure instead
-    // of silently replacing the user's metadata.
-    logger.error('[Sessions] Failed to initialize durable Session metadata', error instanceof Error ? error : new Error(String(error)));
-  });
+  /**
+   * Work a plain terminal doesn't need: it runs once the socket listens, and every command except
+   * a plain terminal's own waits for it (holdUntil below). Each step keeps its order and its
+   * handling of failures. Stopping Pane part way loses nothing: the skill manifest is written
+   * after the copy, and the database and Session store writes are atomic.
+   */
+  const finishDeferredStartup = async (): Promise<void> => {
+    await skillCacheManager.start().catch(error => {
+      logger.warn('[SkillCache] Failed to install Pane Chat skills', error instanceof Error ? error : undefined);
+    });
+    await skillCacheManager.syncHomeSkill(configManager.getConfig(), databaseService.getAllProjects());
+    // Bundled profiles: set up greenfield and the other bundled plugins in Pane's own Agent Farm
+    // config root, without delaying startup. It never touches the person's own Agent Farm.
+    // The Profiles page shows the install's state, so it reads the library again when it ends.
+    void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) }).then(() => getPaneEventSink().send('profiles:changed'));
+    await paneChatManager.getOrCreate().catch(error => {
+      logger.warn('[PaneChat] Failed to ensure startup Pane Chat session', error instanceof Error ? error : undefined);
+    });
+    await orchestrationSessionManager.initialize().catch(error => {
+      // Keep the rest of Pane available when a previously-written Session store
+      // cannot be read. Session APIs retry and return the exact failure instead
+      // of silently replacing the user's metadata.
+      logger.error('[Sessions] Failed to initialize durable Session metadata', error instanceof Error ? error : new Error(String(error)));
+    });
+  };
   getMobilePushSender(configManager, { resolveSubject: paneId => orchestrationSessionManager.alertSubject(paneId) });
   const taskQueue = new TaskQueue({
     sessionManager,
@@ -598,6 +642,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   };
 
   const commandRegistry = registerIpcHandlers(services);
+  let releaseStartupHold!: () => void;
+  commandRegistry.holdUntil(new Promise<void>(resolve => { releaseStartupHold = resolve; }), runsBeforeStartupWork);
 
   // To-dos (D-409): the service answers reads everywhere; only the instance that does housekeeping
   // runs the supervisor, the load gate and launch resume, so one data folder has one supervisor.
@@ -812,6 +858,18 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       '[Pane daemon] Failed to start local daemon server; continuing with renderer-only runtime events',
       error instanceof Error ? error : new Error(String(error)),
     );
+  }
+
+  if (paneDaemonServer) {
+    // A client that connects now sees its plain terminal's output while the startup work runs;
+    // the other sinks join below, as before.
+    const socketSink = paneDaemonServer.getEventSink();
+    installPaneRuntime(createFanoutEventSink([rendererEventSink, socketSink]), configManager, options.getPtyHostRuntime, getWebviewContextMap, socketSink);
+  }
+  try {
+    await finishDeferredStartup();
+  } finally {
+    releaseStartupHold();
   }
 
   if (startRemoteTransport) {

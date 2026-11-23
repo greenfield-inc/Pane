@@ -9,7 +9,10 @@ export const databaseService = new DatabaseService(dbPath);
 
 // Initialize the database schema and run migrations, including the one-time
 // move of terminal bytes out of tool_panels.state (see panelBufferMigration).
+const openedAt = performance.now();
 databaseService.initialize();
+// A startup phase that benchmarks and P11's boot budget read.
+console.log(`[Database] Opened and migrated sessions.db in ${Math.round(performance.now() - openedAt)} ms`);
 export const startupPanelBufferMigration = databaseService.getPanelBufferMigration();
 
 // Scrollback retention sweep. The daemon host runs it first thing at startup,

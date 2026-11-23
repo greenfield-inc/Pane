@@ -1,6 +1,6 @@
 import { exec, execFile, ExecOptions, ExecFileOptions } from 'child_process';
 import { promisify } from 'util';
-import { getShellPath } from './shellPath';
+import { getShellPathAsync } from './shellPath';
 import { WSLContext, buildWSLENV, escapeForBash, getWSLExecArgs } from './wslUtils';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
@@ -107,7 +107,7 @@ export class CommandExecutor {
 
   async execAsync(command: string, options?: ExtendedExecAsyncOptions, wslContext?: WSLContext | null): Promise<{ stdout: string; stderr: string }> {
     const cwd = options?.cwd || process.cwd();
-    const shellPath = getShellPath();
+    const shellPath = await getShellPathAsync();
     const silentMode = options?.silent === true;
 
     if (wslContext) {
@@ -198,7 +198,7 @@ export class CommandExecutor {
     wslContext?: WSLContext | null,
   ): Promise<ExecFileResult> {
     const cwd = options?.cwd || process.cwd();
-    const shellPath = getShellPath();
+    const shellPath = await getShellPathAsync();
     const silentMode = options?.silent === true;
     const { okExitCodes = [], silent: _silent, ...cleanOptions } = options || {};
     void _silent;

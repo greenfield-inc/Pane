@@ -26,8 +26,10 @@ remote PWA / mobile ──HTTP + SSE──▶ daemon ◀──socket── runpa
                                                  ptyHost (optional utility process)
 ```
 
-- **Main process** (`main/src/index.ts`) owns native integration, git
-  worktrees, CLI processes and persistence. Business logic lives in
+- **Main process** owns native integration, git worktrees, CLI processes and
+  persistence. Its entry, `main/src/index.ts`, sets Electron's switches and
+  loads either the desktop app (`desktop.ts`) or, with `--daemon-headless`, the
+  headless daemon (`daemon/headless.ts`) without the desktop's modules. Business logic lives in
   `main/src/services/`; IPC handlers live in `main/src/ipc/`.
 - **Preload** (`main/src/preload.ts`) is bundled with esbuild because the
   renderer is sandboxed (`scripts/verify-sandboxed-preload.js` checks it). It
@@ -52,8 +54,11 @@ remote PWA / mobile ──HTTP + SSE──▶ daemon ◀──socket── runpa
   A desktop saves each computer it reaches once, with its routes in order
   (`shared/types/remoteComputers.ts`), and `daemon/client/remotePaneClient.ts`
   connects on the nearest route that answers ([Routes](QR_PAIRING.md#routes)).
-  `pnpm daemon:headless` runs it
-  without a window. Remote setup and lifecycle:
+  `pnpm daemon:headless` and `pane --daemon-headless` run it
+  without a window. The socket listens before the skill copy, Pane Chat and
+  Session restore (`daemon/bootstrap.ts`); until they finish it answers only a
+  plain shell terminal's requests and holds the rest (`holdUntil` in
+  `commandRegistry.ts`). Remote setup and lifecycle:
   [SELF_HOSTED_REMOTE_DAEMON.md](SELF_HOSTED_REMOTE_DAEMON.md) and
   [remote-daemon-lifecycle.md](remote-daemon-lifecycle.md).
 - **ptyHost** (`main/src/ptyHost`) runs PTYs in an Electron utility process.

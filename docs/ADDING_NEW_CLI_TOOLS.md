@@ -161,7 +161,7 @@ carrying do not offer pi yet.
 
 `main/src/services/agents/agentResume.ts` → `resolveResumeId` maps the agent to the
 resume id shown in the resume dialog. `sessionManager.resumeInterruptedSessions` and
-the `index.ts` graceful-shutdown path are agent-generic once the classifier knows the
+the `desktop.ts` graceful-shutdown path are agent-generic once the classifier knows the
 binary.
 
 ## 3. Status manifest

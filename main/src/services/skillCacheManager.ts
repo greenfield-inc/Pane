@@ -429,20 +429,18 @@ export class SkillCacheManager {
     const bundledSkills = (await fs.readdir(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills'))).sort();
     const skills = [...bundledSkills, 'pane-orchestrator'];
 
-    await fs.rm(this.paneChatSkillsRoot, { recursive: true, force: true });
-    for (const [root, legacy] of [
-      [this.claudeProjectSkillsRoot, legacySynced.claude],
-      [this.codexProjectSkillsRoot, legacySynced.codex],
-    ] as const) {
-      for (const name of new Set([...previous.skills, ...legacy, ...skills])) {
-        await fs.rm(path.join(root, name), { recursive: true, force: true });
-      }
-    }
-    for (const skill of bundledSkills) {
-      for (const root of [this.paneChatSkillsRoot, this.claudeProjectSkillsRoot, this.codexProjectSkillsRoot]) {
-        await copyBundledPath(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills', skill), path.join(root, skill), todos);
-      }
-    }
+    // Removals and copies touch separate paths, so each runs at once rather than one file at a time;
+    // the manifest below is written only after every copy finished.
+    await Promise.all([
+      fs.rm(this.paneChatSkillsRoot, { recursive: true, force: true }),
+      ...([
+        [this.claudeProjectSkillsRoot, legacySynced.claude],
+        [this.codexProjectSkillsRoot, legacySynced.codex],
+      ] as const).flatMap(([root, legacy]) => [...new Set([...previous.skills, ...legacy, ...skills])]
+        .map(name => fs.rm(path.join(root, name), { recursive: true, force: true }))),
+    ]);
+    await Promise.all(bundledSkills.flatMap(skill => [this.paneChatSkillsRoot, this.claudeProjectSkillsRoot, this.codexProjectSkillsRoot]
+      .map(root => copyBundledPath(path.join(PANE_CHAT_BUNDLE_ROOT, 'skills', skill), path.join(root, skill), todos))));
     const agents = await this.installSubagents(subagents, previous.agents);
 
     await this.writeTextFile(manifestPath, `${JSON.stringify({ skills, agents, bundleHash }, null, 2)}\n`);
@@ -1447,9 +1445,7 @@ async function copyBundledPath(source: string, target: string, todos: boolean): 
     await fs.writeFile(target, source.endsWith('.md') ? withTodosText(content.toString('utf8'), todos) : content);
     return;
   }
-  for (const entry of await fs.readdir(source)) {
-    await copyBundledPath(path.join(source, entry), path.join(target, entry), todos);
-  }
+  await Promise.all((await fs.readdir(source)).map(entry => copyBundledPath(path.join(source, entry), path.join(target, entry), todos)));
 }
 
 function markdownCode(value: string): string {

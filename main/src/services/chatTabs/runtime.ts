@@ -54,7 +54,7 @@ export function chatFailure(cause: unknown, fallback: { code: string; next: stri
   return new PaneError(fallback.code, `The agent reported an error: ${reasonOf(cause)}${detail ? ` (${detail})` : ''}.`, fallback.next);
 }
 
-export function isAuthRequired(error: PaneError): boolean { return error.code === 'CHAT_NOT_SIGNED_IN'; }
+export { isAuthRequired } from './chatErrors';
 
 /** claude-agent-acp's extension: stops a task; for the task of an agent's own turn, it interrupts the turn. */
 const ASYNC_TASK_STOP = '_session/async_task/stop';

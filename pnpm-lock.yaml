@@ -400,9 +400,6 @@ importers:
       smol-toml:
         specifier: 1.7.1
         version: 1.7.1
-      uuid:
-        specifier: ^13.0.0
-        version: 13.0.2
       web-streams-polyfill:
         specifier: ^3.3.3
         version: 3.3.3

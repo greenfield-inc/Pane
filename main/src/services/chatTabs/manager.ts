@@ -9,7 +9,8 @@ import { CHAT_CONVERSATION_LIMIT, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState,
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { AgentCommand } from './agentProcess';
-import { ChatTabRuntime, chatFailure, isAuthRequired, type RuntimeExit } from './runtime';
+import type { ChatTabRuntime, RuntimeExit } from './runtime';
+import { isAuthRequired } from './chatErrors';
 import { ChatTranscript, type TurnMarker } from './transcript';
 import type { PauseOutcome } from '../terminalPanelManager';
 import { QueuedBodies } from './queuedBodies';
@@ -18,6 +19,10 @@ import { chatPausedViewSchema } from '../../../../shared/types/chatTabDecoders';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 import { sessionMovingError } from '../../../../shared/types/sessionMove';
 import { CHAT_STALL_MS, chatMidTurn, isRunpaneWait } from '../agentStatus/midTurn';
+
+/** The ACP runtime and its SDK load with the first chat tab that starts, not with Pane. */
+let runtimeModule: Promise<typeof import('./runtime')> | undefined;
+const loadRuntime = () => (runtimeModule ??= import('./runtime'));
 
 /** Everything the agent process needs, rebuilt at every start. Never saved. */
 export interface ResolvedLaunch {
@@ -703,6 +708,7 @@ export class ChatTabManager {
       transcript = tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages, turnTimes });
       launch = await this.options.launcher.resolve(panel, this.required(panelId));
     } catch (error) {
+      const { chatFailure } = await loadRuntime();
       const failure = chatFailure(error, { code: 'CHAT_LAUNCH_FAILED', next: 'Press Restart.' });
       this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent, this.name));
       throw failure;
@@ -710,6 +716,9 @@ export class ChatTabManager {
     // Closed or restarted while the launch resolved: start nothing.
     if (tab.run !== generation) return;
     tab.launch = launch;
+    const { ChatTabRuntime, chatFailure } = await loadRuntime();
+    // Closed or restarted while the runtime loaded: start nothing.
+    if (tab.run !== generation) return;
     const runtime = new ChatTabRuntime({
       command: launch.command,
       generation,
@@ -901,7 +910,7 @@ export class ChatTabManager {
       this.drain(panelId);
     };
     this.publish(panelId);
-    void runtime.prompt(content).then(result => finish('completed', result.stopReason), error => { void runtime.exitsWithin(250).then(exited => finish('failed', exited ? 'exited' : 'error', chatFailure(error))); });
+    void runtime.prompt(content).then(result => finish('completed', result.stopReason), error => { void Promise.all([runtime.exitsWithin(250), loadRuntime()]).then(([exited, { chatFailure }]) => finish('failed', exited ? 'exited' : 'error', chatFailure(error))); });
   }
 
   /**

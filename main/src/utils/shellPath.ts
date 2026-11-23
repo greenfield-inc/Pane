@@ -278,6 +278,15 @@ export async function warmShellPath(): Promise<void> {
 }
 
 /**
+ * The shell PATH for an async caller: it waits for the background probe instead of blocking the
+ * main thread on a synchronous one. Falls back to getShellPath()'s chain if the probe failed.
+ */
+export async function getShellPathAsync(): Promise<string> {
+  await warmShellPath();
+  return getShellPath();
+}
+
+/**
  * Combine the probed shell PATH with the process PATH and known tool
  * directories, and cache the result.
  */

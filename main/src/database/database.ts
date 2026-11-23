@@ -2,7 +2,7 @@ import Database from "better-sqlite3-multiple-ciphers";
 import type { NewPanePlacement } from '../../../shared/utils/paneOrder';
 import { readFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import { createRequire } from "node:module";
 import type {
   Project,
@@ -2210,7 +2210,7 @@ export class DatabaseService {
 
           if (!hasDiffPanel) {
             // Create diff panel for this session
-            const panelId = uuidv4();
+            const panelId = randomUUID();
             const now = new Date().toISOString();
 
             this.db

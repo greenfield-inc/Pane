@@ -41,6 +41,32 @@ describe('PaneCommandRegistry', () => {
     await expect(registry.invokeConnected('runpane:panels:wait', [], new AbortController().signal, { panelId: 'failed' })).rejects.toThrow('no such panel');
     expect(runpaneWaits.isWaiting('failed')).toBe(false);
   });
+  it('holds commands until startup work ends, except the ones allowed to run early', async () => {
+    const registry = new PaneCommandRegistry();
+    const ran: string[] = [];
+    registry.register('runpane:panes:list', () => { ran.push('runpane:panes:list'); return []; });
+    registry.register('panels:initialize', (panelId: PaneCommandValue) => { ran.push(`panels:initialize ${String(panelId)}`); return true; });
+    let finishStartup!: () => void;
+    registry.holdUntil(new Promise<void>(resolve => { finishStartup = resolve; }), (channel, args) => channel === 'panels:initialize' && args[0] === 'plain');
+
+    const held = registry.invoke('runpane:panes:list');
+    const heldPanel = registry.invoke('panels:initialize', ['agent']);
+    await expect(registry.invoke('panels:initialize', ['plain'])).resolves.toBe(true);
+    // A channel registered after the hold began still waits for it rather than failing as unknown.
+    const lateRegistered = registry.invoke('ports:list');
+    registry.register('ports:list', () => { ran.push('ports:list'); return []; });
+    expect(ran).toEqual(['panels:initialize plain']);
+
+    finishStartup();
+    await Promise.all([held, heldPanel, lateRegistered]);
+    expect(ran).toEqual(['panels:initialize plain', 'runpane:panes:list', 'panels:initialize agent', 'ports:list']);
+  });
+  it('releases held commands when startup work fails', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:panes:list', () => []);
+    registry.holdUntil(Promise.reject(new Error('skills could not be copied')), () => false);
+    await expect(registry.invoke('runpane:panes:list')).resolves.toEqual([]);
+  });
   it('keeps a PaneError\'s code in the text Electron IPC sends, as Node does for coded errors', async () => {
     const rejected = await rejectWithPaneErrorText(Promise.reject(new PaneError('CHAT_SWITCH_FAILED', 'The chat did not open.', 'Try again.'))).then(() => new Error('resolved'), (error: Error) => error);
     // Electron replies with error.toString(); the renderer reads the code back from it.

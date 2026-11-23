@@ -77,6 +77,7 @@
     "main": {
       "entry": [
         "src/index.ts",
+        "src/desktop.ts",
         "src/preload.ts",
         "src/services/devices/frameScalerPreload.ts",
         "src/daemon/headless.ts",

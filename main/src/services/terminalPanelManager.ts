@@ -116,7 +116,7 @@ const PROCESS_EXIT_TIMEOUT_MS = 8000;
 // On quit, agents have already had Ctrl+C and two seconds to leave, and a
 // shell exits within milliseconds of its hangup: anything still alive after
 // this is not leaving on its own. The whole snapshot-and-kill step is capped
-// well inside the 30 s forced exit in index.ts, so the cleanup after it runs.
+// well inside the 30 s forced exit in desktop.ts, so the cleanup after it runs.
 const QUIT_EXIT_GRACE_MS = 500;
 const QUIT_KILL_TIMEOUT_MS = 2000;
 const QUIT_TEARDOWN_TIMEOUT_MS = 8000;
@@ -3853,7 +3853,7 @@ export class TerminalPanelManager extends EventEmitter {
       // Outer guard: nothing in one terminal's teardown may abort the loop.
       // That failure is wider than the one this method is fixing — it would
       // leave every later PTY unkilled and skip the `clear()` calls below,
-      // and the caller in `index.ts` hard-exits immediately afterwards.
+      // and the caller in `desktop.ts` hard-exits immediately afterwards.
       try {
         // Save state before killing. `saveTerminalState` is async, so no
         // synchronous `try` can observe its rejection; hence the explicit
