@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { ArrowLeft, ArrowRight, RotateCw, Loader2, ChevronDown, Copy, Check, FileCode, ExternalLink } from 'lucide-react';
+import { ArrowLeft, ArrowRight, RotateCw, Loader2, ChevronDown, Copy, Check, FileCode, ExternalLink, Radio } from 'lucide-react';
 import type { ToolPanel, BrowserPanelState } from '../../../../../shared/types/panels';
 import { cn } from '../../../utils/cn';
 import { panelApi } from '../../../services/panelApi';
@@ -18,7 +18,7 @@ import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../../ui/Skeleton';
 import { PortsList } from './PortsList';
 import { RefusedFilesNotice, type FileRefusal } from './RefusedFilesNotice';
 import { TabNotices, type ShownTabNotice } from './TabNotices';
-import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../../../../shared/types/browser';
+import { BROWSER_TAB_NOTICE_CHANNEL, BROWSER_VIEW_LIVE_CHANNEL, type BrowserTabNotice } from '../../../../../shared/types/browser';
 import { FindBar } from '../../find/FindBar';
 import { usePanelFind } from '../../find/usePanelFind';
 import { closeFind, getFindBar, reportFindResult, setFindQuery, useFindBar } from '../../find/findController';
@@ -32,9 +32,11 @@ const MAX_NOTICES = 3;
 interface BrowserPanelProps {
   panel: ToolPanel;
   isActive: boolean;
+  /** This desktop's own copy of another computer's page an agent used: switch to the host's live page. */
+  onViewLive?: () => void;
 }
 
-const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
+const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive, onViewLive }) => {
   const initRef = useRef(false);
   const [url, setUrl] = useState('');
   const [inputUrl, setInputUrl] = useState('');
@@ -635,6 +637,36 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     window.addEventListener(BROWSER_TAB_NOTICE_CHANNEL, handler);
     return () => window.removeEventListener(BROWSER_TAB_NOTICE_CHANNEL, handler);
   }, [panel.id]);
+  // The page's right-click menu offers View live while this tab does (main's attachEditContextMenu).
+  const offersLive = onViewLive !== undefined;
+  const viewLiveRef = useRef(onViewLive);
+  useEffect(() => { viewLiveRef.current = onViewLive; }, [onViewLive]);
+  useEffect(() => {
+    if (!webview || !offersLive) return;
+    const offer = (on: boolean) => {
+      try {
+        void window.electronAPI?.invoke('browser-panel:offer-live', webview.getWebContentsId(), on);
+      } catch {
+        // Not attached yet: did-attach offers it.
+      }
+    };
+    const onAttach = () => offer(true);
+    offer(true);
+    webview.addEventListener('did-attach', onAttach);
+    return () => {
+      webview.removeEventListener('did-attach', onAttach);
+      offer(false);
+    };
+  }, [webview, offersLive]);
+  useEffect(() => {
+    const handler = (event: Event) => {
+      // SAFETY: preload dispatches this event with BROWSER_VIEW_LIVE_CHANNEL's payload.
+      const { panelId } = (event as CustomEvent<{ panelId: string }>).detail;
+      if (panelId === panel.id) viewLiveRef.current?.();
+    };
+    window.addEventListener(BROWSER_VIEW_LIVE_CHANNEL, handler);
+    return () => window.removeEventListener(BROWSER_VIEW_LIVE_CHANNEL, handler);
+  }, [panel.id]);
   const dismissNotice = useCallback((key: string) => setNotices(current => current.filter(shown => shown.key !== key)), []);
   const openApp = useCallback((key: string, id: string) => {
     dismissNotice(key);
@@ -772,6 +804,21 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             </span>
           )}
         </form>
+        {onViewLive && (
+          <button
+            type="button"
+            onClick={onViewLive}
+            className={cn(
+              'flex flex-shrink-0 items-center gap-1 rounded border border-border-primary px-2 py-1 text-xs text-text-secondary',
+              'transition-colors hover:bg-surface-hover hover:text-text-primary'
+            )}
+            title="Show the page live from the computer the agent works on"
+            data-testid="browser-view-live"
+          >
+            <Radio className="h-3 w-3" />
+            View live
+          </button>
+        )}
         <button
           type="button"
           onClick={handleCopyUrl}

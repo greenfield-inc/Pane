@@ -59,15 +59,56 @@ test.describe('Machine health cards', () => {
     expect(await page.evaluate(() => window.qaAnswers)).toEqual(['Keep them', 'Stop them']);
   });
 
-  test('inside the window, Escape leaves a card waiting and the next card opens', async ({ page }) => {
-    await page.route('**/machine-health-cards.html*', route => route.fulfill({ contentType: 'text/html', body: `<html><head><meta charset="UTF-8"></head><body><div id="root"></div><script type="module">import RefreshRuntime from "/@react-refresh"; RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => type => type; window.__vite_plugin_react_preamble_installed__ = true;</script><script type="module" src="/@vite/client"></script><script type="module" src="/@fs/${fixture}"></script></body></html>` }));
-    await page.goto('/machine-health-cards.html?dialog=1');
-    await expect(page.getByRole('dialog', { name: 'Disk almost full' })).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog', { name: 'Memory is tight' })).toBeVisible();
-    await page.getByRole('button', { name: 'Not now' }).click();
+  test('inside the window, warnings show as bottom-left popups that hide on their own and never take focus', async ({ page }) => {
+    await open(page, 'popup=warning');
+    await page.getByLabel('Composer').focus();
+    const popups = page.getByTestId('health-popup');
+    await expect(popups).toHaveCount(2);
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    expect(await page.evaluate(() => window.qaAnswers)).toEqual(['Not now']);
+    await expect(page.getByRole('status', { name: 'Disk almost full' })).toHaveAttribute('data-level', 'warning');
+    const box = await page.getByTestId('health-popups').boundingBox();
+    expect(box && box.x < 40 && box.y + box.height > 900 - 40).toBe(true);
+    await expect(page.getByLabel('Composer')).toBeFocused();
+    // Hovering the stack holds every popup in it; leaving lets them hide after Notify's update time.
+    await page.getByRole('status', { name: 'Memory is tight' }).hover();
+    await page.waitForTimeout(3000);
+    await expect(popups).toHaveCount(2);
+    await page.mouse.move(700, 100);
+    await expect(popups).toHaveCount(0, { timeout: 4000 });
+    expect(await page.evaluate(() => window.qaCommands)).toEqual([]);
+  });
+
+  test('a critical card is a red popup that stays until dismissed or resolved', async ({ page }) => {
+    await open(page, 'popup=critical');
+    const critical = page.getByRole('alert', { name: 'Disk is almost full' });
+    await expect(critical).toHaveAttribute('data-level', 'critical');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    // The warning hides on its own; the critical card is still there after it.
+    await expect(page.getByRole('status', { name: 'Memory is tight' })).toHaveCount(0, { timeout: 4000 });
+    await page.waitForTimeout(500);
+    await expect(critical).toBeVisible();
+    await critical.getByRole('button', { name: 'Dismiss' }).click();
+    expect(await page.evaluate(() => window.qaCommands)).toEqual([{ type: 'dismiss', id: 'd1' }]);
+    await page.evaluate(() => window.qaResolve('d1'));
+    await expect(critical).toHaveCount(0);
+  });
+
+  test('a popup that arrives after the stack closed under the pointer still hides on its own', async ({ page }) => {
+    await open(page, 'popup=critical');
+    const critical = page.getByRole('alert', { name: 'Disk is almost full' });
+    await critical.hover();
+    // Both cards end while the pointer rests on the stack, so it unmounts without a pointer leave.
+    await page.evaluate(() => { window.qaResolve('m1'); window.qaResolve('d1'); });
+    await expect(page.getByTestId('health-popups')).toHaveCount(0);
+    await page.evaluate(() => window.qaAdd('l1'));
+    await expect(page.getByTestId('health-popup')).toHaveCount(1);
+    await expect(page.getByTestId('health-popup')).toHaveCount(0, { timeout: 4000 });
+  });
+
+  test('Open Resources on a popup opens the Resources view', async ({ page }) => {
+    await open(page, 'popup=critical');
+    await page.getByRole('alert', { name: 'Disk is almost full' }).getByRole('button', { name: 'Open Resources' }).click();
+    await expect.poll(() => page.evaluate(() => window.qaView())).toBe('resources');
   });
 
   test('screenshots of every card, light and dark', async ({ page }) => {
@@ -76,6 +117,14 @@ test.describe('Machine health cards', () => {
       for (const theme of ['light', 'dark']) {
         await open(page, `kind=${kind}&theme=${theme}`);
         await page.locator('#root > div > div').screenshot({ path: `${shots}/card-${kind.replace('&remote=1', '-remote')}-${theme}.png` });
+      }
+    }
+    for (const level of ['warning', 'critical']) {
+      for (const theme of ['light', 'dark']) {
+        await open(page, `popup=${level}&theme=${theme}`);
+        await page.getByTestId('health-popup').first().waitFor();
+        await page.getByTestId('health-popups').hover();
+        await page.screenshot({ path: `${shots}/popup-${level}-${theme}.png`, clip: { x: 0, y: 500, width: 460, height: 400 } });
       }
     }
   });

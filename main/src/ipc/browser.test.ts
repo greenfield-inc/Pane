@@ -787,6 +787,34 @@ describe('browser tabs: streaming a page to another screen', () => {
     expect(decodeBoundary(await fixture.registry.invokeRemote('browser:view', ['closed', 0], { caller: undefined }), browserTabViewSchema)).toMatchObject({ stopped: 'gone' });
   });
 
+  it('marks a tab an agent typed into, so other screens keep streaming it, until its page loads a new document', async () => {
+    const fixture = setup([browserTab('form', 'pane-a', 'claude-a'), browserTab('browsed', 'pane-a', 'claude-a')], { holds });
+    // SAFETY: browserTab builds every tab's customState as a BrowserPanelState.
+    const use = (id: string) => (fixture.tabs.find(tab => tab.id === id)?.state.customState as BrowserPanelState | undefined)?.agentUse;
+    await call(fixture, 'snapshot', { tab: 'form' });
+    await call(fixture, 'snapshot', { tab: 'browsed' });
+    expect(use('form')).toBeUndefined();
+    await call(fixture, 'click', { tab: 'browsed', ref: 'e2' });
+    expect(use('browsed')).toBe('used');
+    await call(fixture, 'type', { tab: 'form', ref: 'e1', text: 'ada@example.com' });
+    expect(use('form')).toBe('typed');
+    await call(fixture, 'click', { tab: 'form', ref: 'e2' });
+    expect(use('form')).toBe('typed');
+    fixture.pages.get('form')?.emit('did-navigate');
+    await vi.waitFor(() => expect(use('form')).toBe('used'));
+    // Typing that submits the form (Enter) loads the next document during the call itself.
+    const page = fixture.pages.get('form');
+    if (!page) throw new Error('The form tab has no page.');
+    Object.assign(page, { insertText: async () => { page.emit('did-navigate'); } });
+    await call(fixture, 'type', { tab: 'form', ref: 'e1', text: 'ada@example.com' });
+    expect(use('form')).toBe('used');
+    // A page that goes (the tab slept) reloads from its URL later, without what was typed.
+    await call(fixture, 'type', { tab: 'browsed', ref: 'e1', text: 'ada@example.com' });
+    expect(use('browsed')).toBe('typed');
+    fixture.pages.get('browsed')?.emit('destroyed');
+    await vi.waitFor(() => expect(use('browsed')).toBe('used'));
+  });
+
   it('says a tab is asleep, so the screen offers to wake it', async () => {
     const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { held: [], holds: { ...holds, idleMs: 50 } });
     await call(fixture, 'snapshot', {});

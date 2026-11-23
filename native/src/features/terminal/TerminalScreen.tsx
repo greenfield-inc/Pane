@@ -8,7 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PaneError } from '@shared/paneError';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import type { OrchestrationSessionView } from '@shared/types/orchestrationSession';
-import { pausedMarkOf, type EditorPanelState, type TerminalPanelState, type ToolPanel } from '@shared/types/panels';
+import { pausedMarkOf, type BrowserPanelState, type EditorPanelState, type TerminalPanelState, type ToolPanel } from '@shared/types/panels';
+import { offersViewLive, streamChoices, viewLive } from '@shared/utils/streamChoice';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
 import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
@@ -171,7 +172,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   };
 
 
-  // A long press on a tab offers Close; a tab whose agent is still at work asks once more.
+  // A long press on a tab offers Close (and View live on a page tab an agent used); a tab whose agent is still at work asks once more.
   const closePanel = (tab: ToolPanel) => {
     const close = () => deletePanel.mutate([tab.id], { onError: error => Alert.alert('Couldn’t close the tab', error.message) });
     const state = statuses.data?.agentStatus[tab.id];
@@ -181,7 +182,10 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
         { text: 'Close', style: 'destructive', onPress: close },
       ])
       : close;
-    offerClose(tab.title, confirm);
+    // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
+    const page = tab.type === 'browser' ? tab.state.customState as BrowserPanelState | undefined : undefined;
+    const live = tab.type === 'browser' && offersViewLive(streamChoices.all().get(tab.id), page) ? () => { viewLive(tab.id, page); selectPanel(tab); } : undefined;
+    offerClose(tab.title, confirm, live);
   };
 
   return (

@@ -59,6 +59,8 @@ describe('HealthCardController', () => {
     const cleaned: string[][] = [];
     const stopped: number[][] = [];
     const alerts: string[] = [];
+    const withdrawn: Array<{ title: string; reason: string }> = [];
+    const titles = new Map<string, string>();
     // The first `awayFor` alerts find the person away from this machine.
     let away = options.awayFor ?? 0;
     const delivered = () => {
@@ -72,15 +74,16 @@ describe('HealthCardController', () => {
     let inventory = options.inventory === undefined ? scanned : options.inventory;
     const c = new HealthCardController({
       // A null answer leaves the card waiting.
-      now: () => now, notificationsOn: () => notifications, ask: question => { asked.push(question); if (unavailable) return Promise.resolve({ unavailable: 'Approvals are not running.', next: 'Turn on Approvals in Settings.' }); return answer === null ? new Promise(() => {}) : Promise.resolve({ answer: question.choices.includes(answer) ? answer : singular(answer) }); },
+      now: () => now, notificationsOn: () => notifications, ask: (question, id) => { asked.push(question); titles.set(id, question.title); if (unavailable) return Promise.resolve({ unavailable: 'Approvals are not running.', next: 'Turn on Approvals in Settings.' }); return answer === null ? new Promise(() => {}) : Promise.resolve({ answer: question.choices.includes(answer) ? answer : singular(answer) }); },
       inventory: () => inventory, idleOffer: () => ({ paneIds: [], memoryMB: 0 }), pauseIdleHours: () => 2, paneName: id => id,
       paneState: () => options.paneState ?? 'archived', tabName: () => null,
       canRestart: async () => false, cleanUp: async ids => { cleaned.push(ids); }, pauseIdle: async () => {}, stopProcess: async () => {},
       stopProcesses: async processes => { stopped.push(processes.map(proc => proc.pid)); return { at: now, source: 'card', removed: [], skipped: [], freedBytes: 0 }; },
+      withdraw: (id, reason) => { withdrawn.push({ title: titles.get(id) ?? id, reason }); },
       restartProcess: async () => {}, ignoreLeak: () => {}, archive: async () => {}, alert: title => { alerts.push(title); return delivered(); }, log: () => {},
       readKept: () => [...(options.kept ?? [])], writeKept: ids => { if (options.kept) options.kept.splice(0, options.kept.length, ...ids); },
     });
-    return { c, asked, cleaned, stopped, alerts, setNow: (value: number) => { now = value; }, setInventory: (value: StorageInventory | null) => { inventory = value; },
+    return { c, asked, cleaned, stopped, alerts, withdrawn, setNow: (value: number) => { now = value; }, setInventory: (value: StorageInventory | null) => { inventory = value; },
       setNotifications: (value: boolean) => { notifications = value; }, setUnavailable: (value: boolean) => { unavailable = value; } };
   }
   const settle = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -101,13 +104,14 @@ describe('HealthCardController', () => {
     expect(alerts).toEqual(['Disk is almost full']);
   });
 
-  it('alerts when disk turns critical while the warning card still waits, once per episode', async () => {
-    const { c, asked, alerts } = controller(null);
+  it('replaces a waiting warning card with the critical one when disk turns critical, alerting once per episode', async () => {
+    const { c, asked, alerts, withdrawn } = controller(null);
     c.onSnapshot(snapshot('warning'));
     c.onSnapshot(snapshot('critical'));
     c.onSnapshot(snapshot('critical'));
     await settle();
-    expect(asked).toHaveLength(1);
+    expect(asked.map(question => question.title)).toEqual(['Disk almost full', 'Disk is almost full']);
+    expect(withdrawn).toEqual([{ title: 'Disk almost full', reason: 'it turned critical, and a new card replaces it' }]);
     expect(alerts).toEqual(['Disk is almost full']);
     c.onSnapshot(snapshot('warning'));
     c.onSnapshot(snapshot('critical'));
@@ -120,6 +124,33 @@ describe('HealthCardController', () => {
     c.onSnapshot(snapshot('critical'));
     c.onSnapshot(snapshot('critical'));
     expect(alerts).toEqual(['Disk is almost full', 'Disk is almost full']);
+  });
+
+  it('keeps a critical card through a dip to warning, takes it back once disk recovers, and raises the next episode', async () => {
+    const { c, asked, withdrawn } = controller(null);
+    c.onSnapshot(snapshot('critical'));
+    c.onSnapshot(snapshot('warning'));
+    c.onSnapshot(snapshot('critical'));
+    await settle();
+    expect(asked).toHaveLength(1);
+    expect(withdrawn).toEqual([]);
+    c.onSnapshot(snapshot('ok'));
+    c.onSnapshot(snapshot('ok'));
+    expect(withdrawn).toEqual([{ title: 'Disk is almost full', reason: 'free disk is back above the warning line' }]);
+    c.onSnapshot(snapshot('critical'));
+    expect(asked.map(question => question.title)).toEqual(['Disk is almost full', 'Disk is almost full']);
+  });
+
+  it('takes back a critical memory card when pressure returns to normal, but keeps a warning card waiting', () => {
+    const { c, asked, withdrawn } = controller(null);
+    c.onSnapshot(snapshot('ok', [], 'warning'));
+    c.onSnapshot(snapshot('ok', [], 'ok'));
+    c.onSnapshot(snapshot('ok', [], 'warning'));
+    expect(asked).toHaveLength(1);
+    expect(withdrawn).toEqual([]);
+    c.onSnapshot(snapshot('ok', [], 'critical'));
+    c.onSnapshot(snapshot('ok', [], 'ok'));
+    expect(withdrawn.map(card => card.reason)).toEqual(['it turned critical, and a new card replaces it', 'memory pressure is back to normal']);
   });
 
   it('waits for the storage scan before raising the disk card', async () => {

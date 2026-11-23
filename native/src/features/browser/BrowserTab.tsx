@@ -34,8 +34,8 @@ const NOTICE_MS = 4_000;
 /**
  * A page tab. It shows the phone's own copy of the page until an agent acts on it; then it streams
  * the page from the computer that owns the Pane, where the agent works, and the phone sends touch
- * and typing back, until 30 s after its driver clears or Back to my copy
- * (docs/BROWSER_AGENTS.md). Host files and dev servers always stay a copy. The address field and who
+ * and typing back, until 30 s after its driver clears or Back to my copy; a page the agent typed into,
+ * or one the person chose View live on, streams until Back to my copy (docs/BROWSER_AGENTS.md). Host files and dev servers always stay a copy. The address field and who
  * drives sit on top, Back, Forward, Reload and the keyboard at the bottom. A computer on an older
  * Pane streams nothing: the phone then keeps its own copy.
  */
@@ -45,15 +45,16 @@ const UPLOAD_LIMIT_BYTES = 10 * 1_048_576;
 export function BrowserTab({ panel }: { panel: ToolPanel }) {
   const { profile } = useDaemon();
   const state = panel.state.customState as BrowserPanelState | undefined;
-  const choice = useStreamChoice(state?.driver?.by === 'agent');
+  const choice = useStreamChoice(panel.id, state);
   // The demo's pages are sample files on the phone.
   if (isDemoProfile(profile)) return <OwnCopyBrowserTab panel={panel} />;
-  if (isHostLocalUrl(state?.currentUrl) || !choice.stream) {
+  const hostLocal = isHostLocalUrl(state?.currentUrl);
+  if (hostLocal || !choice.stream) {
     const driver = state?.driver;
     return (
       <View style={styles.fill}>
         {driver?.by === 'person' ? <HandBackRow panelId={panel.id} agent={driver.agentWaiting} /> : null}
-        <OwnCopyBrowserTab panel={panel} />
+        <OwnCopyBrowserTab panel={panel} onViewLive={state?.agentUse && !hostLocal ? choice.live : undefined} />
       </View>
     );
   }

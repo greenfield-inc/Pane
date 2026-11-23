@@ -1,15 +1,18 @@
 import { createRoot } from 'react-dom/client';
 import { HealthCardBody } from '../../frontend/src/components/machineHealth/HealthCardBody';
-import { HealthCardDialog } from '../../frontend/src/components/machineHealth/HealthCardDialog';
+import { HealthCardPopups } from '../../frontend/src/components/machineHealth/HealthCardPopups';
+import { useNavigationStore } from '../../frontend/src/stores/navigationStore';
 import { useNotifyStore } from '../../frontend/src/stores/notifyStore';
-import { DEFAULT_NOTIFY_SETTINGS } from '../../shared/types/notify';
+import { DEFAULT_NOTIFY_SETTINGS, type NotifyCommand } from '../../shared/types/notify';
 import type { HealthNotifyItem } from '../../frontend/src/components/machineHealth/healthCardActions';
 import type { MachineHealthCard } from '../../shared/types/machineHealth';
 import '../../frontend/src/index.css';
 
 // One machine health card body: ?kind=memory|disk|leak|finished|leftovers, ?theme=dark, ?remote=1 (raised by a
 // linked machine). Answers land in window.qaAnswers and Ask an agent in window.qaAsked.
-declare global { interface Window { qaAnswers: string[]; qaAsked: number } }
+// ?popup=warning|critical: the in-window popups over a sample window, with Notify commands in window.qaCommands,
+// window.qaResolve(id) ending a card, and window.qaView() naming the view Open Resources went to.
+declare global { interface Window { qaAnswers: string[]; qaAsked: number; qaCommands: NotifyCommand[]; qaResolve: (id: string) => void; qaAdd: (id: string) => void; qaView: () => string } }
 window.qaAnswers = [];
 window.qaAsked = 0;
 const params = new URLSearchParams(location.search);
@@ -113,20 +116,35 @@ if (remote) {
   item.machine = 'build-box';
 }
 
-// ?dialog=1: the in-window dialog over two waiting cards (disk, then memory).
-if (params.has('dialog')) {
-  const toItem = (id: string, fixture: FixtureCard, createdAt: number): HealthNotifyItem => ({
+const popup = params.get('popup');
+if (popup) {
+  const toItem = (id: string, fixture: FixtureCard, createdAt: number, level: 'warning' | 'critical' = 'warning'): HealthNotifyItem => ({
     id, ui: 'options', title: fixture.title, context: fixture.context, choices: fixture.choices.map(label => ({ label })),
-    source: { name: 'Pane', agent: 'Pane' }, state: 'waiting', createdAt, machineHealth: fixture.card,
+    source: { name: 'Pane', agent: 'Pane' }, state: 'waiting', createdAt, machineHealth: { ...fixture.card, level },
   });
-  const items = [toItem('d1', cards.disk, 1), toItem('m1', cards.memory, 2)];
-  Object.assign(window, { electronAPI: { notify: { run: async (command: { answer?: { choice?: string } }) => { window.qaAnswers.push(command.answer?.choice ?? ''); } } } });
-  useNotifyStore.setState({ snapshot: { settings: DEFAULT_NOTIFY_SETTINGS, items, queue: items.map(item => item.id), hidden: [], strip: null, stripSurface: null, pausedUntil: null,
-    shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [], cardsOn: { kind: 'any' }, thisMachine: null } });
+  const criticalDisk: FixtureCard = { ...cards.disk, title: 'Disk is almost full', context: '3.1 GB free. Pane can free about 25 GB of its own leftovers and finished work. Open Resources to see what uses the disk and clean up.' };
+  const items = popup === 'critical'
+    ? [toItem('m1', cards.memory, 1), toItem('d1', criticalDisk, 2, 'critical')]
+    : [toItem('d1', cards.disk, 1), toItem('m1', cards.memory, 2)];
+  window.qaCommands = [];
+  Object.assign(window, { electronAPI: { notify: { run: async (command: NotifyCommand) => { window.qaCommands.push(command); } } } });
+  // A short hide time keeps the test quick; the app uses Notify's setting the same way.
+  const snapshot = { settings: { ...DEFAULT_NOTIFY_SETTINGS, updatesHideAfterSeconds: 2 }, items, queue: items.map(item => item.id), hidden: [], strip: null, stripSurface: null, pausedUntil: null,
+    shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [], cardsOn: { kind: 'any' as const }, thisMachine: null };
+  useNotifyStore.setState({ snapshot });
+  const current = () => useNotifyStore.getState().snapshot ?? snapshot;
+  window.qaResolve = id => useNotifyStore.setState({ snapshot: { ...current(), items: current().items.filter(item => item.id !== id), queue: current().queue.filter(other => other !== id) } });
+  window.qaAdd = id => useNotifyStore.setState({ snapshot: { ...current(), items: [...current().items, toItem(id, cards.leak, Date.now())], queue: [...current().queue, id] } });
+  window.qaView = () => useNavigationStore.getState().activeView;
 }
 
 createRoot(document.getElementById('root')!).render(
-  params.has('dialog') ? <HealthCardDialog /> : <div className="bg-bg-primary" style={{ padding: 32, minHeight: '100vh' }}>
+  popup ? (
+    <div className="bg-bg-primary" style={{ minHeight: '100vh', padding: 32 }}>
+      <input aria-label="Composer" className="rounded-md border border-border-primary bg-surface-primary px-3 py-2 text-text-primary" placeholder="Typing here" />
+      <HealthCardPopups suppressed={false} />
+    </div>
+  ) : <div className="bg-bg-primary" style={{ padding: 32, minHeight: '100vh' }}>
     <div className="rounded-2xl border border-border-primary bg-surface-primary p-6 shadow-xl" style={{ width: 720 }}>
       <HealthCardBody
         item={item}

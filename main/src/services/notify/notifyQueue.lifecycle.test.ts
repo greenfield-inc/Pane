@@ -50,6 +50,18 @@ describe('NotifyQueue with its store', () => {
     vi.useRealTimers();
   });
 
+  it('a card Pane withdraws stops waiting, says why, and stays closed after a restart', async () => {
+    const queue = queueWith();
+    const result = queue.ask({ question: { ui: 'options', title: 'Disk almost full', choices: [{ label: 'Not now' }] }, source: { name: 'Pane', agent: 'Pane' }, id: 'disk-1' });
+    queue.withdraw('disk-1', 'free disk is back above the warning line');
+    await expect(result).resolves.toMatchObject({ unavailable: 'free disk is back above the warning line' });
+    const closed = { state: 'expired', closed: { by: 'pane', reason: 'free disk is back above the warning line' } };
+    expect(item(queue, 'disk-1')).toMatchObject(closed);
+    expect(queue.snapshot().queue).toEqual([]);
+    queue.dispose();
+    expect(item(queueWith(), 'disk-1')).toMatchObject(closed);
+  });
+
   it('J6: an item outlives a restart, and its answer goes to the tab once', async () => {
     const before = queueWith();
     void before.ask({ question: ask('Q-5: ship?'), source: orchestrator });

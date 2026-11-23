@@ -346,6 +346,12 @@ export interface BrowserPanelState {
    * so the page keeps it through a sleep. Unset while the page fills its own tab. Only main writes it.
    */
   pageSize?: BrowserPageSize;
+  /**
+   * What agents did on the tab, so other screens offer View live and know when to keep streaming:
+   * `used` once an agent acted on it; `typed` while its page holds input an agent typed, selected,
+   * uploaded or pressed into, back to `used` when the page loads a new document. Only main writes it.
+   */
+  agentUse?: 'used' | 'typed';
 }
 
 /** A browser tab page's size in CSS pixels; `mobile` gives it a phone's layout and touch. */
