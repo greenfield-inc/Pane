@@ -33,6 +33,10 @@ export interface PaneCloudManagerOptions {
   startSession(machineId: string, input: JsonObject): Promise<string>;
   /** Forgets the saved computer of a deleted VM. */
   forget(machineId: string): Promise<void>;
+  /** Removes the saved computer from all of the person's computers at once (relay:unlink-computer-everywhere). */
+  unlink(machineId: string): Promise<void>;
+  /** Archives every Session on the machine (true), or brings back every archived one (false). The machine's own Pane Chat stays as it is. */
+  archiveSessions(machineId: string, archived: boolean): Promise<void>;
   onChange?: (snapshot: PaneCloudSnapshot) => void;
   /** Secrets sync (K1) carries this desktop's secrets to new cloud Sessions; the card says so only then. */
   sendsSecrets?: boolean;
@@ -188,6 +192,33 @@ export class PaneCloudManager {
     return this.act(vmId, async (client) => {
       await client.deleteVm(vmId);
       if (machineId) await this.options.forget(machineId);
+    });
+  }
+
+  /**
+   * Archives a cloud Session (D-94): its Session is archived, its VM is unlinked from all of the
+   * person's computers at once, and it stops, so it spends no hours while nothing can reach it. The
+   * service keeps the VM and its disk; a cloud Session no computer here pairs with reads as archived.
+   */
+  archive(vmId: string): Promise<PaneCloudSnapshot> {
+    const session = this.state.sessions.find((candidate) => candidate.vmId === vmId);
+    return this.act(vmId, async (client) => {
+      if (session?.machineId) {
+        await this.options.archiveSessions(session.machineId, true);
+        await this.options.unlink(session.machineId);
+      }
+      if (session?.awake) await client.stopVm(vmId);
+    });
+  }
+
+  /** Restores an archived cloud Session: its VM starts, pairs with this computer again (A6's path), and its Session comes back. */
+  restore(vmId: string): Promise<PaneCloudSnapshot> {
+    return this.act(vmId, async (client) => {
+      if (!AWAKE.has((await client.getVm(vmId)).state)) await client.startVm(vmId);
+      await this.waitUntilRunning(client, vmId);
+      const pairing = await client.pairVm(vmId);
+      const machineId = await this.options.pair({ link: pairing.link, relay: pairing.relay });
+      await this.options.archiveSessions(machineId, false);
     });
   }
 

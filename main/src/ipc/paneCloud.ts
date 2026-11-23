@@ -11,12 +11,19 @@ import { PaneError } from '../../../shared/paneError';
 import { computerRelayId } from '../../../shared/types/remoteComputers';
 import { normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneCloudSnapshot } from '../../../shared/types/paneCloud';
+import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestrationSession';
+import { RELAY_DEVICE_COMMANDS } from '../../../shared/types/relay';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 /** How long a newly paired VM may take to answer on its saved connection. */
 const CONNECT_DEADLINE_MS = 60_000;
 
 const pairedSchema = boundary.object({ computerId: boundary.nonEmptyString });
+const sessionListSchema = boundary.object({
+  data: boundary.optional(boundary.object({ sessions: boundary.array(boundary.object({ id: boundary.nonEmptyString, archived: boundary.optional(boundary.boolean) })) })),
+});
+/** How long one Session call on a cloud machine may take. */
+const SESSION_CALL_MS = 30_000;
 const createdSchema = boundary.object({
   success: boundary.boolean,
   error: boundary.optional(boundary.string),
@@ -31,7 +38,7 @@ let manager: PaneCloudManager | null = null;
  */
 export function registerPaneCloudHandlers(ipcMain: IpcMain, deps: {
   commands: Pick<PaneCommandRegistry, 'invoke' | 'register'>;
-  machines: Pick<MachineConnections, 'machineState' | 'run'>;
+  machines: Pick<MachineConnections, 'machineState' | 'run' | 'invokeOn'>;
   configManager: Pick<ConfigManager, 'getConfig' | 'updateConfigWith'>;
   send: (channel: string, snapshot: PaneCloudSnapshot) => void;
 }): void {
@@ -65,6 +72,15 @@ export function registerPaneCloudHandlers(ipcMain: IpcMain, deps: {
         return { remoteDaemon: { ...remote, client } };
       });
     },
+    unlink: async (machineId) => { await commands.invoke(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, [{ computerId: machineId }]); },
+    archiveSessions: async (machineId, archived) => {
+      await waitUntilOnline(machines, machineId);
+      const listed = decodeBoundary(await machines.invokeOn(machineId, 'orchestration-sessions:list', [], SESSION_CALL_MS), sessionListSchema);
+      const targets = (listed.data?.sessions ?? []).filter((session) => session.id !== LEGACY_ORCHESTRATION_SESSION_ID && (session.archived === true) !== archived);
+      for (const session of targets) {
+        await machines.invokeOn(machineId, 'orchestration-sessions:update', [{ sessionId: session.id }, { archived }], SESSION_CALL_MS);
+      }
+    },
     onChange: (snapshot) => deps.send('pane-cloud:changed', snapshot),
   });
   manager = cloud;
@@ -85,6 +101,8 @@ export function registerPaneCloudHandlers(ipcMain: IpcMain, deps: {
   ipcMain.handle('pane-cloud:stop', (_event, id: PaneCommandValue) => answer(() => cloud.stop(vmId(id))));
   ipcMain.handle('pane-cloud:start', (_event, id: PaneCommandValue) => answer(() => cloud.start(vmId(id))));
   ipcMain.handle('pane-cloud:delete', (_event, id: PaneCommandValue) => answer(() => cloud.remove(vmId(id))));
+  ipcMain.handle('pane-cloud:archive', (_event, id: PaneCommandValue) => answer(() => cloud.archive(vmId(id))));
+  ipcMain.handle('pane-cloud:restore', (_event, id: PaneCommandValue) => answer(() => cloud.restore(vmId(id))));
   ipcMain.handle('pane-cloud:update-pane', (_event, id: PaneCommandValue) => answer(() => cloud.updatePane(vmId(id))));
   ipcMain.handle('pane-cloud:actions', async (_event, id: PaneCommandValue) => answer(() => cloud.actions(vmId(id))));
   ipcMain.handle('pane-cloud:create', async (_event, input: PaneCommandValue) =>

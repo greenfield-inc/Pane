@@ -880,6 +880,10 @@ interface ElectronAPI {
     stop: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
     start: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
     remove: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
+    /** Archives a cloud Session: its Session archived, its VM unlinked from every computer and stopped (D-94). */
+    archive: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
+    /** Restores an archived cloud Session: started, paired again, its Session back. */
+    restore: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
     updatePane: (vmId: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
     actions: (vmId: string) => Promise<IPCResponse<PaneCloudAction[]>>;
     onChanged: (callback: (snapshot: PaneCloudSnapshot) => void) => () => void;

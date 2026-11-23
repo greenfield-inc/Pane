@@ -17,6 +17,8 @@ let pairings: VouchedPairing[];
 let computers: Map<string, string>;
 let started: Array<{ machineId: string; input: JsonObject }>;
 let forgotten: string[];
+let unlinked: string[];
+let archiving: Array<{ machineId: string; archived: boolean }>;
 const managers: PaneCloudManager[] = [];
 
 function manager(overrides: Partial<ConstructorParameters<typeof PaneCloudManager>[0]> = {}): PaneCloudManager {
@@ -36,6 +38,12 @@ function manager(overrides: Partial<ConstructorParameters<typeof PaneCloudManage
       return `session-on-${machineId}`;
     },
     forget: async (machineId) => { forgotten.push(machineId); },
+    // Unlinking removes the computer here too, as relay:unlink-computer-everywhere does.
+    unlink: async (machineId) => {
+      unlinked.push(machineId);
+      for (const [relayId, id] of computers) if (id === machineId) computers.delete(relayId);
+    },
+    archiveSessions: async (machineId, archived) => { archiving.push({ machineId, archived }); },
     pollMs: { waiting: 10, steady: 60_000 },
     ...overrides,
   });
@@ -61,6 +69,8 @@ beforeEach(async () => {
   computers = new Map();
   started = [];
   forgotten = [];
+  unlinked = [];
+  archiving = [];
   service = await startServiceStub({
     now: () => clock,
     accounts: [
@@ -258,6 +268,35 @@ describe('a cloud Session', () => {
     const actions = await cloud.actions(vmId);
     expect(actions[0]).toMatchObject({ operation: 'stop', actor: 'you', failed: false });
     expect(actions.at(-1)).toMatchObject({ operation: 'create', actor: 'you' });
+  });
+});
+
+describe('archiving a cloud Session (D-94)', () => {
+  it('archives its Session, unlinks its VM from every computer and stops it, so it is no longer one of this computer\'s machines', async () => {
+    const cloud = manager();
+    await signIn(cloud, 'maya@example.test');
+    const { snapshot } = await cloud.createSession(session('Docs'));
+    const vmId = snapshot.sessions[0].vmId;
+
+    const after = await cloud.archive(vmId);
+    expect(archiving).toEqual([{ machineId: 'computer-1', archived: true }]);
+    expect(unlinked).toEqual(['computer-1']);
+    expect(after.sessions).toEqual([expect.objectContaining({ vmId, machineId: null, awake: false })]);
+    expect(after.usage?.awakeNow).toBe(0);
+  });
+
+  it('restores it by starting the VM, pairing it again and bringing its Session back', async () => {
+    const cloud = manager();
+    await signIn(cloud, 'maya@example.test');
+    const { snapshot } = await cloud.createSession(session('Docs'));
+    const vmId = snapshot.sessions[0].vmId;
+    await cloud.archive(vmId);
+
+    const after = await cloud.restore(vmId);
+    expect(pairings).toHaveLength(2);
+    expect(archiving.at(-1)).toEqual({ machineId: 'computer-1', archived: false });
+    expect(after.sessions).toEqual([expect.objectContaining({ vmId, machineId: 'computer-1', awake: true })]);
+    expect(after.error).toBeNull();
   });
 });
 

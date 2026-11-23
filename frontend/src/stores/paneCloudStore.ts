@@ -29,6 +29,8 @@ interface PaneCloudState {
   start: (vmId: string) => Promise<void>;
   remove: (vmId: string) => Promise<void>;
   updatePane: (vmId: string) => Promise<void>;
+  archive: (vmId: string) => Promise<void>;
+  restore: (vmId: string) => Promise<void>;
   /** New cloud Session. Throws PaneCloudCallError with the next step. */
   create: (input: OrchestrationSessionCreateInput) => Promise<PaneCloudCreated>;
 }
@@ -88,6 +90,8 @@ export const usePaneCloudStore = create<PaneCloudState>((set) => {
     start: (vmId) => run(() => api()?.start(vmId) ?? Promise.resolve({ success: false })),
     remove: (vmId) => run(() => api()?.remove(vmId) ?? Promise.resolve({ success: false })),
     updatePane: (vmId) => run(() => api()?.updatePane(vmId) ?? Promise.resolve({ success: false })),
+    archive: (vmId) => run(() => api()?.archive(vmId) ?? Promise.resolve({ success: false })),
+    restore: (vmId) => run(() => api()?.restore(vmId) ?? Promise.resolve({ success: false })),
     create: async (input) => {
       const cloud = api();
       if (!cloud) throw new PaneCloudCallError({ message: 'This version of Pane cannot reach Pane Cloud.', next: 'Update Pane, then try again.' });

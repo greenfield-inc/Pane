@@ -1565,6 +1565,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stop: (vmId: string): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:stop', vmId),
     start: (vmId: string): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:start', vmId),
     remove: (vmId: string): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:delete', vmId),
+    archive: (vmId: string): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:archive', vmId),
+    restore: (vmId: string): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:restore', vmId),
     updatePane: (vmId: string): Promise<IPCResponse<PaneCloudSnapshot>> => ipcRenderer.invoke('pane-cloud:update-pane', vmId),
     actions: (vmId: string): Promise<IPCResponse<PaneCloudAction[]>> => ipcRenderer.invoke('pane-cloud:actions', vmId),
     onChanged: (callback: (snapshot: PaneCloudSnapshot) => void) => {
