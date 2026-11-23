@@ -2601,3 +2601,27 @@ async fn a_relay_hands_out_only_so_many_keys_an_hour_across_its_computers() {
     assert_eq!(answer["code"], "throttled");
     assert!(publicca.received.try_recv().is_err());
 }
+
+#[tokio::test]
+async fn a_metadata_url_without_a_port_is_reached_on_port_80() {
+    // Production's metadata URL names no port (http://metadata.google.internal/...). Nothing
+    // listens on 127.0.0.1:80 here, so the relay must get as far as connecting there.
+    let env = Env::start(&[
+        "--eab-project",
+        "pane-eab",
+        "--acme-email",
+        "certificates@pane.example",
+        "--metadata-url",
+        "http://127.0.0.1/computeMetadata/v1/instance/service-accounts/default/token",
+    ])
+    .await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    agent.send(json!({"t": "eab", "req": "1"})).await;
+    let answer = agent.next().await;
+    let message = answer["message"].as_str().unwrap();
+    assert!(
+        message.contains("the metadata server at 127.0.0.1:"),
+        "{answer}"
+    );
+    assert!(!message.contains("invalid socket address"), "{answer}");
+}
