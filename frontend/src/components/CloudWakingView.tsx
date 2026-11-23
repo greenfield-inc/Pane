@@ -43,8 +43,8 @@ export function CloudWakingView({ waking }: { waking: PaneCloudWaking }) {
   const noRepo = session !== undefined && clone === null;
   const { machineId, sessionId, name } = waking;
   useEffect(() => {
-    if (!machineId || !sessionId) return;
-    const target = paneId ? { kind: 'pane' as const, id: paneId, name: repo ?? name } : noRepo ? { kind: 'session' as const, id: sessionId, name } : null;
+    if (!machineId) return;
+    const target = paneId ? { kind: 'pane' as const, id: paneId, name: repo ?? name } : noRepo && sessionId ? { kind: 'session' as const, id: sessionId, name } : null;
     if (!target) return;
     usePaneCloudStore.getState().setWaking(null);
     void openNewCloudSession(machineId, target);
