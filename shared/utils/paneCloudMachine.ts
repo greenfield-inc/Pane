@@ -41,14 +41,17 @@ export function paneCloudMachine(sessions: readonly PaneCloudSession[]): PaneClo
   return members.length > 0 ? { ...PANE_CLOUD_MACHINE, members } : null;
 }
 
+/** A machine list with Pane Cloud's members taken out and paired with the member each one is. */
+export interface PaneCloudGrouping<Machine> {
+  machines: Machine[];
+  members: Array<{ machine: Machine; member: PaneCloudMember }>;
+}
+
 /**
  * Splits a machine list into the machines shown as themselves and Pane Cloud's members, each with
  * the machine entry it is, in member order. `idOf` gives an entry's saved computer id.
  */
-export function groupPaneCloud<Machine>(machines: readonly Machine[], cloud: PaneCloudMachine | null, idOf: (machine: Machine) => string): {
-  machines: Machine[];
-  members: Array<{ machine: Machine; member: PaneCloudMember }>;
-} {
+export function groupPaneCloud<Machine>(machines: readonly Machine[], cloud: PaneCloudMachine | null, idOf: (machine: Machine) => string): PaneCloudGrouping<Machine> {
   const byComputer = new Map((cloud?.members ?? []).map((member) => [member.computerId, member]));
   const members = (cloud?.members ?? []).flatMap((member) => {
     const machine = machines.find((candidate) => idOf(candidate) === member.computerId);
