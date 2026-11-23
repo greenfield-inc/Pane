@@ -6,6 +6,7 @@ import { PANE_CLOUD_MACHINE_CHANNEL, paneCloudMachine } from '../../../shared/ut
 import type { MachineConnections } from '../services/machineConnections';
 import type { ConfigManager } from '../services/configManager';
 import { DEFAULT_PANE_CLOUD_URL, PaneCloudFailure, PaneCloudManager } from '../services/paneCloud';
+import { cloneRepoOf } from '../services/paneCloudRepo';
 import { getAppDirectory } from '../utils/appDirectory';
 import { PaneError } from '../../../shared/paneError';
 import { computerRelayId } from '../../../shared/types/remoteComputers';
@@ -19,9 +20,12 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 const CONNECT_DEADLINE_MS = 60_000;
 
 const pairedSchema = boundary.object({ computerId: boundary.nonEmptyString });
+const unlinkedSchema = boundary.object({ notReached: boundary.array(boundary.string) });
 const sessionListSchema = boundary.object({
   data: boundary.optional(boundary.object({ sessions: boundary.array(boundary.object({ id: boundary.nonEmptyString, archived: boundary.optional(boundary.boolean) })) })),
 });
+/** How old a read of Pane Cloud `pane-cloud:machine` may answer from. */
+const MACHINE_ANSWER_MAX_AGE_MS = 60_000;
 /** How long one Session call on a cloud machine may take. */
 const SESSION_CALL_MS = 30_000;
 const createdSchema = boundary.object({
@@ -46,6 +50,8 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
   machines: Pick<MachineConnections, 'machineState' | 'run' | 'invokeOn'>;
   configManager: Pick<ConfigManager, 'getConfig' | 'updateConfigWith'>;
   send: (channel: string, snapshot: PaneCloudSnapshot) => void;
+  /** The folder of a project on this computer, for the repo a new cloud Session clones. */
+  projectPath?: (projectId: number) => string | null;
 }): void {
   manager?.dispose();
   const { commands, machines, configManager } = deps;
@@ -77,7 +83,7 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
         return { remoteDaemon: { ...remote, client } };
       });
     },
-    unlink: async (machineId) => { await commands.invoke(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, [{ computerId: machineId }]); },
+    unlink: async (machineId) => ({ notReached: decodeBoundary(await commands.invoke(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, [{ computerId: machineId }]), unlinkedSchema).notReached }),
     archiveSessions: async (machineId, archived) => {
       await waitUntilOnline(machines, machineId);
       const listed = decodeBoundary(await machines.invokeOn(machineId, 'orchestration-sessions:list', [], SESSION_CALL_MS), sessionListSchema);
@@ -97,7 +103,8 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
     if (isRemotePaneCommand()) {
       throw new PaneError('ERR_PANE_CLOUD_HERE_ONLY', 'Pane Cloud answers only on the computer signed in to it, so another computer can\'t read its machines.', 'Run this on the computer signed in to Pane Cloud.');
     }
-    const machine = paneCloudMachine((await cloud.refresh({ background: true })).sessions);
+    // runpane and the MCP ask on every machine call: a read under a minute old answers.
+    const machine = paneCloudMachine((await cloud.recent(MACHINE_ANSWER_MAX_AGE_MS)).sessions);
     return machine === null ? null : { id: machine.id, name: machine.name, members: machine.members.map((member) => ({ ...member })) };
   });
   ipcMain.handle('pane-cloud:get', () => answer(() => cloud.refresh()));
@@ -110,8 +117,13 @@ export function registerPaneCloudHandlers(ipcMain: Pick<IpcMain, 'handle'>, deps
   ipcMain.handle('pane-cloud:restore', (_event, id: PaneCommandValue) => answer(() => cloud.restore(vmId(id))));
   ipcMain.handle('pane-cloud:update-pane', (_event, id: PaneCommandValue) => answer(() => cloud.updatePane(vmId(id))));
   ipcMain.handle('pane-cloud:actions', async (_event, id: PaneCommandValue) => answer(() => cloud.actions(vmId(id))));
-  ipcMain.handle('pane-cloud:create', async (_event, input: PaneCommandValue) =>
-    answer(() => cloud.createSession(decodeBoundary(input, boundary.jsonObject))));
+  ipcMain.handle('pane-cloud:prepare-create', () => answer(async () => cloud.prepareCreate()));
+  ipcMain.handle('pane-cloud:retry-clone', (_event, id: PaneCommandValue) => answer(() => cloud.retryClone(vmId(id))));
+  ipcMain.handle('pane-cloud:create', async (_event, input: PaneCommandValue, projectId?: PaneCommandValue) =>
+    answer(async () => {
+      const folder = projectId === undefined || projectId === null ? null : deps.projectPath?.(decodeBoundary(projectId, boundary.number)) ?? null;
+      return cloud.createSession(decodeBoundary(input, boundary.jsonObject), folder ? await cloneRepoOf(folder) : null);
+    }));
 }
 
 /** A call's IPC answer: its data, or what failed and the next step. */

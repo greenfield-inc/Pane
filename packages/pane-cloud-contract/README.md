@@ -104,6 +104,12 @@ that need them are the review pause, `no_capacity`, a second organization with F
 View only members, agent-hour metering, pairing by a creator who lost Full access (`changeMember`)
 and `relay_key_changed` (`replaceRelayKey`).
 
+The clone cases clone two real GitHub repos: `expressjs/express` succeeds and
+`greenfield-inc/does-not-exist-pane-contract` fails as a missing repo does. The stubs fail a clone
+whose URL holds `does-not-exist` and finish any other one step per read of its VM, so a poller sees
+progress; their `failClone` fails a clone on the spot, and the service stub's `hostGitHubToken`
+(the fleet stub's `secretsVolumeToken`) returns the token the stub host opened, for Pane's own tests.
+
 The service stub gives every account a personal organization on the Free plan, starts and stops
 VMs at once, and counts agent-hours from its clock (pass `now` to move it). Its controls are
 `approveDevice` and `denyDevice` for sign-in, plus each of the controls above; this package's own
@@ -144,14 +150,25 @@ Bearer token from device sign-in on every route except the two sign-in calls.
 | Sign out | `POST /v1/auth/sign-out` | |
 | Account | `GET /v1/account` | `access: waitlisted` is "You're on the list"; `signupState` is the next sign-up step (`needs_phone`, `needs_card`, `ready`); the account's organizations, the personal one marked |
 | List Session VMs | `GET /v1/organizations/:organizationId/vms` | The caller's own in that organization, deleted ones left out |
-| Create | `POST /v1/organizations/:organizationId/vms` | `202`; an 8 GiB VM that starts at once; `not_org_member`, `view_only`, `not_invited`, `signup_incomplete`, `awake_limit_reached`, `no_capacity`; a retry with the same key in the same organization returns the first VM |
-| Get | `GET /v1/vms/:vmId` | State, why it last stopped, memory, Pane version, and `relay`: the relay identity the service vouches for, `null` before the first pairing |
+| Sealing key | `POST /v1/organizations/:organizationId/sealing-keys` | `201`; a free slot's X25519 public key (`keyId`, `publicKey`, `expiresAt`) for the next create's GitHub token; the same access checks as create |
+| Create | `POST /v1/organizations/:organizationId/vms` | `202`; an 8 GiB VM that starts at once; `not_org_member`, `view_only`, `not_invited`, `signup_incomplete`, `awake_limit_reached`, `no_capacity`; a retry with the same key in the same organization returns the first VM. Optional `repo` (`url`, https with no credentials, and `branch`) is cloned at boot; a private repo's token goes as `sealedGitHubToken` with the `sealingKeyId` it was sealed to, only for a github.com repo. A used, unknown or expired key is `sealing_key_expired` |
+| Retry a clone | `POST /v1/vms/:vmId/clone/retry` | `202`; only a running VM whose clone failed, else `invalid_state`; optional fresh `sealedGitHubToken` sealed to a key from `POST /v1/vms/:vmId/sealing-key`; logged as `retry_clone` with no parameters |
+| Get | `GET /v1/vms/:vmId` | State, why it last stopped, memory, Pane version, `relay`: the relay identity the service vouches for, `null` before the first pairing, and `clone`: the repo's clone (`cloning` with its `phase`, `percent` and git's progress `line`, `ready` with the `paneId` to open, or `failed` with git's `error`) |
 | Start, stop | `POST /v1/vms/:vmId/start`, `/stop` | `202`; `invalid_state` if it is already running (start) or stopped (stop); start answers `under_review` for a VM paused for review, and `awake_limit_reached` or `no_capacity` like create |
 | Delete | `DELETE /v1/vms/:vmId` | `202`; deletes the disk |
 | Run an operation | `POST /v1/vms/:vmId/operations` | Only `update_pane` (`{ version? }`, latest release when omitted; the service looks up the checksum) and `collect_diagnostics` (`{}`); any other name is `operation_not_allowed` |
 | Pair a device | `POST /v1/vms/:vmId/pairing` | A one-time pairing link (10 minutes) and the VM's relay identity (`computerId`, key `fingerprint`, `domain`). The client pairs only with a VM that presents exactly that key. The service keeps the first identity a VM reports and answers `relay_key_changed` when it later reports another. Only the VM's creator, while they still have Full access in its organization: `view_only` or `not_org_member` otherwise. `invalid_state` unless running; logged as `create_pairing_link`, without the link |
 | Action log | `GET /v1/vms/:vmId/operations` | Newest first, `?before=<id>&limit=`; every lifecycle step and operation with actor, reason and parameters |
 | Usage | `GET /v1/organizations/:organizationId/usage` | `?month=YYYY-MM`, this month by default: the plan, agent-hours used and the pooled limit, when they reset, and per member their hours, VMs awake now and awake limit |
+
+### The sealed GitHub token
+
+Pane seals `{ token, source, updatedAt }` (`GitHubTokenRecord`) with `sealGitHubToken`: a libsodium
+sealed box to the key's X25519 public half, base64url. Only the host that made the key holds the
+private half (`openGitHubToken`). The service passes the sealed token to the host beside the signed
+operation and never stores, logs or returns it; its action log shows the repo and nothing sealed.
+The contract cases check that no answer, refusal or action log entry holds the token or its sealed
+form.
 
 A Session VM answers only the member who created it; anyone else gets `vm_not_found`. Organization
 routes answer only members (`not_org_member`). No route grants anyone access to a VM.
@@ -164,7 +181,8 @@ Called only by the service. Every change to a VM is one signed operation.
 | --- | --- | --- |
 | Submit an operation | `POST /v1/operations` | `202` with its status; resending a `requestId` returns its first outcome, a refusal included; a different payload under a used `requestId` is `invalid_request`; the status of a refused operation is `failed` with its error |
 | Operation status | `GET /v1/operations/:requestId` | `accepted`, `running`, `succeeded` or `failed` |
-| VM | `GET /v1/vms/:vmId` | State, last stop reason, host, memory, Pane version |
+| Sealing keys | `POST /v1/sealing-keys`, `POST /v1/vms/:vmId/sealing-key` | `201`; a key pair the host makes for a free slot (for `create`) or a running VM (for `retry_clone`), with the host that holds it; each key works once, until `expiresAt` |
+| VM | `GET /v1/vms/:vmId` | State, last stop reason, host, memory, Pane version, and the repo's `clone` |
 | Metrics | `GET /v1/vms/:vmId/metrics?day=` | CPU seconds, resident memory, disk, and egress for a UTC day |
 | Events | `GET /v1/events?after=&limit=` | Every state change and finished operation, with a cursor; the service meters agent-hours from the state changes |
 
@@ -172,13 +190,14 @@ Called only by the service. Every change to a VM is one signed operation.
 
 | Operation | Runs on | Parameters |
 | --- | --- | --- |
-| `create` | host | none; an 8 GiB, 4 vCPU VM, started |
+| `create` | host | an 8 GiB, 4 vCPU VM, started; optional `sealingKeyId` (the slot it takes), `repo` to clone at boot, and `sealedGitHubTokenSha256` |
 | `start`, `delete` | host | none |
 | `stop` | host | `cause`: `user` or `review` (an automatic pause or a person's Suspend), recorded as the VM's `stateReason`; the disk is kept. The fleet's own stops (host maintenance, host loss) set their own reason |
 | `bootstrap` | guest | `release`: a published Pane `version`, `arch: arm64` and the `.deb`'s `debSha256` |
 | `update_pane` | guest | the same `release`; the host refuses a checksum that is not a published release |
 | `prepare_to_stop` | guest | none |
 | `collect_diagnostics` | guest | none; reads only `DIAGNOSTIC_FILES` |
+| `retry_clone` | guest | optional `sealingKeyId` and `sealedGitHubTokenSha256`; runs a failed clone again, else `invalid_state` |
 | `create_pairing_link` | guest | none; returns a one-time pairing link from the VM's Pane, good for at most 10 minutes, and its relay identity. The host keeps the link only to answer a retried `requestId`, and drops it when the operation's `expiresAt` passes |
 
 There is no shell command, file write or access grant, and every schema is strict, so an extra
@@ -199,3 +218,10 @@ An operation signed for another host is `wrong_host`. Once an operation passes t
 host records its `requestId` before running anything, and remembers it at least until `expiresAt`;
 a resend inside that time gets the first outcome, and after it the window refuses the resend on
 its own.
+
+A sealed GitHub token travels beside the payload as `sealed: { githubToken }`, outside the
+signature; the payload signs its SHA-256 (`sealedSecretDigest`) as `sealedGitHubTokenSha256`. For a
+`requestId` it has not seen, the host calls `requireSealedSecrets`, which refuses a missing or
+different sealed token, or one the payload doesn't name, with `invalid_request` before anything
+runs. A resend of a recorded `requestId` gets its first outcome without the sealed token, so the
+service can keep the envelope for a resend and drop the token.

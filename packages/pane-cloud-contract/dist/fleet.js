@@ -1,9 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fleetRoutes = exports.FleetEvent = exports.VmMetrics = exports.OperationStatus = exports.PairingLink = exports.RelayIdentity = exports.OperationError = exports.FleetVm = exports.StateReason = exports.FleetVmState = exports.SubmittedEnvelope = exports.OperationEnvelope = exports.OperationSignature = exports.OperationPayload = exports.FleetOperationName = exports.FLEET_OPERATIONS = exports.StopCause = exports.PaneRelease = exports.VmId = exports.CLOCK_SKEW_SECONDS = exports.MAX_OPERATION_LIFETIME_SECONDS = exports.DIAGNOSTIC_FILES = exports.VmMemoryGiB = void 0;
+exports.fleetRoutes = exports.FleetEvent = exports.VmMetrics = exports.OperationStatus = exports.PairingLink = exports.RelayIdentity = exports.OperationError = exports.FleetVm = exports.StateReason = exports.FleetVmState = exports.SubmittedEnvelope = exports.OperationEnvelope = exports.SealedSecrets = exports.OperationSignature = exports.OperationPayload = exports.FleetOperationName = exports.FLEET_OPERATIONS = exports.StopCause = exports.FleetSealingKey = exports.CloneStatus = exports.CloneRepo = exports.SealedSecret = exports.SealingPublicKey = exports.SealingKeyId = exports.PaneRelease = exports.VmId = exports.CLOCK_SKEW_SECONDS = exports.MAX_OPERATION_LIFETIME_SECONDS = exports.DIAGNOSTIC_FILES = exports.VmMemoryGiB = void 0;
+exports.isGitHubRepo = isGitHubRepo;
+exports.sealedSecretDigest = sealedSecretDigest;
 exports.canonicalJson = canonicalJson;
 exports.operationSigningBytes = operationSigningBytes;
 exports.signOperation = signOperation;
+exports.requireSealedSecrets = requireSealedSecrets;
 exports.verifyOperation = verifyOperation;
 exports.relayComputerIdOf = relayComputerIdOf;
 exports.createFleetClient = createFleetClient;
@@ -44,6 +47,87 @@ exports.PaneRelease = zod_1.z
 })
     .strict();
 const NoParameters = zod_1.z.object({}).strict();
+// ---------- The repo a new Session clones, and the sealed GitHub token (D-107) ----------
+const Sha256Hex = zod_1.z.string().regex(/^[0-9a-f]{64}$/);
+/** Names one sealing key pair the host made: a free slot's for create, a VM's own for retry_clone. */
+exports.SealingKeyId = zod_1.z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
+/** A sealing public key: raw 32-byte X25519, base64url without padding. */
+exports.SealingPublicKey = zod_1.z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+/**
+ * A libsodium sealed box (crypto_box_seal) to one sealing key, base64url without padding. It holds
+ * the JSON `{"token","source","updatedAt"}`: the person's GitHub token, the machine it came from and
+ * when it last changed. Only the host that made the key can open it. Every route passes it on
+ * unopened and never stores, logs or returns it.
+ */
+exports.SealedSecret = zod_1.z.string().min(66).max(8192).regex(/^[A-Za-z0-9_-]+$/);
+/** A branch name git accepts as a ref: no spaces, `..`, `@{`, `~^:?*[\`, leading `-` or trailing `.` or `/`. */
+const GIT_BRANCH = /^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*@\{)[^\s~^:?*[\\]+(?<![./])$/;
+/** The repo a new Session clones: an https URL with no credentials in it, and the branch to check out. */
+exports.CloneRepo = zod_1.z
+    .object({
+    url: zod_1.z.url({ protocol: /^https$/ }).refine((url) => {
+        const parsed = new URL(url);
+        return parsed.username === '' && parsed.password === '' && parsed.search === '' && parsed.hash === '';
+    }, 'The repo URL carries no credentials, query or fragment'),
+    branch: zod_1.z.string().min(1).max(255).regex(GIT_BRANCH),
+})
+    .strict();
+/** Whether a GitHub token may go with this repo: the guest's credential helper answers only for github.com. */
+function isGitHubRepo(repo) {
+    return new URL(repo.url).hostname === 'github.com';
+}
+/** The SHA-256 of a sealed secret, which a signed operation carries to bind the sealed copy sent beside it. */
+function sealedSecretDigest(sealed) {
+    return (0, node_crypto_1.createHash)('sha256').update(sealed, 'utf8').digest('hex');
+}
+/**
+ * The clone of a new Session's repo, as the guest reports it. It starts at boot, beside the daemon:
+ * a shallow clone, then `runpane panes create --no-fetch`, whose Pane id the app opens; the full
+ * history arrives afterwards at low priority, with the status staying `ready`. `line` is
+ * git's last progress line and `error` git's own message; the guest strips anything that looks like a
+ * credential from both. A failed clone creates no Pane and leaves the VM running for retry_clone.
+ */
+exports.CloneStatus = zod_1.z
+    .object({
+    /** The repo as people name it, such as `owner/repo`. */
+    repo: zod_1.z.string().min(1).max(200),
+    branch: zod_1.z.string().min(1).max(255),
+    state: zod_1.z.enum(['cloning', 'ready', 'failed']),
+    /** Where a running clone is: objects received, deltas resolved, files checked out, then the Pane created. */
+    phase: zod_1.z.enum(['receiving', 'resolving', 'checking_out', 'creating_pane']).nullable(),
+    percent: zod_1.z.number().int().min(0).max(100).nullable(),
+    line: zod_1.z.string().max(300).nullable(),
+    startedAt: zod_1.z.iso.datetime({ offset: true }),
+    finishedAt: zod_1.z.iso.datetime({ offset: true }).nullable(),
+    error: zod_1.z.object({ message: zod_1.z.string().min(1).max(4000) }).strict().nullable(),
+    /** The Pane the clone made, once `ready`. */
+    paneId: zod_1.z.string().min(1).max(128).nullable(),
+})
+    .strict();
+/** A sealing key the host made, with the host that holds its private half. */
+exports.FleetSealingKey = zod_1.z
+    .object({
+    keyId: exports.SealingKeyId,
+    hostId: zod_1.z.string().min(1).max(64),
+    publicKey: exports.SealingPublicKey,
+    /** A create or retry_clone naming the key after this is refused with sealing_key_expired. */
+    expiresAt: zod_1.z.iso.datetime({ offset: true }),
+})
+    .strict();
+/**
+ * create's parameters. `sealingKeyId` names the free slot the VM takes (its secrets volume holds the
+ * repo and the sealed token before launch); `sealedGitHubTokenSha256` binds the sealed token sent
+ * beside the signed payload, so the service can keep the envelope for a resend without the token.
+ */
+const CreateParameters = zod_1.z
+    .object({ sealingKeyId: exports.SealingKeyId.optional(), repo: exports.CloneRepo.optional(), sealedGitHubTokenSha256: Sha256Hex.optional() })
+    .strict()
+    .refine((p) => !p.sealedGitHubTokenSha256 || (p.sealingKeyId && p.repo && isGitHubRepo(p.repo)), 'A sealed GitHub token needs a sealing key and a github.com repo');
+/** retry_clone's parameters: a fresh sealed token for a clone that failed to sign in, sealed to the VM's own key. */
+const RetryCloneParameters = zod_1.z
+    .object({ sealingKeyId: exports.SealingKeyId.optional(), sealedGitHubTokenSha256: Sha256Hex.optional() })
+    .strict()
+    .refine((p) => !p.sealedGitHubTokenSha256 || p.sealingKeyId, 'A sealed GitHub token needs a sealing key');
 const ReleaseParameters = zod_1.z.object({ release: exports.PaneRelease }).strict();
 /**
  * Why the service stops a VM; the fleet records it as the VM's stateReason. `user`: its creator
@@ -57,9 +141,10 @@ const StopParameters = zod_1.z.object({ cause: exports.StopCause }).strict();
  * the guest agent. Nothing else exists: no shell command, no file write, no access grant. `create`
  * makes an 8 GiB, 4 vCPU VM and starts it; `stop` keeps its disk; `start` boots it from that disk.
  * `create_pairing_link` asks the VM's Pane for a one-time pairing link and its relay identity.
+ * `retry_clone` runs a failed clone of the Session's repo again.
  */
 exports.FLEET_OPERATIONS = {
-    create: { runsOn: 'host', parameters: NoParameters },
+    create: { runsOn: 'host', parameters: CreateParameters },
     start: { runsOn: 'host', parameters: NoParameters },
     stop: { runsOn: 'host', parameters: StopParameters },
     delete: { runsOn: 'host', parameters: NoParameters },
@@ -68,6 +153,7 @@ exports.FLEET_OPERATIONS = {
     prepare_to_stop: { runsOn: 'guest', parameters: NoParameters },
     collect_diagnostics: { runsOn: 'guest', parameters: NoParameters },
     create_pairing_link: { runsOn: 'guest', parameters: NoParameters },
+    retry_clone: { runsOn: 'guest', parameters: RetryCloneParameters },
 };
 // SAFETY: Object.keys of a non-empty object literal lists exactly its keys.
 const operationNames = Object.keys(exports.FLEET_OPERATIONS);
@@ -99,6 +185,7 @@ exports.OperationPayload = zod_1.z.discriminatedUnion('operation', [
     payloadFor('prepare_to_stop', exports.FLEET_OPERATIONS.prepare_to_stop.parameters),
     payloadFor('collect_diagnostics', exports.FLEET_OPERATIONS.collect_diagnostics.parameters),
     payloadFor('create_pairing_link', exports.FLEET_OPERATIONS.create_pairing_link.parameters),
+    payloadFor('retry_clone', exports.FLEET_OPERATIONS.retry_clone.parameters),
 ]);
 exports.OperationSignature = zod_1.z
     .object({
@@ -109,12 +196,14 @@ exports.OperationSignature = zod_1.z
     value: zod_1.z.base64(),
 })
     .strict();
-exports.OperationEnvelope = zod_1.z.object({ payload: exports.OperationPayload, signature: exports.OperationSignature }).strict();
+/** A sealed GitHub token sent beside the signed payload; the payload signs its digest. */
+exports.SealedSecrets = zod_1.z.object({ githubToken: exports.SealedSecret }).strict();
+exports.OperationEnvelope = zod_1.z.object({ payload: exports.OperationPayload, signature: exports.OperationSignature, sealed: exports.SealedSecrets.optional() }).strict();
 /**
  * What POST /v1/operations accepts before verifyOperation checks it: any operation name, so an
  * unknown one is refused as operation_not_allowed rather than as a malformed request.
  */
-exports.SubmittedEnvelope = zod_1.z.object({ payload: zod_1.z.looseObject({ operation: zod_1.z.string() }), signature: zod_1.z.looseObject({}) }).strict();
+exports.SubmittedEnvelope = zod_1.z.object({ payload: zod_1.z.looseObject({ operation: zod_1.z.string() }), signature: zod_1.z.looseObject({}), sealed: zod_1.z.looseObject({}).optional() }).strict();
 /**
  * JSON with object keys sorted at every level and no whitespace: the bytes both sides sign and check.
  * Keys sort by UTF-16 code unit, as JavaScript's default sort does.
@@ -129,10 +218,35 @@ const SIGNING_DOMAIN = 'pane-cloud-operation-v1\n';
 function operationSigningBytes(payload) {
     return Buffer.from(SIGNING_DOMAIN + canonicalJson(payload), 'utf8');
 }
-async function signOperation(payload, signer) {
+async function signOperation(payload, signer, sealed) {
     const checked = exports.OperationPayload.parse(payload);
     const signature = await signer.sign(operationSigningBytes(checked));
-    return { payload: checked, signature: { keyId: signer.keyId, algorithm: 'ECDSA_SHA_256', value: signature.toString('base64') } };
+    const envelope = { payload: checked, signature: { keyId: signer.keyId, algorithm: 'ECDSA_SHA_256', value: signature.toString('base64') } };
+    if (sealed)
+        envelope.sealed = exports.SealedSecrets.parse(sealed);
+    return envelope;
+}
+/**
+ * The host's check, for a requestId it has not seen, that the sealed token sent beside the payload is
+ * the one the payload signs. A resend of a requestId the host already recorded answers its first
+ * outcome without it. Throws invalid_request; the message never repeats the sealed token.
+ */
+function requireSealedSecrets(envelope) {
+    const operation = envelope.payload;
+    const digest = operation.operation === 'create' || operation.operation === 'retry_clone' ? operation.parameters.sealedGitHubTokenSha256 : undefined;
+    const sealed = envelope.sealed?.githubToken;
+    if (digest === undefined && sealed === undefined)
+        return null;
+    if (digest === undefined) {
+        throw new errors_1.CloudApiError('invalid_request', `${operation.operation} carries a sealed token its signed payload does not name.`, 'Sign the sealed token\'s SHA-256 as sealedGitHubTokenSha256, or send no sealed token.');
+    }
+    if (sealed === undefined) {
+        throw new errors_1.CloudApiError('invalid_request', `${operation.operation} names a sealed token and none was sent with it, so the host ran nothing.`, 'Fail this create and let the person create the Session again; the service keeps no copy of the token.');
+    }
+    if (sealedSecretDigest(sealed) !== digest) {
+        throw new errors_1.CloudApiError('invalid_request', `The sealed token sent with ${operation.operation} is not the one its payload signs, so the host ran nothing.`, 'Send the sealed token exactly as sealed.');
+    }
+    return { githubToken: sealed };
 }
 /**
  * The host agent's check of an envelope it received, before it runs anything. Throws CloudApiError:
@@ -181,6 +295,8 @@ exports.FleetVm = zod_1.z
     hostId: zod_1.z.string().nullable(),
     memoryGiB: exports.VmMemoryGiB,
     paneVersion: zod_1.z.string().nullable(),
+    /** The clone of the Session's repo; null for a VM created without one. */
+    clone: exports.CloneStatus.nullable().default(null),
     updatedAt: Timestamp,
 })
     .strict();
@@ -290,6 +406,10 @@ exports.fleetRoutes = {
         response: exports.OperationStatus,
         status: 202,
     }),
+    /** Reserves a free slot for one create and returns the key its sealed token is sealed to. */
+    reserveSealingKey: (0, http_1.route)({ id: 'fleet.reserveSealingKey', method: 'POST', path: '/v1/sealing-keys', auth: true, body: zod_1.z.object({}).strict(), response: exports.FleetSealingKey, status: 201 }),
+    /** A fresh key for a running VM, for a retry_clone that carries a new sealed token. */
+    createVmSealingKey: (0, http_1.route)({ id: 'fleet.createVmSealingKey', method: 'POST', path: '/v1/vms/:vmId/sealing-key', auth: true, body: zod_1.z.object({}).strict(), response: exports.FleetSealingKey, status: 201 }),
     getOperation: (0, http_1.route)({ id: 'fleet.getOperation', method: 'GET', path: '/v1/operations/:requestId', auth: true, response: exports.OperationStatus }),
     getVm: (0, http_1.route)({ id: 'fleet.getVm', method: 'GET', path: '/v1/vms/:vmId', auth: true, response: exports.FleetVm }),
     getMetrics: (0, http_1.route)({
@@ -313,6 +433,8 @@ exports.fleetRoutes = {
 function createFleetClient(config) {
     return {
         submitOperation: (envelope) => (0, http_1.callRoute)(config, exports.fleetRoutes.submitOperation, { body: envelope }),
+        reserveSealingKey: () => (0, http_1.callRoute)(config, exports.fleetRoutes.reserveSealingKey, { body: {} }),
+        createVmSealingKey: (vmId) => (0, http_1.callRoute)(config, exports.fleetRoutes.createVmSealingKey, { params: { vmId }, body: {} }),
         getOperation: (requestId) => (0, http_1.callRoute)(config, exports.fleetRoutes.getOperation, { params: { requestId } }),
         getVm: (vmId) => (0, http_1.callRoute)(config, exports.fleetRoutes.getVm, { params: { vmId } }),
         getMetrics: (vmId, day) => (0, http_1.callRoute)(config, exports.fleetRoutes.getMetrics, { params: { vmId }, query: { day } }),

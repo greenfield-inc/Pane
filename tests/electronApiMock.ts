@@ -1415,8 +1415,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const paneCloudActions = new Map<string, PaneCloudAction[]>();
     const paneCloudAnswer = () => Promise.resolve({ success: true, data: clone(paneCloudSnapshot) });
     /** Stop, Start, Delete and Update Pane calls, by VM id. */
-    const paneCloudCalls: Array<{ action: 'stop' | 'start' | 'remove' | 'updatePane'; vmId: string }> = [];
-    const paneCloudCall = (action: 'stop' | 'start' | 'remove' | 'updatePane') => (vmId: string) => { paneCloudCalls.push({ action, vmId }); return paneCloudAnswer(); };
+    const paneCloudCalls: Array<{ action: 'stop' | 'start' | 'remove' | 'updatePane' | 'archive' | 'restore' | 'retryClone'; vmId: string }> = [];
+    const paneCloudCall = (action: 'stop' | 'start' | 'remove' | 'updatePane' | 'archive' | 'restore' | 'retryClone') => (vmId: string) => { paneCloudCalls.push({ action, vmId }); return paneCloudAnswer(); };
     const paneCloudApi = {
       get: paneCloudAnswer,
       signIn: paneCloudAnswer,
@@ -1425,10 +1425,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       start: paneCloudCall('start'),
       remove: paneCloudCall('remove'),
       updatePane: paneCloudCall('updatePane'),
+      archive: paneCloudCall('archive'),
+      restore: paneCloudCall('restore'),
+      retryClone: paneCloudCall('retryClone'),
+      prepareCreate: () => Promise.resolve({ success: true }),
       actions: (vmId: string) => Promise.resolve({ success: true, data: clone(paneCloudActions.get(vmId) ?? []) }),
       create: (input: OrchestrationSessionCreateInput) => {
         paneCloudCreates.push(clone(input));
-        return Promise.resolve({ success: true, data: { machineId: 'cloud-1', sessionId: 's-1', snapshot: clone(paneCloudSnapshot) } });
+        return Promise.resolve({ success: true, data: { machineId: 'cloud-1', sessionId: 's-1', vmId: 'vm-new', snapshot: clone(paneCloudSnapshot) } });
       },
       onChanged: (callback: MockEventCallback) => subscribe('pane-cloud:changed', callback),
     };

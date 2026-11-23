@@ -20,3 +20,4 @@ __exportStar(require("./fleet"), exports);
 __exportStar(require("./service"), exports);
 var http_1 = require("./http");
 Object.defineProperty(exports, "callRoute", { enumerable: true, get: function () { return http_1.callRoute; } });
+__exportStar(require("./sealing"), exports);

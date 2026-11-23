@@ -146,8 +146,9 @@ export function cloudSessionRows({ cloud, activeId, lists, waitingCount }: {
   const onCloud = cloud.sessions.some((session) => session.machineId !== null && session.machineId === activeId);
   if (onCloud) rows.push(...(fromLists(LOCAL_MACHINE_ID, null, { underReview: false, busy: false, cloudName: null }) ?? []));
   for (const session of cloud.sessions) {
-    // Not paired with this computer: an archived cloud Session (D-94), listed under Archived.
-    if (session.machineId === null || session.machineId === activeId) continue;
+    // Not paired with this computer and not running: an archived cloud Session (D-94), listed under Archived.
+    // One being created, or unlinked by hand while it runs, keeps its row with Stop and Delete.
+    if ((session.machineId === null && !session.awake) || (session.machineId !== null && session.machineId === activeId)) continue;
     const extra = { underReview: session.underReview, busy: cloud.busy.includes(session.vmId), cloudName: session.name };
     const read = session.awake && session.machineId ? fromLists(session.machineId, session.vmId, extra) : null;
     if (read && read.length > 0) {

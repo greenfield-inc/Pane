@@ -79,7 +79,7 @@ function SignInGroup({ snapshot }: { snapshot: PaneCloudSnapshot }) {
           <Button type="button" size="sm" variant="ghost" onClick={() => void signOut()}>Sign out</Button>
         </Row>
       ) : (
-        <Row label="Pane Cloud" description="A machine for each Session that keeps working when this computer is closed. 300 agent-hours a month free. Most people never reach this.">
+        <Row label="Pane Cloud" description="A machine for each Session that keeps working when this computer is closed. 300 agent-hours a month free.">
           <Button type="button" size="sm" icon={<LogIn className="h-4 w-4" />} onClick={() => void startSignIn()}>Sign in</Button>
         </Row>
       )}

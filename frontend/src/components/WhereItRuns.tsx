@@ -24,7 +24,8 @@ const THIS_COMPUTER = isMac() ? 'this Mac' : 'this computer';
 /** What stops a cloud Session being created now: one quiet line and at most one action. */
 export interface PaneCloudGate {
   line: string;
-  action?: 'sign-in' | 'sign-up';
+  /** The buttons it offers, in order. */
+  actions?: ReadonlyArray<'waitlist' | 'sign-in' | 'sign-up'>;
   /** The code the browser shows while signing in. */
   code?: string;
 }
@@ -80,6 +81,8 @@ interface WhereItRunsProps {
   /** Shown on the Pane Cloud card while it is selected. */
   cloudGate: PaneCloudGate | null;
   onCloudSignIn: () => void;
+  /** Opens the Pane Cloud waitlist in the browser (D-102). */
+  onCloudWaitlist: () => void;
   onCloudSignUp: () => void;
   /** Secrets sync (K1) reaches new cloud Sessions: only then does the card say they come along. */
   sendsSecrets: boolean;
@@ -90,7 +93,7 @@ interface WhereItRunsProps {
   disabled?: boolean;
 }
 
-export function WhereItRuns({ value, onChange, current, others, cloudGate, onCloudSignIn, onCloudSignUp, sendsSecrets, turnsOnPhoneAccess, onMacWorkDocs, disabled }: WhereItRunsProps) {
+export function WhereItRuns({ value, onChange, current, others, cloudGate, onCloudSignIn, onCloudWaitlist, onCloudSignUp, sendsSecrets, turnsOnPhoneAccess, onMacWorkDocs, disabled }: WhereItRunsProps) {
   const here = current.id === LOCAL_MACHINE_ID;
   const thisLabel = isMac() ? 'This Mac' : isWindows() ? 'This PC' : 'This computer';
   const cloudSelected = value === 'cloud';
@@ -120,8 +123,9 @@ export function WhereItRuns({ value, onChange, current, others, cloudGate, onClo
           footer={cloudSelected && cloudGate ? <>
             <span className="flex-1">{cloudGate.line}</span>
             {cloudGate.code && <span className="font-mono text-text-tertiary">{cloudGate.code}</span>}
-            {cloudGate.action === 'sign-in' && <Button type="button" size="sm" variant="secondary" onClick={onCloudSignIn}>Sign in</Button>}
-            {cloudGate.action === 'sign-up' && <Button type="button" size="sm" variant="secondary" onClick={onCloudSignUp}>Finish signing up</Button>}
+            {cloudGate.actions?.includes('waitlist') && <Button type="button" size="sm" variant="ghost" onClick={onCloudWaitlist}>Join the waitlist</Button>}
+            {cloudGate.actions?.includes('sign-in') && <Button type="button" size="sm" variant="secondary" onClick={onCloudSignIn}>Sign in</Button>}
+            {cloudGate.actions?.includes('sign-up') && <Button type="button" size="sm" variant="secondary" onClick={onCloudSignUp}>Finish signing up</Button>}
           </> : onMacWorkDocs ? <>
             <span className="flex-1">This repo has an Xcode project, and none of your Macs is online.</span>
             <Button type="button" size="sm" variant="secondary" onClick={onMacWorkDocs}>Run it on a Mac</Button>

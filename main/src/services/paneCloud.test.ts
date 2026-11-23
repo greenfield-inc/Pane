@@ -18,6 +18,7 @@ let computers: Map<string, string>;
 let started: Array<{ machineId: string; input: JsonObject }>;
 let forgotten: string[];
 let unlinked: string[];
+let notReached: string[];
 let archiving: Array<{ machineId: string; archived: boolean }>;
 const managers: PaneCloudManager[] = [];
 
@@ -42,8 +43,14 @@ function manager(overrides: Partial<ConstructorParameters<typeof PaneCloudManage
     unlink: async (machineId) => {
       unlinked.push(machineId);
       for (const [relayId, id] of computers) if (id === machineId) computers.delete(relayId);
+      return { notReached: [...notReached] };
     },
-    archiveSessions: async (machineId, archived) => { archiving.push({ machineId, archived }); },
+    // As for real: a machine's Sessions can be read and changed only while it runs.
+    archiveSessions: async (machineId, archived) => {
+      const running = managers.some((cloud) => cloud.snapshot().sessions.some((entry) => entry.machineId === machineId && entry.awake));
+      if (!running) throw new PaneError('ERR_CLOUD_SESSION_UNREACHABLE', 'This computer could not connect to the cloud machine.', 'Start it, then try again.');
+      archiving.push({ machineId, archived });
+    },
     pollMs: { waiting: 10, steady: 60_000 },
     ...overrides,
   });
@@ -70,6 +77,7 @@ beforeEach(async () => {
   started = [];
   forgotten = [];
   unlinked = [];
+  notReached = [];
   archiving = [];
   service = await startServiceStub({
     now: () => clock,
@@ -117,6 +125,16 @@ describe('Pane Cloud sign-in', () => {
     expect(opened).toEqual([]);
     expect(after.signIn).toEqual({ state: 'signed-out' });
     expect(after.error?.message).toMatch(/not a web address/);
+  });
+
+  it('says plainly when Sign in can\'t reach Pane Cloud', async () => {
+    const cloud = manager();
+    await service.close();
+
+    const after = await cloud.startSignIn();
+    expect(after.signIn).toEqual({ state: 'signed-out' });
+    expect(after.error).toMatchObject({ code: 'ERR_PANE_CLOUD_UNREACHABLE' });
+    expect(opened).toEqual([]);
   });
 
   it('forgets the session on sign-out', async () => {
@@ -269,6 +287,17 @@ describe('a cloud Session', () => {
     expect(actions[0]).toMatchObject({ operation: 'stop', actor: 'you', failed: false });
     expect(actions.at(-1)).toMatchObject({ operation: 'create', actor: 'you' });
   });
+
+  it('updates Pane on the VM through Pane Cloud, which installs the newest published release (D-105)', async () => {
+    const cloud = manager();
+    await signIn(cloud, 'maya@example.test');
+    const { vmId } = await cloud.createSession(session('Docs'));
+
+    const after = await cloud.updatePane(vmId);
+
+    expect(after.error).toBeNull();
+    expect((await cloud.actions(vmId))[0]).toMatchObject({ operation: 'update_pane', actor: 'you', reason: 'You updated Pane to 2.4.215.' });
+  });
 });
 
 describe('archiving a cloud Session (D-94)', () => {
@@ -283,6 +312,31 @@ describe('archiving a cloud Session (D-94)', () => {
     expect(unlinked).toEqual(['computer-1']);
     expect(after.sessions).toEqual([expect.objectContaining({ vmId, machineId: null, awake: false })]);
     expect(after.usage?.awakeNow).toBe(0);
+  });
+
+  it('archives a stopped cloud Session by starting it first, then stops it again', async () => {
+    const cloud = manager();
+    await signIn(cloud, 'maya@example.test');
+    const { snapshot } = await cloud.createSession(session('Docs'));
+    const vmId = snapshot.sessions[0].vmId;
+    await cloud.stop(vmId);
+
+    const after = await cloud.archive(vmId);
+    expect(after.error).toBeNull();
+    expect(archiving).toEqual([{ machineId: 'computer-1', archived: true }]);
+    expect(unlinked).toEqual(['computer-1']);
+    expect(after.sessions).toEqual([expect.objectContaining({ vmId, machineId: null, awake: false })]);
+  });
+
+  it('says which of the person\'s computers the unlink could not reach', async () => {
+    const cloud = manager();
+    await signIn(cloud, 'maya@example.test');
+    const { snapshot } = await cloud.createSession(session('Docs'));
+    notReached = ['Travel Laptop'];
+
+    const after = await cloud.archive(snapshot.sessions[0].vmId);
+    expect(after.sessions[0]).toMatchObject({ machineId: null });
+    expect(after.error?.message).toMatch(/Travel Laptop/);
   });
 
   it('restores it by starting the VM, pairing it again and bringing its Session back', async () => {
@@ -355,5 +409,73 @@ describe('background re-reads', () => {
     await cloud.createSession(session('Docs'));
     const afterCreate = calls;
     await vi.waitFor(() => expect(calls).toBeGreaterThan(afterCreate), { timeout: 2_000 });
+  });
+});
+
+describe('a new cloud Session for a repo (D-107)', () => {
+  const repo = { url: 'https://github.com/expressjs/express', branch: 'master' };
+  const record = { token: 'gho_maya_desktop_token', source: 'Maya’s MacBook Pro', updatedAt: '2026-12-09T08:00:00.000Z' };
+
+  it('seals the GitHub token with its source and date to the slot\'s key, and puts it in no snapshot or log', async () => {
+    const logged = (['log', 'info', 'warn', 'error', 'debug'] as const).map((level) => vi.spyOn(console, level).mockImplementation(() => undefined));
+    const snapshots: string[] = [];
+    const cloud = manager({ githubToken: async () => record, onChange: (snapshot) => snapshots.push(JSON.stringify(snapshot)) });
+    await signIn(cloud, 'maya@example.test');
+    cloud.prepareCreate();
+
+    const created = await cloud.createSession(session('Docs site migration'), repo);
+
+    expect(service.hostGitHubToken(created.vmId)).toEqual(record);
+    const written = [...snapshots, JSON.stringify(created), ...logged.flatMap((spy) => spy.mock.calls.map((call) => JSON.stringify(call)))];
+    expect(written.filter((text) => text.includes(record.token))).toEqual([]);
+    expect(JSON.stringify(await cloud.actions(created.vmId))).not.toContain(record.token);
+  });
+
+  it('sends no token when the person keeps it from cloud machines, and none with a repo off GitHub', async () => {
+    const asked = vi.fn(async () => record);
+    const kept = manager({ githubToken: async () => null });
+    await signIn(kept, 'maya@example.test');
+    const withoutToken = await kept.createSession(session('Public repo'), repo);
+    expect(service.hostGitHubToken(withoutToken.vmId)).toBeNull();
+    expect(kept.snapshot().sessions.find((entry) => entry.vmId === withoutToken.vmId)?.clone).toMatchObject({ repo: 'expressjs/express', state: 'cloning' });
+
+    const gitlab = manager({ githubToken: asked });
+    await signIn(gitlab, 'maya@example.test');
+    const offGitHub = await gitlab.createSession(session('GitLab repo'), { url: 'https://gitlab.com/example/site', branch: 'main' });
+    expect(service.hostGitHubToken(offGitHub.vmId)).toBeNull();
+    expect(asked).not.toHaveBeenCalled();
+  });
+
+  it('reads the clone at least once a second until it names the Pane to open', async () => {
+    const cloud = manager({ pollMs: { waiting: 10, steady: 60_000, cloning: 20 } });
+    await signIn(cloud, 'maya@example.test');
+    const phases = new Set<string>();
+    const created = await cloud.createSession(session('Clone'), repo);
+    await vi.waitFor(() => {
+      const clone = cloud.snapshot().sessions.find((entry) => entry.vmId === created.vmId)?.clone;
+      if (clone?.phase) phases.add(clone.phase);
+      expect(clone).toMatchObject({ state: 'ready', paneId: expect.any(String) });
+    }, { timeout: 5_000, interval: 5 });
+    expect(phases.has('receiving')).toBe(true);
+  });
+
+  it('shows git\'s error for a failed clone, keeps the VM, and retries with a freshly sealed token', async () => {
+    let current = record;
+    const cloud = manager({ githubToken: async () => current });
+    await signIn(cloud, 'maya@example.test');
+    const created = await cloud.createSession(session('Private repo'), repo);
+    service.failClone(created.vmId, "remote: Invalid username or token.\nfatal: Authentication failed for 'https://github.com/expressjs/express/'");
+    await cloud.refresh();
+    expect(cloud.snapshot().sessions.find((entry) => entry.vmId === created.vmId)).toMatchObject({
+      awake: true,
+      clone: { state: 'failed', paneId: null, error: expect.stringContaining('Authentication failed') },
+    });
+
+    current = { ...record, token: 'gho_maya_signed_in_again', updatedAt: '2026-12-10T11:59:00.000Z' };
+    const after = await cloud.retryClone(created.vmId);
+
+    expect(service.hostGitHubToken(created.vmId)).toEqual(current);
+    expect(after.sessions.find((entry) => entry.vmId === created.vmId)?.clone?.state).toBe('cloning');
+    expect(JSON.stringify(after)).not.toContain(current.token);
   });
 });

@@ -76,6 +76,8 @@ import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
 import { isChatTabsEnabled, isMissionControlEnabled, isProfilesEnabled, isTodosEnabled, useConfigStore } from '../stores/configStore';
 import { leaveTodos } from './todos/todosNavigation';
+import { CloudWakingView } from './CloudWakingView';
+import { usePaneCloudStore } from '../stores/paneCloudStore';
 import { configuredIde } from '../../../shared/utils/ideCommands';
 import { cycleIndex } from '../utils/arrayUtils';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
@@ -1919,7 +1921,13 @@ export const SessionView = memo(() => {
   // The tab the Pane's stage showed last; a revisited terminal there makes the Pane's skeleton quiet.
   const stagePanelId = usePanelStore(state => (selectedPaneId ? state.activePanels[selectedPaneId] : undefined));
   // The project view's skeleton waits 150 ms, stays 300 ms once shown, then the view fades in.
+  const cloudWaking = usePaneCloudStore(state => state.waking);
   const projectHold = useSkeletonHold(activeView === 'project' && Boolean(activeProjectId) && (isProjectLoading || !projectData));
+
+  // A new cloud Session, from Create until its first terminal opens (frame D2).
+  if (cloudWaking) {
+    return <CloudWakingView waking={cloudWaking} />;
+  }
 
   // Live grid of every agent pane — spans all projects.
   if (activeView === 'mission-control' && missionControlEnabled) {
