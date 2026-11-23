@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import type { PaneSecretStore } from './paneSecrets';
+import { MAX_CLOCK_AHEAD_MS, type PaneSecretStore } from './paneSecrets';
 import { githubCliToken } from './githubWatchClient';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -88,34 +88,51 @@ function invalidTokenDrop(): PaneError {
  * At daemon start on a machine with a secrets volume: imports the GitHub token the guest left in
  * `incoming/github-token.json`, through the same path as a sync (newest wins, the person's choice
  * applied), deletes the file whatever happened to it, then puts the sign-ins in the agents' environment.
- * A file that doesn't decode is deleted and reported with a PaneError that never quotes it.
+ * A file that isn't a small regular file, can't be read or doesn't decode is deleted and reported with a
+ * PaneError that never quotes it, and the sign-ins the machine holds are still exported.
  */
 export async function startCloudSignIns(secrets: Pick<PaneSecretStore, 'applyFromSync' | 'cloudChoice' | 'has' | 'read'>, volume: string | undefined, env: NodeJS.ProcessEnv): Promise<void> {
-  const drop = volume === undefined ? null : path.join(volume, TOKEN_DROP);
-  let text: string | null = null;
-  if (drop) {
-    try {
-      text = await fs.readFile(drop, 'utf8');
-    } catch (error) {
-      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
-    }
-  }
   try {
-    if (drop && text !== null) {
-      await fs.rm(drop, { force: true });
-      let parsed: { token: string; source: string; updatedAt: string };
-      try {
-        parsed = decodeBoundary(JSON.parse(text), tokenDropSchema);
-      } catch {
-        throw invalidTokenDrop();
-      }
-      if (Number.isNaN(Date.parse(parsed.updatedAt))) throw invalidTokenDrop();
-      const record = { [GITHUB_SIGN_IN_KEY]: { value: parsed.token, updatedAt: parsed.updatedAt, source: parsed.source } };
-      await secrets.applyFromSync(cloudSecretRecords(record, secrets.cloudChoice()));
-    }
+    if (volume !== undefined) await importTokenDrop(secrets, path.join(volume, TOKEN_DROP));
   } finally {
     await exportCloudSignIns(secrets, env);
   }
+}
+
+/** The most a token file holds: a token, a host label and a time. */
+const MAX_TOKEN_DROP_BYTES = 64 * 1024;
+
+async function importTokenDrop(secrets: Pick<PaneSecretStore, 'applyFromSync' | 'cloudChoice'>, drop: string): Promise<void> {
+  let text: string;
+  try {
+    // Only a small regular file is read: a directory, a link, a pipe or an oversized file is deleted unread.
+    const info = await fs.lstat(drop);
+    if (!info.isFile() || info.size > MAX_TOKEN_DROP_BYTES) throw invalidTokenDrop();
+    text = await fs.readFile(drop, 'utf8');
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error ? String(error.code) : undefined;
+    if (code === 'ENOENT') return;
+    await fs.rm(drop, { recursive: true, force: true }).catch(() => undefined);
+    if (error instanceof PaneError) throw error;
+    throw new PaneError(
+      'ERR_CLOUD_TOKEN_DROP_UNREADABLE',
+      `Pane could not read the GitHub token this cloud machine was given at creation (${code ?? 'unknown error'}), so it deleted it and this machine has no GitHub sign-in yet.`,
+      'It arrives with the next sync from a computer signed in to gh; or create the cloud Session again.',
+    );
+  }
+  await fs.rm(drop, { force: true });
+  let parsed: { token: string; source: string; updatedAt: string };
+  try {
+    parsed = decodeBoundary(JSON.parse(text), tokenDropSchema);
+  } catch {
+    throw invalidTokenDrop();
+  }
+  const time = Date.parse(parsed.updatedAt);
+  if (Number.isNaN(time)) throw invalidTokenDrop();
+  // A time far ahead of this clock would outrank every later token; take it as now.
+  const updatedAt = time > Date.now() + MAX_CLOCK_AHEAD_MS ? new Date().toISOString() : parsed.updatedAt;
+  const record = { [GITHUB_SIGN_IN_KEY]: { value: parsed.token, updatedAt, source: parsed.source } };
+  await secrets.applyFromSync(cloudSecretRecords(record, secrets.cloudChoice()));
 }
 
 type CloudSecretStore = Pick<PaneSecretStore, 'applyCloudChoiceFromSync' | 'cloudChoice' | 'forgetExcluded' | 'applyFromSync' | 'secretRecord' | 'has' | 'read'>;

@@ -879,6 +879,17 @@ describe('Pane Cloud VMs', () => {
     expect(await signedOut.sync.githubTokenForCloud()).toBeNull();
   });
 
+  it('log a malformed token file at start without the token in the log', async () => {
+    const warned: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warned.push(args.map(String).join(' ')); });
+    const vm = await cloudVm({ tokenDrop: '{"token": gho_LOGCANARY123}' });
+
+    await vi.waitFor(() => expect(warned.join('\n')).toContain('ERR_CLOUD_TOKEN_DROP_INVALID'));
+    // JSON.parse's message would quote only the token's first characters.
+    expect(warned.join('\n')).not.toContain('gho_LO');
+    await expect(fs.access(path.join(vm.volume ?? '', 'incoming', 'github-token.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('refuse the send when the VM has no secrets volume, so the cloud Session is not started without its secrets', async () => {
     const vm = await cloudVm({ withVolume: false });
     const { sync } = await desktop([vm]);

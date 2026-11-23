@@ -36,7 +36,11 @@ export function registerSharedCredentialHandlers(
 ): void {
   const { configManager } = services;
   // The GitHub token the machine was given at creation first, then the sign-ins it holds (D-107).
-  if (cloudVm) void startCloudSignIns(secrets, cloudVm.volume, cloudVm.env).catch((error) => console.warn('[SharedCredentials] Could not start the cloud sign-ins:', error instanceof PaneError ? error.message : 'the secrets volume could not be read'));
+  if (cloudVm) void startCloudSignIns(secrets, cloudVm.volume, cloudVm.env).catch((error: Error) => {
+    // A PaneError's text never quotes the token file; for anything else only its code, never its message.
+    const code = error instanceof Error && 'code' in error ? String(error.code) : 'unknown error';
+    console.warn('[SharedCredentials] Could not start the cloud sign-ins:', error instanceof PaneError ? `${error.code}: ${error.message}` : code);
+  });
   const readAll = async (): Promise<SharedCredentials> => ({
     ...readSharedCredentials(configManager.getConfig()),
     paneSecrets: await secrets.exportForSync(),
