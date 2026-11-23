@@ -143,7 +143,19 @@ export class RelayService {
     const own = this.secretStore('relay/computer-key');
     const file = this.prebootFile('computer-key.pem');
     return {
-      read: async () => readOptionalFile(file)?.toString('utf8') ?? own.read(),
+      // Only an absent file falls back to this computer's own key; an unreadable or empty one is an error naming it.
+      read: async () => {
+        if (!file) return own.read();
+        let pem: string;
+        try {
+          pem = readFileSync(file, 'utf8');
+        } catch (error) {
+          if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return own.read();
+          throw error;
+        }
+        if (!pem.trim()) throw new Error('the file is empty');
+        return pem;
+      },
       write: (pem) => own.write(pem),
     };
   }

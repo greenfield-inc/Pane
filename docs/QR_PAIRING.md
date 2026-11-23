@@ -84,9 +84,11 @@ group when it pairs, after asking (below).
 A Pane Cloud Session's VM is one of your computers. Pane links it the same way
 it links another of your machines, so the VM gets the same access: it reaches
 your other computers and they reach it. The only difference is how it pairs:
-Pane Cloud hands Pane the VM's one-time link and its key, and Pane connects
-only to a VM that presents exactly that key, so nothing else can stand in for
-it. To take that access away, unlink the VM like any computer: **Unlink from all
+Pane Cloud hands Pane the VM's one-time link and its public key, and Pane
+connects only to a VM that presents exactly that key, so nothing else can stand
+in for it. Pane Cloud's host makes a cloud VM's private key before the VM first
+boots and keeps it only on that VM's secrets volume; Pane Cloud's service sees
+only its public half. To take that access away, unlink the VM like any computer: **Unlink from all
 your computers** in its row under Settings › Remote Access › Computers.
 Archiving a cloud Session unlinks its VM from each of your computers Pane can
 reach. A computer that is off at the time keeps the VM until you unlink it
@@ -154,7 +156,8 @@ answers.
 
 Each computer gets its own address, `https://<id>.runpane.net`, with its own
 certificate. The computer holds the private key; it never leaves the
-computer.
+computer. (A Pane Cloud VM's private key is made by Pane Cloud's host; see
+above.)
 
 - **Same Wi-Fi:** the Pane app and desktop Pane connect to the computer
   directly.

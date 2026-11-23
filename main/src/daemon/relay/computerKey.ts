@@ -1,6 +1,10 @@
 import { createHash, createPrivateKey, createPublicKey, createSign, generateKeyPairSync, type KeyObject } from 'crypto';
 
-/** Where the computer's private key lives: the OS keychain or the encrypted secrets file. It never leaves this computer. */
+/**
+ * Where the computer's private key lives: the OS keychain or the encrypted secrets file, and it
+ * never leaves this computer. On a Pane Cloud VM, Pane Cloud's host makes the key before the first
+ * boot and keeps it only on the VM's secrets volume (D-104).
+ */
 export interface KeyStore {
   read(): Promise<string | null>;
   write(pem: string): Promise<void>;

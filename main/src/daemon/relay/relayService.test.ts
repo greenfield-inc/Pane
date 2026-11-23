@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import net from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -11,14 +11,19 @@ import { letsEncryptLimit, startRefusingCa } from './__fixtures__/refusingCa';
 afterEach(() => { vi.useRealTimers(); });
 
 describe('relay service', () => {
-  it('names the file and the next step when the relay key Pane Cloud\'s host wrote before boot does not read', async () => {
+  it.each([
+    ['holds no key', (file: string) => writeFileSync(file, 'not a key')],
+    ['is empty', (file: string) => writeFileSync(file, '')],
+    ...(process.platform === 'win32' || process.getuid?.() === 0 ? [] : [['cannot be read', (file: string) => { writeFileSync(file, 'x'); chmodSync(file, 0o000); }] as const]),
+  ])('names the file and the next step, and makes no key of its own, when the relay key Pane Cloud\'s host wrote before boot %s', async (_name, write) => {
     const secretsDir = mkdtempSync(join(tmpdir(), 'pane-relay-preboot-'));
     mkdirSync(join(secretsDir, 'relay'));
-    writeFileSync(join(secretsDir, 'relay', 'computer-key.pem'), 'not a key');
+    write(join(secretsDir, 'relay', 'computer-key.pem'));
+    const ownKey: string[] = [];
     const service = new RelayService({
       settings: () => ({ enabled: true, relayAddress: `${RELAY_HOST}:1` }),
       onSettingsChanged: () => () => {},
-      secrets: { read: async () => null, write: async () => {} },
+      secrets: { read: async () => null, write: async (_key, value) => { ownKey.push(value); } },
       dataDir: mkdtempSync(join(tmpdir(), 'pane-relay-service-')),
       pairingListener: () => ({ port: 1 }),
       previewPort: () => null,
@@ -30,8 +35,10 @@ describe('relay service', () => {
       service.start();
       await vi.waitFor(() => expect(service.getStatus().lastError).toContain(join(secretsDir, 'relay', 'computer-key.pem')), { timeout: 10_000 });
       expect(service.getStatus().lastError).toContain('Restart the Session from Pane Cloud');
+      expect(ownKey).toEqual([]);
     } finally {
       await service.stop();
+      chmodSync(join(secretsDir, 'relay', 'computer-key.pem'), 0o600);
     }
   });
 
