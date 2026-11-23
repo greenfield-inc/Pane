@@ -187,7 +187,10 @@ function openPopupTab({ url, options, opener }: PopupTabRequest): WebContents {
   const closeTab = () => {
     if (!tabId) return;
     popupPages.delete(tabId);
-    void popupHost?.commandRegistry.invoke('panels:delete', [tabId]).catch(() => undefined);
+    // Every screen goes back to the opener, where the sign-in reported back (or its line shows).
+    void popupHost?.commandRegistry.invoke('panels:delete', [tabId])
+      .then(() => panelManager.getPanel(opener.panelId) && panelManager.setActivePanel(opener.sessionId, opener.panelId))
+      .catch(() => undefined);
   };
   window.once('closed', closeTab);
   routeHiddenPage(page, {

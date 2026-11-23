@@ -832,6 +832,14 @@ describe('browser tabs: streaming a page to another screen', () => {
     expect((await view()).signIn).toBeUndefined();
   });
 
+  it('ends a sign-in line when the page moves on before any screen looked at the tab', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a')], { holds });
+    fixture.refuseSignIn('mine', 'Google', 'https://accounts.google.com/');
+    fixture.pages.get('mine')?.emit('did-navigate');
+    const view = decodeBoundary(await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined }), browserTabViewSchema);
+    expect(view.signIn).toBeUndefined();
+  });
+
   it('says a tab is asleep, so the screen offers to wake it', async () => {
     const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { held: [], holds: { ...holds, idleMs: 50 } });
     await call(fixture, 'snapshot', {});

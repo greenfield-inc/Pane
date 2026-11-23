@@ -1078,6 +1078,9 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   const signIns = new Map<string, { site: string; url: string }>();
   host.onSignInRefused((tabId, signIn) => {
     signIns.set(tabId, signIn);
+    // Hear the page's next navigation now, which ends the line, even before any screen views the tab.
+    const page = host.page(tabId);
+    if (page && !page.isDestroyed()) followPage(tabId, page);
     changedView(tabId);
   });
 
