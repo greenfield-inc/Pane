@@ -554,7 +554,8 @@ export interface RunpanePaneCreateItem {
   baseBranch?: string;
   sessionPrompt?: string;
   pinned?: boolean;
-  tool: RunpaneToolSpec;
+  /** The agent or command the Pane's tab runs. Omitted, the Pane opens with its plain terminal and the create does not wait for setup. */
+  tool?: RunpaneToolSpec;
   /**
    * A native agent session id to resume, as `panes adopt --resume`: Pane launches the agent's own
    * resume for this id and records it as the tab's id, so a restart resumes the same conversation.
@@ -563,7 +564,10 @@ export interface RunpanePaneCreateItem {
 }
 
 export interface RunpanePaneCreateRequest {
-  repo: RunpaneRepoSelector;
+  /** The saved repository; exactly one of `repo` and `repoPath`. */
+  repo?: RunpaneRepoSelector;
+  /** A git repository directory: saved first, as `repos add` does, when it isn't yet. */
+  repoPath?: string;
   panes: RunpanePaneCreateItem[];
   dryRun?: boolean;
   timeoutMs?: number;
@@ -579,6 +583,8 @@ export interface RunpanePaneCreateRequest {
   associateSession?: string;
   /** Without associateSession, Pane joins new Panes to the Session the caller's Pane belongs to; true skips that. */
   noAssociate?: boolean;
+  /** Start each new worktree from the local base ref without fetching it; each item's `base.refresh` is `skipped`. */
+  noFetch?: boolean;
   /** The sender waits for a `runpane report`: journal `agent.report.missing` if the agent goes ready or exits without one. */
   expectReport?: boolean;
 }
@@ -782,6 +788,8 @@ export interface RunpanePaneCreateResult {
   ok: boolean;
   generation?: number;
   repo: RunpaneRepoSummary;
+  /** True when this create saved `repoPath` as a new repository. */
+  repoAdded?: boolean;
   items: RunpanePaneCreateResultItem[];
 }
 

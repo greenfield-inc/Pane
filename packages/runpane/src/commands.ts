@@ -36,6 +36,8 @@ export interface ParsedArgs {
   sessionId?: string;
   panelId?: string;
   repoPath?: string;
+  /** panes create --repo-path: a repository directory, saved first when new. */
+  repoDir?: string;
   folder?: string;
   resume?: string;
   name?: string;
@@ -114,6 +116,8 @@ export interface ParsedArgs {
   pinned?: boolean;
   noPinned?: boolean;
   noAssociate?: boolean;
+  /** panes create: start from the local base ref without fetching it. */
+  noFetch?: boolean;
   composerStrategy?: string;
   force?: boolean;
   removeWorktree?: boolean;
@@ -1001,6 +1005,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.noAssociate = true;
     return;
   }
+  if (flag === '--no-fetch') {
+    parsed.noFetch = true;
+    return;
+  }
   if (flag === '--force') {
     parsed.force = true;
     return;
@@ -1177,6 +1185,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--repo') {
     parsed.repo = value;
+    return;
+  }
+  if (flag === '--repo-path') {
+    parsed.repoDir = value;
     return;
   }
   if (flag === '--pane') {

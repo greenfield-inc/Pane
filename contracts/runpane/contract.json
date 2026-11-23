@@ -1573,6 +1573,8 @@
       "usage": [
         "runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
         "runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
+        "runpane panes create --repo <selector> --name <name> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--no-fetch] [options] [--pane-dir <path>]",
+        "runpane panes create --repo-path <dir> --name <name> [--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>] [--base <ref>] [--branch <name>] [--no-fetch] [options] [--pane-dir <path>]",
         "runpane panes create --from-json <path|-> [--yes] [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
@@ -3547,6 +3549,11 @@
         "description": "Repository selector: active, id, exact path, or saved repository name."
       },
       {
+        "name": "--repo-path",
+        "value": "<dir>",
+        "description": "panes create: a git repository directory, saved first as `repos add` does when it is not a saved repository yet. Use instead of --repo."
+      },
+      {
         "name": "--pane",
         "value": "<pane-id>",
         "description": "Pane/session id to inspect."
@@ -4217,6 +4224,10 @@
       {
         "name": "--no-associate",
         "description": "Do not associate the created pane with the caller's Session."
+      },
+      {
+        "name": "--no-fetch",
+        "description": "panes create: start each new worktree from the local base ref without fetching it first; each item's `base.refresh` reports `skipped`."
       },
       {
         "name": "--force",
@@ -4974,14 +4985,21 @@
         "Usage:",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
         "  runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
+        "  runpane panes create --repo <selector> --name <name> [--base <ref>] [--branch <name>] [--no-fetch] [options]",
+        "  runpane panes create --repo-path <dir> --name <name> [--agent <agent>|--tool-command <command>] [options]",
         "  runpane panes create --from-json <path|-> [--yes] [--json]",
         "",
         "Creates a Pane in a saved repository and opens a terminal-backed tool tab. Create one only when the work's branch has no Pane yet; for existing work use `runpane panels create --pane <id>`.",
+        "",
+        "Without --agent or --tool-command, the Pane opens with a plain terminal: the result's panelId is its default terminal, shell already started, and the create returns without waiting for setup, which keeps running in the background.",
+        "",
+        "--repo-path <dir> takes a directory instead of a saved repository: if it is not saved yet, Pane saves it as `repos add` does and creates the Pane in the same call; the result then has repoAdded: true.",
         "",
         "A long or multi-line prompt is never typed into the shell: on bash, zsh or sh the agent launches with `\"$(cat '<prompt file>')\"` reading a private copy under `<pane-dir>/prompts/<pane-id>/`; on PowerShell, cmd, fish or WSL the prompt is pasted into the agent's composer once it is ready.",
         "",
         "Options:",
         "  --repo <selector>              active, id, exact path, or saved repository name",
+        "  --repo-path <dir>              Git repository directory, saved first if new; instead of --repo",
         "  --name <name>                  Pane/session name",
         "  --worktree-name <name>         Worktree directory name, cut to 100 characters at a word; defaults to --name",
         "  --branch <name>                Exact new branch name (slashes kept); must not exist; defaults to the worktree name",
@@ -5011,6 +5029,7 @@
         "  --pinned                       Request pinning at creation; first Session association clears it",
         "  --no-pinned                    Create unpinned (the UI's favorite/pin star)",
         "  --no-associate                 Do not associate the new pane with the caller's Session",
+        "  --no-fetch                     Start from the local base ref without fetching it first",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
@@ -7923,14 +7942,21 @@
         "Usage:",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
         "  python -m runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
+        "  runpane panes create --repo <selector> --name <name> [--base <ref>] [--branch <name>] [--no-fetch] [options]",
+        "  runpane panes create --repo-path <dir> --name <name> [--agent <agent>|--tool-command <command>] [options]",
         "  runpane panes create --from-json <path|-> [--yes] [--json]",
         "",
         "Creates a Pane in a saved repository and opens a terminal-backed tool tab. Create one only when the work's branch has no Pane yet; for existing work use `runpane panels create --pane <id>`.",
+        "",
+        "Without --agent or --tool-command, the Pane opens with a plain terminal: the result's panelId is its default terminal, shell already started, and the create returns without waiting for setup, which keeps running in the background.",
+        "",
+        "--repo-path <dir> takes a directory instead of a saved repository: if it is not saved yet, Pane saves it as `repos add` does and creates the Pane in the same call; the result then has repoAdded: true.",
         "",
         "A long or multi-line prompt is never typed into the shell: on bash, zsh or sh the agent launches with `\"$(cat '<prompt file>')\"` reading a private copy under `<pane-dir>/prompts/<pane-id>/`; on PowerShell, cmd, fish or WSL the prompt is pasted into the agent's composer once it is ready.",
         "",
         "Options:",
         "  --repo <selector>              active, id, exact path, or saved repository name",
+        "  --repo-path <dir>              Git repository directory, saved first if new; instead of --repo",
         "  --name <name>                  Pane/session name",
         "  --worktree-name <name>         Worktree directory name, cut to 100 characters at a word; defaults to --name",
         "  --branch <name>                Exact new branch name (slashes kept); must not exist; defaults to the worktree name",
@@ -7960,6 +7986,7 @@
         "  --pinned                       Request pinning at creation; first Session association clears it",
         "  --no-pinned                    Create unpinned (the UI's favorite/pin star)",
         "  --no-associate                 Do not associate the new pane with the caller's Session",
+        "  --no-fetch                     Start from the local base ref without fetching it first",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
@@ -10214,7 +10241,7 @@
       "`runpane secrets` manages Pane secrets: named values, addressed as `<project>/<NAME>`, that every machine saved in Pane keeps a copy of. `list` shows names, times and machines, 1Password references and live leases, never a value. `set` reads the value from stdin. `delete` removes one everywhere. `exec` runs a command with secrets in its environment and returns its exit code. `request` asks the person on a masked Notify card and returns only `saved` or `declined`. A secret can instead be a 1Password reference, which the person sets in Settings; it has a value only during a lease. `lease` asks the person to start one and returns the lease's id, end time and machines; `lease end` ends one now. `exec` fails with `SECRET_LEASE_ENDED` when a reference has no live lease. No command prints a value, and the MCP server has no tool that sets or reads one. These commands run on the machine itself, so `runpane workspace <machine> secrets ...` is refused; use `runpane workspace <machine> exec -- runpane secrets ...`.",
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
-      "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. New Panes join the caller's Session automatically: the orchestrator's Session (`PANE_ORCHESTRATION_SESSION_ID`), or the open Session the calling tab's Pane belongs to; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
+      "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. New Panes join the caller's Session automatically: the orchestrator's Session (`PANE_ORCHESTRATION_SESSION_ID`), or the open Session the calling tab's Pane belongs to; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane. Without `--agent` or `--tool-command`, the Pane opens with a plain terminal: the item's `panelId` is the Pane's default terminal with its shell already started, `tool` is omitted, and the create returns without waiting for the repository's setup, which keeps running in the background. `--repo-path <dir>` replaces `--repo` with a directory: a directory that is not a saved repository yet is saved exactly as `repos add` saves it, in the same call, and the result reports `repoAdded: true`. Passing both fails with `ERR_RUNPANE_REPO_AND_REPO_PATH`.",
       "For `panes create --wait-ready` (and `panels create`, `panes adopt --launch`), ready means an identified agent at its own input box: declared with `--agent`, or detected from the command, its foreground process or its screen. A `--tool-command` that never shows a supported agent is not ready: `readiness.ok` is false with `readiness.reason.code` `no-agent-detected` after the timeout, or `command-exited` as soon as the command exits back to the shell, and nothing is typed into it. `agent-not-ready` means the agent was detected but its input box was not ready in time. CLI readiness is confirmed on consecutive polls. Codex also requires a recognized configured model or context footer below its live composer; its provisional startup composer is not ready. Hidden or unrecognized Codex status lines conservatively time out rather than prove readiness. Startup prompts return blocked with the prompt's own text in blocked.message and a suggestedCommand, and Pane never answers them, apart from Claude's folder trust for a Session's own folder: first-run trust and daemon dialogs and Agent Farm's `Trust this repository workspace? [y/N]` as blocked.kind=first-run-dialog; Codex's security setup banner and any other prompt, including a wrapper's or shell's `[y/N]` before the agent appears, as agent-prompt. A starting message blocked this way is held and sent once the prompt is answered and the agent's input box is ready. Every create with a starting message returns `initialInput`. Pane stages the text in the composer, presses the agent's submit key separately (Ctrl+Enter for Codex, declared or detected), and checks where it went: `initialInput.delivery` is `taken` or `queued` (from the agent's transcript or its screen), `in-composer`, or `unknown` (`argv` means a prompt was routed at launch; Pane gives the transcript up to 10 seconds before settling on unknown). `initialInput.verifiedSubmitted` is true exactly when it is `taken` or `queued`, and the create's `ok` is false unless a Claude or Codex starting message is verified. Cursor, OpenCode and Pi have no acceptance probe: their delivery stays `unknown` with a delivery.message saying so, `verification: unverifiable`, and `ok` follows readiness. Without `--wait-ready` the create returns at once with `initialInput.verifiedSubmitted: false`, a delivery.message saying the call did not wait, and a `panels wait` nextCommand; Pane still sends the message once the agent is identified and at its input box, and gives up without typing it if no supported agent appears within 30 seconds.",
       "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup: completed` once the worktree is gone from its path and from git; `trashDeletion: pending` means its files are still being deleted in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane. Archive refuses a Pane with an agent mid-turn or waiting for an answer (`agent-busy`, listed in `safetyCheck.busyAgents`), or with a tab holding unsent composer text or unsaved editor edits (`unsent-input`, listed in `safetyCheck.unsentInput`), unless `--force` is used, and the Session sweep skips it. Add `--closed` to the sweep to also archive Panes whose PR closed without merging.",
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
@@ -10225,7 +10252,7 @@
       "`runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.",
       "`runpane panels input` sends exact input bytes to one terminal panel. Prefer `--input-file` for newlines, Ctrl-C, quotes, or shell-sensitive text.",
       "`runpane panes create --prompt` is an alias for `--initial-input`; request JSON and daemon payloads should use the canonical `initialInput` field.",
-      "`runpane panes create --branch <name>` creates the Pane's worktree on exactly that new branch, slashes included (for example `agents/w5a`). The name is checked with `git check-ref-format --branch`, creation fails if the branch already exists, and Pane never renames it to make it unique. `--worktree-name` still names the directory and defaults to `--name`. `--base` is an alias for `--base-branch`, and `--prompt-file` for `--initial-input-file`. `panes create --base <ref> --branch <name> --prompt-file <file>` replaces `git worktree add` plus `panes adopt`. When the base is a remote-tracking branch (the default `origin/main`, or one named with `--base`), Pane fetches it first, waiting at most about 10 seconds, so the Pane starts at the remote's current tip. Each created item reports `base` (`ref`, `commit`, `refresh`); if the fetch fails the Pane still starts, from the local ref, and `base.notice` says so and how to catch up.",
+      "`runpane panes create --branch <name>` creates the Pane's worktree on exactly that new branch, slashes included (for example `agents/w5a`). The name is checked with `git check-ref-format --branch`, creation fails if the branch already exists, and Pane never renames it to make it unique. `--worktree-name` still names the directory and defaults to `--name`. `--base` is an alias for `--base-branch`, and `--prompt-file` for `--initial-input-file`. `panes create --base <ref> --branch <name> --prompt-file <file>` replaces `git worktree add` plus `panes adopt`. When the base is a remote-tracking branch (the default `origin/main`, or one named with `--base`), Pane fetches it first, waiting at most about 10 seconds, so the Pane starts at the remote's current tip. Each created item reports `base` (`ref`, `commit`, `refresh`); if the fetch fails the Pane still starts, from the local ref, and `base.notice` says so and how to catch up. `--no-fetch` skips that fetch, for example for a repository cloned moments ago: the Pane starts from the local ref and `base.refresh` is `skipped`.",
       "`runpane panes adopt --launch` accepts `--prompt`, `--prompt-file`, `--wait-ready`, and `--ready-timeout-ms`, and reports `readiness`, `initialInput`, and `nextCommand` like `panes create`. A prompt without `--launch` is an error rather than being dropped.",
       "If composer submission cannot be verified without risking a duplicate, the create item is unsuccessful with `initialInput.staged`, `initialInput.attempts`, `initialInput.blocked.kind: submission_unverified`, and an actionable `nextCommand`. The CLI-facing `--prompt` alias maps to this canonical `initialInput` result.",
       "When running from WSL while Pane is installed on Windows, a Linux-installed runpane cannot reach Pane: it looks for a missing `/tmp/pane-daemon.../daemon.sock`. Pane's own `runpane` (on PATH in Pane's WSL terminals, or `/mnt/c/Users/<you>/.pane/bin/runpane` from any WSL shell) runs the Windows CLI through WSL interop and converts path arguments. With a Pane build older than that shim, invoke the Windows wrapper through PowerShell from a Windows cwd, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.",
@@ -12146,6 +12173,30 @@
       [
         "profiles",
         "--help"
+      ],
+      [
+        "panes",
+        "create",
+        "--repo",
+        "active",
+        "--name",
+        "shell",
+        "--no-fetch",
+        "--dry-run",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panes",
+        "create",
+        "--repo-path",
+        "/work/clone",
+        "--name",
+        "shell",
+        "--no-fetch",
+        "--dry-run",
+        "--yes",
+        "--json"
       ]
     ],
     "topLevelHelpIncludes": [
@@ -13739,7 +13790,6 @@
     "paneCreateRequest": {
       "type": "object",
       "required": [
-        "repo",
         "panes"
       ],
       "properties": {
@@ -13768,14 +13818,17 @@
             }
           ]
         },
+        "repoPath": {
+          "type": "string",
+          "description": "A git repository directory, used instead of repo: saved first, as repos add does, when it is not a saved repository yet. Exactly one of repo and repoPath."
+        },
         "panes": {
           "type": "array",
           "minItems": 1,
           "items": {
             "type": "object",
             "required": [
-              "name",
-              "tool"
+              "name"
             ],
             "properties": {
               "name": {
@@ -13797,6 +13850,7 @@
                 "type": "boolean"
               },
               "tool": {
+                "description": "The agent or command the Pane's tab runs. Omitted, the Pane opens with its plain terminal and the create does not wait for setup.",
                 "oneOf": [
                   {
                     "type": "object",
@@ -13907,6 +13961,10 @@
           "type": "boolean",
           "description": "Without associateSession, Pane associates each created Pane with the open Session the calling tab's Pane belongs to; true skips that. The CLI sets it for --no-associate."
         },
+        "noFetch": {
+          "type": "boolean",
+          "description": "Start each new worktree from the local base ref without fetching it; each item's base.refresh is skipped. The CLI sets it for --no-fetch."
+        },
         "expectReport": {
           "type": "boolean",
           "description": "true or false decides whether Pane waits for a `runpane report`; omitted, it waits unless source is user (and, for a submit, only on an agent's panel)."
@@ -13930,6 +13988,10 @@
         },
         "repo": {
           "$ref": "#/jsonSchemas/repoListResult/properties/repos/items"
+        },
+        "repoAdded": {
+          "type": "boolean",
+          "description": "True when this create saved repoPath as a new repository."
         },
         "items": {
           "type": "array",
@@ -25445,8 +25507,14 @@
           {
             "name": "--repo",
             "value": "<selector>",
-            "required": true,
-            "description": "Repository selector: active, id, exact path, or saved repository name."
+            "required": false,
+            "description": "Repository selector: active, id, exact path, or saved repository name. Required unless --repo-path or --from-json is used."
+          },
+          {
+            "name": "--repo-path",
+            "value": "<dir>",
+            "required": false,
+            "description": "A git repository directory instead of --repo: if it is not a saved repository yet, Pane saves it as `repos add` does and creates the Pane in the same call (the result reports `repoAdded: true`)."
           },
           {
             "name": "--name",
@@ -25557,6 +25625,11 @@
             "description": "Do not associate the created pane with the caller's Session: the orchestrator's, or the open one the calling tab's Pane belongs to (associated automatically by default)."
           },
           {
+            "name": "--no-fetch",
+            "required": false,
+            "description": "Start the worktree from the local base ref without fetching it first, for a repository cloned moments ago; the item's `base.refresh` reports `skipped`."
+          },
+          {
             "name": "--yes",
             "required": false,
             "description": "Skip confirmation for mutating commands."
@@ -25628,7 +25701,8 @@
           "paneCreateResult"
         ],
         "notes": [
-          "At least one of --agent or --tool-command is required unless --from-json is used.",
+          "Without --agent or --tool-command (and without --from-json), a script (--yes, or no terminal) opens the Pane with a plain terminal, and a person at a terminal is asked which agent to run: the item's `panelId` is the Pane's default terminal with its shell started, `tool` is omitted, and the create returns without waiting for setup, which keeps running in the background. Prompt options (--prompt, --prompt-file, --as-file-pointer, --attach, --title, --wait) need an agent or command and fail with `ERR_RUNPANE_PLAIN_TERMINAL_OPTION`.",
+          "`--repo-path <dir>` creates a Pane in a repository directory that may not be saved yet, in one call: Pane saves it exactly as `runpane repos add --path <dir>` does, then creates the Pane, and the result reports `repoAdded: true`. A saved directory is reused. It replaces `--repo`; passing both fails with `ERR_RUNPANE_REPO_AND_REPO_PATH`. With `--dry-run` the directory must already be saved.",
           "`panes create` is for user-visible Pane orchestration, not the agent's default private delegation mechanism. Before creating a Pane, find the feature's Pane with `runpane panes list --repo <repo> --json` by matching the PR's head branch (`gh pr view <n> --json headRefName`) against `git -C <worktreePath> branch --show-current`, and add a tab with `panels create --pane <id>` when it exists.",
           "Register the saved base repository once. Pane creates and owns the worktree/branch for each new Pane.",
           "`panes create --base <ref> --branch <name> --prompt-file <file>` replaces `git worktree add` plus `panes adopt`: Pane creates the worktree on exactly that branch name. `--branch` is checked with `git check-ref-format --branch` and fails if the branch already exists; `--worktree-name` still names the directory.",
@@ -25649,7 +25723,7 @@
           "If readiness returns blocked, inspect blocked.suggestedCommand rather than guessing which prompt to answer.",
           "With --tool-command, --agent names the agent the command runs (a wrapper such as `agent-farm run`): Pane launches the command unchanged and treats the panel as that agent. Without --agent, Pane detects Claude Code, Codex and Cursor from the foreground process or the agent's screen, and --wait-ready waits for the detected agent's input box; a command that never shows a supported agent is not ready and nothing is typed into it.",
           "At most 2 Panes run setup at once (worktree file sync, dependency install, build script); more wait in line. A queued `panes create` returns the Pane id right away with `setupQueue` ({ position, message }) and no `panelId`; the agent starts when setup finishes. Find its panel later with `runpane panels list --pane <id> --json`.",
-          "A Pane with its own worktree starts at the remote's current tip of a remote-tracking base (the default `origin/main`, or one named with `--base`): Pane fetches that branch first, waiting at most about 10 seconds, and creates started together share the fetch. Each item's `base` reports `{ ref, commit, refresh }`, where `refresh` is `fetched`, `recent` (reused a fetch from the last 30 seconds), `skipped` (a local branch or commit base) or `failed`. A failed refresh never fails the create; the Pane starts from the local ref and `base.notice` says what happened and how to catch up.",
+          "A Pane with its own worktree starts at the remote's current tip of a remote-tracking base (the default `origin/main`, or one named with `--base`): Pane fetches that branch first, waiting at most about 10 seconds, and creates started together share the fetch. Each item's `base` reports `{ ref, commit, refresh }`, where `refresh` is `fetched`, `recent` (reused a fetch from the last 30 seconds), `skipped` (a local branch or commit base) or `failed`. A failed refresh never fails the create; the Pane starts from the local ref and `base.notice` says what happened and how to catch up. `--no-fetch` skips the fetch: the Pane starts from the local ref and `refresh` is `skipped`.",
           "`panes create --branch <name>` fails with code `ERR_RUNPANE_BRANCH_HAS_PANE` when another Pane already has that branch checked out. The message names the Pane and gives the next step: `runpane panels create --pane <id> --tool-command \"<cmd>\" --source agent --no-focus`."
         ]
       },

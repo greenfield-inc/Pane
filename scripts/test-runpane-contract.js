@@ -1700,7 +1700,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   includeHeldInput: false, idleBackoff: false, allManaged: false, allStopped: false,
   includeShells: false, noHeldInput: false, selfTest: false, report: false,
   watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [], attachments: [],
-  asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false, closed: false,
+  asFilePointer: false, interrupt: false, noAssociate: false, noFetch: false, removeWorktree: false, merged: false, closed: false,
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false, stackTabs: [], stackNext: false,
   todoArgs: [], noStart: false, escalate: false, remindMe: false,
@@ -2829,6 +2829,61 @@ try:
     assert build_pane_adopt_request(parse_args(["panes", "adopt", "--from-json", handle.name]))["associateSession"] == "current-session"
 finally:
     os.unlink(handle.name)
+`);
+}
+
+/** `panes create` without --agent or --tool-command asks for the Pane's plain terminal; prompt options still need a tool. */
+async function checkPlainTerminalCreate() {
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { buildPaneCreateRequest } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const request = await buildPaneCreateRequest(parseRunpaneArgs(['panes', 'create', '--repo', 'active', '--name', 'shell', '--no-fetch', '--yes']));
+  assert.strictEqual(request.panes[0].tool, undefined, 'a create without a tool sends no tool');
+  assert.strictEqual(request.noFetch, true, '--no-fetch reaches the request');
+  await assert.rejects(
+    buildPaneCreateRequest(parseRunpaneArgs(['panes', 'create', '--repo', 'active', '--name', 'shell', '--prompt', 'hi', '--yes'])),
+    error => error.code === 'ERR_RUNPANE_PLAIN_TERMINAL_OPTION',
+  );
+
+  runPythonSnippet(`
+from runpane.cli import parse_args
+from runpane.local_control import build_pane_create_request
+from runpane.notify import RunpaneError
+
+request = build_pane_create_request(parse_args(["panes", "create", "--repo", "active", "--name", "shell", "--no-fetch", "--yes"]))
+assert "tool" not in request["panes"][0], request
+assert request["noFetch"] is True, request
+try:
+    build_pane_create_request(parse_args(["panes", "create", "--repo", "active", "--name", "shell", "--prompt", "hi", "--yes"]))
+    raise AssertionError("a prompt without a tool was accepted")
+except RunpaneError as error:
+    assert error.code == "ERR_RUNPANE_PLAIN_TERMINAL_OPTION", error.code
+`);
+}
+
+/** `panes create --repo-path <dir>` sends the directory instead of a saved-repository selector, never both. */
+async function checkRepoPathCreate() {
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { buildPaneCreateRequest } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const request = await buildPaneCreateRequest(parseRunpaneArgs(['panes', 'create', '--repo-path', '/work/clone', '--name', 'shell', '--yes']));
+  assert.strictEqual(request.repoPath, '/work/clone');
+  assert.strictEqual(request.repo, undefined, '--repo-path sends no repo selector');
+  await assert.rejects(
+    buildPaneCreateRequest(parseRunpaneArgs(['panes', 'create', '--repo', 'active', '--repo-path', '/work/clone', '--name', 'shell', '--yes'])),
+    error => error.code === 'ERR_RUNPANE_REPO_AND_REPO_PATH',
+  );
+
+  runPythonSnippet(`
+from runpane.cli import parse_args
+from runpane.local_control import build_pane_create_request
+from runpane.notify import RunpaneError
+
+request = build_pane_create_request(parse_args(["panes", "create", "--repo-path", "/work/clone", "--name", "shell", "--yes"]))
+assert request["repoPath"] == "/work/clone" and "repo" not in request, request
+try:
+    build_pane_create_request(parse_args(["panes", "create", "--repo", "active", "--repo-path", "/work/clone", "--name", "shell", "--yes"]))
+    raise AssertionError("--repo with --repo-path was accepted")
+except RunpaneError as error:
+    assert error.code == "ERR_RUNPANE_REPO_AND_REPO_PATH", error.code
 `);
 }
 
@@ -7702,6 +7757,8 @@ const checks = [
   checkPaneCreateResultFields,
   compareExistingReusePolicy,
   checkCreateAssociationSource,
+  checkPlainTerminalCreate,
+  checkRepoPathCreate,
   checkPanePinParity,
   checkFilePointerParity,
   checkChatTabCreateParity,

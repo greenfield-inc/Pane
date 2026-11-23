@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { ToolPanel, CreatePanelRequest, PanelEventType, PanelActivationRequest, PanelOpenPlacement, ToolPanelState, ToolPanelMetadata, ToolPanelType, LogsPanelState, TerminalPanelState, TerminalPausedMark, BrowserPanelState } from '../../../shared/types/panels';
 import { getPaneEventSink, getPaneWebviewContextMap } from '../core/runtime';
 import { databaseService } from './database';
@@ -107,7 +107,7 @@ class PanelManager {
       // This allows auto-creation to work again in the future if they close it again and create a new session
       databaseService.removeClosedPanelType(request.sessionId, request.type);
 
-      const panelId = request.id ?? uuidv4();
+      const panelId = request.id ?? randomUUID();
       const existingPanel = this.getPanel(panelId);
       if (existingPanel) {
         return existingPanel;
@@ -261,6 +261,15 @@ class PanelManager {
         metadata: { permanent: true }
       });
     }
+  }
+
+  /**
+   * The session's terminal: once a creation already in flight finishes (the default
+   * terminal a new Pane opens), that one; with none, a new plain terminal.
+   */
+  async ensureTerminalPanel(sessionId: string): Promise<ToolPanel> {
+    const existing = await withLock(`panel-creation-${sessionId}`, () => this.getPanelsForSession(sessionId).find(p => p.type === 'terminal'));
+    return existing ?? this.createPanel({ sessionId, type: 'terminal', title: 'Terminal' });
   }
 
   async deletePanel(panelId: string): Promise<void> {

@@ -250,6 +250,7 @@ class ParsedArgs:
     session_id: Optional[str] = None
     panel_id: Optional[str] = None
     repo_path: Optional[str] = None
+    repo_dir: Optional[str] = None  # panes create --repo-path: a repository directory, saved first when new.
     name: Optional[str] = None
     worktree_name: Optional[str] = None
     branch: Optional[str] = None
@@ -308,6 +309,7 @@ class ParsedArgs:
     pinned: bool = False
     no_pinned: bool = False
     no_associate: bool = False
+    no_fetch: bool = False
     composer_strategy: Optional[str] = None
     force: bool = False
     remove_worktree: bool = False
@@ -1177,6 +1179,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--no-associate":
         parsed.no_associate = True
         return
+    if flag == "--no-fetch":
+        parsed.no_fetch = True
+        return
     if flag == "--force":
         parsed.force = True
         return
@@ -1288,6 +1293,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--repo":
         parsed.repo = value
+        return
+    if flag == "--repo-path":
+        parsed.repo_dir = value
         return
     if flag == "--pane":
         if parsed.command == "watch":

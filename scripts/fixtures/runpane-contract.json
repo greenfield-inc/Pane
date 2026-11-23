@@ -1858,6 +1858,30 @@
     [
       "profiles",
       "--help"
+    ],
+    [
+      "panes",
+      "create",
+      "--repo",
+      "active",
+      "--name",
+      "shell",
+      "--no-fetch",
+      "--dry-run",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panes",
+      "create",
+      "--repo-path",
+      "/work/clone",
+      "--name",
+      "shell",
+      "--no-fetch",
+      "--dry-run",
+      "--yes",
+      "--json"
     ]
   ],
   "help": {

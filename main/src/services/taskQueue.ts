@@ -59,6 +59,8 @@ interface CreateSessionJob {
   baseBranch?: string;
   /** Exact new branch for the worktree; defaults to the (sanitized, uniquified) worktree name. */
   branchName?: string;
+  /** Start the worktree from the local base ref without fetching it. */
+  noFetch?: boolean;
   toolType?: 'claude' | 'none';
   startPinned?: boolean;
   activateOnCreate?: boolean;
@@ -320,7 +322,7 @@ export class TaskQueue {
           // Resolve working directory — worktree or project directory
           const { worktreePath, baseCommit, baseBranch: actualBaseBranch, base } = await worktreeManager.resolveWorkingDirectory(
             targetProject.path, worktreeName, baseBranch, !job.data.isMainRepo, targetProject.worktree_folder || undefined, ctx.pathResolver, ctx.commandRunner,
-            { branchName: job.data.branchName }
+            { branchName: job.data.branchName, noFetch: job.data.noFetch }
           );
 
           // For non-worktree sessions, clear worktree_name so archival cleanup

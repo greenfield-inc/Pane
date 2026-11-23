@@ -6028,6 +6028,115 @@ describe('runpane IPC handlers', () => {
     expect(result.items[0]).toMatchObject({ warnings: undefined });
   });
 
+  describe('panes create --repo-path', () => {
+    function repoPathServices(projects: Project[]) {
+      return createServices({
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        databaseService: {
+          ...createServices().databaseService,
+          getAllProjects: vi.fn(() => projects),
+          createProject: vi.fn((name: string, savedPath: string): Project => {
+            const created = { ...project, id: 7, name, path: savedPath, active: false };
+            projects.push(created);
+            return created;
+          }),
+        } as never,
+      });
+    }
+
+    it('saves a new repository and creates its Pane in the same call', async () => {
+      const repoPath = createTempGitRepo('fresh-clone');
+      vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
+      const services = repoPathServices([]);
+
+      const result = await createRegistry(services).invoke('runpane:panes:create', [{
+        repoPath,
+        panes: [{ name: 'shell' }],
+        noFetch: true,
+      }]);
+
+      expect(result).toMatchObject({ ok: true, repoAdded: true, repo: { id: 7, name: 'fresh-clone', path: repoPath }, items: [{ ok: true, paneId: session.id }] });
+      expect(services.databaseService.createProject).toHaveBeenCalledTimes(1);
+      expect(services.sessionManager.emit).toHaveBeenCalledWith('project:list-changed');
+      expect(services.taskQueue?.createSessionAndWait).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: 7, noFetch: true }), expect.anything(),
+      );
+    });
+
+    it('uses a repository that is already saved', async () => {
+      const repoPath = createTempGitRepo('saved');
+      vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
+      const services = repoPathServices([{ ...project, id: 4, path: repoPath }]);
+
+      const result = await createRegistry(services).invoke('runpane:panes:create', [{
+        repoPath,
+        panes: [{ name: 'shell' }],
+      }]);
+
+      expect(result).toMatchObject({ ok: true, repo: { id: 4 } });
+      expect(result.repoAdded).toBeUndefined();
+      expect(services.databaseService.createProject).not.toHaveBeenCalled();
+      expect(services.taskQueue?.createSessionAndWait).toHaveBeenCalledWith(expect.objectContaining({ projectId: 4 }), expect.anything());
+    });
+
+    it('refuses repo and repoPath together', async () => {
+      await expect(createRegistry(createServices()).invoke('runpane:panes:create', [{
+        repo: 'active',
+        repoPath: '/work/clone',
+        panes: [{ name: 'shell' }],
+      }])).rejects.toMatchObject({ code: 'ERR_RUNPANE_REPO_AND_REPO_PATH' });
+    });
+  });
+
+  describe('without a tool', () => {
+    const defaultTerminal: ToolPanel = {
+      ...terminalPanel,
+      id: 'default-terminal',
+      title: 'Terminal',
+      state: { isActive: true, customState: {} },
+    };
+    // Setup (install, build) is still running and never finishes in these tests.
+    const busySetupQueue = () => ({
+      createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })),
+      setupQueuePosition: vi.fn(() => undefined),
+      waitForSetup: vi.fn(() => new Promise<void>(() => {})),
+    });
+
+    it("returns the Pane's default terminal, started, without waiting for setup", async () => {
+      vi.mocked(panelManager.getPanelsForSession).mockReturnValue([defaultTerminal]);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
+      // SAFETY: This queue double implements the create and setup-queue methods the create handler uses.
+      const services = createServices({ taskQueue: busySetupQueue() as never });
+
+      const result = await createRegistry(services).invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'shell' }],
+      }]);
+
+      expect(result).toMatchObject({ ok: true, items: [{ ok: true, paneId: session.id, panelId: 'default-terminal' }] });
+      expect(result.items[0]).not.toHaveProperty('tool');
+      expect(panelManager.createPanel).not.toHaveBeenCalled();
+      expect(terminalPanelManager.initializeTerminal).toHaveBeenCalledWith(defaultTerminal, session.worktreePath, null);
+    });
+
+    it('opens one plain terminal when the Pane has none', async () => {
+      vi.mocked(panelManager.getPanelsForSession).mockReturnValue([]);
+      vi.mocked(panelManager.createPanel).mockResolvedValue(defaultTerminal);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
+      // SAFETY: This queue double implements the create and setup-queue methods the create handler uses.
+      const services = createServices({ taskQueue: busySetupQueue() as never });
+
+      const result = await createRegistry(services).invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'shell' }],
+      }]);
+
+      expect(result).toMatchObject({ ok: true, items: [{ ok: true, panelId: 'default-terminal' }] });
+      expect(panelManager.createPanel).toHaveBeenCalledTimes(1);
+      expect(panelManager.createPanel).toHaveBeenCalledWith({ sessionId: session.id, type: 'terminal', title: 'Terminal' });
+    });
+  });
+
   it('creates a pinned pane without focusing it', async () => {
     vi.mocked(panelManager.createPanel).mockResolvedValue({
       ...terminalPanel,

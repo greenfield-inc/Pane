@@ -464,7 +464,8 @@ export class WorktreeManager {
    *
    * A remote-tracking base is fetched first (capped, outside the repository
    * lock), so the worktree starts at the remote's tip. If that fails the
-   * worktree starts from the local ref and `base.notice` says so.
+   * worktree starts from the local ref and `base.notice` says so. `noFetch`
+   * skips the fetch and reports the refresh as `skipped`.
    */
   async resolveWorkingDirectory(
     projectPath: string,
@@ -474,7 +475,7 @@ export class WorktreeManager {
     worktreeFolder: string | undefined,
     pathResolver: PathResolver,
     commandRunner: CommandRunner,
-    options: { branchName?: string } = {},
+    options: { branchName?: string; noFetch?: boolean } = {},
   ): Promise<{ worktreePath: string; baseCommit: string | undefined; baseBranch: string | undefined; base?: RunpanePaneBase }> {
     if (!useWorktree && options.branchName) {
       throw new Error('A branch name can only be requested for a Pane with its own worktree.');
@@ -484,7 +485,9 @@ export class WorktreeManager {
         ? await assertNewBranchName(projectPath, options.branchName, commandRunner)
         : undefined;
       const effectiveBase = baseBranch || await resolveDefaultWorktreeBase(projectPath, commandRunner);
-      const refresh = await refreshWorktreeBase(projectPath, effectiveBase, commandRunner);
+      const refresh = options.noFetch
+        ? { ref: effectiveBase, status: 'skipped' as const }
+        : await refreshWorktreeBase(projectPath, effectiveBase, commandRunner);
       if (refresh.status === 'failed') {
         console.warn(`[WorktreeManager] Could not refresh ${effectiveBase} for ${projectPath}; creating from the local ref: ${refresh.reason}`);
       }

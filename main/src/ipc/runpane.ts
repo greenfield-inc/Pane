@@ -667,6 +667,14 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:repos:add', async (request: PaneCommandValue): Promise<RunpaneRepoAddResult> => {
     return withRunpaneAction(services, 'repos:add', {}, async () => {
       const normalized = parseRepoAddRequest(request);
+      if (!normalized.dryRun) {
+        const { project, created } = await saveRepository(services, normalized.path, normalized.name);
+        return {
+          ok: true,
+          created,
+          repo: projectToRepoSummary(project, created ? 0 : sessionManager.getSessionsForProject(project.id).length),
+        };
+      }
       const existing = resolveProjectByPath(databaseService.getAllProjects(), normalized.path);
 
       if (existing) {
@@ -690,49 +698,17 @@ export function registerRunpaneHandlers(
       const registration = resolveProjectRegistration(normalized.path);
       await validateProjectRepository(registration);
 
-      const preview = {
-        name: normalized.name,
-        path: registration.path,
-        alreadyExists: false,
-        wouldCreate: true,
-        environment: registration.pathResolver.environment,
-      };
-
-      if (normalized.dryRun) {
-        return {
-          ok: true,
-          created: false,
-          dryRun: true,
-          preview,
-        };
-      }
-
-      const project = databaseService.createProject(
-        normalized.name,
-        registration.path,
-        undefined,
-        undefined,
-        undefined,
-        'ignore',
-        undefined,
-        registration.wsl_enabled || undefined,
-        registration.wsl_distribution,
-      );
-      sessionManager.emit('project:list-changed');
-
-      try {
-        await ensureProjectAgentContext(project, configManager.getConfig());
-        if (project.wsl_enabled && project.wsl_distribution) {
-          await syncPaneHomeSkill(configManager.getConfig(), [], [project.wsl_distribution]);
-        }
-      } catch (error) {
-        console.warn('[Runpane] Failed to update Pane agent context after repo add:', error);
-      }
-
       return {
         ok: true,
-        created: true,
-        repo: projectToRepoSummary(project, 0),
+        created: false,
+        dryRun: true,
+        preview: {
+          name: normalized.name,
+          path: registration.path,
+          alreadyExists: false,
+          wouldCreate: true,
+          environment: registration.pathResolver.environment,
+        },
       };
     }, result => ({ repoId: result.repo?.id, resultCount: result.created ? 1 : 0 }));
   });
@@ -1107,7 +1083,7 @@ export function registerRunpaneHandlers(
       const normalized = parsePaneCreateRequest(request);
       // To-dos: a start from a to-do's Session waits for the load gate (the CLI assigns --todo once the tab exists).
       todoAgentStart(services, request, normalized.callerPanelId, normalized.dryRun !== true);
-      const repo = resolveRepoSelector(databaseService.getAllProjects(), normalized.repo);
+      const { project: repo, added: repoAdded } = await resolvePaneCreateRepo(services, normalized);
       const repoSummary = projectToRepoSummary(repo, sessionManager.getSessionsForProject(repo.id).length);
 
       if (normalized.dryRun) {
@@ -1122,7 +1098,7 @@ export function registerRunpaneHandlers(
             index,
             name: pane.name,
             pinned: Boolean(pane.pinned),
-            tool: describeTool(resolveToolSpec(pane.tool, new PathResolver(repo).environment)),
+            tool: pane.tool && describeTool(resolveToolSpec(pane.tool, new PathResolver(repo).environment)),
           };
         });
         return { ok: items.every(item => item.ok), repo: repoSummary, items };
@@ -1145,6 +1121,7 @@ export function registerRunpaneHandlers(
             expectReport: normalized.expectReport,
             source: normalized.source,
             callerPanelId: normalized.callerPanelId,
+            noFetch: normalized.noFetch,
           });
           if (normalized.focus === true) requestHostDesktopFocus(created);
           return created;
@@ -1154,6 +1131,7 @@ export function registerRunpaneHandlers(
       return {
         ok: items.every(isPaneCreateItemSuccessful),
         repo: repoSummary,
+        repoAdded: repoAdded || undefined,
         items,
       };
     }, result => ({ repoId: result.repo.id, resultCount: result.items.length, failure: result.items.map(createFailure).find(Boolean) }));
@@ -2745,6 +2723,8 @@ interface PaneCreateItemOptions {
   source?: 'user' | 'agent';
   /** The calling tab, recorded as the opener of the Pane's agent tab. */
   callerPanelId?: string;
+  /** Start the worktree from the local base ref without fetching it. */
+  noFetch?: boolean;
 }
 
 interface TerminalPanelCreateOptions {
@@ -3372,8 +3352,8 @@ async function createPaneItem(
     throw new Error('Task queue not initialized');
   }
 
-  const tool = resolveToolSpec(item.tool, new PathResolver(repo).environment);
-  assertResumableTool(tool, item.resume);
+  const tool = item.tool && resolveToolSpec(item.tool, new PathResolver(repo).environment);
+  if (tool) assertResumableTool(tool, item.resume);
 
   let createdSessionId: string | undefined;
   let createdWorktreePath: string | undefined;
@@ -3390,6 +3370,7 @@ async function createPaneItem(
       projectId: repo.id,
       baseBranch: item.baseBranch,
       branchName: item.branch,
+      noFetch: options.noFetch,
       toolType: 'none',
       startPinned: item.pinned,
       activateOnCreate: options.activate !== false,
@@ -3406,6 +3387,29 @@ async function createPaneItem(
     }
     createdWorktreePath = session.worktreePath;
     const association = await associateCreatedPane(services, options.associateSession, session.id);
+
+    // No tool: the Pane's own terminal is the tab, started now while setup runs in the background.
+    if (!tool) {
+      const panel = await panelManager.ensureTerminalPanel(session.id);
+      await terminalPanelManager.initializeTerminal(panel, session.worktreePath, sessionWslContext(services, session.id));
+      const setupPosition = taskQueue.setupQueuePosition(session.id);
+      return {
+        ok: true,
+        index,
+        name: item.name,
+        pinned: Boolean(session.isFavorite),
+        sessionId: session.id,
+        paneId: session.id,
+        panelId: panel.id,
+        worktreePath: session.worktreePath,
+        nextCommand: panelOutputCommand(panel.id),
+        active: Boolean(panel.state.isActive),
+        focused: Boolean(panel.state.isActive),
+        association,
+        base: sessionResult.base,
+        setupQueue: setupPosition === undefined ? undefined : { position: setupPosition, message: `${queuedSetupMessage(setupPosition)}.` },
+      };
+    }
 
     // A queued setup can wait longer than any caller should block, so report the
     // Pane now and launch its agent once setup finishes.
@@ -3573,7 +3577,7 @@ function resolvePaneCreateActivation(
   if (request.noFocus === true || request.source === 'agent') {
     return false;
   }
-  return !('agent' in item.tool);
+  return !item.tool || !('agent' in item.tool);
 }
 
 function resolvePanelCreateActivation(
@@ -5154,7 +5158,15 @@ function parsePaneCreateRequest(value: PaneCommandValue): RunpanePaneCreateReque
     throw new Error('Pane create request must be an object');
   }
 
-  const repo = parseRepoSelector(value.repo);
+  const repoPath = optionalString(value.repoPath)?.trim() || undefined;
+  if (repoPath !== undefined && value.repo !== undefined && value.repo !== null) {
+    throw new PaneError(
+      'ERR_RUNPANE_REPO_AND_REPO_PATH',
+      'The Pane create request names both a saved repository (repo) and a directory (repoPath), so nothing was created.',
+      'Pass --repo <selector> for a saved repository or --repo-path <dir> for a directory, not both.',
+    );
+  }
+  const repo = repoPath === undefined ? parseRepoSelector(value.repo) : undefined;
   const panesValue = value.panes;
   if (!Array.isArray(panesValue) || panesValue.length === 0) {
     throw new Error('Pane create request must include at least one pane');
@@ -5175,6 +5187,7 @@ function parsePaneCreateRequest(value: PaneCommandValue): RunpanePaneCreateReque
 
   return {
     repo,
+    repoPath,
     panes,
     dryRun: optionalBoolean(value.dryRun),
     timeoutMs: optionalNumber(value.timeoutMs),
@@ -5187,6 +5200,7 @@ function parsePaneCreateRequest(value: PaneCommandValue): RunpanePaneCreateReque
     callerPanelId: optionalString(value.callerPanelId)?.trim() || undefined,
     associateSession: optionalString(value.associateSession)?.trim() || undefined,
     noAssociate: optionalBoolean(value.noAssociate),
+    noFetch: optionalBoolean(value.noFetch),
     expectReport: optionalBoolean(value.expectReport),
   };
 }
@@ -5777,6 +5791,56 @@ function parseWaitCondition(value: PaneCommandValue, contains?: string): Runpane
     return value;
   }
   throw new Error('Panel wait condition must be one of: initialized, ready, idle, text');
+}
+
+/** The saved repository at `repoPath`, saved first (validated, listed, given Pane's agent context) when it isn't yet. */
+async function saveRepository(services: AppServices, repoPath: string, name: string): Promise<{ project: Project; created: boolean }> {
+  const { databaseService, sessionManager, configManager } = services;
+  const existing = resolveProjectByPath(databaseService.getAllProjects(), repoPath);
+  if (existing) return { project: existing, created: false };
+
+  const registration = resolveProjectRegistration(repoPath);
+  await validateProjectRepository(registration);
+  const project = databaseService.createProject(
+    name,
+    registration.path,
+    undefined,
+    undefined,
+    undefined,
+    'ignore',
+    undefined,
+    registration.wsl_enabled || undefined,
+    registration.wsl_distribution,
+  );
+  sessionManager.emit('project:list-changed');
+
+  try {
+    await ensureProjectAgentContext(project, configManager.getConfig());
+    if (project.wsl_enabled && project.wsl_distribution) {
+      await syncPaneHomeSkill(configManager.getConfig(), [], [project.wsl_distribution]);
+    }
+  } catch (error) {
+    console.warn('[Runpane] Failed to update Pane agent context after repo add:', error);
+  }
+  return { project, created: true };
+}
+
+/** The repository a `panes create` targets: its `repo` selector, or its `repoPath`, saved first when new. */
+async function resolvePaneCreateRepo(services: AppServices, request: RunpanePaneCreateRequest): Promise<{ project: Project; added: boolean }> {
+  const projects = services.databaseService.getAllProjects();
+  if (request.repo !== undefined) return { project: resolveRepoSelector(projects, request.repo), added: false };
+  const target = parseRepoAddRequest({ path: request.repoPath ?? '' });
+  if (!request.dryRun) {
+    const { project, created } = await saveRepository(services, target.path, target.name);
+    return { project, added: created };
+  }
+  const existing = resolveProjectByPath(projects, target.path);
+  if (existing) return { project: existing, added: false };
+  throw new PaneError(
+    'ERR_RUNPANE_REPO_PATH_NOT_SAVED',
+    `${request.repoPath} is not a saved repository yet, so --dry-run has no repository to check the Pane against. Nothing was changed.`,
+    `Preview the repository with \`runpane repos add --path ${request.repoPath} --dry-run\`, or run this create without --dry-run to save it and create the Pane.`,
+  );
 }
 
 function parseRepoAddRequest(value: PaneCommandValue): Required<Pick<RunpaneRepoAddRequest, 'path' | 'name'>> & Pick<RunpaneRepoAddRequest, 'dryRun'> {
@@ -6794,7 +6858,7 @@ function parsePaneCreateItem(value: PaneCommandValue, index: number): RunpanePan
     // CLI/daemon-created Panes pin by default so orchestrated work stays visible
     // in the sidebar; the Pane UI create dialog has its own startPinned preference.
     pinned: optionalBoolean(value.pinned) ?? true,
-    tool: parseRunpaneToolSpec(value.tool, `Pane create item ${index}`),
+    tool: value.tool === undefined || value.tool === null ? undefined : parseRunpaneToolSpec(value.tool, `Pane create item ${index}`),
     resume: parseResumeId(value.resume, `Pane create item ${index}`),
   };
 }

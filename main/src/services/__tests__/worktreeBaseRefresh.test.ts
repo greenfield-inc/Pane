@@ -189,6 +189,20 @@ describe('creating a worktree Pane on a remote-tracking base', () => {
     expect(result.base).toMatchObject({ refresh: 'skipped', commit: fixture.tipA });
     expect(git(result.worktreePath, 'rev-parse', 'HEAD')).toBe(fixture.tipA);
   });
+
+  it('starts from the local remote-tracking ref without fetching when asked not to', async () => {
+    const fixture = remoteFixture();
+    fixture.advanceRemote('B');
+    const fetches = fetchCalls(fixture.runner);
+
+    const result = await new WorktreeManager().resolveWorkingDirectory(
+      fixture.project, 'fresh-clone', undefined, true, undefined, fixture.resolver, fixture.runner, { noFetch: true },
+    );
+
+    expect(fetches()).toHaveLength(0);
+    expect(result.base).toEqual({ ref: 'origin/main', commit: fixture.tipA, refresh: 'skipped' });
+    expect(git(result.worktreePath, 'rev-parse', 'HEAD')).toBe(fixture.tipA);
+  });
 });
 
 describe('the reserve worktree pool', () => {

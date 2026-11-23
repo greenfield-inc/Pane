@@ -279,7 +279,7 @@ export class DemoWorkspace {
     const project = DEMO_PROJECTS.find(candidate => candidate.id === projectId) ?? DEMO_PROJECTS[0];
     const items = request.panes.map((item, index) => {
       const id = `demo-new-${Date.now()}-${index}`;
-      const agentType = 'agent' in item.tool ? item.tool.agent : undefined;
+      const agentType = item.tool && 'agent' in item.tool ? item.tool.agent : undefined;
       const seed: DemoPaneSeed = {
         id, name: item.name, projectId: project.id, baseBranch: item.baseBranch ?? 'origin/main', favorite: item.pinned,
         agent: agentType ? { title: agentType === 'codex' ? 'Codex' : agentType === 'claude' ? 'Claude Code' : agentType, type: agentType } : null,

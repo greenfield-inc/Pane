@@ -309,7 +309,10 @@ interface RepoRenameResult {
 }
 
 interface PaneCreateRequest {
-  repo: string | { id: number } | { path: string } | { name: string } | { active: true };
+  /** The saved repository; exactly one of `repo` and `repoPath`. */
+  repo?: string | { id: number } | { path: string } | { name: string } | { active: true };
+  /** A repository directory (`--repo-path`), saved first when new. */
+  repoPath?: string;
   panes: PaneCreateItem[];
   dryRun?: boolean;
   timeoutMs?: number;
@@ -323,6 +326,8 @@ interface PaneCreateRequest {
   callerPanelId?: string;
   associateSession?: string;
   noAssociate?: boolean;
+  /** Start each worktree from the local base ref without fetching it (`--no-fetch`). */
+  noFetch?: boolean;
   expectReport?: boolean;
   /** `agents start --todo <T-n>`: the to-do the new agent works on. */
   todo?: string;
@@ -358,7 +363,8 @@ interface PaneCreateItem {
   baseBranch?: string;
   sessionPrompt?: string;
   pinned?: boolean;
-  tool: PaneToolSpec;
+  /** The agent or command the Pane's tab runs; without one the Pane opens with a plain terminal. */
+  tool?: PaneToolSpec;
   /** A native session id the new Pane's agent resumes, as panes adopt --resume. */
   resume?: string;
 }
@@ -424,6 +430,8 @@ interface PaneCreateResult {
   ok: boolean;
   generation?: number;
   repo: RepoSummary;
+  /** True when this create saved `repoPath` as a new repository. */
+  repoAdded?: boolean;
   items: Array<PaneCreateSuccessItem | PaneCreateFailureItem>;
 }
 
@@ -1194,11 +1202,12 @@ interface PaneCreateItemInput {
   baseBranch?: string;
   sessionPrompt?: string;
   pinned?: boolean;
-  tool: PaneToolInput;
+  tool?: PaneToolInput;
 }
 
 interface PaneCreateRequestInput {
-  repo: PaneCreateRequest['repo'];
+  repo?: PaneCreateRequest['repo'];
+  repoPath?: string;
   panes: PaneCreateItemInput[];
   dryRun?: boolean;
   timeoutMs?: number;
@@ -1210,6 +1219,7 @@ interface PaneCreateRequestInput {
   source?: 'user' | 'agent';
   associateSession?: string;
   noAssociate?: boolean;
+  noFetch?: boolean;
 }
 
 interface PaneAdoptRequestInput extends Omit<PaneAdoptRequest, 'panes'> {
@@ -1790,6 +1800,7 @@ const paneCostResultSchema: BoundarySchema<PaneCostResult> = boundary.object({
 export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary.object({
   ok: boundary.boolean,
   repo: repoSummarySchema,
+  repoAdded: boundary.optional(boundary.boolean),
   items: boundary.array(boundary.union(
     boundary.object({
       ok: boundary.boolean,
@@ -2278,7 +2289,8 @@ const paneToolInputSchema: BoundarySchema<PaneToolInput> = boundary.object({
   initialInputAsFilePointer: boundary.optional(boundary.boolean),
 });
 const paneCreateRequestInputSchema: BoundarySchema<PaneCreateRequestInput> = boundary.object({
-  repo: repoSelectorSchema,
+  repo: boundary.optional(repoSelectorSchema),
+  repoPath: boundary.optional(boundary.string),
   panes: boundary.array(boundary.object({
     name: boundary.string,
     worktreeName: boundary.optional(boundary.string),
@@ -2286,7 +2298,7 @@ const paneCreateRequestInputSchema: BoundarySchema<PaneCreateRequestInput> = bou
     baseBranch: boundary.optional(boundary.string),
     sessionPrompt: boundary.optional(boundary.string),
     pinned: boundary.optional(boundary.boolean),
-    tool: paneToolInputSchema,
+    tool: boundary.optional(paneToolInputSchema),
   })),
   dryRun: boundary.optional(boundary.boolean),
   timeoutMs: boundary.optional(boundary.number),
@@ -2298,6 +2310,7 @@ const paneCreateRequestInputSchema: BoundarySchema<PaneCreateRequestInput> = bou
   source: boundary.optional(boundary.enumeration('user', 'agent')),
   associateSession: boundary.optional(boundary.string),
   noAssociate: boundary.optional(boundary.boolean),
+  noFetch: boundary.optional(boundary.boolean),
 });
 const paneAdoptRequestInputSchema: BoundarySchema<PaneAdoptRequestInput> = boundary.object({
   repo: repoSelectorSchema,
@@ -4658,24 +4671,36 @@ export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCr
     applyPaneFocusOptions(parsed, request);
     request.associateSession = parsed.noAssociate ? undefined : resolveAssociateSession(parsed) ?? request.associateSession;
     if (parsed.noAssociate) request.noAssociate = true;
+    if (parsed.noFetch) request.noFetch = true;
     request.callerPanelId = resolveCallerPanelId();
     return request;
   }
 
-  if (!parsed.repo) {
-    throw new Error('runpane panes create requires --repo unless --from-json is used.');
+  if (parsed.repo && parsed.repoDir) {
+    throw new RunpaneError(
+      'ERR_RUNPANE_REPO_AND_REPO_PATH',
+      'runpane panes create got both --repo and --repo-path, so nothing was created.',
+      'Pass --repo <selector> for a saved repository or --repo-path <dir> for a directory, not both.',
+    );
+  }
+  if (!parsed.repo && !parsed.repoDir) {
+    throw new Error('runpane panes create requires --repo or --repo-path unless --from-json is used.');
   }
   if (!parsed.name) {
     throw new Error('runpane panes create requires --name unless --from-json is used.');
   }
 
-  const tool = await buildToolSpec(parsed);
+  // Neither --agent nor --tool-command: a person at a terminal is asked which agent to run, as
+  // before; a script (no terminal, or --yes) opens the Pane with its plain terminal.
+  const plainTerminal = !parsed.agent && !parsed.toolCommand && (parsed.yes === true || !isInteractiveShell());
+  if (plainTerminal) assertPlainTerminalCreate(parsed);
+  const tool = plainTerminal ? undefined : await buildToolSpec(parsed);
   const source = parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined;
   if (parsed.noFocus && parsed.focus) {
     throw new Error('Use either --focus or --no-focus, not both.');
   }
   const request: PaneCreateRequest = {
-    repo: parsed.repo,
+    ...(parsed.repoDir ? { repoPath: parsed.repoDir } : { repo: parsed.repo }),
     panes: [{
       name: parsed.name,
       worktreeName: parsed.worktreeName,
@@ -4695,9 +4720,27 @@ export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCr
     callerPanelId: resolveCallerPanelId(),
     associateSession: resolveAssociateSession(parsed),
     noAssociate: parsed.noAssociate || undefined,
+    noFetch: parsed.noFetch || undefined,
   };
 
   return request;
+}
+
+/** Options that only mean something to an agent or command, refused on a plain-terminal create. */
+function assertPlainTerminalCreate(parsed: ParsedArgs): void {
+  const flag = parsed.initialInput !== undefined ? '--prompt'
+    : parsed.initialInputFile !== undefined ? '--prompt-file'
+      : parsed.asFilePointer ? '--as-file-pointer'
+        : parsed.attachments?.length ? '--attach'
+          : parsed.title !== undefined ? '--title'
+            : parsed.waitForResult ? '--wait'
+              : undefined;
+  if (!flag) return;
+  throw new RunpaneError(
+    'ERR_RUNPANE_PLAIN_TERMINAL_OPTION',
+    `${flag} needs an agent or command to run, and this panes create names neither, so nothing was created.`,
+    `Add --agent <agent> or --tool-command <command>, or leave out ${flag} to open the Pane with a plain terminal.`,
+  );
 }
 
 const remoteAssociationResultSchema = boundary.object({
@@ -5251,6 +5294,7 @@ function printPaneCostModels(models: UsageByModelResult[]): void {
 }
 
 function printPaneCreateResult(result: PaneCreateResult, dryRun = false, action: 'create' | 'adopt' = 'create'): void {
+  if (result.repoAdded) console.log(`Saved repository ${result.repo.name} at ${result.repo.path}`);
   for (const item of result.items) {
     if (!('error' in item)) {
       const worktree = item.worktreePath ? ` at ${item.worktreePath}` : '';
@@ -5556,7 +5600,7 @@ function parsePaneCreateItemPayload(value: PaneCreateItemInput, index: number): 
     baseBranch: value.baseBranch,
     sessionPrompt: value.sessionPrompt,
     pinned: value.pinned,
-    tool: parsePaneToolSpecPayload(value.tool, index),
+    tool: value.tool ? parsePaneToolSpecPayload(value.tool, index) : undefined,
   };
 }
 

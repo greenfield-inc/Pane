@@ -2242,12 +2242,20 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
             payload["noAssociate"] = True
         else:
             payload.update(optional_value("associateSession", resolve_associate_session(parsed)))
+        if parsed.no_fetch:
+            payload["noFetch"] = True
         payload.pop("callerPanelId", None)
         payload.update(optional_value("callerPanelId", resolve_caller_panel_id()))
         return payload
 
-    if not parsed.repo:
-        raise ValueError("runpane panes create requires --repo unless --from-json is used.")
+    if parsed.repo and parsed.repo_dir:
+        raise RunpaneError(
+            "ERR_RUNPANE_REPO_AND_REPO_PATH",
+            "runpane panes create got both --repo and --repo-path, so nothing was created.",
+            "Pass --repo <selector> for a saved repository or --repo-path <dir> for a directory, not both.",
+        )
+    if not parsed.repo and not parsed.repo_dir:
+        raise ValueError("runpane panes create requires --repo or --repo-path unless --from-json is used.")
     if not parsed.name:
         raise ValueError("runpane panes create requires --name unless --from-json is used.")
     if parsed.no_focus and parsed.focus:
@@ -2255,16 +2263,21 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
 
     pinned_override = resolve_pinned_override(parsed)
     pinned = not bool(os.environ.get("PANE_ORCHESTRATION_SESSION_ID")) if pinned_override is None else pinned_override
+    # Neither --agent nor --tool-command: a person at a terminal is asked which agent to run, as
+    # before; a script (no terminal, or --yes) opens the Pane with its plain terminal.
+    plain_terminal = not parsed.agent and not parsed.tool_command and (parsed.yes or not is_interactive_shell())
+    if plain_terminal:
+        assert_plain_terminal_create(parsed)
 
     return {
-        "repo": parsed.repo,
+        **({"repoPath": parsed.repo_dir} if parsed.repo_dir else {"repo": parsed.repo}),
         "panes": [{
             "name": parsed.name,
             **optional_value("worktreeName", parsed.worktree_name),
             **optional_value("branch", parsed.branch),
             **optional_value("baseBranch", parsed.base_branch),
             "pinned": pinned,
-            "tool": build_tool_spec(parsed),
+            **({} if plain_terminal else {"tool": build_tool_spec(parsed)}),
         }],
         **optional_value("dryRun", True if parsed.dry_run else None),
         **optional_value("timeoutMs", parsed.timeout_ms),
@@ -2277,7 +2290,27 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
         **optional_value("callerPanelId", resolve_caller_panel_id()),
         **optional_value("associateSession", resolve_associate_session(parsed)),
         **optional_value("noAssociate", True if parsed.no_associate else None),
+        **optional_value("noFetch", True if parsed.no_fetch else None),
     }
+
+
+def assert_plain_terminal_create(parsed: Any) -> None:
+    """Options that only mean something to an agent or command, refused on a plain-terminal create."""
+    checks = [
+        (parsed.initial_input is not None, "--prompt"),
+        (parsed.initial_input_file is not None, "--prompt-file"),
+        (parsed.as_file_pointer, "--as-file-pointer"),
+        (bool(getattr(parsed, "attachments", None)), "--attach"),
+        (parsed.title is not None, "--title"),
+        (parsed.wait_for_result, "--wait"),
+    ]
+    flag = next((name for is_set, name in checks if is_set), None)
+    if flag:
+        raise RunpaneError(
+            "ERR_RUNPANE_PLAIN_TERMINAL_OPTION",
+            f"{flag} needs an agent or command to run, and this panes create names neither, so nothing was created.",
+            f"Add --agent <agent> or --tool-command <command>, or leave out {flag} to open the Pane with a plain terminal.",
+        )
 
 
 def resolve_associate_session(parsed: Any) -> Optional[str]:
@@ -2801,6 +2834,9 @@ def print_pane_cost_models(models: list[Dict[str, Any]]) -> None:
 
 
 def print_pane_create_result(result: Dict[str, Any], dry_run: bool = False, action: str = "create") -> None:
+    if result.get("repoAdded"):
+        repo = result.get("repo") or {}
+        print(f"Saved repository {repo.get('name')} at {repo.get('path')}")
     for item in result.get("items", []):
         name = item.get("name") or f"pane {item.get('index')}"
         # A created item can be not ok (agent not ready, prompt unverified); only an error item failed.
