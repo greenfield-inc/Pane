@@ -88,8 +88,9 @@ Pane Cloud hands Pane the VM's one-time link and its key, and Pane connects
 only to a VM that presents exactly that key, so nothing else can stand in for
 it. To take that access away, unlink the VM like any computer: **Unlink from all
 your computers** in its row under Settings › Remote Access › Computers.
-Archiving a cloud Session removes its VM from all your computers. Restoring
-the Session pairs it again.
+Archiving a cloud Session unlinks its VM from each of your computers Pane can
+reach. A computer that is off at the time keeps the VM until you unlink it
+there. Restoring the Session pairs it again.
 
 **Settings › Remote Access › Computers** shows each computer once, with a
 pill for every route Pane can reach it on and a dot on the route in use.
