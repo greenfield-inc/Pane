@@ -3,7 +3,7 @@ import { gotoApp, installElectronApiMock } from './electronApiMock';
 import { dismissStartupDialogs, installSessionsFixture, sessionFixture } from './orchestrationSessionsFixture';
 import type { MachineConnectionsEvent } from '../shared/types/machineConnections';
 import type { OrchestrationSessionCreateInput } from '../shared/types/orchestrationSession';
-import type { PaneCloudAction, PaneCloudSnapshot } from '../shared/types/paneCloud';
+import type { PaneCloudAction, PaneCloudClone, PaneCloudSnapshot } from '../shared/types/paneCloud';
 import type { RemoteComputer } from '../shared/types/remoteComputers';
 import { notifyFixture } from './fixtures/notifySnapshot';
 
@@ -74,6 +74,61 @@ test('creates a Session on Pane Cloud from Where it runs', async ({ page }) => {
   await expect(dialog).toBeHidden();
 });
 
+const cloning = (clone: Partial<PaneCloudClone>): Partial<PaneCloudSnapshot> => ({
+  sessions: [{
+    vmId: 'vm-new', name: 'Docs site migration', awake: true, underReview: false, machineId: 'cloud-1', paneVersion: '2.4.249', createdAt: '2026-11-22T10:00:00.000Z',
+    clone: { repo: 'greenfield-inc/docs-site', state: 'cloning', phase: 'receiving', percent: 45, line: 'Receiving objects:  45% (540/1200), 2.10 MiB | 9.80 MiB/s', startedAt: '2026-11-22T10:00:01.000Z', error: null, paneId: null, ...clone },
+  }],
+});
+
+async function setCloud(page: Page, parts: Partial<PaneCloudSnapshot>) {
+  await page.evaluate((next) => {
+    // SAFETY: installElectronApiMock defines this test-only API before navigation.
+    (window as MockWindow).__paneTestElectronMock.setPaneCloud(next);
+  }, parts);
+}
+
+test('D-107: Create shows the waking view at once, with the clone\'s progress, then opens the repo\'s Pane', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 800 });
+  const dialog = await openCreateSession(page);
+  await dialog.getByLabel('Session name (optional)', { exact: true }).fill('Docs site migration');
+  await dialog.getByTestId('where-it-runs-cloud').click();
+  await dialog.getByRole('button', { name: 'Create Session on Pane Cloud', exact: true }).click();
+
+  const waking = page.getByTestId('cloud-waking-view');
+  await expect(waking).toBeVisible();
+  await expect(dialog).toBeHidden();
+  await expect(waking.getByTestId('cloud-waking-status')).toHaveText('Starting the machine');
+
+  await setCloud(page, cloning({}));
+  await expect(waking.getByTestId('cloud-waking-status')).toHaveText('Cloning greenfield-inc/docs-site');
+  await expect(waking.getByTestId('cloud-waking-progress')).toHaveText('Receiving objects:  45% (540/1200), 2.10 MiB | 9.80 MiB/s');
+  await page.screenshot({ path: screenshotPath('d107-waking-cloning.png') });
+  await setCloud(page, cloning({ phase: 'checking_out', percent: 100, line: 'Updating files: 100% (214/214), done.' }));
+  await expect(waking.getByTestId('cloud-waking-progress')).toHaveText('Updating files: 100% (214/214), done.');
+
+  await setCloud(page, cloning({ state: 'ready', phase: null, line: null, paneId: 'pane-9' }));
+  await expect(waking).toBeHidden();
+});
+
+test('D-107: a failed clone shows git\'s error with Retry, which runs the clone again', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 800 });
+  const dialog = await openCreateSession(page);
+  await dialog.getByTestId('where-it-runs-cloud').click();
+  await dialog.getByRole('button', { name: 'Create Session on Pane Cloud', exact: true }).click();
+  const waking = page.getByTestId('cloud-waking-view');
+  const gitError = "Cloning into 'docs-site'...\nremote: Invalid username or token. Password authentication is not supported for Git operations.\nfatal: Authentication failed for 'https://github.com/greenfield-inc/docs-site/'";
+  await setCloud(page, cloning({ state: 'failed', phase: null, line: null, error: gitError }));
+
+  await expect(waking.getByTestId('cloud-waking-error')).toHaveText(gitError);
+  await page.screenshot({ path: screenshotPath('d107-waking-failed.png') });
+  await waking.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (
+    // SAFETY: installElectronApiMock defines this test-only API before navigation.
+    window as MockWindow
+  ).__paneTestElectronMock.getPaneCloudCalls())).toContainEqual({ action: 'retryClone', vmId: 'vm-new' });
+});
+
 test('Pane Cloud at the awake limit says so and cannot create', async ({ page }) => {
   const dialog = await openCreateSession(page, {
     usage: { plan: 'free', planAgentHours: 300, planAwakeLimit: 5, resetsAt: '2026-12-01T00:00:00.000Z', agentHoursUsed: 12, agentHoursLimit: 300, awakeNow: 5, awakeLimit: 5, members: [] },
@@ -85,8 +140,8 @@ test('Pane Cloud at the awake limit says so and cannot create', async ({ page })
 
 const CLOUD_SESSIONS: Partial<PaneCloudSnapshot> = {
   sessions: [
-    { vmId: 'vm-1', name: 'Docs site migration', awake: true, underReview: false, machineId: 'cloud-1', paneVersion: '2.4.249', createdAt: '2026-11-20T10:00:00.000Z' },
-    { vmId: 'vm-2', name: 'Pricing page copy', awake: false, underReview: false, machineId: 'cloud-2', paneVersion: '2.4.249', createdAt: '2026-11-19T10:00:00.000Z' },
+    { vmId: 'vm-1', name: 'Docs site migration', awake: true, underReview: false, machineId: 'cloud-1', paneVersion: '2.4.249', createdAt: '2026-11-20T10:00:00.000Z', clone: null },
+    { vmId: 'vm-2', name: 'Pricing page copy', awake: false, underReview: false, machineId: 'cloud-2', paneVersion: '2.4.249', createdAt: '2026-11-19T10:00:00.000Z', clone: null },
   ],
   usage: {
     plan: 'free', planAgentHours: 300, planAwakeLimit: 5, resetsAt: '2026-12-01T00:00:00.000Z', agentHoursUsed: 131.6, agentHoursLimit: 300, awakeNow: 1, awakeLimit: 5,

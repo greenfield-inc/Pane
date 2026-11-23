@@ -31,8 +31,27 @@ interface PaneCloudState {
   updatePane: (vmId: string) => Promise<void>;
   archive: (vmId: string) => Promise<void>;
   restore: (vmId: string) => Promise<void>;
-  /** New cloud Session. Throws PaneCloudCallError with the next step. */
-  create: (input: OrchestrationSessionCreateInput) => Promise<PaneCloudCreated>;
+  /** New cloud Session; with `projectId`, its VM clones that project's repo. Throws PaneCloudCallError with the next step. */
+  create: (input: OrchestrationSessionCreateInput, projectId?: number) => Promise<PaneCloudCreated>;
+  /** Asks for a sealing key while the create dialog is open, so Create waits on nothing extra. */
+  prepareCreate: () => void;
+  retryClone: (vmId: string) => Promise<void>;
+  /** The new cloud Session the waking view shows, from Create until its Pane opens or the person leaves it. */
+  waking: PaneCloudWaking | null;
+  setWaking: (waking: PaneCloudWaking | null) => void;
+}
+
+/** What the waking view shows about a cloud Session being made (frame D2). */
+export interface PaneCloudWaking {
+  name: string;
+  /** When Create was pressed, for the time so far. */
+  startedAt: number;
+  /** Known once the service made the VM; its clone is read from the snapshot. */
+  vmId: string | null;
+  machineId: string | null;
+  sessionId: string | null;
+  /** Why the create failed, when it did. */
+  error: PaneCloudError | null;
 }
 
 function api() {
@@ -92,10 +111,16 @@ export const usePaneCloudStore = create<PaneCloudState>((set) => {
     updatePane: (vmId) => run(() => api()?.updatePane(vmId) ?? Promise.resolve({ success: false })),
     archive: (vmId) => run(() => api()?.archive(vmId) ?? Promise.resolve({ success: false })),
     restore: (vmId) => run(() => api()?.restore(vmId) ?? Promise.resolve({ success: false })),
-    create: async (input) => {
+    waking: null,
+    setWaking: (waking) => set({ waking }),
+    prepareCreate: () => {
+      void api()?.prepareCreate().catch(() => undefined);
+    },
+    retryClone: (vmId) => run(() => api()?.retryClone(vmId) ?? Promise.resolve({ success: false })),
+    create: async (input, projectId) => {
       const cloud = api();
       if (!cloud) throw new PaneCloudCallError({ message: 'This version of Pane cannot reach Pane Cloud.', next: 'Update Pane, then try again.' });
-      const response = await cloud.create(input);
+      const response = await cloud.create(input, projectId);
       if (!response.success || !response.data) {
         throw new PaneCloudCallError({ message: response.error ?? 'Pane Cloud did not create the Session and gave no reason.', next: response.details ?? null, code: response.code });
       }

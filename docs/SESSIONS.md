@@ -462,6 +462,10 @@ for now: without an invite, the card offers **Join the waitlist**. Pane creates 
 machine, pairs this computer with it over the relay (phone access turns on if
 it was off), and starts the Session there.
 
+With a project open, the cloud machine clones that project's repo on the branch
+you have checked out. The Session's view shows the clone's progress and opens the
+repo's Pane when it is done. A failed clone shows git's error and **Retry**.
+
 Pane Cloud machines run Linux, so iOS Simulator and Xcode work needs one of
 your Macs; the Pane Cloud card says so. When the project you have open has an
 Xcode project (`.xcodeproj` or `.xcworkspace`), **Where it runs** lists your
