@@ -4,12 +4,16 @@ import { cn } from '../utils/cn';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { useConfigStore } from '../stores/configStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
+import { usePaneCloudStore } from '../stores/paneCloudStore';
 import { openSessionOnMachineNamed } from '../utils/sessionMoveOpen';
-import { moveTargets, moveToHostPrompt, sessionHostFor, sessionHostForMachine, type MoveTarget, type MoveTargetList, type SessionHost } from '../utils/moveSessionToHost';
+import { openOnMachine } from '../utils/machineRowActions';
+import { machineNameKey } from '../../../shared/types/remoteComputers';
+import { linkedMoveTargets, moveTargets, moveToHostPrompt, sessionHostFor, sessionHostForMachine, type MoveTarget, type SessionHost } from '../utils/moveSessionToHost';
 import {
   cancelSessionMove, checkSessionMove, fixSessionMove, sessionMovePeers, sessionMoveStatus, startSessionMove, stopSessionMoveNow,
-  type SessionMoveWhere,
+  type SessionMoveVia, type SessionMoveWhere,
 } from '../utils/sessionMoveClient';
+import type { TailnetMachineList } from '../../../shared/types/workspaceAccess';
 import {
   blockingChecks, confirmingLine, confirmingReason, doneView, isMoveRunning, moveIntro, needsFixLine, progressHeading, shownProgress, targetCheckLabel, waitingLine,
   wholeMoveTargets, workingFor,
@@ -46,6 +50,12 @@ function hostOf(machineId: string | null, config: Pick<RemoteDaemonConfig, 'clie
 /** The error's message without its closing period, for a sentence that goes on or adds its own. */
 function messageOf(cause: unknown, fallback: string): string {
   return (cause instanceof Error && cause.message ? cause.message : fallback).replace(/\.+$/, '');
+}
+
+/** How the Session's host reaches the chosen target, from the target's own fields. */
+function viaOf(computerId: string | undefined, cloud: true | undefined): SessionMoveVia {
+  if (cloud) return { cloud };
+  return computerId ? { computerId } : {};
 }
 
 /**
@@ -141,7 +151,9 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
   const machineId = moving?.kind === 'machine' ? moving.machineId : null;
   const remoteDaemon = useConfigStore(state => state.config?.remoteDaemon);
   const [mode, setMode] = useState<'move' | 'note'>('move');
-  const [targets, setTargets] = useState<MoveTargetList | null>(null);
+  // Tailscale discovery's answer, and this computer as a target when the Session lives elsewhere.
+  const [discovered, setDiscovered] = useState<{ machines: TailnetMachineList; thisComputer?: MoveTarget } | null>(null);
+  const cloudSnapshot = usePaneCloudStore(state => state.snapshot);
   const [peers, setPeers] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [preflight, setPreflight] = useState<SessionMovePreflight | null>(null);
@@ -162,6 +174,15 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
   const where = useMemo<SessionMoveWhere>(() => (machineId === null ? { kind: 'here' } : { kind: 'machine', machineId }), [machineId]);
   const running = isMoveRunning(progress);
   const name = session?.name || 'Session';
+  const computers = remoteDaemon?.client.computers;
+  const linked = useMemo(() => linkedMoveTargets(computers ?? [], cloudSnapshot), [computers, cloudSnapshot]);
+  const targets = useMemo(
+    () => discovered && moveTargets({ ...discovered, sessionHost: hostOf(machineId, remoteDaemon), linked }),
+    [discovered, machineId, remoteDaemon, linked],
+  );
+
+  // Pane Cloud is listed once the person can create cloud machines.
+  useEffect(() => (isOpen ? usePaneCloudStore.getState().follow() : undefined), [isOpen]);
 
   // Opening: is a move already running on the Session's host? Then list the machines.
   useEffect(() => {
@@ -169,7 +190,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
     let cancelled = false;
     checkGeneration.current += 1;
     setFixing(null);
-    setMode('move'); setTargets(null); setPeers([]); setSelected(null); setPreflight(null); setError(null); setProgress(null); setStatusKnown(false);
+    setMode('move'); setDiscovered(null); setPeers([]); setSelected(null); setPreflight(null); setError(null); setProgress(null); setStatusKnown(false);
     void sessionMoveStatus(where, sessionId).then(
       status => { if (!cancelled) { setProgress(isMoveRunning(status) ? shownProgress(status) : null); setStatusKnown(true); } },
       // A host that can't say (an older Pane) has no move running.
@@ -193,25 +214,33 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
           thisComputer = { name: self.machineName, available: self.state === 'on' };
           if (self.state !== 'on') thisComputer.reason = self.reason ?? 'Remote access to this computer is off';
         }
-        setTargets(moveTargets({ machines: machines.data, sessionHost: host, thisComputer }));
+        setDiscovered({ machines: machines.data, thisComputer });
       } catch (cause) {
-        if (!cancelled) setError(`${messageOf(cause, 'Could not list your machines')}.`);
+        // Computers linked through Pane relay and Pane Cloud are still listed without Tailscale.
+        if (!cancelled) setDiscovered({ machines: { ok: false, reason: messageOf(cause, 'Could not list your machines'), fix: 'Open Pane on the machine you want, then try again.' } });
       }
     })();
     return () => { cancelled = true; };
   }, [isOpen, sessionId, machineId, hostKey, where]);
 
-  const shown = mode === 'move' && targets ? wholeMoveTargets(targets, peers) : targets;
+  const shown = useMemo(() => {
+    if (!targets) return targets;
+    if (mode === 'move') return wholeMoveTargets(targets, peers);
+    // A handoff note goes to a machine that already runs Pane; Pane Cloud makes one only for a move.
+    return targets.ok ? { ...targets, targets: targets.targets.filter(target => !target.via?.cloud) } : targets;
+  }, [targets, peers, mode]);
+  const chosen = shown?.ok ? shown.targets.find(candidate => candidate.name === selected && candidate.available) : undefined;
+  const chosenComputerId = chosen?.via?.computerId;
+  const chosenCloud = chosen?.via?.cloud;
   // The list waits for the machines, and in a move also for whether one is already running.
   const machinesHold = useSkeletonHold(sessionHost.kind !== 'paired' && ((!targets && !error) || (mode === 'move' && !statusKnown)));
 
   // The first machine that can take the Session starts selected, in each mode.
   useEffect(() => {
-    const list = mode === 'move' && targets ? wholeMoveTargets(targets, peers) : targets;
-    if (!list?.ok) return;
-    if (selected && list.targets.some(target => target.name === selected && target.available)) return;
-    setSelected(list.targets.find(target => target.available)?.name ?? null);
-  }, [targets, peers, mode, selected]);
+    if (!shown?.ok) return;
+    if (selected && shown.targets.some(target => target.name === selected && target.available)) return;
+    setSelected(shown.targets.find(target => target.available)?.name ?? null);
+  }, [shown, selected]);
 
   // Choosing a machine runs its checks at once; nothing stops.
   useEffect(() => {
@@ -222,12 +251,12 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
     if (!isOpen || !sessionId || !selected || mode !== 'move' || running || !statusKnown) return;
     let cancelled = false;
     setChecking(true); setError(null);
-    void checkSessionMove(where, sessionId, selected).then(
+    void checkSessionMove(where, sessionId, selected, viaOf(chosenComputerId, chosenCloud)).then(
       result => { if (!cancelled) setPreflight(result); },
       cause => { if (!cancelled) setError(`Couldn’t check ${selected}: ${messageOf(cause, 'it did not answer')}. Nothing has been paused. Choose the machine again to retry.`); },
     ).finally(() => { if (!cancelled) setChecking(false); });
     return () => { cancelled = true; };
-  }, [isOpen, sessionId, selected, mode, running, statusKnown, where, checkRun]);
+  }, [isOpen, sessionId, selected, chosenComputerId, chosenCloud, mode, running, statusKnown, where, checkRun]);
 
   // While a move runs and the dialog is open, ask how it is going every second.
   const progressRef = useRef(progress);
@@ -254,23 +283,24 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
 
   // A running move only hides: it carries on, and opening the dialog again shows it.
   const close = () => { if (!busy || running) onClose(); };
-  const destination = shown?.ok ? shown.targets.find(candidate => candidate.name === selected && candidate.available) : undefined;
+  const destination = chosen;
   const blocks = blockingChecks(preflight);
 
   const startMove = () => {
     if (!sessionId || !destination || !preflight?.ready) return;
-    act(() => startSessionMove(where, sessionId, destination.name), `Couldn’t start the move to ${destination.name}`);
+    act(() => startSessionMove(where, sessionId, destination.name, destination.via), `Couldn’t start the move to ${destination.name}`);
   };
 
   const runFix = (check: SessionMoveCheck) => {
     if (!sessionId || !selected || !check.fix) return;
     const fix = check.fix;
     const target = selected;
+    const via = viaOf(chosenComputerId, chosenCloud);
     // The destination can't change while a fix runs, but closing and opening the dialog can.
     const generation = checkGeneration.current;
     const current = () => checkGeneration.current === generation;
     setFixing(check.id); setError(null);
-    void fixSessionMove(where, sessionId, target, fix).then(
+    void fixSessionMove(where, sessionId, target, fix, via).then(
       result => { if (current()) setPreflight(result); },
       cause => { if (current()) setError(`${fix.label} didn’t finish on ${target}: ${messageOf(cause, 'it did not answer')}. Nothing has been paused. Try ${fix.label} again.`); },
     ).finally(() => { if (current()) setFixing(null); });
@@ -287,6 +317,10 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
     const target = progress?.target;
     onClose();
     if (!target || !sessionId) return;
+    if (progress?.computerId) {
+      void openOnMachine(progress.computerId, { kind: 'session', id: sessionId, name });
+      return;
+    }
     // With no saved connection to the target, Close and Open there are the same: the Session runs there now.
     openSessionOnMachineNamed(target, { id: sessionId, name });
   };
@@ -403,7 +437,9 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
       body = (
         <>
           <p className="text-sm text-text-secondary">
-            {confirming ? confirmingLine(target) : 'The Session is paused here. Don’t close Pane on either machine.'}
+            {confirming ? confirmingLine(target)
+              : progress.steps.some(step => step.id === 'machine' && step.state === 'running') ? 'Pane is making a cloud machine for this Session. Nothing has stopped yet.'
+                : 'The Session is paused here. Don’t close Pane on either machine.'}
           </p>
           {reason && (
             <p className="mt-2 text-sm text-text-primary" data-testid="move-confirming-reason">
@@ -516,7 +552,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
         event.preventDefault();
         if (mode !== 'note' || !moving || !session || !destination || busy) return;
         setBusy(true); setError(null);
-        void submitToAgent(moving, session.panelIds[session.agent], moveToHostPrompt(session.agent, destination.name))
+        void submitToAgent(moving, session.panelIds[session.agent], moveToHostPrompt(session.agent, destination.via?.computerId ? machineNameKey(destination.name) : destination.name))
           .then(() => { onClose(); onMoved(session.id); })
           .catch(failure => setError(`${messageOf(failure, 'Could not send the handoff request')}.`))
           .finally(() => setBusy(false));

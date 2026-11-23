@@ -144,6 +144,20 @@ export class PaneCloudManager {
    */
   async createSession(input: JsonObject): Promise<PaneCloudCreated> {
     const name = (decodeOptionalBoundary(input, namedSchema)?.name.trim().slice(0, 64) ?? '') || UNNAMED;
+    let sessionId = '';
+    const { machineId } = await this.make(name, async (made) => { sessionId = await this.options.startSession(made, input); });
+    return { machineId, sessionId, snapshot: this.state };
+  }
+
+  /**
+   * A cloud machine for a Session that arrives by Session Move: created and paired as New cloud
+   * Session does, with no Session started on it, since the move brings the Session.
+   */
+  createMachine(name: string): Promise<{ vmId: string; machineId: string }> {
+    return this.make(name.trim().slice(0, 64) || UNNAMED, null);
+  }
+
+  private async make(name: string, start: ((machineId: string) => Promise<void>) | null): Promise<{ vmId: string; machineId: string }> {
     let made: { client: ServiceClient; vmId: string; machineId: string | null } | null = null;
     try {
       const { client, account } = await this.readyToCreate();
@@ -160,9 +174,12 @@ export class PaneCloudManager {
       made.machineId = machineId;
       await this.load(client);
 
-      this.update({ creating: { name, step: 'starting-session' } });
-      const sessionId = await this.options.startSession(machineId, input);
-      return { machineId, sessionId, snapshot: this.update({ creating: null }) };
+      if (start) {
+        this.update({ creating: { name, step: 'starting-session' } });
+        await start(machineId);
+      }
+      this.update({ creating: null });
+      return { vmId: vm.id, machineId };
     } catch (error) {
       // A VM without its Session would count toward the awake limit with nothing on it, so it goes.
       if (made) await this.discard(made).catch((cleanup) => console.warn('[PaneCloud] Could not delete the half-made cloud Session:', cleanup));

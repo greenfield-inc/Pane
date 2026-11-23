@@ -108,6 +108,7 @@ const sessionSchema = boundary.object({
   move: boundary.optional(boundary.object({
     state: boundary.enumeration('arriving', 'moving', 'moved'),
     machine: boundary.nonEmptyString,
+    computerId: boundary.optional(boundary.nonEmptyString),
     moveId: boundary.nonEmptyString,
     at: boundary.string,
   })),

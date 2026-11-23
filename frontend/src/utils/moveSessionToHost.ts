@@ -3,6 +3,9 @@ import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { computerTailnetName, type RemoteComputer } from '../../../shared/types/remoteComputers';
 import { LOCAL_MACHINE_ID, type MachineState } from '../../../shared/types/machineConnections';
 import type { TailnetMachine, TailnetMachineList } from '../../../shared/types/workspaceAccess';
+import type { PaneCloudSnapshot } from '../../../shared/types/paneCloud';
+import { PANE_CLOUD_MACHINE, paneCloudMachine } from '../../../shared/utils/paneCloudMachine';
+import type { SessionMoveVia } from './sessionMoveClient';
 
 /**
  * Moving a Session to another host is the existing `runpane handoff`, run by the Session's own
@@ -71,6 +74,26 @@ export interface MoveTarget {
   available: boolean;
   /** Why the Session can't move there; set only when unavailable. */
   reason?: string;
+  /** Set for a saved computer reached over Pane relay, and for Pane Cloud. */
+  via?: SessionMoveVia;
+}
+
+/**
+ * The targets this computer reaches without Tailscale: each saved computer with no Tailscale route
+ * (reached over Pane relay, the same network or its public URL), and one "Pane Cloud" target when
+ * the person can create cloud machines. Cloud machines show as Pane Cloud, never one by one.
+ */
+export function linkedMoveTargets(computers: readonly RemoteComputer[], cloud: PaneCloudSnapshot): MoveTarget[] {
+  const members = new Set(paneCloudMachine(cloud.sessions)?.members.map(member => member.computerId));
+  const targets: MoveTarget[] = computers
+    .filter(computer => !members.has(computer.id) && !computerTailnetName(computer)
+      && computer.routes.some(route => route.kind === 'relay' || route.kind === 'public' || route.kind === 'lan'))
+    .map(computer => ({ name: computer.label, os: computer.os, available: true, via: { computerId: computer.id } }));
+  const { signIn } = cloud;
+  if (signIn.state === 'signed-in' && signIn.access === 'invited' && signIn.signupState === 'ready') {
+    targets.push({ name: PANE_CLOUD_MACHINE.name, available: true, via: { cloud: true } });
+  }
+  return targets;
 }
 
 export type MoveTargetList =
@@ -96,13 +119,19 @@ function unavailableReason(machine: TailnetMachine): string | undefined {
 /**
  * The machines a Session can move to: every listed machine except the Session's own host, plus
  * this computer when the Session lives elsewhere (discovery never lists the machine it runs on).
+ * A Session on this computer can also move to the `linked` targets (see linkedMoveTargets).
  */
-export function moveTargets({ machines, sessionHost, thisComputer }: {
+export function moveTargets({ machines, sessionHost, thisComputer, linked = [] }: {
   machines: TailnetMachineList;
   sessionHost: SessionHost;
   thisComputer?: MoveTarget;
+  linked?: readonly MoveTarget[];
 }): MoveTargetList {
-  if (!machines.ok) return { ok: false, reason: machines.reason, fix: machines.fix };
+  const extra = sessionHost.kind === 'local' ? linked : [];
+  if (!machines.ok) {
+    if (!extra.length) return { ok: false, reason: machines.reason, fix: machines.fix };
+    return { ok: true, targets: [...extra], noneReachable: false };
+  }
   const host = sessionHost.kind === 'tailnet' ? sessionHost.machine.toLowerCase() : null;
   const targets: MoveTarget[] = machines.machines
     .filter(machine => machine.name.toLowerCase() !== host)
@@ -117,5 +146,8 @@ export function moveTargets({ machines, sessionHost, thisComputer }: {
       return target;
     });
   if (host && thisComputer) targets.unshift(thisComputer);
+  // A computer on the tailnet too is already listed by its tailnet name.
+  const listed = new Set(targets.map(target => target.name.toLowerCase()));
+  targets.push(...extra.filter(target => !listed.has(target.name.toLowerCase())));
   return { ok: true, targets, noneReachable: !targets.some(target => target.available) };
 }

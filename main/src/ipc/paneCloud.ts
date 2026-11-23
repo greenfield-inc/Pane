@@ -32,6 +32,11 @@ const createdSchema = boundary.object({
 
 let manager: PaneCloudManager | null = null;
 
+/** Pane Cloud's create and delete, for Session Move to Pane Cloud; null until the handlers are registered. */
+export function paneCloudForMoves(): Pick<PaneCloudManager, 'createMachine' | 'remove'> | null {
+  return manager;
+}
+
 /**
  * Pane Cloud's channels. They run on this computer even while the window shows another one: the
  * service session, pairing and the saved computers are this desktop's.

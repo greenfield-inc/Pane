@@ -28,6 +28,8 @@ export interface SessionMoveMark {
   state: SessionMoveState;
   /** The other machine: the target on the source, the source on the target. */
   machine: string;
+  /** The source's saved computer id for the target, when the move reaches it over its routes (Pane relay, Pane Cloud) rather than Tailscale. */
+  computerId?: string;
   moveId: string;
   at: string;
 }
@@ -67,7 +69,8 @@ export interface SessionMoveWaitingTab {
   since?: string;
 }
 
-export type SessionMoveStepId = 'stop' | 'pack' | 'send' | 'build' | 'start';
+/** `machine` comes first only in a move to Pane Cloud: it creates the cloud machine before any tab stops. */
+export type SessionMoveStepId = 'machine' | 'stop' | 'pack' | 'send' | 'build' | 'start';
 
 export interface SessionMoveStep {
   id: SessionMoveStepId;
@@ -82,6 +85,8 @@ export interface SessionMoveProgress {
   sessionId: string;
   sessionName: string;
   target: string;
+  /** The target's saved computer id on this computer, when it is one (Pane relay, Pane Cloud): Open there goes to it. */
+  computerId?: string;
   phase:
     /** Waiting for tabs to finish their turn (state 3). */
     | 'waiting'
@@ -153,11 +158,15 @@ export interface SessionMoveRecord {
  * machines through `machines.run`'s `move-session` command). Each takes one object argument.
  */
 export const SESSION_MOVE_CHANNELS = {
-  /** { sessionId, target } → SessionMovePreflight. Runs every check; stops nothing. */
+  /**
+   * { sessionId, target, computerId?, cloud? } → SessionMovePreflight. Runs every check; stops nothing.
+   * `computerId` names a saved computer reached over its own routes; `cloud` checks a move to Pane Cloud
+   * on this computer alone, as its machine is made only when the move starts.
+   */
   check: 'runpane:sessions:move-check',
-  /** { sessionId, target, fix } → SessionMovePreflight, checked again after the fix ran on the target. */
+  /** { sessionId, target, computerId?, fix } → SessionMovePreflight, checked again after the fix ran on the target. */
   fix: 'runpane:sessions:move-fix',
-  /** { sessionId, target } → SessionMoveProgress. Starts the move. */
+  /** { sessionId, target, computerId?, cloud? } → SessionMoveProgress. Starts the move; with `cloud`, it first creates the cloud machine. */
   start: 'runpane:sessions:move',
   /** { sessionId, recheck? } → SessionMoveProgress | null. recheck asks a silent target again ("Check again"). */
   status: 'runpane:sessions:move-status',

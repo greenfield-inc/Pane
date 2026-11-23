@@ -490,13 +490,26 @@ folder. It carries on there from where it is now, with the same Session, Pane
 and tab IDs.
 
 The dialog lists your Tailscale machines running Pane, except the one the
-Session is on. Your teammates' machines are listed but disabled: a whole
-Session moves only between your own macOS and Linux machines, so for a teammate
-use **Hand off with a note…** (below). Machines Pane can't reach, or that run a
-Pane too old to receive a Session, are disabled with the reason. While you view
-a host connected with a pairing code rather than over Tailscale, the item is
-disabled. In All machines, the same item is in each Session's menu and moves
-the Session from its own machine without switching to it.
+Session is on. For a Session on this computer it also lists the computers you
+linked through Pane relay (by their name in **Settings › Remote Access ›
+Computers**) and **Pane Cloud** once your Pane Cloud account can create
+Sessions. Your cloud machines show as that one Pane Cloud entry. Your
+teammates' machines are listed but disabled: a whole Session moves only between
+your own macOS and Linux machines, so for a teammate use **Hand off with a
+note…** (below). Machines Pane can't reach, or that run a Pane too old to
+receive a Session, are disabled with the reason. While you view a host without
+a Tailscale route, the item is disabled. In All machines, the same item is in
+each Session's menu and moves the Session from its own machine without
+switching to it.
+
+Moving to **Pane Cloud** makes a new cloud machine named after the Session.
+Choosing it checks only this computer: each repository needs an origin remote,
+since the cloud machine clones it from there. **Move** first creates the
+machine, then clones and trusts what the Session needs there on its own, then
+checks it like any machine, all before any tab stops. If a check still fails,
+or the move fails or is cancelled before the Session starts there, Pane deletes
+the machine. After the move, the Session runs on its cloud machine like any
+other cloud Session.
 
 Choosing a machine runs the checks at once, and nothing is paused until they
 pass:

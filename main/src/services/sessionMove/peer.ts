@@ -1,10 +1,12 @@
+import os from 'os';
 import { app } from 'electron';
 import { boundary as runpaneBoundary } from '../../../../packages/runpane/src/boundaryDecoder';
-import { invokeDaemon } from '../../../../packages/runpane/src/daemonClient';
+import { invokeDaemon, invokeRemoteDaemon, PaneDaemonClientError, type RemoteDaemonTarget, type RemoteRoute } from '../../../../packages/runpane/src/daemonClient';
 import { PaneError } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { callWorkspace, locateTailnetCandidate, readTailscaleStatus, savedSecretKey, savedWorkspaceSecrets } from '../tailnetMachines';
 import { normalizeRemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
+import { routesReachableHere, type RemoteComputer } from '../../../../shared/types/remoteComputers';
 import { asTargetAnswer, TargetAnswerError } from './afterFreeze';
 import type { ConfigManager } from '../configManager';
 
@@ -70,8 +72,53 @@ function tailnetPeer(name: string, configManager: Pick<ConfigManager, 'getConfig
   };
 }
 
-/** The peer for a target machine name: a loopback test peer when one has that name, else the tailnet machine. */
-export function resolvePeer(name: string, configManager: Pick<ConfigManager, 'getConfig'>): MovePeer {
+/**
+ * A saved computer's routes as runpane tries them: Same network routes only on this network, and
+ * no SSH route (it needs a tunnel this Pane opens only for its own connection).
+ */
+function computerTarget(computer: RemoteComputer): RemoteDaemonTarget {
+  const interfaces = Object.values(os.networkInterfaces()).flatMap(entries => entries ?? []);
+  const routes = routesReachableHere(computer.routes.filter(route => route.kind !== 'ssh'), interfaces).map(route => {
+    const remote: RemoteRoute = { kind: route.kind, baseUrl: route.baseUrl };
+    if (route.token) remote.token = route.token;
+    if (route.relay) remote.fingerprint = route.relay.fingerprint;
+    return remote;
+  });
+  return { machine: computer.label, routes };
+}
+
+/** A computer saved in Settings › Remote Access, reached over its own routes (Pane relay, same network, public URL). */
+function computerPeer(name: string, computerId: string, configManager: Pick<ConfigManager, 'getConfig'>): MovePeer {
+  return {
+    name,
+    async invoke(channel, args, schema, timeoutMs) {
+      const computer = normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon).client.computers.find(candidate => candidate.id === computerId);
+      if (!computer) {
+        throw new PaneError('ERR_MOVE_UNKNOWN_COMPUTER', `${name} is no longer saved on this computer, so Pane can't reach it. Nothing was sent.`, 'Link it again in Settings › Remote Access › Computers, then try again.');
+      }
+      try {
+        return decodeBoundary(await invokeRemoteDaemon(computerTarget(computer), channel, args, runpaneBoundary.json, timeoutMs), schema);
+      } catch (error) {
+        if (!(error instanceof PaneDaemonClientError)) throw error;
+        if (error.code === 'ERR_WORKSPACE_UNREACHABLE' || error.code === 'ERR_WORKSPACE_TIMEOUT' || !error.code) {
+          throw new PaneError('ERR_MOVE_UNREACHABLE', `Pane on ${name} didn't answer (${error.message.replace(/\.+$/, '')}).`, `Check that Pane is open on ${name}, then try again.`);
+        }
+        if (error.code === 'ERR_UNKNOWN_CHANNEL') {
+          throw new PaneError('ERR_MOVE_TARGET_OUTDATED', `Pane on ${name} is too old to receive a Session move.`, `Update Pane on ${name}, then try again.`);
+        }
+        // Pane on the target answered, with an error.
+        throw new TargetAnswerError(error.code, error.message, error.next ?? `Check Pane on ${name}, then try again.`);
+      }
+    },
+  };
+}
+
+/**
+ * The peer for a target: a loopback test peer with that name, else the saved computer `computerId`
+ * names (reached over its own routes), else the tailnet machine with that name.
+ */
+export function resolvePeer(name: string, configManager: Pick<ConfigManager, 'getConfig'>, computerId?: string): MovePeer {
   const test = testPeers().find(peer => peer.name === name);
-  return test ? socketPeer(test.name, test.paneDir) : tailnetPeer(name, configManager);
+  if (test) return socketPeer(test.name, test.paneDir);
+  return computerId ? computerPeer(name, computerId, configManager) : tailnetPeer(name, configManager);
 }
