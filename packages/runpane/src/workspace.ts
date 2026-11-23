@@ -535,15 +535,16 @@ export interface CloudSelector {
 
 /**
  * `example` is the command line after the machine, with `--session "<name>"` where it belongs.
- * The VM a command for "Pane Cloud" goes to: the cloud Session it names by name or id, or the one
+ * The VM a command for "Pane Cloud" goes to: the cloud Session it names by its id or its name on that VM, or the one
  * holding the Pane or tab it names. A command that names none of them is refused, listing the Sessions.
  */
 async function cloudSessionMachine(group: TailnetMachine, selector: CloudSelector, example: string): Promise<TailnetMachine> {
   const sessions = group.cloudSessions ?? [];
   const named = selector.session?.trim();
-  const byName = named ? sessions.filter((session) => session.name.toLowerCase() === named.toLowerCase()) : [];
-  let found: CloudSession[] = byName;
-  if (!found.length && (named || selector.pane || selector.panel)) {
+  // Each awake machine says whether it holds the Session (by its id or its name there), Pane or tab. The service's
+  // name for a cloud Session dates from its creation and misses a rename, so it is never matched against.
+  let found: CloudSession[] = [];
+  if (named || selector.pane || selector.panel) {
     const probe = named
       ? (target: RemoteDaemonTarget) => invokeRemoteDaemon(target, 'runpane:sessions:get', [{ sessionId: named }], boundary.json, PROBE_TIMEOUT_MS).then(() => true)
       : selector.pane
@@ -560,12 +561,11 @@ async function cloudSessionMachine(group: TailnetMachine, selector: CloudSelecto
   if (found.length > 1) {
     throw new RunpaneError('ERR_WORKSPACE_CLOUD_SESSION_AMBIGUOUS', `Several cloud Sessions match: ${found.map((session) => `"${session.name}"`).join(', ')}. Nothing was sent.`, 'Name the Session by its id with --session <id>.');
   }
-  if (found.length === 1) {
-    const [session] = found;
-    if (!session.awake) {
-      throw new RunpaneError('ERR_WORKSPACE_CLOUD_SESSION_STOPPED', `Cloud Session "${session.name}" is stopped, so nothing was sent.`, 'Start it in Pane (Settings › Pane Cloud), then try again.');
-    }
-    return session.machine;
+  if (found.length === 1) return found[0].machine;
+  // A stopped machine can't be asked; its listed name is enough to say why nothing was sent.
+  const stopped = named ? sessions.find((session) => !session.awake && session.name.toLowerCase() === named.toLowerCase()) : undefined;
+  if (stopped) {
+    throw new RunpaneError('ERR_WORKSPACE_CLOUD_SESSION_STOPPED', `Cloud Session "${stopped.name}" is stopped, so nothing was sent.`, 'Start it in Pane (Settings › Pane Cloud), then try again.');
   }
   // A stopped Session's machine can't be asked, so an id of one reads as unknown: say so.
   const asleep = sessions.some((session) => !session.awake) ? ', or it is a stopped Session (start it in Pane)' : '';

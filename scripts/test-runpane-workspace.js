@@ -300,9 +300,11 @@ async function withComputer({ computers, tailnet = null, relay = null }, check) 
       }
       // Two cloud VMs share this server; each holds one Session, told apart by its link token.
       const session = { 'Bearer vm-docs': 'sess-docs', 'Bearer vm-login': 'sess-login' }[request.headers.authorization];
+      // Each answers to its Session's id, or to its name there, which a rename made differ from the service's.
+      const names = { 'sess-docs': 'Docs', 'sess-login': 'Fix login and signup' };
       if (channel === 'runpane:sessions:get') {
         const { args: [{ sessionId }] } = JSON.parse(body);
-        return session === sessionId ? reply(200, { ok: true, result: { ok: true, session: { id: session } } }) : reply(200, { ok: false, error: { code: 'ERR_SESSION_NOT_FOUND', message: 'no such Session' } });
+        return session && (session === sessionId || names[session] === sessionId) ? reply(200, { ok: true, result: { ok: true, session: { id: session } } }) : reply(200, { ok: false, error: { code: 'ERR_SESSION_NOT_FOUND', message: 'no such Session' } });
       }
       if (channel === 'runpane:machine:exec') {
         return reply(200, { ok: true, result: { os: 'Linux', shell: '/bin/bash', cwd: '/home/pane', exitCode: 0, signal: null, timedOut: false, stdout: `ran in ${session}\n`, stderr: '' } });
@@ -398,12 +400,13 @@ test('all cloud Sessions list as one machine, Pane Cloud, with each Session unde
   });
 });
 
-test('a command for Pane Cloud reaches the VM of the Session it names, by name or id, over the relay', posixOnly, async () => {
+test('a command for Pane Cloud reaches the VM of the Session it names, by its name there or its id, over the relay', posixOnly, async () => {
   await withComputer({ computers: cloudVms }, async (run, requests) => {
-    const byName = await run('workspace', 'Pane Cloud', 'exec', '--session', 'fix login', '--', 'hostname');
+    // Renamed on its machine since the service named it "Fix login".
+    const byName = await run('workspace', 'Pane Cloud', 'exec', '--session', 'Fix login and signup', '--', 'hostname');
     assert.equal(byName.status, 0, byName.output);
     assert.match(byName.output, /^ran in sess-login\n/);
-    assert.deepEqual(requests.splice(0), [{ authorization: 'Bearer vm-login', channel: 'runpane:machine:exec' }]);
+    assert.deepEqual(requests.splice(0).filter((request) => request.channel === 'runpane:machine:exec'), [{ authorization: 'Bearer vm-login', channel: 'runpane:machine:exec' }]);
 
     const byId = await run('workspace', 'pane cloud', 'exec', '--session', 'sess-docs', '--', 'hostname');
     assert.match(byId.output, /^ran in sess-docs\n/);
@@ -420,7 +423,8 @@ test('a command for Pane Cloud that names no Session lists the cloud Sessions an
 
     const stopped = await run('workspace', 'Pane Cloud', 'exec', '--session', 'Fix login', '--', 'hostname');
     assert.match(stopped.output, /Cloud Session "Fix login" is stopped, so nothing was sent\./);
-    assert.deepEqual(requests, []);
+    // Awake machines may be asked which Session they hold; no command runs anywhere.
+    assert.deepEqual(requests.filter((request) => request.channel !== 'runpane:sessions:get'), []);
   });
 });
 

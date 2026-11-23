@@ -30,7 +30,7 @@ Pane Cloud (2 cloud Sessions, each on its own machine; name one with --session):
   "Docs": stopped
 ```
 
-A command for Pane Cloud goes to the machine of the Session it names. `--session` takes the cloud Session's name or its Session id; a command that names a Pane (`--pane`) or a tab (`--panel`) goes to the Session that holds it. A command that names none of them, such as `exec`, is refused with the list of your cloud Sessions, and nothing is sent. A stopped cloud Session is started in Pane first.
+A command for Pane Cloud goes to the machine of the Session it names. `--session` takes the Session's id or its name on its own machine (each awake machine is asked, so a rename there counts); a command that names a Pane (`--pane`) or a tab (`--panel`) goes to the Session that holds it. A command that names none of them, such as `exec`, is refused with the list of your cloud Sessions, and nothing is sent. A stopped cloud Session is started in Pane first.
 
 ```
 runpane workspace "Pane Cloud" exec --session "Fix login" -- git status
