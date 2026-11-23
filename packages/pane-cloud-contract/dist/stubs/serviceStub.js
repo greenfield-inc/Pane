@@ -196,7 +196,11 @@ async function startServiceStub(options) {
                 awake: [],
                 log: [],
                 relayKey: (0, relayKey_1.newRelayIdentity)('runpane.net'),
+                prebootLink: null,
             };
+            // The host makes the identity and a first link before boot (D-104); the service vouches from now on.
+            record.vm.relay = record.relayKey;
+            record.prebootLink = (0, relayKey_1.pairingLinkFor)(record.relayKey, body.name, now());
             vms.set(id, record);
             setState(record, 'running', null);
             const entry = log(record, 'create', account, 'You created this Session.');
@@ -251,6 +255,13 @@ async function startServiceStub(options) {
             const record = ownVm(account, params.vmId ?? '');
             // Pairing hands a device control of the VM: its creator must still have Full access in its organization.
             requireFullAccess(account, record.vm.organizationId);
+            // The first pairing uses the link made before boot, so it answers while the VM still boots.
+            const preboot = record.prebootLink;
+            if (preboot && Date.parse(preboot.expiresAt) > now().getTime() && AWAKE.includes(record.vm.state)) {
+                record.prebootLink = null;
+                log(record, 'create_pairing_link', account, 'You paired a device with this Session.');
+                return preboot;
+            }
             requireState(record, 'running', 'Pairing');
             const reported = record.relayKey;
             const vouched = record.vm.relay;

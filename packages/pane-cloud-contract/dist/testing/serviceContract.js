@@ -185,13 +185,14 @@ function serviceContractCases(target) {
             name: 'service: pairing a running Session VM gives a one-time link for the relay identity the service vouches for, the same identity after a stop and start, logged without the link',
             async run() {
                 await withVm(async (member, vm) => {
-                    strict_1.default.equal(vm.relay, null, 'a VM no device has paired with has no vouched identity yet');
+                    strict_1.default.ok(vm.relay, 'the service vouches for the identity the host made before boot, from create on');
                     const first = await member.pairVm(vm.id);
                     const link = new URL(first.link);
                     const fragment = new URLSearchParams(link.hash.slice(1));
                     strict_1.default.equal(link.host, first.relay.domain, 'the link is under the relay domain');
                     strict_1.default.equal(fragment.get('c'), first.relay.computerId, 'the link names the vouched computer');
                     strict_1.default.ok(fragment.get('s'), 'the link carries a one-time secret');
+                    strict_1.default.deepEqual(first.relay, vm.relay, 'the first link is for the identity vouched for at create');
                     strict_1.default.deepEqual((await member.getVm(vm.id)).relay, first.relay, 'the VM shows the identity the service vouches for');
                     await member.stopVm(vm.id);
                     await vmIn(member, vm.id, 'stopped');
@@ -209,6 +210,21 @@ function serviceContractCases(target) {
                     strict_1.default.ok(logged.every((e) => !JSON.stringify(e).includes(secret)), 'the action log never holds the link');
                     await (0, cases_1.expectError)('vm_not_found', async () => (await as('waitlisted')).pairVm(vm.id));
                 });
+            },
+        },
+        {
+            name: 'service: the first pairing answers right after create, without waiting for the VM to run, with the identity made before boot (D-104)',
+            async run() {
+                const member = await as('member');
+                const { vm } = await member.createVm(await personalOrg(member), 'pairs while booting', (0, node_crypto_1.randomUUID)());
+                try {
+                    const pairing = await member.pairVm(vm.id);
+                    strict_1.default.equal(new URLSearchParams(new URL(pairing.link).hash.slice(1)).get('c'), pairing.relay.computerId);
+                    strict_1.default.deepEqual((await member.getVm(vm.id)).relay, pairing.relay, 'the service vouches for the identity it handed out');
+                }
+                finally {
+                    await cleanUp(member, [vm.id]);
+                }
             },
         },
         {

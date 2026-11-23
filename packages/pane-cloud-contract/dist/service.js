@@ -90,8 +90,8 @@ exports.SessionVm = zod_1.z
     memoryGiB: fleet_1.VmMemoryGiB,
     paneVersion: zod_1.z.string().nullable(),
     /**
-     * The relay identity the VM reported when a device first paired with it, which the service
-     * vouches for from then on; null before the first pairing.
+     * The relay identity the host made before the VM's first boot (D-104), which the service vouches
+     * for from create on. Null only for a VM created before pre-boot identities.
      */
     relay: fleet_1.RelayIdentity.nullable(),
     createdAt: Timestamp,
@@ -198,8 +198,10 @@ exports.serviceRoutes = {
     deleteVm: (0, http_1.route)({ id: 'service.deleteVm', method: 'DELETE', path: '/v1/vms/:vmId', auth: true, response: VmAction, status: 202 }),
     requestOperation: (0, http_1.route)({ id: 'service.requestOperation', method: 'POST', path: '/v1/vms/:vmId/operations', auth: true, body: exports.SubmittedOperation, response: exports.ActionLogEntry, status: 202 }),
     /**
-     * A one-time link for pairing a device with a running VM, and the relay identity the service
-     * vouches for. The client pairs only with a VM that presents exactly that key. A VM that reports
+     * A one-time link for pairing a device with the VM, and the relay identity the service vouches
+     * for. The first call returns the link the host made before boot, so it answers while the VM is
+     * still creating or starting; later calls ask the running VM for a new link (invalid_state
+     * otherwise). The client pairs only with a VM that presents exactly that key. A VM that reports
      * a different identity than its first one is refused with relay_key_changed. Logged as
      * create_pairing_link, without the link.
      */

@@ -12,7 +12,7 @@ import {
   serviceRoutes,
   type SessionVm,
 } from '../service';
-import type { RelayIdentity } from '../fleet';
+import type { PairingLink, RelayIdentity } from '../fleet';
 import { newRelayIdentity, pairingLinkFor } from './relayKey';
 import { bind, createRouteServer, listen, type RunningStub } from './server';
 
@@ -65,8 +65,10 @@ interface VmRecord {
   /** Awake intervals in epoch ms at one memory size; the last one is open while the VM is awake. */
   awake: { from: number; to: number | null; memoryGiB: SessionVm['memoryGiB'] }[];
   log: ActionLogEntry[];
-  /** The key the VM's Pane holds on its Session disk; it survives stops and starts. */
+  /** The key the host made before the first boot; the VM's Pane keeps it on the secrets volume across stops and starts. */
   relayKey: RelayIdentity;
+  /** The first pairing link, made with the key before boot; null once handed out. */
+  prebootLink: PairingLink | null;
 }
 
 const AWAKE: readonly SessionVm['state'][] = ['creating', 'starting', 'running'];
@@ -256,7 +258,11 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
         awake: [],
         log: [],
         relayKey: newRelayIdentity('runpane.net'),
+        prebootLink: null,
       };
+      // The host makes the identity and a first link before boot (D-104); the service vouches from now on.
+      record.vm.relay = record.relayKey;
+      record.prebootLink = pairingLinkFor(record.relayKey, body.name, now());
       vms.set(id, record);
       setState(record, 'running', null);
       const entry = log(record, 'create', account, 'You created this Session.');
@@ -308,6 +314,13 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       const record = ownVm(account, params.vmId ?? '');
       // Pairing hands a device control of the VM: its creator must still have Full access in its organization.
       requireFullAccess(account, record.vm.organizationId);
+      // The first pairing uses the link made before boot, so it answers while the VM still boots.
+      const preboot = record.prebootLink;
+      if (preboot && Date.parse(preboot.expiresAt) > now().getTime() && AWAKE.includes(record.vm.state)) {
+        record.prebootLink = null;
+        log(record, 'create_pairing_link', account, 'You paired a device with this Session.');
+        return preboot;
+      }
       requireState(record, 'running', 'Pairing');
       const reported = record.relayKey;
       const vouched = record.vm.relay;

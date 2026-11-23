@@ -57,7 +57,9 @@ const StopParameters = z.object({ cause: StopCause }).strict();
  * The allow-list. Lifecycle operations run on the host; guest operations run inside the VM through
  * the guest agent. Nothing else exists: no shell command, no file write, no access grant. `create`
  * makes an 8 GiB, 4 vCPU VM and starts it; `stop` keeps its disk; `start` boots it from that disk.
- * `create_pairing_link` asks the VM's Pane for a one-time pairing link and its relay identity.
+ * `create` also makes the VM's relay identity and a first one-time pairing link before the VM boots
+ * (PREBOOT_RELAY_FILES) and returns them, so the service can vouch while the VM boots (D-104).
+ * `create_pairing_link` asks the running VM's Pane for another link, for a later pairing.
  */
 export const FLEET_OPERATIONS = {
   create: { runsOn: 'host', parameters: NoParameters },
@@ -280,6 +282,24 @@ export const PairingLink = z
   .strict();
 export type PairingLink = z.infer<typeof PairingLink>;
 
+/**
+ * What the host writes onto a new VM's secrets volume at assignment, before the first boot (D-104),
+ * as paths under the volume's root (the guest's PANE_SECRETS_DIR). Pane uses this key as its relay
+ * key and accepts this one-time secret as a pairing link, so pairing needs no step after the
+ * daemon's socket appears. The host keeps the private key only on the volume, and the secret only
+ * as its hash there and in `create`'s result for the service.
+ */
+export const PREBOOT_RELAY_FILES = {
+  /** The VM's relay key: a P-256 private key, PKCS#8 PEM. Its public key's fingerprint is the identity `create` returns. */
+  key: 'relay/computer-key.pem',
+  /** The first pairing link's secret, as PrebootPairing JSON. */
+  pairing: 'relay/pairing.json',
+} as const;
+
+/** `relay/pairing.json`: the SHA-256 (hex) of the one-time secret in `create`'s link, and when the link expires. */
+export const PrebootPairing = z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), expiresAt: Timestamp }).strict();
+export type PrebootPairing = z.infer<typeof PrebootPairing>;
+
 export const OperationStatus = z
   .object({
     requestId: z.uuid(),
@@ -287,7 +307,7 @@ export const OperationStatus = z
     operation: FleetOperationName,
     status: z.enum(['accepted', 'running', 'succeeded', 'failed']),
     error: OperationError.nullable(),
-    /** Set for a finished collect_diagnostics or create_pairing_link; null for every other operation. */
+    /** Set for a finished create (the pre-boot identity and first link), collect_diagnostics or create_pairing_link; null for every other operation. */
     result: z.union([DiagnosticsResult, PairingLink]).nullable(),
     acceptedAt: Timestamp,
     finishedAt: Timestamp.nullable(),

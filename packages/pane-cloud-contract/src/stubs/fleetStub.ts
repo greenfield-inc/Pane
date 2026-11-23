@@ -75,7 +75,10 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
       if (existing && existing.state !== 'deleted') throw new CloudApiError('vm_exists', `VM ${payload.vmId} already exists.`, 'Use a new VM id, or start the existing VM.');
       const vm: FleetVm = { vmId: payload.vmId, state: 'running', stateReason: null, hostId, memoryGiB: 8, paneVersion: null, updatedAt: iso() };
       vms.set(vm.vmId, vm);
-      relayKeys.set(vm.vmId, newRelayIdentity('runpane.net'));
+      // Made before boot and written onto the secrets volume (PREBOOT_RELAY_FILES); returned for the service to vouch for.
+      const relay = newRelayIdentity('runpane.net');
+      relayKeys.set(vm.vmId, relay);
+      result = pairingLinkFor(relay, vm.vmId, now());
       record({ vmId: vm.vmId, kind: 'state_changed', state: 'running', reason: null, requestId: payload.requestId });
     } else {
       const vm = requireVm(payload.vmId);

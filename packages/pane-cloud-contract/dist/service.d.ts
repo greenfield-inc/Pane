@@ -748,8 +748,10 @@ export declare const serviceRoutes: {
         finishedAt: z.ZodNullable<z.ZodISODateTime>;
     }, z.core.$strict>>;
     /**
-     * A one-time link for pairing a device with a running VM, and the relay identity the service
-     * vouches for. The client pairs only with a VM that presents exactly that key. A VM that reports
+     * A one-time link for pairing a device with the VM, and the relay identity the service vouches
+     * for. The first call returns the link the host made before boot, so it answers while the VM is
+     * still creating or starting; later calls ask the running VM for a new link (invalid_state
+     * otherwise). The client pairs only with a VM that presents exactly that key. A VM that reports
      * a different identity than its first one is refused with relay_key_changed. Logged as
      * create_pairing_link, without the link.
      */
