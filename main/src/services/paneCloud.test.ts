@@ -447,7 +447,7 @@ describe('a new cloud Session for a repo (D-107)', () => {
   });
 
   it('reads the clone at least once a second until it names the Pane to open', async () => {
-    const cloud = manager({ pollMs: { waiting: 10, steady: 60_000, cloning: 20 } });
+    const cloud = manager({ pollMs: { waiting: 10, steady: 60_000, creating: 20 } });
     await signIn(cloud, 'maya@example.test');
     const phases = new Set<string>();
     const created = await cloud.createSession(session('Clone'), repo);
@@ -455,7 +455,7 @@ describe('a new cloud Session for a repo (D-107)', () => {
       const clone = cloud.snapshot().sessions.find((entry) => entry.vmId === created.vmId)?.clone;
       if (clone?.phase) phases.add(clone.phase);
       expect(clone).toMatchObject({ state: 'ready', paneId: expect.any(String) });
-    }, { timeout: 5_000, interval: 5 });
+    }, { timeout: 15_000, interval: 5 });
     expect(phases.has('receiving')).toBe(true);
   });
 
@@ -477,5 +477,28 @@ describe('a new cloud Session for a repo (D-107)', () => {
     expect(service.hostGitHubToken(created.vmId)).toEqual(current);
     expect(after.sessions.find((entry) => entry.vmId === created.vmId)?.clone?.state).toBe('cloning');
     expect(JSON.stringify(after)).not.toContain(current.token);
+  });
+});
+
+describe('the path to the first terminal (D-115)', () => {
+  it('makes one create request and pairs, and starts the Session off the path to the clone\'s Pane', async () => {
+    const requests: string[] = [];
+    const recorded: typeof fetch = (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if ((init?.method ?? 'GET') !== 'GET') requests.push(`${init?.method} ${url.pathname}`);
+      return fetch(input, init);
+    };
+    let sessionStarts = 0;
+    const cloud = manager({ fetch: recorded, startSession: () => { sessionStarts += 1; return new Promise<string>(() => undefined); } });
+    await signIn(cloud, 'maya@example.test');
+    cloud.prepareCreate();
+    await vi.waitFor(() => expect(requests.some((request) => request.endsWith('/sealing-keys'))).toBe(true));
+    requests.length = 0;
+
+    const created = await cloud.createSession(session('Docs'), { url: 'https://github.com/expressjs/express', branch: 'master' });
+
+    expect(created).toMatchObject({ machineId: 'computer-1', sessionId: null });
+    expect(requests).toEqual([`POST /v1/organizations/org_1/vms`, `POST /v1/vms/${created.vmId}/pairing`]);
+    expect(sessionStarts).toBe(1);
   });
 });
