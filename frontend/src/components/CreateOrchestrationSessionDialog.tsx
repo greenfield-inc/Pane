@@ -24,6 +24,7 @@ import { Toggle } from './ui/Toggle';
 import { SessionLaunchFields } from './SessionLaunchFields';
 import { WhereItRuns, type PaneCloudGate, type Place, type PlaceMachine } from './WhereItRuns';
 import { MAC_WORK_DOCS_URL, placesForMacWork } from '../utils/macWork';
+import { phoneAccessIsOff } from './addDevice/addDeviceStore';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -244,6 +245,14 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
   useEffect(() => { if (isOpen) { setChosenPlace('here'); userPickedPlace.current = false; } }, [isOpen]);
   const listed = usePlaceMachines(isOpen && offerPlaces, cloud.sessions);
   const xcode = useXcodeProject(isOpen && offerPlaces);
+  // Pairing the new machine turns phone access on in place, as linking any machine does (D-88); the card says so first.
+  const [phoneAccessOff, setPhoneAccessOff] = useState(false);
+  useEffect(() => {
+    if (!isOpen || !offerPlaces) return undefined;
+    let live = true;
+    void phoneAccessIsOff().then(off => { if (live) setPhoneAccessOff(off); });
+    return () => { live = false; };
+  }, [isOpen, offerPlaces]);
   const macWork = placesForMacWork({ current: listed.current, others: listed.others, xcode });
   const places = { current: listed.current, others: macWork.others };
   // A repo with an Xcode project starts on one of the person's Macs, before they create the Session (D-85).
@@ -384,7 +393,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
             </div>
           </fieldset>
           {offerPlaces && (
-            <WhereItRuns value={place} onChange={pickPlace} current={places.current} others={places.others} cloudGate={cloudGate} sendsSecrets={cloud.sendsSecrets} disabled={isSubmitting}
+            <WhereItRuns value={place} onChange={pickPlace} current={places.current} others={places.others} cloudGate={cloudGate} sendsSecrets={cloud.sendsSecrets} turnsOnPhoneAccess={phoneAccessOff} disabled={isSubmitting}
               onMacWorkDocs={xcode && !macWork.macAvailable ? () => void window.electronAPI.openExternal(MAC_WORK_DOCS_URL) : undefined}
               onCloudSignIn={() => void signInToCloud()} onCloudSignUp={() => { if (signupUrl) void window.electronAPI.openExternal(signupUrl); }} />
           )}
@@ -437,7 +446,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
           <Button type="button" variant="secondary" disabled={isSubmitting} onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={isSubmitting} loadingText={place === 'cloud' && cloud.creating ? CLOUD_STEP_TEXT[cloud.creating.step] : 'Creating…'}
             disabled={place === 'cloud' && cloudGate !== null}>
-            {place === 'cloud' ? 'Create on Pane Cloud'
+            {place === 'cloud' ? 'Create Session on Pane Cloud'
               : otherMachine ? `Create Session on ${otherMachine.name}`
               : machineName ? `Create Session on ${machineName}` : 'Create Session'}
           </Button>
