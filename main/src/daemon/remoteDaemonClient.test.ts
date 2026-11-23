@@ -285,6 +285,21 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
     client.disconnect();
   });
 
+  it('sends a browser tab\'s ask for a port\'s phone address while restoring (#1559)', async () => {
+    const host = createFakeHost();
+    const client = createClient(host);
+    let release!: () => void;
+    client.onRestore(() => new Promise<void>(resolve => { release = resolve; }));
+    await client.connect(); await flush();
+    expect(client.getState().status).toBe('restoring');
+    // A tab shown while the workspace comes back asks once, on mount; nothing asks again later.
+    await expect(client.invoke('ports:phone-address', [3000])).resolves.toBeNull();
+    const asks = host.requests.filter(request => request.url.endsWith('/invoke') && String(request.init?.body).includes('"ports:phone-address"'));
+    expect(asks).toHaveLength(1);
+    release(); await flush();
+    client.disconnect();
+  });
+
   it.each(['credentials:shared:get', 'credentials:shared:apply', 'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke'])(
     'sends %s from a client that never opened the event stream', async channel => {
       const host = createFakeHost();
