@@ -242,12 +242,14 @@ These apply to every browser tab, whoever drives it.
 - **Apps.** When a page opens an app link, such as a Zoom meeting (`zoommtg:`), the tab asks
   first: "This page wants to open zoom.us. Open · Cancel". Only **Open** hands it to the app.
   Links that reach local files or programs (`file:`, `search-ms:`, `ms-msdt:`) never open.
-- **Sign-ins that refuse embedded browsers.** Google (`accounts.google.com`, or a sign-in that
-  returns `error=disallowed_useragent`) and AWS (the sign-in form at `signin.aws.amazon.com/signin`,
-  and `*.signin.aws`) refuse
-  to sign in inside an app's browser. The tab stays where it was and says "Google doesn't allow
-  sign-in inside apps." with **Open in your browser**, which opens that sign-in in the browser of
-  the screen you are on. A sign-in popup that reaches one closes, and its opener's tab says so.
+- **Sign-ins that refuse embedded browsers.** Google sign-in runs in the tab, popups included,
+  until Google refuses it: its "This browser or app may not be secure" page
+  (`accounts.google.com/…/signin/rejected`) or a `disallowed_useragent` error. AWS's sign-in form
+  (`signin.aws.amazon.com/signin`, and `*.signin.aws`) always refuses. The tab stays where it was
+  and says "Google won't sign in here." with **Open this page in your browser**, which opens the
+  page you were on (the site's login page, not Google's) in the browser of the screen you are on.
+  A sign-in popup that reaches a refusal closes, and its opener's tab says so. The line shows once
+  per page: dismissed or used, it stays away until the page loads again.
   When a site's passkey prompt doesn't appear in a tab, use **Open in your browser**.
 - **Sign-in popups.** A popup a page opens to sign in (`window.open` with a size, as
   "Sign in with GitHub" does) opens as a window on the computer that runs the tab. When nobody

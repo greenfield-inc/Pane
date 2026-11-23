@@ -383,9 +383,9 @@ function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBa
       </View>
       {view?.signIn && view.signIn.url !== signInOpened ? (
         <View testID="browser-sign-in" style={[styles.live, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
-          <Text variant="footnote" tone="secondary" style={styles.shrink}>{`${view.signIn.site} doesn't allow sign-in inside apps.`}</Text>
+          <Text variant="footnote" tone="secondary" style={styles.shrink}>{`${view.signIn.site} won't sign in here.`}</Text>
           <Pressable accessibilityRole="button" hitSlop={6} onPress={() => { const { url } = view.signIn ?? {}; if (!url) return; setSignInOpened(url); void Linking.openURL(url); }}>
-            <Text variant="footnote" style={{ color: colors.accentText }}>Open in your browser</Text>
+            <Text variant="footnote" style={{ color: colors.accentText }}>Open this page in your browser</Text>
           </Pressable>
         </View>
       ) : null}

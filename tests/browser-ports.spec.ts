@@ -254,3 +254,29 @@ test('on a remote desktop, Open in your browser waits for a forwarded port', asy
   await expect(page.getByText("Pane can't open this page in your browser: Port 5174 on devbox isn't forwarded to this computer.")).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally)).toEqual(['http://localhost:5173/']);
 });
+
+test('a sign-in Google refuses shows one line per page, which opens that page in your browser', async ({ page }) => {
+  await openBrowserPanel(page, 'https://www.reddit.com/login/');
+  await loadConfig(page, 'local');
+  await guestEvent(page, 'did-navigate', 'https://www.reddit.com/login/');
+  const refuse = () => page.evaluate(() => window.dispatchEvent(new CustomEvent('browser-panel:notice', {
+    detail: { panelId: 'browser-1', notice: { kind: 'sign-in', site: 'Google', url: 'https://www.reddit.com/login/' } },
+  })));
+  const line = page.getByText("Google won't sign in here.");
+
+  await refuse();
+  await refuse();
+  await refuse();
+  await expect(line).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Open this page in your browser' }).click();
+  await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally)).toEqual(['https://www.reddit.com/login/']);
+  await expect(line).toHaveCount(0);
+
+  // Google refusing again on the same page stays quiet; the page loading again resets it.
+  await refuse();
+  await expect(line).toHaveCount(0);
+  await guestEvent(page, 'did-navigate', 'https://www.reddit.com/login/');
+  await refuse();
+  await expect(line).toHaveCount(1);
+});
