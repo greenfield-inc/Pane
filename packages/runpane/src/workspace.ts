@@ -567,7 +567,9 @@ async function cloudSessionMachine(group: TailnetMachine, selector: CloudSelecto
     }
     return session.machine;
   }
-  const what = named ? `No cloud Session is called "${named}"` : selector.pane ? `No awake cloud Session has Pane ${selector.pane}`
+  // A stopped Session's machine can't be asked, so an id of one reads as unknown: say so.
+  const asleep = sessions.some((session) => !session.awake) ? ', or it is a stopped Session (start it in Pane)' : '';
+  const what = named ? `No awake cloud Session is called "${named}" or has that id${asleep}` : selector.pane ? `No awake cloud Session has Pane ${selector.pane}`
     : selector.panel ? `No awake cloud Session has tab ${selector.panel}` : `${PANE_CLOUD_NAME} runs each Session on its own machine, so this command needs --session`;
   throw new RunpaneError('ERR_WORKSPACE_CLOUD_SESSION_REQUIRED', `${what}. Your cloud Sessions: ${list || 'none'}. Nothing was sent.`,
     `Name one: runpane workspace "${PANE_CLOUD_NAME}" ${example}`);

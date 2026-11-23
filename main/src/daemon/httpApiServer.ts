@@ -1005,8 +1005,10 @@ export class PaneRemoteHttpApiServer {
       this.writeJson(response, auth.statusCode, auth);
       return;
     }
-    // A linked computer (QR pairing) is the owner's own device, so it runs machine commands as runpane workspace does.
-    const linkedComputer = auth.client?.kind === 'computer' && invokeRequest.channel.startsWith('runpane:machine:');
+    // A linked computer (QR pairing) is the owner's own device, so it runs machine commands as runpane workspace does,
+    // and moves a Session here as Move to machine… does (it can already run any command through runpane:machine:exec).
+    const linkedComputer = auth.client?.kind === 'computer'
+      && (invokeRequest.channel.startsWith('runpane:machine:') || invokeRequest.channel.startsWith('runpane:move:'));
     // A paired phone or linked computer holds a token only the owner's QR gave out, so it manages this computer's glasses.
     const pairedDeviceGlasses = Boolean(this.glasses && auth.client) && invokeRequest.channel.startsWith('runpane:glasses:');
     // A token on the Tailscale listener (D-51) gets what it gets on every other listener, not the owner's Tailscale identity.

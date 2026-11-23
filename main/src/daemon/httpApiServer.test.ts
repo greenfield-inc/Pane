@@ -450,9 +450,10 @@ describe('PaneRemoteHttpApiServer', () => {
     }
   });
 
-  it('runs machine commands for a computer linked by QR pairing, and refuses them for a paired phone', async () => {
+  it('runs machine commands and Session moves for a computer linked by QR pairing, and refuses them for a paired phone', async () => {
     const registry = new PaneCommandRegistry();
     registry.register('runpane:machine:info', async () => ({ hostname: 'travel-laptop' }));
+    registry.register('runpane:move:status', async () => ({ stage: 'receiving' }));
     const config = createEnabledRemoteConfig();
     config.host.clients.push({
       id: 'computer-1',
@@ -469,6 +470,10 @@ describe('PaneRemoteHttpApiServer', () => {
     await expect(requestJson(server, 'POST', '/invoke', { channel: 'runpane:machine:info', args: [] }, 'link-token'))
       .resolves.toEqual({ statusCode: 200, body: { ok: true, result: { hostname: 'travel-laptop' } } });
     await expect(requestJson(server, 'POST', '/invoke', { channel: 'runpane:machine:info', args: [] }, 'secret-token'))
+      .resolves.toMatchObject({ statusCode: 403, body: { ok: false, error: { code: 'ERR_WORKSPACE_ONLY_COMMAND' } } });
+    await expect(requestJson(server, 'POST', '/invoke', { channel: 'runpane:move:status', args: [] }, 'link-token'))
+      .resolves.toEqual({ statusCode: 200, body: { ok: true, result: { stage: 'receiving' } } });
+    await expect(requestJson(server, 'POST', '/invoke', { channel: 'runpane:move:status', args: [] }, 'secret-token'))
       .resolves.toMatchObject({ statusCode: 403, body: { ok: false, error: { code: 'ERR_WORKSPACE_ONLY_COMMAND' } } });
   });
 

@@ -666,7 +666,8 @@ export class MoveCoordinator {
 
   /** Deletes the cloud machine a move made and didn't use; says what happened to it. */
   private async discardMachine(cloud: NonNullable<SourceJob['cloud']>): Promise<string> {
-    if (!cloud.vmId) return 'No cloud machine was made.';
+    // createMachine deletes a machine it couldn't finish (pairing failed), so none is left either way.
+    if (!cloud.vmId) return 'No cloud machine is left from the move.';
     try {
       await this.moveCloud().remove(cloud.vmId);
       return 'Pane deleted the cloud machine it made for the move.';
@@ -973,9 +974,11 @@ export class MoveCoordinator {
     const there = job.cloud ? await this.discardMachine(job.cloud) : cleaned
       ? `${job.progress.target} removed everything it had set up.`
       : `${job.progress.target} didn't answer; it removes what it had set up on its own once the move stops arriving.`;
+    // The cloud machine is gone, so advice to fix something on it no longer applies.
+    const cloudNext = job.cloud ? 'Fix what the message names here (such as a repository its origin can\'t serve), then move to Pane Cloud again; each move makes a new cloud machine.' : undefined;
     const failure = error instanceof PaneError
-      ? { message: `${error.message} ${there} The Session is running here again, unchanged.`, next: error.next ?? 'Try again.' }
-      : { message: `${reasonOf(error)}. ${there} The Session is running here again, unchanged.`, next: 'Try again.' };
+      ? { message: `${error.message} ${there} The Session is running here again, unchanged.`, next: cloudNext ?? error.next ?? 'Try again.' }
+      : { message: `${reasonOf(error)}. ${there} The Session is running here again, unchanged.`, next: cloudNext ?? 'Try again.' };
     this.touch(job, cancelled ? { phase: 'cancelled', error: undefined } : { phase: 'failed', error: failure });
   }
 }
