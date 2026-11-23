@@ -180,7 +180,7 @@ describe('linkedMoveTargets', () => {
   const signedIn = (overrides: Partial<Extract<PaneCloudSignIn, { state: 'signed-in' }>> = {}): PaneCloudSignIn => ({
     state: 'signed-in', email: 'tyler@example.invalid', name: null, access: 'invited', signupState: 'ready', signupUrl: 'https://cloud.example.invalid/signup', organizationId: 'org', ...overrides,
   });
-  const cloudVm = (id: string, name: string, machineId: string | null) => ({ vmId: id, name, awake: true, underReview: false, machineId, paneVersion: null, createdAt: '2026-11-01T00:00:00Z' });
+  const cloudVm = (id: string, name: string, machineId: string | null) => ({ vmId: id, name, awake: true, underReview: false, machineId, paneVersion: null, createdAt: '2026-11-01T00:00:00Z', clone: null });
   const snapshot = (signIn: PaneCloudSignIn, sessions: PaneCloudSnapshot['sessions'] = []): PaneCloudSnapshot => ({ ...SIGNED_OUT_PANE_CLOUD, signIn, sessions });
   const relayComputer = (id: string, label: string): RemoteComputer => ({ id, label, routes: [{ ...relayRoute, id: `relay:${id}`, relay: { computerId: id, fingerprint: 'f' } }] });
 
