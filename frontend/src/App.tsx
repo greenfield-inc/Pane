@@ -42,6 +42,7 @@ import { ResumeSessionsDialog } from './components/ResumeSessionsDialog';
 import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
 import { openLink } from './utils/openLink';
+import { LinkPopoverHost } from './components/links/LinkPopover';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeSessionActivity } from './services/sessionActivitySync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
@@ -1174,6 +1175,7 @@ function App() {
         />
         <DocsDialog isOpen={isDocsOpen} onClose={() => setIsDocsOpen(false)} />
         <ShortcutHintsOverlay isVisible={shortcutHintsVisible} shortcuts={terminalShortcuts} />
+        <LinkPopoverHost />
         </div>
       </div>
     </ContextMenuProvider>

@@ -73,5 +73,7 @@ export interface BrowserTabView {
   page?: string;
   /** The host's name, for "on studio-mac". */
   host: string;
+  /** The tab stopped a sign-in that refuses to run inside apps: the screen offers `url` in its own browser. */
+  signIn?: { site: string; url: string };
   stopped?: BrowserStop;
 }

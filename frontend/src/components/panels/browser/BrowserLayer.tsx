@@ -1,5 +1,5 @@
 import { Suspense, lazy, memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
-import type { ToolPanel } from '../../../../../shared/types/panels';
+import type { BrowserPanelState, ToolPanel } from '../../../../../shared/types/panels';
 import { usePanelStore } from '../../../stores/panelStore';
 import { panelApi } from '../../../services/panelApi';
 import { PanelErrorBoundary } from '../PanelErrorBoundary';
@@ -143,7 +143,10 @@ export const BrowserLayer = memo(function BrowserLayer() {
         lastRects.set(id, rect);
         // A desktop showing another computer's Pane reports from the stream itself (StreamedBrowserPanel).
         // A tab this computer's own agents hold is this computer's page, even while it shows another computer.
-        const fromHost = remote && !held.some(tab => tab.panelId === id);
+        // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
+        const signInPopup = (panel.state.customState as BrowserPanelState | undefined)?.signInPopup === true;
+        // A sign-in popup's page lives only in a hidden window on its host, this computer included: every screen streams it.
+        const fromHost = signInPopup || (remote && !held.some(tab => tab.panelId === id));
         if (visible && !fromHost) shown.set(id, { width: rect.width, height: rect.height });
         // A hidden page is not drawn, and Chromium throttles it. While a call runs on it, or another
         // device streams it, it is drawn fully transparent under the tab in view, so its frames are current.

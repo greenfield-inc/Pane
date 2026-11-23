@@ -49,18 +49,15 @@ function blockLanguage(node: HastNode | undefined): string | undefined {
  * its blocks and the state inside them (a half-typed form) survives.
  */
 const Markdown = memo(({ text, live }: { text: string; live: boolean }) => {
-  const { blocks, openLink } = useContext(ChatBlocksContext);
+  const { blocks } = useContext(ChatBlocksContext);
   const components = useMemo<Components>(() => ({
-    a: ({ children, href, ...props }: ComponentProps<'a'>) => <a {...props} href={href} target="_blank" rel="noopener noreferrer" onClick={openLink && (event => {
-      event.preventDefault();
-      openLink(event.currentTarget.href);
-    })}>{children}</a>,
+    a: ({ children, href, ...props }: ComponentProps<'a'>) => <a {...props} href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
     pre: ({ node, children, ...props }: ComponentProps<'pre'> & { node?: HastNode }) => {
       const language = blockLanguage(node);
       const render = language ? blocks?.[language] : undefined;
       return render ? <>{render(hastText(node).replace(/\n$/, ''))}</> : <CodeBlock {...props}>{children}</CodeBlock>;
     },
-  }), [blocks, openLink]);
+  }), [blocks]);
   const split = useRef(live).current;
   const parts = split ? markdownBlocks(text) : [text];
   return <div className="chat-markdown">{parts.map((block, index) => <MarkdownBlock key={index} text={block} components={components} />)}</div>;

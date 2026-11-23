@@ -11,7 +11,7 @@ export interface ChatRendering {
   userMessage?: (text: string) => ReactNode | undefined;
   /** A queued message's label instead of its raw text (Autopilot's Pane lines), or undefined to keep the text. */
   queued?: (text: string) => string | undefined;
-  /** Opens a web link the person clicks in the chat (Settings > Links); without it the link opens in the system browser. */
-  openLink?: (url: string) => void;
+  /** The Pane the chat's web links open in (LinkPopover, Settings > Links); without one they open in the system browser. */
+  paneId?: string;
 }
 export const ChatBlocksContext = createContext<ChatRendering>({});

@@ -32,7 +32,7 @@ import { registerRemoteTerminalRestore } from '../../utils/remoteRestoration';
 import { terminalTiming } from '../../utils/terminalTiming';
 import { acknowledgeTerminalOutput } from '../../utils/terminalAck';
 import { FileEdit, FolderOpen } from 'lucide-react';
-import { useTerminalLinks } from '../terminal/hooks/useTerminalLinks';
+import { hoverTerminalLink, openTerminalLink, useTerminalLinks } from '../terminal/hooks/useTerminalLinks';
 import { openPaneLink } from '../terminal/openPaneLink';
 import { PANE_LINK_REGEX } from '../terminal/paneLink';
 import { TerminalLinkTooltip } from '../terminal/TerminalLinkTooltip';
@@ -66,7 +66,7 @@ import { markTerminalRevealed, wasTerminalRevealed } from '../../utils/revealedT
 import { TerminalSkeleton } from './TerminalSkeleton';
 import { noteTerminalCell } from '../../utils/terminalCellSize';
 import { REVEAL_MS, useSkeletonHold } from '../ui/Skeleton';
-import { openLink } from '../../utils/openLink';
+import { leaveLink } from '../links/linkPopoverState';
 import { flushSync } from 'react-dom';
 import '@xterm/xterm/css/xterm.css';
 
@@ -1160,16 +1160,22 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           rescaleOverlappingGlyphs: true,
           minimumContrastRatio: getMinimumContrastRatio(terminalRuntimeRef.current.highContrast),
           macOptionIsMeta: false,
+          // OSC 8 hyperlinks: a click opens the page (Cmd/Ctrl-click in the other place), and
+          // resting on one shows the link popover.
           linkHandler: {
-            activate: (_event, uri) => {
+            activate: (event, uri) => {
               if (uri.startsWith('pane://')) {
                 void openPaneLink(uri).catch(error => console.error('[TerminalPanel] Failed to open Pane link:', error));
                 return;
               }
-              void openLink(uri, panel.sessionId).catch((error) => {
+              void openTerminalLink(uri, panel.sessionId, event).catch((error) => {
                 console.error('[TerminalPanel] Failed to open terminal link:', error);
               });
             },
+            hover: (event, uri) => {
+              if (!uri.startsWith('pane://')) hoverTerminalLink(uri, panel.sessionId, event);
+            },
+            leave: () => leaveLink(),
           },
         });
         setTerminalFontObservation(initialFontFamily);
@@ -1344,11 +1350,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             const { WebLinksAddon: WebLinksAddonImpl } = await import('@xterm/addon-web-links');
             if (!disposed) {
               const isMac = navigator.platform.toUpperCase().includes('MAC');
+              // A click opens the URL (Cmd/Ctrl-click in the other place); resting on it shows the link popover.
               const webLinksAddon = new WebLinksAddonImpl((event, uri) => {
-                // Only open link if Ctrl (Windows/Linux) or Cmd (Mac) is held
-                if (isMac ? event.metaKey : event.ctrlKey) {
-                  void openLink(uri, panel.sessionId);
-                }
+                void openTerminalLink(uri, panel.sessionId, event);
+              }, {
+                hover: (event, uri) => hoverTerminalLink(uri, panel.sessionId, event),
+                leave: () => leaveLink(),
               });
               terminal.loadAddon(webLinksAddon);
               webLinksAddonRef.current = webLinksAddon;

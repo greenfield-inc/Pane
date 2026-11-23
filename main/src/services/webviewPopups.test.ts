@@ -6,7 +6,7 @@ type OpenHandler = (details: Pick<HandlerDetails, 'url' | 'disposition'>) => Win
 
 type NavigateHandler = (event: { preventDefault: () => void }, url: string, isInPlace?: boolean, isMainFrame?: boolean) => void;
 
-function setup(registered: boolean, pageUrl = 'https://example.com/') {
+function setup(registered: boolean, pageUrl = 'https://example.com/', extra: Partial<Parameters<typeof routeWebviewPopups>[1]> = {}) {
   let handler: OpenHandler | undefined;
   let navigate: NavigateHandler | undefined;
   let redirect: NavigateHandler | undefined;
@@ -26,7 +26,8 @@ function setup(registered: boolean, pageUrl = 'https://example.com/') {
     openExternal: vi.fn(),
     openPaneLink: vi.fn(),
     offerApp: vi.fn(),
-    sendOut: vi.fn(),
+    refuseSignIn: vi.fn(),
+    ...extra,
   };
   routeWebviewPopups(wvContents, routing);
   if (!handler || !navigate || !redirect) throw new Error('routeWebviewPopups did not install its handlers');
@@ -96,20 +97,44 @@ describe('routeWebviewPopups', () => {
     expect(routing.openExternal).not.toHaveBeenCalled();
   });
 
-  it('sends Google sign-in to the system browser, from a link, a redirect or a popup', () => {
+  it('keeps a Google sign-in out of the tab and offers the system browser, from a link, a redirect or a popup', () => {
     const { follow, redirectTo, open, routing } = setup(true);
     const signIn = 'https://accounts.google.com/v3/signin/identifier?continue=https://mail.google.com';
     expect(follow(signIn)).toBe(false);
     expect(redirectTo(signIn, true)).toBe(false);
     expect(open({ url: signIn, disposition: 'new-window' })).toEqual({ action: 'deny' });
-    expect(routing.sendOut).toHaveBeenCalledTimes(3);
-    expect(routing.sendOut).toHaveBeenCalledWith({ url: signIn, site: 'Google sign-in', panelId: 'panel-1' });
+    expect(routing.refuseSignIn).toHaveBeenCalledTimes(3);
+    expect(routing.refuseSignIn).toHaveBeenCalledWith({ url: signIn, site: 'Google', panelId: 'panel-1' });
+    // The person chooses: nothing opens until they press Open in your browser.
+    expect(routing.openExternal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['https://signin.aws.amazon.com/oauth?client_id=arn', 'AWS'],
+    ['https://us-east-1.signin.aws/platform/login', 'AWS'],
+    ['https://example.com/oauth/error?authError=Error+403:+disallowed_useragent', 'Google'],
+  ])('names %s as a sign-in %s refuses inside apps', (url, site) => {
+    const { follow, routing } = setup(true);
+    expect(follow(url)).toBe(false);
+    expect(routing.refuseSignIn).toHaveBeenCalledWith({ url, site, panelId: 'panel-1' });
+  });
+
+  it('opens a sign-in popup as a tab beside its opener when the opener\'s popups become tabs', () => {
+    const popupPage = { id: 99 };
+    const createPopup = vi.fn(() => popupPage);
+    const { open, routing } = setup(true, 'https://example.com/', { popupTab: () => createPopup });
+    const answer = open({ url: 'https://accounts.example.com/authorize', disposition: 'new-window' });
+    if (answer.action !== 'allow' || !answer.createWindow) throw new Error(`expected a popup Pane creates itself, got ${JSON.stringify(answer)}`);
+    const options = { width: 500, height: 600 };
+    expect(answer.createWindow(options)).toBe(popupPage);
+    expect(createPopup).toHaveBeenCalledWith({ url: 'https://accounts.example.com/authorize', options, opener: { panelId: 'panel-1', sessionId: 'session-1' } });
+    expect(routing.openBrowserTab).not.toHaveBeenCalled();
   });
 
   it('leaves a Google sign-in button inside another site\'s page alone', () => {
     const { redirectTo, routing } = setup(true);
     expect(redirectTo('https://accounts.google.com/gsi/button?client_id=1', false)).toBe(true);
-    expect(routing.sendOut).not.toHaveBeenCalled();
+    expect(routing.refuseSignIn).not.toHaveBeenCalled();
   });
 
   it('lets ordinary links navigate the page', () => {

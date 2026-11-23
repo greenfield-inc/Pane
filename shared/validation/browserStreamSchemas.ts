@@ -38,5 +38,6 @@ export const browserTabViewSchema: BoundarySchema<BrowserTabView> = boundary.obj
   downloads: boundary.array(boundary.object({ name: boundary.string, at: boundary.number, agent: boundary.optional(boundary.string) })),
   page: boundary.optional(boundary.string),
   host: boundary.string,
+  signIn: boundary.optional(boundary.object({ site: boundary.string, url: boundary.string })),
   stopped: boundary.optional(stopSchema),
 });

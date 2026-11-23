@@ -421,12 +421,12 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
               </div>
             )}
             {references.length > 0 && (
-              <div className="mt-4 flex flex-wrap items-center gap-1.5" data-testid="approval-references">
+              <div className="mt-4 flex flex-wrap items-center gap-1.5" data-testid="approval-references" data-link-pane={item.source.paneId ?? ''}>
                 <span className="mr-1 text-[13px] text-text-tertiary">References</span>
                 {references.map((reference) => {
                   const Icon = tabIcon(reference) ?? FileText;
                   return (
-                    <button key={reference.key} type="button" onClick={() => onOpenTab(reference.key)}
+                    <button key={reference.key} type="button" onClick={() => onOpenTab(reference.key)} data-link-url={'url' in reference.link ? reference.link.url : undefined}
                       className="inline-flex max-w-[260px] items-center gap-1.5 rounded-md border border-border-secondary px-2 py-1 text-[13px] text-interactive hover:bg-surface-hover">
                       <Icon className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
                       <span className="truncate">{reference.label}</span>

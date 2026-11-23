@@ -36,6 +36,7 @@ import { useAgentStatuses, useMarkPaneSeen } from '../panes/hooks';
 import { ShortcutsSheet } from '../shortcuts/ShortcutsSheet';
 import { PlaceholderTab } from '../tabs/PlaceholderTab';
 import { ChatTabBody } from '../chatTab/ChatTabBody';
+import { LinkPane } from '../links/LinkMenu';
 import { AttachSheet } from '../upload/AttachSheet';
 import { UploadReceipts } from '../upload/UploadReceipts';
 import { useUploads } from '../upload/useUploads';
@@ -279,8 +280,12 @@ export function LeadingBodies({ leading, selectedId }: { leading: LeadingTabs; s
   );
 }
 
-/** A tab that is not a terminal, drawn by its type. */
+/** A tab that is not a terminal, drawn by its type; its links open in Pane in the tab's Pane. */
 function TabBody({ panel, title, panels }: { panel: ToolPanel; title: string; panels: readonly ToolPanel[] }) {
+  return <LinkPane value={panel.sessionId}><TabView panel={panel} title={title} panels={panels} /></LinkPane>;
+}
+
+function TabView({ panel, title, panels }: { panel: ToolPanel; title: string; panels: readonly ToolPanel[] }) {
   switch (tabView(panel)) {
     case 'chat':
       return <ChatTabBody panel={panel} panels={panels} />;

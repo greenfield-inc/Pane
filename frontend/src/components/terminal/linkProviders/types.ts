@@ -11,5 +11,9 @@ export interface LinkProviderConfig {
   onShowTooltip: (event: MouseEvent, text: string, hint: string) => void;
   onHideTooltip: () => void;
   onShowFilePopover: (event: MouseEvent, filePath: TerminalFilePath, line?: number) => void;
-  onOpenUrl: (url: string) => void;
+  /** A click on a web link; the event says whether Cmd or Ctrl was held. */
+  onOpenUrl: (url: string, event: MouseEvent) => void;
+  /** The pointer rests on a web link, or leaves it (the link popover). */
+  onHoverUrl: (url: string, event: MouseEvent) => void;
+  onLeaveUrl: () => void;
 }

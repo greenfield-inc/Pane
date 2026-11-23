@@ -5,7 +5,7 @@ import { browserInputQueue, fitFrame, keyboardField, movesFocus, pagePoint, Phon
 import * as Clipboard from 'expo-clipboard';
 import { useIsFocused } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Image, Keyboard, Modal, PixelRatio, Platform, Pressable, StyleSheet, TextInput, View, type LayoutChangeEvent } from 'react-native';
+import { Alert, AppState, Image, Keyboard, Linking, Modal, PixelRatio, Platform, Pressable, StyleSheet, TextInput, View, type LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -58,7 +58,8 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
       </View>
     );
   }
-  return <StreamedBrowserTab panel={panel} onBack={choice.back} onInput={choice.input} />;
+  // A sign-in popup's page exists only on the host: there is no copy to go back to.
+  return <StreamedBrowserTab panel={panel} onBack={state?.signInPopup ? undefined : choice.back} onInput={choice.input} />;
 }
 
 /** On the own copy while the person drives the tab (they took over): hand it back to the agent from here. */
@@ -76,7 +77,7 @@ function HandBackRow({ panelId, agent }: { panelId: string; agent: string | unde
   );
 }
 
-function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBack(): void; onInput(): void }) {
+function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBack: (() => void) | undefined; onInput(): void }) {
   const theme = useTheme();
   const { colors } = theme;
   const { client, profile } = useDaemon();
@@ -290,6 +291,7 @@ function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBa
     ], { cancelable: false });
   }, [fileChooser, host, send]);
 
+  const [signInOpened, setSignInOpened] = useState<string | null>(null);
   const download = view?.downloads.at(-1);
   const seenDownload = useRef<number | null>(null);
   useEffect(() => {
@@ -372,10 +374,20 @@ function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBa
       </View>
       <View testID="browser-live" style={[styles.live, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
         <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.shrink}>{liveLine(host)}</Text>
-        <Pressable testID="browser-back-to-copy" accessibilityRole="button" hitSlop={6} onPress={onBack}>
-          <Text variant="footnote" style={{ color: colors.accentText }}>Back to my copy</Text>
-        </Pressable>
+        {onBack ? (
+          <Pressable testID="browser-back-to-copy" accessibilityRole="button" hitSlop={6} onPress={onBack}>
+            <Text variant="footnote" style={{ color: colors.accentText }}>Back to my copy</Text>
+          </Pressable>
+        ) : null}
       </View>
+      {view?.signIn && view.signIn.url !== signInOpened ? (
+        <View testID="browser-sign-in" style={[styles.live, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
+          <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.shrink}>{`${view.signIn.site} doesn't allow sign-in inside apps.`}</Text>
+          <Pressable accessibilityRole="button" hitSlop={6} onPress={() => { const { url } = view.signIn ?? {}; if (!url) return; setSignInOpened(url); void Linking.openURL(url); }}>
+            <Text variant="footnote" style={{ color: colors.accentText }}>Open in your browser</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {addressError ? (
         <Pressable testID="browser-input-error" onPress={() => setAddressError(null)} accessibilityHint="Dismiss" style={styles.notice}>
           <Text variant="footnote" tone="danger">{addressError}</Text>

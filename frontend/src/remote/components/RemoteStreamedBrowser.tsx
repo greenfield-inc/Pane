@@ -43,7 +43,8 @@ export function RemoteStreamedBrowser({ adapter, panel, hostName, ownCopy }: { a
       </div>
     );
   }
-  return <HostStream adapter={adapter} panel={panel} hostName={hostName} ownCopy={ownCopy} onBack={choice.back} onInput={choice.input} />;
+  // A sign-in popup's page exists only on the host: there is no copy to go back to.
+  return <HostStream adapter={adapter} panel={panel} hostName={hostName} ownCopy={ownCopy} onBack={state?.signInPopup ? undefined : choice.back} onInput={choice.input} />;
 }
 
 /** On the own copy while the person drives the tab (they took over): hand it back to the agent from here. */
@@ -62,7 +63,7 @@ function HandBackRow({ adapter, panelId, agent }: { adapter: RemoteRuntimeAdapte
 }
 
 /** The host's page as a stream; a host on an older Pane streams nothing and `ownCopy` shows instead. */
-function HostStream({ adapter, panel, hostName, ownCopy, onBack, onInput }: { adapter: RemoteRuntimeAdapter; panel: ToolPanel; hostName: string; ownCopy: (onViewLive?: () => void) => ReactNode; onBack(): void; onInput(): void }) {
+function HostStream({ adapter, panel, hostName, ownCopy, onBack, onInput }: { adapter: RemoteRuntimeAdapter; panel: ToolPanel; hostName: string; ownCopy: (onViewLive?: () => void) => ReactNode; onBack: (() => void) | undefined; onInput(): void }) {
   const client = useMemo(() => streamClient((channel, ...args) => adapter.invoke<JsonValue>(channel, args)), [adapter]);
   const stream = useBrowserStream(client, panel.id, true);
   const view = stream.view;
@@ -146,9 +147,9 @@ function HostStream({ adapter, panel, hostName, ownCopy, onBack, onInput }: { ad
           />
         </form>
       </div>
-      <LiveChip host={host} onBack={onBack} />
+      {onBack && <LiveChip host={host} onBack={onBack} />}
       {error && <div className="border-b border-border-primary px-3 py-1 text-xs text-status-error">{error}</div>}
-      <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} phone={touchScreen} keyboardRef={keyboard} onPersonInput={onInput} />
+      <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} phone={touchScreen} keyboardRef={keyboard} onPersonInput={onInput} openOutside={url => { window.open(url, '_blank', 'noopener,noreferrer'); }} />
       {phone && (
         <div className="flex flex-shrink-0 items-center gap-1 border-t border-border-primary bg-bg-chrome px-2 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
           {controls}

@@ -271,7 +271,7 @@ export function FileEditorView({
 
   // The root div stays mounted (the ⌘S listener is on it); the first file's load swaps inside it.
   return (
-    <div ref={containerRef} className="h-full w-full min-w-0 flex flex-col overflow-hidden">
+    <div ref={containerRef} className="h-full w-full min-w-0 flex flex-col overflow-hidden" data-link-pane={sessionId}>
       {!selectedFile && error ? <div className="flex-1 flex items-center justify-center text-text-secondary">Error: {error}</div>
       : <SkeletonSwap loading={!selectedFile && loading} skeleton={<>
         <Skeleton className="flex items-center px-4 py-2 bg-surface-secondary border-b border-border-primary">

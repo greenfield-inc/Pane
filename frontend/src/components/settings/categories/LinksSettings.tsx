@@ -74,7 +74,7 @@ export function LinksSettings({ persistence, onDirtyChange }: LinksSettingsProps
         <SettingRow
           settingId="links-open-in"
           label="Open links in"
-          description="Links in terminal output, chat messages and cards, and links opened by command-line tools (gh pr view --web), open in a Pane browser tab beside where you clicked, with your Pane sign-ins. Pane's own links, such as release notes and downloads, always open in your system browser."
+          description="Links in terminal output, chat messages and cards, and links opened by command-line tools (gh pr view --web), open in a Pane browser tab beside where you clicked, with your Pane sign-ins. Cmd-click (Ctrl-click on Windows and Linux) opens a link in the other place, and resting the pointer on a link offers both. Pane's own links, such as release notes and downloads, always open in your system browser."
           saveState={persistence.saveStates['links-open-in']}
         >
           <SegmentedControl<LinksOpenIn>
@@ -89,7 +89,7 @@ export function LinksSettings({ persistence, onDirtyChange }: LinksSettingsProps
         <SettingRow
           settingId="custom-links"
           label="Custom links"
-          description={`Text matching a pattern (a regular expression) becomes a link. In the link, $0 is the whole match and $1 to $9 are its groups. Ctrl+Click (Cmd+Click on macOS) opens it. Where two patterns match the same text, the first one wins. A pattern that takes longer than ${CUSTOM_LINK_MATCH_TIMEOUT_MS} ms on a line, such as one with nested repeats like (a+)+, is stopped and that line gets no links.`}
+          description={`Text matching a pattern (a regular expression) becomes a link. In the link, $0 is the whole match and $1 to $9 are its groups. A click opens it. Where two patterns match the same text, the first one wins. A pattern that takes longer than ${CUSTOM_LINK_MATCH_TIMEOUT_MS} ms on a line, such as one with nested repeats like (a+)+, is stopped and that line gets no links.`}
           saveState={persistence.saveStates['custom-links']}
           align="start"
         >
