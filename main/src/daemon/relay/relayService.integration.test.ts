@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
-import { createHash, X509Certificate } from 'crypto';
-import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { createHash, generateKeyPairSync, randomBytes, X509Certificate } from 'crypto';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import type { OutgoingHttpHeaders } from 'http';
 import https from 'https';
 import net from 'net';
@@ -153,7 +153,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     setListenerDown(down: boolean): void;
   }
 
-  async function startComputer(name: string, dataDir: string): Promise<Computer> {
+  async function startComputer(name: string, dataDir: string, options: { secretsDir?: string } = {}): Promise<Computer> {
     let config = createDefaultRemoteDaemonConfig();
     config.host.config = { ...config.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0 };
     config.relay = { enabled: true, relayAddress: `us.relay.${DOMAIN}:${relayPort}` };
@@ -182,7 +182,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
       previewPort: () => null,
       displayName: () => name,
       addClient: (record) => links.addClient(record),
-      env,
+      env: options.secretsDir ? { ...env, PANE_SECRETS_DIR: options.secretsDir } : env,
     });
     const call = createComputerCaller({ dial, extraCa });
     const links: RelayLinks = new RelayLinks({
@@ -374,5 +374,29 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     expect(toVm.relay.fingerprint).toBe(self.fingerprint);
     expect(await call(toVm, 'sessions:get-all-with-projects', [])).toEqual([{ id: 'Cloud Session session' }]);
     expect(await call(toLaptop, 'sessions:get-all-with-projects', [])).toEqual([{ id: 'Travel Laptop session' }]);
+  }, 90_000);
+
+  it('uses the relay identity and the pairing secret the host prepared before boot, so the laptop pairs with no step on the VM (D-104)', async () => {
+    // What Pane Cloud's host writes onto a new VM's secrets volume at assignment (PREBOOT_RELAY_FILES).
+    const secretsDir = join(folder, 'preboot-secrets');
+    mkdirSync(join(secretsDir, 'relay'), { recursive: true });
+    const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    writeFileSync(join(secretsDir, 'relay', 'computer-key.pem'), privateKey.export({ format: 'pem', type: 'pkcs8' }));
+    const fingerprint = createHash('sha256').update(publicKey.export({ format: 'der', type: 'spki' })).digest('base64url');
+    const secret = randomBytes(32).toString('base64url');
+    writeFileSync(join(secretsDir, 'relay', 'pairing.json'), JSON.stringify({ sha256: createHash('sha256').update(secret).digest('hex'), expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() }));
+
+    const vm = await startComputer('Prepared Session', join(folder, 'prepared-vm'), { secretsDir });
+    started.push(vm);
+    const self = vm.service.computerInfo();
+    expect(self?.fingerprint).toBe(fingerprint);
+    if (!self) throw new Error('the VM has no relay identity');
+    // The link the service hands out while the VM boots: built from what the host made, not asked of the VM.
+    const link = `https://${DOMAIN}/pair#${new URLSearchParams({ s: secret, c: self.id, n: 'Prepared Session' }).toString()}`;
+
+    expect(await laptop.registry.invoke('relay:redeem-vouched', [{ link, relay: { computerId: self.id, fingerprint, domain: DOMAIN } }])).toMatchObject({ name: 'Prepared Session' });
+    const toVm = laptop.links.linked().find((profile) => profile.relay.computerId === self.id);
+    if (!toVm) throw new Error('the laptop did not save the VM');
+    expect(await createComputerCaller({ dial, extraCa })(toVm, 'sessions:get-all-with-projects', [])).toEqual([{ id: 'Prepared Session session' }]);
   }, 90_000);
 });

@@ -123,6 +123,18 @@ export class PairingExchange {
     return { secret, expiresAt: new Date(expiresAt).toISOString() };
   }
 
+  /**
+   * A secret made elsewhere, known here only by its SHA-256: the one Pane Cloud's host prepares
+   * before a VM's first boot (D-104). Waits like a 10-minute link until `expiresAt`; adding the
+   * same one again (on a later boot) changes nothing, so a spent secret stays spent.
+   */
+  addPrepared(sha256Hex: string, expiresAt: number): void {
+    const hash = Buffer.from(sha256Hex, 'hex');
+    if (hash.length !== 32 || this.pending.some((entry) => entry.hash.equals(hash))) return;
+    this.pending.push({ hash, lifetime: '10m', expiresAt, spentAt: null });
+    this.save();
+  }
+
   /** Whether a secret would trade now, without spending it. Wrong secrets count toward the lockout. */
   check(secret: string, source: string): { ok: true; expiresAt: string } | PairingRefusal {
     const now = this.now();
