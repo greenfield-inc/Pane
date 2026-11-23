@@ -1319,7 +1319,7 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
   );
   // An archived cloud Session (D-94): a VM Pane Cloud keeps that no computer here pairs with. Restore pairs it again.
   const cloudSessions = usePaneCloudStore(s => s.snapshot.sessions);
-  const archivedCloudSessions = useMemo(() => cloudSessions.filter(session => session.machineId === null), [cloudSessions]);
+  const archivedCloudSessions = useMemo(() => cloudSessions.filter(session => session.machineId === null && !session.awake), [cloudSessions]);
   useEffect(() => usePaneCloudStore.getState().follow(), []);
   const archivedSessionCount = archivedPaneCount + archivedOrchestrationSessions.length + archivedCloudSessions.length;
   const hasLoadedAnyArchived = hasLoadedArchived || orchestrationAvailability === 'ready';

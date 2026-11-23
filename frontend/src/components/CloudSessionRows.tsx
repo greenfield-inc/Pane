@@ -188,7 +188,11 @@ export async function archiveCloudSession(vmId: string, machineId: string | null
     await usePaneCloudStore.getState().archive(vmId);
   } catch (error) {
     showActionError('Could not archive the cloud Session', error);
+    return;
   }
+  // The store answers with the snapshot, whose error says what went wrong, or which computers still list it.
+  const error = usePaneCloudStore.getState().snapshot.error;
+  if (error) showActionError('Archive Session', [error.message, error.next].filter(Boolean).join(' '));
 }
 
 async function deleteCloudSession(vmId: string, machineId: string | null): Promise<void> {
