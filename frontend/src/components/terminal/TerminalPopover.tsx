@@ -17,18 +17,25 @@ export interface TerminalPopoverProps {
   visible: boolean;
   x: number;
   y: number;
+  /** Where its bottom edge goes when it flips up near the window's bottom; defaults to `y`. */
+  flipY?: number;
   onClose: () => void;
   children: React.ReactNode;
   className?: string;
+  onMouseEnter?: React.MouseEventHandler<HTMLDivElement>;
+  onMouseLeave?: React.MouseEventHandler<HTMLDivElement>;
 }
 
 export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   visible,
   x,
   y,
+  flipY = y,
   onClose,
   children,
   className,
+  onMouseEnter,
+  onMouseLeave,
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -46,7 +53,7 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
 
     // Flip up if near bottom
     if (top + rect.height > viewportHeight - 10) {
-      top = y - rect.height;
+      top = flipY - rect.height;
     }
 
     // Keep on screen horizontally
@@ -65,7 +72,7 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
     }
 
     setPosition({ top, left });
-  }, [visible, x, y]);
+  }, [visible, x, y, flipY]);
 
   useEffect(() => {
     if (!visible) return;
@@ -104,6 +111,8 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
       data-terminal-popover
       className={cn('fixed z-[10001] w-56 max-w-[calc(100vw-20px)] max-h-[calc(100vh-20px)] overflow-y-auto bg-surface-primary border border-border-primary rounded-lg shadow-dropdown-elevated p-1', className)}
       style={{ left: position.left, top: position.top }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       {children}
     </div>,

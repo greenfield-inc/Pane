@@ -44,6 +44,7 @@ const BROWSER_SPECS = [
   'launch-outline.spec.ts',
   'launch-shortcuts.spec.ts',
   'leaderboard.spec.ts',
+  'link-popover.spec.ts',
   'loops.spec.ts',
   'machine-health-cards.spec.ts',
   'machine-health-resources.spec.ts',

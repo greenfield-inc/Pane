@@ -223,10 +223,17 @@ small pages and 100 MB for the GitHub page, 320 MB in all, with no CPU use and a
   browser**. With System browser, links from terminals, chats, cards, the command palette, the
   docs dialog and command-line tools all open in your system browser, at once, in terminals
   already open too.
+- **Click or Cmd-click.** A plain click on a link in a terminal, a chat or a file preview opens
+  it where **Open links in** says; Cmd-click (Ctrl-click on Windows and Linux) opens it in the
+  other place. Resting the pointer on a link for half a second, or right-clicking it, shows a
+  popover with **Open in Pane**, **Open in browser** and **Copy link**; an approval's web links
+  show it too. Open in browser and Copy link act on the computer you are using, also from the web
+  app. In the phone app, long-press a link in a chat or a file for the same three actions; a tap
+  opens the phone's browser.
 - **Leave any page.** On the computer that runs the tab, its **Open in your browser** button
-  sends the page to your system browser, and right-clicking a link, in a tab or in a chat,
-  offers **Open in System Browser**. A tab streamed to another screen has neither: its address
-  bar has **Copy URL** (the host's address).
+  sends the page to your system browser, right-clicking a link in a tab offers **Open in System
+  Browser**, and the link popover elsewhere offers **Open in browser**. A tab streamed to another
+  screen has neither: its address bar has **Copy URL** (the host's address).
 
 ## Apps, sign-ins and downloads
 

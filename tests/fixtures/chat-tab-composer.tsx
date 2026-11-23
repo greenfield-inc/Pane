@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import ChatTabPanel from '../../frontend/src/components/chatTab/ChatTabPanel';
+import { LinkPopoverHost } from '../../frontend/src/components/links/LinkPopover';
 import type { AgentChatConfigOption } from '../../shared/types/agentChat';
 import type { ChatTabAnswer, ChatTabClient, ChatTabConversation, ChatTabSend, ChatTabSwitchBanner, ChatTabView } from '../../shared/types/chatTab';
 import '../../frontend/src/index.css';
@@ -31,7 +32,7 @@ const view: ChatTabView = {
       { type: 'text', text: 'The `a.test.ts` suite imports a file that moved. Change the import:\n\n```ts\nimport { a } from "./lib/a";\n```' },
     ] },
     { id: 'user:2', role: 'user', parts: [{ type: 'text', text: 'Thanks, fix it please.' }] },
-    { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'Done: the import now points at `./lib/a`, and the suite passes.' }] },
+    { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: `Done: the import now points at \`./lib/a\`, and the suite passes.${params.has('links') ? ' I opened [pull request #1272](https://github.com/greenfield-inc/Pane/pull/1272).' : ''}` }] },
   ] : [
     { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Nothing is waiting on you right now.' }] },
   ] },
@@ -136,15 +137,26 @@ const client: ChatTabClient = {
   dismissBanner: async () => { window.qaDismissed++; delete view.banner; stateListeners.forEach(listener => listener(structuredClone(view))); },
 };
 const width = Number(params.get('width') ?? 360);
+// ?links=1: the chat belongs to Pane pane-1, so its links open there (LinkPopover); what opened is kept for the test.
+const rendering = params.has('links') ? { paneId: 'pane-1' } : undefined;
+declare global { interface Window { qaOpened: string[] } }
+window.qaOpened = [];
+if (params.has('links')) {
+  Object.assign(window, { electronAPI: {
+    invoke: async (channel: string, request: { paneId: string; url: string }) => { window.qaOpened.push(`${channel} ${request.paneId} ${request.url}`); },
+    openExternal: async (url: string) => { window.qaOpened.push(`external ${url}`); return { success: true }; },
+  } });
+}
 const root = createRoot(document.getElementById('root')!);
 // window.qaSwitchAway(): unmounts the panel and mounts it again, as leaving its Pane and coming back does.
 // In StrictMode, as the desktop app's development build renders it.
 const render = (mounted: boolean) => root.render(<StrictMode>
   <div className="bg-bg-secondary" style={{ height: '100vh', display: 'flex' }}>
     <div data-testid="column" className="bg-bg-primary" style={{ width, height: '100%', borderRight: '1px solid var(--color-border-primary)' }}>
-      {mounted && <ChatTabPanel panelId="composer" client={client} saveFile={saveFile} placeholder={params.get('placeholder') ?? 'Message Autopilot…'} pr={pr} workers={workers} actions={actions} />}
+      {mounted && <ChatTabPanel rendering={rendering} panelId="composer" client={client} saveFile={saveFile} placeholder={params.get('placeholder') ?? 'Message Autopilot…'} pr={pr} workers={workers} actions={actions} />}
     </div>
   </div>
+  <LinkPopoverHost />
 </StrictMode>);
 declare global { interface Window { qaSwitchAway: () => Promise<void> } }
 window.qaSwitchAway = async () => {
