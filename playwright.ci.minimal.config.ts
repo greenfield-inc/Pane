@@ -58,6 +58,7 @@ const BROWSER_SPECS = [
   'onboarding-open-project.spec.ts',
   'orchestration-sessions.spec.ts',
   'pair-phone.spec.ts',
+  'pane-cloud.spec.ts',
   'pane-order.spec.ts',
   'pause.spec.ts',
   'project-dashboard-refresh.spec.ts',

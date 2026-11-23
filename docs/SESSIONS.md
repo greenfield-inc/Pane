@@ -452,6 +452,44 @@ time it writes. Archiving the selected Session chooses an available active
 Session or clears the selection if none remain. Restoring a Session does not
 replace an unrelated selection.
 
+### Run a Session on Pane Cloud
+
+Pane Cloud (invite-only beta) runs a Session on its own cloud machine, which
+keeps working when this computer is closed. In **New Session**, pick **Pane
+Cloud** under **Where it runs**, then **Create Session on Pane Cloud**. The first time,
+**Sign in** opens the Pane Cloud page in your browser. Pane Cloud is invite-only
+for now: without an invite, the card offers **Join the waitlist**. Pane creates the
+machine, pairs this computer with it over the relay (phone access turns on if
+it was off), and starts the Session there.
+
+Pane Cloud machines run Linux, so iOS Simulator and Xcode work needs one of
+your Macs; the Pane Cloud card says so. When the project you have open has an
+Xcode project (`.xcodeproj` or `.xcworkspace`), **Where it runs** lists your
+Macs first and picks one; with none online, **Run it on a Mac** opens
+[Work that needs a Mac](https://runpane.com/docs/security#work-that-needs-a-mac).
+
+A cloud Session sits in the Sessions list like any other. Its ⋯ menu has
+**Stop**, **Start**, **Archive Session** and **Delete…**; Delete removes the
+machine and its disk. Archive Session archives it, unlinks its machine from each
+of your computers Pane can reach, and stops it. A computer that is off at the
+time keeps the machine until you unlink it there, and Pane says which computers
+it didn't reach. The Session then shows under **Archived**, where Restore starts
+it, pairs it with this computer again and brings the Session back. You can have 5 cloud Sessions running at once on the Free plan.
+**Settings › Usage & Limits** shows your plan, agent-hours this month of the
+plan's amount, and how many Sessions are running.
+
+All your cloud Sessions' machines show as one machine, **Pane Cloud**, in the
+machine switcher and **Settings › Remote Access**, with each Session under it;
+picking one opens that Session's machine. The Pane Cloud page lists its
+Sessions, updates Pane on each with **Update Pane**, and lists every operation
+you or Pane Cloud asked for on them, with who asked and why. If Pane Cloud stops answering or your sign-in ends while
+Pane is open, your cloud Sessions stay in the list and keep running. If Pane
+starts while Pane Cloud can't be reached, they appear once Pane reaches it
+again, such as when you open **Usage & Limits** and choose **Try again**.
+
+`PANE_CLOUD_URL` points a dev build at another Pane Cloud service, such as the
+stub in `packages/pane-cloud-contract`.
+
 ### Move a Session to another machine
 
 Right-click a Session, or use its ⋯ button, and choose **Move to machine…** to

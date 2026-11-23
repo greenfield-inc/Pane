@@ -38,6 +38,7 @@ let preview: LinkPreview;
 let redeem: () => Promise<LinkRedeemResult>;
 let emitOpened: (event: RelayLinkOpenedEvent) => void;
 let emitPaired: (event: RelayPairedEvent) => void;
+let phoneAccessOn = true;
 const invoke = vi.fn(async (channel: string, ..._args: object[]): Promise<object> => {
   switch (channel) {
     case 'relay:link-preview': return preview;
@@ -45,6 +46,7 @@ const invoke = vi.fn(async (channel: string, ..._args: object[]): Promise<object
     case 'computers:routes-report': return { machineId: 'm-build', name: 'Build Box' };
     case 'relay:pairing-code': return { url: LINK, expiresAt: '2026-11-15T10:00:00Z' };
     case 'relay:undo-join': return { removed: ['Build Box', 'NAS'], notReached: [] };
+    case 'relay:status': return { enabled: phoneAccessOn };
     default: throw new Error(`unexpected ${channel}`);
   }
 });
@@ -56,6 +58,7 @@ beforeEach(() => {
   invoke.mockClear();
   writeText.mockClear();
   preview = JOINING_TWO_GROUPS;
+  phoneAccessOn = true;
   redeem = async () => ({ linked: ['Studio Mac', 'Travel Laptop', 'Old iMac', 'Lab PC'] });
   vi.stubGlobal('navigator', { clipboard: { writeText } });
   vi.stubGlobal('window', {
@@ -112,6 +115,16 @@ describe('Add a device › Computer: pasting a link', () => {
     expect(callsTo('relay:redeem-link')).toEqual([[{ link: LINK }]]);
     expect(useAddDeviceStore.getState().flow).toMatchObject({ step: 'linked', maker: 'Studio Mac' });
     expect(text(renderFlow())).toContain('This computer now reaches Studio Mac and 3 other computers.');
+    expect(text(renderFlow())).not.toContain('turned on phone access');
+  });
+
+  it('says so when linking turned phone access on in place', async () => {
+    phoneAccessOn = false;
+    await useAddDeviceStore.getState().startLink(LINK, 'paste');
+    await useAddDeviceStore.getState().confirmLink();
+
+    expect(useAddDeviceStore.getState().flow).toMatchObject({ step: 'linked', turnedOnPhoneAccess: true });
+    expect(text(renderFlow())).toContain('Pane turned on phone access on this computer to link it.');
   });
 
   it('"Not mine, cancel" redeems nothing, so the link stays usable', async () => {

@@ -136,6 +136,8 @@ export const DAEMON_OWNED_CHANNEL_PREFIXES = [
 ] as const;
 
 export const DAEMON_OWNED_EXACT_CHANNELS = [
+  // The "Pane Cloud" machine for runpane and the pane MCP (D-90); answered on this computer only.
+  'pane-cloud:machine',
   'archive:get-progress',
   'archive:retry-cleanup',
   'git:cancel-status-for-project',
@@ -199,7 +201,7 @@ const ELECTRON_ADAPTER_ONLY_CHANNEL_SET = new Set<string>(ELECTRON_ADAPTER_ONLY_
  * answers them on this computer even while switched to another one; the commands refuse remote callers.
  * `relay:client:` commands are the ones other computers call, so they are not among them.
  */
-const THIS_COMPUTER_CHANNEL_PREFIXES = ['relay:', 'computers:', 'ssh:route-'] as const;
+const THIS_COMPUTER_CHANNEL_PREFIXES = ['relay:', 'computers:', 'ssh:route-', 'pane-cloud:machine'] as const;
 
 export function runsOnThisComputer(channel: string): boolean {
   return THIS_COMPUTER_CHANNEL_PREFIXES.some((prefix) => channel.startsWith(prefix)) && !channel.startsWith('relay:client:');

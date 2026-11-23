@@ -20,6 +20,7 @@ import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { API } from '../utils/api';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { showActionError } from '../stores/errorStore';
+import { usePaneCloudStore } from '../stores/paneCloudStore';
 import { cn } from '../utils/cn';
 import { paneIconColor } from '../utils/paneIconColor';
 import type { Session, GitStatus } from '../types/session';
@@ -1278,6 +1279,13 @@ function SessionRow({
   </>);
 }
 
+/** Restores an archived cloud Session: its machine starts and pairs with this computer again (D-94). */
+async function restoreCloudSession(vmId: string, name: string): Promise<void> {
+  await usePaneCloudStore.getState().restore(vmId);
+  const error = usePaneCloudStore.getState().snapshot.error;
+  if (error) showActionError(`Could not restore ${name}`, [error.message, error.next].filter(Boolean).join(' '));
+}
+
 // --- Archived Sessions panel (pinned to sidebar bottom) ---
 
 export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: { expanded: boolean; onExpandedChange: (expanded: boolean) => void }) {
@@ -1309,7 +1317,11 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
     () => archivedProjects.reduce((sum, project) => sum + project.sessions.length, 0),
     [archivedProjects],
   );
-  const archivedSessionCount = archivedPaneCount + archivedOrchestrationSessions.length;
+  // An archived cloud Session (D-94): a VM Pane Cloud keeps that no computer here pairs with. Restore pairs it again.
+  const cloudSessions = usePaneCloudStore(s => s.snapshot.sessions);
+  const archivedCloudSessions = useMemo(() => cloudSessions.filter(session => session.machineId === null && !session.awake), [cloudSessions]);
+  useEffect(() => usePaneCloudStore.getState().follow(), []);
+  const archivedSessionCount = archivedPaneCount + archivedOrchestrationSessions.length + archivedCloudSessions.length;
   const hasLoadedAnyArchived = hasLoadedArchived || orchestrationAvailability === 'ready';
 
   const loadArchivedSessions = useCallback(async () => {
@@ -1509,7 +1521,26 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
             <>
               <div data-testid="archived-orchestration-sessions" className="pb-1">
                 <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Sessions</p>
-                {archivedOrchestrationSessions.length === 0 && <p className="px-5 py-2 text-xs text-text-tertiary">No archived Sessions</p>}
+                {archivedOrchestrationSessions.length === 0 && archivedCloudSessions.length === 0 && <p className="px-5 py-2 text-xs text-text-tertiary">No archived Sessions</p>}
+                {archivedCloudSessions.map(cloud => (
+                  <div
+                    key={`archived-cloud-${cloud.vmId}`}
+                    data-testid={`archived-cloud-session-${cloud.vmId}`}
+                    className="group/archived relative flex items-center gap-2 pl-8 pr-1 py-1.5 hover:bg-surface-hover transition-colors"
+                  >
+                    <Archive className="h-3 w-3 flex-shrink-0 text-text-muted" />
+                    <span className="min-w-0 flex-1 truncate text-xs text-text-tertiary">{cloud.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => void restoreCloudSession(cloud.vmId, cloud.name)}
+                      className="relative z-10 flex-shrink-0 rounded p-1 text-text-muted hover:bg-surface-hover hover:text-status-success transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
+                      title={`Restore Session ${cloud.name}`}
+                      aria-label={`Restore Session ${cloud.name}`}
+                    >
+                      <ArchiveRestore className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
                 {archivedOrchestrationSessions.map(session => session.move?.state === 'moved' ? (
                   <MovedSessionRow key={`archived-orchestration-${session.id}`} session={session} mark={session.move} onRestore={handleRestoreOrchestrationSession} />
                 ) : (

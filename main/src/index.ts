@@ -141,6 +141,7 @@ import { startSecretLeases } from './services/secretLeaseRuntime';
 import { MachineConnections, remoteMachineAccess } from './services/machineConnections';
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
+import { registerPaneCloudHandlers } from './ipc/paneCloud';
 import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
 import { prepareProfileRunnerForQuit } from './services/profiles/profileRunnerHost';
 import { LeaderboardService } from './services/leaderboardService';
@@ -1288,6 +1289,12 @@ async function initializeServices() {
     },
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
+  registerPaneCloudHandlers(ipcMain, {
+    commands: commandRegistry,
+    machines: machineConnections,
+    configManager,
+    send: (channel, snapshot) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, snapshot); },
+  });
   setDeviceMachines(machineConnections);
   const machines = machineConnections;
   powerMonitor.on('suspend', () => machines.suspend());

@@ -1,0 +1,178 @@
+import type { ReactNode } from 'react';
+import { Cloud, Cpu, Eye, KeyRound, Laptop, MemoryStick, Monitor, Server, Smartphone } from 'lucide-react';
+import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
+import type { MachineOs } from '../utils/machineList';
+import { cn } from '../utils/cn';
+import { isMac, isWindows } from '../utils/platformUtils';
+import { Badge } from './ui/Badge';
+import { Button } from './ui/Button';
+
+/** Where a new Session runs: `here` (the machine the window is on), `cloud`, or another saved machine's id. */
+export type Place = string;
+
+export interface PlaceMachine {
+  id: string;
+  name: string;
+  os: MachineOs | null;
+}
+
+/** L1's machine-inspection disclosure (runpane-website src/lib/legal.ts), word for word until the lawyer's edit lands. */
+const INSPECTION_NOTICE = "During the beta, your cloud Sessions are not private from Greenfield. Automated checks look at the programs running, the files on disk and where network traffic goes, to stop abuse such as crypto mining. A Greenfield staff member opens a Session's files only when its account has been flagged or the law requires it, through a read-only view, and each look is logged on your usage page unless the law forbids telling you. Do not put health records or anything else you cannot share on these terms into a cloud Session.";
+
+const THIS_COMPUTER = isMac() ? 'this Mac' : 'this computer';
+
+/** What stops a cloud Session being created now: one quiet line and at most one action. */
+export interface PaneCloudGate {
+  line: string;
+  /** The buttons it offers, in order. */
+  actions?: ReadonlyArray<'waitlist' | 'sign-in' | 'sign-up'>;
+  /** The code the browser shows while signing in. */
+  code?: string;
+}
+
+const SMALL_BADGE = 'gap-1 px-1.5 py-px text-[10.5px] leading-[14px]';
+
+function OnlineBadge() {
+  return <Badge variant="success" size="sm" className={SMALL_BADGE} icon={<span className="h-1.5 w-1.5 rounded-full bg-status-success" aria-hidden="true" />}>Online</Badge>;
+}
+
+interface PlaceCardProps {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: ReactNode;
+  badge: ReactNode;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+  children?: ReactNode;
+  footer?: ReactNode;
+}
+
+function PlaceCard({ id, title, subtitle, icon, badge, selected, disabled, onSelect, children, footer }: PlaceCardProps) {
+  return (
+    <div
+      data-testid={`where-it-runs-${id}`}
+      className={cn(
+        'rounded border px-3 py-2.5 text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-interactive',
+        selected ? 'border-interactive bg-surface-selected' : 'border-border-primary hover:bg-surface-hover',
+      )}
+    >
+      <label htmlFor={`where-it-runs-input-${id}`} className="flex cursor-default items-start gap-3">
+        <input id={`where-it-runs-input-${id}`} type="radio" name="where-it-runs" value={id} aria-label={title} checked={selected} disabled={disabled} onChange={onSelect} className="sr-only" />
+        <span className="mt-0.5 shrink-0 text-text-tertiary" aria-hidden="true">{icon}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium text-text-primary">{title}</span>
+          <span className="block text-xs text-text-secondary">{subtitle}</span>
+          {children}
+        </span>
+        <span className="shrink-0">{badge}</span>
+      </label>
+      {footer && <div className="ml-[30px] mt-2.5 flex items-center gap-2 text-xs text-text-secondary">{footer}</div>}
+    </div>
+  );
+}
+
+interface WhereItRunsProps {
+  value: Place;
+  onChange: (place: Place) => void;
+  current: PlaceMachine;
+  others: readonly PlaceMachine[];
+  /** Shown on the Pane Cloud card while it is selected. */
+  cloudGate: PaneCloudGate | null;
+  onCloudSignIn: () => void;
+  /** Opens the Pane Cloud waitlist in the browser (D-102). */
+  onCloudWaitlist: () => void;
+  onCloudSignUp: () => void;
+  /** Secrets sync (K1) reaches new cloud Sessions: only then does the card say they come along. */
+  sendsSecrets: boolean;
+  /** Phone access is off here: creating turns it on in place, so the card says so. */
+  turnsOnPhoneAccess: boolean;
+  /** The repo has an Xcode project and none of the person's Macs is online: the Mac line links to the docs. */
+  onMacWorkDocs?: () => void;
+  disabled?: boolean;
+}
+
+export function WhereItRuns({ value, onChange, current, others, cloudGate, onCloudSignIn, onCloudWaitlist, onCloudSignUp, sendsSecrets, turnsOnPhoneAccess, onMacWorkDocs, disabled }: WhereItRunsProps) {
+  const here = current.id === LOCAL_MACHINE_ID;
+  const thisLabel = isMac() ? 'This Mac' : isWindows() ? 'This PC' : 'This computer';
+  const cloudSelected = value === 'cloud';
+  return (
+    <fieldset className="space-y-2">
+      <legend className="mb-2 text-label font-medium text-text-primary">Where it runs</legend>
+      <div className="grid gap-2" role="radiogroup" aria-label="Where it runs">
+        <PlaceCard
+          id="here"
+          title={here ? thisLabel : current.name}
+          subtitle={here ? (current.name === 'This computer' ? 'The computer this window is on' : current.name) : 'Remote machine'}
+          icon={here ? <Monitor className="h-[18px] w-[18px]" /> : <Server className="h-[18px] w-[18px]" />}
+          badge={<OnlineBadge />}
+          selected={value === 'here'}
+          disabled={disabled}
+          onSelect={() => onChange('here')}
+        />
+        <PlaceCard
+          id="cloud"
+          title="Pane Cloud"
+          subtitle={`A new machine for this Session. Keeps working when ${THIS_COMPUTER} is closed.`}
+          icon={<Cloud className="h-[18px] w-[18px]" />}
+          badge={<Badge variant="success" size="sm" className={SMALL_BADGE}>Beta</Badge>}
+          selected={cloudSelected}
+          disabled={disabled}
+          onSelect={() => onChange('cloud')}
+          footer={cloudSelected && cloudGate ? <>
+            <span className="flex-1">{cloudGate.line}</span>
+            {cloudGate.code && <span className="font-mono text-text-tertiary">{cloudGate.code}</span>}
+            {cloudGate.actions?.includes('waitlist') && <Button type="button" size="sm" variant="ghost" onClick={onCloudWaitlist}>Join the waitlist</Button>}
+            {cloudGate.actions?.includes('sign-in') && <Button type="button" size="sm" variant="secondary" onClick={onCloudSignIn}>Sign in</Button>}
+            {cloudGate.actions?.includes('sign-up') && <Button type="button" size="sm" variant="secondary" onClick={onCloudSignUp}>Finish signing up</Button>}
+          </> : onMacWorkDocs ? <>
+            <span className="flex-1">This repo has an Xcode project, and none of your Macs is online.</span>
+            <Button type="button" size="sm" variant="secondary" onClick={onMacWorkDocs}>Run it on a Mac</Button>
+          </> : undefined}
+        >
+          {/* Pane Cloud machines run Linux (D-85): said whether or not the card is picked. */}
+          <span className="mt-1.5 flex items-start gap-2 text-xs text-text-secondary" data-testid="where-it-runs-mac-work">
+            <Laptop className="mt-0.5 h-[13px] w-[13px] shrink-0 text-text-tertiary" aria-hidden="true" />
+            <span>iOS Simulator work needs a Mac.</span>
+          </span>
+          {cloudSelected && <>
+            <span className="mt-2 flex flex-wrap gap-1">
+              <Badge size="sm" className={SMALL_BADGE} icon={<Cpu className="h-2.5 w-2.5" aria-hidden="true" />}>4 vCPUs</Badge>
+              <Badge size="sm" className={SMALL_BADGE} icon={<MemoryStick className="h-2.5 w-2.5" aria-hidden="true" />}>8 GB</Badge>
+            </span>
+            {turnsOnPhoneAccess && (
+              <span className="mt-2.5 flex items-start gap-2 text-xs text-text-secondary" data-testid="where-it-runs-phone-access">
+                <Smartphone className="mt-0.5 h-[13px] w-[13px] shrink-0 text-text-tertiary" aria-hidden="true" />
+                <span>Creating it turns on phone access on {THIS_COMPUTER}, which the new machine connects through.</span>
+              </span>
+            )}
+            {sendsSecrets && (
+              <span className="mt-2.5 flex items-start gap-2 text-xs text-text-secondary">
+                <KeyRound className="mt-0.5 h-[13px] w-[13px] shrink-0 text-text-tertiary" aria-hidden="true" />
+                <span>Your secrets come along, sent straight from your machines, and are kept on a separate volume the checks don&apos;t read.</span>
+              </span>
+            )}
+            <span className="mt-2.5 flex items-start gap-2 text-xs text-text-tertiary">
+              <Eye className="mt-0.5 h-[13px] w-[13px] shrink-0" aria-hidden="true" />
+              <span>{INSPECTION_NOTICE}</span>
+            </span>
+          </>}
+        </PlaceCard>
+        {others.map(machine => (
+          <PlaceCard
+            key={machine.id}
+            id={machine.id}
+            title={machine.name}
+            subtitle="Remote machine"
+            icon={<Server className="h-[18px] w-[18px]" />}
+            badge={<OnlineBadge />}
+            selected={value === machine.id}
+            disabled={disabled}
+            onSelect={() => onChange(machine.id)}
+          />
+        ))}
+      </div>
+    </fieldset>
+  );
+}

@@ -246,7 +246,7 @@ test('Session creation agent picker supports native radio keyboard semantics', a
 
   await page.getByTestId('new-orchestration-session').click();
   const dialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
-  const radios = dialog.getByRole('radio');
+  const radios = dialog.getByRole('radiogroup', { name: 'Session agent' }).getByRole('radio');
   // Claude, Codex, Cursor, OpenCode and Pi.
   await expect(radios).toHaveCount(5);
   await expect(dialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
@@ -276,7 +276,7 @@ test('Session creation hides unsupported Cursor on Windows', async ({ page }) =>
   await page.getByTestId('new-orchestration-session').click();
   const dialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
   // Claude, Codex, OpenCode and Pi.
-  await expect(dialog.getByRole('radio')).toHaveCount(4);
+  await expect(dialog.getByRole('radiogroup', { name: 'Session agent' }).getByRole('radio')).toHaveCount(4);
   await expect(dialog.getByRole('radio', { name: 'Cursor', exact: true })).toHaveCount(0);
   await expect(dialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
   await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();

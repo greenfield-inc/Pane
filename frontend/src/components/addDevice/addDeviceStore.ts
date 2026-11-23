@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { LinkPreview, LinkRedeemResult, RelayLinkOpenedEvent, RelayPairedEvent, RelayPairingInfo } from '../../../../shared/types/relay';
+import type { LinkPreview, LinkRedeemResult, RelayLinkOpenedEvent, RelayPairedEvent, RelayPairingInfo, RelayStatus } from '../../../../shared/types/relay';
 import { RELAY_DEVICE_COMMANDS } from '../../../../shared/types/relay';
 import type { ComputerRoutesReport } from '../../../../shared/types/remoteComputers';
 import { parseRelayPairingLink } from '../../../../shared/remoteClient/relay';
@@ -21,7 +21,7 @@ export type LinkFlow =
   | { step: 'checking'; source: LinkSource }
   | { step: 'confirm'; source: LinkSource; link: string; preview: LinkPreview; here: string }
   | { step: 'linking'; source: LinkSource; maker: string }
-  | { step: 'linked'; source: LinkSource; maker: string; linked: string[] }
+  | { step: 'linked'; source: LinkSource; maker: string; linked: string[]; turnedOnPhoneAccess: boolean }
   | { step: 'failed'; source: LinkSource; message: string };
 
 /** The computer that used this dialog's link, and what came of "Not you? Unlink". */
@@ -85,12 +85,24 @@ async function thisComputerName(): Promise<string> {
   }
 }
 
+/** Phone access (the relay) is off on this computer; unknown counts as on, so nothing claims a change it didn't see. */
+export async function phoneAccessIsOff(): Promise<boolean> {
+  try {
+    const status: RelayStatus = await window.electronAPI.invoke('relay:status');
+    return !status.enabled;
+  } catch {
+    return false;
+  }
+}
+
 export const useAddDeviceStore = create<AddDeviceState>((set, get) => {
   const redeem = async (link: string, source: LinkSource, maker: string, generation: number) => {
     set({ flow: { step: 'linking', source, maker } });
     try {
+      // Linking turns phone access on in place when it is off; the result says so.
+      const wasOff = await phoneAccessIsOff();
       const result: LinkRedeemResult = await window.electronAPI.invoke('relay:redeem-link', { link });
-      if (generation === flowGeneration) set({ flow: { step: 'linked', source, maker, linked: result.linked } });
+      if (generation === flowGeneration) set({ flow: { step: 'linked', source, maker, linked: result.linked, turnedOnPhoneAccess: wasOff } });
     } catch (cause) {
       if (generation === flowGeneration) set({ flow: { step: 'failed', source, message: refusal(cause, `Pane couldn't link with ${maker}`) } });
     }

@@ -16,7 +16,7 @@ const fs: typeof nodeFs = process.versions.electron
  */
 export const PANE_STATE_FOLDERS = [
   'agent-chat', 'agent-logs', 'artifacts', 'autopilot', 'images', 'logs', 'mcp', 'migrate-to-pane', 'notes',
-  'profiles', 'prompts', 'remote-daemon', 'sessions', 'skills', 'uploads',
+  'pane-cloud', 'profiles', 'prompts', 'remote-daemon', 'sessions', 'skills', 'uploads',
 ] as const;
 
 /** Top-level folders Pane writes that the snapshot leaves out. */

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { API } from '../utils/api';
+import { usePaneCloudStore } from '../stores/paneCloudStore';
 import { useConfigStore } from '../stores/configStore';
 import { buildMachineList, machineOsFromPlatform, type MachineEntry, type MachineOs } from '../utils/machineList';
 import { useConnectionPresence } from './useConnectionPresence';
@@ -103,9 +104,18 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
 
   // The active machine pulses through the grace window and dims after it, like every other connection dot.
   const { presence: connectionPresence } = useConnectionPresence(connectionState);
+  // A cloud Session's machine goes by its Session's name (D-90): its own computer name is a VM's hostname.
+  const cloudSessions = usePaneCloudStore((state) => state.snapshot.sessions);
+  const named = useMemo(() => {
+    const names = new Map(cloudSessions.flatMap((session) => session.machineId ? [[session.machineId, session.name]] : []));
+    return (computers ?? []).map((computer) => {
+      const name = names.get(computer.id);
+      return name === undefined ? computer : { ...computer, label: name };
+    });
+  }, [computers, cloudSessions]);
   const machines = useMemo(
-    () => buildMachineList({ connectionState, computers: computers ?? [], tailnet, localName, localOs, connectionPresence, marks, machineStates }),
-    [connectionState, computers, tailnet, localName, localOs, connectionPresence, marks, machineStates],
+    () => buildMachineList({ connectionState, computers: named, tailnet, localName, localOs, connectionPresence, marks, machineStates }),
+    [connectionState, named, tailnet, localName, localOs, connectionPresence, marks, machineStates],
   );
 
   const select = useCallback(async (machine: MachineEntry, password?: string): Promise<MachineSelectOutcome> => {

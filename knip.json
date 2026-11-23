@@ -55,6 +55,7 @@
         "chokidar",
         "croner",
         "electron-updater",
+        "pane-cloud-contract",
         "smol-toml",
         "web-streams-polyfill",
         "ws",

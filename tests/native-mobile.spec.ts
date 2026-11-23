@@ -104,6 +104,7 @@ test('a secure-storage read failure does not overwrite the saved profiles', asyn
     store.get = async () => { throw new Error('Secure storage is locked'); };
   });
   await page.goto('/remote.html');
-  await expect(page.getByText('Secure storage is locked')).toBeVisible();
+  // The first page a CI shard opens waits for Vite to compile the remote app, which can pass 5 s.
+  await expect(page.getByText('Secure storage is locked')).toBeVisible({ timeout: 20_000 });
   expect(await page.evaluate(() => localStorage.getItem('pane.remotePwa.savedProfiles'))).toBe('existing encrypted profiles');
 });

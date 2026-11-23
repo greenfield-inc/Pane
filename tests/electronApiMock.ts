@@ -23,6 +23,8 @@ import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/
 import type { PaneSecretsOverview, SecretLeaseStartRequest } from '../shared/types/paneSecrets';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 import type { RelayPairingInfo, RelayStatus } from '../shared/types/relay';
+import type { PaneCloudAction, PaneCloudSnapshot } from '../shared/types/paneCloud';
+import type { OrchestrationSessionCreateInput } from '../shared/types/orchestrationSession';
 import type { ComputerRoute, ComputerRoutesReport, RemoteComputer } from '../shared/types/remoteComputers';
 import type { AutopilotDocument } from '../shared/types/autopilot';
 import type { TodoAction, TodoActivity, TodoAttachment, TodoCreateInput, TodoDetail, TodoSnooze, TodoStatus, TodosSnapshot } from '../shared/types/todos';
@@ -203,6 +205,10 @@ export type ElectronApiMockOptions = {
   paneSecrets?: Partial<PaneSecretsOverview>;
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
+  /** Paths in every project, as `file:search` finds them. Absent: none. */
+  projectFiles?: string[];
+  /** The window's connection at start: a saved machine it shows instead of this computer. Absent: local. */
+  remoteConnection?: Partial<RemotePaneConnectionState>;
   /** machines:latency answers by machine, in ms, over the route its machine state names; `pending` never answers. Absent: null (no answer). */
   machineLatency?: Record<string, number | null | 'pending'>;
   /** machines:run answers by machine, then command type. Absent: `{ success: true }`. */
@@ -339,6 +345,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       activeBaseUrl: null,
       lastError: null,
       lastSeenAt: null,
+      ...mockOptions.remoteConnection,
     };
     const remoteHostState = {
       enabled: false,
@@ -888,6 +895,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           preferredShell: configState.preferredShell ?? 'auto',
         });
       }
+      if (channel === 'file:search') {
+        // SAFETY: the renderer sends file:search a { pattern } request.
+        const pattern = String((args[0] as { pattern?: string }).pattern ?? '').toLowerCase();
+        const files = (mockOptions.projectFiles ?? []).filter((file) => file.toLowerCase().includes(pattern)).map((file) => ({ path: file, isDirectory: true, name: file.split('/').pop() ?? file }));
+        return Promise.resolve({ success: true, files });
+      }
       if (channel === 'terminal:set-preferred-shell') {
         configState.preferredShell = String(args[0]);
         return Promise.resolve(undefined);
@@ -1387,6 +1400,40 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         onState: () => () => undefined,
       };
     })() : undefined;
+    // window.electronAPI.paneCloud: absent until a spec calls setPaneCloud(), which serves it.
+    let paneCloudSnapshot: PaneCloudSnapshot = {
+      signIn: { state: 'signed-in', email: 'maya@example.com', name: 'Maya', access: 'invited', signupState: 'ready', signupUrl: 'https://cloud.example.test/signup', organizationId: 'org-1' },
+      sessions: [],
+      usage: { plan: 'free', planAgentHours: 300, planAwakeLimit: 5, resetsAt: '2026-12-01T00:00:00.000Z', agentHoursUsed: 12, agentHoursLimit: 300, awakeNow: 1, awakeLimit: 5, members: [] },
+      creating: null,
+      busy: [],
+      error: null,
+      sendsSecrets: false,
+    };
+    const paneCloudCreates: OrchestrationSessionCreateInput[] = [];
+    /** Each cloud Session's action log, by VM id; empty until a spec sets one. */
+    const paneCloudActions = new Map<string, PaneCloudAction[]>();
+    const paneCloudAnswer = () => Promise.resolve({ success: true, data: clone(paneCloudSnapshot) });
+    /** Stop, Start, Delete and Update Pane calls, by VM id. */
+    const paneCloudCalls: Array<{ action: 'stop' | 'start' | 'remove' | 'updatePane' | 'archive' | 'restore'; vmId: string }> = [];
+    const paneCloudCall = (action: 'stop' | 'start' | 'remove' | 'updatePane' | 'archive' | 'restore') => (vmId: string) => { paneCloudCalls.push({ action, vmId }); return paneCloudAnswer(); };
+    const paneCloudApi = {
+      get: paneCloudAnswer,
+      signIn: paneCloudAnswer,
+      signOut: paneCloudAnswer,
+      stop: paneCloudCall('stop'),
+      start: paneCloudCall('start'),
+      remove: paneCloudCall('remove'),
+      updatePane: paneCloudCall('updatePane'),
+      archive: paneCloudCall('archive'),
+      restore: paneCloudCall('restore'),
+      actions: (vmId: string) => Promise.resolve({ success: true, data: clone(paneCloudActions.get(vmId) ?? []) }),
+      create: (input: OrchestrationSessionCreateInput) => {
+        paneCloudCreates.push(clone(input));
+        return Promise.resolve({ success: true, data: { machineId: 'cloud-1', sessionId: 's-1', snapshot: clone(paneCloudSnapshot) } });
+      },
+      onChanged: (callback: MockEventCallback) => subscribe('pane-cloud:changed', callback),
+    };
     const electronAPI = {
       autopilot: autopilotApi,
       todos: todosApi,
@@ -2418,6 +2465,27 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getOpenedExternalUrls() {
           return clone(openedExternalUrls);
+        },
+        /**
+         * Serves window.electronAPI.paneCloud with these parts over the default snapshot (signed in,
+         * invited, ready, free plan at 12 of 300 hours, 1 of 5 awake) and announces it.
+         */
+        setPaneCloud(parts: Partial<PaneCloudSnapshot>) {
+          paneCloudSnapshot = { ...paneCloudSnapshot, ...clone(parts) };
+          Object.assign(window.electronAPI, { paneCloud: paneCloudApi });
+          emit('pane-cloud:changed', clone(paneCloudSnapshot));
+        },
+        /** Serves this action log for the cloud Session on `vmId`. */
+        setPaneCloudActions(vmId: string, actions: PaneCloudAction[]) {
+          paneCloudActions.set(vmId, clone(actions));
+        },
+        /** Every Stop, Start, Delete and Update Pane of a cloud Session, in order. */
+        getPaneCloudCalls() {
+          return clone(paneCloudCalls);
+        },
+        /** Every New cloud Session input, in order. */
+        getPaneCloudCreates() {
+          return clone(paneCloudCreates);
         },
         /** Every panel the renderer created through `panels.createPanel`, in order. */
         getPanelCreates() {

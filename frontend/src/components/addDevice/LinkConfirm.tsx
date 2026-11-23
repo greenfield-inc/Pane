@@ -116,6 +116,7 @@ export function LinkFlowView({ flow, onDone }: { flow: Exclude<LinkFlow, { step:
             <p className="text-xs text-text-secondary">
               This computer now reaches {flow.maker}{others > 0 ? ` and ${others} other ${others === 1 ? 'computer' : 'computers'}` : ''}.
             </p>
+            {flow.turnedOnPhoneAccess && <p className="text-xs text-text-secondary">Pane turned on phone access on this computer to link it.</p>}
           </div>
         </div>
         <div className="flex justify-end"><Button type="button" variant="secondary" onClick={onDone}>Done</Button></div>
