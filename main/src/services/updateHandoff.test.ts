@@ -22,9 +22,9 @@ function host(executable: string) {
   return { protocol: 1, machine: os.hostname(), bootId: 'boot', pid: process.pid, executable, version: runningVersion, paneDir, userData: path.join(root, 'profile'), packaged: true, remoteEnabled: false, remoteHealthy: true, endpointFingerprint: 'fingerprint', active: 0, idle: 0, blocked: 0 };
 }
 
-async function startDesktop({ inAppUpdate = true, executable = path.join(root, 'Pane.app/Contents/MacOS/Pane') } = {}) {
+async function startDesktop({ inAppUpdate = true, updateHost = true, executable = path.join(root, 'Pane.app/Contents/MacOS/Pane') } = {}) {
   const registry = new PaneCommandRegistry();
-  registry.register('runpane:update:host', () => host(executable));
+  if (updateHost) registry.register('runpane:update:host', () => host(executable));
   if (inAppUpdate) registry.register('runpane:update:in-app', () => inApp());
   server = new PaneDaemonServer(registry, paneDir);
   await server.start();
@@ -150,6 +150,25 @@ describe('runpane update hands off to the in-app updater', () => {
     await startDesktop({ inAppUpdate: false });
     runAsManagedCli(path.join(root, 'empty'));
     await expect(update()).rejects.toMatchObject({ code: 'ERR_UPDATE_IN_APP_UNAVAILABLE', next: expect.stringContaining('Settings') });
+  });
+
+  it('tells a desktop older than runpane update how to get it, instead of to run runpane update', async () => {
+    await startDesktop({ inAppUpdate: false, updateHost: false });
+    const tooOld = {
+      code: 'ERR_UPDATE_HOST_UNSUPPORTED',
+      message: expect.stringContaining('The running Pane is older than runpane update'),
+      next: expect.stringContaining('runpane install client'),
+    };
+    // The independent update reaches the host lookup, so preflight reports it, pinned or not.
+    for (const args of [['--pane-only'], ['--pane-only', '--dry-run'], ['--pane-only', '--version', '2.4.190']]) {
+      const failure = update(...args);
+      await expect(failure).rejects.toMatchObject(tooOld);
+      await expect(failure).rejects.not.toMatchObject({ next: expect.stringContaining('Update Pane with `runpane update`') });
+    }
+    // The managed CLI without standalone Node is refused before the host lookup, then the fallback asks.
+    runAsManagedCli(path.join(root, 'empty'));
+    await expect(update()).rejects.toMatchObject(tooOld);
+    expect(inApp).not.toHaveBeenCalled();
   });
 
   it('relays a desktop that cannot install updates itself', async () => {

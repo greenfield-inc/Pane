@@ -12,6 +12,11 @@ leaves an npm or pip CLI as it was (`cliUpdated: false`). It returns `"phase": "
 install starts; with `--wait` it returns `"phase": "complete"` only after the relaunched Pane
 reports the new version, and fails with `ERR_UPDATE_IN_APP_TIMEOUT` after 10 minutes. Pinned versions,
 `--pane-path`, `--cli-only` and `--dry-run` still report the refusal.
+A Pane older than `runpane update` itself (it has no `runpane:update:host`
+command) cannot be updated in place or handed off to: the command fails with
+`ERR_UPDATE_HOST_UNSUPPORTED`. Update that Pane once with its own updater in
+Settings, or quit it and run `runpane install client`; `runpane update` works
+from then on.
 Run `runpane update --dry-run --json` first to see the executable, data directory,
 CLI owner and supervisor capability without starting an update.
 When Pane is not running on the machine, for example because a failed update

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { boundary, decodeBoundary } from './boundaryDecoder';
-import { invokeDaemon, resolvePaneDirectory } from './daemonClient';
+import { invokeDaemon, PaneDaemonClientError, resolvePaneDirectory } from './daemonClient';
 import { RunpaneError } from './errors';
 import { getWrapperVersion } from './version';
 import { identifyPythonCli } from './updatePython';
@@ -56,6 +56,30 @@ export interface UpdatePreflight {
   snapshotSkipped: string[];
   limitations: string[];
   disableOsIntegration?: boolean;
+}
+
+/**
+ * A Pane without runpane:update:host predates `runpane update`, so the daemon's
+ * generic "update with runpane update" advice would loop back to this command.
+ * Point at the one-time update that brings the command instead.
+ */
+export const UPDATE_HOST_UNSUPPORTED = 'ERR_UPDATE_HOST_UNSUPPORTED';
+function updateHostUnsupported(): RunpaneError {
+  return new RunpaneError(
+    UPDATE_HOST_UNSUPPORTED,
+    'The running Pane is older than runpane update: it has no update command (runpane:update:host), so runpane cannot update it in place. Nothing was changed.',
+    'Update Pane once with its own updater (open Pane, go to Settings, and check for updates there), or quit Pane and run runpane install client. After that, runpane update works directly.',
+  );
+}
+
+/** The running Pane's identity for an update; a Pane too old to report it gets updateHostUnsupported. */
+export async function readUpdateHost(paneDir: string, timeoutMs: number): Promise<UpdateHost> {
+  try {
+    return await invokeDaemon('runpane:update:host', [], updateHostSchema, { paneDir, timeoutMs });
+  } catch (error) {
+    if (error instanceof PaneDaemonClientError && error.code === 'ERR_UNKNOWN_CHANNEL') throw updateHostUnsupported();
+    throw error;
+  }
 }
 
 function fail(message: string, next: string): never {
@@ -126,7 +150,7 @@ export async function preflightUpdate(parsed: ParsedArgs, scope: UpdatePreflight
     ? identifyPythonCli(process.env.PANE_UPDATE_PYTHON, process.env.PANE_UPDATE_PYTHON_ENTRYPOINT) : identifyUpdateCli(paneDir);
   let host: UpdateHost | null = null;
   if (scope !== 'cli') {
-    host = await invokeDaemon('runpane:update:host', [], updateHostSchema, { paneDir, timeoutMs: 10_000 });
+    host = await readUpdateHost(paneDir, 10_000);
     if (path.resolve(host.paneDir) !== paneDir || host.machine !== os.hostname()) fail('The daemon identity does not match this command’s local target.', 'Run update on the owning machine with its explicit --pane-dir.');
     if (!host.packaged) fail('This Pane is a development build, not a supported installed application.', 'Use the packaged installation, or the isolated update test harness.');
     if (parsed.panePath && fs.realpathSync(parsed.panePath) !== fs.realpathSync(host.executable)) fail('--pane-path does not identify the running Pane.', 'Use the executable shown by this host’s update preflight.');
