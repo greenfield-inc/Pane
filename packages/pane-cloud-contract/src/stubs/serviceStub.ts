@@ -31,8 +31,6 @@ export interface ServiceStubOptions {
   paneVersions?: string[];
   /** VMs the stub's one host holds awake at once; past it, create and start answer no_capacity. Default unlimited. */
   capacity?: number;
-  /** The relay domain the stub's VMs report. Default runpane.net. */
-  relayDomain?: string;
   now?: () => Date;
 }
 
@@ -86,7 +84,6 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
   const versions = options.paneVersions ?? ['2.4.214', '2.4.215'];
   const latest = versions.at(-1) ?? '2.4.215';
   let capacity = options.capacity ?? Number.POSITIVE_INFINITY;
-  const relayDomain = options.relayDomain ?? 'runpane.net';
   const plans = new Map<string, Plan>();
   const planOf = (organizationId: string): Plan => plans.get(organizationId) ?? 'free';
   let counter = 0;
@@ -258,7 +255,7 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
         vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, relay: null, createdAt: iso(), updatedAt: iso() },
         awake: [],
         log: [],
-        relayKey: newRelayIdentity(relayDomain),
+        relayKey: newRelayIdentity('runpane.net'),
       };
       vms.set(id, record);
       setState(record, 'running', null);
@@ -392,7 +389,7 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
     replaceRelayKey(vmId) {
       const record = vms.get(vmId);
       if (!record) throw new Error(`stub: no Session VM ${vmId}`);
-      record.relayKey = newRelayIdentity(relayDomain);
+      record.relayKey = newRelayIdentity('runpane.net');
     },
   };
 }

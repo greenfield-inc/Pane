@@ -20,7 +20,7 @@ const RELAY_COMMANDS = {
   linkPreview: 'relay:link-preview',
   /** Local only: `{link}` → `LinkRedeemResult`. The client asks the person first when `needsConfirm`. */
   redeemLink: 'relay:redeem-link',
-  /** Local only: a Pane Cloud `VouchedPairing` → `{computerId, name}`, the VM saved in `client.computers`. */
+  /** Local only: a Pane Cloud `VouchedPairing` → `{computerId, name}`, the Session VM linked like any computer. */
   redeemVouched: 'relay:redeem-vouched',
 } as const;
 

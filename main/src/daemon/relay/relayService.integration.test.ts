@@ -153,7 +153,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     setListenerDown(down: boolean): void;
   }
 
-  async function startComputer(name: string, dataDir: string, options: { receiveOnly?: boolean } = {}): Promise<Computer> {
+  async function startComputer(name: string, dataDir: string): Promise<Computer> {
     let config = createDefaultRemoteDaemonConfig();
     config.host.config = { ...config.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0 };
     config.relay = { enabled: true, relayAddress: `us.relay.${DOMAIN}:${relayPort}` };
@@ -182,7 +182,6 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
       previewPort: () => null,
       displayName: () => name,
       addClient: (record) => links.addClient(record),
-      receiveOnly: options.receiveOnly,
       env,
     });
     const call = createComputerCaller({ dial, extraCa });
@@ -192,7 +191,6 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
       call,
       disconnect: (ids) => server?.disconnectClients(ids),
       connectedClientIds: () => new Set(),
-      receiveOnly: options.receiveOnly,
     });
     const linking = new ComputerLinking({ links, self: () => service.computerInfo(), routesReport: () => undefined, post: createComputerPoster({ dial, extraCa }), call });
     const registry = new PaneCommandRegistry();
@@ -357,12 +355,11 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     expect((await invoke(b.host, String(studioToLaptop), 'sessions:get-all-with-projects')).status).toBe(200);
   }, 90_000);
 
-  it('pairs a laptop with a cloud VM one way from the vouched identity, and sends the secret only to the vouched key', async () => {
-    const vm = await startComputer('Cloud Session', join(folder, 'vm'), { receiveOnly: true });
+  it('pairs a laptop with a cloud VM from the vouched identity like any computer, and sends the secret only to the vouched key', async () => {
+    const vm = await startComputer('Cloud Session', join(folder, 'vm'));
     started.push(vm);
     const self = vm.service.computerInfo();
     if (!self) throw new Error('the VM has no relay identity');
-    expect(self.receiveOnly).toBe(true);
     const pairing = { link: vm.service.createPairingCode().url, relay: { computerId: self.id, fingerprint: self.fingerprint, domain: self.domain } };
 
     const poster = createComputerPoster({ dial, extraCa });
@@ -370,12 +367,12 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     await expect(poster(self.address, '/pair/preview', { secret: 'unused' }, 'Cloud Session', studioKey)).rejects.toBeInstanceOf(RelayKeyMismatch);
 
     expect(await laptop.registry.invoke('relay:redeem-vouched', [pairing])).toMatchObject({ name: 'Cloud Session' });
-    const saved = laptop.links.linked().find((profile) => profile.relay.computerId === self.id);
-    expect(saved?.relay.fingerprint).toBe(self.fingerprint);
-    if (!saved) throw new Error('the laptop did not save the VM');
-    const answer = await createComputerCaller({ dial, extraCa })(saved, 'sessions:get-all-with-projects', []);
-    expect(answer).toEqual([{ id: 'Cloud Session session' }]);
-    expect(vm.links.linked()).toEqual([]);
-    expect(vm.config().host.clients).toEqual([expect.objectContaining({ kind: 'computer', computerId: laptop.service.computerInfo()?.id })]);
+    const call = createComputerCaller({ dial, extraCa });
+    const toVm = laptop.links.linked().find((profile) => profile.relay.computerId === self.id);
+    const toLaptop = vm.links.linked().find((profile) => profile.relay.computerId === laptop.service.computerInfo()?.id);
+    if (!toVm || !toLaptop) throw new Error('the laptop and the VM did not link both ways');
+    expect(toVm.relay.fingerprint).toBe(self.fingerprint);
+    expect(await call(toVm, 'sessions:get-all-with-projects', [])).toEqual([{ id: 'Cloud Session session' }]);
+    expect(await call(toLaptop, 'sessions:get-all-with-projects', [])).toEqual([{ id: 'Travel Laptop session' }]);
   }, 90_000);
 });

@@ -1,7 +1,6 @@
 import { createHash } from 'crypto';
 import { describe, expect, it } from 'vitest';
 import { PaneError } from '../../../../shared/paneError';
-import { linkWithSavedRelayComputers, relayProfile, type RelayConnectionProfile } from '../../../../shared/remoteClient/relay';
 import { RemoteRequestError } from '../../../../shared/remoteClient/remoteDaemonClient';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
 import type { ComputerRoutesReport, RemoteComputer } from '../../../../shared/types/remoteComputers';
@@ -14,7 +13,7 @@ import { ComputerLinking, createPairingRoute } from './computerLinking';
 import { PairingExchange } from './pairingExchange';
 import { registerRelayCommands } from './relayCommands';
 import { RelayKeyMismatch } from './keyPinning';
-import { RelayLinks, type CallComputer, type PostToComputer, type RelayLinksDeps } from './relayLinks';
+import { RelayLinks, type CallComputer, type PostToComputer } from './relayLinks';
 import { RelayPreviews } from './relayPreviews';
 
 const DOMAIN = 'relay.test';
@@ -34,8 +33,6 @@ interface Computer {
   preview(link: string): Promise<PaneCommandValue>;
   redeem(link: string): Promise<PaneCommandValue>;
   redeemVouched(pairing: VouchedPairing): Promise<PaneCommandValue>;
-  /** A VM running a modified Pane: it stops saying it is receive-only and keeps any token it is sent. */
-  lie(): void;
 }
 
 /**
@@ -58,8 +55,6 @@ function relayIdentity(seed: string): Pick<RelayComputer, 'id' | 'fingerprint'> 
 function network() {
   let now = Date.parse('2026-11-15T09:00:00Z');
   const computers = new Map<string, Computer>();
-  /** Every command a computer received from another device, with its arguments. */
-  const received: Array<{ to: string; channel: string; args: unknown[] }> = [];
   const at = (address: string) => {
     const computer = computers.get(new URL(address).hostname.split('.')[0]);
     if (!computer) throw new Error(`Nothing answers at ${address}`);
@@ -87,7 +82,6 @@ function network() {
   const call: CallComputer = async (profile, channel, args) => {
     const callee = at(profile.baseUrl);
     if (profile.relay?.fingerprint !== callee.info.fingerprint) throw new Error(`${profile.label} showed a different key.`);
-    received.push({ to: callee.name, channel, args });
     const tokenHash = createHash('sha256').update(profile.token).digest('hex');
     const client = callee.config().host.clients.find((candidate) => candidate.tokenHash === tokenHash);
     if (!client) throw new RemoteRequestError('Unauthorized', 403, 'ERR_REMOTE_DAEMON_UNAUTHORIZED');
@@ -102,12 +96,10 @@ function network() {
     }
   };
 
-  function add(name: string, seed: string, report: Omit<ComputerRoutesReport, 'name' | 'relay'> = { machineId: `${seed}-install` }, options: { receiveOnly?: boolean } = {}): Computer {
+  function add(name: string, seed: string, report: Omit<ComputerRoutesReport, 'name' | 'relay'> = { machineId: `${seed}-install` }): Computer {
     const { id, fingerprint } = relayIdentity(seed);
     const info: RelayComputer = { id, name, domain: DOMAIN, address: `https://${id}.${DOMAIN}`, local: [], fingerprint };
     let config = createDefaultRemoteDaemonConfig();
-    // As on a Pane Cloud VM (onCloudVm), and as RelayService then reports it.
-    if (options.receiveOnly) info.receiveOnly = true;
     const configManager = {
       getConfig: () => ({ remoteDaemon: config }),
       updateConfigWith: async (update: (current: AppConfig) => Partial<AppConfig>) => {
@@ -119,8 +111,7 @@ function network() {
       },
     };
     const routes: ComputerRoutesReport = { ...report, name, relay: { id, address: info.address, fingerprint: info.fingerprint, local: [] } };
-    const linkDeps: RelayLinksDeps = { config: configManager, self: () => info, call, disconnect: () => undefined, connectedClientIds: () => new Set(), receiveOnly: options.receiveOnly };
-    const links: RelayLinks = new RelayLinks(linkDeps);
+    const links: RelayLinks = new RelayLinks({ config: configManager, self: () => info, call, disconnect: () => undefined, connectedClientIds: () => new Set() });
     const exchange = new PairingExchange({ now: () => now, addClient: (record) => links.addClient(record) });
     const linking = new ComputerLinking({ links, self: () => info, routesReport: () => routes, post, call });
     const paired: RelayPairedEvent[] = [];
@@ -162,10 +153,6 @@ function network() {
       preview: (link) => registry.invoke('relay:link-preview', [{ link }]),
       redeem: (link) => registry.invoke('relay:redeem-link', [{ link }]),
       redeemVouched: (pairing) => registry.invoke('relay:redeem-vouched', [{ ...pairing, relay: { ...pairing.relay } }]),
-      lie: () => {
-        linkDeps.receiveOnly = false;
-        delete info.receiveOnly;
-      },
     };
     computers.set(id, computer);
     return computer;
@@ -193,13 +180,7 @@ function network() {
     return await call({ id: saved.id, label: saved.label, baseUrl: route.baseUrl, token: route.token, transport: 'http+sse', relay: route.relay }, channel, [request]) as PaneCommandValue;
   }
 
-  /** A phone's client for one of its saved computers, through the same network. */
-  const phoneClient = (profile: RelayConnectionProfile) => ({
-    // SAFETY: the network answers JSON, which is what the phone's link code decodes.
-    invoke: async <T,>(channel: string, args: unknown[] = []) => await call(profile, channel, args) as T,
-  });
-
-  return { add, reaches, callAs, phoneClient, received, advance: (ms: number) => { now += ms; } };
+  return { add, reaches, callAs, advance: (ms: number) => { now += ms; } };
 }
 
 describe('linking computers with a one-time link', () => {
@@ -428,46 +409,46 @@ describe('linking computers with a one-time link', () => {
 });
 
 describe('pairing with a cloud VM from the identity Pane Cloud vouches for', () => {
-  /** What the service answers for a VM: a one-time link and the identity the VM reported when first paired. */
+  /** What Pane Cloud answers for a VM: a one-time link and the identity the VM reported when first paired. */
   async function vouched(vm: Computer, identity: Pick<RelayComputer, 'id' | 'fingerprint'> = vm.info): Promise<VouchedPairing> {
     return { link: await vm.link(), relay: { computerId: identity.id, fingerprint: identity.fingerprint, domain: DOMAIN } };
   }
 
-  it('pairs one way: the desktop reaches the VM, and the VM holds no token for the desktop', async () => {
+  it('links the VM like any other computer, without asking: each reaches the other', async () => {
     const net = network();
     const laptop = net.add('Laptop', 'laplaplaplaplap0');
-    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
+    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0');
 
     const result = await laptop.redeemVouched(await vouched(vm));
 
     expect(result).toEqual({ computerId: laptop.config().client.computers[0].id, name: 'Cloud Session' });
     expect(await net.reaches(laptop, vm)).toBe(true);
-    expect(await net.reaches(vm, laptop)).toBe(false);
-    expect(vm.listed()).toEqual([]);
-    expect(vm.config().host.clients).toEqual([expect.objectContaining({ kind: 'computer', computerId: laptop.info.id, label: 'Laptop' })]);
-    expect(laptop.config().host.clients).toEqual([]);
+    expect(await net.reaches(vm, laptop)).toBe(true);
+    expect(laptop.listed()).toEqual(['Cloud Session']);
+    expect(vm.listed()).toEqual(['Laptop']);
   });
 
-  it('refuses a VM that presents a key other than the vouched one, and the link stays unused', async () => {
+  it('refuses a VM that presents a key other than the vouched one, sends it nothing, and the link stays unused', async () => {
     const net = network();
     const laptop = net.add('Laptop', 'laplaplaplaplap0');
-    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
+    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0');
     const pairing = await vouched(vm);
     const vouchedKey = vm.info.fingerprint;
     vm.info.fingerprint = relayIdentity('another key').fingerprint;
 
     await expect(laptop.redeemVouched(pairing)).rejects.toMatchObject({ code: 'ERR_PAIRING_KEY_MISMATCH' });
     expect(laptop.listed()).toEqual([]);
+    expect(laptop.config().host.clients).toEqual([]);
     expect(vm.config().host.clients).toEqual([]);
 
     vm.info.fingerprint = vouchedKey;
     await expect(laptop.redeemVouched(pairing)).resolves.toMatchObject({ name: 'Cloud Session' });
   });
 
-  it('refuses a pairing whose link names another computer than the vouched identity, without contacting either', async () => {
+  it('refuses a pairing whose link leads to a computer other than the vouched key, and pairs nothing', async () => {
     const net = network();
     const laptop = net.add('Laptop', 'laplaplaplaplap0');
-    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
+    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0');
     const other = net.add('Other', 'othothothothoth0');
 
     await expect(laptop.redeemVouched(await vouched(vm, other.info))).rejects.toMatchObject({ code: 'ERR_PAIRING_KEY_MISMATCH' });
@@ -480,7 +461,7 @@ describe('pairing with a cloud VM from the identity Pane Cloud vouches for', () 
   it('gives a phone paired by QR from the desktop a token for the VM', async () => {
     const net = network();
     const laptop = net.add('Laptop', 'laplaplaplaplap0');
-    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
+    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0');
     await laptop.redeemVouched(await vouched(vm));
 
     const secret = new URLSearchParams(new URL(await laptop.link()).hash.slice(1)).get('s') ?? '';
@@ -490,128 +471,14 @@ describe('pairing with a cloud VM from the identity Pane Cloud vouches for', () 
     expect(vm.config().host.clients).toContainEqual(expect.objectContaining({ phoneId: 'phone-1', label: 'Pixel 9', grantedBy: laptop.info.id }));
   });
 
-  describe('a cloud VM is receive-only', () => {
-    /** A phone pairs with `computer` by QR: its profile, plus a profile for each computer linked with it. */
-    async function phonePairs(net: ReturnType<typeof network>, computer: Computer): Promise<RelayConnectionProfile[]> {
-      const secret = new URLSearchParams(new URL(await computer.link()).hash.slice(1)).get('s') ?? '';
-      const result = await computer.route.exchange({ secret, label: 'Pixel 9', phoneId: 'phone-1', source: '192.168.1.30' });
-      if (!result.ok || !('linked' in result)) throw new Error('the phone did not pair');
-      return [relayProfile({ computer: computer.info, token: result.token }), ...result.linked.map((grant) => relayProfile(grant, computer.name))];
-    }
-
-    it('a phone linking a new computer gives the new computer a token for the VM and never sends the VM one', async () => {
-      const net = network();
-      const laptop = net.add('Laptop', 'laplaplaplaplap0');
-      const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
-      await laptop.redeemVouched(await vouched(vm));
-      const saved = await phonePairs(net, laptop);
-      expect(saved.map((profile) => profile.label)).toEqual(['Laptop', 'Cloud Session']);
-
-      const studio = net.add('Studio', 'stustustustustu0');
-      const [studioProfile] = await phonePairs(net, studio);
-      const before = net.received.length;
-      const failed = await linkWithSavedRelayComputers(studioProfile, [], saved, net.phoneClient);
-
-      expect(failed).toEqual([]);
-      expect(await net.reaches(studio, vm)).toBe(true);
-      expect(await net.reaches(studio, laptop)).toBe(true);
-      expect(await net.reaches(laptop, studio)).toBe(true);
-      expect(vm.config().client.computers).toEqual([]);
-      const toVm = net.received.slice(before).filter((call) => call.to === 'Cloud Session');
-      expect(toVm.map((call) => call.channel)).not.toContain('relay:client:save-link');
-    });
-
-    it('refuses a token a phone from before this release still sends, and saves nothing', async () => {
-      const net = network();
-      const laptop = net.add('Laptop', 'laplaplaplaplap0');
-      const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
-      await laptop.redeemVouched(await vouched(vm));
-      // An older phone sends the VM a token the laptop minted for it; the VM refuses to keep it.
-      await expect(net.callAs(laptop, vm, 'relay:client:save-link', { peer: { ...laptop.info }, token: 'minted-on-the-laptop' })).rejects.toMatchObject({ code: 'ERR_RELAY_RECEIVE_ONLY' });
-      expect(vm.config().client.computers).toEqual([]);
-    });
-
-    it.each([
-      ['another group redeems the desktop\'s link', 'theirs'],
-      ['the desktop redeems another group\'s link', 'ours'],
-    ])('when %s, the other group gets the VM and the VM gets nothing', async (_name, side) => {
-      const net = network();
-      const laptop = net.add('Laptop', 'laplaplaplaplap0');
-      const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
-      const windows = net.add('Windows', 'winwinwinwinwin0');
-      const nas = net.add('NAS', 'nasnasnasnasnas0');
-      await laptop.redeemVouched(await vouched(vm));
-      await nas.redeem(await windows.link());
-
-      if (side === 'theirs') await windows.redeem(await laptop.link());
-      else await laptop.redeem(await windows.link());
-
-      for (const from of [laptop, windows, nas]) expect(await net.reaches(from, vm), `${from.name} reaches the VM`).toBe(true);
-      expect(vm.config().client.computers).toEqual([]);
-      expect(net.received.filter((call) => call.to === 'Cloud Session').map((call) => call.channel)).not.toContain('relay:client:save-link');
-    });
-
-    it('refuses a link redeemed with a token offer before spending it', async () => {
-      const net = network();
-      const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
-      const laptop = net.add('Laptop', 'laplaplaplaplap0');
-      const link = await vm.link();
-
-      await expect(laptop.redeem(link)).rejects.toMatchObject({ code: 'ERR_RELAY_RECEIVE_ONLY' });
-      expect(vm.config().host.clients).toEqual([]);
-      expect(laptop.config().host.clients).toEqual([]);
-      await expect(laptop.redeemVouched({ link, relay: { computerId: vm.info.id, fingerprint: vm.info.fingerprint, domain: DOMAIN } })).resolves.toMatchObject({ name: 'Cloud Session' });
-    });
-  
-    it.each([
-      ['a phone links a new computer', 'phone'],
-      ['the desktop redeems another computer\'s link', 'ours'],
-      ['another computer redeems the desktop\'s link', 'theirs'],
-    ])('a VM that stops saying it is receive-only still gets no token when %s (F-1)', async (_name, path) => {
-      const net = network();
-      const laptop = net.add('Laptop', 'laplaplaplaplap0');
-      const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0', undefined, { receiveOnly: true });
-      const mini = net.add('Mini', 'minminminminmin0');
-      await laptop.redeemVouched(await vouched(vm));
-      vm.lie();
-      // The phone learns of the VM only now, from the desktop, while the VM claims to be ordinary.
-      const saved = await phonePairs(net, laptop);
-
-      if (path === 'phone') {
-        const [miniProfile] = await phonePairs(net, mini);
-        await linkWithSavedRelayComputers(miniProfile, [], saved, net.phoneClient);
-      } else if (path === 'ours') {
-        await laptop.redeem(await mini.link());
-      } else {
-        await mini.redeem(await laptop.link());
-      }
-
-      expect(await net.reaches(mini, vm)).toBe(true);
-      expect(vm.config().client.computers).toEqual([]);
-      expect(net.received.filter((call) => call.to === 'Cloud Session').map((call) => call.channel)).not.toContain('relay:client:save-link');
-    });
-  });
-
-  it('a computer that is not a cloud VM refuses a link redeemed without a token, and the link stays unused (F-2)', async () => {
-    const net = network();
-    const mac = net.add('Mac', 'macmacmacmacmac0');
-    const mini = net.add('Mini', 'minminminminmin0');
-    await mini.redeem(await mac.link());
-    const stranger = net.add('Stranger', 'strstrstrstrstr0');
-    const link = await mac.link();
-    const secret = new URLSearchParams(new URL(link).hash.slice(1)).get('s') ?? '';
-
-    const result = await mac.route.exchange({ secret, label: 'Stranger', known: [], computer: { computer: { ...stranger.info } }, source: '192.168.1.40' });
-
-    expect(result).toMatchObject({ ok: false, code: 'ERR_PAIRING_BAD_REQUEST' });
-    expect(mac.config().host.clients.map((client) => client.label)).toEqual(['Mini']);
-    expect(mini.config().host.clients.map((client) => client.label)).toEqual(['Mac']);
-    await expect(stranger.redeem(link)).resolves.toMatchObject({ linked: expect.arrayContaining(['Mac']) });
-  });
-
-  it('refuses a vouched pairing that names this computer itself (F-10)', async () => {
+  it('tells the person to open the Session again when a vouched link was already used, since a VM has no screen to copy a new one from', async () => {
     const net = network();
     const laptop = net.add('Laptop', 'laplaplaplaplap0');
-    await expect(laptop.redeemVouched(await vouched(laptop))).rejects.toMatchObject({ code: 'ERR_RELAY_LINK_SELF' });
+    const vm = net.add('Cloud Session', 'vmvmvmvmvmvmvmv0');
+    const pairing = await vouched(vm);
+    await laptop.redeemVouched(pairing);
+    const desk = net.add('Desk', 'desdesdesdesdes0');
+
+    await expect(desk.redeemVouched(pairing)).rejects.toMatchObject({ code: 'ERR_PAIRING_CODE_USED', next: 'Open the Session again for a new pairing.' });
   });
 });

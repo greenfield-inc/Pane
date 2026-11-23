@@ -61,7 +61,6 @@ export function relayProfile(grant: RelayComputerGrant, linkedBy?: string): Rela
   const { computer, token } = grant;
   const relay: StoredRelayProfile = { computerId: computer.id, fingerprint: computer.fingerprint, domain: computer.domain, local: computer.local };
   if (linkedBy) relay.linkedBy = linkedBy;
-  if (computer.receiveOnly) relay.receiveOnly = true;
   return { id: `relay:${computer.id}`, label: computer.name, baseUrl: computer.address.replace(/\/+$/u, ''), token, transport: 'http+sse', relay };
 }
 
@@ -89,7 +88,6 @@ const computerSchema = boundary.object({
   address: boundary.nonEmptyString,
   local: boundary.array(boundary.string),
   fingerprint: boundary.nonEmptyString,
-  receiveOnly: boundary.optional(boundary.boolean),
 });
 const grantSchema = boundary.object({ computer: computerSchema, token: boundary.nonEmptyString });
 const exchangeSchema = boundary.object({
@@ -231,19 +229,11 @@ export interface RelayLinkPeer {
  */
 export async function linkRelayComputers(added: RelayLinkPeer, others: readonly RelayLinkPeer[]): Promise<string[]> {
   const peers = others.filter(other => other.computer.id !== added.computer.id);
-  // The saved mark first, else asked live: a profile saved before marks existed has none.
-  const addedReceivesOnly = receivesOnly(added);
   const results = await Promise.allSettled(peers.map(async (other) => {
-    const [addedOnly, otherOnly] = await Promise.all([addedReceivesOnly, receivesOnly(other)]);
-    // A receive-only computer (a Pane Cloud VM) is never sent a token: only the other side gets one for it.
-    if (!otherOnly) {
-      const forOther = decodeBoundary(await added.client.invoke(RELAY_CLIENT_COMMANDS.mintLink, [{ peer: other.computer }]), tokenSchema);
-      await other.client.invoke(RELAY_CLIENT_COMMANDS.saveLink, [{ peer: added.computer, token: forOther.token }]);
-    }
-    if (!addedOnly) {
-      const forAdded = decodeBoundary(await other.client.invoke(RELAY_CLIENT_COMMANDS.mintLink, [{ peer: added.computer }]), tokenSchema);
-      await added.client.invoke(RELAY_CLIENT_COMMANDS.saveLink, [{ peer: other.computer, token: forAdded.token }]);
-    }
+    const forOther = decodeBoundary(await added.client.invoke(RELAY_CLIENT_COMMANDS.mintLink, [{ peer: other.computer }]), tokenSchema);
+    const forAdded = decodeBoundary(await other.client.invoke(RELAY_CLIENT_COMMANDS.mintLink, [{ peer: added.computer }]), tokenSchema);
+    await other.client.invoke(RELAY_CLIENT_COMMANDS.saveLink, [{ peer: added.computer, token: forOther.token }]);
+    await added.client.invoke(RELAY_CLIENT_COMMANDS.saveLink, [{ peer: other.computer, token: forAdded.token }]);
   }));
   return peers.flatMap((peer, index) => {
     const result = results[index];
@@ -251,20 +241,6 @@ export async function linkRelayComputers(added: RelayLinkPeer, others: readonly 
     const alreadyLinked = result?.status === 'rejected' && result.reason instanceof RemoteRequestError && result.reason.code === 'ERR_RELAY_ALREADY_LINKED';
     return result?.status === 'rejected' && !alreadyLinked ? [peer.computer.id] : [];
   });
-}
-
-/**
- * Whether a computer is receive-only (a Pane Cloud VM): marked so on this device, else by its own
- * answer. The device's mark wins, so a VM that stops saying so still gets no token. One that
- * doesn't answer counts as not.
- */
-async function receivesOnly(peer: RelayLinkPeer): Promise<boolean> {
-  if (peer.computer.receiveOnly) return true;
-  try {
-    return decodeOptionalBoundary(await peer.client.invoke(RELAY_CLIENT_COMMANDS.computer, []), computerSchema)?.receiveOnly === true;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -286,9 +262,7 @@ export function linkWithSavedRelayComputers(
 /** The computer a relay profile stands for, as the link commands take it. */
 export function relayComputerOf(profile: RelayConnectionProfile): RelayComputer {
   const { relay } = profile;
-  const computer: RelayComputer = { id: relay.computerId, name: profile.label, domain: relay.domain, address: profile.baseUrl, local: relay.local, fingerprint: relay.fingerprint };
-  if (relay.receiveOnly) computer.receiveOnly = true;
-  return computer;
+  return { id: relay.computerId, name: profile.label, domain: relay.domain, address: profile.baseUrl, local: relay.local, fingerprint: relay.fingerprint };
 }
 
 /**

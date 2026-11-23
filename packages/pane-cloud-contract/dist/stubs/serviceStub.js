@@ -19,7 +19,6 @@ async function startServiceStub(options) {
     const versions = options.paneVersions ?? ['2.4.214', '2.4.215'];
     const latest = versions.at(-1) ?? '2.4.215';
     let capacity = options.capacity ?? Number.POSITIVE_INFINITY;
-    const relayDomain = options.relayDomain ?? 'runpane.net';
     const plans = new Map();
     const planOf = (organizationId) => plans.get(organizationId) ?? 'free';
     let counter = 0;
@@ -196,7 +195,7 @@ async function startServiceStub(options) {
                 vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, relay: null, createdAt: iso(), updatedAt: iso() },
                 awake: [],
                 log: [],
-                relayKey: (0, relayKey_1.newRelayIdentity)(relayDomain),
+                relayKey: (0, relayKey_1.newRelayIdentity)('runpane.net'),
             };
             vms.set(id, record);
             setState(record, 'running', null);
@@ -339,7 +338,7 @@ async function startServiceStub(options) {
             const record = vms.get(vmId);
             if (!record)
                 throw new Error(`stub: no Session VM ${vmId}`);
-            record.relayKey = (0, relayKey_1.newRelayIdentity)(relayDomain);
+            record.relayKey = (0, relayKey_1.newRelayIdentity)('runpane.net');
         },
     };
 }

@@ -101,7 +101,8 @@ Some service cases need test-mode setup: pass `controls` to `serviceContractCase
 (`ServiceContractControls`). A case whose control is missing throws `SkipCase`; report it as
 skipped. `setClock` only moves forward, so run the cases in order. Without controls, the cases
 that need them are the review pause, `no_capacity`, a second organization with Full access and
-View only members, and agent-hour metering.
+View only members, agent-hour metering, pairing by a creator who lost Full access (`changeMember`)
+and `relay_key_changed` (`replaceRelayKey`).
 
 The service stub gives every account a personal organization on the Free plan, starts and stops
 VMs at once, and counts agent-hours from its clock (pass `now` to move it). Its controls are

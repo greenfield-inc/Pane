@@ -55,7 +55,6 @@ export const relayComputerSchema: BoundarySchema<RelayComputer> = boundary.objec
   address: boundary.nonEmptyString,
   local: boundary.array(boundary.string),
   fingerprint: boundary.nonEmptyString,
-  receiveOnly: boundary.optional(boundary.boolean),
 });
 
 /** A linked computer's `/invoke` answer. */
@@ -75,8 +74,6 @@ export interface RelayLinksDeps {
   /** Drops live connections of revoked clients. */
   disconnect(clientIds: string[]): void;
   connectedClientIds(): ReadonlySet<string>;
-  /** A Pane Cloud VM (`onCloudVm`), read once at start: it never keeps a token for another computer. */
-  receiveOnly?: boolean;
   log?(line: string): void;
 }
 
@@ -313,9 +310,8 @@ export class RelayLinks {
    * reported, on its record in `client.computers` (a computer saved already gains the routes).
    * Returns the record's id.
    */
-  async saveComputer(peer: { computer: RelayComputer; token: string; routes?: ComputerRoutesReport; linkedBy?: string; receiveOnly?: boolean }): Promise<string> {
+  async saveComputer(peer: { computer: RelayComputer; token: string; routes?: ComputerRoutesReport; linkedBy?: string }): Promise<string> {
     const { computer, token, linkedBy } = peer;
-    this.refuseIfReceiveOnly(computer.name);
     // A report about another relay id is not this computer's.
     const report = peer.routes && (!peer.routes.relay || peer.routes.relay.id === computer.id) ? peer.routes : undefined;
     const linkRoute: ComputerRoute = {
@@ -328,10 +324,6 @@ export class RelayLinks {
     };
     let id = '';
     await this.update((remote) => {
-      // A computer marked receive-only here stays marked, whatever it later says about itself.
-      const wasMarked = remote.client.computers.some((saved) => computerRelayId(saved) === computer.id
-        && saved.routes.some((route) => route.relay?.receiveOnly));
-      if (peer.receiveOnly || computer.receiveOnly || wasMarked) linkRoute.relay = { computerId: computer.id, fingerprint: computer.fingerprint, receiveOnly: true };
       // An install id another saved computer holds under a different relay id is not trusted to merge.
       const holder = report ? remote.client.computers.find((candidate) => candidate.machineId === report.machineId) : undefined;
       const holderRelay = holder && computerRelayId(holder);
@@ -349,26 +341,6 @@ export class RelayLinks {
     });
     this.deps.log?.(`[relay] linked with ${computer.name} (${computer.id})${linkedBy ? `, linked by ${linkedBy}` : ''}`);
     return id;
-  }
-
-  /** Whether this computer marked a saved computer receive-only (it paired with it as a Pane Cloud VM). */
-  markedReceiveOnly(relayId: string): boolean {
-    return this.linked().some((profile) => profile.relay.computerId === relayId && profile.relay.receiveOnly === true);
-  }
-
-  /** Whether this computer is a Pane Cloud VM that holds no token for any other computer. */
-  receiveOnly(): boolean {
-    return this.deps.receiveOnly === true;
-  }
-
-  /** On a receive-only computer, refuses to keep a way to call `peer`. */
-  refuseIfReceiveOnly(peer: string): void {
-    if (!this.receiveOnly()) return;
-    throw new PaneError(
-      'ERR_RELAY_RECEIVE_ONLY',
-      `This is a Pane Cloud VM, which never keeps a way to call other computers, so it did not save one for ${peer}.`,
-      `Nothing to do: ${peer} can still reach this VM. Update the device that sent it to a Pane release that links cloud VMs one way.`,
-    );
   }
 
   /** A phone or linked computer hands this computer the token to call a peer it just linked. */
@@ -423,8 +395,6 @@ export class RelayLinks {
         const token = decodeOptionalBoundary(result, grantedTokenSchema)?.token;
         const info = decodeOptionalBoundary(computer, relayComputerSchema);
         if (token === undefined || !info || info.id !== profile.relay.computerId) return null;
-        // This computer's own mark, not the VM's word, tells the device the grant goes to.
-        if (profile.relay.receiveOnly) info.receiveOnly = true;
         return { computer: info, token };
       } catch (error) {
         this.deps.log?.(`[relay] ${profile.label} did not hand out a token: ${error instanceof Error ? error.message : String(error)}`);

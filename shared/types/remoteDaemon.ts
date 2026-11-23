@@ -123,11 +123,6 @@ export interface RemoteRelayProfile {
   fingerprint: string;
   /** Shown as "Linked by <name>" when a phone's scan linked it. */
   linkedBy?: string;
-  /**
-   * A Pane Cloud VM, as this device recorded when it paired with or learned of it. Kept on the
-   * device, so a VM that later claims otherwise is never sent a token for another computer.
-   */
-  receiveOnly?: boolean;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -636,7 +631,6 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
     computerId: boundary.nonEmptyString,
     fingerprint: boundary.nonEmptyString,
     linkedBy: boundary.optional(boundary.nonEmptyString),
-    receiveOnly: boundary.optional(boundary.boolean),
   })),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */

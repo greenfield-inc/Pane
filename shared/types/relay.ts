@@ -49,11 +49,6 @@ export interface RelayComputer {
   fingerprint: string;
   /** The computer's direct QUIC endpoint (`pane-direct`); absent while it has none. */
   direct?: RelayDirectEndpoint;
-  /**
-   * Set on a Pane Cloud VM: other devices may call it, and it holds no token for any other
-   * computer. Linking with it mints a token on it for the other side and never one for it.
-   */
-  receiveOnly?: boolean;
 }
 
 /** Where `pane-direct connect` finds a computer: its node id, its addresses, and the relays that introduce the two ends. */
@@ -72,21 +67,17 @@ export interface RelayComputerGrant {
   token: string;
 }
 
-/**
- * A computer redeeming a link: who it is, its routes, and a token it made for the link's maker to
- * call it. Without a token the maker records the computer as a client only and can't call it back:
- * a desktop pairing with a cloud VM.
- */
+/** A computer redeeming a link: who it is, its routes, and a token it made for the link's maker to call it. */
 export interface RelayComputerOffer {
   computer: RelayComputer;
   routes?: ComputerRoutesReport;
-  token?: string;
+  token: string;
 }
 
 /**
- * A pairing with a cloud VM, as Pane Cloud's `POST /v1/vms/:vmId/pairing` answers it: a one-time
- * link, and the relay identity the service vouches for. Pane pairs only with a VM that presents
- * exactly that key.
+ * A pairing with a Pane Cloud Session VM, as Pane Cloud's `POST /v1/vms/:vmId/pairing` answers it: a
+ * one-time link, and the relay identity the service vouches for. Pane links with the VM as with any
+ * other computer, but only over connections pinned to exactly that key.
  */
 export interface VouchedPairing {
   link: string;
@@ -100,11 +91,7 @@ export interface RelayExchangeRequest {
   phoneId?: string;
   /** Computer ids the app already has a token for. Linked computers among them hand out no new token, which would replace the app's. */
   known?: string[];
-  /**
-   * Set when a computer redeems the link: the maker records it as a computer, not a phone. With a
-   * token the maker saves it to call back; without one (accepted only by a Pane Cloud VM) the pairing
-   * is one way.
-   */
+  /** Set when a computer redeems the link: the maker saves it as a computer, not a phone. */
   computer?: RelayComputerOffer;
 }
 
@@ -141,10 +128,7 @@ export interface LinkRedeemResult {
 export interface RelayPairedEvent {
   kind: 'phone' | 'computer';
   label: string;
-  /**
-   * A computer this one saved: its id in `client.computers`, for "Not you? Unlink". Absent for a
-   * phone, and on a Pane Cloud VM for a desktop that paired one way (the VM saves nothing to call).
-   */
+  /** Computers only: its id in `client.computers`, for "Not you? Unlink". */
   computerId?: string;
 }
 
