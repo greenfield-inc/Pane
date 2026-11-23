@@ -13,6 +13,8 @@ import {
   type SessionVm,
 } from '../service';
 import type { RelayIdentity } from '../fleet';
+import type { GitHubTokenRecord } from '../sealing';
+import { StubClone, StubSealingKeys } from './clone';
 import { newRelayIdentity, pairingLinkFor } from './relayKey';
 import { bind, createRouteServer, listen, type RunningStub } from './server';
 
@@ -52,6 +54,13 @@ export interface ServiceStub extends RunningStub {
   setMemoryGiB(vmId: string, memoryGiB: SessionVm['memoryGiB']): void;
   /** The VM's Pane losing its relay key and making a new one, so its next pairing reports another identity. */
   replaceRelayKey(vmId: string): void;
+  /** The VM's clone failing now with git's message, as a sign-in or network error does. */
+  failClone(vmId: string, message: string): void;
+  /**
+   * The GitHub token the host opened for this VM's secrets volume, from its create or its latest
+   * retry: what the stub's host received, never something the service keeps.
+   */
+  hostGitHubToken(vmId: string): GitHubTokenRecord | null;
 }
 
 interface DeviceGrant {
@@ -67,6 +76,7 @@ interface VmRecord {
   log: ActionLogEntry[];
   /** The key the VM's Pane holds on its Session disk; it survives stops and starts. */
   relayKey: RelayIdentity;
+  clone: StubClone | null;
 }
 
 const AWAKE: readonly SessionVm['state'][] = ['creating', 'starting', 'running'];
@@ -106,6 +116,9 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
   const tokens = new Map<string, string>();
   const vms = new Map<string, VmRecord>();
   const idempotent = new Map<string, { vmId: string; entryId: string }>();
+  const sealingKeys = new StubSealingKeys('stub-host-1', now);
+  /** Stands in for each VM's secrets volume on the host. */
+  const hostTokens = new Map<string, GitHubTokenRecord | null>();
 
   const byId = (accountId: string) => [...accounts.values()].find((a) => a.id === accountId);
   const caller = (token: string | null): Account => {
@@ -127,6 +140,15 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
     return record;
   };
   const isAwake = (record: VmRecord) => AWAKE.includes(record.vm.state);
+  /** The VM as a read sees it: each read moves its clone one step. */
+  const view = (record: VmRecord) => {
+    if (record.clone) record.vm.clone = record.clone.read();
+    return record.vm;
+  };
+  const requireCanCreate = (account: Account) => {
+    if (account.access !== 'invited') throw new CloudApiError('not_invited', "You're on the list. Pane Cloud is invite-only for now.", 'Wait for your invite email.');
+    if (account.signupState !== 'ready') throw new CloudApiError('signup_incomplete', 'Finish signing up before you create a cloud Session.', account.signupState === 'needs_phone' ? 'Verify your phone number on the sign-up page.' : 'Add a card on the sign-up page.');
+  };
   /** VMs an account has awake, across every organization it belongs to (D-74). */
   const awakeOf = (accountId: string) => [...vms.values()].filter((r) => r.vm.createdByAccountId === accountId && isAwake(r)).length;
   /** The highest awake limit among the account's Full access memberships (D-74). */
@@ -236,9 +258,34 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       const account = caller(token);
       const organizationId = params.organizationId ?? '';
       membership(account, organizationId);
-      return { vms: [...vms.values()].filter((v) => v.vm.organizationId === organizationId && v.vm.createdByAccountId === account.id && v.vm.state !== 'deleted').map((v) => v.vm) };
+      return { vms: [...vms.values()].filter((v) => v.vm.organizationId === organizationId && v.vm.createdByAccountId === account.id && v.vm.state !== 'deleted').map(view) };
     }),
-    bind(r.createVm, ({ token, params, body }) => {
+    bind(r.createSealingKey, async ({ token, params }) => {
+      const account = caller(token);
+      const organizationId = params.organizationId ?? '';
+      requireFullAccess(account, organizationId);
+      requireCanCreate(account);
+      const { keyId, publicKey, expiresAt } = await sealingKeys.make(`${account.id}:${organizationId}`);
+      return { keyId, publicKey, expiresAt };
+    }),
+    bind(r.createVmSealingKey, async ({ token, params }) => {
+      const record = ownVm(caller(token), params.vmId ?? '');
+      requireState(record, 'running', 'A sealing key');
+      const { keyId, publicKey, expiresAt } = await sealingKeys.make(`vm:${record.vm.id}`);
+      return { keyId, publicKey, expiresAt };
+    }),
+    bind(r.retryClone, async ({ token, params, body }) => {
+      const account = caller(token);
+      const record = ownVm(account, params.vmId ?? '');
+      requireState(record, 'running', 'Retrying the clone');
+      if (!record.clone || record.clone.status.state !== 'failed') {
+        throw new CloudApiError('invalid_state', 'Only a clone that failed can be retried.', 'Wait for the clone to finish, or open the Session.');
+      }
+      if (body.sealingKeyId) hostTokens.set(record.vm.id, await sealingKeys.use(body.sealingKeyId, `vm:${record.vm.id}`, body.sealedGitHubToken));
+      record.vm.clone = record.clone.restart();
+      return { vm: record.vm, operation: log(record, 'retry_clone', account, 'You retried cloning the repo.') };
+    }),
+    bind(r.createVm, async ({ token, params, body }) => {
       const account = caller(token);
       const organizationId = params.organizationId ?? '';
       requireFullAccess(account, organizationId);
@@ -247,24 +294,27 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       const repeated = repeat ? vms.get(repeat.vmId) : undefined;
       const repeatedEntry = repeated?.log.find((e) => e.id === repeat?.entryId);
       if (repeated && repeatedEntry) return { vm: repeated.vm, operation: repeatedEntry };
-      if (account.access !== 'invited') throw new CloudApiError('not_invited', "You're on the list. Pane Cloud is invite-only for now.", 'Wait for your invite email.');
-      if (account.signupState !== 'ready') throw new CloudApiError('signup_incomplete', 'Finish signing up before you create a cloud Session.', account.signupState === 'needs_phone' ? 'Verify your phone number on the sign-up page.' : 'Add a card on the sign-up page.');
+      requireCanCreate(account);
       requireRoomToWake(account);
+      const opened = body.sealingKeyId ? await sealingKeys.use(body.sealingKeyId, `${account.id}:${organizationId}`, body.sealedGitHubToken) : null;
       const id = nextId('vm');
       const record: VmRecord = {
-        vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, relay: null, createdAt: iso(), updatedAt: iso() },
+        vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, relay: null, clone: null, createdAt: iso(), updatedAt: iso() },
         awake: [],
         log: [],
         relayKey: newRelayIdentity('runpane.net'),
+        clone: body.repo ? new StubClone(body.repo, iso, nextId('pane')) : null,
       };
+      record.vm.clone = record.clone?.status ?? null;
       vms.set(id, record);
+      hostTokens.set(id, opened);
       setState(record, 'running', null);
-      const entry = log(record, 'create', account, 'You created this Session.');
+      const entry = log(record, 'create', account, 'You created this Session.', body.repo ? { repo: body.repo } : {});
       log(record, 'bootstrap', 'service', 'First boot: install Pane.', { release: releaseFor(latest) });
       idempotent.set(key, { vmId: id, entryId: entry.id });
       return { vm: record.vm, operation: entry };
     }),
-    bind(r.getVm, ({ token, params }) => ownVm(caller(token), params.vmId ?? '').vm),
+    bind(r.getVm, ({ token, params }) => view(ownVm(caller(token), params.vmId ?? ''))),
     bind(r.startVm, ({ token, params }) => {
       const account = caller(token);
       const record = ownVm(account, params.vmId ?? '');
@@ -385,6 +435,14 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       if (!record) throw new Error(`stub: no Session VM ${vmId}`);
       setState(record, 'stopped', 'review');
       log(record, 'stop', 'service', 'Paused while your usage is under review.', { cause: 'review' });
+    },
+    failClone(vmId, message) {
+      const record = vms.get(vmId);
+      if (!record?.clone) throw new Error(`stub: Session VM ${vmId} has no clone`);
+      record.vm.clone = record.clone.fail(message);
+    },
+    hostGitHubToken(vmId) {
+      return hostTokens.get(vmId) ?? null;
     },
     replaceRelayKey(vmId) {
       const record = vms.get(vmId);

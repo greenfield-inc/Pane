@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.startServiceStub = startServiceStub;
 const errors_1 = require("../errors");
 const service_1 = require("../service");
+const clone_1 = require("./clone");
 const relayKey_1 = require("./relayKey");
 const server_1 = require("./server");
 const AWAKE = ['creating', 'starting', 'running'];
@@ -38,6 +39,9 @@ async function startServiceStub(options) {
     const tokens = new Map();
     const vms = new Map();
     const idempotent = new Map();
+    const sealingKeys = new clone_1.StubSealingKeys('stub-host-1', now);
+    /** Stands in for each VM's secrets volume on the host. */
+    const hostTokens = new Map();
     const byId = (accountId) => [...accounts.values()].find((a) => a.id === accountId);
     const caller = (token) => {
         const accountId = token ? tokens.get(token) : undefined;
@@ -60,6 +64,18 @@ async function startServiceStub(options) {
         return record;
     };
     const isAwake = (record) => AWAKE.includes(record.vm.state);
+    /** The VM as a read sees it: each read moves its clone one step. */
+    const view = (record) => {
+        if (record.clone)
+            record.vm.clone = record.clone.read();
+        return record.vm;
+    };
+    const requireCanCreate = (account) => {
+        if (account.access !== 'invited')
+            throw new errors_1.CloudApiError('not_invited', "You're on the list. Pane Cloud is invite-only for now.", 'Wait for your invite email.');
+        if (account.signupState !== 'ready')
+            throw new errors_1.CloudApiError('signup_incomplete', 'Finish signing up before you create a cloud Session.', account.signupState === 'needs_phone' ? 'Verify your phone number on the sign-up page.' : 'Add a card on the sign-up page.');
+    };
     /** VMs an account has awake, across every organization it belongs to (D-74). */
     const awakeOf = (accountId) => [...vms.values()].filter((r) => r.vm.createdByAccountId === accountId && isAwake(r)).length;
     /** The highest awake limit among the account's Full access memberships (D-74). */
@@ -173,9 +189,35 @@ async function startServiceStub(options) {
             const account = caller(token);
             const organizationId = params.organizationId ?? '';
             membership(account, organizationId);
-            return { vms: [...vms.values()].filter((v) => v.vm.organizationId === organizationId && v.vm.createdByAccountId === account.id && v.vm.state !== 'deleted').map((v) => v.vm) };
+            return { vms: [...vms.values()].filter((v) => v.vm.organizationId === organizationId && v.vm.createdByAccountId === account.id && v.vm.state !== 'deleted').map(view) };
         }),
-        (0, server_1.bind)(r.createVm, ({ token, params, body }) => {
+        (0, server_1.bind)(r.createSealingKey, async ({ token, params }) => {
+            const account = caller(token);
+            const organizationId = params.organizationId ?? '';
+            requireFullAccess(account, organizationId);
+            requireCanCreate(account);
+            const { keyId, publicKey, expiresAt } = await sealingKeys.make(`${account.id}:${organizationId}`);
+            return { keyId, publicKey, expiresAt };
+        }),
+        (0, server_1.bind)(r.createVmSealingKey, async ({ token, params }) => {
+            const record = ownVm(caller(token), params.vmId ?? '');
+            requireState(record, 'running', 'A sealing key');
+            const { keyId, publicKey, expiresAt } = await sealingKeys.make(`vm:${record.vm.id}`);
+            return { keyId, publicKey, expiresAt };
+        }),
+        (0, server_1.bind)(r.retryClone, async ({ token, params, body }) => {
+            const account = caller(token);
+            const record = ownVm(account, params.vmId ?? '');
+            requireState(record, 'running', 'Retrying the clone');
+            if (!record.clone || record.clone.status.state !== 'failed') {
+                throw new errors_1.CloudApiError('invalid_state', 'Only a clone that failed can be retried.', 'Wait for the clone to finish, or open the Session.');
+            }
+            if (body.sealingKeyId)
+                hostTokens.set(record.vm.id, await sealingKeys.use(body.sealingKeyId, `vm:${record.vm.id}`, body.sealedGitHubToken));
+            record.vm.clone = record.clone.restart();
+            return { vm: record.vm, operation: log(record, 'retry_clone', account, 'You retried cloning the repo.') };
+        }),
+        (0, server_1.bind)(r.createVm, async ({ token, params, body }) => {
             const account = caller(token);
             const organizationId = params.organizationId ?? '';
             requireFullAccess(account, organizationId);
@@ -185,26 +227,27 @@ async function startServiceStub(options) {
             const repeatedEntry = repeated?.log.find((e) => e.id === repeat?.entryId);
             if (repeated && repeatedEntry)
                 return { vm: repeated.vm, operation: repeatedEntry };
-            if (account.access !== 'invited')
-                throw new errors_1.CloudApiError('not_invited', "You're on the list. Pane Cloud is invite-only for now.", 'Wait for your invite email.');
-            if (account.signupState !== 'ready')
-                throw new errors_1.CloudApiError('signup_incomplete', 'Finish signing up before you create a cloud Session.', account.signupState === 'needs_phone' ? 'Verify your phone number on the sign-up page.' : 'Add a card on the sign-up page.');
+            requireCanCreate(account);
             requireRoomToWake(account);
+            const opened = body.sealingKeyId ? await sealingKeys.use(body.sealingKeyId, `${account.id}:${organizationId}`, body.sealedGitHubToken) : null;
             const id = nextId('vm');
             const record = {
-                vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, relay: null, createdAt: iso(), updatedAt: iso() },
+                vm: { id, organizationId, createdByAccountId: account.id, name: body.name, state: 'stopped', stateReason: null, memoryGiB: 8, paneVersion: latest, relay: null, clone: null, createdAt: iso(), updatedAt: iso() },
                 awake: [],
                 log: [],
                 relayKey: (0, relayKey_1.newRelayIdentity)('runpane.net'),
+                clone: body.repo ? new clone_1.StubClone(body.repo, iso, nextId('pane')) : null,
             };
+            record.vm.clone = record.clone?.status ?? null;
             vms.set(id, record);
+            hostTokens.set(id, opened);
             setState(record, 'running', null);
-            const entry = log(record, 'create', account, 'You created this Session.');
+            const entry = log(record, 'create', account, 'You created this Session.', body.repo ? { repo: body.repo } : {});
             log(record, 'bootstrap', 'service', 'First boot: install Pane.', { release: releaseFor(latest) });
             idempotent.set(key, { vmId: id, entryId: entry.id });
             return { vm: record.vm, operation: entry };
         }),
-        (0, server_1.bind)(r.getVm, ({ token, params }) => ownVm(caller(token), params.vmId ?? '').vm),
+        (0, server_1.bind)(r.getVm, ({ token, params }) => view(ownVm(caller(token), params.vmId ?? ''))),
         (0, server_1.bind)(r.startVm, ({ token, params }) => {
             const account = caller(token);
             const record = ownVm(account, params.vmId ?? '');
@@ -333,6 +376,15 @@ async function startServiceStub(options) {
                 throw new Error(`stub: no Session VM ${vmId}`);
             setState(record, 'stopped', 'review');
             log(record, 'stop', 'service', 'Paused while your usage is under review.', { cause: 'review' });
+        },
+        failClone(vmId, message) {
+            const record = vms.get(vmId);
+            if (!record?.clone)
+                throw new Error(`stub: Session VM ${vmId} has no clone`);
+            record.vm.clone = record.clone.fail(message);
+        },
+        hostGitHubToken(vmId) {
+            return hostTokens.get(vmId) ?? null;
         },
         replaceRelayKey(vmId) {
             const record = vms.get(vmId);

@@ -20,6 +20,65 @@ export declare const PaneRelease: z.ZodObject<{
     debSha256: z.ZodString;
 }, z.core.$strict>;
 export type PaneRelease = z.infer<typeof PaneRelease>;
+/** Names one sealing key pair the host made: a free slot's for create, a VM's own for retry_clone. */
+export declare const SealingKeyId: z.ZodString;
+/** A sealing public key: raw 32-byte X25519, base64url without padding. */
+export declare const SealingPublicKey: z.ZodString;
+/**
+ * A libsodium sealed box (crypto_box_seal) to one sealing key, base64url without padding. It holds
+ * the JSON `{"token","source","updatedAt"}`: the person's GitHub token, the machine it came from and
+ * when it last changed. Only the host that made the key can open it. Every route passes it on
+ * unopened and never stores, logs or returns it.
+ */
+export declare const SealedSecret: z.ZodString;
+/** The repo a new Session clones: an https URL with no credentials in it, and the branch to check out. */
+export declare const CloneRepo: z.ZodObject<{
+    url: z.ZodURL;
+    branch: z.ZodString;
+}, z.core.$strict>;
+export type CloneRepo = z.infer<typeof CloneRepo>;
+/** Whether a GitHub token may go with this repo: the guest's credential helper answers only for github.com. */
+export declare function isGitHubRepo(repo: CloneRepo): boolean;
+/** The SHA-256 of a sealed secret, which a signed operation carries to bind the sealed copy sent beside it. */
+export declare function sealedSecretDigest(sealed: string): string;
+/**
+ * The clone of a new Session's repo, as the guest reports it. It starts at boot, beside the daemon:
+ * a blobless clone, then `runpane panes create --no-fetch`, whose Pane id the app opens. `line` is
+ * git's last progress line and `error` git's own message; the guest strips anything that looks like a
+ * credential from both. A failed clone creates no Pane and leaves the VM running for retry_clone.
+ */
+export declare const CloneStatus: z.ZodObject<{
+    repo: z.ZodString;
+    branch: z.ZodString;
+    state: z.ZodEnum<{
+        cloning: "cloning";
+        ready: "ready";
+        failed: "failed";
+    }>;
+    phase: z.ZodNullable<z.ZodEnum<{
+        receiving: "receiving";
+        resolving: "resolving";
+        checking_out: "checking_out";
+        creating_pane: "creating_pane";
+    }>>;
+    percent: z.ZodNullable<z.ZodNumber>;
+    line: z.ZodNullable<z.ZodString>;
+    startedAt: z.ZodISODateTime;
+    finishedAt: z.ZodNullable<z.ZodISODateTime>;
+    error: z.ZodNullable<z.ZodObject<{
+        message: z.ZodString;
+    }, z.core.$strict>>;
+    paneId: z.ZodNullable<z.ZodString>;
+}, z.core.$strict>;
+export type CloneStatus = z.infer<typeof CloneStatus>;
+/** A sealing key the host made, with the host that holds its private half. */
+export declare const FleetSealingKey: z.ZodObject<{
+    keyId: z.ZodString;
+    hostId: z.ZodString;
+    publicKey: z.ZodString;
+    expiresAt: z.ZodISODateTime;
+}, z.core.$strict>;
+export type FleetSealingKey = z.infer<typeof FleetSealingKey>;
 /**
  * Why the service stops a VM; the fleet records it as the VM's stateReason. `user`: its creator
  * stopped it. `review`: paused for review, automatically or by a person's Suspend (one state, D-68).
@@ -34,11 +93,19 @@ export declare const StopCause: z.ZodEnum<{
  * the guest agent. Nothing else exists: no shell command, no file write, no access grant. `create`
  * makes an 8 GiB, 4 vCPU VM and starts it; `stop` keeps its disk; `start` boots it from that disk.
  * `create_pairing_link` asks the VM's Pane for a one-time pairing link and its relay identity.
+ * `retry_clone` runs a failed clone of the Session's repo again.
  */
 export declare const FLEET_OPERATIONS: {
     readonly create: {
         readonly runsOn: "host";
-        readonly parameters: z.ZodObject<{}, z.core.$strict>;
+        readonly parameters: z.ZodObject<{
+            sealingKeyId: z.ZodOptional<z.ZodString>;
+            repo: z.ZodOptional<z.ZodObject<{
+                url: z.ZodURL;
+                branch: z.ZodString;
+            }, z.core.$strict>>;
+            sealedGitHubTokenSha256: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>;
     };
     readonly start: {
         readonly runsOn: "host";
@@ -89,6 +156,13 @@ export declare const FLEET_OPERATIONS: {
         readonly runsOn: "guest";
         readonly parameters: z.ZodObject<{}, z.core.$strict>;
     };
+    readonly retry_clone: {
+        readonly runsOn: "guest";
+        readonly parameters: z.ZodObject<{
+            sealingKeyId: z.ZodOptional<z.ZodString>;
+            sealedGitHubTokenSha256: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>;
+    };
 };
 export type FleetOperationName = keyof typeof FLEET_OPERATIONS;
 export declare const FleetOperationName: z.ZodEnum<{
@@ -101,10 +175,18 @@ export declare const FleetOperationName: z.ZodEnum<{
     prepare_to_stop: "prepare_to_stop";
     collect_diagnostics: "collect_diagnostics";
     create_pairing_link: "create_pairing_link";
+    retry_clone: "retry_clone";
 }>;
 export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     operation: z.ZodLiteral<"create">;
-    parameters: z.ZodObject<{}, z.core.$strict>;
+    parameters: z.ZodObject<{
+        sealingKeyId: z.ZodOptional<z.ZodString>;
+        repo: z.ZodOptional<z.ZodObject<{
+            url: z.ZodURL;
+            branch: z.ZodString;
+        }, z.core.$strict>>;
+        sealedGitHubTokenSha256: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>;
     requestId: z.ZodUUID;
     hostId: z.ZodString;
     vmId: z.ZodString;
@@ -200,6 +282,18 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     reason: z.ZodString;
     issuedAt: z.ZodISODateTime;
     expiresAt: z.ZodISODateTime;
+}, z.core.$strict>, z.ZodObject<{
+    operation: z.ZodLiteral<"retry_clone">;
+    parameters: z.ZodObject<{
+        sealingKeyId: z.ZodOptional<z.ZodString>;
+        sealedGitHubTokenSha256: z.ZodOptional<z.ZodString>;
+    }, z.core.$strict>;
+    requestId: z.ZodUUID;
+    hostId: z.ZodString;
+    vmId: z.ZodString;
+    reason: z.ZodString;
+    issuedAt: z.ZodISODateTime;
+    expiresAt: z.ZodISODateTime;
 }, z.core.$strict>], "operation">;
 export type OperationPayload = z.infer<typeof OperationPayload>;
 export declare const OperationSignature: z.ZodObject<{
@@ -207,10 +301,22 @@ export declare const OperationSignature: z.ZodObject<{
     algorithm: z.ZodLiteral<"ECDSA_SHA_256">;
     value: z.ZodBase64;
 }, z.core.$strict>;
+/** A sealed GitHub token sent beside the signed payload; the payload signs its digest. */
+export declare const SealedSecrets: z.ZodObject<{
+    githubToken: z.ZodString;
+}, z.core.$strict>;
+export type SealedSecrets = z.infer<typeof SealedSecrets>;
 export declare const OperationEnvelope: z.ZodObject<{
     payload: z.ZodDiscriminatedUnion<[z.ZodObject<{
         operation: z.ZodLiteral<"create">;
-        parameters: z.ZodObject<{}, z.core.$strict>;
+        parameters: z.ZodObject<{
+            sealingKeyId: z.ZodOptional<z.ZodString>;
+            repo: z.ZodOptional<z.ZodObject<{
+                url: z.ZodURL;
+                branch: z.ZodString;
+            }, z.core.$strict>>;
+            sealedGitHubTokenSha256: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>;
         requestId: z.ZodUUID;
         hostId: z.ZodString;
         vmId: z.ZodString;
@@ -306,12 +412,27 @@ export declare const OperationEnvelope: z.ZodObject<{
         reason: z.ZodString;
         issuedAt: z.ZodISODateTime;
         expiresAt: z.ZodISODateTime;
+    }, z.core.$strict>, z.ZodObject<{
+        operation: z.ZodLiteral<"retry_clone">;
+        parameters: z.ZodObject<{
+            sealingKeyId: z.ZodOptional<z.ZodString>;
+            sealedGitHubTokenSha256: z.ZodOptional<z.ZodString>;
+        }, z.core.$strict>;
+        requestId: z.ZodUUID;
+        hostId: z.ZodString;
+        vmId: z.ZodString;
+        reason: z.ZodString;
+        issuedAt: z.ZodISODateTime;
+        expiresAt: z.ZodISODateTime;
     }, z.core.$strict>], "operation">;
     signature: z.ZodObject<{
         keyId: z.ZodString;
         algorithm: z.ZodLiteral<"ECDSA_SHA_256">;
         value: z.ZodBase64;
     }, z.core.$strict>;
+    sealed: z.ZodOptional<z.ZodObject<{
+        githubToken: z.ZodString;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 export type OperationEnvelope = z.infer<typeof OperationEnvelope>;
 /**
@@ -323,6 +444,7 @@ export declare const SubmittedEnvelope: z.ZodObject<{
         operation: z.ZodString;
     }, z.core.$loose>;
     signature: z.ZodObject<{}, z.core.$loose>;
+    sealed: z.ZodOptional<z.ZodObject<{}, z.core.$loose>>;
 }, z.core.$strict>;
 export type SubmittedEnvelope = z.infer<typeof SubmittedEnvelope>;
 type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
@@ -341,7 +463,13 @@ export interface OperationSigner {
     keyId: string;
     sign(bytes: Buffer): Promise<Buffer>;
 }
-export declare function signOperation(payload: OperationPayload, signer: OperationSigner): Promise<OperationEnvelope>;
+export declare function signOperation(payload: OperationPayload, signer: OperationSigner, sealed?: SealedSecrets): Promise<OperationEnvelope>;
+/**
+ * The host's check, for a requestId it has not seen, that the sealed token sent beside the payload is
+ * the one the payload signs. A resend of a requestId the host already recorded answers its first
+ * outcome without it. Throws invalid_request; the message never repeats the sealed token.
+ */
+export declare function requireSealedSecrets(envelope: OperationEnvelope): SealedSecrets | null;
 /**
  * The host agent's check of an envelope it received, before it runs anything. Throws CloudApiError:
  * operation_not_allowed or invalid_request for a payload outside the allow-list, signature_invalid
@@ -361,11 +489,11 @@ export declare const FleetVmState: z.ZodEnum<{
 }>;
 /** Why a VM last stopped or failed; null while it runs normally. */
 export declare const StateReason: z.ZodEnum<{
+    failed: "failed";
     user: "user";
     review: "review";
     host_maintenance: "host_maintenance";
     host_lost: "host_lost";
-    failed: "failed";
 }>;
 export declare const FleetVm: z.ZodObject<{
     vmId: z.ZodString;
@@ -380,15 +508,38 @@ export declare const FleetVm: z.ZodObject<{
         deleted: "deleted";
     }>;
     stateReason: z.ZodNullable<z.ZodEnum<{
+        failed: "failed";
         user: "user";
         review: "review";
         host_maintenance: "host_maintenance";
         host_lost: "host_lost";
-        failed: "failed";
     }>>;
     hostId: z.ZodNullable<z.ZodString>;
     memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
     paneVersion: z.ZodNullable<z.ZodString>;
+    clone: z.ZodDefault<z.ZodNullable<z.ZodObject<{
+        repo: z.ZodString;
+        branch: z.ZodString;
+        state: z.ZodEnum<{
+            cloning: "cloning";
+            ready: "ready";
+            failed: "failed";
+        }>;
+        phase: z.ZodNullable<z.ZodEnum<{
+            receiving: "receiving";
+            resolving: "resolving";
+            checking_out: "checking_out";
+            creating_pane: "creating_pane";
+        }>>;
+        percent: z.ZodNullable<z.ZodNumber>;
+        line: z.ZodNullable<z.ZodString>;
+        startedAt: z.ZodISODateTime;
+        finishedAt: z.ZodNullable<z.ZodISODateTime>;
+        error: z.ZodNullable<z.ZodObject<{
+            message: z.ZodString;
+        }, z.core.$strict>>;
+        paneId: z.ZodNullable<z.ZodString>;
+    }, z.core.$strict>>>;
     updatedAt: z.ZodISODateTime;
 }, z.core.$strict>;
 export type FleetVm = z.infer<typeof FleetVm>;
@@ -437,10 +588,11 @@ export declare const OperationStatus: z.ZodObject<{
         prepare_to_stop: "prepare_to_stop";
         collect_diagnostics: "collect_diagnostics";
         create_pairing_link: "create_pairing_link";
+        retry_clone: "retry_clone";
     }>;
     status: z.ZodEnum<{
-        running: "running";
         failed: "failed";
+        running: "running";
         accepted: "accepted";
         succeeded: "succeeded";
     }>;
@@ -501,11 +653,11 @@ export declare const FleetEvent: z.ZodObject<{
         deleted: "deleted";
     }>>;
     reason: z.ZodNullable<z.ZodEnum<{
+        failed: "failed";
         user: "user";
         review: "review";
         host_maintenance: "host_maintenance";
         host_lost: "host_lost";
-        failed: "failed";
     }>>;
     requestId: z.ZodNullable<z.ZodUUID>;
     at: z.ZodISODateTime;
@@ -517,6 +669,7 @@ export declare const fleetRoutes: {
             operation: z.ZodString;
         }, z.core.$loose>;
         signature: z.ZodObject<{}, z.core.$loose>;
+        sealed: z.ZodOptional<z.ZodObject<{}, z.core.$loose>>;
     }, z.core.$strict>, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
         requestId: z.ZodUUID;
         vmId: z.ZodString;
@@ -530,10 +683,11 @@ export declare const fleetRoutes: {
             prepare_to_stop: "prepare_to_stop";
             collect_diagnostics: "collect_diagnostics";
             create_pairing_link: "create_pairing_link";
+            retry_clone: "retry_clone";
         }>;
         status: z.ZodEnum<{
-            running: "running";
             failed: "failed";
+            running: "running";
             accepted: "accepted";
             succeeded: "succeeded";
         }>;
@@ -560,6 +714,20 @@ export declare const fleetRoutes: {
         acceptedAt: z.ZodISODateTime;
         finishedAt: z.ZodNullable<z.ZodISODateTime>;
     }, z.core.$strict>>;
+    /** Reserves a free slot for one create and returns the key its sealed token is sealed to. */
+    reserveSealingKey: import("./http").Route<z.ZodObject<{}, z.core.$strict>, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
+        keyId: z.ZodString;
+        hostId: z.ZodString;
+        publicKey: z.ZodString;
+        expiresAt: z.ZodISODateTime;
+    }, z.core.$strict>>;
+    /** A fresh key for a running VM, for a retry_clone that carries a new sealed token. */
+    createVmSealingKey: import("./http").Route<z.ZodObject<{}, z.core.$strict>, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
+        keyId: z.ZodString;
+        hostId: z.ZodString;
+        publicKey: z.ZodString;
+        expiresAt: z.ZodISODateTime;
+    }, z.core.$strict>>;
     getOperation: import("./http").Route<z.ZodUndefined, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
         requestId: z.ZodUUID;
         vmId: z.ZodString;
@@ -573,10 +741,11 @@ export declare const fleetRoutes: {
             prepare_to_stop: "prepare_to_stop";
             collect_diagnostics: "collect_diagnostics";
             create_pairing_link: "create_pairing_link";
+            retry_clone: "retry_clone";
         }>;
         status: z.ZodEnum<{
-            running: "running";
             failed: "failed";
+            running: "running";
             accepted: "accepted";
             succeeded: "succeeded";
         }>;
@@ -616,15 +785,38 @@ export declare const fleetRoutes: {
             deleted: "deleted";
         }>;
         stateReason: z.ZodNullable<z.ZodEnum<{
+            failed: "failed";
             user: "user";
             review: "review";
             host_maintenance: "host_maintenance";
             host_lost: "host_lost";
-            failed: "failed";
         }>>;
         hostId: z.ZodNullable<z.ZodString>;
         memoryGiB: z.ZodUnion<readonly [z.ZodLiteral<8>, z.ZodLiteral<16>]>;
         paneVersion: z.ZodNullable<z.ZodString>;
+        clone: z.ZodDefault<z.ZodNullable<z.ZodObject<{
+            repo: z.ZodString;
+            branch: z.ZodString;
+            state: z.ZodEnum<{
+                cloning: "cloning";
+                ready: "ready";
+                failed: "failed";
+            }>;
+            phase: z.ZodNullable<z.ZodEnum<{
+                receiving: "receiving";
+                resolving: "resolving";
+                checking_out: "checking_out";
+                creating_pane: "creating_pane";
+            }>>;
+            percent: z.ZodNullable<z.ZodNumber>;
+            line: z.ZodNullable<z.ZodString>;
+            startedAt: z.ZodISODateTime;
+            finishedAt: z.ZodNullable<z.ZodISODateTime>;
+            error: z.ZodNullable<z.ZodObject<{
+                message: z.ZodString;
+            }, z.core.$strict>>;
+            paneId: z.ZodNullable<z.ZodString>;
+        }, z.core.$strict>>>;
         updatedAt: z.ZodISODateTime;
     }, z.core.$strict>>;
     getMetrics: import("./http").Route<z.ZodUndefined, z.ZodObject<{
@@ -660,11 +852,11 @@ export declare const fleetRoutes: {
                 deleted: "deleted";
             }>>;
             reason: z.ZodNullable<z.ZodEnum<{
+                failed: "failed";
                 user: "user";
                 review: "review";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
-                failed: "failed";
             }>>;
             requestId: z.ZodNullable<z.ZodUUID>;
             at: z.ZodISODateTime;
@@ -677,8 +869,8 @@ export declare function createFleetClient(config: ClientConfig): {
     submitOperation: (envelope: OperationEnvelope) => Promise<{
         requestId: string;
         vmId: string;
-        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
-        status: "running" | "failed" | "accepted" | "succeeded";
+        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link" | "retry_clone";
+        status: "failed" | "running" | "accepted" | "succeeded";
         error: {
             code: string;
             message: string;
@@ -702,11 +894,23 @@ export declare function createFleetClient(config: ClientConfig): {
         acceptedAt: string;
         finishedAt: string | null;
     }>;
+    reserveSealingKey: () => Promise<{
+        keyId: string;
+        hostId: string;
+        publicKey: string;
+        expiresAt: string;
+    }>;
+    createVmSealingKey: (vmId: string) => Promise<{
+        keyId: string;
+        hostId: string;
+        publicKey: string;
+        expiresAt: string;
+    }>;
     getOperation: (requestId: string) => Promise<{
         requestId: string;
         vmId: string;
-        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link";
-        status: "running" | "failed" | "accepted" | "succeeded";
+        operation: "create" | "start" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "create_pairing_link" | "retry_clone";
+        status: "failed" | "running" | "accepted" | "succeeded";
         error: {
             code: string;
             message: string;
@@ -733,10 +937,24 @@ export declare function createFleetClient(config: ClientConfig): {
     getVm: (vmId: string) => Promise<{
         vmId: string;
         state: "error" | "creating" | "running" | "stopping" | "stopped" | "starting" | "deleting" | "deleted";
-        stateReason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
+        stateReason: "failed" | "user" | "review" | "host_maintenance" | "host_lost" | null;
         hostId: string | null;
         memoryGiB: 8 | 16;
         paneVersion: string | null;
+        clone: {
+            repo: string;
+            branch: string;
+            state: "cloning" | "ready" | "failed";
+            phase: "receiving" | "resolving" | "checking_out" | "creating_pane" | null;
+            percent: number | null;
+            line: string | null;
+            startedAt: string;
+            finishedAt: string | null;
+            error: {
+                message: string;
+            } | null;
+            paneId: string | null;
+        } | null;
         updatedAt: string;
     }>;
     getMetrics: (vmId: string, day?: string) => Promise<{
@@ -754,7 +972,7 @@ export declare function createFleetClient(config: ClientConfig): {
             vmId: string;
             kind: "state_changed" | "operation_finished";
             state: "error" | "creating" | "running" | "stopping" | "stopped" | "starting" | "deleting" | "deleted" | null;
-            reason: "user" | "review" | "host_maintenance" | "host_lost" | "failed" | null;
+            reason: "failed" | "user" | "review" | "host_maintenance" | "host_lost" | null;
             requestId: string | null;
             at: string;
         }[];

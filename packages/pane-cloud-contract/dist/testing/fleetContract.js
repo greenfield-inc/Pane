@@ -8,6 +8,7 @@ exports.fleetContractCases = fleetContractCases;
 const strict_1 = __importDefault(require("node:assert/strict"));
 const node_crypto_1 = require("node:crypto");
 const fleet_1 = require("../fleet");
+const sealing_1 = require("../sealing");
 const cases_1 = require("./cases");
 /** A P-256 signing key held in memory, standing in for the service's KMS key in tests. */
 function createLocalSigner(keyId = 'local-test-key') {
@@ -17,6 +18,8 @@ function createLocalSigner(keyId = 'local-test-key') {
         publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
     };
 }
+/** A small public repo every clone case can reach. */
+const PUBLIC_REPO = { url: 'https://github.com/expressjs/express', branch: 'master' };
 /** The fleet API contract: what the host agent must do for the service. */
 function fleetContractCases(target) {
     // Read baseUrl at call time, so a target can name a server that starts after the cases are built.
@@ -178,6 +181,61 @@ function fleetContractCases(target) {
                 const second = await run(vmId, 'create_pairing_link');
                 strict_1.default.ok(second.result && 'relay' in second.result);
                 strict_1.default.deepEqual(second.result.relay, first.result.relay, 'the relay key lives on the VM disk and survives a stop and start');
+                await run(vmId, 'delete');
+            },
+        },
+        {
+            name: "fleet: create with a repo and a sealed token clones it; the payload signs the token's digest, a missing or different sealed token runs nothing, and nothing the fleet answers repeats it",
+            async run() {
+                const token = `gho_fleet${(0, node_crypto_1.randomUUID)().replaceAll('-', '')}`;
+                const key = await fleet.reserveSealingKey();
+                strict_1.default.equal(Buffer.from(key.publicKey, 'base64url').length, 32, 'a raw X25519 public key');
+                const sealed = await (0, sealing_1.sealGitHubToken)(key.publicKey, { token, source: 'contract-desktop', updatedAt: new Date().toISOString() });
+                const other = await (0, sealing_1.sealGitHubToken)(key.publicKey, { token: `${token}x`, source: 'contract-desktop', updatedAt: new Date().toISOString() });
+                const vmId = `contract-${(0, node_crypto_1.randomUUID)().slice(0, 8)}`;
+                const create = () => ({
+                    ...payload(vmId, 'create'),
+                    operation: 'create',
+                    parameters: { sealingKeyId: key.keyId, repo: PUBLIC_REPO, sealedGitHubTokenSha256: (0, fleet_1.sealedSecretDigest)(sealed) },
+                });
+                const send = async (sealedSecrets) => fleet.submitOperation(await (0, fleet_1.signOperation)(create(), target.signer, sealedSecrets));
+                await (0, cases_1.expectError)('invalid_request', () => send());
+                await (0, cases_1.expectError)('invalid_request', () => send({ githubToken: other }));
+                await (0, cases_1.expectError)('vm_not_found', () => fleet.getVm(vmId));
+                const envelope = await (0, fleet_1.signOperation)(create(), target.signer, { githubToken: sealed });
+                const accepted = await fleet.submitOperation(envelope);
+                const { sealed: _sent, ...withoutToken } = envelope;
+                strict_1.default.equal((await fleet.submitOperation(withoutToken)).requestId, accepted.requestId, 'a resend without the sealed token gets the first outcome');
+                const reads = [];
+                const done = await (0, cases_1.waitFor)(async () => {
+                    const read = await fleet.getVm(vmId);
+                    reads.push(read);
+                    return read;
+                }, (vm) => vm.clone?.state === 'ready' || vm.clone?.state === 'failed', 'the clone to finish', timeoutMs);
+                strict_1.default.equal(done.clone?.state, 'ready', `the clone failed: ${done.clone?.error?.message ?? ''}`);
+                strict_1.default.ok(done.clone?.paneId, 'a finished clone names its Pane');
+                const answers = JSON.stringify([accepted, reads, await fleet.getOperation(accepted.requestId), await fleet.listEvents()]);
+                strict_1.default.ok(!answers.includes(token) && !answers.includes(sealed), 'no fleet answer holds the token');
+                await (0, cases_1.expectError)('invalid_state', async () => fleet.submitOperation(await (0, fleet_1.signOperation)({ ...payload(vmId, 'retry_clone'), operation: 'retry_clone', parameters: {} }, target.signer)));
+                await run(vmId, 'delete');
+            },
+        },
+        {
+            name: "fleet: a failed clone keeps the VM up with git's error and no Pane, and retry_clone runs it again with a token sealed to the VM's own key",
+            async run() {
+                const vmId = `contract-${(0, node_crypto_1.randomUUID)().slice(0, 8)}`;
+                const repo = { url: 'https://github.com/greenfield-inc/does-not-exist-pane-contract', branch: 'main' };
+                await fleet.submitOperation(await (0, fleet_1.signOperation)({ ...payload(vmId, 'create'), operation: 'create', parameters: { repo } }, target.signer));
+                const failed = await (0, cases_1.waitFor)(() => fleet.getVm(vmId), (vm) => vm.clone?.state === 'failed', 'the clone to fail', timeoutMs);
+                strict_1.default.ok(failed.clone?.error?.message, "a failed clone carries git's message");
+                strict_1.default.equal(failed.clone?.paneId, null);
+                strict_1.default.equal(failed.state, 'running', 'the VM stays up for a retry');
+                const key = await fleet.createVmSealingKey(vmId);
+                const sealed = await (0, sealing_1.sealGitHubToken)(key.publicKey, { token: `gho_retry${(0, node_crypto_1.randomUUID)().replaceAll('-', '')}`, source: 'contract-desktop', updatedAt: new Date().toISOString() });
+                const retry = await (0, fleet_1.signOperation)({ ...payload(vmId, 'retry_clone'), operation: 'retry_clone', parameters: { sealingKeyId: key.keyId, sealedGitHubTokenSha256: (0, fleet_1.sealedSecretDigest)(sealed) } }, target.signer, { githubToken: sealed });
+                const accepted = await fleet.submitOperation(retry);
+                await (0, cases_1.waitFor)(() => fleet.getOperation(accepted.requestId), (s) => s.status === 'succeeded', 'the retry to be accepted', timeoutMs);
+                await (0, cases_1.waitFor)(() => fleet.getVm(vmId), (vm) => vm.clone?.state === 'failed' && vm.clone.finishedAt !== failed.clone?.finishedAt, 'the retried clone to fail again', timeoutMs);
                 await run(vmId, 'delete');
             },
         },

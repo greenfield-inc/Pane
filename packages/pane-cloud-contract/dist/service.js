@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.serviceRoutes = exports.OrganizationUsage = exports.MemberUsage = exports.SubmittedOperation = exports.USER_OPERATIONS = exports.UserOperationRequest = exports.ActionLogEntry = exports.LoggedOperation = exports.SessionVm = exports.DeviceTokenResult = exports.Account = exports.Membership = exports.OrgRole = exports.DeviceCode = exports.AGENT_HOURS_PER_AWAKE_HOUR = exports.Plan = exports.PLANS = void 0;
+exports.serviceRoutes = exports.OrganizationUsage = exports.MemberUsage = exports.RetryCloneRequest = exports.CreateVmRequest = exports.SealingKey = exports.SubmittedOperation = exports.USER_OPERATIONS = exports.UserOperationRequest = exports.ActionLogEntry = exports.LoggedOperation = exports.SessionVm = exports.DeviceTokenResult = exports.Account = exports.Membership = exports.OrgRole = exports.DeviceCode = exports.AGENT_HOURS_PER_AWAKE_HOUR = exports.Plan = exports.PLANS = void 0;
 exports.createServiceClient = createServiceClient;
 exports.parseUserOperation = parseUserOperation;
 /**
@@ -94,12 +94,14 @@ exports.SessionVm = zod_1.z
      * vouches for from then on; null before the first pairing.
      */
     relay: fleet_1.RelayIdentity.nullable(),
+    /** The clone of the repo the Session was created for, as the guest reports it; null without one (D-107). */
+    clone: fleet_1.CloneStatus.nullable().default(null),
     createdAt: Timestamp,
     updatedAt: Timestamp,
 })
     .strict();
 /** Lifecycle actions plus the allow-listed guest operations, as the VM's action log names them. */
-exports.LoggedOperation = zod_1.z.enum(['create', 'start', 'stop', 'delete', 'bootstrap', 'update_pane', 'prepare_to_stop', 'collect_diagnostics', 'create_pairing_link']);
+exports.LoggedOperation = zod_1.z.enum(['create', 'start', 'stop', 'delete', 'bootstrap', 'update_pane', 'prepare_to_stop', 'collect_diagnostics', 'create_pairing_link', 'retry_clone']);
 exports.ActionLogEntry = zod_1.z
     .object({
     id: Id,
@@ -135,6 +137,36 @@ exports.USER_OPERATIONS = ['update_pane', 'collect_diagnostics'];
 const UserOperationName = zod_1.z.enum(exports.USER_OPERATIONS);
 /** What requestOperation accepts before parseUserOperation checks it. */
 exports.SubmittedOperation = zod_1.z.object({ operation: zod_1.z.string(), parameters: zod_1.z.record(zod_1.z.string(), zod_1.z.json()) }).strict();
+// ---------- A new Session's repo and the sealed GitHub token (D-107) ----------
+/**
+ * A key to seal the person's GitHub token to (sealGitHubToken). Pane asks for one when the create
+ * dialog opens: it reserves a free slot until `expiresAt`, and a create naming it after that answers
+ * sealing_key_expired, so Pane asks again and seals again.
+ */
+exports.SealingKey = zod_1.z.object({ keyId: fleet_1.SealingKeyId, publicKey: fleet_1.SealingPublicKey, expiresAt: Timestamp }).strict();
+/**
+ * createVm's body. With `repo`, the VM clones it at boot and reports the clone on the VM. A private
+ * repo's token goes sealed, to the key `sealingKeyId` names; the service passes it to the host and
+ * never stores, logs or returns it. Pane sends no token when the person keeps it from this machine.
+ */
+exports.CreateVmRequest = zod_1.z
+    .object({
+    name: zod_1.z.string().min(1).max(64),
+    idempotencyKey: zod_1.z.string().min(8).max(128),
+    repo: fleet_1.CloneRepo.optional(),
+    sealingKeyId: fleet_1.SealingKeyId.optional(),
+    sealedGitHubToken: fleet_1.SealedSecret.optional(),
+})
+    .strict()
+    .refine((body) => !body.sealedGitHubToken || (body.sealingKeyId && body.repo && (0, fleet_1.isGitHubRepo)(body.repo)), {
+    message: 'A sealed GitHub token goes only with a github.com repo and the sealing key it was sealed to',
+    path: ['sealedGitHubToken'],
+});
+/** retryClone's body: a fresh sealed token, sealed to a key from createVmSealingKey, after a sign-in error. */
+exports.RetryCloneRequest = zod_1.z
+    .object({ sealingKeyId: fleet_1.SealingKeyId.optional(), sealedGitHubToken: fleet_1.SealedSecret.optional() })
+    .strict()
+    .refine((body) => !body.sealedGitHubToken || body.sealingKeyId, { message: 'A sealed GitHub token goes with the sealing key it was sealed to', path: ['sealedGitHubToken'] });
 // ---------- Usage ----------
 const Month = zod_1.z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 exports.MemberUsage = zod_1.z
@@ -188,10 +220,16 @@ exports.serviceRoutes = {
         method: 'POST',
         path: '/v1/organizations/:organizationId/vms',
         auth: true,
-        body: zod_1.z.object({ name: zod_1.z.string().min(1).max(64), idempotencyKey: zod_1.z.string().min(8).max(128) }).strict(),
+        body: exports.CreateVmRequest,
         response: VmAction,
         status: 202,
     }),
+    /** A key for the GitHub token of the next create in this organization; needs the same access a create does. */
+    createSealingKey: (0, http_1.route)({ id: 'service.createSealingKey', method: 'POST', path: '/v1/organizations/:organizationId/sealing-keys', auth: true, body: zod_1.z.object({}).strict(), response: exports.SealingKey, status: 201 }),
+    /** A key for a fresh GitHub token for a running VM's retryClone. */
+    createVmSealingKey: (0, http_1.route)({ id: 'service.createVmSealingKey', method: 'POST', path: '/v1/vms/:vmId/sealing-key', auth: true, body: zod_1.z.object({}).strict(), response: exports.SealingKey, status: 201 }),
+    /** Runs a failed clone again; invalid_state unless the VM is running and its clone failed. Logged as retry_clone, without the token. */
+    retryClone: (0, http_1.route)({ id: 'service.retryClone', method: 'POST', path: '/v1/vms/:vmId/clone/retry', auth: true, body: exports.RetryCloneRequest, response: VmAction, status: 202 }),
     getVm: (0, http_1.route)({ id: 'service.getVm', method: 'GET', path: '/v1/vms/:vmId', auth: true, response: exports.SessionVm }),
     startVm: (0, http_1.route)({ id: 'service.startVm', method: 'POST', path: '/v1/vms/:vmId/start', auth: true, body: zod_1.z.object({}).strict(), response: VmAction, status: 202 }),
     stopVm: (0, http_1.route)({ id: 'service.stopVm', method: 'POST', path: '/v1/vms/:vmId/stop', auth: true, body: zod_1.z.object({}).strict(), response: VmAction, status: 202 }),
@@ -230,7 +268,10 @@ function createServiceClient(config) {
         signOut: () => (0, http_1.callRoute)(config, r.signOut, { body: {} }),
         getAccount: () => (0, http_1.callRoute)(config, r.getAccount),
         listVms: (organizationId) => (0, http_1.callRoute)(config, r.listVms, { params: { organizationId } }),
-        createVm: (organizationId, name, idempotencyKey) => (0, http_1.callRoute)(config, r.createVm, { params: { organizationId }, body: { name, idempotencyKey } }),
+        createVm: (organizationId, name, idempotencyKey, clone = {}) => (0, http_1.callRoute)(config, r.createVm, { params: { organizationId }, body: { name, idempotencyKey, ...clone } }),
+        createSealingKey: (organizationId) => (0, http_1.callRoute)(config, r.createSealingKey, { params: { organizationId }, body: {} }),
+        createVmSealingKey: (vmId) => (0, http_1.callRoute)(config, r.createVmSealingKey, { params: { vmId }, body: {} }),
+        retryClone: (vmId, request = {}) => (0, http_1.callRoute)(config, r.retryClone, { params: { vmId }, body: request }),
         getVm: (vmId) => (0, http_1.callRoute)(config, r.getVm, { params: { vmId } }),
         startVm: (vmId) => (0, http_1.callRoute)(config, r.startVm, { params: { vmId }, body: {} }),
         stopVm: (vmId) => (0, http_1.callRoute)(config, r.stopVm, { params: { vmId }, body: {} }),

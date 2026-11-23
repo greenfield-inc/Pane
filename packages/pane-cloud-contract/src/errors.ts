@@ -19,6 +19,7 @@ export const ERROR_STATUS = {
   awake_limit_reached: 409,
   wrong_host: 421,
   relay_key_changed: 409,
+  sealing_key_expired: 409,
   release_not_published: 422,
   internal: 500,
   no_capacity: 503,

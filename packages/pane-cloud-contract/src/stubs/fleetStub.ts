@@ -7,8 +7,12 @@ import {
   type OperationEnvelope,
   type OperationStatus,
   type PaneRelease,
+  requireSealedSecrets,
+  type SealedSecrets,
   verifyOperation,
 } from '../fleet';
+import type { GitHubTokenRecord } from '../sealing';
+import { StubClone, StubSealingKeys } from './clone';
 import type { RelayIdentity } from '../fleet';
 import { newRelayIdentity, pairingLinkFor } from './relayKey';
 import { bind, createRouteServer, listen, type RunningStub } from './server';
@@ -27,6 +31,10 @@ export interface FleetStub extends RunningStub {
   /** The fleet stopping a VM on its own (host maintenance or host loss). */
   hostStop(vmId: string, reason: 'host_maintenance' | 'host_lost'): void;
   setCpuSecondsUsed(vmId: string, seconds: number): void;
+  /** The VM's clone failing now with git's message, as a sign-in or network error does. */
+  failClone(vmId: string, message: string): void;
+  /** The GitHub token the stub host opened onto the VM's secrets volume, from its create or latest retry_clone. */
+  secretsVolumeToken(vmId: string): GitHubTokenRecord | null;
 }
 
 const notFound = (vmId: string) => new CloudApiError('vm_not_found', `The fleet has no VM ${vmId}.`, 'Create the VM first, or check its id.');
@@ -44,6 +52,16 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
   const relayKeys = new Map<string, RelayIdentity>();
   const operations = new Map<string, { status: OperationStatus; payloadJson: string; refusal: CloudApiError | null }>();
   const events: FleetEvent[] = [];
+  const sealingKeys = new StubSealingKeys(hostId, now);
+  const clones = new Map<string, StubClone>();
+  const volumeTokens = new Map<string, GitHubTokenRecord | null>();
+  let panes = 0;
+  /** The VM as a read sees it: each read moves its clone one step. */
+  const view = (vm: FleetVm): FleetVm => {
+    const clone = clones.get(vm.vmId);
+    if (clone) vm.clone = clone.read();
+    return vm;
+  };
 
   const record = (event: Omit<FleetEvent, 'id' | 'at'>) => events.push({ ...event, id: String(events.length + 1), at: iso() });
   const setState = (vm: FleetVm, state: FleetVm['state'], reason: FleetVm['stateReason'], requestId: string | null = null) => {
@@ -68,12 +86,21 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
   };
 
   /** Runs a checked operation; throws CloudApiError when the VM's state or the release refuses it. */
-  const runOperation = (payload: OperationEnvelope['payload']): OperationStatus['result'] => {
+  const runOperation = async (payload: OperationEnvelope['payload'], sealed: SealedSecrets | null): Promise<OperationStatus['result']> => {
     let result: OperationStatus['result'] = null;
     if (payload.operation === 'create') {
       const existing = vms.get(payload.vmId);
       if (existing && existing.state !== 'deleted') throw new CloudApiError('vm_exists', `VM ${payload.vmId} already exists.`, 'Use a new VM id, or start the existing VM.');
-      const vm: FleetVm = { vmId: payload.vmId, state: 'running', stateReason: null, hostId, memoryGiB: 8, paneVersion: null, updatedAt: iso() };
+      const { sealingKeyId, repo } = payload.parameters;
+      const opened = sealingKeyId ? await sealingKeys.use(sealingKeyId, 'slot', sealed?.githubToken) : null;
+      const vm: FleetVm = { vmId: payload.vmId, state: 'running', stateReason: null, hostId, memoryGiB: 8, paneVersion: null, clone: null, updatedAt: iso() };
+      if (repo) {
+        panes += 1;
+        const clone = new StubClone(repo, iso, `pane_${panes}`);
+        clones.set(vm.vmId, clone);
+        vm.clone = clone.status;
+      }
+      volumeTokens.set(vm.vmId, opened);
       vms.set(vm.vmId, vm);
       relayKeys.set(vm.vmId, newRelayIdentity('runpane.net'));
       record({ vmId: vm.vmId, kind: 'state_changed', state: 'running', reason: null, requestId: payload.requestId });
@@ -112,14 +139,30 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
           result = pairingLinkFor(relay, vm.vmId, now());
           break;
         }
+        case 'retry_clone': {
+          requireState(vm, 'running', 'retry_clone');
+          const clone = clones.get(vm.vmId);
+          if (!clone || clone.status.state !== 'failed') throw new CloudApiError('invalid_state', `retry_clone needs a failed clone; ${vm.vmId}'s is ${clone?.status.state ?? 'absent'}.`, 'Read the VM and retry only a failed clone.');
+          const { sealingKeyId } = payload.parameters;
+          if (sealingKeyId) volumeTokens.set(vm.vmId, await sealingKeys.use(sealingKeyId, `vm:${vm.vmId}`, sealed?.githubToken));
+          vm.clone = clone.restart();
+          break;
+        }
       }
     }
     return result;
   };
 
   const server = createRouteServer([
-    bind(fleetRoutes.submitOperation, ({ body }) => {
-      const { payload } = verifyOperation(body, options.trustedKeys, hostId, now());
+    bind(fleetRoutes.reserveSealingKey, () => sealingKeys.make('slot')),
+    bind(fleetRoutes.createVmSealingKey, ({ params }) => {
+      const vm = requireVm(params.vmId ?? '');
+      requireState(vm, 'running', 'A sealing key');
+      return sealingKeys.make(`vm:${vm.vmId}`);
+    }),
+    bind(fleetRoutes.submitOperation, async ({ body }) => {
+      const envelope = verifyOperation(body, options.trustedKeys, hostId, now());
+      const { payload } = envelope;
       const payloadJson = canonicalJson(payload);
       const seen = operations.get(payload.requestId);
       if (seen) {
@@ -129,7 +172,7 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
       }
       const status: OperationStatus = { requestId: payload.requestId, vmId: payload.vmId, operation: payload.operation, status: 'succeeded', error: null, result: null, acceptedAt: iso(), finishedAt: null };
       try {
-        status.result = runOperation(payload);
+        status.result = await runOperation(payload, requireSealedSecrets(envelope));
       } catch (error) {
         if (!(error instanceof CloudApiError)) throw error;
         operations.set(payload.requestId, { status: { ...status, status: 'failed', error: { code: error.code, message: error.message, next: error.next }, finishedAt: iso() }, payloadJson, refusal: error });
@@ -148,7 +191,7 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
     bind(fleetRoutes.getVm, ({ params }) => {
       const vm = vms.get(params.vmId ?? '');
       if (!vm) throw notFound(params.vmId ?? '');
-      return vm;
+      return view(vm);
     }),
     bind(fleetRoutes.getMetrics, ({ params, query }) => {
       const vm = requireVm(params.vmId ?? '');
@@ -177,6 +220,15 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
     hostStop(vmId, reason) {
       const vm = requireVm(vmId);
       setState(vm, 'stopped', reason);
+    },
+    failClone(vmId, message) {
+      const clone = clones.get(vmId);
+      const vm = requireVm(vmId);
+      if (!clone) throw new Error(`stub: VM ${vmId} has no clone`);
+      vm.clone = clone.fail(message);
+    },
+    secretsVolumeToken(vmId) {
+      return volumeTokens.get(vmId) ?? null;
     },
     setCpuSecondsUsed(vmId, seconds) {
       requireVm(vmId);
