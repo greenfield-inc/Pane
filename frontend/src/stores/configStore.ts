@@ -40,11 +40,6 @@ export function isNotesEnabled(config: AppConfig | null): boolean {
   return config?.notesEnabled === true;
 }
 
-/** Profiles is opt-in (D-106): its page, nav entry and + menu entry wait for this. */
-export function isProfilesEnabled(config: AppConfig | null): boolean {
-  return config?.profilesEnabled === true;
-}
-
 /** To-dos is experimental (T-39): every screen, shortcut and palette entry waits for this opt-in. */
 export function isTodosEnabled(config: AppConfig | null): boolean {
   return config?.todosEnabled === true;

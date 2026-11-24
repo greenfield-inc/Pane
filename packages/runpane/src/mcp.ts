@@ -96,12 +96,15 @@ interface McpServerOptions {
   readOnly?: boolean;
 }
 
+/** Toolsets older Panes served. A saved `--toolsets` that names one still starts, and serves nothing for it. */
+const RETIRED_TOOLSETS = ['profiles'];
+
 /** The tools a `--toolsets` / `--read-only` selection serves. `all` and `read` are built in. */
 function selectTools(tools: readonly McpTool[], options: McpServerOptions, every: readonly McpTool[] = tools): McpTool[] {
   const wanted = new Set(options.toolsets && options.toolsets.length > 0 ? options.toolsets : DEFAULT_TOOLSETS);
   // Toolset names come from every tool, so `--toolsets todos` still starts while To-dos is off (and serves none).
   const known = new Set(['all', 'read', ...every.flatMap((tool) => tool.toolsets)]);
-  const unknown = [...wanted].filter((name) => !known.has(name));
+  const unknown = [...wanted].filter((name) => !known.has(name) && !RETIRED_TOOLSETS.includes(name));
   if (unknown.length > 0) {
     throw new Error(`Unknown toolset(s): ${unknown.join(', ')}. Choose from: ${[...known].sort().join(', ')}.`);
   }

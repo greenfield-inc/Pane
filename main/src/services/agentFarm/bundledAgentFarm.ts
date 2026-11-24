@@ -56,9 +56,9 @@ export function bundledAgentFarmProcess(bundle: BundledAgentFarm, args: string[]
   return { executable: runtime, args: [bundle.entry, ...args, '--config-root', configRoot], env: { ...rest, ELECTRON_RUN_AS_NODE: '1' } };
 }
 
-/** What the Profiles page shows about the bundled Agent Farm. */
+/** The bundled Agent Farm's state after a start's install. */
 export interface BundledAgentFarmStatus {
-  state: 'missing' | 'installing' | 'ready' | 'failed';
+  state: 'missing' | 'ready' | 'failed';
   configRoot: string;
   version?: string;
   /** Installed plugin → version. */
@@ -131,28 +131,15 @@ export interface InstallBundledAgentFarmOptions {
  * Installs greenfield and the other bundled plugins into `<PANE_DIR>/agent-farm` with the
  * bundled Agent Farm, when the bundle (its version and plugin files) differs from what the
  * manifest there records; an unchanged bundle installs nothing. Called at startup without
- * waiting. Never throws: a failure is logged and returned in the status, for the Profiles page.
+ * waiting. Never throws: a failure is logged and returned in the status.
  */
-let lastStatus: BundledAgentFarmStatus | undefined;
-
-/** The bundled Agent Farm's state since this start; undefined before the installer first ran. */
-export function bundledAgentFarmStatus(): BundledAgentFarmStatus | undefined {
-  return lastStatus;
-}
-
 export async function installBundledAgentFarm(options: InstallBundledAgentFarmOptions): Promise<BundledAgentFarmStatus> {
-  const status = await installOnce(options);
-  lastStatus = status;
-  return status;
-}
-
-async function installOnce(options: InstallBundledAgentFarmOptions): Promise<BundledAgentFarmStatus> {
   let status: BundledAgentFarmStatus;
   const log = options.log ?? ((message: string) => console.log(message));
   const configRoot = agentFarmConfigRoot(options.paneDir);
   const bundle = options.bundle ?? bundledAgentFarm();
   if (!bundle) {
-    status = { state: 'missing', configRoot, plugins: {}, error: `This Pane build does not include ${AGENT_FARM_PACKAGE}, so bundled profiles can't be set up. Reinstall Pane from runpane.com.` };
+    status = { state: 'missing', configRoot, plugins: {}, error: `This Pane build does not include ${AGENT_FARM_PACKAGE}, so its Agent Farm profiles can't be set up. Reinstall Pane from runpane.com.` };
     log(`[AgentFarm] ${status.error}`);
     return status;
   }
@@ -177,8 +164,6 @@ async function installOnce(options: InstallBundledAgentFarmOptions): Promise<Bun
     log(`[AgentFarm] Bundled Agent Farm ${bundle.version} is already set up in ${configRoot} (manifest hash unchanged); nothing reinstalled.`);
     return status;
   }
-  status = { state: 'installing', configRoot, version: bundle.version, plugins: {} };
-  lastStatus = status;
   log(`[AgentFarm] Setting up bundled Agent Farm ${bundle.version} in ${configRoot} (${previous ? `bundle changed from ${previous.agentFarmVersion}` : 'first start'}).`);
   const run = options.run ?? runAgentFarm;
   const plugins: Record<string, string> = {};
@@ -194,7 +179,7 @@ async function installOnce(options: InstallBundledAgentFarmOptions): Promise<Bun
     await fs.writeFile(manifestPath, `${JSON.stringify({ hash, agentFarmVersion: bundle.version, plugins }, null, 2)}\n`);
   } catch (error) {
     const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);
-    status = { state: 'failed', configRoot, version: bundle.version, plugins, error: `Pane couldn't set up its bundled Agent Farm in ${configRoot}: ${reason}. Bundled profiles may be out of date; restart Pane to try again.` };
+    status = { state: 'failed', configRoot, version: bundle.version, plugins, error: `Pane couldn't set up its bundled Agent Farm in ${configRoot}: ${reason}. Its Agent Farm profiles may be out of date; restart Pane to try again.` };
     log(`[AgentFarm] ${status.error}`);
     return status;
   }
