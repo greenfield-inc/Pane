@@ -108,6 +108,7 @@ describe('ApprovalStore install id', () => {
   beforeEach(() => { db = new Database(':memory:'); });
   afterEach(() => db.close());
 
+  // SAFETY: PRAGMA table_info returns one row per column with these fields.
   const columns = () => (db.prepare('PRAGMA table_info(approvals)').all() as Array<{ name: string; notnull: number; dflt_value: unknown }>);
   const rowOf = (id: string) => db.prepare('SELECT machine, install_id, todo_id FROM approvals WHERE id = ?').get(id);
   // The approvals table as the first build with it made it: no todo_id, no install_id.
