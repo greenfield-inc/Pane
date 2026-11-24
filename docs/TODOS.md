@@ -715,7 +715,14 @@ runpane todos wake T-n
   another machine's Session, so it checks `report --todo` only when the Pane
   is in a Session there or the to-do is assigned to that tab (a number with no
   open to-do is then refused). Otherwise it records nothing on its own
-  to-dos and the report says so in a warning.
+  to-dos and the report says so in a warning. Progress is recorded only once
+  the report is accepted, so a refused report changes no to-do.
+- That rule needs an updated Pane on the worker's machine. A worker's machine
+  on an older Pane still checks `--todo` against its own to-dos: it refuses
+  the report when it has no open to-do with that number (so nothing reaches
+  the Session's machine), and otherwise records progress on its own,
+  unrelated T-n. An updated Session's machine still links its own T-n to any
+  report that arrives.
 - To-do links, the to-dos snapshot and a report with `--todo` carry the owning
   machine's install id (`installId`); a card whose link names another install
   id than the machine that sent it shows unlinked. Older machines send none.
