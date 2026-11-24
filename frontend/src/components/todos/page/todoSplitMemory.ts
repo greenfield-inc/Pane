@@ -23,6 +23,16 @@ const hiddenSchema = boundary.record(boundary.number);
 const closedSchema = boundary.record(boundary.object({ at: boundary.number, keys: boundary.array(boundary.string) }));
 
 /**
+ * On a to-do page of machine `pageMachine`: forgets that machine's closed or gone to-dos, from a list read from it
+ * (T-51 F-3). A list from another machine (one still shown just after a computer switch) says nothing about this
+ * machine's to-dos, so nothing is forgotten until the page's machine's own list is read.
+ */
+export function pruneForPage(storage: Storage, pageMachine: string, list: { machineId: string; rows: readonly TodoListRow[] } | null): void {
+  if (!list || list.machineId !== pageMachine) return;
+  pruneClosedTodos(storage, list.machineId, list.rows);
+}
+
+/**
  * Forgets the to-dos of machine `machineId` that are closed or gone, as its `rows` say; other machines' to-dos
  * stay (T-51): their T-5 is another to-do than this one's.
  */

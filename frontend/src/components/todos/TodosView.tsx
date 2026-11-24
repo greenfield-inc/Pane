@@ -5,7 +5,7 @@ import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { useNavigationStore, type SelectedTodo } from '../../stores/navigationStore';
 import { todoKey } from '../../../../shared/todoKey';
 import { openOnMachine } from '../../utils/machineRowActions';
-import { useRemoteTodosPoll, useShownHostId, useTodosStore, type CreatedTodo } from '../../stores/todosStore';
+import { shownSnapshot, useRemoteTodosPoll, useShownHostId, useTodosStore, type CreatedTodo } from '../../stores/todosStore';
 import { cn } from '../../utils/cn';
 import { Dropdown } from '../ui/Dropdown';
 import { useNow } from '../notify/useNow';
@@ -137,7 +137,7 @@ export function TodosView() {
     // The whole main area: the to-do page and one file may be its two splits (D-448).
     return (
       <SplitAreaContext.Provider value={MAIN_AREA}>
-        <TodoPage key={todoKey(shownHost, selected)} number={selected} onBack={() => selectTodo(null)} onOpenTodo={number => selectTodo(number)} />
+        <TodoPage key={todoKey(shownHost, selected)} number={selected} machineId={shownHost} onBack={() => selectTodo(null)} onOpenTodo={number => selectTodo(number)} />
       </SplitAreaContext.Provider>
     );
   }
@@ -146,8 +146,9 @@ export function TodosView() {
 
 function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; lastOpened: number | null }) {
   const entries = useTodoEntries();
-  const loaded = useTodosStore(state => state.snapshot !== null);
-  const gate = useTodosStore(state => state.snapshot?.gate);
+  const shownHost = useShownHostId();
+  const loaded = useTodosStore(state => shownSnapshot(state, shownHost) !== null);
+  const gate = useTodosStore(state => shownSnapshot(state, shownHost)?.gate);
   const act = useTodosStore(state => state.act);
   const actOn = useTodosStore(state => state.actOn);
   const now = useNow();
