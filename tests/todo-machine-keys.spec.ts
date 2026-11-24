@@ -162,20 +162,27 @@ test('T-51 F-2: a card open in the Session\'s column leaves it when its machine 
 // mini's Firecracker Grain, which owns T-27 → T-28.
 test('T-51: with the window switched to the mini, this computer\'s own card on its T-28 stays out of the mini\'s Session that owns another T-28', async ({ page }) => {
   const ownQ84: NotifyItem = { ...q84, id: 'q-84', machineId: undefined, machine: undefined };
-  await open(page, [ownQ84]);
+  // The mini's own card on its T-27: it docks once the mini's to-dos are read, so the checks below wait for them.
+  const miniQ86: NotifyItem = {
+    ...q84, id: 'mini:q-86', title: 'Q-86: Which BAA signer?', createdAt: Date.now() - 60_000, machineId: 'mini', machine: 'tylers-mac-mini',
+    source: { name: 'Firecracker Grain orchestrator', agent: 'Claude', session: { id: 'mini-hidden-27', name: 'T-27', paneId: 'h' } }, todo: { number: 27, title: 'Firecracker Grain' },
+  };
+  await open(page, [ownQ84, miniQ86]);
   await expect(row(page)).toBeVisible({ timeout: 15_000 });
   // Main switches this window to the mini: its to-dos (T-27 → T-28) are the list now; Notify stays this computer's.
   await page.evaluate((todos) => window.__paneTestElectronMock.switchTodosHost('mini', todos), { snapshot: local, details: localDetails });
   await row(page).click();
   await expect(page.locator(`[data-session-content-id="${FIRECRACKER}"]`)).toBeVisible();
-  await expect(page.getByTestId('approvals-nav')).toContainText('1');
-  await expect(page.getByTestId('session-approval-card')).toHaveCount(0);
-  await expect(row(page).getByTestId('session-approvals-count')).toHaveCount(0);
+  await expect(page.getByTestId('approvals-nav')).toContainText('2');
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(miniQ86.title);
+  await expect(page.getByTestId('session-approval-card-pager')).toHaveText('1 of 1');
+  await expect(row(page).getByTestId('session-approvals-count')).toHaveText('1');
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/t51-switched-dock.png` });
 
+  // ⌥⌘A opens the mini's card, never this computer's Q-84.
   await openSessionApprovalKey(page);
-  await expect(page.getByText('Nothing in this Session is waiting on you.')).toBeVisible();
-  await expect(page.getByTestId('approval-column')).toHaveCount(0);
+  await expect(page.getByTestId('approval-title')).toHaveText(miniQ86.title);
+  await expect(page.getByTestId('approval-pager')).toHaveText('1 of 1');
 
   // In Approvals it names this computer: its T-28 isn't the mini's.
   await page.getByTestId('approvals-nav').click();
