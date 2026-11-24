@@ -789,7 +789,7 @@ export function followSavedMachines(machines: NotifyMachines): void {
  * one this machine connected to is shown unlinked rather than as the wrong to-do; a link or machine with no
  * install id (an older Pane) is kept, since on screen a link is read with the card's machine.
  */
-export function withOwnTodoLinks(state: NotifySharedState, installId: string | undefined): NotifySharedState {
+function withOwnTodoLinks(state: NotifySharedState, installId: string | undefined): NotifySharedState {
   if (!installId || !state.items.some(item => item.todo?.installId && item.todo.installId !== installId)) return state;
   return { ...state, items: state.items.map(item => (item.todo?.installId && item.todo.installId !== installId ? { ...item, todo: undefined } : item)) };
 }
