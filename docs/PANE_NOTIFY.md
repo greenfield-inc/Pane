@@ -306,7 +306,9 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   sidebar (Files, Changes, To-dos) is never covered. The Session's title
   bar shows **Approvals n · n ready**, and a Session row's count in the
   sidebar opens the newest ready-again approval, or the first waiting one. A
-  Session's orchestrator chat docks one compact card above its composer:
+  Session's orchestrator chat docks one compact card above its composer, for
+  the cards of the machine the Session is on (none from a machine gone
+  offline):
   who asks, the title and subtitle across the card, and a bottom row with ‹ n
   of m ›, the reference count, Summary and **Open**; its pager stays in step
   with the column's. Its ✕ (**Dismiss**) takes the card out of that chat
