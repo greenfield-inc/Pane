@@ -112,6 +112,9 @@ test('T-51 W10: "Open its Session" on the mini\'s T-5, while switched to the min
   await page.getByTestId('todo-chip-agents').click();
   await expect(page.locator(`[data-session-content-id="${MINI_SESSION}"]`)).toBeVisible({ timeout: 15_000 });
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/t55-open-its-session.png` });
-  // Nothing was left for this computer to open: the window stays on the mini.
-  expect(await page.evaluate(() => window.__paneTestElectronMock.getNavigationMemory(null))).toBeNull();
+  // The window stays on the mini, and nothing asked this computer to open the mini's Session after a switch back.
+  const connection = await page.evaluate(() => window.electronAPI.remoteDaemon.getConnectionState());
+  expect(connection.data).toMatchObject({ mode: 'remote', activeProfileId: MINI });
+  const here = await page.evaluate(() => window.__paneTestElectronMock.getNavigationMemory(null));
+  expect(here?.view ?? null).not.toBe('pane-chat');
 });
