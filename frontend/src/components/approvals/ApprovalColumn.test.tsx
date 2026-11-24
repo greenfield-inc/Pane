@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { NotifyItem, NotifySnapshot } from '../../../../shared/types/notify';
 import { DEFAULT_NOTIFY_SETTINGS } from '../../../../shared/types/notify';
 import { useNotifyStore } from '../../stores/notifyStore';
 import { useApprovalColumnStore } from '../../stores/approvalColumnStore';
-import { ApprovalColumn } from './ApprovalColumn';
+import { useConfigStore } from '../../stores/configStore';
+import { ApprovalColumn, LinkTab } from './ApprovalColumn';
 
 const q20: NotifyItem = {
   id: 'q20',
@@ -111,4 +112,27 @@ describe('ApprovalColumn', () => {
   it('No agent can read replies right now', () => {
     expect(text(show({ ...q20, reply: { id: 'r', text: 'why?', at: 1, state: 'unread' } }))).toContain('No agent can read replies right now. You can still pick an option.');
   });
+});
+
+describe('ApprovalColumn: a link to another approval by Q-n', () => {
+  const linking: NotifyItem = { ...q20, id: 'q22', title: 'Q-22: Merge after the migration?', links: [{ label: 'Q-1', approval: 'Q-1' }] };
+  const link = { label: 'Q-1', approval: 'Q-1' };
+  const tab = (item: NotifyItem, target: string | undefined) => text(renderToStaticMarkup(<LinkTab item={item} link={link} target={target} onOpenApproval={() => undefined} />));
+
+  for (const todosEnabled of [true, false]) {
+    describe(`with To-dos ${todosEnabled ? 'on' : 'off'}`, () => {
+      beforeEach(() => useConfigStore.setState({ config: { todosEnabled } }));
+      afterEach(() => useConfigStore.setState({ config: null }));
+
+      it('offers the card it resolved to', () => {
+        expect(tab(linking, 'doozy-q1')).toBe('Q-1 is another approval. Open it here');
+      });
+
+      it('says so when its own Session has no such Q-n, rather than open another', () => {
+        expect(tab(linking, undefined)).toBe("Q-1 isn't here any more. Pane looks for Q-1 only among this Session's approvals, so it won't open another one with that name.");
+        const remote = { ...linking, machineId: 'macbook', machine: 'tylers-macbook-pro' };
+        expect(tab(remote, undefined)).toContain("only among this Session's approvals on tylers-macbook-pro,");
+      });
+    });
+  }
 });
