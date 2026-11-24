@@ -103,7 +103,7 @@ function agentFarmVersion(app, entry) {
 /** Checks the bundled Agent Farm in one packed app; returns its log line. */
 async function verifyAgentFarm(app, files, runnable) {
   const root = `/node_modules/${AGENT_FARM}/`;
-  if (!files.includes(`${root}package.json`)) throw new Error(`${app.asar} is missing ${AGENT_FARM}, so bundled profiles would fail on every install. Check it is a dependency in package.json.`);
+  if (!files.includes(`${root}package.json`)) throw new Error(`${app.asar} is missing ${AGENT_FARM}, so Agent Farm profiles would fail on every install without their own agent-farm. Check it is a dependency in package.json.`);
   const native = files.filter(file => file.startsWith(root) && AGENT_FARM_NATIVE.test(file));
   if (native.length) throw new Error(`${app.asar} carries native binaries inside ${AGENT_FARM}, for example ${native[0]}. Pane runs it as plain JavaScript; check the package before bumping it.`);
   const { version } = JSON.parse(asar.extractFile(app.asar, path.join('node_modules', ...AGENT_FARM.split('/'), 'package.json')).toString('utf8'));

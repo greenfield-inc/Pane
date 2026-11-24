@@ -1,1 +1,0 @@
-# standing-rules (test fixture)

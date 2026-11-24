@@ -6,7 +6,7 @@ import { useHotkey } from '../../hooks/useHotkey';
 import { PanelTabBarProps, PanelCreateOptions } from '../../types/panelComponents';
 import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES } from '../../../../shared/types/panels';
 import { useSession } from '../../contexts/SessionContext';
-import { isChatTabsEnabled, isNotesEnabled, isProfilesEnabled, useConfigStore } from '../../stores/configStore';
+import { isChatTabsEnabled, isNotesEnabled, useConfigStore } from '../../stores/configStore';
 import { showActionError } from '../../stores/errorStore';
 
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
@@ -26,8 +26,6 @@ import { focusChatSoon } from '../../services/regionFocus';
 import { SwitchToChatPaletteEntry } from './SwitchToChat';
 import { CustomCommandForm } from './CustomCommandForm';
 import { AgentFarmProfileDialog } from '../chatTab/AgentFarmProfileDialog';
-import { LaunchProfileDialog } from '../profiles/LaunchProfileDialog';
-import type { LibraryProfile } from '../../../../shared/types/profiles';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
 
 const ADD_TOOL_MENU_WIDTH = 280;
@@ -110,14 +108,11 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const [resolvedRunScript, setResolvedRunScript] = useState<{ command: string; source: string } | null>(null);
   const { config, fetchConfig, updateConfig } = useConfigStore();
   const chatTabs = isChatTabsEnabled(config);
-  // Pane's profiles wait for Settings › Advanced › Profiles (D-106); with chat tabs on, Profile… still opens an Agent Farm profile by name.
-  const profilesOn = isProfilesEnabled(config);
   const chatAgents = menuChatAgents(useChatAgents(chatTabs ? window.electronAPI.chatTab : undefined));
   const [showDropdown, setShowDropdown] = useState(false);
   // Read the catalog again each time the menu opens, so an agent installed meanwhile is offered.
   useEffect(() => { if (showDropdown && chatTabs) void refreshChatAgents(window.electronAPI.chatTab); }, [showDropdown, chatTabs]);
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
-  const [launchingProfile, setLaunchingProfile] = useState<LibraryProfile | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const addToolButtonRef = useRef<HTMLButtonElement>(null);
   const dropdownMenuRef = useRef<HTMLDivElement>(null);
@@ -676,19 +671,6 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                   ))}
                 </>
               )}
-              {/* Profiles run in terminal tabs, so "Profile…" is there with chat tabs off too. */}
-              {profilesOn && !chatTabs && session && (
-                <button
-                  type="button"
-                  ref={itemRef()}
-                  role="menuitem"
-                  className={menuItemClass}
-                  onClick={() => { setShowDropdown(false); setProfileDialogOpen(true); }}
-                >
-                  <Sprout className="w-3.5 h-3.5 flex-shrink-0" />
-                  <span className="truncate">Profile…</span>
-                </button>
-              )}
               {/* Terminal - plain terminal */}
               {availablePanelTypes.includes('terminal') && (
                 <button
@@ -896,12 +878,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
       <AgentFarmProfileDialog
         onClose={() => setProfileDialogOpen(false)}
         onCreate={async launch => { await window.electronAPI.chatTab.create({ sessionId: session.id, launch }); }}
-        onLaunchProfile={profilesOn ? profile => { setProfileDialogOpen(false); setLaunchingProfile(profile); } : undefined}
-        byName={chatTabs}
       />
-    )}
-    {launchingProfile && session && (
-      <LaunchProfileDialog profile={launchingProfile} defaults={{ repoId: session.projectId }} onClose={() => setLaunchingProfile(null)} onLaunched={() => setLaunchingProfile(null)} />
     )}
 
     </>

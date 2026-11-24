@@ -62,6 +62,17 @@ describe('NotifyQueue with its store', () => {
     expect(item(queueWith(), 'disk-1')).toMatchObject(closed);
   });
 
+  it('a card whose asker has no tab, such as a removed profile run, ends at the next start instead of waiting', () => {
+    const before = queueWith();
+    void before.ask({ question: { ui: 'options', title: 'Ship it?', choices: [{ label: 'Yes' }, { label: 'No' }], optionsOnly: true }, source: { name: 'greenfield run', agent: 'Pane profile', paneId: 'p1' }, id: 'run-card' });
+    expect(item(before, 'run-card')).toMatchObject({ state: 'waiting' });
+
+    const after = queueWith();
+    expect(item(after, 'run-card')).toMatchObject({ state: 'expired', closed: { by: 'pane', reason: 'the asker stopped waiting' } });
+    expect(after.snapshot().queue).toEqual([]);
+    expect(store.readItem('run-card')?.state).toBe('expired');
+  });
+
   it('J6: an item outlives a restart, and its answer goes to the tab once', async () => {
     const before = queueWith();
     void before.ask({ question: ask('Q-5: ship?'), source: orchestrator });

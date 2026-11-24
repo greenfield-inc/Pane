@@ -12,7 +12,6 @@ import type {
 } from '../shared/types/remoteDaemon';
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop';
-import type { ProfileLibraryView } from '../shared/types/profiles';
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
@@ -115,9 +114,6 @@ export type ElectronApiMockOptions = {
   /** The host runs an older Pane with no Pane order commands: they fail as the remote client says. */
   paneOrderUnsupported?: boolean;
   initialLoops?: Loop[];
-  /** profiles:list answer (the Profiles page); profiles:get reads each file's text from profileYaml. */
-  profileLibrary?: ProfileLibraryView;
-  profileYaml?: Record<string, string>;
   /** remote-daemon:list-tailnet-machines answer. */
   tailnetMachines?: TailnetMachineList;
   /** Remote connections end in `error` with this message instead of connecting. */
@@ -452,7 +448,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockSessions = clone(mockOptions.initialSessions ?? []);
     const mockArchivedSessions: JsonObject[] = [];
     let mockLoops = clone(mockOptions.initialLoops ?? []);
-    const mockProfiles: ProfileLibraryView = clone(mockOptions.profileLibrary ?? { profiles: [] });
     /** A plausible loops:preview answer for the form's preset shapes. */
     const previewLoopCron = (cron: string): LoopSchedulePreview => {
       const fields = cron.trim().split(/\s+/);
@@ -743,9 +738,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         }
         if (prop === 'onSessionCreated') {
           return (callback: MockEventCallback) => subscribe('session:created', callback);
-        }
-        if (prop === 'onProfilesChanged') {
-          return (callback: MockEventCallback) => subscribe('profiles:changed', callback);
         }
         if (prop === 'onLoopsChanged') {
           return (callback: MockEventCallback) => subscribe('loops:changed', callback);
@@ -1810,25 +1802,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }),
       resourceMonitor: namespace({
         getSnapshot: () => success(null),
-      }),
-      profiles: namespace({
-        list: () => success(clone(mockProfiles)),
-        get: (name: string) => {
-          const profile = mockProfiles.profiles.find((candidate) => candidate.name === name);
-          return profile ? success({ profile: clone(profile), yaml: mockOptions.profileYaml?.[name] ?? '' }) : Promise.resolve({ success: false, error: `No profile is named "${name}".` });
-        },
-        setEnabled: (name: string, enabled: boolean) => {
-          trackCall('profiles:set-enabled', [name, enabled]);
-          for (const profile of mockProfiles.profiles) if (profile.name === name) profile.enabled = enabled;
-          return success(clone(mockProfiles));
-        },
-        launch: (input: JsonObject) => {
-          trackCall('profiles:launch', [input]);
-          return Promise.resolve({ success: false, error: 'Launching is not available in this preview.' });
-        },
-        runs: () => success([]),
-        setOutcome: () => success(null),
-        stop: () => success(null),
       }),
       loops: namespace({
         list: () => success(clone(mockLoops)),

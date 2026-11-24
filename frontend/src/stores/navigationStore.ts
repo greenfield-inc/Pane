@@ -80,7 +80,6 @@ interface NavigationState {
   navigateToMissionControl: () => void;
   navigateToSsh: () => void;
   navigateToLoops: () => void;
-  navigateToProfiles: () => void;
   /** Autopilot spans every Session, so it clears the project scope. */
   navigateToAutopilot: () => void;
   /**
@@ -260,12 +259,6 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   // Loops span every project, so the page clears the project scope.
   navigateToLoops: () => set({
     activeView: 'loops',
-    activeProjectId: null
-  }),
-
-  // Profiles span every project, like Loops.
-  navigateToProfiles: () => set({
-    activeView: 'profiles',
     activeProjectId: null
   }),
 

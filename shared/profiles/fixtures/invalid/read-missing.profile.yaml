@@ -1,6 +1,0 @@
-# expect: READ_MISSING
-format: pane-profile/1
-name: read-missing
-version: 1.0.0
-agents:
-  writer: { runs: claude/claude-opus-5-5, reads: [no-such-file] }

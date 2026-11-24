@@ -1105,12 +1105,7 @@
         "todos start",
         "todos stop",
         "todos snooze",
-        "todos wake",
-        "profiles",
-        "profiles list",
-        "profiles show",
-        "profiles launch",
-        "profiles runs"
+        "todos wake"
       ],
       "properties": {
         "default": {
@@ -1621,21 +1616,6 @@
           "$ref": "#/$defs/helpLines"
         },
         "todos wake": {
-          "$ref": "#/$defs/helpLines"
-        },
-        "profiles": {
-          "$ref": "#/$defs/helpLines"
-        },
-        "profiles list": {
-          "$ref": "#/$defs/helpLines"
-        },
-        "profiles show": {
-          "$ref": "#/$defs/helpLines"
-        },
-        "profiles launch": {
-          "$ref": "#/$defs/helpLines"
-        },
-        "profiles runs": {
           "$ref": "#/$defs/helpLines"
         },
         "sessions pin": {
