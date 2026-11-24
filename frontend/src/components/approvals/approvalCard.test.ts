@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { todoKey } from '../../../../shared/todoKey';
-import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dockKey, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals } from './approvalCard';
+import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dockKey, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals, sessionColumnNext } from './approvalCard';
 
 const q20: NotifyItem = {
   id: 'q20',
@@ -143,6 +143,18 @@ describe('the approval card', () => {
     // The MacBook's own Session, opened from All machines, docks the MacBook's card and not this computer's.
     const onMacbook = { machineId: 'macbook', sessionIds: new Set<string>(), todoKeys: new Set([todoKey('macbook', 28)]) };
     expect(sessionApprovals([local28, macbook28], 's1', onMacbook).map(item => item.id)).toEqual(['macbook:q-84']);
+  });
+
+  it('T-51 F-2: a Session\'s open column moves on when its card\'s machine goes offline or the card is another machine\'s', () => {
+    const mine = { ...q20, id: 'mine', machineId: 'macbook' };
+    const other = { ...q20, id: 'other', machineId: 'macbook', createdAt: 2_000 };
+    expect(sessionColumnNext(mine, [mine, other], 'macbook')).toEqual({ keep: true });
+    // Answered or gone from the list, it stays for its receipt.
+    expect(sessionColumnNext({ ...mine, state: 'answered' }, [other], 'macbook')).toEqual({ keep: true });
+    expect(sessionColumnNext(undefined, [other], 'macbook')).toEqual({ keep: true });
+    expect(sessionColumnNext({ ...mine, unreachable: true }, [other], 'macbook')).toEqual({ open: 'other' });
+    expect(sessionColumnNext({ ...mine, unreachable: true }, [], 'macbook')).toEqual({ close: true });
+    expect(sessionColumnNext(mine, [], 'local')).toEqual({ close: true });
   });
 
   it('a Session whose approvals were dismissed has none open, so no count or badge', () => {

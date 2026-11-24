@@ -220,6 +220,17 @@ export function sessionApprovals(items: readonly NotifyItem[], sessionId: string
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
+/**
+ * What a Session's open column does with its card (T-51): keeps it, unless the card is from another machine
+ * than the Session's or its machine went offline, when the next of the Session's cards takes its place, or the
+ * column closes. An answered card stays (its receipt shows); only the card's machine or reach moves it on.
+ */
+export function sessionColumnNext(selected: NotifyItem | undefined, waiting: readonly NotifyItem[], machineId: string): { keep: true } | { open: string } | { close: true } {
+  if (!selected || (!selected.unreachable && machineOfItem(selected) === machineId)) return { keep: true };
+  const next = firstToOpen(waiting.filter(item => item.id !== selected.id));
+  return next ? { open: next.id } : { close: true };
+}
+
 /** "1 ready": how many of these came back updated and wait again. */
 export function readyCount(items: readonly NotifyItem[]): number {
   return items.filter(item => item.state === 'waiting' && item.readyAgain !== undefined).length;

@@ -29,7 +29,7 @@ import { checkCard, fitLinks } from '../services/notify/cardCheck';
 import { summaryPage } from '../services/notify/summaryPage';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import type { MachineHealthCard } from '../../../shared/types/machineHealth';
-import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage } from '../../../shared/types/notify';
+import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage, type NotifyTodoLink } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import { thisMachineName, type ApprovalStore } from '../services/approvals/approvalStore';
@@ -216,6 +216,19 @@ const machineHealthCardSchema = boundary.object({
  * kind, a changed field) is dropped, and the item shows as a plain card whose choices still answer it.
  */
 const machineHealthField: BoundarySchema<MachineHealthCard | undefined> = { decode: current => decodeOptionalBoundary(current.value, machineHealthCardSchema) };
+const todoLinkSchema = boundary.object({
+  number: boundary.number,
+  title: boundary.string,
+  kind: boundary.optional(boundary.enumeration('review', 'stuck', 'question', 'reminder')),
+  installId: boundary.optional(boundary.string),
+});
+/**
+ * A card's to-do link, read on its own (T-51): one this Pane can't read (a newer machine's kind, say) leaves the
+ * card unlinked, rather than refusing the card and with it every card that machine shares.
+ */
+const tolerantTodoLinkSchema: BoundarySchema<NotifyTodoLink | undefined> = {
+  decode: (cursor) => decodeOptionalBoundary(cursor.value, todoLinkSchema),
+};
 const notifyItemSchema = boundary.object({
   id: boundary.nonEmptyString,
   ui: boundary.enumeration('options', 'approve', 'ask', 'secret', 'info'),
@@ -302,12 +315,7 @@ const notifyItemSchema = boundary.object({
   relayedBy: boundary.optional(boundary.object({ panelId: boundary.string, name: boundary.string })),
   // The to-do it is linked to, by its number on the asking machine (T-51): the renderer reads it with the card's
   // machineId, so another machine's T-28 names that machine and never matches this one's. Absent from older machines.
-  todo: boundary.optional(boundary.object({
-    number: boundary.number,
-    title: boundary.string,
-    kind: boundary.optional(boundary.enumeration('review', 'stuck', 'question', 'reminder')),
-    installId: boundary.optional(boundary.string),
-  })),
+  todo: tolerantTodoLinkSchema,
 });
 const notifySharedStateSchema = boundary.object({
   machine: boundary.string,
