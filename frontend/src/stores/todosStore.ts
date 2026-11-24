@@ -257,8 +257,10 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     if (shownNow() !== machineId) return null;
     if (detailGenerations.get(key) !== generation) return get().details.get(key) ?? null;
     if (!response?.success || !response.data) return null;
-    // Stamped with its machine, so its layout memory and "Open its Session" name the right one (T-51).
-    const detail = { ...(api.hostIsHere ? detailAsThisMachine(response.data) : response.data), machineId };
+    // Stamped with its machine, so its layout memory and "Open its Session" name the right one (T-51). Main
+    // sends none; a page that already names its machine keeps it.
+    const read = api.hostIsHere ? detailAsThisMachine(response.data) : response.data;
+    const detail = { ...read, machineId: read.machineId ?? machineId };
     set(state => ({ details: new Map(state.details).set(key, detail) }));
     return detail;
   },
