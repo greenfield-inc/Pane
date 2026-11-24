@@ -69,7 +69,7 @@ describe('a Session\'s to-dos (T-22, T-23)', () => {
       item('perm', { session: 'hidden-3' }),
       item('conn', { connected: 'hidden-10' }),
       item('stray', { session: 'nobody' }),
-    ], rows);
+    ], rows, 'local');
     expect(Object.fromEntries(counts)).toEqual({ 3: 1, 10: 3 });
   });
 });
@@ -85,6 +85,13 @@ describe('to-dos keyed by machine and number (T-51)', () => {
     expect(inTodoScope(fromMacbook(item('q-84', { session: 'workspaces', todo: 28 })), scope)).toBe(false);
     expect(inTodoScope(item('local-28', { todo: 28 }), scope)).toBe(true);
     expect(inTodoScope({ ...item('local-28', { todo: 28 }), machineId: 'local' }, scope)).toBe(true);
+  });
+
+  it('a row\'s count takes only its own machine\'s card on that number (T-51 PR 5, the lint rule\'s hit)', () => {
+    const counts = approvalsByTodo([fromMacbook(item('q-84', { todo: 28 })), item('local-28', { todo: 28 })], mini, 'local');
+    expect(Object.fromEntries(counts)).toEqual({ 27: 1 });
+    expect(Object.fromEntries(approvalsByTodo([fromMacbook(item('q-84', { todo: 28 }))], mini, 'local'))).toEqual({});
+    expect(Object.fromEntries(approvalsByTodo([fromMacbook(item('q-84', { todo: 28 }))], mini, 'macbook'))).toEqual({ 27: 1 });
   });
 
   it('a hidden Session\'s card counts only from the to-do\'s own machine', () => {

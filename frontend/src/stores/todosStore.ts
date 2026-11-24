@@ -689,12 +689,13 @@ export interface SessionTodoApprovals {
 export function useSessionTodoApprovals(sessionId: string, machineId?: string): SessionTodoApprovals {
   const items = useNotifyStore(selectNotifyItems);
   const shownHost = useShownHostId();
-  const rows = useTodosStore(state => machineRows(state, sessionTodoMachine(machineId, shownHost), shownHost));
+  const machine = sessionTodoMachine(machineId, shownHost);
+  const rows = useTodosStore(state => machineRows(state, machine, shownHost));
   const scope = useSessionTodoScope(sessionId, machineId);
   return useMemo(() => {
     const waiting = sessionTodoApprovals(items, scope).sort((a, b) => a.createdAt - b.createdAt);
-    return { items: waiting, byTodo: approvalsByTodo(waiting, rows ?? []) };
-  }, [items, rows, scope]);
+    return { items: waiting, byTodo: approvalsByTodo(waiting, rows ?? [], machine) };
+  }, [items, rows, scope, machine]);
 }
 
 /** A Session's To-dos tab's amber count (T-23): its to-dos' approvals waiting on you, each once. */

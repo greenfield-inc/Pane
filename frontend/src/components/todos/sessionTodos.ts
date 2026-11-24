@@ -1,7 +1,7 @@
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { isOpenTodoState, type TodoListRow } from '../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
-import { machineOfItem, todoKeyOfItem, todoKeyOfRow, type TodoKey } from '../../../../shared/todoKey';
+import { machineOfItem, todoKey, todoKeyOfItem, todoKeyOfRow, type TodoKey } from '../../../../shared/todoKey';
 
 /**
  * A Session's to-dos (T-22, T-23): the top-level to-dos it requested (its orchestrator created them), or, for a
@@ -65,16 +65,19 @@ export function todoRefOf(item: NotifyItem, rows: readonly TodoListRow[], sessio
 
 /**
  * How many of `approvals` each top-level to-do has (T-37): one linked to it or to one of its sub-to-dos, or
- * asked (or connected) in its own hidden Session. `rows` is the machine's whole list, sub-to-dos included.
+ * asked (or connected) in its own hidden Session. `rows` is machine `machineId`'s whole list, sub-to-dos
+ * included, and the result is keyed by its numbers. A card is matched to a row by key (T-51), so another
+ * machine's card on the same T-n never counts.
  */
-export function approvalsByTodo(approvals: readonly NotifyItem[], rows: readonly TodoListRow[]): Map<number, number> {
-  const byNumber = new Map(rows.map(({ todo }) => [todo.number, todo]));
+export function approvalsByTodo(approvals: readonly NotifyItem[], rows: readonly TodoListRow[], machineId: string): Map<number, number> {
+  const byKey = new Map(rows.map(row => [todoKeyOfRow(machineId, row), row.todo]));
   const counts = new Map<number, number>();
   for (const item of approvals) {
     const connected = item.connected?.kind === 'session' ? item.connected.id : undefined;
     const ownedBy = (sessionId: string | undefined) => (sessionId ? rows.find(({ todo }) => todo.sessionId === sessionId && todo.parentNumber === null)?.todo : undefined);
-    let todo = (item.todo ? byNumber.get(item.todo.number) : undefined) ?? ownedBy(item.source.session?.id) ?? ownedBy(connected);
-    for (let depth = 0; todo && todo.parentNumber !== null && depth < rows.length; depth += 1) todo = byNumber.get(todo.parentNumber);
+    const linked = todoKeyOfItem(item);
+    let todo = (linked ? byKey.get(linked) : undefined) ?? ownedBy(item.source.session?.id) ?? ownedBy(connected);
+    for (let depth = 0; todo && todo.parentNumber !== null && depth < rows.length; depth += 1) todo = byKey.get(todoKey(machineId, todo.parentNumber));
     if (todo) counts.set(todo.number, (counts.get(todo.number) ?? 0) + 1);
   }
   return counts;

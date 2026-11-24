@@ -28,6 +28,7 @@ export function todoForSession(
   rows: readonly SessionTodoRow[] | undefined,
   origin: TodoSessionOrigin | null,
 ): TodoSessionLink | null {
+  // oxlint-disable-next-line pane/no-bare-todo-number -- The Session, its record's todoNumber, the origin (matched by Session id first) and `rows` all come from the computer the window shows, so every number here is that machine's.
   const byNumber = (number: number) => rows?.find((row) => row.todo.number === number);
   if (origin && origin.sessionId === session.id) return link(origin.number, byNumber(origin.number), true);
   const recorded = session.todoNumber ?? undefined;
