@@ -138,6 +138,8 @@ export interface ApprovalsReturn {
 }
 
 export interface TodoSessionOrigin {
+  /** The machine the to-do is on, as the viewer names it (`local` or a saved machine's id). */
+  machineId: string;
   sessionId: string;
   number: number;
 }

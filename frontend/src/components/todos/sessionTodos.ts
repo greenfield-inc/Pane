@@ -34,10 +34,13 @@ export const EMPTY_TODO_SCOPE: TodoApprovalScope = emptyTodoScope(LOCAL_MACHINE_
 export function todoApprovalScope(rows: readonly TodoListRow[], sessionId: string, machineId: string = LOCAL_MACHINE_ID): TodoApprovalScope {
   const own = sessionTodos(rows, sessionId).filter(({ todo }) => isOpenTodoState(todo.state));
   if (own.length === 0) return emptyTodoScope(machineId);
-  const numbers = new Set(own.map(({ todo }) => todo.number));
-  for (const { todo } of rows) if (todo.parentNumber !== null && numbers.has(todo.parentNumber) && isOpenTodoState(todo.state)) numbers.add(todo.number);
+  const todoKeys = new Set(own.map(row => todoKeyOfRow(machineId, row)));
+  // Their open sub-to-dos join them.
+  for (const row of rows) {
+    const parent = row.todo.parentNumber;
+    if (parent !== null && todoKeys.has(todoKey(machineId, parent)) && isOpenTodoState(row.todo.state)) todoKeys.add(todoKeyOfRow(machineId, row));
+  }
   const sessionIds = new Set(own.flatMap(({ todo }) => (todo.sessionId && todo.sessionId !== sessionId ? [todo.sessionId] : [])));
-  const todoKeys = new Set(rows.filter(({ todo }) => numbers.has(todo.number)).map(row => todoKeyOfRow(machineId, row)));
   return { machineId, sessionIds, todoKeys };
 }
 
@@ -64,21 +67,25 @@ export function todoRefOf(item: NotifyItem, rows: readonly TodoListRow[], sessio
 }
 
 /**
- * How many of `approvals` each top-level to-do has (T-37): one linked to it or to one of its sub-to-dos, or
- * asked (or connected) in its own hidden Session. `rows` is machine `machineId`'s whole list, sub-to-dos
- * included, and the result is keyed by its numbers. A card is matched to a row by key (T-51), so another
- * machine's card on the same T-n never counts.
+ * How many of `approvals` each top-level to-do has (T-37), by its key: one linked to it or to one of its sub-to-dos,
+ * or asked (or connected) in its own hidden Session. `rows` is machine `machineId`'s whole list, sub-to-dos included.
+ * Only that machine's cards count (T-51): a link is matched by key, and another machine's card asked in a Session
+ * with the same id counts nowhere.
  */
-export function approvalsByTodo(approvals: readonly NotifyItem[], rows: readonly TodoListRow[], machineId: string): Map<number, number> {
+export function approvalsByTodo(approvals: readonly NotifyItem[], rows: readonly TodoListRow[], machineId: string): Map<TodoKey, number> {
+  const counts = new Map<TodoKey, number>();
+  const own = approvals.filter(item => machineOfItem(item) === machineId);
+  if (own.length === 0) return counts;
   const byKey = new Map(rows.map(row => [todoKeyOfRow(machineId, row), row.todo]));
-  const counts = new Map<number, number>();
-  for (const item of approvals) {
+  const ownedBy = (sessionId: string | undefined) => (sessionId ? rows.find(({ todo }) => todo.sessionId === sessionId && todo.parentNumber === null)?.todo : undefined);
+  for (const item of own) {
     const connected = item.connected?.kind === 'session' ? item.connected.id : undefined;
-    const ownedBy = (sessionId: string | undefined) => (sessionId ? rows.find(({ todo }) => todo.sessionId === sessionId && todo.parentNumber === null)?.todo : undefined);
     const linked = todoKeyOfItem(item);
     let todo = (linked ? byKey.get(linked) : undefined) ?? ownedBy(item.source.session?.id) ?? ownedBy(connected);
     for (let depth = 0; todo && todo.parentNumber !== null && depth < rows.length; depth += 1) todo = byKey.get(todoKey(machineId, todo.parentNumber));
-    if (todo) counts.set(todo.number, (counts.get(todo.number) ?? 0) + 1);
+    if (!todo) continue;
+    const key = todoKey(machineId, todo.number);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return counts;
 }
