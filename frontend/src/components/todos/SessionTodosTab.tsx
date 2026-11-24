@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from 'react';
 import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ListTodo, Plus } from 'lucide-react';
 import { todoRef } from '../../../../shared/types/todos';
-import { useSessionTodoApprovals, useSessionTodoEntries } from '../../stores/todosStore';
+import { sessionTodoMachine, useSessionTodoApprovals, useSessionTodoEntries, useShownHostId, type CreatedTodo } from '../../stores/todosStore';
+import { todoKeyOfItem, todoKeyOfRow } from '../../../../shared/todoKey';
+import { openOnMachine } from '../../utils/machineRowActions';
 import { useNotifyStore } from '../../stores/notifyStore';
 import { useApprovalColumnStore, type ApprovalSurface } from '../../stores/approvalColumnStore';
 import { cn } from '../../utils/cn';
@@ -59,6 +61,8 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
   const stops = useMemo(() => listStops(groups, folded), [groups, folded]);
   // What Answer opens and the pager walks: the same approvals as the tabs' counts (T-37).
   const approvals = useSessionTodoApprovals(sessionId, machineId).items;
+  const shownHost = useShownHostId();
+  const todosMachine = sessionTodoMachine(machineId, shownHost);
   const [creating, setCreating] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const narrow = useNarrow(rootRef);
@@ -68,6 +72,12 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
   const showList = useCallback((selected?: string) => update(sessionId, selected === undefined ? { view: { kind: 'list' } } : { view: { kind: 'list' }, selected }), [sessionId, update]);
   const openNumber = useCallback((number: number) => update(sessionId, { view: { kind: 'todo', number }, selected: keyOf(number) }), [keyOf, sessionId, update]);
   const openApproval = useCallback((id: string, key: string) => update(sessionId, { view: { kind: 'approval', id }, selected: key }), [sessionId, update]);
+
+  const openCreated = (created: CreatedTodo) => {
+    // Made on another machine (T-51): it opens there, as the To-dos list opens one, never as this machine's to-do with that number.
+    if (sessionTodoMachine(created.machineId, shownHost) === todosMachine) openNumber(created.number);
+    else void openOnMachine(created.machineId, { kind: 'todo', id: created.number, name: todoRef(created.number) });
+  };
 
   const { view } = memory;
   // An approval answered elsewhere (Approvals, the chat card, another machine) leaves the Decide view for the list (T-23 QA F4).
@@ -121,7 +131,7 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
         }}
         onOpen={(entry) => openNumber(entry.row.todo.number)}
         onAnswer={(entry) => {
-          const id = entry.row.status.waitingApprovalId ?? approvals.find(item => item.todo?.number === entry.row.todo.number)?.id;
+          const id = entry.row.status.waitingApprovalId ?? approvals.find(item => todoKeyOfItem(item) === todoKeyOfRow(todosMachine, entry.row))?.id;
           if (id) openApproval(id, entry.key);
           else openNumber(entry.row.todo.number);
         }}
@@ -134,7 +144,7 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
     <div ref={rootRef} className="flex h-full min-h-0 min-w-0 flex-col bg-bg-primary text-[14px] text-text-primary" data-testid="session-todos-tab" data-view={view.kind} data-narrow={narrow || undefined}>
       {body}
       {/* A to-do made here is yours (the dialog says so), so the list may not hold it: it opens here all the same (T-23 QA F1). */}
-      {creating && <NewTodoDialog onClose={() => setCreating(false)} onCreated={(created) => { setCreating(false); openNumber(created.number); }} />}
+      {creating && <NewTodoDialog onClose={() => setCreating(false)} onCreated={(created) => { setCreating(false); openCreated(created); }} />}
     </div>
   );
 }

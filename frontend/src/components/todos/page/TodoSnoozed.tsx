@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Moon } from 'lucide-react';
 import type { TodoAction, TodoDetail, TodoRecord, TodoSnooze } from '../../../../../shared/types/todos';
-import { useTodosStore } from '../../../stores/todosStore';
+import { snoozeRequestedFor, useTodosStore } from '../../../stores/todosStore';
 import { cn } from '../../../utils/cn';
 import { useNow } from '../../notify/useNow';
 import { isTypingTarget, overlayOpen } from '../todosNavigation';
@@ -147,7 +147,7 @@ export function usePageSnooze(detail: TodoDetail, anchorOf: () => DOMRect | null
     setAnchor(anchorOf() ?? new DOMRect(window.innerWidth - 24, 52, 0, 0));
   }, [anchorOf, can]);
   useEffect(() => {
-    if (request !== number) return;
+    if (!snoozeRequestedFor(request, number)) return;
     useTodosStore.getState().requestSnooze(null);
     open();
   }, [request, number, open]);
