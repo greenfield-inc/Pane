@@ -3,7 +3,7 @@ import { gotoApp } from './electronApiMock';
 import { installSessionsFixture, sessionFixture } from './orchestrationSessionsFixture';
 import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
 import type { MachineState } from '../shared/types/machineConnections';
-import type { TodoListRow, TodoRecord, TodosSnapshot } from '../shared/types/todos';
+import type { TodoDetail, TodoListRow, TodoRecord, TodosSnapshot } from '../shared/types/todos';
 
 // T-51, renderer only: two machines each have a T-28, and they are different to-dos. The MacBook's Q-84 is linked to
 // the MacBook's T-28; this computer's Session "Firecracker Grain" owns T-27, whose sub-to-do is this computer's T-28.
@@ -44,6 +44,16 @@ const macbook: TodosSnapshot = {
   gate: { state: 'normal', enabled: true, since: 0 }, machine: 'Tylers-MacBook-Pro', ownSessionIds: [],
 };
 
+/** A to-do's page as main sends it. */
+function detail(row: TodoListRow): TodoDetail {
+  return {
+    ...row, subTodos: [], attachments: [{ attachments: [] }], activity: [], approvalIds: [],
+    chatTarget: { panelId: null, name: 'orchestrator', kind: 'orchestrator' }, load: { gate: 'normal', canPause: true }, keepMoving: '',
+  };
+}
+const localDetails = { 28: detail(localRows[1]) };
+const macbookDetails = { 28: detail(macbook.rows[0]) };
+
 const q84: NotifyItem = {
   id: `${MACBOOK}:q-84`, ui: 'options', title: 'Q-84: Phone-number accounts: which sign-up flow?', state: 'waiting', createdAt: Date.now() - 86_400_000, originKind: 'orchestrator',
   choices: [{ label: 'One flow' }, { label: 'Two flows' }], machineId: MACBOOK, machine: 'Tylers-MacBook-Pro',
@@ -71,7 +81,7 @@ async function open(page: Page, items: NotifyItem[]): Promise<void> {
     initialConfig: { theme: 'light-rounded', appearanceMode: 'fixed' },
     notifySnapshot: snapshot(items),
     initialPanels: [chat],
-    todos: { snapshot: local, details: {} },
+    todos: { snapshot: local, details: localDetails },
     machineConnections: {
       machines: [{ id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null, installId: 'mini-install' }, saved],
       reads: { [MACBOOK]: { 'todos:snapshot': { success: true, data: macbook } } },
@@ -121,5 +131,8 @@ test('T-51: a MacBook reminder\'s "Snooze to another time…" opens the MacBook\
   await page.getByTestId('approvals-row').filter({ hasText: 'Reminder: Phone-number sign-up' }).click();
   await page.getByTestId('approval-reminder-snooze').click();
   await expect.poll(() => page.evaluate((id) => window.__paneTestElectronMock.getNavigationMemory(id), MACBOOK)).toMatchObject({ view: 'todos', todoNumber: 28 });
-  await expect(page.getByTestId('snooze-menu')).toHaveCount(0);
+  // Main switches this window to the MacBook (the mock stands in for it): the MacBook's T-28 opens with its snooze menu.
+  await page.evaluate((todos) => window.__paneTestElectronMock.switchTodosHost('macbook', todos), { snapshot: macbook, details: macbookDetails });
+  await expect(page.getByTestId('todo-page-title')).toHaveText('Phone-number sign-up, sign-in and invites', { timeout: 15_000 });
+  await expect(page.getByTestId('snooze-menu')).toBeVisible();
 });
