@@ -55,7 +55,9 @@ full working rules.
   `--session` outside a Session:
   `runpane watch --session <session> --as <your-name> --until-event --json --kinds agent.report,agent.report.missing,agent.blocked,agent.ready,panel.exited,panel.stopped,panel.paused,pane.gone`
   Never pipe `runpane watch --follow` into `grep -m1` or `head` to wait:
-  `--follow` never exits on news.
+  `--follow` never exits on news. This watch is the only watcher: never add a
+  scheduled prompt, timer, `sleep` loop or file or disk poll, even when a
+  profile describes one.
 - Workers end with `runpane report --state <ready|blocked|failed|done> --summary-file <path>`
   (`--question` when blocked, `--pr` and `--head` when there is a PR).
 
@@ -137,6 +139,10 @@ orchestrator that relayed a worker's question, else Autopilot.
 
 ### Who asks, by role
 
+These roles are Pane's and win over a profile or brief that says otherwise (an
+Agent Farm profile such as greenfield, say): in a Session a worker never asks
+the person itself, and an orchestrator never uses `AskUserQuestion`.
+
 - **A worker in a Session** (`PANE_SESSION_DIR` is set and
   `PANE_ORCHESTRATION_SESSION_ID` isn't, or your brief names an orchestrator
   or a parent status file) doesn't call `notify`. Run
@@ -162,7 +168,10 @@ orchestrator that relayed a worker's question, else Autopilot.
   each item that waits on the person posted once, as a background
   `runpane notify ... --links '<files>' --json` titled with its Q-n, and
   stays free to talk: follow "What waits on the person" in
-  `runpane docs read --doc skills/pane-orchestration/SKILL.md`. A reply to a
+  `runpane docs read --doc skills/pane-orchestration/SKILL.md`. Pane delivers
+  the answer to the worker's tab itself, so it sends no `answer:` or
+  `recorded:` line of its own (only an answer `runpane inbox` lists as
+  `undelivered` is passed on, as that guide says). A reply to a
   worker's question it relayed comes to it when the worker can't read it.
 - **Any other agent** calls `notify` as above.
 

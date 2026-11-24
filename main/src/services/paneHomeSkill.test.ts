@@ -92,6 +92,14 @@ describe('Pane home skill', () => {
     expect(skill).toContain('Any other agent** calls `notify` as above.');
   });
 
+  it('says Pane decides who asks, how answers arrive and how to wait, over any profile', () => {
+    const skill = buildPaneHomeSkill().replace(/\s+/g, ' ');
+    expect(skill).toContain('win over a profile or brief that says otherwise');
+    expect(skill).toContain('in a Session a worker never asks the person itself, and an orchestrator never uses `AskUserQuestion`');
+    expect(skill).toContain('it sends no `answer:` or `recorded:` line of its own');
+    expect(skill).toContain('This watch is the only watcher');
+  });
+
   it('tells an agent a typed reply is recorded as the answer, and to reopen and update instead of re-asking', () => {
     const skill = buildPaneHomeSkill().replace(/\s+/g, ' ');
     expect(skill).toContain('`reply: Q-n → "<their words>" (picked: <picks>) (by you)`');

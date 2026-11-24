@@ -19,7 +19,13 @@ Pane is the transport: workspaces, terminals, input delivery, events, resume.
 Your protocol (roles, routing, the status-file schema, question and decision
 IDs, approvals, review policy) stays yours; Pane carries it and never parses
 it. Where this guide and your protocol both speak, Pane wins on a mechanic and
-your protocol wins on roles, approvals and review.
+your protocol wins on roles, which decisions need the person, and review.
+These are mechanics, so Pane's rule wins even when a profile (an Agent Farm
+profile such as greenfield, say) says otherwise: who asks the person (in a
+Session, only the orchestrator; a worker reports blocked), how (`runpane
+notify`, never `AskUserQuestion`), how an answer reaches a worker (Pane
+delivers it; don't send it again), and how you wait (the one watch below,
+never a watcher of your own).
 
 Before the first command: `runpane` must be on `PATH` (or use
 `npx --yes runpane@latest` in its place), and `runpane doctor --json` must
@@ -217,7 +223,9 @@ finished while you were down, whether or not a wait was running, plus
 worker's `runpane agents status --panel <id> --json` and its status file
 instead. Work Pane sends an agent expects a report, so a worker that stops
 without one wakes you with MISSING REPORT; no timeout or periodic sweep is
-needed.
+needed. This watch is your watcher: never add a scheduled prompt, timer,
+`sleep` loop, status-file or disk poll on top of it, and don't ask the person
+whether to set one up, even when your protocol describes one.
 
 A REPORT usually comes with a READY for the same turn: the second wake finds
 nothing new and you wait again. An event is a cue to look, never proof, and a
@@ -383,7 +391,8 @@ approval, a PR ready to merge, and a next step only they can take.
   a card: `runpane notify --relays <item>`, with the id from `runpane inbox`,
   improves that card with your choices, context and links, and rings it. The
   answer goes straight to the worker's tab (`answer: Q-n → <answer> (by you)`),
-  whether or not your call is still open, so don't forward it. When `runpane
+  whether or not your call is still open, so don't forward it or send an
+  `answer:` or `recorded:` line of your own, whatever your protocol says. When `runpane
   inbox` lists that answer with `undelivered`, read why: if Pane can't see
   what runs in the tab, pass it on yourself with `runpane panels submit`; if
   its tab closed, there is no worker left to tell, so don't resubmit it.

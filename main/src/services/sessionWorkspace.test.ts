@@ -145,6 +145,18 @@ describe('Session workspace instructions', () => {
     expect(agents).not.toContain('progress.html');
   });
 
+  it("names Pane's own status-page renderer by path and puts Pane's asking and waiting rules over a profile's", async () => {
+    const cwd = prepareSessionWorkspace('renderer');
+    const agents = (await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).replace(/\s+/g, ' ');
+    const bundled = path.join(root, 'skills', 'pane-chat', 'skills', 'orchestrate-sessions');
+    expect(agents).toContain(`node ${bundled}/assets/status-page/render.mjs`);
+    expect(agents).toContain(`${bundled}/references/status-board.md`);
+    expect(agents).not.toContain("the orchestrate-sessions skill's renderer");
+    expect(agents).toContain('never AskUserQuestion');
+    expect(agents).toContain('win over any profile or skill that says otherwise');
+    expect(agents).toContain('send an answer: or recorded: line of your own');
+  });
+
   it('gives the orchestrator its own Keep the Session tidy section', async () => {
     const cwd = prepareSessionWorkspace('tidy');
     const agents = (await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).replace(/\s+/g, ' ');
