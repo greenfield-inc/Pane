@@ -5,7 +5,7 @@ import json
 import re
 import sys
 from typing import Any, Dict, Optional
-from urllib.parse import urlencode
+from urllib.parse import quote_plus, urlencode
 
 from .daemon_client import invoke_daemon
 from .generated_contract import RUNPANE_CONTRACT
@@ -13,6 +13,9 @@ from .notify import RunpaneError
 
 LINK_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 REPO_ID = re.compile(r"^[1-9][0-9]{0,15}$")
+# A repository id, saved name, or owner/repo for a start link, as Pane's URL handler accepts it.
+REPO_SELECTOR = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}(?:/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}){0,2}\Z")
+MAX_LINK_PROMPT_LENGTH = 4000
 
 
 def repo_id(repo: Optional[str]) -> Optional[int]:
@@ -97,7 +100,47 @@ def build_pane_link(kind: str, target_id: str, panel_id: Optional[str] = None) -
     return f"pane://open?{urlencode(params)}"
 
 
+def build_start_link(repo: str, prompt: str, agent: Optional[str] = None) -> str:
+    """pane://new?repo=<repo>&prompt=<text>[&agent=<id>], encoded as the npm CLI's URLSearchParams does."""
+    params = [("repo", repo), ("prompt", prompt)] + ([("agent", agent)] if agent else [])
+    return "pane://new?" + "&".join(f"{key}={quote_plus(value, safe='*').replace('~', '%7E')}" for key, value in params)
+
+
+def is_unsafe_character(character: str) -> bool:
+    """Control characters other than tab and newline, and bidirectional overrides; Pane refuses them in a link's prompt."""
+    code = ord(character)
+    return (code < 32 and code not in (9, 10)) or 127 <= code < 160 or 0x202A <= code <= 0x202E or 0x2066 <= code <= 0x2069
+
+
+def start_link_target(parsed: Any, prompt: str) -> Dict[str, str]:
+    if not parsed.repo or parsed.pane_id or parsed.panel_id or parsed.session_id:
+        raise ValueError("A start link takes --repo and --prompt (and optionally --agent), not --pane, --panel or --session.")
+    if not REPO_SELECTOR.match(parsed.repo):
+        raise ValueError("--repo must be a repository id, saved name, or owner/repo. Run `runpane repos list` to find it.")
+    text = prompt.strip()
+    if not text:
+        raise ValueError("--prompt must not be empty.")
+    if len(text) > MAX_LINK_PROMPT_LENGTH:
+        raise ValueError(f"--prompt must be at most {MAX_LINK_PROMPT_LENGTH} characters for a link.")
+    if any(is_unsafe_character(character) for character in text):
+        raise ValueError("--prompt must not contain control characters other than tab and newline.")
+    target = {"kind": "new", "id": parsed.repo, "prompt": text}
+    if parsed.agent:
+        target["agent"] = parsed.agent
+    return target
+
+
 def run_links_create(parsed: Any) -> int:
+    if parsed.initial_input is not None:
+        target = start_link_target(parsed, parsed.initial_input)
+        url = build_start_link(target["id"], target["prompt"], target.get("agent"))
+        if parsed.json:
+            print(json.dumps({"ok": True, "url": url, "target": target}, indent=2, ensure_ascii=False))
+        else:
+            print(url)
+        return 0
+    if parsed.agent:
+        raise ValueError("--agent needs --prompt: it names the agent a start link starts.")
     given = [name for name, value in (("pane", parsed.pane_id), ("repo", parsed.repo), ("session", parsed.session_id)) if value]
     if len(given) != 1:
         raise ValueError("runpane links create needs exactly one of --pane, --repo, or --session.")

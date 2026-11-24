@@ -302,7 +302,7 @@ The orchestrator guide prescribes submit without `--wait`, followed by its named
 
 Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.
 
-`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.
+`runpane links create` builds `pane://open?...` links, which select what they name and never change Pane state, and `pane://new?...` start links, which ask the person before Pane starts an agent on the prompt.
 
 `runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.
 
@@ -426,7 +426,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panes move`: Move a Pane into a sidebar folder.
 - `folders list`: List the sidebar folders of a repository.
 - `folders create`: Create a sidebar folder in a repository.
-- `links create`: Build a pane:// link that opens a Pane, panel, repository, or Session in the Pane app.
+- `links create`: Build a pane:// link that opens a Pane, panel, repository, or Session, or that starts an agent on a prompt once the person confirms.
 - `links open`: Open a pane:// link in the running Pane app.
 - `docs search`: Search Pane's docs, runpane help, and the Pane Chat skills.
 - `docs read`: Read one Pane doc, help topic, or skill in full.
@@ -610,6 +610,7 @@ runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir
 runpane links create --pane <pane-id> [--panel <panel-id>] [--json]
 runpane links create --repo <repo-id> [--json]
 runpane links create --session <session-id> [--json]
+runpane links create --repo <repo> --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--json]
 runpane links open --url <pane-url> --yes [--json] [--pane-dir <path>]
 runpane docs search --query <text> [--limit <count>] [--json]
 runpane docs read --doc <path> [--json]

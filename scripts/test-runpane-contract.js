@@ -527,6 +527,33 @@ async function checkPanesAdoptCliParity() {
   assert.deepStrictEqual(frames.pip, frames.npm, 'Python and Node panes adopt sent different daemon requests');
 }
 
+async function checkStartLinkParity() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-start-link-'));
+  const prompt = 'Fix "can\'t log in" (run *42*) ~ 100% — naïve 日本\nSee the log.';
+  const cases = [
+    [['links', 'create', '--repo', 'owner/app', '--prompt', prompt, '--agent', 'codex', '--json'], 0],
+    [['links', 'create', '--repo', '3', '--prompt', 'hi'], 0],
+    [['links', 'create', '--pane', 'p', '--agent', 'codex'], 1],
+    [['links', 'create', '--repo', 'a/../b', '--prompt', 'hi'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'a\u001b[2Jb'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'x'.repeat(4001)], 1],
+  ];
+  try {
+    for (const [args, code] of cases) {
+      const [npm, pip] = await Promise.all([runCliOnce('npm', args, paneDir), runCliOnce('pip', args, paneDir)]);
+      assert.strictEqual(npm.code, code, `npm ${args.slice(0, 4).join(' ')} exited ${npm.code}: ${npm.stderr}`);
+      assert.deepStrictEqual({ code: pip.code, stdout: pip.stdout, stderr: pip.stderr }, { code: npm.code, stdout: npm.stdout, stderr: npm.stderr }, `Python and Node differ on links create ${args.slice(2, 4).join(' ')}`);
+    }
+    const { url, target } = JSON.parse((await runCliOnce('npm', cases[0][0], paneDir)).stdout);
+    assert.deepStrictEqual(target, { kind: 'new', id: 'owner/app', prompt, agent: 'codex' });
+    const parsed = new URL(url);
+    assert.strictEqual(parsed.host, 'new');
+    assert.deepStrictEqual(Object.fromEntries(parsed.searchParams), { repo: 'owner/app', prompt, agent: 'codex' });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
 async function checkPanesCreateBaseNotice() {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-create-base-'));
   const notice = 'Could not refresh origin/main before creating this Pane (git fetch timed out after 10s). '
@@ -7447,6 +7474,7 @@ const checks = [
   checkSessionPinCommands,
   checkHelpOutput,
   checkPanesCreateBaseNotice,
+  checkStartLinkParity,
   checkReportParity,
   checkCliEventSubscriptions,
   checkPaneArchiveDryRunParity,

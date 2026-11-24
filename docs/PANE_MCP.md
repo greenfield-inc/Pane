@@ -104,6 +104,8 @@ The server tells Pane which agent is asking (Claude, Codex, Cursor, or the clien
 
 `links_create` builds `pane://open?pane=<id>[&panel=<id>]`, `pane://open?repo=<id>`, or `pane://open?session=<id>`. Pane registers the `pane://` scheme on macOS, Windows, and Linux. Opening a link (from a browser, a terminal, or `links_open`) raises Pane and selects what it names (a Session opens on its Overview tab). It never changes Pane state, and a link with any unexpected part is rejected.
 
+`links_create` with `prompt` builds a start link, `pane://new?repo=<repo>&prompt=<text>[&agent=<id>]`, for a tool such as a chat bot's button that opens a failure in a local agent. `repo` is a saved repository's id, its name, or `owner/repo`, matched against each saved repository's origin remote, so one link works for everyone who has that repository in Pane. The prompt is at most 4000 characters, with no control characters but tab and newline. Opening a start link never runs anything on its own: Pane shows the repository, the agent and the whole prompt, with Cancel as the default, and only **Start** creates a Pane with that agent and sends it the prompt. A link Pane can't open (an unknown repository, a malformed link) shows why in Pane instead of doing nothing.
+
 ## Registering by hand
 
 Without the desktop app, or for another MCP client, run the server from npm: `npx --yes runpane@latest mcp`. Add `--toolsets <names>` to choose tools.
@@ -155,8 +157,9 @@ Automated tests cover the registration and link logic on every OS. Check these b
    - Linux: `xdg-open "pane://open?pane=<pane-id>"`
 3. Pane comes to the front on that Pane, and no second Pane window opens. On Windows and Linux, the extra process hands the link to the running Pane and exits.
 4. Quit Pane and open the link again. Pane starts and opens that Pane.
-5. Open `pane://open?pane=<pane-id>&archive=1`. Pane logs `Unknown pane link parameter: archive` and changes nothing.
-6. On Linux, check the handler: `xdg-mime query default x-scheme-handler/pane` names Pane's desktop file (AppImage and .deb).
+5. Open `pane://open?pane=<pane-id>&archive=1`. Pane says `Unknown pane link parameter: archive` and changes nothing.
+6. Open the link from `runpane links create --repo <owner/repo> --prompt "Say hello"`. Pane asks whether to start the default agent in that repository and shows the prompt. **Cancel** changes nothing; **Start** opens a new Pane whose agent receives the prompt. With a repository Pane doesn't have, Pane says no saved repository matches.
+7. On Linux, check the handler: `xdg-mime query default x-scheme-handler/pane` names Pane's desktop file (AppImage and .deb).
 
 **Windows with WSL**
 

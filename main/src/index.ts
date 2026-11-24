@@ -317,20 +317,32 @@ function openPaneLink(link: string): void {
     mainWindow?.webContents.send('relay:link-opened', { link });
     return;
   }
-  if (remotePaneClientController.isRemoteModeActive()) {
-    // The link names the active host's Panes, which only the renderer holds in remote mode.
-    try {
-      const target = parsePaneLink(link);
+  try {
+    const target = parsePaneLink(link);
+    // An open link names the active host's Panes, which only the renderer holds in remote mode.
+    // A start link names a repository saved on this computer, so this computer's Pane starts it.
+    if (remotePaneClientController.isRemoteModeActive() && target.kind !== 'new') {
       showMainWindow();
       mainWindow?.webContents.send('pane:open-link', target);
-    } catch (error) {
-      console.warn('[Main] Could not open pane link:', error);
+      return;
     }
+  } catch (error) {
+    showPaneLinkError(error instanceof Error ? error.message : String(error));
     return;
   }
   void paneDaemonHost.commandRegistry.invoke(OPEN_PANE_LINK_CHANNEL, [link]).then((result) => {
     console.log('[Main] Opened pane link:', JSON.stringify(result));
-  }).catch((error) => console.warn('[Main] Could not open pane link:', error));
+    const failure = decodeBoundary(result, boundary.object({ success: boundary.boolean, error: boundary.optional(boundary.string) }));
+    if (!failure.success) showPaneLinkError(failure.error ?? 'Pane did not say why.');
+  }).catch((error) => showPaneLinkError(error instanceof Error ? error.message : String(error)));
+}
+
+/** A link from outside Pane that does nothing says why, rather than failing silently. */
+function showPaneLinkError(detail: string): void {
+  console.warn('[Main] Could not open pane link:', detail);
+  showMainWindow();
+  const options = { type: 'warning' as const, message: 'Pane could not open this link', detail };
+  void (mainWindow && !mainWindow.isDestroyed() ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options));
 }
 let powerSaveManager: PowerSaveManager | null = null;
 
