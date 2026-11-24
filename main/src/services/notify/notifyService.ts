@@ -454,7 +454,7 @@ export class NotifyService {
     // A reader saying how it took a reply, or updating the approval: not a new ask, so a worker may too.
     const reader = { paneId: source.paneId, panelId: source.panelId };
     if (took !== undefined) return Promise.resolve(this.queue.took(reader, took, tookAs ?? 'answer', status));
-    if (close !== undefined) return Promise.resolve(this.queue.withdraw(reader, close));
+    if (close !== undefined) return Promise.resolve(this.queue.withdrawByAsker(reader, close));
     if (update !== undefined) {
       return this.queue.update(reader, update, {
         asked: asked ?? '', whatChanged: whatChanged ?? '',

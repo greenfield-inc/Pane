@@ -1181,7 +1181,7 @@ export class NotifyQueue extends EventEmitter {
    * its call no longer closes a tab's card, so this is how an asker takes one back. Only the tab
    * that asked may: a relayed worker's card stays the worker's.
    */
-  withdraw(caller: NotifyReaderCaller, ref: string): NotifyResult {
+  withdrawByAsker(caller: NotifyReaderCaller, ref: string): NotifyResult {
     const wanted = ref.trim();
     const open = [...this.entries.values()].filter(entry => isOpen(entry.item) && (entry.item.id === wanted || leadingQn(entry.item.title) === wanted));
     if (open.length === 0) {
