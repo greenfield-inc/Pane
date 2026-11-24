@@ -706,6 +706,9 @@ export class MoveImporter {
     const arriving = JSON.parse(JSON.stringify(rewriteJson(map, record))) as OrchestrationSessionRecord;
     arriving.move = arrivingMark;
     arriving.associations = arriving.associations.filter(association => !association.machine);
+    // T-51 (W11): an older source doesn't refuse to move a to-do's Session; its to-do number names a
+    // different to-do here, so the arriving record keeps none (as moved cards keep no `todo`).
+    delete arriving.todoNumber;
     // Moving back: the copy that moved away keeps its owner Pane (archiving and recreating a live
     // Pane would let its teardown remove the arriving tabs); only its old tabs give way.
     step();

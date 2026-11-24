@@ -253,6 +253,18 @@ describe('MoveImporter', { timeout: BUILD_TIMEOUT_MS }, () => {
     expect(fs.readFileSync(path.join(folder, 'notes.md'), 'utf8')).toBe(`see ${folder}/x`);
   });
 
+  it('an arriving Session keeps no to-do number: T-n there names a different to-do here (T-51, W11)', async () => {
+    const { services, importArriving } = fakeServices(target);
+    const importer = new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
+    const moveId = newMoveId();
+    // An older source machine doesn't refuse to move a to-do's own Session.
+    await stage(importer, manifest(moveId, [], { session: { id: 'sess-1', name: 'S', internalSessionId: '__owner__', associations: [], todoNumber: 28 } }), {});
+    importer.build(moveId);
+    expect((await waitStage(importer, moveId, ['built', 'failed'])).stage).toBe('built');
+    expect(importArriving).toHaveBeenCalledTimes(1);
+    expect(importArriving.mock.calls[0][0]).not.toHaveProperty('todoNumber');
+  });
+
   it('carries open approvals: Notify here takes them in when the move starts, never before, with paths for this machine (T-44)', async () => {
     const { services, adopted } = fakeServices(target);
     const importer = new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
