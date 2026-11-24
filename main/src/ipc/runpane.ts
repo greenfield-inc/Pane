@@ -18,7 +18,6 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
-import { getProfileRunner } from '../services/profiles/profileRunnerHost';
 import { paneInactiveSince, parseSessionTimestampMs } from '../services/paneInactivity';
 import { chatPanelIdsOf, chatTabsNotPausedNote, panesWithStoppedRunScripts, pausePanes, restartRunScripts, terminalPanelIdsOf } from '../services/panePause';
 import { isOrchestrationInternalSessionId, resolveSessionRetention } from '../../../shared/types/orchestrationSession';
@@ -344,10 +343,6 @@ const RUNPANE_CHANNELS = [
   'runpane:loops:run-now',
   'runpane:loops:preview',
   ...RUNPANE_TODO_VERBS.map(verb => `runpane:todos:${verb}`),
-  'runpane:profiles:list',
-  'runpane:profiles:show',
-  'runpane:profiles:launch',
-  'runpane:profiles:runs',
   'runpane:secrets:list',
   'runpane:secrets:set',
   'runpane:secrets:delete',
@@ -2028,13 +2023,6 @@ export function registerRunpaneHandlers(
       // T-51: which machine sent the number, for the Session's machine.
       const installId = report.todo ? services.configManager.getConfig().machineId : undefined;
       if (installId) report.installId = installId;
-      // A profile step's outcome moves its run first: an undeclared one is refused and nothing is recorded.
-      if (normalized.outcome !== undefined) {
-        // The same codes the CLIs refuse these with before sending.
-        if (normalized.state !== 'done') throw new PaneError('ERR_REPORT_OUTCOME_STATE', `An outcome ends a profile step as done, so it cannot be sent with --state ${normalized.state}. Nothing was recorded.`, `Run runpane report --outcome "${normalized.outcome.trim()}" without --state, or drop --outcome to report ${normalized.state}.`);
-        if (normalized.question !== undefined) throw new PaneError('ERR_REPORT_OUTCOME_QUESTION', 'An outcome ends a profile step, and a --question would block it instead. Nothing was recorded.', 'To ask something, run runpane report --state blocked --question "<text>"; once it is answered, run runpane report --outcome <name>.');
-        await getProfileRunner().reportOutcome(panel.id, normalized.outcome.trim(), report.summary);
-      }
       // A blocked report becomes an approval card: it takes the card check before it's recorded (P3).
       const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath, readStatusFile: report.summaryTruncated, choices: report.choices, questions: report.questions }).warnings : [];
       if (todoCheck?.warning) warnings.push(todoCheck.warning);
@@ -5672,7 +5660,6 @@ const reportRequestSchema = boundary.object({
   summary: boundary.optional(boundary.string),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
-  outcome: boundary.optional(boundary.nonEmptyString),
   ...agentReportOptionFields,
   todo: boundary.optional(boundary.string),
 });
@@ -6888,7 +6875,7 @@ function parseAttachments(value: PaneCommandValue, asFilePointer: boolean | unde
   return attachments;
 }
 
-export function parseRepoSelector(value: PaneCommandValue): RunpaneRepoSelector {
+function parseRepoSelector(value: PaneCommandValue): RunpaneRepoSelector {
   const selectorText = optionalString(value);
   if (selectorText !== undefined) return selectorText;
 
@@ -6909,7 +6896,7 @@ export function parseRepoSelector(value: PaneCommandValue): RunpaneRepoSelector 
   throw new Error('Repo selector must include id, path, name, active, or a string selector');
 }
 
-export function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector): Project {
+function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector): Project {
   const selectorText = optionalString(selector);
   if (selectorText !== undefined) {
     if (selectorText === 'active' || selectorText === 'default') {

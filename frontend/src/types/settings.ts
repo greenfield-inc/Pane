@@ -136,7 +136,6 @@ export type SettingsSettingId =
   | 'autopilot'
   | 'autopilot-instructions'
   | 'notes'
-  | 'profiles'
   | 'todos'
   | 'usage-leaderboard';
 

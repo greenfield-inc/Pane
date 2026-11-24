@@ -74,7 +74,7 @@ import { requestOpenSettings } from '../utils/openSettings';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
-import { isChatTabsEnabled, isMissionControlEnabled, isProfilesEnabled, isTodosEnabled, useConfigStore } from '../stores/configStore';
+import { isChatTabsEnabled, isMissionControlEnabled, isTodosEnabled, useConfigStore } from '../stores/configStore';
 import { leaveTodos } from './todos/todosNavigation';
 import { configuredIde } from '../../../shared/utils/ideCommands';
 import { cycleIndex } from '../utils/arrayUtils';
@@ -84,9 +84,6 @@ import { OPEN_INSPECTOR_EVENT, type InspectorRequest, type InspectorTab } from '
 import { showActionError, useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
 import { LoopsView } from './loops/LoopsView';
-import { ProfilesView } from './profiles/ProfilesView';
-import { LaunchProfileDialog } from './profiles/LaunchProfileDialog';
-import type { LibraryProfile } from '../../../shared/types/profiles';
 import { LivePreviewPrompt } from './LivePreviewPrompt';
 import { ApprovalsView } from './approvals/ApprovalsView';
 import { TodosView } from './todos/TodosView';
@@ -136,11 +133,6 @@ export const SessionView = memo(() => {
   useEffect(() => {
     if (config && !missionControlEnabled && activeView === 'mission-control') navigateToSessions();
   }, [activeView, config, missionControlEnabled, navigateToSessions]);
-  // Profiles is opt-in the same way (D-106).
-  const profilesOn = isProfilesEnabled(config);
-  useEffect(() => {
-    if (config && !profilesOn && activeView === 'profiles') navigateToSessions();
-  }, [activeView, config, profilesOn, navigateToSessions]);
   // To-dos is opt-in too (T-39): turned off while open, it goes back to where you were.
   const todosOn = isTodosEnabled(config);
   useEffect(() => {
@@ -1314,7 +1306,6 @@ export const SessionView = memo(() => {
   }, [hotkeys]);
 
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
-  const [launchingProfile, setLaunchingProfile] = useState<LibraryProfile | null>(null);
   // The empty stage is the "+" menu laid out inline: one click (or the
   // shortcut beside it) from a running tool, instead of a placeholder.
   const emptyStage = useMemo(() => (
@@ -1330,10 +1321,8 @@ export const SessionView = memo(() => {
             hotkeyId: '',
             onClick: () => { void window.electronAPI.chatTab.create({ sessionId: activeSession.id, agent: agent.id }).catch(error => showActionError(`Could not open a ${agent.label} chat`, error)); },
           })) : []),
-          // Profiles run in terminal tabs, so "Profile…" is here with chat tabs off too.
-          // With Profiles off it still opens an Agent Farm profile by name as a chat tab.
-          ...(activeSession && (profilesOn || chatTabs) ? [{ key: 'chat-profile', label: 'Profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) }] : []),
           ...(chatTabs && activeSession ? [
+            { key: 'chat-profile', label: 'Profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) },
             { key: 'chat-more', label: 'More agents…', icon: <Boxes className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => requestOpenSettings({ category: 'agents' }) },
           ] : []),
           { key: 'terminal', label: 'Terminal', icon: <Terminal className="h-3.5 w-3.5" />, hotkeyId: 'add-tool-terminal', onClick: () => handlePanelCreate('terminal') },
@@ -1369,15 +1358,10 @@ export const SessionView = memo(() => {
           onClose={() => setProfileDialogOpen(false)}
           // The new tab replaces this empty stage, so the parent closes the dialog itself.
           onCreate={async launch => { await window.electronAPI.chatTab.create({ sessionId: activeSession.id, launch }); setProfileDialogOpen(false); }}
-          onLaunchProfile={profilesOn ? profile => { setProfileDialogOpen(false); setLaunchingProfile(profile); } : undefined}
-          byName={chatTabs}
         />
       )}
-      {launchingProfile && activeSession && (
-        <LaunchProfileDialog profile={launchingProfile} defaults={{ repoId: activeSession.projectId }} onClose={() => setLaunchingProfile(null)} onLaunched={() => setLaunchingProfile(null)} />
-      )}
     </div>
-  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen, launchingProfile, profilesOn]);
+  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
@@ -1980,10 +1964,6 @@ export const SessionView = memo(() => {
 
   if (activeView === 'todos' && todosOn) {
     return <TodosView />;
-  }
-
-  if (activeView === 'profiles' && profilesOn) {
-    return <ProfilesView />;
   }
 
   if (activeView === 'autopilot') {

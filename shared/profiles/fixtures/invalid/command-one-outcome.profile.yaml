@@ -1,8 +1,0 @@
-# expect: COMMAND_OUTCOMES
-format: pane-profile/1
-name: command-one-outcome
-version: 1.0.0
-flow:
-  start: test
-  test: { run: npm test, outcomes: { green: ship } }
-  ship: { run: echo shipped }

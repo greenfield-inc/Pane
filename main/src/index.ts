@@ -142,7 +142,6 @@ import { MachineConnections, remoteMachineAccess } from './services/machineConne
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
 import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
-import { prepareProfileRunnerForQuit } from './services/profiles/profileRunnerHost';
 import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
@@ -1778,8 +1777,6 @@ if (launchRemoteSetup) {
   }, 30_000);
 
   try {
-    // Step tabs that Pane's quit stops are not steps finishing: no profile run moves on them.
-    prepareProfileRunnerForQuit();
     if (paneDaemonHost?.paneDaemonServer) {
       logToFile('Stopping local daemon server early');
       console.log('[Main] Stopping local daemon server early...');

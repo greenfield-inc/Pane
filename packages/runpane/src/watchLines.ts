@@ -47,7 +47,7 @@ export interface WatchResult {
   reset?: { reason: string };
 }
 
-export function sanitizeName(value: string): string {
+function sanitizeName(value: string): string {
   const printable = [...value]
     .map(character => {
       const codePoint = character.codePointAt(0) ?? 0;

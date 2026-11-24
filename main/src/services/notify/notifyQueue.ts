@@ -1187,7 +1187,7 @@ export class NotifyQueue extends EventEmitter {
     // The caller's own card first; a card it reads only as another run of the same loop comes
     // after, newest first, so a run never acts on an older run's card that shares its Q-n.
     const own = candidates.filter(entry => this.mayRead(entry, caller, wanted, false));
-    if (own.length > 0) return pickOwn(own);
+    if (own.length > 0) return pickNamed(own, caller, wanted, what);
     const mine = candidates.filter(entry => this.mayRead(entry, caller, wanted)).sort((a, b) => b.item.createdAt - a.item.createdAt);
     if (mine.length === 0) {
       const reader = candidates[0].item.reply?.reader?.name ?? candidates[0].item.source.name;
@@ -2431,6 +2431,40 @@ function picksText(picks: readonly string[]): string {
 /** What a reader with an open call does if the reply was a question: it names the reply's id, which only this call was given. */
 function tookNext(item: NotifyItem, replyId: string): string {
   return `The person replied, and Pane recorded the reply as the answer to ${refOf(item)}. If it asks about it instead, run \`runpane notify --took ${replyId} question\`, find out, then \`runpane notify --update ${replyId} --asked "<their question>" --what-changed "<one line per change>"\`. Use this reply id, not the Q-n: it is what lets this call continue.`;
+}
+
+/**
+ * The card `wanted` names among those the caller reads: by id or continuation exactly; by Q-n, one
+ * asker's card about one Session (`pickOwn`). Cards from two askers or about two Sessions share a
+ * Q-n when a reader reads or asks about several Sessions (Autopilot): the one whose reply came to
+ * the caller wins, and if that leaves two, Pane refuses with their ids rather than guess.
+ */
+function pickNamed(own: Entry[], caller: NotifyReaderCaller, wanted: string, what: 'took' | 'update'): Entry {
+  const exact = own.find(entry => entry.item.id === wanted || (entry.continuation !== undefined && entry.continuation === wanted));
+  if (exact) return exact;
+  if (askerCount(own) <= 1) return pickOwn(own);
+  const toCaller = caller.panelId ? own.filter(entry => entry.item.reply?.reader?.panelId === caller.panelId) : [];
+  if (toCaller.length > 0 && askerCount(toCaller) <= 1) return pickOwn(toCaller);
+  const left = toCaller.length > 0 ? toCaller : own;
+  const named = left.map(entry => `${entry.item.id} (${entry.item.connected?.name ?? entry.item.source.session?.name ?? entry.item.source.name})`).join(', ');
+  throw new PaneError(
+    'ERR_NOTIFY_AMBIGUOUS',
+    `${wanted} names ${left.length} approvals this tab reads, from different askers or Sessions: ${named}. Nothing was changed.`,
+    `Run --${what} again with the id of the one you mean, for example \`runpane notify --${what} ${left[0].item.id} …\`.`,
+  );
+}
+
+/**
+ * How many askers, each in one Session (or Pane), these cards have: one asker's cards about one
+ * Session share a Q-n only when it asked again. Autopilot asks from one tab about several Sessions
+ * (`connected`), so its Session counts as well as its tab.
+ */
+function askerCount(entries: readonly Entry[]): number {
+  return new Set(entries.map(({ item }) => {
+    const asker = item.source.panelId ?? item.source.paneId ?? item.id;
+    const about = item.connected ? `${item.connected.kind}:${item.connected.id}` : item.source.session?.id ?? '';
+    return `${asker}\u0000${about}`;
+  })).size;
 }
 
 /**

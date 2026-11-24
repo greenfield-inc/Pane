@@ -32,7 +32,6 @@ import { RunCommandManager } from '../services/runCommandManager';
 import { VersionChecker } from '../services/versionChecker';
 import { SkillCacheManager } from '../services/skillCacheManager';
 import { installBundledAgentFarm } from '../services/agentFarm/bundledAgentFarm';
-import { startProfileRunner } from '../services/profiles/profileRunnerHost';
 import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import type { AppConfig } from '../types/config';
 import { PaneChatManager } from '../services/paneChatManager';
@@ -353,10 +352,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
         : Promise.resolve(true),
     ]).catch(error => logger.warn('[Todos] Could not rewrite agent instructions after To-dos was turned on or off', error instanceof Error ? error : undefined));
   });
-  // Bundled profiles: set up greenfield and the other bundled plugins in Pane's own Agent Farm
+  // Bundled Agent Farm: set up greenfield and the other bundled plugins in Pane's own Agent Farm
   // config root, without delaying startup. It never touches the person's own Agent Farm.
-  // The Profiles page shows the install's state, so it reads the library again when it ends.
-  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) }).then(() => getPaneEventSink().send('profiles:changed'));
+  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) });
   if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {
     // Retry until all saved repositories are available, without delaying startup.
     const migrationConfig = configManager.getConfig();
@@ -846,8 +844,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   );
 
   setupEventListeners(services);
-  // Profiles: Pane runs each launched profile's workflow from its file, and resumes saved runs.
-  startProfileRunner(services, commandRegistry, workspaceJournal, message => logger.info(message));
   // A member Pane's reports and exits go to every connected computer: one whose Session holds this
   // Pane records them (`RemoteMemberEvents`). Entries recorded from another machine are not sent on.
   workspaceJournal.subscribe(entry => {
