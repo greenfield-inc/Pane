@@ -169,6 +169,11 @@ interface TodosState {
   create: (input: TodoCreateInput) => Promise<TodoRecord | null>;
   /** Runs one action and returns its result, or null after showing why it failed. */
   act: (action: TodoAction) => Promise<TodoActionResult | null>;
+  /**
+   * This computer's own to-dos while the window shows another computer (T-51): All machines still lists
+   * this computer's Sessions, and their approvals scope reads these. Null while the window shows this one.
+   */
+  desktop: TodosSnapshot | null;
   /** Saved machines' to-dos, by machine id. */
   remote: Readonly<Record<string, RemoteTodos>>;
   /** Saved machines as `machines.list` last said, so a reread knows their names and whether they answer. */
@@ -189,6 +194,8 @@ interface TodosState {
 }
 
 let refreshGeneration = 0;
+/** Bumped when To-dos turns off (T-51): a saved machine's read still in flight then lands nowhere. */
+let remoteGeneration = 0;
 /** Each to-do's newest detail read, so an older answer never replaces a newer one. */
 const detailGenerations = new Map<number, number>();
 
@@ -274,6 +281,7 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     }
   },
 
+  desktop: null,
   remote: {},
   machines: [],
   setMachines: (machines) => {
@@ -286,17 +294,27 @@ export const useTodosStore = create<TodosState>((set, get) => ({
         const known = state.remote[machine.id];
         remote[machine.id] = { machineId: machine.id, label: machine.label, snapshot: known?.snapshot ?? null, offline: machine.status === 'offline' };
       }
-      return { machines: saved, remote };
+      // Back on this computer: its to-dos are the store's own list again.
+      return config && getActiveRemoteHostId(config.remoteDaemon) ? { machines: saved, remote } : { machines: saved, remote, desktop: null };
     });
   },
   refreshRemote: async (machineId) => {
     const api = window.electronAPI?.machines;
     if (!api || !isTodosEnabled(useConfigStore.getState().config)) return;
+    const generation = remoteGeneration;
+    // A read that lands after To-dos was turned off is dropped (T-51).
+    const current = () => generation === remoteGeneration && isTodosEnabled(useConfigStore.getState().config);
+    if ((machineId === undefined || machineId === LOCAL_MACHINE_ID) && shownHostId(useConfigStore.getState().config) !== LOCAL_MACHINE_ID) {
+      void api.read(LOCAL_MACHINE_ID, 'todos:snapshot').then(read => read.data, () => null).then((response) => {
+        if (current() && response?.success && response.data) set({ desktop: response.data });
+      });
+    }
     const targets = get().machines.filter(machine => (machineId === undefined || machine.id === machineId) && machine.status === 'online');
     await Promise.all(targets.map(async machine => {
       const response = await api.read(machine.id, 'todos:snapshot').then(read => read.data, () => null);
       // A machine whose Pane predates To-dos answers with an error: it has none.
       const snapshot = response?.success && response.data ? response.data : null;
+      if (!current()) return;
       set(state => {
         const known = state.remote[machine.id];
         if (!known) return {};
@@ -372,6 +390,8 @@ export function useTodosMachines(): void {
       for (const machine of machines) {
         if (machine.kind === 'remote' && machine.status === 'online' && before.get(machine.id) !== 'online') schedule(machine.id);
       }
+      // The window shows another computer: this computer's own to-dos are read too, for All machines (T-51).
+      if (shownHostId(useConfigStore.getState().config) !== LOCAL_MACHINE_ID) schedule(LOCAL_MACHINE_ID);
     };
     const onEvent = (event: MachineConnectionsEvent) => {
       if (event.type === 'machines') applyMachines(event.machines);
@@ -436,9 +456,7 @@ export function useTodosRefresh(): void {
       void useTodosStore.getState().refreshRemote();
       return watchTodos(refresh);
     }
-    // Turned off (T-39): forget every to-do read, here and from other machines; nothing is deleted.
-    resetTodos();
-    useTodosStore.setState(state => ({ remote: Object.fromEntries(Object.entries(state.remote).map(([id, machine]) => [id, { ...machine, snapshot: null }])) }));
+    forgetTodos();
     return undefined;
   }, [refresh, enabled]);
 }
@@ -453,6 +471,16 @@ export async function switchTodosHost(): Promise<void> {
   detailGenerations.clear();
   useTodosStore.setState({ snapshot: null, details: new Map() });
   await useTodosStore.getState().refresh();
+}
+
+/**
+ * To-dos turned off (T-39): forgets every to-do read, here and from other machines, and drops the reads
+ * still in flight (T-51), so none lands after. Nothing is deleted.
+ */
+export function forgetTodos(): void {
+  remoteGeneration += 1;
+  resetTodos();
+  useTodosStore.setState(state => ({ desktop: null, remote: Object.fromEntries(Object.entries(state.remote).map(([id, machine]) => [id, { ...machine, snapshot: null }])) }));
 }
 
 /** Forgets every to-do read so far: the web app does this when it leaves a host. */
@@ -540,15 +568,21 @@ export function sessionTodoMachine(machineId: string | undefined, shownHost: str
   return machineId ?? shownHost;
 }
 
-/** The to-do rows of machine `machine` (a `sessionTodoMachine` id): the shown host's own list, or a saved machine's. */
-function machineRows(state: Pick<TodosState, 'snapshot' | 'remote'>, machine: string, shownHost: string): readonly TodoListRow[] | undefined {
-  return machine === shownHost ? state.snapshot?.rows : state.remote[machine]?.snapshot?.rows;
+/**
+ * The to-do rows of machine `machine` (a `sessionTodoMachine` id): the shown host's own list, this computer's
+ * while the window shows another (`desktop`), or a saved machine's.
+ */
+function machineRows(state: Pick<TodosState, 'snapshot' | 'desktop' | 'remote'>, machine: string, shownHost: string): readonly TodoListRow[] | undefined {
+  if (machine === shownHost) return state.snapshot?.rows;
+  return machine === LOCAL_MACHINE_ID ? state.desktop?.rows : state.remote[machine]?.snapshot?.rows;
 }
 
 /** A Session's to-dos' approvals scope (T-22), read once from the store's current state. */
 export function sessionTodoScope(sessionId: string, machineId?: string): TodoApprovalScope {
   const shownHost = shownHostId(useConfigStore.getState().config);
   const machine = sessionTodoMachine(machineId, shownHost);
+  // To-dos off: no to-do brings a card, whatever a late read left in the store (T-51).
+  if (!todosEnabledNow()) return emptyTodoScope(machine);
   return todoApprovalScope(machineRows(useTodosStore.getState(), machine, shownHost) ?? [], sessionId, machine);
 }
 
@@ -557,7 +591,8 @@ export function useSessionTodoScope(sessionId: string, machineId?: string): Todo
   const shownHost = useShownHostId();
   const machine = sessionTodoMachine(machineId, shownHost);
   const rows = useTodosStore(state => machineRows(state, machine, shownHost));
-  return useMemo(() => todoApprovalScope(rows ?? [], sessionId, machine), [rows, sessionId, machine]);
+  const enabled = useTodosEnabled();
+  return useMemo(() => (enabled ? todoApprovalScope(rows ?? [], sessionId, machine) : emptyTodoScope(machine)), [enabled, rows, sessionId, machine]);
 }
 
 /** No to-dos, only the machine whose cards a Session takes: for a count that leaves its to-dos out. */
