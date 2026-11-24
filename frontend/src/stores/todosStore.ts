@@ -621,8 +621,18 @@ export function snoozeRequestedFor(request: TodoKey | null, number: number): boo
 /** A Session's to-dos (T-23) as list entries, kept current; null until that machine's to-dos are read. */
 export function useSessionTodoEntries(sessionId: string, machineId?: string): TodoEntry[] | null {
   const shownHost = useShownHostId();
-  const rows = useTodosStore(state => machineRows(state, sessionTodoMachine(machineId, shownHost), shownHost));
-  return useMemo(() => (rows ? sessionTodoEntries(rows, sessionId, machineId ?? LOCAL_MACHINE_ID) : null), [rows, sessionId, machineId]);
+  const machine = sessionTodoMachine(machineId, shownHost);
+  const rows = useTodosStore(state => machineRows(state, machine, shownHost));
+  // Keyed by the machine its approval scope uses (T-51), so a row and its cards name the same to-do.
+  return useMemo(() => (rows ? sessionTodoEntries(rows, sessionId, machine) : null), [rows, sessionId, machine]);
+}
+
+/** As useSessionTodoEntries, read once from the store's current state. */
+export function sessionTodoEntriesNow(sessionId: string, machineId?: string): TodoEntry[] | null {
+  const shownHost = shownHostId(useConfigStore.getState().config);
+  const machine = sessionTodoMachine(machineId, shownHost);
+  const rows = machineRows(useTodosStore.getState(), machine, shownHost);
+  return rows ? sessionTodoEntries(rows, sessionId, machine) : null;
 }
 
 /** The approvals waiting on you for a Session's to-dos: oldest first, and how many each of its to-dos has. */

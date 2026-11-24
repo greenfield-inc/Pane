@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ListTodo, Plus } from 'lucide-react';
 import { todoRef } from '../../../../shared/types/todos';
 import { sessionTodoMachine, useSessionTodoApprovals, useSessionTodoEntries, useShownHostId, type CreatedTodo } from '../../stores/todosStore';
-import { todoKeyOfItem, todoKeyOfRow } from '../../../../shared/todoKey';
+import { todoKey, todoKeyOfItem, todoKeyOfRow } from '../../../../shared/todoKey';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { openOnMachine } from '../../utils/machineRowActions';
 import { useNotifyStore } from '../../stores/notifyStore';
@@ -69,7 +69,7 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
   const narrow = useNarrow(rootRef);
 
   const select = useCallback((key: string | null) => update(sessionId, { selected: key }), [sessionId, update]);
-  const keyOf = useCallback((number: number) => `${entries?.[0]?.machineId ?? machineId ?? 'local'}:${number}`, [entries, machineId]);
+  const keyOf = useCallback((number: number): string => todoKey(todosMachine, number), [todosMachine]);
   const showList = useCallback((selected?: string) => update(sessionId, selected === undefined ? { view: { kind: 'list' } } : { view: { kind: 'list' }, selected }), [sessionId, update]);
   const openNumber = useCallback((number: number) => update(sessionId, { view: { kind: 'todo', number }, selected: keyOf(number) }), [keyOf, sessionId, update]);
   const openApproval = useCallback((id: string, key: string) => update(sessionId, { view: { kind: 'approval', id }, selected: key }), [sessionId, update]);

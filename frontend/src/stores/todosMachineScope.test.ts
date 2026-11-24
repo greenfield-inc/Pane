@@ -6,7 +6,7 @@ import type { TodoListRow, TodoRecord, TodosSnapshot } from '../../../shared/typ
 import { createDefaultRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { todoKey } from '../../../shared/todoKey';
 import { useConfigStore } from './configStore';
-import { forgetTodos, resetTodos, sessionTodoScope, useTodosStore } from './todosStore';
+import { forgetTodos, resetTodos, sessionTodoEntriesNow, sessionTodoScope, useTodosStore } from './todosStore';
 import { sessionApprovals } from '../components/approvals/approvalCard';
 
 /** T-51: a Session's approval scope reads the rows of the machine its Session is on, and none once To-dos is off. */
@@ -112,5 +112,15 @@ describe('To-dos turned off while a saved machine\'s read is in flight (review F
     configure(null, false);
     useTodosStore.setState({ remote: { macbook: { machineId: 'macbook', label: 'tylers-macbook-pro', snapshot: macbookTodos, offline: false } } });
     expect(sessionTodoScope('workspaces', 'macbook').sessionIds.size).toBe(0);
+  });
+});
+
+describe('a Session\'s rows and its approvals name the same machine (review F-6)', () => {
+  it('with the window on the MacBook, its Session\'s rows key as the MacBook\'s, as its scope does', () => {
+    configure('macbook');
+    useTodosStore.setState({ snapshot: macbookTodos });
+    const keys = (sessionTodoEntriesNow('workspaces') ?? []).map(entry => entry.key);
+    expect(keys).toEqual([todoKey('macbook', 28)]);
+    expect(new Set(keys)).toEqual(sessionTodoScope('workspaces').todoKeys);
   });
 });
