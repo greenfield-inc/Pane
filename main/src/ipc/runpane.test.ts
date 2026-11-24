@@ -50,6 +50,13 @@ import type { TaskQueue } from '../services/taskQueue';
 import { PaneError } from '../../../shared/paneError';
 import Database from 'better-sqlite3-multiple-ciphers';
 import { TodoService } from '../services/todos/todoService';
+import { EventEmitter } from 'events';
+import type { PaneCommandValue } from '../daemon/commandRegistry';
+import { RemoteMemberEvents } from '../services/remoteMemberEvents';
+import { SessionInbox } from '../services/sessionInbox';
+import { ApprovalStore } from '../services/approvals/approvalStore';
+import { NotifyService } from '../services/notify/notifyService';
+import { activeTodoService } from '../services/todos/todosFeature';
 import { TodoStore } from '../services/todos/todoStore';
 import { FakeHost } from '../services/todos/todoTestHost';
 import { agentTerminalCommand, configuredAgent } from '../../../shared/agents';
@@ -7795,6 +7802,75 @@ describe('runpane IPC handlers', () => {
         const result = await registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', todo: 'T-28' }]);
         expect(result.warnings).toBeUndefined();
         expect(result.report).toMatchObject({ todo: 'T-28', installId: 'install-b' });
+      });
+
+      it('end to end, both machines have a T-28: B\'s journaled report reaches A\'s card linked to A\'s T-28, and B\'s T-28 is untouched (review F-3)', async () => {
+        vi.stubEnv('PANE_DISABLE_OS_INTEGRATION', '1');
+        const { registry: worker, todoService: workerTodos } = await workerMachine(false);
+        const workersOwn = workerTodos.require(28);
+        const reported = await worker.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked', question: 'Q-84: Which sign-up flow?', todo: 'T-28' }]);
+        const memberPane = reported.paneId;
+
+        // A, the Session's machine: its own T-28, a journal, the inbox on its approvals table, and Notify.
+        const aDb = new Database(':memory:');
+        const aHost = new FakeHost();
+        aHost.installIdValue = 'install-a';
+        const aTodos = new TodoService(new TodoStore(aDb), aHost, () => Date.UTC(2026, 10, 24, 9, 0));
+        for (let i = 1; i < 28; i += 1) await aTodos.create({ title: `A filler ${i}`, startNow: false }, { kind: 'person' });
+        await aTodos.create({ title: 'Accept Google Cloud\'s HIPAA BAA', startNow: false }, { kind: 'person' });
+        const aJournal = new WorkspaceJournal();
+        const approvalStore = new ApprovalStore(aDb, 'mini');
+        const inbox = new SessionInbox(approvalStore, { sessionIdsFor: paneId => (paneId === memberPane ? ['sess-a'] : []), itemsPerSession: () => 10 });
+        inbox.attach(aJournal);
+        // B's entries reach A as RemoteMemberEvents reads them: B's own runpane:workspace:wait.
+        let cursor: { epoch: string; gen: number } | undefined;
+        const bridge = new RemoteMemberEvents({
+          machines: {
+            subscribe: () => () => {},
+            // SAFETY: a JSON round trip of B's reply is a PaneCommandValue, as the connection carries it.
+            invoke: async (_machineId, channel, args) => JSON.parse(JSON.stringify(await worker.invoke(channel, args))) as PaneCommandValue,
+          },
+          journal: aJournal,
+          members: {
+            remoteMember: paneId => (paneId === memberPane ? { machine: { id: 'macbook', label: 'tylers-macbook-pro' } } : undefined),
+            remoteMemberPaneIds: () => [memberPane],
+            remoteCursor: () => cursor,
+            saveRemoteCursor: (_machineId, next) => { cursor = next; },
+          },
+        });
+        await bridge.catchUp('macbook');
+        class FakeConfigManager extends EventEmitter {
+          getConfig(): AppConfig { return { machineId: 'install-a', todosEnabled: true }; }
+        }
+        const configManager = new FakeConfigManager();
+        const notify = new NotifyService({
+          // SAFETY: NotifyService reads only getConfig() and 'config-updated' from its ConfigManager.
+          configManager: configManager as ConfigManager,
+          getMainWindow: () => null,
+          findPane: () => undefined,
+          rendererArguments: () => [],
+          headless: true,
+          machine: 'mini',
+          publish: () => {},
+          sendToMachine: async () => {},
+          refreshMachine: async () => {},
+          memberMachine: paneId => (paneId === memberPane ? 'tylers-macbook-pro' : undefined),
+          todoOf: (panelId, explicit) => activeTodoService({ todoService: aTodos, configManager })?.todoLinkFor(panelId, explicit),
+          sessionRecord: () => ({ name: 'Firecracker Grain', paneId: 'owner-a', archived: false }),
+          inbox,
+          store: approvalStore,
+        });
+        try {
+          const card = notify.queue.snapshot().items.find(item => item.title.startsWith('Q-84'));
+          expect(card?.todo).toEqual({ number: 28, title: 'Accept Google Cloud\'s HIPAA BAA', installId: 'install-a' });
+          // The journal carried B's reference and install id to A's inbox.
+          expect(inbox.all()[0]?.report).toMatchObject({ todo: 'T-28', installId: 'install-b' });
+          expect(aDb.prepare('SELECT todo_id FROM approvals WHERE id = ?').get(card?.id)).toEqual({ todo_id: 28 });
+          expect(workerTodos.require(28)).toEqual(workersOwn);
+        } finally {
+          notify.dispose();
+          aDb.close();
+        }
       });
 
       it('a refused report leaves the to-do untouched; an accepted one records progress (review F-2)', async () => {
