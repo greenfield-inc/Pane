@@ -757,6 +757,10 @@ export interface AgentReport {
   choices?: NotifyChoice[];
   /** A blocked report's several questions (`--questions`). */
   questions?: NotifySubQuestion[];
+  /** To-dos: the `--todo` reference ("T-28"). The Session's machine reads it as its own to-do. */
+  todo?: string;
+  /** The install id of the machine the report was made on, sent with `todo`. */
+  installId?: string;
   reportedAt: string;
 }
 
@@ -769,7 +773,7 @@ interface ReportResult {
   sessionIds: string[];
   /** Watches waiting when the report was journaled; absent from older daemons. */
   liveWatchers?: number;
-  /** A blocked report's card check: what its card misses; it was recorded anyway. */
+  /** Recorded anyway: a blocked report's card check, and a --todo left to the Session's machine. */
   warnings?: string[];
 }
 
@@ -1386,6 +1390,8 @@ const agentReportFields = {
     choices: boundary.array(reportChoiceSchema),
     why: boundary.optional(boundary.string),
   }))),
+  todo: boundary.optional(boundary.string),
+  installId: boundary.optional(boundary.string),
   reportedAt: boundary.string,
 };
 const agentReportSchema: BoundarySchema<AgentReport> = boundary.object(agentReportFields);

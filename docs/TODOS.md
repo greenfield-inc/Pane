@@ -708,6 +708,24 @@ runpane todos wake T-n
 - `--todo T-n` on `runpane notify`, `runpane report` and `runpane agents start`
   links that card, report or new agent to a to-do. An agent started with
   `--todo` is assigned that to-do.
+- A worker in a Pane on another machine, in a Session on this one, means this
+  machine's T-n: the Session's machine reads the number against its own
+  to-dos and links the card there; a number it has no open to-do for leaves
+  the card unlinked. The worker's machine keeps no record that its Pane is in
+  another machine's Session, so it checks `report --todo` only when the Pane
+  is in a Session there or the to-do is assigned to that tab (a number with no
+  open to-do is then refused). Otherwise it records nothing on its own
+  to-dos and the report says so in a warning. Progress is recorded only once
+  the report is accepted, so a refused report changes no to-do.
+- That rule needs an updated Pane on the worker's machine. A worker's machine
+  on an older Pane still checks `--todo` against its own to-dos: it refuses
+  the report when it has no open to-do with that number (so nothing reaches
+  the Session's machine), and otherwise records progress on its own,
+  unrelated T-n. An updated Session's machine still links its own T-n to any
+  report that arrives.
+- To-do links, the to-dos snapshot and a report with `--todo` carry the owning
+  machine's install id (`installId`); a card whose link names another install
+  id than the machine that sent it shows unlinked. Older machines send none.
 
 The full contract is in [RUNPANE_CLI_CONTRACT.md](RUNPANE_CLI_CONTRACT.md).
 

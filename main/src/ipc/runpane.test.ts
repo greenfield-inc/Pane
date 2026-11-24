@@ -49,6 +49,16 @@ import { createLoopTestDb } from '../services/loops/loopTestDb';
 import type { TaskQueue } from '../services/taskQueue';
 import { PaneError } from '../../../shared/paneError';
 import Database from 'better-sqlite3-multiple-ciphers';
+import { TodoService } from '../services/todos/todoService';
+import { EventEmitter } from 'events';
+import type { PaneCommandValue } from '../daemon/commandRegistry';
+import { RemoteMemberEvents } from '../services/remoteMemberEvents';
+import { SessionInbox } from '../services/sessionInbox';
+import { ApprovalStore } from '../services/approvals/approvalStore';
+import { NotifyService } from '../services/notify/notifyService';
+import { activeTodoService } from '../services/todos/todosFeature';
+import { TodoStore } from '../services/todos/todoStore';
+import { FakeHost } from '../services/todos/todoTestHost';
 import { agentTerminalCommand, configuredAgent } from '../../../shared/agents';
 
 /** The approvals table on its own, for tests that don't look at it. */
@@ -7750,7 +7760,132 @@ describe('runpane IPC handlers', () => {
 
       expect(result.report).toMatchObject({ state: 'blocked', question: 'Which PDF library?' });
       expect(result.report).not.toHaveProperty('todo');
+      expect(result.report).not.toHaveProperty('installId');
+      expect(result.warnings ?? []).not.toContainEqual(expect.stringContaining('was not checked on this machine'));
       expect(stored.state.customState).not.toHaveProperty('agentReport.todo');
+    });
+
+    describe('--todo on the worker\'s machine (T-51, D-4)', () => {
+      let todoDb: Database.Database;
+      afterEach(() => todoDb.close());
+
+      /** This machine with To-dos on and its own T-28, the tab's Pane in a Session here or not. */
+      async function workerMachine(inLocalSession: boolean) {
+        todoDb = new Database(':memory:');
+        const todoService = new TodoService(new TodoStore(todoDb), new FakeHost(), () => Date.UTC(2026, 10, 24, 9, 0));
+        for (let i = 1; i < 28; i += 1) await todoService.create({ title: `Filler ${i}`, startNow: false }, { kind: 'person' });
+        await todoService.create({ title: 'Phone-number sign-up, sign-in and invites', startNow: false }, { kind: 'person' });
+        // SAFETY: Only recordAgentReport and approvalSession are reached by the report handler, and both are stubbed below.
+        const orchestrationSessionManager = Object.create(OrchestrationSessionManager.prototype) as OrchestrationSessionManager;
+        vi.spyOn(orchestrationSessionManager, 'recordAgentReport').mockResolvedValue([]);
+        vi.spyOn(orchestrationSessionManager, 'approvalSession').mockReturnValue(inLocalSession ? { id: 'sess-b', name: 'Local', paneId: 'owner-b' } : undefined);
+        const services = createServices({ orchestrationSessionManager, todoService });
+        vi.mocked(services.configManager.getConfig).mockReturnValue({ machineId: 'install-b', todosEnabled: true });
+        return { registry: createRegistry(services), todoService };
+      }
+
+      it('a Pane in no Session here: the report lands with its --todo and this machine\'s install id, a warning, and this machine\'s T-28 untouched', async () => {
+        const { registry, todoService } = await workerMachine(false);
+        const before = todoService.require(28);
+        const result = await registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked', question: 'Q-84: go?', todo: 'T-28' }]);
+        expect(result.report).toMatchObject({ todo: 'T-28', installId: 'install-b' });
+        expect(result.warnings).toContainEqual(expect.stringContaining('T-28 was not checked on this machine'));
+        expect(todoService.require(28)).toEqual(before);
+        // A number this machine doesn't have is the Session's machine's to read, not a refusal here.
+        await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', todo: 'T-99' }])).resolves.toMatchObject({ ok: true, report: { todo: 'T-99' } });
+      });
+
+      it('a Pane in a Session here keeps D-408: a --todo with no open to-do is refused and nothing is stored', async () => {
+        const { registry } = await workerMachine(true);
+        await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', todo: 'T-99' }])).rejects.toMatchObject({ code: 'ERR_TODO_NOT_FOUND' });
+        expect(stored.state.customState).not.toHaveProperty('agentReport');
+        const result = await registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', todo: 'T-28' }]);
+        expect(result.warnings).toBeUndefined();
+        expect(result.report).toMatchObject({ todo: 'T-28', installId: 'install-b' });
+      });
+
+      it('end to end, both machines have a T-28: B\'s journaled report reaches A\'s card linked to A\'s T-28, and B\'s T-28 is untouched (review F-3)', async () => {
+        vi.stubEnv('PANE_DISABLE_OS_INTEGRATION', '1');
+        const { registry: worker, todoService: workerTodos } = await workerMachine(false);
+        const workersOwn = workerTodos.require(28);
+        const reported = await worker.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked', question: 'Q-84: Which sign-up flow?', todo: 'T-28' }]);
+        const memberPane = reported.paneId;
+
+        // A, the Session's machine: its own T-28, a journal, the inbox on its approvals table, and Notify.
+        const aDb = new Database(':memory:');
+        const aHost = new FakeHost();
+        aHost.installIdValue = 'install-a';
+        const aTodos = new TodoService(new TodoStore(aDb), aHost, () => Date.UTC(2026, 10, 24, 9, 0));
+        for (let i = 1; i < 28; i += 1) await aTodos.create({ title: `A filler ${i}`, startNow: false }, { kind: 'person' });
+        await aTodos.create({ title: 'Accept Google Cloud\'s HIPAA BAA', startNow: false }, { kind: 'person' });
+        const aJournal = new WorkspaceJournal();
+        const approvalStore = new ApprovalStore(aDb, 'mini');
+        const inbox = new SessionInbox(approvalStore, { sessionIdsFor: paneId => (paneId === memberPane ? ['sess-a'] : []), itemsPerSession: () => 10 });
+        inbox.attach(aJournal);
+        // B's entries reach A as RemoteMemberEvents reads them: B's own runpane:workspace:wait.
+        let cursor: { epoch: string; gen: number } | undefined;
+        const bridge = new RemoteMemberEvents({
+          machines: {
+            subscribe: () => () => {},
+            // SAFETY: a JSON round trip of B's reply is a PaneCommandValue, as the connection carries it.
+            invoke: async (_machineId, channel, args) => JSON.parse(JSON.stringify(await worker.invoke(channel, args))) as PaneCommandValue,
+          },
+          journal: aJournal,
+          members: {
+            remoteMember: paneId => (paneId === memberPane ? { machine: { id: 'macbook', label: 'tylers-macbook-pro' } } : undefined),
+            remoteMemberPaneIds: () => [memberPane],
+            remoteCursor: () => cursor,
+            saveRemoteCursor: (_machineId, next) => { cursor = next; },
+          },
+        });
+        await bridge.catchUp('macbook');
+        class FakeConfigManager extends EventEmitter {
+          getConfig(): AppConfig { return { machineId: 'install-a', todosEnabled: true }; }
+        }
+        const configManager = new FakeConfigManager();
+        const notify = new NotifyService({
+          // SAFETY: NotifyService reads only getConfig() and 'config-updated' from its ConfigManager.
+          configManager: configManager as ConfigManager,
+          getMainWindow: () => null,
+          findPane: () => undefined,
+          rendererArguments: () => [],
+          headless: true,
+          machine: 'mini',
+          publish: () => {},
+          sendToMachine: async () => {},
+          refreshMachine: async () => {},
+          memberMachine: paneId => (paneId === memberPane ? 'tylers-macbook-pro' : undefined),
+          todoOf: (panelId, explicit) => activeTodoService({ todoService: aTodos, configManager })?.todoLinkFor(panelId, explicit),
+          sessionRecord: () => ({ name: 'Firecracker Grain', paneId: 'owner-a', archived: false }),
+          inbox,
+          store: approvalStore,
+        });
+        try {
+          const card = notify.queue.snapshot().items.find(item => item.title.startsWith('Q-84'));
+          expect(card?.todo).toEqual({ number: 28, title: 'Accept Google Cloud\'s HIPAA BAA', installId: 'install-a' });
+          // The journal carried B's reference and install id to A's inbox.
+          expect(inbox.all()[0]?.report).toMatchObject({ todo: 'T-28', installId: 'install-b' });
+          expect(aDb.prepare('SELECT todo_id FROM approvals WHERE id = ?').get(card?.id)).toEqual({ todo_id: 28 });
+          expect(workerTodos.require(28)).toEqual(workersOwn);
+        } finally {
+          notify.dispose();
+          aDb.close();
+        }
+      });
+
+      it('a refused report leaves the to-do untouched; an accepted one records progress (review F-2)', async () => {
+        const { registry, todoService } = await workerMachine(true);
+        const before = todoService.require(28);
+        // The panel belongs to another Pane: refused after the to-do check.
+        await expect(registry.invoke('runpane:report', [{ paneId: 'another-pane', panelId: terminalPanel.id, state: 'ready', todo: 'T-28' }])).rejects.toThrow(/belongs to Pane/);
+        // Buttons on a report that isn't blocked: refused.
+        await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', choices: [{ label: 'A' }], todo: 'T-28' }])).rejects.toThrow();
+        expect(todoService.require(28)).toEqual(before);
+        expect(stored.state.customState).not.toHaveProperty('agentReport');
+
+        await registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', todo: 'T-28' }]);
+        expect(todoService.require(28).lastProgressAt).not.toBe(before.lastProgressAt);
+      });
     });
 
     it('stores the latest report in the panel custom state and journals an opt-in agent.report', async () => {

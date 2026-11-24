@@ -30,7 +30,7 @@ import {
   type NotifyTodoLink,
 } from '../../../../shared/types/notify';
 import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed, type MoveStayed } from './notifyQueue';
-import { PaneError, paneErrorText } from '../../../../shared/paneError';
+import { PaneError, paneErrorText, reasonOf } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
 import { NotifyTray } from './notifyTray';
@@ -284,11 +284,16 @@ export class NotifyService {
   }
 
   /** Each worker's blocked question is a card from the start (J7). */
-  /** A worker's question's to-do; a `--todo` that no longer resolves leaves the card unlinked rather than lost. */
-  private workerTodo(panelId: string, explicit: string | undefined): NotifyTodoLink | undefined {
+  /**
+   * A worker's question's to-do; a `--todo` that no longer resolves leaves the card unlinked rather than lost.
+   * T-51 (D-1 C): a member on another machine (`machine`) means this machine's to-do, since the Session is
+   * here; its machine checked nothing (D-4), so a miss is said in the log instead of passing silently.
+   */
+  private workerTodo(panelId: string, explicit: string | undefined, machine: string | undefined): NotifyTodoLink | undefined {
     try {
       return this.deps.todoOf?.(panelId, explicit);
-    } catch {
+    } catch (error) {
+      if (machine && explicit) console.warn(`[Notify] A worker on ${machine} asked about ${explicit}, which is no open to-do on this machine (the Session's), so its card is not linked to a to-do: ${reasonOf(error)}`);
       return undefined;
     }
   }
@@ -336,7 +341,7 @@ export class NotifyService {
         choices: card.choices,
         questions: card.questions,
         asSent: card.asSent,
-        todo: this.workerTodo(entry.panelId, entry.report?.todo),
+        todo: this.workerTodo(entry.panelId, entry.report?.todo, machine),
         ...summaryFiles(entry.report?.summaryPath, card.summaryPage),
       });
     }

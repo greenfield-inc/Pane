@@ -98,6 +98,16 @@ export interface TodoHost {
   /** The PR on any of these Panes: "#1390 · CI running". */
   prOf(paneIds: string[]): TodoListRow['pr'] | undefined;
   log(message: string, error?: Error | string): void;
+  /** T-51: this machine's install id, carried on to-do links and the snapshot. Absent: none sent. */
+  installId?(): string | undefined;
+}
+
+/** What a `runpane report --todo` came to on this machine (T-51, D-4). Checking it writes nothing. */
+export interface ReportTodoCheck {
+  /** This machine's own open to-do the report is about: `recordReportTodo` records progress on it once the report is accepted. */
+  todoNumber?: number;
+  /** Set when this machine left the number to the Session's machine: nothing is recorded here. */
+  warning?: string;
 }
 
 interface OutboxEntry {
@@ -334,7 +344,10 @@ export class TodoService extends EventEmitter {
     // Snoozed: soonest first.
     const wakesAt = (row: TodoListRow) => row.status.status === 'snoozed' ? row.todo.snooze?.until ?? 0 : 0;
     rows.sort((a, b) => STATUS_ORDER[a.status.status] - STATUS_ORDER[b.status.status] || wakesAt(a) - wakesAt(b) || b.todo.updatedAt - a.todo.updatedAt);
-    return { rows, gate: this.gateSnapshot(), machine: this.host.machineName(), ownSessionIds: this.store.ownSessionIds() };
+    const snapshot: TodosSnapshot = { rows, gate: this.gateSnapshot(), machine: this.host.machineName(), ownSessionIds: this.store.ownSessionIds() };
+    const installId = this.host.installId?.();
+    if (installId) snapshot.installId = installId;
+    return snapshot;
   }
 
   /** Own attachments, then the parent's (for a sub-to-do) or each sub-to-do's (for a parent). Read, never copied. */
@@ -685,8 +698,51 @@ export class TodoService extends EventEmitter {
     if (!todo) return undefined;
     this.progress(todo);
     this.changed();
-    return { number: todo.number, title: todo.title };
+    return this.linkOf(todo);
   }
+
+  /** A to-do's link on a card: its number here, with this machine's install id (T-51). */
+  linkOf(todo: Pick<TodoRecord, 'number' | 'title'>, kind?: NotifyTodoLink['kind']): NotifyTodoLink {
+    const link: NotifyTodoLink = { number: todo.number, title: todo.title };
+    if (kind) link.kind = kind;
+    const installId = this.host.installId?.();
+    if (installId) link.installId = installId;
+    return link;
+  }
+
+  /**
+   * `runpane report --todo T-n` on the machine the reporting tab runs on (T-51, D-4). This machine
+   * can't tell whether the tab's Pane belongs to a Session on another machine: that membership is
+   * recorded only there. So it checks the to-do only when it can tell the report is its own: the Pane
+   * is in a Session here (`inLocalSession`), or the to-do is assigned to this tab. Then a number with no
+   * open to-do is refused, as before (D-408), and `recordReportTodo` records progress once the report is
+   * accepted. Otherwise nothing is recorded on its own to-dos, and the Session's machine resolves the
+   * number against its to-dos (D-1 C). Checking writes nothing either way.
+   */
+  checkReportTodo(panelId: string, explicit: string, inLocalSession: boolean): ReportTodoCheck {
+    const number = parseTodoRef(explicit);
+    if (number === null) throw notFound(explicit);
+    const own = this.store.get(number);
+    if (inLocalSession || own?.assignee?.panelId === panelId) {
+      if (!own) throw notFound(explicit);
+      this.requireOpen(own, 'asked about');
+      return { todoNumber: own.number };
+    }
+    return {
+      warning: `${todoRef(number)} was not checked on this machine: this tab's Pane is in no Session here, so the machine whose Session it is in reads ${todoRef(number)} as its own to-do. Nothing was recorded on this machine's to-dos.`,
+    };
+  }
+  /**
+   * The report passed every check and was stored: progress on the to-do `checkReportTodo` found (T-51 review F-2).
+   * A refused report never gets here, so it never resets the supervisor's clock.
+   */
+  recordReportTodo(check: ReportTodoCheck): void {
+    const todo = check.todoNumber === undefined ? undefined : this.store.get(check.todoNumber);
+    if (!todo || !isOpenTodoState(todo.state)) return;
+    this.progress(todo);
+    this.changed();
+  }
+
 
   /** The one open to-do a tab is assigned to, if exactly one (unlinked questions link to it). */
   soleTodoOfPanel(panelId: string): TodoRecord | undefined {

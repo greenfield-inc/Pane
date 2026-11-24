@@ -115,6 +115,70 @@ describe('TodoService', () => {
     });
   });
 
+  describe('a report\'s --todo on the worker\'s machine (T-51, D-1 C, D-4)', () => {
+    /** Makes to-dos up to T-n here, the last one titled `title`. */
+    async function upTo(target: TodoService, n: number, title: string) {
+      for (let i = 1; i < n; i += 1) await target.create({ title: `Filler ${i}`, startNow: false }, person);
+      return target.create({ title, startNow: false }, person);
+    }
+
+    it('a Pane in no Session here leaves T-28 to the Session\'s machine: no refusal, no progress on this machine\'s own T-28', async () => {
+      const own = await upTo(service, 28, 'Phone-number sign-up');
+      const before = service.require(own.number);
+      now += 60_000;
+      const check = service.checkReportTodo('remote-worker-tab', 'T-28', false);
+      expect(check.todoNumber).toBeUndefined();
+      service.recordReportTodo(check);
+      expect(check.warning).toContain('T-28 was not checked on this machine');
+      expect(check.warning).toContain('Nothing was recorded');
+      expect(service.require(own.number)).toEqual(before);
+    });
+
+    it('a number this machine has no open to-do for is accepted, with the warning, when the Pane is in no Session here', async () => {
+      const check = service.checkReportTodo('remote-worker-tab', 'T-28', false);
+      expect(check).toEqual({ warning: expect.stringContaining('reads T-28 as its own to-do') });
+    });
+
+    it('a Pane in a Session here keeps the D-408 check: a miss or a closed to-do is refused, an open one records progress once the report is accepted', async () => {
+      expect(() => service.checkReportTodo('w', 'T-28', true)).toThrow(expect.objectContaining({ code: 'ERR_TODO_NOT_FOUND' }));
+      const own = await upTo(service, 2, 'Local work');
+      const before = service.require(own.number);
+      now += 60_000;
+      const check = service.checkReportTodo('w', 'T-2', true);
+      expect(check).toEqual({ todoNumber: 2 });
+      // Checking writes nothing (review F-2): the report may still be refused.
+      expect(service.require(own.number)).toEqual(before);
+      service.recordReportTodo(check);
+      expect(service.require(own.number).lastProgressAt).toBe(now);
+      service.drop(own.number, {}, person);
+      expect(() => service.checkReportTodo('w', 'T-2', true)).toThrow(expect.objectContaining({ code: 'ERR_TODO_CLOSED' }));
+    });
+
+    it('a to-do assigned to this tab is this machine\'s own, even in no Session: checked and recorded as before', async () => {
+      const own = await service.create({ title: 'Assigned here' }, person);
+      host.panels.set('w1', { name: 'implementer', sessionId: 's1', orchestrator: false, paneId: 'p1' });
+      service.assign(own.number, 'w1', { kind: 'agent', panelId: 's1-orch' });
+      now += 60_000;
+      const check = service.checkReportTodo('w1', own.ref, false);
+      expect(check).toEqual({ todoNumber: own.number });
+      service.recordReportTodo(check);
+      expect(service.require(own.number).lastProgressAt).toBe(now);
+    });
+
+    it('a ref that is not a to-do number is refused on any machine', () => {
+      expect(() => service.checkReportTodo('w', 'twenty-eight', false)).toThrow(expect.objectContaining({ code: 'ERR_TODO_NOT_FOUND' }));
+    });
+
+    it('links and the snapshot carry this machine\'s install id; an older Pane (none) sends none', async () => {
+      await service.create({ title: 'Mine', startNow: false }, person);
+      expect(service.todoLinkFor(undefined, 'T-1')).toEqual({ number: 1, title: 'Mine', installId: 'install-a' });
+      expect(service.snapshot().installId).toBe('install-a');
+      host.installIdValue = undefined;
+      expect(service.todoLinkFor(undefined, 'T-1')).toEqual({ number: 1, title: 'Mine' });
+      expect(service.snapshot()).not.toHaveProperty('installId');
+    });
+  });
+
   describe('done, review and accept', () => {
     it('refuses an agent marking an unaccepted top-level to-do done, pointing to review; --person-said goes through and is quoted', async () => {
       const todo = await service.create({ title: 'Ship' }, person);

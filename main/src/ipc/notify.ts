@@ -220,6 +220,7 @@ const todoLinkSchema = boundary.object({
   number: boundary.number,
   title: boundary.string,
   kind: boundary.optional(boundary.enumeration('review', 'stuck', 'question', 'reminder')),
+  installId: boundary.optional(boundary.string),
 });
 /**
  * A card's to-do link, read on its own (T-51): one this Pane can't read (a newer machine's kind, say) leaves the
@@ -783,6 +784,16 @@ export function followSavedMachines(machines: NotifyMachines): void {
   followMachines?.(machines);
 }
 
+/**
+ * T-51: a card's to-do link is that machine's own to-do. A link naming another machine's install id than the
+ * one this machine connected to is shown unlinked rather than as the wrong to-do; a link or machine with no
+ * install id (an older Pane) is kept, since on screen a link is read with the card's machine.
+ */
+function withOwnTodoLinks(state: NotifySharedState, installId: string | undefined): NotifySharedState {
+  if (!installId || !state.items.some(item => item.todo?.installId && item.todo.installId !== installId)) return state;
+  return { ...state, items: state.items.map(item => (item.todo?.installId && item.todo.installId !== installId ? { ...item, todo: undefined } : item)) };
+}
+
 /** One Notify slot per saved machine: read on first sight, on reconnect and resync; kept, unanswerable, while offline. */
 function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): SavedMachinesLink {
   const queue = notify.queue;
@@ -796,7 +807,7 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
       return;
     }
     // A read finishing after the machine went offline must not mark its cards answerable again.
-    queue.setRemote(machineId, { machine: machine.label, online: machine.status !== 'offline', state });
+    queue.setRemote(machineId, { machine: machine.label, online: machine.status !== 'offline', state: withOwnTodoLinks(state, machine.installId) });
   };
   const read = async (machineId: string) => {
     if (!known.has(machineId)) return;

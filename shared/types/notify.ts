@@ -93,6 +93,11 @@ export interface NotifyTodoLink {
   title: string;
   /** Pane's own card about the to-do: its review, the supervisor's stuck card, or a snooze's reminder (round 9). */
   kind?: 'review' | 'stuck' | 'question' | 'reminder';
+  /**
+   * T-51: the install id (`AppConfig.machineId`) of the machine whose to-do this is. Only for checks between
+   * machines; on screen a link is matched with the card's `machineId`. Absent from older machines.
+   */
+  installId?: string;
 }
 
 /** Up to this many links per card; a label takes up to NOTIFY_LINK_LABEL_MAX characters. */

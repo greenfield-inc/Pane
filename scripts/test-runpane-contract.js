@@ -3588,6 +3588,78 @@ print(json.dumps({"codes": codes, "calls": calls, "stdout": stdout.getvalue().sp
   assert.ok(python.stderr.includes('transcript-unavailable: No claude transcript reply found.'), python.stderr.join('\n'));
 }
 
+/**
+ * T-51 (D-4): a report with --todo comes back with the reference and the sending machine's install id, and,
+ * when the Pane is in no Session on this machine, a warning. Both CLIs print them with --json, and the reply
+ * matches the published schema; an older daemon's reply (none of them) prints and validates as before.
+ */
+async function checkReportTodoParity() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const localControl = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const Ajv = require(require.resolve('ajv', { paths: [rootDir] }));
+  const ajv = new Ajv({ allErrors: true });
+  ajv.addSchema({ jsonSchemas: contract.jsonSchemas }, 'contract');
+  const validResult = ajv.compile({ $ref: 'contract#/jsonSchemas/reportResult' });
+  const warning = 'T-28 was not checked on this machine: this tab\'s Pane is in no Session here, so the machine whose Session it is in reads T-28 as its own to-do. Nothing was recorded on this machine\'s to-dos.';
+  const withTodo = {
+    ok: true, generation: 3, paneId: 'session-1', panelId: 'panel-1', sessionIds: [], liveWatchers: 0,
+    report: { state: 'blocked', question: 'Q-84: Which sign-up flow?', todo: 'T-28', installId: 'install-b', reportedAt: '2026-11-24T17:00:00.000Z' },
+    warnings: [warning],
+  };
+  const older = { ok: true, paneId: 'session-1', panelId: 'panel-1', sessionIds: [], report: { state: 'ready', reportedAt: '2026-11-24T17:00:00.000Z' } };
+  for (const [label, reply] of [['with --todo', withTodo], ['older daemon', older]]) {
+    assert.ok(validResult(reply), `${label}: ${ajv.errorsText(validResult.errors)}`);
+  }
+
+  const cases = [
+    { reply: withTodo, args: ['report', '--state', 'blocked', '--question', 'Q-84: Which sign-up flow?', '--todo', 'T-28', '--panel', 'panel-1', '--json'] },
+    { reply: older, args: ['report', '--state', 'ready', '--panel', 'panel-1', '--json'] },
+    { reply: withTodo, args: ['report', '--state', 'blocked', '--question', 'Q-84: Which sign-up flow?', '--todo', 'T-28', '--panel', 'panel-1'] },
+  ];
+  const npmOut = [];
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  try {
+    for (const { reply, args } of cases) {
+      const lines = [];
+      // Decode with the caller's boundary schema, as the real client does, so dropped keys show.
+      daemonClient.invokeDaemon = async (_channel, _args, schema) => decodeBoundary(JSON.parse(JSON.stringify(reply)), schema);
+      console.log = (line) => lines.push(String(line));
+      assert.strictEqual(await localControl.runReport(parseRunpaneArgs(args), {}), 0);
+      npmOut.push(lines);
+    }
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+  assert.deepStrictEqual(JSON.parse(npmOut[0].join('\n')), withTodo, 'npm prints the report\'s todo, installId and the warning');
+  assert.deepStrictEqual(JSON.parse(npmOut[1].join('\n')), older, 'npm prints an older reply unchanged');
+  assert.ok(npmOut[2].includes(`Warning: ${warning}`), npmOut[2].join('\n'));
+
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+cases = json.loads(${JSON.stringify(JSON.stringify(cases))})
+outputs = []
+for case in cases:
+    local_control.invoke_daemon = lambda channel, args, reply=case["reply"], **kwargs: reply
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        local_control.run_report(parse_args(case["args"]), {})
+    outputs.append(stdout.getvalue().splitlines())
+print(json.dumps(outputs))
+`));
+  assert.deepStrictEqual(JSON.parse(python[0].join('\n')), withTodo, 'Python prints the report\'s todo, installId and the warning');
+  assert.deepStrictEqual(JSON.parse(python[1].join('\n')), older, 'Python prints an older reply unchanged');
+  assert.ok(python[2].includes(`Warning: ${warning}`), python[2].join('\n'));
+}
+
 async function checkOlderOutputNote() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -7448,6 +7520,7 @@ const checks = [
   checkHelpOutput,
   checkPanesCreateBaseNotice,
   checkReportParity,
+  checkReportTodoParity,
   checkCliEventSubscriptions,
   checkPaneArchiveDryRunParity,
   compareRemoteSetupDiagnosticParity,

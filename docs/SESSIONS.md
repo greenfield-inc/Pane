@@ -483,6 +483,11 @@ pass:
 - project environment variables set here but not there are listed by name
   (values never travel; Pane secrets sync on their own).
 
+A to-do's own Session never moves: its to-do stays on this machine, and the
+same number names a different to-do there, so the check blocks it
+(`ERR_MOVE_TODO_SESSION` from a start). A Session arriving from an older Pane
+keeps no to-do number.
+
 **Move** then stops each tab as soon as its turn ends. A tab whose agent is
 only waiting in `runpane watch` counts as idle and stops at once. The dialog
 lists the agents still working; **Stop now** interrupts them, and they pick up
