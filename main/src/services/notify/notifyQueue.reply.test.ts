@@ -716,6 +716,29 @@ describe('NotifyQueue replies (the reply contract)', () => {
       queue.dispose();
     });
 
+    it('F-1: refuses a Q-1 Autopilot itself asked about two Sessions, both replies taken as answers, naming both ids', async () => {
+      const autopilotSource: NotifySource = { name: 'Autopilot', agent: 'Claude', panelId: 'autopilot-chat', autopilot: true };
+      const first = queueWith();
+      void first.ask({ question: { ...q1('Ship the Doozy build?'), connected: { kind: 'session', id: session.id, name: session.name, paneId: session.paneId } }, source: autopilotSource, id: 'ap-a' });
+      void first.ask({ question: { ...q1('Merge the Grain fix?'), connected: { kind: 'session', id: otherSession.id, name: otherSession.name, paneId: otherSession.paneId } }, source: autopilotSource, id: 'ap-b' });
+      first.dispose();
+      const queue = queueWith();
+      queue.run({ type: 'answer', id: 'ap-a', answer: { picks: [], text: 'only after lunch' } });
+      queue.run({ type: 'answer', id: 'ap-b', answer: { picks: [], text: 'what for?' } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(item(queue, 'ap-a')?.reply).toMatchObject({ state: 'answer', reader: { panelId: 'autopilot-chat' } });
+      expect(item(queue, 'ap-b')?.reply).toMatchObject({ state: 'answer', reader: { panelId: 'autopilot-chat' } });
+      const before = [item(queue, 'ap-a'), item(queue, 'ap-b')];
+
+      const took = refusal(() => queue.took({ panelId: 'autopilot-chat' }, 'Q-1', 'question'));
+      expect(took.code).toBe('ERR_NOTIFY_AMBIGUOUS');
+      expect(took.message).toContain('ap-a (Doozy)');
+      expect(took.message).toContain('ap-b (Firecracker Grain)');
+      expect(refusal(() => queue.update({ panelId: 'autopilot-chat' }, 'Q-1', { asked: 'why?', whatChanged: ['Said why'] })).code).toBe('ERR_NOTIFY_AMBIGUOUS');
+      expect([item(queue, 'ap-a'), item(queue, 'ap-b')]).toEqual(before);
+      queue.dispose();
+    });
+
     it('takes the card whose reply went to Autopilot when the other Session\'s Q-1 only waits', async () => {
       const queue = twoQ1s();
       queue.run({ type: 'answer', id: 'b1', answer: { picks: [], text: 'what for?' } });

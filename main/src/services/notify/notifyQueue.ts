@@ -2435,9 +2435,9 @@ function tookNext(item: NotifyItem, replyId: string): string {
 
 /**
  * The card `wanted` names among those the caller reads: by id or continuation exactly; by Q-n, one
- * asker's card (`pickOwn`). Two askers' cards share a Q-n when a reader reads several Sessions
- * (Autopilot): the one whose reply came to the caller wins, and if that leaves two, Pane refuses
- * with their ids rather than guess.
+ * asker's card about one Session (`pickOwn`). Cards from two askers or about two Sessions share a
+ * Q-n when a reader reads or asks about several Sessions (Autopilot): the one whose reply came to
+ * the caller wins, and if that leaves two, Pane refuses with their ids rather than guess.
  */
 function pickNamed(own: Entry[], caller: NotifyReaderCaller, wanted: string, what: 'took' | 'update'): Entry {
   const exact = own.find(entry => entry.item.id === wanted || (entry.continuation !== undefined && entry.continuation === wanted));
@@ -2449,14 +2449,22 @@ function pickNamed(own: Entry[], caller: NotifyReaderCaller, wanted: string, wha
   const named = left.map(entry => `${entry.item.id} (${entry.item.connected?.name ?? entry.item.source.session?.name ?? entry.item.source.name})`).join(', ');
   throw new PaneError(
     'ERR_NOTIFY_AMBIGUOUS',
-    `${wanted} names ${left.length} approvals this tab reads, from different askers: ${named}. Nothing was changed.`,
+    `${wanted} names ${left.length} approvals this tab reads, from different askers or Sessions: ${named}. Nothing was changed.`,
     `Run --${what} again with the id of the one you mean, for example \`runpane notify --${what} ${left[0].item.id} …\`.`,
   );
 }
 
-/** How many tabs (or Panes) asked these cards: one asker's cards share a Q-n only when it asked again. */
+/**
+ * How many askers, each in one Session (or Pane), these cards have: one asker's cards about one
+ * Session share a Q-n only when it asked again. Autopilot asks from one tab about several Sessions
+ * (`connected`), so its Session counts as well as its tab.
+ */
 function askerCount(entries: readonly Entry[]): number {
-  return new Set(entries.map(entry => entry.item.source.panelId ?? entry.item.source.paneId ?? entry.item.id)).size;
+  return new Set(entries.map(({ item }) => {
+    const asker = item.source.panelId ?? item.source.paneId ?? item.id;
+    const about = item.connected ? `${item.connected.kind}:${item.connected.id}` : item.source.session?.id ?? '';
+    return `${asker}\u0000${about}`;
+  })).size;
 }
 
 /**
