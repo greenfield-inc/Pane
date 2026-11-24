@@ -619,3 +619,21 @@ test('QA F1: a to-do made with New in the tab opens there, though it is yours, n
   await expect(page.getByTestId('todo-page')).toHaveAttribute('data-todo', '18');
   await expect(page.getByTestId('todo-breadcrumb')).toHaveText(/\/\s*T-18/);
 });
+
+// T-51 review F-4: this computer and devbox each have a Session "billing" (the same id) whose to-dos include a T-14,
+// and they are different to-dos. A T-14 open in this computer's Session tab is not devbox's Session's.
+test('T-51 F-4: this computer\'s T-14 open in the Session\'s To-dos tab doesn\'t carry over to devbox\'s Session with the same id', async ({ page }) => {
+  await open(page, { devbox: true });
+  await showTodos(page);
+  await rowOf(page, 14).click();
+  await expect(page.getByTestId('todo-page-title')).toHaveText('Ship receipt PDFs');
+  await page.evaluate((remote) => window.__paneTestElectronMock.switchTodosHost('devbox', remote), devboxTodos());
+  // devbox's list is read: its Session's tab shows its own to-dos, not a page carried over from this computer.
+  if (!(await page.getByTestId('session-todos-tab').isVisible())) {
+    await page.getByRole('button', { name: 'Open Session Billing rewrite' }).click({ timeout: 15_000 });
+    await showTodos(page);
+  }
+  await expect(rowOf(page, 14)).toContainText('Deploy the API to staging', { timeout: 15_000 });
+  await expect(page.getByTestId('session-todo-open')).toHaveCount(0);
+  await expect(page.getByTestId('todo-page-title')).toHaveCount(0);
+});

@@ -26,7 +26,15 @@ only while To-dos is on.
   saved machine that is this computer (or, in remote mode, the computer the
   window shows) isn't read a second time. Opening another machine's to-do
   (its row reads Open on devbox) switches the window to that machine and
-  shows the to-do there; an offline machine says so instead.
+  shows the to-do there; an offline machine says so instead. Every machine
+  numbers its own to-dos, so a to-do's page belongs to the machine it was
+  opened on: switching the window to another computer closes it rather than
+  showing that computer's to-do with the same number, its split and closed
+  tabs are remembered per machine and number, and its Open its Session opens
+  the Session on that machine. A page or list read from a saved computer
+  names it by the label it is saved under (T-5 · devbox), never "This Mac".
+  Just after a switch the list waits for the new computer's own list, and a
+  Session's To-dos tab keeps its open to-do per machine.
 - **Kept moving.** A plain-code supervisor on each machine notices a to-do
   that has gone quiet, reminds its orchestrator, restarts it, and then asks
   you. See [The supervisor](#the-supervisor).

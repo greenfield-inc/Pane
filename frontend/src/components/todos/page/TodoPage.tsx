@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from 'react';
 import { ChevronLeft, ChevronRight, Columns2, MoreHorizontal, PanelRight, Play, Square } from 'lucide-react';
-import type { TodoAction, TodoAttachment, TodoDetail } from '../../../../../shared/types/todos';
+import { todoRef, type TodoAction, type TodoAttachment, type TodoDetail } from '../../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
 import { normalizeKeyboardShortcutOverrides, resolveEffectiveChord } from '../../../../../shared/utils/keyboardBindings';
 import { useTodoDetail, useTodosStore } from '../../../stores/todosStore';
+import { todoKey, todoRefOn } from '../../../../../shared/todoKey';
 import { countsAsWaiting, notifyItem, useNotifyStore } from '../../../stores/notifyStore';
 import { todoApprovalSurface, useApprovalColumnStore } from '../../../stores/approvalColumnStore';
 import { useOrchestrationSessionStore } from '../../../stores/orchestrationSessionStore';
@@ -34,7 +35,7 @@ import {
 const THREAD_FLOOR_PX = 360;
 /** The split's narrowest useful width. */
 const SPLIT_FLOOR_PX = 240;
-import { pruneSplitMemory, readClosedTabs, readSplitHidden, todoSplitKey, writeClosedTabs, writeSplitHidden } from './todoSplitMemory';
+import { pruneForPage, readClosedTabs, readSplitHidden, writeClosedTabs, writeSplitHidden } from './todoSplitMemory';
 import { recallTodoView, rememberTodoView, restoreActiveTab } from './todoPageView';
 import { SnoozeMenu } from '../SnoozeMenu';
 import { SnoozeBanner, SnoozeHeaderButton, canSnoozeTodo, snoozeTarget, usePageSnooze } from './TodoSnoozed';
@@ -47,6 +48,11 @@ export interface TodoPageProps {
   onOpenTodo: (number: number) => void;
   /** Shown inside a Session's To-dos tab (T-23) rather than on the To-dos screen. */
   embedded?: TodoPageEmbed;
+  /**
+   * The machine the to-do is on (T-51 F-4), by the window's id for it. The page reads it only while the window shows
+   * that machine, so it never shows another machine's to-do with the same number. Absent: the computer shown.
+   */
+  machineId?: string;
 }
 
 /**
@@ -64,11 +70,11 @@ interface TodoPageEmbed {
  * Each to-do opens fresh: details closed, the split as remembered for that to-do.
  */
 export function TodoPage(props: TodoPageProps) {
-  return <TodoPageView key={props.number} {...props} />;
+  return <TodoPageView key={`${props.machineId ?? ''}:${props.number}`} {...props} />;
 }
 
-function TodoPageView({ number, onBack, onOpenTodo, embedded }: TodoPageProps) {
-  const detail = useAnsweredNow(useTodoDetail(number));
+function TodoPageView({ number, onBack, onOpenTodo, embedded, machineId }: TodoPageProps) {
+  const detail = useAnsweredNow(useTodoDetail(number, machineId));
   // The loaded page owns Esc (an approval first, a sub-to-do's parent, then back). Until it is on screen
   // (the skeleton holds a moment, even for a to-do already read, as when ↑ ↓ step), Esc still goes back.
   const [bodyShown, setBodyShown] = useState(false);
@@ -115,7 +121,8 @@ function useAnsweredNow(detail: TodoDetail | null): TodoDetail | null {
 }
 
 function useSplitMemory(detail: TodoDetail, areaPx: number) {
-  const key = todoSplitKey(detail.machineId ?? LOCAL_MACHINE_ID, detail.todo.number);
+  // Keyed by the machine the page was read from (T-51), so two machines' T-5 keep their own layouts.
+  const key = todoKey(detail.machineId ?? LOCAL_MACHINE_ID, detail.todo.number);
   // A visit that opened under 1,000 px starts hidden, and showing the split lasts for that visit only.
   const [narrowVisit] = useState(() => areaPx < NARROW_TODO_AREA_PX);
   const [hiddenAtOpen] = useState(() => startsHidden(safeRead(key), areaPx));
@@ -136,17 +143,18 @@ function useSplitMemory(detail: TodoDetail, areaPx: number) {
       // Storage blocked: the split simply isn't remembered.
     }
   }, [key, narrowVisit]);
-  // Closed to-dos on this machine leave the memory.
+  // Closed to-dos of the page's machine leave the memory, read from a list that came from that machine (T-51 F-3);
+  // other machines' stay.
   const rows = useTodosStore((state) => state.snapshot?.rows);
+  const listMachine = useTodosStore((state) => state.snapshotMachine);
+  const pageMachine = detail.machineId ?? LOCAL_MACHINE_ID;
   useEffect(() => {
-    if (!rows) return;
-    const open = new Set(rows.filter((row) => row.status.status !== 'done' && row.status.status !== 'dropped').map((row) => todoSplitKey(LOCAL_MACHINE_ID, row.todo.number)));
     try {
-      pruneSplitMemory(window.localStorage, (stored) => !stored.startsWith(`${LOCAL_MACHINE_ID}:`) || open.has(stored));
+      pruneForPage(window.localStorage, pageMachine, rows && listMachine ? { machineId: listMachine, rows } : null);
     } catch {
       // Storage blocked: nothing to prune.
     }
-  }, [rows]);
+  }, [rows, listMachine, pageMachine]);
   return { hiddenAtOpen, remember, closedAtOpen, rememberClosed };
 }
 
@@ -201,7 +209,7 @@ function TodoPageLoaded({ detail, areaPx, rootRef, onBack, onOpenTodo, embedded,
   const number = detail.todo.number;
   const { hiddenAtOpen, remember, closedAtOpen, rememberClosed } = useSplitMemory(detail, areaPx);
   const overview = useSplitOverviewSession(detail);
-  const viewKey = todoSplitKey(detail.machineId ?? LOCAL_MACHINE_ID, number);
+  const viewKey = todoKey(detail.machineId ?? LOCAL_MACHINE_ID, number);
   const [leftAs] = useState(() => recallTodoView(viewKey));
   const [split, dispatch] = useReducer(todoSplitReducer, undefined, () => restoreActiveTab(initialSplit(detail.attachments, hiddenAtOpen, overview, closedAtOpen), leftAs?.tab ?? null, leftAs?.todoShown ?? true));
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -675,7 +683,8 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, spli
             <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
           </>
         )}
-        <b className="shrink-0 font-semibold text-text-primary" aria-current="page">T-{number}</b>
+        {/* Another computer's to-do names it, as the To-dos list does: "T-5 · qa-mini" (T-51 F-2). */}
+        <b className="shrink-0 font-semibold text-text-primary" aria-current="page" data-testid="todo-page-ref">{detail?.machineId && detail.machineId !== LOCAL_MACHINE_ID ? todoRefOn(number, detail.machine) : todoRef(number)}</b>
       </nav>
       <span className="flex-1" />
       {snoozed && snooze && <SnoozeHeaderButton ref={(element) => { snooze.anchorRef.current = element; }} snooze={snoozed} onOpen={snooze.onOpen} />}

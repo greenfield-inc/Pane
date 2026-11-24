@@ -6,7 +6,7 @@ import { SETTINGS_CATEGORIES, matchSettingsCategories } from '../components/sett
 import { isTodosEnabled, useConfigStore } from './configStore';
 import { useNavigationStore } from './navigationStore';
 import { selectNotifyItems, subscribeNotify, useNotifyStore } from './notifyStore';
-import { installTodosApi, resetTodos, sessionTodoScope, todosEnabledNow, useTodosStore, type TodosAnswer, type TodosApi } from './todosStore';
+import { installTodosApi, resetTodos, sessionTodoScope, switchTodosHost, todosEnabledNow, useTodosStore, type TodosAnswer, type TodosApi } from './todosStore';
 import { sessionApprovals } from '../components/approvals/approvalCard';
 
 /** To-dos behind one switch, off by default (T-39). */
@@ -40,7 +40,7 @@ function stubDesktop(snapshot: () => Promise<TodosAnswer<TodosSnapshot>>, items:
 beforeEach(() => {
   resetTodos();
   useConfigStore.setState({ config: null });
-  useNavigationStore.setState({ activeView: 'sessions', todosReturn: null, selectedTodoNumber: null });
+  useNavigationStore.setState({ activeView: 'sessions', todosReturn: null, selectedTodo: null });
 });
 
 afterEach(() => {
@@ -87,7 +87,7 @@ describe('the desktop with To-dos off', () => {
     turnTodos(true);
     useNavigationStore.getState().navigateToTodos({ number: 12 });
     expect(useNavigationStore.getState().activeView).toBe('todos');
-    expect(useNavigationStore.getState().selectedTodoNumber).toBe(12);
+    expect(useNavigationStore.getState().selectedTodo?.number).toBe(12);
   });
 
   it('shows approvals without their to-do, and puts it back when turned on', async () => {
@@ -115,6 +115,22 @@ describe('the desktop with To-dos off', () => {
     expect(scope.todoKeys.size).toBe(0);
     expect(sessionApprovals(items, 'firecracker', scope).map(item => item.id)).toEqual(['own']);
     expect(snapshot).not.toHaveBeenCalled();
+  });
+
+  it('T-51: opens no to-do page and reads no to-do\'s page, and a computer switch reads nothing either', async () => {
+    const snapshot = vi.fn(async () => ({ success: true, data: SNAPSHOT }));
+    stubDesktop(snapshot);
+    turnTodos(false);
+    useNavigationStore.getState().navigateToTodos({ number: 5 });
+    expect(useNavigationStore.getState().selectedTodo).toBeNull();
+    const stop = useTodosStore.getState().watch(5);
+    expect(await useTodosStore.getState().loadDetail(5)).toBeNull();
+    await switchTodosHost();
+    stop();
+    expect(window.electronAPI.todos.detail).not.toHaveBeenCalled();
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(useTodosStore.getState().details.size).toBe(0);
+    expect(useNavigationStore.getState().activeView).toBe('sessions');
   });
 });
 
