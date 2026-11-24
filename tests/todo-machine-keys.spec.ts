@@ -77,7 +77,10 @@ const saved: MachineState = { id: MACBOOK, label: MACBOOK_LABEL, kind: 'remote',
 
 async function open(page: Page, items: NotifyItem[]): Promise<void> {
   await installSessionsFixture(page, [sessionFixture(FIRECRACKER, 'Firecracker Grain', '', '', now)], [], {
-    computers: [{ id: MACBOOK, label: MACBOOK_LABEL, routes: [{ id: 'public:http://mbp.test:7777', kind: 'public', source: 'manual', baseUrl: 'http://mbp.test:7777', token: 'token' }] }],
+    computers: [
+      { id: MACBOOK, label: MACBOOK_LABEL, routes: [{ id: 'public:http://mbp.test:7777', kind: 'public', source: 'manual', baseUrl: 'http://mbp.test:7777', token: 'token' }] },
+      { id: 'mini', label: 'tylers-mac-mini', routes: [{ id: 'public:http://mini.test:7777', kind: 'public', source: 'manual', baseUrl: 'http://mini.test:7777', token: 'token' }] },
+    ],
     initialConfig: { theme: 'light-rounded', appearanceMode: 'fixed' },
     notifySnapshot: snapshot(items),
     initialPanels: [chat],
@@ -152,4 +155,32 @@ test('T-51 F-2: a card open in the Session\'s column leaves it when its machine 
   await page.evaluate((next) => window.__paneTestElectronMock.emitNotifySnapshot(next), snapshot([{ ...own, unreachable: true }]));
   await expect(page.getByTestId('session-approval-card')).toHaveCount(0);
   await expect(page.getByTestId('approval-column')).toHaveCount(0);
+});
+
+// The incident as it happened (investigate-dock): the person was at the MacBook with its window switched to the mini.
+// To-dos and Sessions came from the mini; Notify was the MacBook's own, so its local Q-84 (the MacBook's T-28) met the
+// mini's Firecracker Grain, which owns T-27 → T-28.
+test('T-51: with the window switched to the mini, this computer\'s own card on its T-28 stays out of the mini\'s Session that owns another T-28', async ({ page }) => {
+  const ownQ84: NotifyItem = { ...q84, id: 'q-84', machineId: undefined, machine: undefined };
+  await open(page, [ownQ84]);
+  await expect(row(page)).toBeVisible({ timeout: 15_000 });
+  // Main switches this window to the mini: its to-dos (T-27 → T-28) are the list now; Notify stays this computer's.
+  await page.evaluate((todos) => window.__paneTestElectronMock.switchTodosHost('mini', todos), { snapshot: local, details: localDetails });
+  await row(page).click();
+  await expect(page.locator(`[data-session-content-id="${FIRECRACKER}"]`)).toBeVisible();
+  await expect(page.getByTestId('approvals-nav')).toContainText('1');
+  await expect(page.getByTestId('session-approval-card')).toHaveCount(0);
+  await expect(row(page).getByTestId('session-approvals-count')).toHaveCount(0);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/t51-switched-dock.png` });
+
+  await openSessionApprovalKey(page);
+  await expect(page.getByText('Nothing in this Session is waiting on you.')).toBeVisible();
+  await expect(page.getByTestId('approval-column')).toHaveCount(0);
+
+  // In Approvals it names this computer: its T-28 isn't the mini's.
+  await page.getByTestId('approvals-nav').click();
+  const group = page.getByTestId('approvals-group').filter({ hasText: 'T-28' });
+  await expect(group).toHaveCount(1);
+  await expect(group).toContainText(/T-28 · This (Mac|computer) · Phone-number sign-up/);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/t51-switched-approvals.png` });
 });
