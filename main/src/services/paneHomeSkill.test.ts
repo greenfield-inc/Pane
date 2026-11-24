@@ -96,8 +96,17 @@ describe('Pane home skill', () => {
     const skill = buildPaneHomeSkill().replace(/\s+/g, ' ');
     expect(skill).toContain('win over a profile or brief that says otherwise');
     expect(skill).toContain('in a Session a worker never asks the person itself, and an orchestrator never uses `AskUserQuestion`');
-    expect(skill).toContain('it sends no `answer:` or `recorded:` line of its own');
+    expect(skill).toContain('the orchestrator sends no `answer:` or `recorded:` line of its own for it');
+    expect(skill).toContain('A question the plan or an earlier decision settles, it answers the worker itself.');
     expect(skill).toContain('This watch is the only watcher');
+  });
+
+  it("scopes Claude's own card to agents outside a Session in the chooser itself", () => {
+    const skill = buildPaneHomeSkill().replace(/\s+/g, ' ');
+    const chooser = skill.split(' - ').find(bullet => bullet.startsWith("**Claude's own card (AskUserQuestion)**"));
+    expect(chooser).toMatch(/^\*\*Claude's own card \(AskUserQuestion\)\*\* only outside a Session \(you are neither a worker in one nor its orchestrator\), and only when all of these hold/);
+    expect(skill).toContain('**In a Session, never AskUserQuestion**, even for a quick question the person typed in your tab');
+    expect(skill).toContain('Only when `runpane notify` returns `unavailable` because Approvals is off does the orchestrator ask in its own tab, as a plain message.');
   });
 
   it('tells an agent a typed reply is recorded as the answer, and to reopen and update instead of re-asking', () => {

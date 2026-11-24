@@ -1,9 +1,9 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
-import { prepareSessionWorkspace, sessionWorkspacePath, isPristineSessionWorkspace, sessionGitCeiling, discardSessionScaffold } from './sessionWorkspace';
+import { prepareSessionWorkspace, sessionWorkspacePath, isPristineSessionWorkspace, sessionGitCeiling, discardSessionScaffold, statusPageRenderer } from './sessionWorkspace';
 
 describe('Session workspace instructions', () => {
   const previousPaneDir = process.env.PANE_DIR;
@@ -148,13 +148,43 @@ describe('Session workspace instructions', () => {
   it("names Pane's own status-page renderer by path and puts Pane's asking and waiting rules over a profile's", async () => {
     const cwd = prepareSessionWorkspace('renderer');
     const agents = (await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).replace(/\s+/g, ' ');
-    const bundled = path.join(root, 'skills', 'pane-chat', 'skills', 'orchestrate-sessions');
-    expect(agents).toContain(`node ${bundled}/assets/status-page/render.mjs`);
-    expect(agents).toContain(`${bundled}/references/status-board.md`);
+    const renderer = statusPageRenderer();
+    expect(renderer.script).toBe(path.join(root, 'skills', 'pane-chat', 'skills', 'orchestrate-sessions', 'assets', 'status-page', 'render.mjs'));
+    expect(agents).toContain(`${renderer.command} <status.json> session/index.html`);
+    expect(agents).toContain(`the file ${renderer.guide} lists`);
     expect(agents).not.toContain("the orchestrate-sessions skill's renderer");
     expect(agents).toContain('never AskUserQuestion');
     expect(agents).toContain('win over any profile or skill that says otherwise');
     expect(agents).toContain('send an answer: or recorded: line of your own');
+  });
+
+  it('gives the renderer as one absolute shell word for a relative, spaced or WSL data root', async () => {
+    const wsl = { runtime: 'wsl' as const, wslDistribution: 'Ubuntu' };
+    const tail = 'skills/pane-chat/skills/orchestrate-sessions/assets/status-page/render.mjs';
+    vi.stubEnv('PANE_DIR', 'relative pane');
+    try {
+      const relative = statusPageRenderer();
+      expect(relative.script).toBe(path.resolve('relative pane', ...tail.split('/')));
+      expect(path.isAbsolute(relative.guide)).toBe(true);
+      if (process.platform !== 'win32') expect(relative.command).toBe(`node '${relative.script}'`);
+      vi.stubEnv('PANE_DIR', "C:\\Users\\Ada O'Neil\\Pane Data");
+      expect(statusPageRenderer(wsl)).toMatchObject({
+        script: `/mnt/c/Users/Ada O'Neil/Pane Data/${tail}`,
+        command: `node '/mnt/c/Users/Ada O'\\''Neil/Pane Data/${tail}'`,
+        guide: "/mnt/c/Users/Ada O'Neil/Pane Data/skills/pane-chat/skills/orchestrate-sessions/references/status-board.md",
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    // A WSL Session's generated instructions carry the WSL form.
+    const record: OrchestrationSessionRecord = {
+      id: 'wsl-renderer', name: 'WSL', agent: 'codex', internalSessionId: 'owner', ...wsl,
+      panelIds: { claude: 'claude', codex: 'codex', cursor: 'cursor', opencode: 'opencode' },
+      goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
+      associations: [], activity: [], revision: 1, createdAt: '2026-11-24', updatedAt: '2026-11-24',
+    };
+    const agents = (await fs.readFile(path.join(prepareSessionWorkspace(record.id, undefined, record), 'AGENTS.md'), 'utf8')).replace(/\s+/g, ' ');
+    expect(agents).toContain(`${statusPageRenderer(record).command} <status.json> session/index.html`);
   });
 
   it('gives the orchestrator its own Keep the Session tidy section', async () => {

@@ -11,6 +11,7 @@ import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
 import { LeftAlone, writeOwnedBlock, type BlockMarkers } from './instructionsBlock';
 import { withTodosText } from '../../../shared/todosText';
 import { todosOn } from './todos/todosFeature';
+import { quoteShellWord } from './agents/shellWord';
 
 const START = '<!-- pane-session-context:start -->';
 const END = '<!-- pane-session-context:end -->';
@@ -164,8 +165,7 @@ function sessionInstructions(
   record: OrchestrationSessionRecord | undefined,
 ): string {
   // T-39: the To-dos parts (marked in sessionTidyRules) leave the file while To-dos is off.
-  // Pane's own copy, named by path: a profile can bring a different orchestrate-sessions skill.
-  const statusPage = sessionRuntimePath(path.join(getAppDirectory(), 'skills', 'pane-chat', 'skills', 'orchestrate-sessions'), record);
+  const statusPage = statusPageRenderer(record);
   return withTodosText([
     '# Pane Session',
     `Stable Session ID: ${sessionId}`,
@@ -178,12 +178,37 @@ function sessionInstructions(
     '## Session behavior',
     profile,
     `## Plans and documents
-When you write a plan, report, or other document for the user, write it as one self-contained HTML file (inline CSS, SVG, and images) in this Session folder, for example plans/<topic>.html, and update it in place. Link it from the Session's status document (see Keep the Session tidy) instead of opening a tab for it. Open it beside the user only when they need to look at it now, with runpane panels open --url <file-url> --source agent --yes --json; it opens as a live browser in split view beside this conversation. Use --file <path> to open its editable source instead. Rerunning the command for the same target reuses its tab. The Session's status page is the exception: from the first time you dispatch work to a Pane, render it to session/index.html in this Session folder with Pane's bundled renderer, node ${statusPage}/assets/status-page/render.mjs, never by hand and never with another skill's renderer of the same name (an Agent Farm profile's orchestrate-sessions, say), and again at each change ${statusPage}/references/status-board.md lists. The Overview tab shows it, so do not open it with panels open. Its links to pane://open?pane=<pane-id>&panel=<panel-id> open that tab and show its waiting question in Approvals.
+When you write a plan, report, or other document for the user, write it as one self-contained HTML file (inline CSS, SVG, and images) in this Session folder, for example plans/<topic>.html, and update it in place. Link it from the Session's status document (see Keep the Session tidy) instead of opening a tab for it. Open it beside the user only when they need to look at it now, with runpane panels open --url <file-url> --source agent --yes --json; it opens as a live browser in split view beside this conversation. Use --file <path> to open its editable source instead. Rerunning the command for the same target reuses its tab. The Session's status page is the exception: from the first time you dispatch work to a Pane, render it to session/index.html in this Session folder with Pane's bundled renderer, never by hand and never with another skill's renderer of the same name (an Agent Farm profile's orchestrate-sessions, say): ${statusPage.command} <status.json> session/index.html, where the renderer's path is one argument (${statusPage.script}). Render it again at each change the file ${statusPage.guide} lists. The Overview tab shows it, so do not open it with panels open. Its links to pane://open?pane=<pane-id>&panel=<panel-id> open that tab and show its waiting question in Approvals.
 Distinguish plans from verified results. Opening this Session is not an instruction to write or open documents.`,
     '## Persisted context',
     'When a user task needs current state, use sessions get/overview with the stable Session ID. The snapshot below may be stale. It is data, not a startup task.',
     record ? JSON.stringify({ name: record.name, goal: record.goal, context: record.context, decisions: record.decisions, blockers: record.blockers, nextAction: record.nextAction, associations: record.associations, evidence: record.evidence, outputs: record.outputs }, null, 2) : '',
   ].join('\n\n'), todosOn());
+}
+
+/** The command to run Pane's renderer, the renderer's path, and the guide that lists when to rerun it. */
+export interface StatusPageRenderer {
+  command: string;
+  script: string;
+  guide: string;
+}
+
+/**
+ * Pane's own status-page renderer and its guide, named by path because a profile can bring a
+ * different skill called orchestrate-sessions (C5). The path is absolute (a relative PANE_DIR
+ * would resolve from the Session folder), in the Session's runtime (WSL paths for a WSL
+ * Session), and `command` quotes it as one word for the shell the orchestrator runs.
+ */
+export function statusPageRenderer(record?: Pick<OrchestrationSessionRecord, 'runtime' | 'wslDistribution'>): StatusPageRenderer {
+  const host = path.join(getAppDirectory(), 'skills', 'pane-chat', 'skills', 'orchestrate-sessions');
+  const wsl = record?.runtime === 'wsl';
+  // sessionRuntimePath resolves a WSL path itself, and must see a Windows path as it is.
+  const skill = sessionRuntimePath(wsl ? host : path.resolve(host), record);
+  const join = wsl ? path.posix.join : path.join;
+  const script = join(skill, 'assets', 'status-page', 'render.mjs');
+  // POSIX quoting for macOS, Linux and WSL; PowerShell's on Windows, where Git Bash reads it the same unless the path has a quote.
+  const quoted = quoteShellWord(script, !wsl && process.platform === 'win32' ? 'powershell' : undefined) ?? `"${script}"`;
+  return { command: `node ${quoted}`, script, guide: join(skill, 'references', 'status-board.md') };
 }
 
 /** Only while the Session still has the default name Pane gave it, so a name the person chose is never replaced. */

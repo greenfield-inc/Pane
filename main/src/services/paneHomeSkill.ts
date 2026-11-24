@@ -432,10 +432,12 @@ the person itself, and an orchestrator never uses \`AskUserQuestion\`.
   each item that waits on the person posted once, as a background
   \`runpane notify ... --links '<files>' --json\` titled with its Q-n, and
   stays free to talk: follow "What waits on the person" in
-  \`runpane docs read --doc skills/pane-orchestration/SKILL.md\`. Pane delivers
-  the answer to the worker's tab itself, so it sends no \`answer:\` or
-  \`recorded:\` line of its own (only an answer \`runpane inbox\` lists as
-  \`undelivered\` is passed on, as that guide says). A reply to a
+  \`runpane docs read --doc skills/pane-orchestration/SKILL.md\`. When it
+  relays a worker's question, Pane delivers the person's answer to the
+  worker's tab itself, so the orchestrator sends no \`answer:\` or
+  \`recorded:\` line of its own for it (it passes the answer on only when
+  \`runpane inbox\` lists it \`undelivered\`, as that guide says). A question
+  the plan or an earlier decision settles, it answers the worker itself. A reply to a
   worker's question it relayed comes to it when the worker can't read it.
 - **Any other agent** calls \`notify\` as above.
 

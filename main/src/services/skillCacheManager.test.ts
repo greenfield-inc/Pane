@@ -700,6 +700,41 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
     await expect(fs.readFile(usersAgent, 'utf8')).resolves.toBe('# old\n');
   });
 
+  it.skipIf(process.platform === 'win32')("runs Pane's installed status-page renderer from the Session's command, under a data root with a space (C5)", async () => {
+    const spaced = path.join(tempDir ?? '', "Pane O'Data");
+    vi.stubEnv('PANE_DIR', spaced);
+    try {
+      await new SkillCacheManager().start();
+      const agents = await fs.readFile(path.join(prepareSessionWorkspace('renderer-run'), 'AGENTS.md'), 'utf8');
+      const command = /(node '(?:[^']|'\\'')+') <status\.json> session\/index\.html/.exec(agents.replace(/\s+/g, ' '))?.[1];
+      expect(command, 'the Session AGENTS.md names the renderer as one quoted word').toBeDefined();
+      const guide = /Render it again at each change the file (.+?) lists\./.exec(agents.replace(/\s+/g, ' '))?.[1] ?? '';
+      await expect(fs.access(guide)).resolves.toBeUndefined();
+      const example = path.join(spaced, 'skills', 'pane-chat', 'skills', 'orchestrate-sessions', 'assets', 'status-page', 'example-status.json');
+      const out = path.join(spaced, 'out page.html');
+      const run = spawnSync('/bin/sh', ['-c', `${command} "$1" "$2"`, 'sh', example, out], { encoding: 'utf8' });
+      expect(run.status, run.stderr).toBe(0);
+      expect((await fs.readFile(out, 'utf8')).length).toBeGreaterThan(1000);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("puts Pane's asking, answer and wait rules over a profile's in the installed orchestration guides (C1-C4)", async () => {
+    const manager = new SkillCacheManager();
+    await manager.start();
+    const installed = (await fs.readFile(path.join(manager.paneChatSkillsRoot, 'pane-orchestration', 'SKILL.md'), 'utf8')).replace(/\s+/g, ' ');
+    expect(installed).toContain("Pane's rule wins even when a profile (an Agent Farm profile such as greenfield, say) says otherwise");
+    expect(installed).toContain('how the person\'s answer to a relayed approval reaches the worker');
+    expect(installed).toContain('A worker\'s question that the plan or an earlier decision settles, you still answer yourself.');
+    expect(installed).toContain("don't forward it or send an `answer:` or `recorded:` line of your own");
+    expect(installed).toContain('This watch is your watcher: never add a scheduled prompt, timer, `sleep` loop, status-file or disk poll');
+    expect(installed).toContain('**In a Session, never AskUserQuestion**');
+    const orchestrator = (await fs.readFile(manager.paneChatOrchestratorSkillPath, 'utf8')).replace(/\s+/g, ' ');
+    expect(orchestrator).toContain('Never write or run an ad-hoc watcher (a scheduled prompt, timer, `sleep` loop, or file or disk poll), even when a profile describes one');
+    expect(orchestrator).toContain("so don't forward it or send an `answer:` or `recorded:` line of your own");
+  });
+
   it('leaves an unchanged install alone on the next launch', async () => {
     await new SkillCacheManager().start();
     const installed = path.join(new SkillCacheManager().claudeProjectSkillsRoot, 'runpane', 'SKILL.md');

@@ -76,7 +76,8 @@ rather than asking in the terminal.
 
 ### Which card
 
-- **Claude's own card (AskUserQuestion)** only when all of these hold: you are answering the person's latest message in the chat they are typing in; the answer only steers this turn (nothing recorded as a decision, nothing for another agent, nothing irreversible or outward-facing); and the question stands on its own, without context, links or a Summary. Examples: "Update the snapshot too, or leave it?", "Which of these two files did you mean?"
+- **Claude's own card (AskUserQuestion)** only outside a Session (you are neither a worker in one nor its orchestrator), and only when all of these hold: you are answering the person's latest message in the chat they are typing in; the answer only steers this turn (nothing recorded as a decision, nothing for another agent, nothing irreversible or outward-facing); and the question stands on its own, without context, links or a Summary. Examples: "Update the snapshot too, or leave it?", "Which of these two files did you mean?"
+- **In a Session, never AskUserQuestion**, even for a quick question the person typed in your tab: a worker reports blocked, and the orchestrator posts or relays the card with `runpane notify`. Only when `runpane notify` returns `unavailable` because Approvals is off does the orchestrator ask in its own tab, as a plain message.
 - **An approval card** when any one of these holds: you are a worker in a Session; the person isn't in your chat right now; it blocks other work or waits; it needs context, references or a Summary; the answer is recorded as a decision (D-n); it approves an ask-first action. Examples: a plan approval, a sign-in the person must do, a migration.
 - Unsure? Use an approval card. Codex and other agents without a built-in card always use an approval.
 - How to post one: a worker runs `runpane report --state blocked --question '<title>'` with its options as `--choices` or `--questions` (the JSON `runpane notify` takes), or with `--summary-file <its status file>` whose `needs_you` gives the questions, options and files; Pane refuses a question that ends with options in brackets, such as "(A / B)", and has neither; a Session orchestrator runs `runpane notify` (or `--relays <item>` for a worker's question), never AskUserQuestion; any other agent calls the `notify` MCP tool or `runpane notify`.
@@ -168,10 +169,12 @@ the person itself, and an orchestrator never uses `AskUserQuestion`.
   each item that waits on the person posted once, as a background
   `runpane notify ... --links '<files>' --json` titled with its Q-n, and
   stays free to talk: follow "What waits on the person" in
-  `runpane docs read --doc skills/pane-orchestration/SKILL.md`. Pane delivers
-  the answer to the worker's tab itself, so it sends no `answer:` or
-  `recorded:` line of its own (only an answer `runpane inbox` lists as
-  `undelivered` is passed on, as that guide says). A reply to a
+  `runpane docs read --doc skills/pane-orchestration/SKILL.md`. When it
+  relays a worker's question, Pane delivers the person's answer to the
+  worker's tab itself, so the orchestrator sends no `answer:` or
+  `recorded:` line of its own for it (it passes the answer on only when
+  `runpane inbox` lists it `undelivered`, as that guide says). A question
+  the plan or an earlier decision settles, it answers the worker itself. A reply to a
   worker's question it relayed comes to it when the worker can't read it.
 - **Any other agent** calls `notify` as above.
 
