@@ -194,7 +194,8 @@ describe('NotifyService: a remote member\'s --todo (T-51, D-1 C, D-4)', () => {
     const workersOwn = worker.require(28);
     // On the MacBook: the Pane is in no Session there, so its check writes nothing.
     const check = worker.checkReportTodo('tab-b', 'T-28', false);
-    expect(check.link).toBeUndefined();
+    expect(check.todoNumber).toBeUndefined();
+    worker.recordReportTodo(check);
     expect(worker.require(28)).toEqual(workersOwn);
     // On the mini: the report arrives with the MacBook's install id, and links the mini's T-28.
     const card = sessionMachine(session, { state: 'blocked', question: 'Q-84: Phone-number accounts: go?', todo: 'T-28', installId: 'install-b', reportedAt: new Date().toISOString() });

@@ -127,7 +127,8 @@ describe('TodoService', () => {
       const before = service.require(own.number);
       now += 60_000;
       const check = service.checkReportTodo('remote-worker-tab', 'T-28', false);
-      expect(check.link).toBeUndefined();
+      expect(check.todoNumber).toBeUndefined();
+      service.recordReportTodo(check);
       expect(check.warning).toContain('T-28 was not checked on this machine');
       expect(check.warning).toContain('Nothing was recorded');
       expect(service.require(own.number)).toEqual(before);
@@ -138,11 +139,16 @@ describe('TodoService', () => {
       expect(check).toEqual({ warning: expect.stringContaining('reads T-28 as its own to-do') });
     });
 
-    it('a Pane in a Session here keeps the D-408 check: a miss or a closed to-do is refused, an open one records progress', async () => {
+    it('a Pane in a Session here keeps the D-408 check: a miss or a closed to-do is refused, an open one records progress once the report is accepted', async () => {
       expect(() => service.checkReportTodo('w', 'T-28', true)).toThrow(expect.objectContaining({ code: 'ERR_TODO_NOT_FOUND' }));
       const own = await upTo(service, 2, 'Local work');
+      const before = service.require(own.number);
       now += 60_000;
-      expect(service.checkReportTodo('w', 'T-2', true)).toEqual({ link: { number: 2, title: 'Local work', installId: 'install-a' } });
+      const check = service.checkReportTodo('w', 'T-2', true);
+      expect(check).toEqual({ todoNumber: 2 });
+      // Checking writes nothing (review F-2): the report may still be refused.
+      expect(service.require(own.number)).toEqual(before);
+      service.recordReportTodo(check);
       expect(service.require(own.number).lastProgressAt).toBe(now);
       service.drop(own.number, {}, person);
       expect(() => service.checkReportTodo('w', 'T-2', true)).toThrow(expect.objectContaining({ code: 'ERR_TODO_CLOSED' }));
@@ -153,7 +159,9 @@ describe('TodoService', () => {
       host.panels.set('w1', { name: 'implementer', sessionId: 's1', orchestrator: false, paneId: 'p1' });
       service.assign(own.number, 'w1', { kind: 'agent', panelId: 's1-orch' });
       now += 60_000;
-      expect(service.checkReportTodo('w1', own.ref, false).link).toMatchObject({ number: own.number });
+      const check = service.checkReportTodo('w1', own.ref, false);
+      expect(check).toEqual({ todoNumber: own.number });
+      service.recordReportTodo(check);
       expect(service.require(own.number).lastProgressAt).toBe(now);
     });
 
