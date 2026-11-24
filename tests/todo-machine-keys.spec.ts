@@ -136,3 +136,20 @@ test('T-51: a MacBook reminder\'s "Snooze to another time…" opens the MacBook\
   await expect(page.getByTestId('todo-page-title')).toHaveText('Phone-number sign-up, sign-in and invites', { timeout: 15_000 });
   await expect(page.getByTestId('snooze-menu')).toBeVisible();
 });
+
+test('T-51 F-2: a card open in the Session\'s column leaves it when its machine goes offline', async ({ page }) => {
+  // This computer's own card on its T-28 docks in Firecracker Grain; opened, then its machine stops answering.
+  const own: NotifyItem = {
+    id: 'q-85', ui: 'options', title: 'Q-85: Sign the BAA now?', state: 'waiting', createdAt: Date.now() - 60_000, originKind: 'orchestrator', machineId: 'local',
+    choices: [{ label: 'Sign' }, { label: 'Wait' }], source: { name: 'Firecracker Grain orchestrator', agent: 'Claude', session: { id: FIRECRACKER, name: 'Firecracker Grain', paneId: 'p', orchestrator: true } },
+    todo: { number: 28, title: 'Accept Google Cloud’s HIPAA BAA' },
+  };
+  await open(page, [own]);
+  await row(page).click();
+  await page.getByTestId('session-approval-card-open').click();
+  await expect(page.getByTestId('approval-column')).toBeVisible();
+  // A stand-in for the machine going offline: main marks its waiting cards unreachable.
+  await page.evaluate((next) => window.__paneTestElectronMock.emitNotifySnapshot(next), snapshot([{ ...own, unreachable: true }]));
+  await expect(page.getByTestId('session-approval-card')).toHaveCount(0);
+  await expect(page.getByTestId('approval-column')).toHaveCount(0);
+});
