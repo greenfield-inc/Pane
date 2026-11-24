@@ -632,7 +632,9 @@ jobs:
         TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
       run: |
         if [ -z "$TAP_TOKEN" ]; then
-          echo "::notice::Skipping the Homebrew tap update: HOMEBREW_TAP_TOKEN is not set."
+          # Not a failure: the release's other channels publish independently.
+          echo "::warning title=Homebrew cask not published::HOMEBREW_TAP_TOKEN is not set, so greenfield-inc/homebrew-tap did not get $RELEASE_TAG. See Package-manager distribution in RUNBOOK.md."
+          echo "**Homebrew cask not published:** \`HOMEBREW_TAP_TOKEN\` is not set, so \`greenfield-inc/homebrew-tap\` did not get $RELEASE_TAG. See Package-manager distribution in RUNBOOK.md." >> "$GITHUB_STEP_SUMMARY"
           exit 0
         fi
         git clone "https://x-access-token:$TAP_TOKEN@github.com/greenfield-inc/homebrew-tap.git" tap

@@ -73,3 +73,30 @@ describe('a Session\'s to-dos (T-22, T-23)', () => {
     expect(Object.fromEntries(counts)).toEqual({ 3: 1, 10: 3 });
   });
 });
+
+describe('to-dos keyed by machine and number (T-51)', () => {
+  // The reported bug: the MacBook's Q-84, linked to the MacBook's T-28, docked in the mini's Firecracker Grain, whose
+  // T-27 has a sub-to-do that is also numbered T-28.
+  const mini = [row(27, { own: 'hidden-27', requestedBy: 'firecracker' }), row(28, { parent: 27, requestedBy: 'firecracker' })];
+  const fromMacbook = (made: NotifyItem): NotifyItem => ({ ...made, machineId: 'macbook', machine: 'Tylers-MacBook-Pro' });
+
+  it('another machine\'s T-28 is not in a local Session\'s scope; this machine\'s T-28 is', () => {
+    const scope = todoApprovalScope(mini, 'firecracker', 'local');
+    expect(inTodoScope(fromMacbook(item('q-84', { session: 'workspaces', todo: 28 })), scope)).toBe(false);
+    expect(inTodoScope(item('local-28', { todo: 28 }), scope)).toBe(true);
+    expect(inTodoScope({ ...item('local-28', { todo: 28 }), machineId: 'local' }, scope)).toBe(true);
+  });
+
+  it('a hidden Session\'s card counts only from the to-do\'s own machine', () => {
+    const scope = todoApprovalScope(mini, 'firecracker', 'local');
+    expect(inTodoScope(item('perm', { session: 'hidden-27' }), scope)).toBe(true);
+    expect(inTodoScope(fromMacbook(item('perm', { session: 'hidden-27' })), scope)).toBe(false);
+    expect(inTodoScope(fromMacbook(item('conn', { connected: 'hidden-27' })), scope)).toBe(false);
+  });
+
+  it('a saved machine\'s Session takes that machine\'s cards, not this one\'s', () => {
+    const scope = todoApprovalScope(mini, 'firecracker', 'macbook');
+    expect(inTodoScope(fromMacbook(item('q-84', { todo: 28 })), scope)).toBe(true);
+    expect(inTodoScope(item('local-28', { todo: 28 }), scope)).toBe(false);
+  });
+});

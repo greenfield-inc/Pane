@@ -6,7 +6,7 @@ import {
   type RunpaneChannel,
   type RunpaneCommand
 } from './generated/contract';
-import { boundary, decodeBoundary, type JsonValue } from './boundaryDecoder';
+import { boundary, decodeBoundary } from './boundaryDecoder';
 import { RunpaneError } from './errors';
 import { isTodoCommand, todosDisabledError, todosOn, withoutTodoLines } from './todosFeature';
 import { BROWSER_BOOLEAN_FLAGS, BROWSER_VALUE_FLAGS, setBrowserFlag, type BrowserRequest } from './browser';
@@ -167,8 +167,6 @@ export interface ParsedArgs {
   summary?: string;
   summaryFile?: string;
   question?: string;
-  /** report `--outcome`: which of a profile step's declared outcomes happened (trimmed); implies `--state done`. */
-  reportOutcome?: string;
   /** panels conversation `--conversation`: the conversation (agent session) id the panel is on. */
   conversationId?: string;
   /** panels conversation `--source`: what started that conversation. */
@@ -252,16 +250,6 @@ export interface ParsedArgs {
   todoStatus?: string;
   /** notify, report and agents start `--todo <T-n>`: the to-do it belongs to. */
   todo?: string;
-  /** `runpane profiles show|launch <name>`: the profile's name. */
-  profileName?: string;
-  /** profiles launch `--harness`: one CLI (`cli` or `cli/model`) for every agent. */
-  profileHarness?: string;
-  /** profiles launch `--agent-harness <agent>=<cli>`: agent id → CLI, over the file's runs. */
-  agentHarness?: Assignments;
-  /** profiles launch `--command <cli>=<command>`: a CLI Pane doesn't know → the command that starts it. */
-  profileCommands?: Assignments;
-  /** profiles show `--yaml`: print the file text only. */
-  yaml?: boolean;
   /** loops: the loop id, its cron, and create's --paused. */
   loopId?: string;
   cron?: string;
@@ -287,9 +275,6 @@ export interface ParsedArgs {
   handoffNoteOnly?: boolean;
   remoteSetupArgs: string[];
 }
-
-/** `key=value` flags gathered into one map: profiles launch's --agent-harness and --command. */
-type Assignments = Record<string, string>;
 
 /** `runpane report --state`: what a worker says about its task. */
 type ReportState = 'ready' | 'blocked' | 'failed' | 'done';
@@ -321,15 +306,13 @@ const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactForm
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'machine', 'loops', 'todos', 'profiles', 'secrets', 'autopilot', 'devices', 'browser']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'machine', 'loops', 'todos', 'secrets', 'autopilot', 'devices', 'browser']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
 
 const REMOTE_VALUE_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteValue.map((flag) => flag.name));
 const REMOTE_BOOLEAN_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteBoolean.map((flag) => flag.name));
-/** The profiles commands that take the profile's name as their first word. */
-const PROFILE_NAME_COMMANDS = new Set(['profiles show', 'profiles launch']);
 /** Autopilot's commands that take a waiting item's id as their first word. */
 const AUTOPILOT_ITEM_COMMANDS = new Set(['autopilot answer', 'autopilot close', 'autopilot rewrite']);
 /** Flags only some commands own; on any other they are refused rather than ignored. */
@@ -337,7 +320,6 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--relays', ['notify']],
   ['--about-session', ['notify']],
   ['--questions', ['notify', 'report']],
-  ['--outcome', ['report']],
   ['--took', ['notify']],
   ['--took-as', ['notify']],
   ['--status', ['notify', 'update', 'todos list']],
@@ -374,10 +356,6 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--todo', ['notify', 'report', 'agents start']],
   ['--conversation', ['panels conversation']],
   ['--hook', ['panels conversation']],
-  ['--harness', ['profiles launch']],
-  ['--agent-harness', ['profiles launch']],
-  ['--command', ['profiles launch']],
-  ['--yaml', ['profiles show']],
 ]);
 const LOCAL_VALUE_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localValue);
 const LOCAL_BOOLEAN_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localBoolean);
@@ -615,11 +593,8 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
 }
 
 /** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; relay takes all of it; read and write take one path; inbox ack takes item ids; secrets lease takes secret names; Autopilot's answer, close and rewrite take one; link takes the link; profiles show and launch take the profile's name. */
-function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink' | 'todoArgs' | 'profileName' | 'secretNames'> {
+function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink' | 'todoArgs' | 'secretNames'> {
   if (command.startsWith('todos ')) return { todoArgs: takeTodoWords(args) };
-  if (PROFILE_NAME_COMMANDS.has(command)) {
-    return args[0] !== undefined && !args[0].startsWith('-') ? { profileName: args.shift() ?? '' } : {};
-  }
   if (command === 'link') return args[0] !== undefined && !args[0].startsWith('-') ? { pairingLink: args.shift() ?? '' } : {};
   if (AUTOPILOT_ITEM_COMMANDS.has(command)) {
     return args[0] !== undefined && !args[0].startsWith('-') ? { item: args.shift() ?? '' } : {};
@@ -712,7 +687,6 @@ export function splitWorkspacePassThrough(argv: string[]): { machine: string; co
 }
 
 function validateReportArgs(parsed: ParsedArgs): void {
-  if (parsed.reportOutcome !== undefined) validateReportOutcome(parsed, parsed.reportOutcome);
   if (!parsed.reportState) {
     throw new Error(`runpane report requires --state <${REPORT_STATES.join('|')}>.`);
   }
@@ -725,25 +699,6 @@ function validateReportArgs(parsed: ParsedArgs): void {
   if (parsed.reportState !== 'blocked' && (parsed.notifyChoices !== undefined || parsed.notifyQuestions !== undefined)) {
     throw new Error('runpane report takes --choices and --questions only with --state blocked: they are the buttons on its question card.');
   }
-}
-
-/** `--outcome` ends a profile step, so it is a done report: it implies `--state done` and takes no question. */
-function validateReportOutcome(parsed: ParsedArgs, outcome: string): void {
-  if (parsed.reportState !== undefined && parsed.reportState !== 'done') {
-    throw new RunpaneError(
-      'ERR_REPORT_OUTCOME_STATE',
-      `runpane report --outcome ends the step as done, so it cannot be sent with --state ${parsed.reportState}. Nothing was reported.`,
-      `Run \`runpane report --outcome "${outcome}"\` without --state, or drop --outcome to report ${parsed.reportState}.`,
-    );
-  }
-  if (parsed.question !== undefined) {
-    throw new RunpaneError(
-      'ERR_REPORT_OUTCOME_QUESTION',
-      'runpane report --outcome ends the step, and a --question would block it instead. Nothing was reported.',
-      'To ask something, run `runpane report --state blocked --question "<text>"`; once it is answered, run `runpane report --outcome <name>`.',
-    );
-  }
-  parsed.reportState = 'done';
 }
 
 function validateConversationArgs(parsed: ParsedArgs): void {
@@ -1015,10 +970,6 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--closed') {
     parsed.closed = true;
-    return;
-  }
-  if (flag === '--yaml') {
-    parsed.yaml = true;
     return;
   }
   if (flag === '--launch') {
@@ -1628,18 +1579,6 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.question = value;
     return;
   }
-  if (flag === '--outcome') {
-    const outcome = value.trim();
-    if (!outcome) {
-      throw new RunpaneError(
-        'ERR_RUNPANE_INVALID_ARGUMENT',
-        '--outcome needs the name of one of the step\'s declared outcomes; it was empty. Nothing was reported.',
-        'Run `runpane report --outcome "<name>"` with an outcome the step declares, such as "plan ready".',
-      );
-    }
-    parsed.reportOutcome = outcome;
-    return;
-  }
   if (flag === '--conversation') {
     if (!CONVERSATION_ID_PATTERN.test(value)) {
       throw new Error('--conversation must be a conversation id: up to 256 letters, digits, ".", "_", ":" or "-", starting with a letter or digit.');
@@ -1749,55 +1688,12 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.cron = value;
     return;
   }
-  if (flag === '--harness') {
-    parsed.profileHarness = value;
-    return;
-  }
-  if (flag === '--agent-harness') {
-    addAssignments(flag, value, parsed.agentHarness ??= {});
-    return;
-  }
-  if (flag === '--command') {
-    addAssignments(flag, value, parsed.profileCommands ??= {});
-    return;
-  }
   if (flag === '--item') {
     parsed.item = value;
     return;
   }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
-}
-
-/**
- * `--agent-harness <agent>=<cli>` and `--command <cli>=<command>`: one `key=value` pair, or a JSON
- * object of them (what the MCP tool sends), added to the pairs given before.
- */
-function addAssignments(flag: string, value: string, into: Assignments): void {
-  const example = flag === '--command' ? '--command aider="aider --yes-always"' : '--agent-harness planner=claude/opus';
-  const invalid = (problem: string) => new RunpaneError(
-    'ERR_RUNPANE_INVALID_ARGUMENT',
-    `${flag} ${problem}. Nothing was launched.`,
-    `Pass ${flag} as key=value, such as \`${example}\`, once per key, or one JSON object of them.`,
-  );
-  const pairs: [string, string][] = [];
-  if (value.trim().startsWith('{')) {
-    try {
-      // SAFETY: JSON.parse returns JSON data, and decodeBoundary checks it is an object of strings.
-      const decoded = decodeBoundary(JSON.parse(value) as JsonValue, boundary.jsonObject);
-      for (const [key, text] of Object.entries(decoded)) pairs.push([key, decodeBoundary(text, boundary.string)]);
-    } catch {
-      throw invalid('must be a JSON object of strings when it starts with "{"');
-    }
-  } else {
-    const separator = value.indexOf('=');
-    if (separator === -1) throw invalid(`needs key=value; got "${value}"`);
-    pairs.push([value.slice(0, separator), value.slice(separator + 1)]);
-  }
-  for (const [key, text] of pairs) {
-    if (!key.trim() || !text.trim()) throw invalid(`needs a key and a value; got "${key}=${text}"`);
-    into[key.trim()] = text.trim();
-  }
 }
 
 function setNotifyTookAs(parsed: ParsedArgs, value: string): void {

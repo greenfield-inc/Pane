@@ -1,15 +1,24 @@
 import { Moon } from 'lucide-react';
-import { useTodosStore } from '../../stores/todosStore';
+import type { NotifyItem } from '../../../../shared/types/notify';
+import { machineOfItem, todoKey } from '../../../../shared/todoKey';
+import { todoRef } from '../../../../shared/types/todos';
+import { shownHostId, useTodosStore } from '../../stores/todosStore';
+import { useConfigStore } from '../../stores/configStore';
 
 /**
  * Under a reminder card's four answers (round 9, T-17): "Snooze to another time…" opens the to-do
  * with its snooze menu, since a card can't hold a date picker. Hand to an agent is explained here.
+ * Another machine's reminder opens its to-do there (T-51), never this computer's with that number.
  */
-export function ReminderSnoozeLink({ number }: { number: number }) {
+export function ReminderSnoozeLink({ item }: { item: NotifyItem }) {
   const open = () => {
-    useTodosStore.getState().requestSnooze(number);
+    if (!item.todo) return;
+    const { number, title } = item.todo;
+    const machine = machineOfItem(item);
+    useTodosStore.getState().requestSnooze(todoKey(machine, number));
     // Loaded on use: the approval column stays free of the app's navigation (its tests run without storage).
-    void import('./todosNavigation').then(({ openTodo }) => openTodo(number));
+    if (machine === shownHostId(useConfigStore.getState().config)) void import('./todosNavigation').then(({ openTodo }) => openTodo(number));
+    else void import('../../utils/machineRowActions').then(({ openOnMachine }) => openOnMachine(machine, { kind: 'todo', id: number, name: `${todoRef(number)} ${title}` }));
   };
   return (
     <div className="mt-3" data-testid="approval-reminder">

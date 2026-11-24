@@ -54,7 +54,9 @@ only while To-dos is on.
 - **A requester.** Whoever created the to-do: you, or the orchestrator of the
   Session whose chat it came from. Sub-to-dos share their parent's requester.
 - **A number.** To-dos are numbered T-1, T-2 and so on per machine, and a
-  number is never handed out twice.
+  number is never handed out twice. Two machines can each have a T-28, so
+  Pane always reads a number with its machine: another machine's to-do reads
+  **T-28 · tylers-macbook-pro**, by the name that machine is saved under.
 
 ## Statuses
 
@@ -319,6 +321,10 @@ none open or closed this week it says so in one quiet line, as Changes does for
 a Session with no Panes. On All machines, a Session on another machine shows
 that machine's to-dos: switching rereads them, and only that machine's
 approvals count, so another computer's T-14 never adds to this one's.
+A Session's chat card, approval column, ⌥⌘A and sidebar count take only
+the cards of the machine the Session is on, and none from a machine that has
+gone offline until it is back; another machine's cards stay in Approvals under
+that machine.
 
 In the web app, an open Session's header has a **To-dos** button with the same
 count. It opens that list full screen; a to-do opens on the phone's to-do
@@ -509,7 +515,7 @@ wakes it and delivers them at once.
   the orchestrator's first message), **Snooze 1 hour**, **Snooze to the next
   morning** (9:00 AM tomorrow in the zone it was set in, or Monday instead of
   a weekend day) and "Snooze to another time…", which opens the to-do with
-  the menu. It is in Approvals and the floating strip like any card, covers
+  the menu (on its own machine, for another machine's reminder). It is in Approvals and the floating strip like any card, covers
   the to-do's split, and opens full screen on the phone.
 
 **Waking early.** Wake now, R on a snoozed row and `runpane todos wake` wake

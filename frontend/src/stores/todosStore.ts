@@ -4,11 +4,13 @@ import type { TodoAction, TodoActionResult, TodoCreateInput, TodoDetail, TodoLis
 import { isMac } from '../utils/platformUtils';
 import { LOCAL_MACHINE_ID, type MachineCommand, type MachineConnectionsEvent, type MachineEventChannel, type MachineState } from '../../../shared/types/machineConnections';
 import { otherMachines } from '../components/todos/todoList';
-import { approvalsByTodo, todoApprovalScope, type TodoApprovalScope } from '../components/todos/sessionTodos';
+import { approvalsByTodo, emptyTodoScope, todoApprovalScope, type TodoApprovalScope } from '../components/todos/sessionTodos';
+import { machineOfItem, todoKey, todoRefOn, type TodoKey } from '../../../shared/todoKey';
 import { sessionTodoEntries } from '../components/todos/sessionTodosList';
 import type { TodoEntry } from '../components/todos/todoList';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { isTodosEnabled, useConfigStore } from './configStore';
+import type { AppConfig } from '../types/config';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { showActionError } from './errorStore';
 import { selectNotifyItems, sessionTodoApprovals, useNotifyStore } from './notifyStore';
@@ -167,6 +169,11 @@ interface TodosState {
   create: (input: TodoCreateInput) => Promise<TodoRecord | null>;
   /** Runs one action and returns its result, or null after showing why it failed. */
   act: (action: TodoAction) => Promise<TodoActionResult | null>;
+  /**
+   * This computer's own to-dos while the window shows another computer (T-51): All machines still lists
+   * this computer's Sessions, and their approvals scope reads these. Null while the window shows this one.
+   */
+  desktop: TodosSnapshot | null;
   /** Saved machines' to-dos, by machine id. */
   remote: Readonly<Record<string, RemoteTodos>>;
   /** Saved machines as `machines.list` last said, so a reread knows their names and whether they answer. */
@@ -178,12 +185,17 @@ interface TodosState {
   actOn: (machineId: string, action: TodoAction) => Promise<boolean>;
   /** Creates a to-do (and its Session) on a saved machine; null after showing why it failed. */
   createOn: (machineId: string, input: TodoCreateInput) => Promise<CreatedTodo | null>;
-  /** Round 9: a to-do whose page should open its snooze menu (a reminder card's "Snooze to another time…"). */
-  snoozeRequest: number | null;
-  requestSnooze: (number: number | null) => void;
+  /**
+   * Round 9: a to-do whose page should open its snooze menu (a reminder card's "Snooze to another time…"),
+   * by machine (T-51), so another machine's reminder never opens this computer's to-do with that number.
+   */
+  snoozeRequest: TodoKey | null;
+  requestSnooze: (key: TodoKey | null) => void;
 }
 
 let refreshGeneration = 0;
+/** Bumped when To-dos turns off (T-51): a saved machine's read still in flight then lands nowhere. */
+let remoteGeneration = 0;
 /** Each to-do's newest detail read, so an older answer never replaces a newer one. */
 const detailGenerations = new Map<number, number>();
 
@@ -193,7 +205,7 @@ export const useTodosStore = create<TodosState>((set, get) => ({
   details: new Map(),
   watched: new Map(),
   snoozeRequest: null,
-  requestSnooze: (number) => set({ snoozeRequest: number }),
+  requestSnooze: (key) => set({ snoozeRequest: key }),
 
   refresh: async () => {
     const api = todosApi();
@@ -269,6 +281,7 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     }
   },
 
+  desktop: null,
   remote: {},
   machines: [],
   setMachines: (machines) => {
@@ -281,17 +294,27 @@ export const useTodosStore = create<TodosState>((set, get) => ({
         const known = state.remote[machine.id];
         remote[machine.id] = { machineId: machine.id, label: machine.label, snapshot: known?.snapshot ?? null, offline: machine.status === 'offline' };
       }
-      return { machines: saved, remote };
+      // Back on this computer: its to-dos are the store's own list again.
+      return config && getActiveRemoteHostId(config.remoteDaemon) ? { machines: saved, remote } : { machines: saved, remote, desktop: null };
     });
   },
   refreshRemote: async (machineId) => {
     const api = window.electronAPI?.machines;
     if (!api || !isTodosEnabled(useConfigStore.getState().config)) return;
+    const generation = remoteGeneration;
+    // A read that lands after To-dos was turned off is dropped (T-51).
+    const current = () => generation === remoteGeneration && isTodosEnabled(useConfigStore.getState().config);
+    if ((machineId === undefined || machineId === LOCAL_MACHINE_ID) && shownHostId(useConfigStore.getState().config) !== LOCAL_MACHINE_ID) {
+      void api.read(LOCAL_MACHINE_ID, 'todos:snapshot').then(read => read.data, () => null).then((response) => {
+        if (current() && response?.success && response.data) set({ desktop: response.data });
+      });
+    }
     const targets = get().machines.filter(machine => (machineId === undefined || machine.id === machineId) && machine.status === 'online');
     await Promise.all(targets.map(async machine => {
       const response = await api.read(machine.id, 'todos:snapshot').then(read => read.data, () => null);
       // A machine whose Pane predates To-dos answers with an error: it has none.
       const snapshot = response?.success && response.data ? response.data : null;
+      if (!current()) return;
       set(state => {
         const known = state.remote[machine.id];
         if (!known) return {};
@@ -367,6 +390,8 @@ export function useTodosMachines(): void {
       for (const machine of machines) {
         if (machine.kind === 'remote' && machine.status === 'online' && before.get(machine.id) !== 'online') schedule(machine.id);
       }
+      // The window shows another computer: this computer's own to-dos are read too, for All machines (T-51).
+      if (shownHostId(useConfigStore.getState().config) !== LOCAL_MACHINE_ID) schedule(LOCAL_MACHINE_ID);
     };
     const onEvent = (event: MachineConnectionsEvent) => {
       if (event.type === 'machines') applyMachines(event.machines);
@@ -431,9 +456,7 @@ export function useTodosRefresh(): void {
       void useTodosStore.getState().refreshRemote();
       return watchTodos(refresh);
     }
-    // Turned off (T-39): forget every to-do read, here and from other machines; nothing is deleted.
-    resetTodos();
-    useTodosStore.setState(state => ({ remote: Object.fromEntries(Object.entries(state.remote).map(([id, machine]) => [id, { ...machine, snapshot: null }])) }));
+    forgetTodos();
     return undefined;
   }, [refresh, enabled]);
 }
@@ -448,6 +471,16 @@ export async function switchTodosHost(): Promise<void> {
   detailGenerations.clear();
   useTodosStore.setState({ snapshot: null, details: new Map() });
   await useTodosStore.getState().refresh();
+}
+
+/**
+ * To-dos turned off (T-39): forgets every to-do read, here and from other machines, and drops the reads
+ * still in flight (T-51), so none lands after. Nothing is deleted.
+ */
+export function forgetTodos(): void {
+  remoteGeneration += 1;
+  resetTodos();
+  useTodosStore.setState(state => ({ desktop: null, remote: Object.fromEntries(Object.entries(state.remote).map(([id, machine]) => [id, { ...machine, snapshot: null }])) }));
 }
 
 /** Forgets every to-do read so far: the web app does this when it leaves a host. */
@@ -517,26 +550,89 @@ function approvalStates(snapshot: NotifySnapshot | null): string {
   return (snapshot?.items ?? []).filter(item => item.todo).map(item => `${item.id}:${item.state}`).join(',');
 }
 
-/** The to-do rows of one machine: this computer's (`local` or absent) or a saved machine's. */
-function machineRows(state: Pick<TodosState, 'snapshot' | 'remote'>, machineId?: string): readonly TodoListRow[] | undefined {
-  return machineId === undefined || machineId === LOCAL_MACHINE_ID ? state.snapshot?.rows : state.remote[machineId]?.snapshot?.rows;
+/** The computer this window shows: this one (`local`), or the saved machine it was switched to (All machines, T-37). */
+export function shownHostId(config: AppConfig | null): string {
+  return getActiveRemoteHostId(config?.remoteDaemon) ?? LOCAL_MACHINE_ID;
+}
+
+export function useShownHostId(): string {
+  return useConfigStore(state => shownHostId(state.config));
+}
+
+/**
+ * Which machine a Session's to-dos are on (T-51), by the id its cards carry: the machine given (All machines
+ * names each row's), else the computer this window shows, whose to-dos are the store's own list. Every
+ * Session's approval scope goes through here, so no caller picks the machine by hand.
+ */
+export function sessionTodoMachine(machineId: string | undefined, shownHost: string): string {
+  return machineId ?? shownHost;
+}
+
+/**
+ * The to-do rows of machine `machine` (a `sessionTodoMachine` id): the shown host's own list, this computer's
+ * while the window shows another (`desktop`), or a saved machine's.
+ */
+function machineRows(state: Pick<TodosState, 'snapshot' | 'desktop' | 'remote'>, machine: string, shownHost: string): readonly TodoListRow[] | undefined {
+  if (machine === shownHost) return state.snapshot?.rows;
+  return machine === LOCAL_MACHINE_ID ? state.desktop?.rows : state.remote[machine]?.snapshot?.rows;
 }
 
 /** A Session's to-dos' approvals scope (T-22), read once from the store's current state. */
 export function sessionTodoScope(sessionId: string, machineId?: string): TodoApprovalScope {
-  return todoApprovalScope(machineRows(useTodosStore.getState(), machineId) ?? [], sessionId);
+  const shownHost = shownHostId(useConfigStore.getState().config);
+  const machine = sessionTodoMachine(machineId, shownHost);
+  // To-dos off: no to-do brings a card, whatever a late read left in the store (T-51).
+  if (!todosEnabledNow()) return emptyTodoScope(machine);
+  return todoApprovalScope(machineRows(useTodosStore.getState(), machine, shownHost) ?? [], sessionId, machine);
 }
 
 /** As sessionTodoScope, kept current: its row's count and its Approvals column include its to-dos' approvals. */
 export function useSessionTodoScope(sessionId: string, machineId?: string): TodoApprovalScope {
-  const rows = useTodosStore(state => machineRows(state, machineId));
-  return useMemo(() => todoApprovalScope(rows ?? [], sessionId), [rows, sessionId]);
+  const shownHost = useShownHostId();
+  const machine = sessionTodoMachine(machineId, shownHost);
+  const rows = useTodosStore(state => machineRows(state, machine, shownHost));
+  const enabled = useTodosEnabled();
+  return useMemo(() => (enabled ? todoApprovalScope(rows ?? [], sessionId, machine) : emptyTodoScope(machine)), [enabled, rows, sessionId, machine]);
+}
+
+/** No to-dos, only the machine whose cards a Session takes: for a count that leaves its to-dos out. */
+export function useSessionMachineScope(machineId?: string): TodoApprovalScope {
+  const machine = sessionTodoMachine(machineId, useShownHostId());
+  return useMemo(() => emptyTodoScope(machine), [machine]);
+}
+
+/**
+ * How a card names its to-do (T-51): "T-28" when it is on the computer this window shows, else with the
+ * machine beside it, by the name it is saved under ("T-28 · tylers-macbook-pro"), as the To-dos list does.
+ */
+export function todoRefOfItem(item: Pick<NotifyItem, 'machineId' | 'machine' | 'todo'>): string | undefined {
+  if (!item.todo) return undefined;
+  const machine = machineOfItem(item);
+  if (machine === shownHostId(useConfigStore.getState().config)) return todoRefOn(item.todo.number);
+  const label = machine === LOCAL_MACHINE_ID ? THIS_MACHINE_LABEL : useTodosStore.getState().machines.find(saved => saved.id === machine)?.label;
+  return todoRefOn(item.todo.number, label ?? item.machine ?? machine);
+}
+
+/** Whether a snooze request is for to-do `number` on the computer this window shows. */
+export function snoozeRequestedFor(request: TodoKey | null, number: number): boolean {
+  return request !== null && request === todoKey(shownHostId(useConfigStore.getState().config), number);
 }
 
 /** A Session's to-dos (T-23) as list entries, kept current; null until that machine's to-dos are read. */
 export function useSessionTodoEntries(sessionId: string, machineId?: string): TodoEntry[] | null {
-  const rows = useTodosStore(state => machineRows(state, machineId));
-  return useMemo(() => (rows ? sessionTodoEntries(rows, sessionId, machineId ?? LOCAL_MACHINE_ID) : null), [rows, sessionId, machineId]);
+  const shownHost = useShownHostId();
+  const machine = sessionTodoMachine(machineId, shownHost);
+  const rows = useTodosStore(state => machineRows(state, machine, shownHost));
+  // Keyed by the machine its approval scope uses (T-51), so a row and its cards name the same to-do.
+  return useMemo(() => (rows ? sessionTodoEntries(rows, sessionId, machine) : null), [rows, sessionId, machine]);
+}
+
+/** As useSessionTodoEntries, read once from the store's current state. */
+export function sessionTodoEntriesNow(sessionId: string, machineId?: string): TodoEntry[] | null {
+  const shownHost = shownHostId(useConfigStore.getState().config);
+  const machine = sessionTodoMachine(machineId, shownHost);
+  const rows = machineRows(useTodosStore.getState(), machine, shownHost);
+  return rows ? sessionTodoEntries(rows, sessionId, machine) : null;
 }
 
 /** The approvals waiting on you for a Session's to-dos: oldest first, and how many each of its to-dos has. */
@@ -547,21 +643,20 @@ export interface SessionTodoApprovals {
 }
 
 /**
- * The approvals of a Session's to-dos waiting on you (T-23, T-37), from the machine those to-dos are on.
- * Desktop Notify lists every saved machine's cards together, and two machines each have a T-14, so a card
- * counts only when its machine is that one: the given saved machine, else the host this window shows.
- * The tabs' counts, the rows' counts and the approval pager all read this one set.
+ * The approvals of a Session's to-dos waiting on you (T-23, T-37), from the machine those to-dos are on
+ * (`sessionTodoMachine`): desktop Notify lists every saved machine's cards together, and two machines each
+ * have a T-14, so the scope takes only that machine's. The tabs' counts, the rows' counts and the approval
+ * pager all read this one set.
  */
 export function useSessionTodoApprovals(sessionId: string, machineId?: string): SessionTodoApprovals {
   const items = useNotifyStore(selectNotifyItems);
-  const rows = useTodosStore(state => machineRows(state, machineId));
+  const shownHost = useShownHostId();
+  const rows = useTodosStore(state => machineRows(state, sessionTodoMachine(machineId, shownHost), shownHost));
   const scope = useSessionTodoScope(sessionId, machineId);
-  const shownHost = useConfigStore(state => getActiveRemoteHostId(state.config?.remoteDaemon) ?? LOCAL_MACHINE_ID);
-  const notifyMachine = machineId === undefined || machineId === LOCAL_MACHINE_ID ? shownHost : machineId;
   return useMemo(() => {
-    const waiting = sessionTodoApprovals(items, scope, notifyMachine).sort((a, b) => a.createdAt - b.createdAt);
+    const waiting = sessionTodoApprovals(items, scope).sort((a, b) => a.createdAt - b.createdAt);
     return { items: waiting, byTodo: approvalsByTodo(waiting, rows ?? []) };
-  }, [items, rows, scope, notifyMachine]);
+  }, [items, rows, scope]);
 }
 
 /** A Session's To-dos tab's amber count (T-23): its to-dos' approvals waiting on you, each once. */

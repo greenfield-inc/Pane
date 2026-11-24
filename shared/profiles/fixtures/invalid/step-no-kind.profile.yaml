@@ -1,7 +1,0 @@
-# expect: STEP_KIND
-format: pane-profile/1
-name: step-no-kind
-version: 1.0.0
-flow:
-  start: idle
-  idle: { title: Nothing here }

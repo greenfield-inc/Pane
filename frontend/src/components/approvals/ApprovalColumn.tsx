@@ -4,6 +4,7 @@ import type { NotifyAnswer, NotifyItem, NotifyLink } from '../../../../shared/ty
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { cn } from '../../utils/cn';
 import { runNotify, sendNotify, useNotifyStore } from '../../stores/notifyStore';
+import { approvalLinkScope, resolveApprovalLink } from './approvalLink';
 import { leadingQn } from '../../../../shared/autopilotDecision';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
 import { draftKey as draftKeyOf, useApprovalColumnStore, type ApprovalSurface } from '../../stores/approvalColumnStore';
@@ -155,17 +156,11 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
             : <QuestionsTab key={`${item.id}:${item.version ?? 1}`} item={item} onSent={onSent} tabs={tabs} onOpenTab={(key) => setTab(surface, itemId, key)} />
         )}
         {tab?.kind === 'summary' && <SummaryTab key={item.id} item={item} />}
-        {tab?.kind === 'link' && <LinkTab item={item} link={tab.link} onOpenApproval={(id) => openNested(surface, itemId, resolveApproval(items ?? [], id))} />}
+        {tab?.kind === 'link' && <LinkTab item={item} link={tab.link} target={'approval' in tab.link ? resolveApprovalLink(items ?? [], item, tab.link.approval) : undefined} onOpenApproval={(id) => openNested(surface, itemId, id)} />}
         {tab?.kind === 'origin' && (renderOrigin?.(item) ?? <p className="p-6 text-[13px] text-text-tertiary">Asked in {item.source.name}.</p>)}
       </div>
     </div>
   );
-}
-
-/** An approval link names an id, or a Q-n read as every other Q-n is (`leadingQn`). */
-function resolveApproval(items: readonly NotifyItem[], ref: string): string | undefined {
-  const wanted = ref.trim();
-  return items.find((candidate) => candidate.id === wanted)?.id ?? items.find((candidate) => leadingQn(candidate.title) === wanted)?.id;
 }
 
 /**
@@ -406,7 +401,7 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
                 showTitle={questions.length > 1 || question.title !== item.title}
               />
             ))}
-            {item.todo?.kind === 'reminder' && waiting && <ReminderSnoozeLink number={item.todo.number} />}
+            {item.todo?.kind === 'reminder' && waiting && <ReminderSnoozeLink item={item} />}
             {item.ui === 'approve' && item.detail && (
               <details className="mt-3 rounded-lg border border-border-secondary">
                 <summary className="cursor-pointer px-3 py-2 text-[13px] text-text-secondary">{item.detailLabel ?? 'Show details'}</summary>
@@ -714,19 +709,44 @@ function baseName(file: string): string {
 }
 
 /** A reference: a file in the document viewer, a URL in the in-app browser, another approval in place. */
-function LinkTab({ item, link, onOpenApproval }: { item: NotifyItem; link: NotifyLink; onOpenApproval: (id: string) => void }) {
+export function LinkTab({ item, link, target, onOpenApproval }: { item: NotifyItem; link: NotifyLink; target: string | undefined; onOpenApproval: (id: string) => void }) {
   const activeMachineId = useAllMachinesStore((state) => state.entries.find((entry) => entry.active)?.id ?? LOCAL_MACHINE_ID);
   if ('approval' in link) {
+    // A Q-n is searched only in this card's own Session on its own machine (resolveApprovalLink).
+    if (!target) {
+      return (
+        <div className="p-6 text-[13.5px] text-text-secondary" data-testid="approval-link-missing">
+          <p>{missingLinkWords(item, link.label, link.approval)}</p>
+        </div>
+      );
+    }
     return (
       <div className="p-6 text-[13.5px] text-text-secondary">
         <p>{link.label} is another approval.</p>
-        <button type="button" onClick={() => onOpenApproval(link.approval)} className="mt-2 font-medium text-interactive hover:underline">Open it here</button>
+        <button type="button" onClick={() => onOpenApproval(target)} className="mt-2 font-medium text-interactive hover:underline">Open it here</button>
       </div>
     );
   }
   if ('url' in link) return <div className="absolute inset-0 flex flex-col"><AutopilotWebPage key={link.url} src={link.url} title={link.label} /></div>;
   if (linkedFileReadsHere(item, activeMachineId)) return <div className="absolute inset-0 flex flex-col overflow-y-auto"><AutopilotDocument key={link.path} path={link.path} label={link.label} /></div>;
   return <MachineFileFrame item={item} label={link.label}><MachineDocument key={link.path} item={item} path={link.path} label={link.label} machine={item.machine ?? 'the asking machine'} /></MachineFileFrame>;
+}
+
+/** Where a Q-n link looks, in words, and the machine when it's another one; `undefined` when a Q-n can't be looked up. */
+function sessionWords(item: NotifyItem): string | undefined {
+  const scope = approvalLinkScope(item);
+  if (!scope) return undefined;
+  const where = scope === 'session' ? "this Session's approvals" : scope === 'pane' ? "this Pane's approvals" : "Autopilot's approvals";
+  const machine = otherMachine(item);
+  return machine ? `${where} on ${machine}` : where;
+}
+
+/** Why an approval link opens nothing: its card is gone, or a Q-n has no card in this one's own place. */
+function missingLinkWords(item: NotifyItem, label: string, ref: string): string {
+  if (leadingQn(ref) !== ref.trim()) return `${label} isn't here any more.`;
+  const where = sessionWords(item);
+  if (!where) return `${label} can't be opened from here: this approval was asked outside a Session or Pane, so ${ref.trim()} could be any caller's. A link by the approval's id opens it.`;
+  return `${label} isn't here any more. Pane looks for ${ref.trim()} only among ${where}, so it won't open another one with that name.`;
 }
 
 /** A file read from the approval's machine, under a header naming the file and, when it's another computer, that machine. */

@@ -908,7 +908,6 @@ test('serves the core toolset by default, and named toolsets or read-only on req
     'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
-    'profiles_launch', 'profiles_list', 'profiles_runs', 'profiles_show',
     'repos_add', 'repos_list', 'repos_rename', 'secrets_lease', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'theme_read', 'theme_set',
     'todos_archive', 'todos_ask', 'todos_assign', 'todos_attach', 'todos_comment', 'todos_create', 'todos_detach', 'todos_done',
@@ -951,7 +950,6 @@ test('the plugin toolset is core without the tools that reach other machines', a
     'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
-    'profiles_launch', 'profiles_list', 'profiles_runs', 'profiles_show',
     'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'todos_archive', 'todos_ask', 'todos_assign', 'todos_attach', 'todos_comment', 'todos_create', 'todos_detach', 'todos_done',
     'todos_drop', 'todos_list', 'todos_review', 'todos_show', 'todos_snooze', 'todos_start', 'todos_stop', 'todos_update', 'todos_wake',
@@ -1027,6 +1025,12 @@ test('an unknown toolset stops the server with the valid names', () => {
   });
   assert.equal(result.status, 2);
   assert.match(result.stderr, /Unknown toolset\(s\): everything\. Choose from: .*core.*git/);
+});
+
+test('a saved toolset Pane retired still starts and serves the rest', async () => {
+  const tools = await withMcpClient(async (client) => (await client.listTools()).tools, { args: ['--toolsets', 'git,profiles'] });
+  assert.ok(tools.some((tool) => tool.name === 'panes_commit'));
+  assert.ok(!tools.some((tool) => tool.name.startsWith('profiles_')));
 });
 
 test('a tool outside the served toolsets says which toolset has it', async () => {

@@ -13,6 +13,7 @@ const fs: typeof nodeFs = process.versions.electron
 /**
  * Top-level folders of Pane data that hold Pane's own state. The recovery
  * snapshot copies these and every top-level file (config, databases, journals).
+ * `profiles` holds files people wrote for a feature Pane no longer has; Pane only preserves it.
  */
 export const PANE_STATE_FOLDERS = [
   'agent-chat', 'agent-logs', 'artifacts', 'autopilot', 'images', 'logs', 'mcp', 'migrate-to-pane', 'notes',
