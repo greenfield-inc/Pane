@@ -2012,14 +2012,21 @@ export function registerRunpaneHandlers(
       const todoService = activeTodoService(services);
       const normalized = todoService ? parsed : { ...parsed, todo: undefined };
       const panel = resolveAgentPanel(normalized.panelId);
-      // To-dos (D-408): a --todo that names no open to-do is refused before anything is recorded.
-      if (normalized.todo) todoService?.todoLinkFor(panel.id, normalized.todo);
+      // To-dos (D-408): a --todo that names no open to-do is refused before anything is recorded, when this
+      // machine can tell the to-do is its own. T-51 (D-4): a Pane in no Session here may be a member of a
+      // Session on another machine, which reads the number as its own to-do; this machine then records nothing.
+      const todoCheck = normalized.todo && todoService
+        ? todoService.checkReportTodo(panel.id, normalized.todo, services.orchestrationSessionManager?.approvalSession(panel.sessionId, panel.id) !== undefined)
+        : undefined;
       if (normalized.paneId && normalized.paneId !== panel.sessionId) {
         throw new Error(`Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${normalized.paneId}.`);
       }
       // Its buttons take notify's own checks (count, distinct labels, choices or questions).
       checkNotifyOptions(normalized.choices, normalized.questions);
       const report = normalizeAgentReport(normalized, new Date().toISOString());
+      // T-51: which machine sent the number, for the Session's machine.
+      const installId = report.todo ? services.configManager.getConfig().machineId : undefined;
+      if (installId) report.installId = installId;
       // A profile step's outcome moves its run first: an undeclared one is refused and nothing is recorded.
       if (normalized.outcome !== undefined) {
         // The same codes the CLIs refuse these with before sending.
@@ -2029,6 +2036,7 @@ export function registerRunpaneHandlers(
       }
       // A blocked report becomes an approval card: it takes the card check before it's recorded (P3).
       const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath, readStatusFile: report.summaryTruncated, choices: report.choices, questions: report.questions }).warnings : [];
+      if (todoCheck?.warning) warnings.push(todoCheck.warning);
       if (panel.type === 'chat') getChatTabManager().setReport(panel.id, report);
       else await storePanelAgentReport(panel, report);
       const panelSummary = panelToSummary(panelManager.getPanel(panel.id) ?? panel);

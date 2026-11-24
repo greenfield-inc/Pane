@@ -49,6 +49,9 @@ import { createLoopTestDb } from '../services/loops/loopTestDb';
 import type { TaskQueue } from '../services/taskQueue';
 import { PaneError } from '../../../shared/paneError';
 import Database from 'better-sqlite3-multiple-ciphers';
+import { TodoService } from '../services/todos/todoService';
+import { TodoStore } from '../services/todos/todoStore';
+import { FakeHost } from '../services/todos/todoTestHost';
 import { agentTerminalCommand, configuredAgent } from '../../../shared/agents';
 
 /** The approvals table on its own, for tests that don't look at it. */
@@ -7750,7 +7753,49 @@ describe('runpane IPC handlers', () => {
 
       expect(result.report).toMatchObject({ state: 'blocked', question: 'Which PDF library?' });
       expect(result.report).not.toHaveProperty('todo');
+      expect(result.report).not.toHaveProperty('installId');
+      expect(result.warnings ?? []).not.toContainEqual(expect.stringContaining('was not checked on this machine'));
       expect(stored.state.customState).not.toHaveProperty('agentReport.todo');
+    });
+
+    describe('--todo on the worker\'s machine (T-51, D-4)', () => {
+      let todoDb: Database.Database;
+      afterEach(() => todoDb.close());
+
+      /** This machine with To-dos on and its own T-28, the tab's Pane in a Session here or not. */
+      async function workerMachine(inLocalSession: boolean) {
+        todoDb = new Database(':memory:');
+        const todoService = new TodoService(new TodoStore(todoDb), new FakeHost(), () => Date.UTC(2026, 10, 24, 9, 0));
+        for (let i = 1; i < 28; i += 1) await todoService.create({ title: `Filler ${i}`, startNow: false }, { kind: 'person' });
+        await todoService.create({ title: 'Phone-number sign-up, sign-in and invites', startNow: false }, { kind: 'person' });
+        // SAFETY: Only recordAgentReport and approvalSession are reached by the report handler, and both are stubbed below.
+        const orchestrationSessionManager = Object.create(OrchestrationSessionManager.prototype) as OrchestrationSessionManager;
+        vi.spyOn(orchestrationSessionManager, 'recordAgentReport').mockResolvedValue([]);
+        vi.spyOn(orchestrationSessionManager, 'approvalSession').mockReturnValue(inLocalSession ? { id: 'sess-b', name: 'Local', paneId: 'owner-b' } : undefined);
+        const services = createServices({ orchestrationSessionManager, todoService });
+        vi.mocked(services.configManager.getConfig).mockReturnValue({ machineId: 'install-b', todosEnabled: true });
+        return { registry: createRegistry(services), todoService };
+      }
+
+      it('a Pane in no Session here: the report lands with its --todo and this machine\'s install id, a warning, and this machine\'s T-28 untouched', async () => {
+        const { registry, todoService } = await workerMachine(false);
+        const before = todoService.require(28);
+        const result = await registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked', question: 'Q-84: go?', todo: 'T-28' }]);
+        expect(result.report).toMatchObject({ todo: 'T-28', installId: 'install-b' });
+        expect(result.warnings).toContainEqual(expect.stringContaining('T-28 was not checked on this machine'));
+        expect(todoService.require(28)).toEqual(before);
+        // A number this machine doesn't have is the Session's machine's to read, not a refusal here.
+        await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', todo: 'T-99' }])).resolves.toMatchObject({ ok: true, report: { todo: 'T-99' } });
+      });
+
+      it('a Pane in a Session here keeps D-408: a --todo with no open to-do is refused and nothing is stored', async () => {
+        const { registry } = await workerMachine(true);
+        await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', todo: 'T-99' }])).rejects.toMatchObject({ code: 'ERR_TODO_NOT_FOUND' });
+        expect(stored.state.customState).not.toHaveProperty('agentReport');
+        const result = await registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', todo: 'T-28' }]);
+        expect(result.warnings).toBeUndefined();
+        expect(result.report).toMatchObject({ todo: 'T-28', installId: 'install-b' });
+      });
     });
 
     it('stores the latest report in the panel custom state and journals an opt-in agent.report', async () => {

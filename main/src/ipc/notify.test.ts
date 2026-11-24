@@ -11,7 +11,7 @@ import { ConfigManager } from '../services/configManager';
 import { MachineConnections } from '../services/machineConnections';
 import { panelManager } from '../services/panelManager';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
-import type { NotifyItem, NotifyResult, NotifySharedState } from '../../../shared/types/notify';
+import type { NotifyItem, NotifyResult, NotifySharedState, NotifyTodoLink } from '../../../shared/types/notify';
 import type { MachineConnectionsEvent, MachineState } from '../../../shared/types/machineConnections';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import type { RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
@@ -50,13 +50,17 @@ function stateOf(machine: string, ...items: NotifyItem[]): NotifySharedState {
 }
 
 /** Saved machines (id to its Notify state) behind a stand-in for the machine connections; records every command run. */
-function savedMachines(states: Record<string, NotifySharedState>, initial: MachineState['status'] = 'online') {
+function savedMachines(states: Record<string, NotifySharedState>, initial: MachineState['status'] = 'online', installIds: Record<string, string> = {}) {
   const listeners = new Set<(event: MachineConnectionsEvent) => void>();
   const statuses = new Map(Object.keys(states).map(id => [id, initial]));
   const sent: Array<[string, PaneCommandValue]> = [];
   const list = (): MachineState[] => [
     { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
-    ...Object.keys(states).map((id): MachineState => ({ id, label: states[id].machine, kind: 'remote', status: statuses.get(id) ?? 'online', offlineSince: null })),
+    ...Object.keys(states).map((id): MachineState => {
+      const machine: MachineState = { id, label: states[id].machine, kind: 'remote', status: statuses.get(id) ?? 'online', offlineSince: null };
+      if (installIds[id]) machine.installId = installIds[id];
+      return machine;
+    }),
   ];
   const emit = (event: MachineConnectionsEvent) => { for (const listener of [...listeners]) listener(event); };
   const machines: NotifyMachines = {
@@ -133,6 +137,28 @@ describe('Notify across machines, through the registered handlers', () => {
     expect(items.find(item => item.id === 'macbook:q-84')?.todo).toEqual({ number: 28, title: 'Phone-number sign-up', kind: 'review' });
     // An older machine sends none: the card simply has no link.
     expect(items.find(item => item.id === 'macbook:q-85')?.todo).toBeUndefined();
+    pane.notify.dispose();
+  });
+
+  it('T-51: a card\'s to-do link carries its machine\'s install id; one naming another install id is shown unlinked, not as the wrong to-do', async () => {
+    const pane = await startPane();
+    const linked = (id: string, title: string, installId?: string): NotifyItem => {
+      const todo: NotifyTodoLink = { number: 28, title: 'Phone-number sign-up' };
+      if (installId) todo.installId = installId;
+      return { ...question(id, title, 1_000), todo };
+    };
+    const saved = savedMachines({
+      macbook: stateOf('Tylers-MacBook-Pro', linked('q-84', 'Q-84: Own link?', 'install-macbook'), linked('q-85', 'Q-85: Foreign link?', 'install-mini'), linked('q-86', 'Q-86: Older link?')),
+      studio: stateOf('mac-studio', linked('q-1', 'Q-1: Older machine?', 'install-macbook')),
+    }, 'online', { macbook: 'install-macbook' });
+    followSavedMachines(saved.machines);
+    await flush();
+    const items = pane.notify.snapshot().items;
+    expect(items.find(item => item.id === 'macbook:q-84')?.todo).toEqual({ number: 28, title: 'Phone-number sign-up', installId: 'install-macbook' });
+    expect(items.find(item => item.id === 'macbook:q-85')?.todo).toBeUndefined();
+    // No install id on the link, or none known for the machine (an older Pane): kept, and read with the card's machine.
+    expect(items.find(item => item.id === 'macbook:q-86')?.todo).toEqual({ number: 28, title: 'Phone-number sign-up' });
+    expect(items.find(item => item.id === 'studio:q-1')?.todo).toMatchObject({ number: 28 });
     pane.notify.dispose();
   });
 
