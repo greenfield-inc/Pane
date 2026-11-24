@@ -136,6 +136,25 @@ describe('Notify across machines, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
+  it('T-51 F-5: a link this Pane can\'t read drops only that link: the card and the machine\'s other cards stay', async () => {
+    const pane = await startPane();
+    // A newer machine's link kind, beside an unrelated card.
+    const newer = question('q-90', 'Newer link?', 1_000);
+    // As a newer machine sends it: a kind this Pane doesn't know.
+    Object.assign(newer, { todo: { number: 28, title: 'Phone-number sign-up', kind: 'checkpoint' } });
+    const saved = savedMachines({ macbook: stateOf('Tylers-MacBook-Pro', newer, question('q-91', 'Plain?', 2_000)) });
+    followSavedMachines(saved.machines);
+    await flush();
+    const first = pane.notify.snapshot().items.filter(item => item.machineId === 'macbook');
+    expect(first.map(item => [item.id, item.todo])).toEqual([['macbook:q-90', undefined], ['macbook:q-91', undefined]]);
+
+    // On a change too: the snapshot updates instead of staying stale.
+    saved.emit({ type: 'event', machineId: 'macbook', channel: 'notify:shared-changed', args: [{ ...stateOf('Tylers-MacBook-Pro', newer, question('q-92', 'Another?', 3_000)), revision: 2 }] });
+    await settle();
+    expect(pane.notify.snapshot().items.filter(item => item.machineId === 'macbook').map(item => item.id)).toEqual(['macbook:q-90', 'macbook:q-92']);
+    pane.notify.dispose();
+  });
+
   it('refuses a secret card a teammate posts, so the owner never sees one to answer', async () => {
     const host = await startPane();
     setPaneRuntime({ eventSink: { send: () => undefined }, getConfigManager: () => new ConfigManager(), getPtyHostRuntime: () => null, getWebviewContextMap: () => new Map() });
