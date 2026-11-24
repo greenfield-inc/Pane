@@ -534,6 +534,25 @@ describe('durable archive cleanup', { timeout: 15000 }, () => {
     expect(existsSync(path.join(outside, 'keep.txt'))).toBe(true);
   });
 
+  it('shows a multi-batch worktree purge as one steady removal', async () => {
+    const f = fixture();
+    for (let i = 0; i < 1500; i++) writeFileSync(path.join(f.source, `file-${i}.txt`), 'x');
+    const snapshots: ArchiveProgressSnapshot[] = [];
+    f.progress.on('archive-progress', (snapshot: ArchiveProgressSnapshot) => snapshots.push(snapshot));
+    const job = await f.manager.prepare(f.session, true, false);
+    f.db.archiveSession(f.session.id, job);
+    f.manager.enqueue(job, () => Promise.resolve());
+    await settled(f, 'completed');
+    const statuses = snapshots.map(s => s.tasks[0]?.status);
+    const removing = statuses.indexOf('removing-worktree');
+    expect(removing).toBeGreaterThanOrEqual(0);
+    // Between purge batches the job is requeued internally; the row must not flip back to "Queued".
+    expect(statuses.slice(removing)).not.toContain('queued');
+    // Repeating an unchanged snapshot only makes the renderer redraw.
+    const distinct = snapshots.filter((s, i) => i === 0 || JSON.stringify(s) !== JSON.stringify(snapshots[i - 1]));
+    expect(distinct).toHaveLength(snapshots.length);
+  });
+
   it('makes bounded deletion progress on large physical trees and treats .asar as a file', async () => {
     const f = fixture();
     const tree = path.join(f.root, 'purge');

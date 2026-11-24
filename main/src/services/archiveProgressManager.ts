@@ -35,6 +35,7 @@ export class ArchiveProgressManager extends EventEmitter {
   private executingTasks = new Set<string>();
   private failures = new Map<string, string>();
   private durableTasks?: () => ArchiveProgressTask[];
+  private lastEmitted?: string;
 
   setDurableTasks(read: () => ArchiveProgressTask[]): void {
     this.durableTasks = read;
@@ -197,6 +198,10 @@ export class ArchiveProgressManager extends EventEmitter {
 
   private emitProgress(): void {
     const progress = this.getProgress();
+    // A durable job saves after every purge batch; resending an unchanged snapshot only redraws the panel.
+    const key = JSON.stringify(progress);
+    if (key === this.lastEmitted) return;
+    this.lastEmitted = key;
     console.log('[ArchiveProgressManager] Emitting progress:', {
       tasks: progress.totalCount,
       activeCount: progress.activeCount,
