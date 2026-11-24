@@ -532,12 +532,12 @@ export function useShownHostId(): string {
 }
 
 /**
- * Which machine a Session's to-dos are on (T-51), by the id its cards carry: the given saved machine, else
- * (absent, or `local`) the computer this window shows, whose to-dos are the store's own list. Every
+ * Which machine a Session's to-dos are on (T-51), by the id its cards carry: the machine given (All machines
+ * names each row's), else the computer this window shows, whose to-dos are the store's own list. Every
  * Session's approval scope goes through here, so no caller picks the machine by hand.
  */
 export function sessionTodoMachine(machineId: string | undefined, shownHost: string): string {
-  return machineId === undefined || machineId === LOCAL_MACHINE_ID ? shownHost : machineId;
+  return machineId ?? shownHost;
 }
 
 /** The to-do rows of machine `machine` (a `sessionTodoMachine` id): the shown host's own list, or a saved machine's. */

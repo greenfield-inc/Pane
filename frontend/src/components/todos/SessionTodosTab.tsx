@@ -3,6 +3,7 @@ import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ListTo
 import { todoRef } from '../../../../shared/types/todos';
 import { sessionTodoMachine, useSessionTodoApprovals, useSessionTodoEntries, useShownHostId, type CreatedTodo } from '../../stores/todosStore';
 import { todoKeyOfItem, todoKeyOfRow } from '../../../../shared/todoKey';
+import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { openOnMachine } from '../../utils/machineRowActions';
 import { useNotifyStore } from '../../stores/notifyStore';
 import { useApprovalColumnStore, type ApprovalSurface } from '../../stores/approvalColumnStore';
@@ -75,7 +76,8 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
 
   const openCreated = (created: CreatedTodo) => {
     // Made on another machine (T-51): it opens there, as the To-dos list opens one, never as this machine's to-do with that number.
-    if (sessionTodoMachine(created.machineId, shownHost) === todosMachine) openNumber(created.number);
+    // `local` is the list's own host: the computer this window shows.
+    if ((created.machineId === LOCAL_MACHINE_ID ? shownHost : created.machineId) === todosMachine) openNumber(created.number);
     else void openOnMachine(created.machineId, { kind: 'todo', id: created.number, name: todoRef(created.number) });
   };
 

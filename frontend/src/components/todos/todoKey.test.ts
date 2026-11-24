@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { machineOfItem, todoKey, todoKeyOfItem, todoKeyOfRow, todoRefOn } from '../../../../shared/todoKey';
+import { sessionTodoMachine } from '../../stores/todosStore';
 
 function card(machineId?: string, number?: number): NotifyItem {
   const made: NotifyItem = { id: 'q', ui: 'options', title: 'q', state: 'waiting', createdAt: 1, source: { name: 'agent', agent: 'Agent' } };
@@ -29,5 +30,15 @@ describe('TodoKey (T-51)', () => {
   it('another machine\'s to-do reads with the machine beside it', () => {
     expect(todoRefOn(28)).toBe('T-28');
     expect(todoRefOn(28, 'tylers-macbook-pro')).toBe('T-28 · tylers-macbook-pro');
+  });
+});
+
+describe('which machine a Session\'s to-dos are on (T-51)', () => {
+  it('the machine named, else the computer this window shows', () => {
+    expect(sessionTodoMachine(undefined, 'local')).toBe('local');
+    expect(sessionTodoMachine(undefined, 'devbox')).toBe('devbox');
+    // All machines names each row's machine: this computer's row stays this computer while the window shows another.
+    expect(sessionTodoMachine('local', 'devbox')).toBe('local');
+    expect(sessionTodoMachine('macbook', 'local')).toBe('macbook');
   });
 });
