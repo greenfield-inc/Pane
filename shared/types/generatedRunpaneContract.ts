@@ -15183,6 +15183,14 @@ const CONTRACT_SECTION_16 = {
           "additionalProperties": false
         },
         "description": "A blocked report's several questions (--questions), each with its own buttons."
+      },
+      "todo": {
+        "type": "string",
+        "description": "To-dos: the --todo reference the report was sent with (\"T-28\"). A worker's report is read by its Session's machine as that machine's to-do. Absent while To-dos is off, and from older daemons."
+      },
+      "installId": {
+        "type": "string",
+        "description": "The install id of the machine the report was made on; sent with todo. Absent from older daemons."
       }
     },
     "additionalProperties": false
@@ -18808,6 +18816,13 @@ const CONTRACT_SECTION_16 = {
       "liveWatchers": {
         "type": "number",
         "description": "Watches that were waiting for this report when it was journaled and received it. A snapshot: a named-cursor watch that waits later still receives it. Absent from older daemons."
+      },
+      "warnings": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Recorded anyway, but worth reading: a blocked report's card check, and a --todo this machine left to the Session's machine (its Pane is in no Session here). Absent when there is none."
       }
     },
     "additionalProperties": false
