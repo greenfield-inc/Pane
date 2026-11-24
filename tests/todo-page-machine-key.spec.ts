@@ -24,10 +24,11 @@ function todo(number: number, title: string, sessionId: string | null): TodoReco
 
 const working = { status: 'working' as const, reason: '' };
 const localFive: TodoListRow = { todo: todo(5, 'Invoice PDFs', null), status: working, machine: 'This Mac' };
-const miniFive: TodoListRow = { todo: todo(5, 'Receipts export', MINI_SESSION), status: working, machine: 'tylers-mac-mini' };
+// The mini names itself by hostname, as main does; the window names it by the label it is saved under.
+const miniFive: TodoListRow = { todo: todo(5, 'Receipts export', MINI_SESSION), status: working, machine: 'Tylers-Mac-mini.local' };
 const snapshotOf = (machine: string, rows: TodoListRow[]): TodosSnapshot => ({ rows, gate: { state: 'normal', enabled: true, since: 0 }, machine, ownSessionIds: [] });
 const local = snapshotOf('This Mac', [localFive]);
-const mini = snapshotOf('tylers-mac-mini', [miniFive]);
+const mini = snapshotOf('Tylers-Mac-mini.local', [miniFive]);
 
 function plan(path: string): TodoAttachment {
   return { id: 1, todoNumber: 5, kind: 'plan', label: 'Plan', target: path, addedBy: 'planner', source: 'attached', addedAt: 0 };
@@ -99,6 +100,10 @@ test('T-51 W9: the mini\'s T-5 keeps its own layout, not this computer\'s T-5\'s
   await openFive(page, 'Receipts export');
   // This computer's T-5 hid its split; the mini's T-5 never did.
   await expect(page.getByTestId('todo-page-split')).toBeVisible();
+  // Review F-2: the page names the mini by its saved name, in its ref and its machine chip, never "This Mac".
+  await expect(page.getByTestId('todo-page-ref')).toHaveText('T-5 · tylers-mac-mini');
+  await expect(page.getByTestId('todo-chip-machine')).toContainText('tylers-mac-mini');
+  await expect(page.getByTestId('todo-chip-machine')).not.toContainText(/This (Mac|computer)/);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/t55-mini-five-layout.png` });
   await page.getByTestId('todo-split-toggle').click();
   await expect(page.getByTestId('todo-page-split')).toHaveCount(0);

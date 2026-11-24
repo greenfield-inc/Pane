@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { todoKey } from '../../../../../shared/todoKey';
 import type { TodoListRow, TodoRecord } from '../../../../../shared/types/todos';
 import {
-  CLOSED_TABS_STORAGE_KEY, SPLIT_MEMORY_LIMIT, SPLIT_MEMORY_STORAGE_KEY, pruneClosedTodos, pruneSplitMemory, readClosedTabs, readSplitHidden, writeClosedTabs, writeSplitHidden,
+  CLOSED_TABS_STORAGE_KEY, SPLIT_MEMORY_LIMIT, SPLIT_MEMORY_STORAGE_KEY, pruneClosedTodos, pruneForPage, pruneSplitMemory, readClosedTabs, readSplitHidden, writeClosedTabs, writeSplitHidden,
 } from './todoSplitMemory';
 
 function memoryStorage(): Storage {
@@ -105,5 +105,36 @@ describe('pruneClosedTodos (T-51 W9)', () => {
     pruneClosedTodos(storage, 'local', [row(5, 'working')]);
     expect(readSplitHidden(storage, todoKey('mini', 5))).toBe(true);
     expect(readSplitHidden(storage, todoKey('local', 5))).toBe(true);
+  });
+});
+
+describe('pruneForPage (T-51 review F-3)', () => {
+  // SAFETY: pruning reads only a row's number and status.
+  const row = (number: number, status: 'working' | 'done'): TodoListRow => ({ todo: { number } as TodoRecord, status: { status, reason: '' }, machine: 'm' });
+  const remembered = (storage: Storage) => ({ hidden: readSplitHidden(storage, todoKey('mini', 5)), closed: readClosedTabs(storage, todoKey('mini', 5)) });
+
+  it('on the mini\'s T-5 page, a list still from this computer (its T-5 done) forgets nothing of the mini\'s', () => {
+    const storage = memoryStorage();
+    writeSplitHidden(storage, todoKey('mini', 5), true, 1);
+    writeClosedTabs(storage, todoKey('mini', 5), ['attachment:1'], 1);
+    // Just after the switch: the store's list is this computer's, where T-5 is done.
+    pruneForPage(storage, 'mini', { machineId: 'local', rows: [row(5, 'done')] });
+    expect(remembered(storage)).toEqual({ hidden: true, closed: ['attachment:1'] });
+    // No list read yet: nothing either.
+    pruneForPage(storage, 'mini', null);
+    expect(remembered(storage)).toEqual({ hidden: true, closed: ['attachment:1'] });
+    // The mini's own list, with its T-5 open, keeps both; once its T-5 is done, both go.
+    pruneForPage(storage, 'mini', { machineId: 'mini', rows: [row(5, 'working')] });
+    expect(remembered(storage)).toEqual({ hidden: true, closed: ['attachment:1'] });
+    pruneForPage(storage, 'mini', { machineId: 'mini', rows: [row(5, 'done')] });
+    expect(remembered(storage)).toEqual({ hidden: false, closed: [] });
+  });
+
+  it('pairing that list with the shown machine, as the page did before, erased the mini\'s layout', () => {
+    const storage = memoryStorage();
+    writeSplitHidden(storage, todoKey('mini', 5), true, 1);
+    writeClosedTabs(storage, todoKey('mini', 5), ['attachment:1'], 1);
+    pruneClosedTodos(storage, 'mini', [row(4, 'working')]);
+    expect(remembered(storage)).toEqual({ hidden: false, closed: [] });
   });
 });

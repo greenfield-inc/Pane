@@ -156,6 +156,13 @@ export interface RemoteTodos {
  */
 interface TodosState {
   snapshot: TodosSnapshot | null;
+  /**
+   * The machine `snapshot` was read from (T-51), by the id the window names it with: a list is shown only while
+   * that is the computer the window shows, so another machine's rows never read as its own.
+   */
+  snapshotMachine: string | null;
+  /** Each machine's install id, by the window's id for it, as `machines.list` last said: what checks where a read came from. */
+  installIds: Readonly<Record<string, string>>;
   /** The host answered that To-dos is turned off (T-39), as opposed to not read yet: open To-dos screens close. */
   hostTodosOff: boolean;
   /**
@@ -206,6 +213,22 @@ interface WatchedTodo {
 }
 
 let refreshGeneration = 0;
+/** Reads of the list that reached the wrong computer, in a row; each waits STALE_RETRY_MS and reads again. */
+let staleRetries = 0;
+const STALE_RETRY_MS = 1_000;
+const STALE_RETRY_LIMIT = 30;
+
+/**
+ * Whether a list read for machine `machine` came from it (T-51 F-1), by the install id the host puts on its
+ * list. An older host sends none, and a machine whose install id isn't known yet can't be checked: both pass.
+ * This computer's own list never passes as a saved machine's.
+ */
+function fromMachine(snapshot: TodosSnapshot, machine: string, installIds: Readonly<Record<string, string>>): boolean {
+  if (!snapshot.installId) return true;
+  const expected = installIds[machine];
+  if (expected) return snapshot.installId === expected;
+  return machine === LOCAL_MACHINE_ID || snapshot.installId !== installIds[LOCAL_MACHINE_ID];
+}
 /** Bumped when To-dos turns off (T-51): a saved machine's read still in flight then lands nowhere. */
 let remoteGeneration = 0;
 /**
@@ -222,6 +245,8 @@ function shownNow(): string {
 
 export const useTodosStore = create<TodosState>((set, get) => ({
   snapshot: null,
+  snapshotMachine: null,
+  installIds: {},
   hostTodosOff: false,
   details: new Map(),
   watched: new Map(),
@@ -232,12 +257,25 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     const api = todosApi();
     if (!api) return;
     const generation = ++refreshGeneration;
+    const machine = shownNow();
     const response = await api.snapshot().catch(() => null);
     if (generation !== refreshGeneration) return;
+    // The window switched computers while this read was out: the list it answered is the old one's (T-51).
+    if (shownNow() !== machine) return;
     // The host turned To-dos off: forget what it showed, so every entry hides (T-39).
-    if (response && !response.success && refusedAsOff(response.error)) { set({ snapshot: null, details: new Map(), hostTodosOff: true }); return; }
+    if (response && !response.success && refusedAsOff(response.error)) { set({ snapshot: null, snapshotMachine: null, details: new Map(), hostTodosOff: true }); return; }
     if (!response?.success || !response.data) return;
-    set({ snapshot: api.hostIsHere ? asThisMachine(response.data) : response.data, hostTodosOff: false });
+    // Just after a switch, a read can still reach the computer the window left (T-51 F-1): its list is not the
+    // shown computer's, so it waits for a read that is.
+    if (!fromMachine(response.data, machine, get().installIds)) {
+      if (generation === refreshGeneration && staleRetries < STALE_RETRY_LIMIT) {
+        staleRetries += 1;
+        setTimeout(() => { if (generation === refreshGeneration) void get().refresh(); }, STALE_RETRY_MS);
+      }
+      return;
+    }
+    staleRetries = 0;
+    set({ snapshot: api.hostIsHere ? asHost(response.data, machine) : response.data, snapshotMachine: machine, hostTodosOff: false });
     // Only the shown computer's pages: one still open from before a switch is another machine's to-do.
     const shown = shownNow();
     await Promise.all([...get().watched.values()].filter(page => page.machineId === shown).map(page => get().loadDetail(page.number)));
@@ -259,7 +297,7 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     if (!response?.success || !response.data) return null;
     // Stamped with its machine, so its layout memory and "Open its Session" name the right one (T-51). Main
     // sends none; a page that already names its machine keeps it.
-    const read = api.hostIsHere ? detailAsThisMachine(response.data) : response.data;
+    const read = api.hostIsHere ? detailAsHost(response.data, machineId) : response.data;
     const detail = { ...read, machineId: read.machineId ?? machineId };
     set(state => ({ details: new Map(state.details).set(key, detail) }));
     return detail;
@@ -320,6 +358,7 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     // In remote mode the list's own reads go to the computer this window shows; it is not listed again (T-8).
     const config = useConfigStore.getState().config;
     const saved = otherMachines(machines, config ? getActiveRemoteHostId(config.remoteDaemon) : null);
+    const installIds = Object.fromEntries(machines.flatMap(machine => (machine.installId ? [[machine.id, machine.installId]] : [])));
     set(state => {
       const remote: Record<string, RemoteTodos> = {};
       for (const machine of saved) {
@@ -327,7 +366,7 @@ export const useTodosStore = create<TodosState>((set, get) => ({
         remote[machine.id] = { machineId: machine.id, label: machine.label, snapshot: known?.snapshot ?? null, offline: machine.status === 'offline' };
       }
       // Back on this computer: its to-dos are the store's own list again.
-      return config && getActiveRemoteHostId(config.remoteDaemon) ? { machines: saved, remote } : { machines: saved, remote, desktop: null };
+      return config && getActiveRemoteHostId(config.remoteDaemon) ? { machines: saved, remote, installIds } : { machines: saved, remote, installIds, desktop: null };
     });
   },
   refreshRemote: async (machineId) => {
@@ -455,10 +494,13 @@ export function useRemoteTodosPoll(): void {
   }, []);
 }
 
-/** The page of to-do `number` of the computer this window shows, kept current while it is on screen. */
-export function useTodoDetail(number: number | null): TodoDetail | null {
+/**
+ * The page of to-do `number` of the computer this window shows, kept current while it is on screen. Given
+ * `machineId` (T-51 F-4), only that machine's: none while the window shows another, whose T-n is another to-do.
+ */
+export function useTodoDetail(number: number | null, machineId?: string): TodoDetail | null {
   const shown = useShownHostId();
-  const key = number === null ? null : todoKey(shown, number);
+  const key = number === null || (machineId !== undefined && machineId !== shown) ? null : todoKey(shown, number);
   const detail = useTodosStore(state => (key === null ? null : state.details.get(key) ?? null));
   const watch = useTodosStore(state => state.watch);
   // The key names the machine too: after a switch this watches the new computer's to-do, never the old one's.
@@ -509,10 +551,11 @@ export function useTodosRefresh(): void {
  */
 export async function switchTodosHost(): Promise<void> {
   refreshGeneration += 1;
+  staleRetries = 0;
   detailGenerations.clear();
   const selected = useNavigationStore.getState().selectedTodo;
   if (selected && selected.machineId !== shownNow()) useNavigationStore.getState().selectTodo(null);
-  useTodosStore.setState({ snapshot: null, details: new Map() });
+  useTodosStore.setState({ snapshot: null, snapshotMachine: null, details: new Map() });
   await useTodosStore.getState().refresh();
 }
 
@@ -529,7 +572,7 @@ export function forgetTodos(): void {
 /** Forgets every to-do read so far: the web app does this when it leaves a host. */
 export function resetTodos(): void {
   refreshGeneration += 1;
-  useTodosStore.setState({ snapshot: null, details: new Map(), watched: new Map(), hostTodosOff: false });
+  useTodosStore.setState({ snapshot: null, snapshotMachine: null, details: new Map(), watched: new Map(), hostTodosOff: false });
 }
 
 /**
@@ -562,29 +605,44 @@ export function watchTodos(refresh: () => Promise<void> = useTodosStore.getState
 /** How this machine is named on its own screens, as the design shows it ("This Mac is busy"). */
 export const THIS_MACHINE_LABEL = isMac() ? 'This Mac' : 'This computer';
 
-/** The host names itself by hostname, for other machines' screens; here it reads "This Mac". */
-function relabel(text: string, host: string): string;
-function relabel(text: string | undefined, host: string): string | undefined;
-function relabel(text: string | undefined, host: string): string | undefined {
-  return text?.split(host).join(THIS_MACHINE_LABEL);
+/**
+ * What the desktop calls machine `machine` (T-51 F-2): "This Mac" for this computer, else the name it is saved
+ * under, as the To-dos list shows another machine. Undefined when it isn't a saved computer: the host's own name stays.
+ */
+function hostLabel(machine: string): string | undefined {
+  if (machine === LOCAL_MACHINE_ID) return THIS_MACHINE_LABEL;
+  return useConfigStore.getState().config?.remoteDaemon?.client.computers.find(computer => computer.id === machine)?.label;
 }
 
-function rowAsThisMachine<Row extends TodoListRow>(row: Row, host: string): Row {
-  return { ...row, machine: THIS_MACHINE_LABEL, status: { ...row.status, reason: relabel(row.status.reason, host) } };
+/** The host names itself by hostname, for other machines' screens; the desktop names it as it knows it. */
+function relabel(text: string, host: string, label: string): string;
+function relabel(text: string | undefined, host: string, label: string): string | undefined;
+function relabel(text: string | undefined, host: string, label: string): string | undefined {
+  return text?.split(host).join(label);
 }
 
-function asThisMachine(snapshot: TodosSnapshot): TodosSnapshot {
+function rowAs<Row extends TodoListRow>(row: Row, host: string, label: string): Row {
+  return { ...row, machine: label, status: { ...row.status, reason: relabel(row.status.reason, host, label) } };
+}
+
+/** Machine `machine`'s list, named as the desktop names it. */
+function asHost(snapshot: TodosSnapshot, machine: string): TodosSnapshot {
+  const label = hostLabel(machine);
+  if (!label) return snapshot;
   const host = snapshot.machine;
-  return { ...snapshot, machine: THIS_MACHINE_LABEL, gate: { ...snapshot.gate, line: relabel(snapshot.gate.line, host) }, rows: snapshot.rows.map(row => rowAsThisMachine(row, host)) };
+  return { ...snapshot, machine: label, gate: { ...snapshot.gate, line: relabel(snapshot.gate.line, host, label) }, rows: snapshot.rows.map(row => rowAs(row, host, label)) };
 }
 
-function detailAsThisMachine(detail: TodoDetail): TodoDetail {
+/** Machine `machine`'s to-do page, named as the desktop names it. */
+function detailAsHost(detail: TodoDetail, machine: string): TodoDetail {
+  const label = hostLabel(machine);
+  if (!label) return detail;
   const host = detail.machine;
   return {
-    ...rowAsThisMachine(detail, host),
-    subTodos: detail.subTodos.map(row => rowAsThisMachine(row, host)),
-    parent: detail.parent ? rowAsThisMachine(detail.parent, host) : undefined,
-    load: { ...detail.load, reason: relabel(detail.load.reason, host) },
+    ...rowAs(detail, host, label),
+    subTodos: detail.subTodos.map(row => rowAs(row, host, label)),
+    parent: detail.parent ? rowAs(detail.parent, host, label) : undefined,
+    load: { ...detail.load, reason: relabel(detail.load.reason, host, label) },
   };
 }
 
@@ -610,9 +668,14 @@ export function sessionTodoMachine(machineId: string | undefined, shownHost: str
  * The to-do rows of machine `machine` (a `sessionTodoMachine` id): the shown host's own list, this computer's
  * while the window shows another (`desktop`), or a saved machine's.
  */
-function machineRows(state: Pick<TodosState, 'snapshot' | 'desktop' | 'remote'>, machine: string, shownHost: string): readonly TodoListRow[] | undefined {
-  if (machine === shownHost) return state.snapshot?.rows;
+function machineRows(state: Pick<TodosState, 'snapshot' | 'snapshotMachine' | 'desktop' | 'remote'>, machine: string, shownHost: string): readonly TodoListRow[] | undefined {
+  if (machine === shownHost) return shownSnapshot(state, shownHost)?.rows;
   return machine === LOCAL_MACHINE_ID ? state.desktop?.rows : state.remote[machine]?.snapshot?.rows;
+}
+
+/** The list of the computer the window shows, once it is read from that computer; null until then (T-51 F-1). */
+export function shownSnapshot(state: Pick<TodosState, 'snapshot' | 'snapshotMachine'>, shownHost: string): TodosSnapshot | null {
+  return state.snapshotMachine === shownHost ? state.snapshot : null;
 }
 
 /** A Session's to-dos' approvals scope (T-22), read once from the store's current state. */

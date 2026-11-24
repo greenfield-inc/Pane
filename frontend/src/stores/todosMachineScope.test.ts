@@ -69,7 +69,7 @@ describe('All machines while the window shows the MacBook (review F-1)', () => {
   it('a desktop Session\'s scope reads the desktop\'s own to-dos, and the MacBook\'s reads the MacBook\'s', async () => {
     const { pending } = stubReads();
     configure('macbook');
-    useTodosStore.setState({ snapshot: macbookTodos });
+    useTodosStore.setState({ snapshot: macbookTodos, snapshotMachine: 'macbook' });
     useTodosStore.getState().setMachines([local, macbook]);
     const reading = useTodosStore.getState().refreshRemote();
     for (const read of pending) read.answer({ success: true, data: read.machineId === 'local' ? desktopTodos : macbookTodos });
@@ -118,7 +118,7 @@ describe('To-dos turned off while a saved machine\'s read is in flight (review F
 describe('a Session\'s rows and its approvals name the same machine (review F-6)', () => {
   it('with the window on the MacBook, its Session\'s rows key as the MacBook\'s, as its scope does', () => {
     configure('macbook');
-    useTodosStore.setState({ snapshot: macbookTodos });
+    useTodosStore.setState({ snapshot: macbookTodos, snapshotMachine: 'macbook' });
     const keys = (sessionTodoEntriesNow('workspaces') ?? []).map(entry => entry.key);
     expect(keys).toEqual([todoKey('macbook', 28)]);
     expect(new Set(keys)).toEqual(sessionTodoScope('workspaces').todoKeys);
