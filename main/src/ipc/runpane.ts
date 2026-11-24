@@ -2015,6 +2015,7 @@ export function registerRunpaneHandlers(
       // To-dos (D-408): a --todo that names no open to-do is refused before anything is recorded, when this
       // machine can tell the to-do is its own. T-51 (D-4): a Pane in no Session here may be a member of a
       // Session on another machine, which reads the number as its own to-do; this machine then records nothing.
+      // The check writes nothing: progress is recorded once the report is stored (review F-2).
       const todoCheck = normalized.todo && todoService
         ? todoService.checkReportTodo(panel.id, normalized.todo, services.orchestrationSessionManager?.approvalSession(panel.sessionId, panel.id) !== undefined)
         : undefined;
@@ -2039,6 +2040,8 @@ export function registerRunpaneHandlers(
       if (todoCheck?.warning) warnings.push(todoCheck.warning);
       if (panel.type === 'chat') getChatTabManager().setReport(panel.id, report);
       else await storePanelAgentReport(panel, report);
+      // T-51 review F-2: progress only once the report passed every check and is stored.
+      if (todoCheck) todoService?.recordReportTodo(todoCheck);
       const panelSummary = panelToSummary(panelManager.getPanel(panel.id) ?? panel);
       const { liveWatchers } = workspaceJournal.deliverPaneEntry(panel.sessionId, {
         kind: 'agent.report',

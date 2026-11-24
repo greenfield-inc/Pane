@@ -102,11 +102,11 @@ export interface TodoHost {
   installId?(): string | undefined;
 }
 
-/** What a `runpane report --todo` came to on this machine (T-51, D-4). */
+/** What a `runpane report --todo` came to on this machine (T-51, D-4). Checking it writes nothing. */
 export interface ReportTodoCheck {
-  /** Set when the report's to-do is this machine's own and was checked and recorded here. */
-  link?: NotifyTodoLink;
-  /** Set when this machine left the number to the Session's machine: nothing was recorded here. */
+  /** This machine's own open to-do the report is about: `recordReportTodo` records progress on it once the report is accepted. */
+  todoNumber?: number;
+  /** Set when this machine left the number to the Session's machine: nothing is recorded here. */
   warning?: string;
 }
 
@@ -713,21 +713,36 @@ export class TodoService extends EventEmitter {
   /**
    * `runpane report --todo T-n` on the machine the reporting tab runs on (T-51, D-4). This machine
    * can't tell whether the tab's Pane belongs to a Session on another machine: that membership is
-   * recorded only there. So it checks and records the to-do only when it can tell the report is its
-   * own: the Pane is in a Session here (`inLocalSession`), or the to-do is assigned to this tab. Then a
-   * number with no open to-do is refused, as before (D-408). Otherwise it writes nothing to its own
-   * to-dos, not even progress, and the Session's machine resolves the number against its to-dos (D-1 C).
+   * recorded only there. So it checks the to-do only when it can tell the report is its own: the Pane
+   * is in a Session here (`inLocalSession`), or the to-do is assigned to this tab. Then a number with no
+   * open to-do is refused, as before (D-408), and `recordReportTodo` records progress once the report is
+   * accepted. Otherwise nothing is recorded on its own to-dos, and the Session's machine resolves the
+   * number against its to-dos (D-1 C). Checking writes nothing either way.
    */
   checkReportTodo(panelId: string, explicit: string, inLocalSession: boolean): ReportTodoCheck {
     const number = parseTodoRef(explicit);
     if (number === null) throw notFound(explicit);
-    if (inLocalSession) return { link: this.todoLinkFor(panelId, explicit) };
     const own = this.store.get(number);
-    if (own?.assignee?.panelId === panelId) return { link: this.todoLinkFor(panelId, explicit) };
+    if (inLocalSession || own?.assignee?.panelId === panelId) {
+      if (!own) throw notFound(explicit);
+      this.requireOpen(own, 'asked about');
+      return { todoNumber: own.number };
+    }
     return {
       warning: `${todoRef(number)} was not checked on this machine: this tab's Pane is in no Session here, so the machine whose Session it is in reads ${todoRef(number)} as its own to-do. Nothing was recorded on this machine's to-dos.`,
     };
   }
+  /**
+   * The report passed every check and was stored: progress on the to-do `checkReportTodo` found (T-51 review F-2).
+   * A refused report never gets here, so it never resets the supervisor's clock.
+   */
+  recordReportTodo(check: ReportTodoCheck): void {
+    const todo = check.todoNumber === undefined ? undefined : this.store.get(check.todoNumber);
+    if (!todo || !isOpenTodoState(todo.state)) return;
+    this.progress(todo);
+    this.changed();
+  }
+
 
   /** The one open to-do a tab is assigned to, if exactly one (unlinked questions link to it). */
   soleTodoOfPanel(panelId: string): TodoRecord | undefined {

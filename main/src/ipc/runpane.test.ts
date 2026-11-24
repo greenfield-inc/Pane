@@ -7796,6 +7796,22 @@ describe('runpane IPC handlers', () => {
         expect(result.warnings).toBeUndefined();
         expect(result.report).toMatchObject({ todo: 'T-28', installId: 'install-b' });
       });
+
+      it('a refused report leaves the to-do untouched; an accepted one records progress (review F-2)', async () => {
+        const { registry, todoService } = await workerMachine(true);
+        const before = todoService.require(28);
+        // The panel belongs to another Pane: refused after the to-do check.
+        await expect(registry.invoke('runpane:report', [{ paneId: 'another-pane', panelId: terminalPanel.id, state: 'ready', todo: 'T-28' }])).rejects.toThrow(/belongs to Pane/);
+        // An outcome with a state other than done: refused.
+        await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', outcome: 'shipped', todo: 'T-28' }])).rejects.toMatchObject({ code: 'ERR_REPORT_OUTCOME_STATE' });
+        // Buttons on a report that isn't blocked: refused.
+        await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', choices: [{ label: 'A' }], todo: 'T-28' }])).rejects.toThrow();
+        expect(todoService.require(28)).toEqual(before);
+        expect(stored.state.customState).not.toHaveProperty('agentReport');
+
+        await registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', todo: 'T-28' }]);
+        expect(todoService.require(28).lastProgressAt).not.toBe(before.lastProgressAt);
+      });
     });
 
     it('stores the latest report in the panel custom state and journals an opt-in agent.report', async () => {
