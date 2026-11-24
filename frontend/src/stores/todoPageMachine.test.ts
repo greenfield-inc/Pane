@@ -260,6 +260,6 @@ describe('"Open its Session" while the window shows the mini (T-51 W10)', () => 
     // Opened here, on the mini: the window is not switched back to this computer.
     await vi.waitFor(() => expect(useNavigationStore.getState().activeView).toBe('pane-chat'));
     expect(switchMachine).not.toHaveBeenCalled();
-    expect(useNavigationStore.getState().todoSessionOrigin).toEqual({ sessionId: 'mini-receipts', number: 5 });
+    expect(useNavigationStore.getState().todoSessionOrigin).toEqual({ machineId: 'mini', sessionId: 'mini-receipts', number: 5 });
   });
 });

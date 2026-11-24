@@ -18,7 +18,7 @@ function machineOf(detail: TodoDetail): string {
 export function openTodoSession(detail: TodoDetail): void {
   const sessionId = detail.todo.sessionId ?? detail.parent?.todo.sessionId;
   if (!sessionId) return;
-  useNavigationStore.getState().setTodoSessionOrigin({ sessionId, number: detail.todo.number });
+  useNavigationStore.getState().setTodoSessionOrigin({ machineId: machineOf(detail), sessionId, number: detail.todo.number });
   void openOnMachine(machineOf(detail), { kind: 'session', id: sessionId, name: detail.sessionName ?? detail.todo.ref });
 }
 
@@ -37,7 +37,7 @@ export function focusTodoTab(detail: TodoDetail, panelId: string): void {
   const machine = machineOf(detail);
   if (session && (!paneId || paneId === session.internalSessionId)) {
     usePanelStore.getState().requestActivation({ sessionId: session.internalSessionId, panelId });
-    useNavigationStore.getState().setTodoSessionOrigin({ sessionId: session.id, number: detail.todo.number });
+    useNavigationStore.getState().setTodoSessionOrigin({ machineId: machine, sessionId: session.id, number: detail.todo.number });
     void openOnMachine(machine, { kind: 'session', id: session.id, name: detail.sessionName ?? session.name });
     return;
   }

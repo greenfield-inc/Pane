@@ -574,7 +574,8 @@ export function registerRunpaneHandlers(
   services.workspaceStateReader = workspaceStateReader;
   services.workspaceCursorStore = workspaceCursorStore;
   if (!services.sessionInbox) {
-    const approvalStore = new ApprovalStore(databaseService.getDb(), thisMachineName());
+    // Some handler tests register without a config; their rows then carry no install id.
+    const approvalStore = new ApprovalStore(databaseService.getDb(), thisMachineName(), configManager?.getConfig().machineId);
     const sessionName = (sessionId: string) => services.orchestrationSessionManager?.approvalSessionRecord(sessionId)?.name ?? 'Closed Session';
     // A one-time move of the file older builds kept (D-160). A failure leaves the file alone, shows in Approvals, and retries on the next start.
     services.approvalImport = importJsonStoreOnce(databaseService.getDb(), {

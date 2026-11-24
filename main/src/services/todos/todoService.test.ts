@@ -543,6 +543,7 @@ describe('TodoService', () => {
       await holdGate();
       const queued = await service.create({ title: 'Waits' }, person);
       expect(queued).toMatchObject({ sessionId: null, loadHold: 'queued' });
+      // oxlint-disable-next-line pane/no-bare-todo-number -- this test's TodoService holds one machine's to-dos.
       expect(service.snapshot().rows.find(row => row.todo.number === queued.number)?.status.reason).toBe('This Mac is busy · starts when load comes down');
       host.load = { cpuPercent: 5, memory: 'ok' };
       for (let i = 0; i <= 13; i += 1) { await service.loadTick(); now += 10_000; }
@@ -581,6 +582,7 @@ describe('TodoService', () => {
       }
       expect(service.gate.state).toBe('holding');
       expect(service.require(todo.number).loadHold).toBe('queued');
+      // oxlint-disable-next-line pane/no-bare-todo-number -- this test's TodoService holds one machine's to-dos.
       expect(service.snapshot().rows.find(row => row.todo.number === todo.number)?.status.status).toBe('queued');
       for (let i = 0; i < 3; i += 1) await service.flush();
       expect(service.queuedFor('s1-orch')).toEqual([]);
@@ -629,6 +631,7 @@ describe('TodoService', () => {
       now += 10_000;
       await service.loadTick();
       expect(host.paused).toEqual([['s2-orch']]);
+      // oxlint-disable-next-line pane/no-bare-todo-number -- this test's TodoService holds one machine's to-dos.
       expect(service.snapshot().rows.find(row => row.todo.number === second.number)?.status.reason).toBe('paused for load · resumes when load comes down');
     });
 

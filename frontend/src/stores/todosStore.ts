@@ -739,8 +739,10 @@ export function sessionTodoEntriesNow(sessionId: string, machineId?: string): To
 /** The approvals waiting on you for a Session's to-dos: oldest first, and how many each of its to-dos has. */
 export interface SessionTodoApprovals {
   items: NotifyItem[];
-  /** By top-level to-do number; a sub-to-do's count is its parent's. */
-  byTodo: ReadonlyMap<number, number>;
+  /** By top-level to-do, keyed on `machineId`; a sub-to-do's count is its parent's. */
+  byTodo: ReadonlyMap<TodoKey, number>;
+  /** The machine the Session's to-dos are on (`sessionTodoMachine`), to key a row with `todoKeyOfRow`. */
+  machineId: string;
 }
 
 /**
@@ -752,12 +754,13 @@ export interface SessionTodoApprovals {
 export function useSessionTodoApprovals(sessionId: string, machineId?: string): SessionTodoApprovals {
   const items = useNotifyStore(selectNotifyItems);
   const shownHost = useShownHostId();
-  const rows = useTodosStore(state => machineRows(state, sessionTodoMachine(machineId, shownHost), shownHost));
+  const machine = sessionTodoMachine(machineId, shownHost);
+  const rows = useTodosStore(state => machineRows(state, machine, shownHost));
   const scope = useSessionTodoScope(sessionId, machineId);
   return useMemo(() => {
     const waiting = sessionTodoApprovals(items, scope).sort((a, b) => a.createdAt - b.createdAt);
-    return { items: waiting, byTodo: approvalsByTodo(waiting, rows ?? []) };
-  }, [items, rows, scope]);
+    return { items: waiting, byTodo: approvalsByTodo(waiting, rows ?? [], machine), machineId: machine };
+  }, [items, rows, scope, machine]);
 }
 
 /** A Session's To-dos tab's amber count (T-23): its to-dos' approvals waiting on you, each once. */

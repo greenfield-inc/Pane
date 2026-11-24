@@ -48,6 +48,7 @@ class SnoozeHost {
   }];
 
   detail(number: number): TodoDetail | undefined {
+    // oxlint-disable-next-line pane/no-bare-todo-number -- this mock serves one machine's to-dos by number, as main does.
     const row = this.rows.find((candidate) => candidate.todo.number === number);
     if (!row) return undefined;
     return {

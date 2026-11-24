@@ -77,7 +77,9 @@ function snapshot(answered = false) {
 function todos(): TodosMockOptions {
   const details: Record<number, TodoDetail> = {};
   for (const r of rows()) {
+    // oxlint-disable-next-line pane/no-bare-todo-number -- this mock serves one machine's to-dos by number, as main does.
     details[r.todo.number] = {
+      // oxlint-disable-next-line pane/no-bare-todo-number -- this mock serves one machine's to-dos by number, as main does.
       ...r, subTodos: [], attachments: [{ attachments: [] }], activity: [], approvalIds: r.todo.number === 15 ? ['q31'] : [],
       chatTarget: { panelId: 'orch', name: 'orchestrator', kind: 'orchestrator' }, orchestrator: { panelId: 'orch', name: 'orchestrator', agentId: 'claude' },
       load: { gate: 'normal', canPause: true }, keepMoving: '',
@@ -414,6 +416,7 @@ function devboxTodos(): Pick<TodosMockOptions, 'snapshot' | 'details'> {
   ].map(r => ({ ...r, machine: 'devbox' }));
   const base = todos().details[14];
   const details: Record<number, TodoDetail> = {};
+  // oxlint-disable-next-line pane/no-bare-todo-number -- this mock serves one machine's to-dos by number, as main does.
   for (const r of list) details[r.todo.number] = { ...base, ...r, approvalIds: [] };
   return { snapshot: { rows: list, gate: { state: 'normal', enabled: true, since: 0 }, machine: 'devbox', ownSessionIds: [] }, details };
 }
@@ -544,7 +547,9 @@ test.describe('the web app', () => {
       switch (body.channel) {
         case 'todos:snapshot': result = { success: true, data: { rows: list, gate: { state: 'normal', enabled: true, since: 0 }, machine: 'devbox', ownSessionIds: [] } }; break;
         case 'todos:detail': {
+          // oxlint-disable-next-line pane/no-bare-todo-number -- this mock serves one machine's to-dos by number, as main does.
           const found = list.find(r => r.todo.number === Number(args[0]));
+          // oxlint-disable-next-line pane/no-bare-todo-number -- this mock serves one machine's to-dos by number, as main does.
           result = found ? { success: true, data: { ...details[found.todo.number], ...found } } : { success: false, error: 'No such to-do.' };
           break;
         }
