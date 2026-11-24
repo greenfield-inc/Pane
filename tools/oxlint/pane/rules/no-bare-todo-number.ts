@@ -1,5 +1,5 @@
 import { defineRule } from "@oxlint/plugins";
-import type { ESTree } from "@oxlint/plugins";
+import type { ESTree, Scope } from "@oxlint/plugins";
 
 /**
  * Every machine numbers its own to-dos T-1, T-2 and so on, so two machines each have a T-28 (T-51).
@@ -8,7 +8,9 @@ import type { ESTree } from "@oxlint/plugins";
  * by one, is how another machine's card docked in a local Session. Compare and key by a `TodoKey`
  * from `shared/todoKey.ts`, the one file allowed to read the number for that.
  *
- * Showing the number (`T-${item.todo.number}`, `todoRef(n)`) and passing it on are fine.
+ * Showing the number (`T-${item.todo.number}`, `todoRef(n)`) and passing it on are fine. Names, not
+ * types: a `todo` destructured from a row counts, while a plain `todo` variable (main's own records)
+ * does not.
  */
 
 const HELPER_FILE = /(?:^|[/\\])shared[/\\]todoKey\.ts$/u;
@@ -21,9 +23,23 @@ const NUMBER_FIELDS = new Set(["todoNumber", "todo_id"]);
 
 type Node = ESTree.Node;
 
-function propertyName(node: ESTree.MemberExpression): string | undefined {
-  if (!node.computed && node.property.type === "Identifier") return node.property.name;
+/** A static name: `x.name`, `x["name"]` or `` x[`name`] ``. A name only known at run time is none. */
+function staticName(key: Node, computed: boolean): string | undefined {
+  if (!computed) return key.type === "Identifier" ? key.name : undefined;
+  if (key.type === "Literal" && /^["']/u.test(key.raw ?? "")) return String(key.value);
+  if (key.type === "TemplateLiteral" && key.expressions.length === 0) return key.quasis[0]?.value.cooked ?? undefined;
   return undefined;
+}
+
+function propertyName(node: ESTree.MemberExpression): string | undefined {
+  return staticName(node.property, node.computed);
+}
+
+/** The `todo` binding of a destructured row, `({ todo }) =>`, `{ todo: row }` or `{ todo = fallback }`: its own name. */
+function isTodoProperty(binding: Node): boolean {
+  let property = binding.parent;
+  if (property?.type === "AssignmentPattern") property = property.parent;
+  return property?.type === "Property" && property.parent?.type === "ObjectPattern" && staticName(property.key, property.computed) === "todo";
 }
 
 function unwrap(node: Node): Node {
@@ -34,7 +50,10 @@ function unwrap(node: Node): Node {
   return current;
 }
 
-/** `<x>.todo.number`, `<x>.todo?.number`, `<x>.todoNumber` or `<x>.todo_id`. */
+/** Whether an identifier is bound to a row's destructured `todo`; set per file from its scopes. */
+let rowTodoBinding: (identifier: ESTree.IdentifierReference) => boolean = () => false;
+
+/** `<x>.todo.number`, `<x>.todo?.number`, `todo.number` for a destructured row's `todo`, `<x>.todoNumber` or `<x>.todo_id`. */
 function isBareTodoNumber(node: Node | null | undefined): boolean {
   if (!node) return false;
   const expression = unwrap(node);
@@ -43,6 +62,7 @@ function isBareTodoNumber(node: Node | null | undefined): boolean {
   if (name && NUMBER_FIELDS.has(name)) return true;
   if (name !== "number") return false;
   const owner = unwrap(expression.object);
+  if (owner.type === "Identifier") return rowTodoBinding(owner);
   return owner.type === "MemberExpression" && propertyName(owner) === "todo";
 }
 
@@ -107,6 +127,13 @@ export const noBareTodoNumberRule = defineRule({
     return {
       before() {
         skip = HELPER_FILE.test(context.filename);
+        rowTodoBinding = (identifier) => {
+          for (let scope: Scope | null = context.sourceCode.getScope(identifier); scope; scope = scope.upper) {
+            const variable = scope.set.get(identifier.name);
+            if (variable) return variable.defs.some(definition => isTodoProperty(definition.name));
+          }
+          return false;
+        };
       },
       BinaryExpression(node) {
         if (skip || !COMPARISONS.has(node.operator)) return;

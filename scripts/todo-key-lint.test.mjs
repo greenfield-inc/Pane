@@ -13,15 +13,22 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const oxlintBin = path.join(repoRoot, 'node_modules', 'oxlint', 'bin', 'oxlint');
 const RULE = 'pane/no-bare-todo-number';
 
-/** Lints `files` ({ relative path: source }) with only the rule on; returns the lines it reports, by file. */
-function lint(files) {
+const repoConfig = () => JSON.parse(fs.readFileSync(path.join(repoRoot, '.oxlintrc.json'), 'utf8'));
+const onlyTheRule = () => ({
+  plugins: [],
+  jsPlugins: [{ name: 'pane', specifier: path.join(repoRoot, 'tools/oxlint/pane/index.ts') }],
+  rules: { [RULE]: 'error' },
+});
+
+/**
+ * Lints `files` ({ relative path: source }) and returns the lines the rule reports, by file. `config` defaults to the
+ * rule alone; the repository's own config (its overrides included) is laid out at the same relative paths.
+ */
+function lint(files, config = onlyTheRule()) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'todo-key-lint-'));
   try {
-    fs.writeFileSync(path.join(dir, '.oxlintrc.json'), JSON.stringify({
-      plugins: [],
-      jsPlugins: [{ name: 'pane', specifier: path.join(repoRoot, 'tools/oxlint/pane/index.ts') }],
-      rules: { [RULE]: 'error' },
-    }));
+    const plugins = config.jsPlugins.map(plugin => ({ ...plugin, specifier: path.resolve(repoRoot, plugin.specifier) }));
+    fs.writeFileSync(path.join(dir, '.oxlintrc.json'), JSON.stringify({ ...config, jsPlugins: plugins }));
     for (const [name, source] of Object.entries(files)) {
       fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
       fs.writeFileSync(path.join(dir, name), source);
@@ -53,6 +60,16 @@ const flagged = [
   'new Map([[item.todo.number, item]]);',
   'counts[item.todo.number] = 1;',
   'const byRef = { [item.todo.number]: item };',
+  // Review F-2: bracket notation with a static name.
+  'byNumber.get(item.todo["number"]);',
+  "item['todo'].number === wanted;",
+  'counts["set"](row.todo.number, 1);',
+  'byNumber.get(item.todo[`number`]);',
+  // Review F-3: a `todo` destructured from a row, the exact index approvalsByTodo used to build.
+  'new Map(rows.map(({ todo }) => [todo.number, todo]));',
+  'rows.filter(({ todo }) => todo.number === wanted);',
+  'rows.some(({ todo: row }) => byNumber.has(row.number));',
+  'for (const { todo } of rows) seen.add(todo.number);',
 ];
 
 const allowed = [
@@ -65,6 +82,10 @@ const allowed = [
   'new Set(rows.map(row => todoKeyOfRow(machineId, row)));',
   'todo.number === other.number;',
   'item.todo.number > 0;',
+  // A `todo` that isn't destructured from a row (main's own TodoRecord variables) is not a card's or row's link.
+  'function f(todo) { return todo.number === other.number; }',
+  '{ const { todo } = row; const shownRef = `T-${todo.number}`; }',
+  'item.todo[key] === wanted;',
 ];
 
 test('fails on item.todo.number === row.todo.number, the plan\'s fixture', () => {
@@ -93,4 +114,30 @@ test('is on in the repository config, which runs it in pnpm lint and CI', () => 
   const config = JSON.parse(fs.readFileSync(path.join(repoRoot, '.oxlintrc.json'), 'utf8'));
   assert.ok(config.jsPlugins.some(plugin => plugin.name === 'pane' && plugin.specifier === './tools/oxlint/pane/index.ts'));
   assert.equal(config.rules[RULE], 'error');
+});
+
+// Review F-1: the repository config itself, with its overrides, so an override that turns the rule off for a whole
+// directory fails here. Every place the rule was once switched off by directory is listed.
+test('the repository config reports the plan\'s fixture everywhere, tests and main\'s to-do service included', () => {
+  const fixture = 'export const same = (item, row) => item.todo.number === row.todo.number;\n';
+  const places = [
+    'frontend/src/components/todos/sameTodo.ts',
+    'frontend/src/components/todos/sameTodo.test.ts',
+    'frontend/src/components/todos/SameTodo.test.tsx',
+    'main/src/services/todos/sameTodo.ts',
+    'main/src/services/todos/todoService.ts',
+    'main/src/ipc/todos.ts',
+    'main/src/services/notify/sameTodo.test.ts',
+    'tests/same-todo.spec.ts',
+    'tests/electronApiMock.ts',
+    'shared/sameTodo.ts',
+    'packages/runpane/src/sameTodo.ts',
+  ];
+  const { reported, output } = lint(Object.fromEntries(places.map(place => [place, fixture])), repoConfig());
+  assert.deepEqual(Object.keys(reported).sort(), [...places].sort(), output);
+});
+
+test('no override in the repository config turns the rule off', () => {
+  const offIn = (repoConfig().overrides ?? []).filter(override => override.rules?.[RULE] !== undefined).flatMap(override => override.files);
+  assert.deepEqual(offIn, []);
 });

@@ -105,6 +105,7 @@ class TodoHost {
     this.items = this.items.map(item => (item.id === APPROVAL ? { ...item, state: 'answered', answerSummary: 'EUR and USD', resolvedAt: Date.now() } : item));
     this.revision += 1;
     const working = { status: 'working' as const, reason: '' };
+    // oxlint-disable-next-line pane/no-bare-todo-number -- this mock serves one machine's to-dos by number, as main does.
     this.rows = this.rows.map(row => (row.todo.number === 12 ? { ...row, status: working } : row));
     const detail = this.details.get(12);
     if (detail) this.details.set(12, { ...detail, status: working });

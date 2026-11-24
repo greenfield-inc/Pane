@@ -371,18 +371,6 @@
   "overrides": [
     {
       "files": [
-        "main/src/services/todos/**/*.ts",
-        "main/src/ipc/todos.ts",
-        "tests/**/*.ts",
-        "**/*.test.ts",
-        "**/*.test.tsx"
-      ],
-      "rules": {
-        "pane/no-bare-todo-number": "off"
-      }
-    },
-    {
-      "files": [
         "shared/validation/boundaryDecoder.ts",
         "packages/runpane/src/boundaryDecoder.ts"
       ],

@@ -1284,6 +1284,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       todo.updatedAt = Date.now();
       detail.status = status;
+      // oxlint-disable-next-line pane/no-bare-todo-number -- the mock stands in for one machine's to-do API, which main keys by number.
       const listed = state.snapshot.rows.find((row) => row.todo.number === todo.number);
       if (listed) {
         listed.todo = clone(todo);

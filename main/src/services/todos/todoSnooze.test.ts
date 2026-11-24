@@ -345,6 +345,7 @@ describe('TodoService snoozing (round 9)', () => {
       now = START + 3 * MINUTE;
       await service.wakeTick();
       expect(service.require(todo.number)).toMatchObject({ state: 'in_progress', loadHold: 'queued' });
+      // oxlint-disable-next-line pane/no-bare-todo-number -- this test's TodoService holds one machine's to-dos.
       expect(service.snapshot().rows.find(row => row.todo.number === todo.number)?.status).toEqual({ status: 'queued', reason: 'This Mac is busy · starts when load comes down' });
       await flushAll();
       expect(host.typedInto('s1-orch').some(text => text.includes('Reminder for T-1'))).toBe(false);

@@ -48,21 +48,23 @@ codebase. `scripts/todo-key-lint.test.mjs` tests it on fixtures.
 
 `pane/no-bare-todo-number` (T-51): every machine numbers its own to-dos T-1,
 T-2 and so on, so two machines each have a T-28. The rule fails when a bare
-to-do number (`x.todo.number`, `x.todoNumber`, `x.todo_id`) is compared with
-`===`, `!==`, `==` or `!=`, looked up with `includes` or `indexOf`, or used as
-a Map, Set or record key. Compare and key by a `TodoKey` from
-`shared/todoKey.ts` instead, the one file the rule skips. Showing a number
-(`` `T-${n}` ``, `todoRef(n)`), passing it on, and checking it against `null`
-or `undefined` are allowed. The rule reads names, not types, so a `todo`
-destructured from a row (`({ todo }) => todo.number`) is not checked.
+to-do number (`x.todo.number`, `x["todo"]["number"]`, `x.todoNumber`,
+`x.todo_id`, or `todo.number` for a `todo` destructured from a row, as in
+`({ todo }) => todo.number`) is compared with `===`, `!==`, `==` or `!=`,
+looked up with `includes` or `indexOf`, or used as a Map, Set or record key.
+Compare and key by a `TodoKey` from `shared/todoKey.ts` instead, the one file
+the rule skips. Showing a number (`` `T-${n}` ``, `todoRef(n)`), passing it
+on, and checking it against `null` or `undefined` are allowed. The rule reads
+names, not types: a plain `todo` variable (main's own to-do records) is not
+checked.
 
-Where it is off, and why:
-
-| Where | Reason |
-| --- | --- |
-| `main/src/services/todos/**`, `main/src/ipc/todos.ts` | Main's to-do service reads only this machine's database, so every number in it is this machine's. |
-| `tests/**`, `**/*.test.ts(x)` | Fixtures hold one machine's to-dos and assert on the numbers they set up. |
-| `frontend/src/components/todos/page/todoSessionLink.ts` (one line) | The Session, its record's number and the rows all come from the computer the window shows. |
+The rule is on everywhere, tests included, and no override turns it off
+(`scripts/todo-key-lint.test.mjs` checks the repository config). Where a
+comparison is on one machine's to-dos by construction, the line carries
+`// oxlint-disable-next-line pane/no-bare-todo-number -- <reason>`. Today
+those are in main's to-do service (`main/src/services/todos`,
+`main/src/ipc/todos.ts`), which reads only this machine's database, in its unit
+tests, and in Playwright mocks and specs that serve or run one machine.
 
 ## Why a rule is off
 

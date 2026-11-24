@@ -279,6 +279,7 @@ export class TodoService extends EventEmitter {
 
   private waitingByTodo(): Map<number, LinkedApproval[]> {
     const byTodo = new Map<number, LinkedApproval[]>();
+    // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
     for (const approval of this.store.waitingApprovals()) byTodo.set(approval.todoNumber, [...(byTodo.get(approval.todoNumber) ?? []), approval]);
     return byTodo;
   }
@@ -661,6 +662,7 @@ export class TodoService extends EventEmitter {
   detach(number: number, attachmentId: number, actor: TodoActor): void {
     const todo = this.require(number);
     const attachment = this.store.attachment(attachmentId);
+    // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
     if (!attachment || attachment.todoNumber !== number || !this.store.detach(attachmentId, this.now())) {
       throw new PaneError('ERR_TODO_ATTACHMENT', `${todo.ref} has no attachment ${attachmentId}. Nothing changed.`, `Run runpane todos show ${todo.ref} to see its attachments and their ids.`);
     }
@@ -737,6 +739,7 @@ export class TodoService extends EventEmitter {
    * A refused report never gets here, so it never resets the supervisor's clock.
    */
   recordReportTodo(check: ReportTodoCheck): void {
+    // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
     const todo = check.todoNumber === undefined ? undefined : this.store.get(check.todoNumber);
     if (!todo || !isOpenTodoState(todo.state)) return;
     this.progress(todo);
@@ -861,6 +864,7 @@ export class TodoService extends EventEmitter {
   private commentAnswersWaiting(todo: TodoRecord, text: string): TodoRecord {
     const reminderCard = this.store.wake(todo.number)?.reminderCardId ?? null;
     // Only cards linked to the to-do: a permission prompt asked in its Session waits for the person's own answer.
+    // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
     const cards = this.store.waitingApprovals().filter(approval => approval.linked && approval.todoNumber === todo.number && approval.id !== reminderCard);
     if (todo.state !== 'in_review' && cards.length === 0 && todo.stuckCardId === null) return todo;
     const words = text.length > 300 ? `${text.slice(0, 299)}…` : text;
@@ -884,6 +888,7 @@ export class TodoService extends EventEmitter {
   private replyTarget(todo: TodoRecord, replyTo: number): ReplyTarget {
     const row = this.store.activityRow(replyTo);
     const refuse = (why: string) => new PaneError('ERR_TODO_REPLY_TARGET', `That reply can’t be sent: ${why}. Nothing was sent.`, `Reply under a card on ${todo.ref}’s own page, or leave a comment instead.`);
+    // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
     if (!row || row.todoNumber !== todo.number) throw refuse(`the card it answers isn’t on ${todo.ref}`);
     const orchestrator: ReplyTarget = { target: this.chatTarget(todo, true) };
     const tab = row.authorKind === 'agent' ? row.authorTab : row.authorKind === 'person' ? row.toTab : undefined;
@@ -988,6 +993,7 @@ export class TodoService extends EventEmitter {
     // Asking again replaces the open review card, so one waits (T-19).
     const reviewTitle = `Review ${todo.ref}: `;
     for (const open of this.store.waitingApprovals()) {
+      // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
       if (open.linked && open.todoNumber === number && open.title.startsWith(reviewTitle)) this.host.closeCard(open.id, 'Replaced by a newer review request');
     }
     const id = randomUUID();
@@ -1220,6 +1226,7 @@ export class TodoService extends EventEmitter {
   private settleUndelivered(entry: OutboxEntry, why: string): void {
     const index = this.outbox.indexOf(entry);
     if (index >= 0) this.outbox.splice(index, 1);
+    // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
     const todo = this.store.get(entry.todoNumber);
     if (!todo) return;
     const line = `Couldn't reach ${this.host.panel(entry.panelId)?.name ?? 'the tab'}: ${why}`;
@@ -1448,6 +1455,7 @@ export class TodoService extends EventEmitter {
     const waiting = this.waitingByTodo();
     const open = this.store.listOpen();
     const children = this.childrenIndex(open);
+    // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
     const reminding = new Set(this.store.reminders().map(entry => entry.todo.number));
     let moving = false;
     for (const todo of open) {
@@ -1643,6 +1651,7 @@ export class TodoService extends EventEmitter {
 
   /** Comments written to its agents and not yet typed: they go inside the wake message. */
   private heldComments(number: number): TodoActivity[] {
+    // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
     const held = this.store.undelivered().filter(row => row.todoNumber === number && row.authorKind === 'person');
     const ids = new Set(held.map(row => row.id));
     for (let index = this.outbox.length - 1; index >= 0; index -= 1) {
@@ -1908,6 +1917,7 @@ export class TodoService extends EventEmitter {
   private async resumeOnLaunchOnce(why: 'launch' | 'wake'): Promise<{ restarted: number; queued: number }> {
     const now = this.now();
     if (why === 'launch') this.reraiseReminders();
+    // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
     const reminding = new Set(this.store.reminders().map(entry => entry.todo.number));
     const waiting = this.waitingByTodo();
     const top = this.store.listOpen().filter(todo => todo.parentNumber === null && todo.sessionId !== null);
