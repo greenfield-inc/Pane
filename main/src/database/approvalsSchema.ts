@@ -51,5 +51,8 @@ export function ensureApprovalsSchema(db: Database.Database): void {
   // SAFETY: PRAGMA table_info always returns rows with a `name` column.
   const columns = db.prepare('PRAGMA table_info(approvals)').all() as ColumnInfo[];
   if (!columns.some(column => column.name === 'todo_id')) db.prepare('ALTER TABLE approvals ADD COLUMN todo_id INTEGER').run();
+  // T-51: the install id (AppConfig.machineId) of the machine that wrote the row, beside `machine`, its hostname-style name,
+  // which drifts with the network and is never a key. Optional: older rows keep none, and an older Pane's writes leave it alone.
+  if (!columns.some(column => column.name === 'install_id')) db.prepare('ALTER TABLE approvals ADD COLUMN install_id TEXT').run();
   db.prepare('CREATE INDEX IF NOT EXISTS idx_approvals_todo ON approvals(todo_id, state)').run();
 }

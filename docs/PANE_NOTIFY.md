@@ -139,6 +139,12 @@ settle it. Review cards (`runpane todos review`, with Accept and Ask for
 changes) and the supervisor's stuck cards are linked approvals too. Pane
 stores the link in the `todo_id` column of the `approvals` table.
 
+Each row also names the machine that wrote it twice: `machine`, its
+hostname-style name, which macOS changes with the network (`Mac`,
+`Tylers-MacBook-Pro`, `tylers-mbp`), and `install_id`, the stable install id
+made on first start (`machineId` in `config.json`). Nothing keys on
+`machine`. Rows written before `install_id` was added keep it empty.
+
 ## Claude's own prompts
 
 Claude tabs Pane starts also ask their permission and plan prompts in Approvals,

@@ -101,3 +101,73 @@ describe('ApprovalStore', () => {
     expect(performance.now() - start).toBeLessThan(5);
   });
 });
+
+// T-51 PR 5: the owning machine's install id (AppConfig.machineId) beside the hostname-style `machine`, which drifts.
+describe('ApprovalStore install id', () => {
+  let db: Database.Database;
+  beforeEach(() => { db = new Database(':memory:'); });
+  afterEach(() => db.close());
+
+  const columns = () => (db.prepare('PRAGMA table_info(approvals)').all() as Array<{ name: string; notnull: number; dflt_value: unknown }>);
+  const rowOf = (id: string) => db.prepare('SELECT machine, install_id, todo_id FROM approvals WHERE id = ?').get(id);
+  // The approvals table as the first build with it made it: no todo_id, no install_id.
+  const createOldestTable = () => db.prepare(`CREATE TABLE approvals (
+    id TEXT PRIMARY KEY, machine TEXT NOT NULL,
+    connected_kind TEXT NOT NULL CHECK (connected_kind IN ('session', 'pane', 'autopilot', 'machine')),
+    connected_id TEXT NOT NULL CHECK (length(connected_id) > 0), connected_name TEXT NOT NULL,
+    origin_kind TEXT NOT NULL CHECK (origin_kind IN ('orchestrator', 'worker', 'autopilot', 'claude-prompt', 'pane', 'agent')),
+    session_id TEXT, pane_id TEXT, panel_id TEXT, addressee TEXT NOT NULL CHECK (addressee IN ('person', 'orchestrator')),
+    qn TEXT, state TEXT NOT NULL, item_json TEXT, report_json TEXT, inbox_session_id TEXT, acked_at INTEGER, answered_by TEXT,
+    closed_by TEXT, closed_reason TEXT, stale_since INTEGER, rewritten_from TEXT, rewritten_as TEXT, delivered_via TEXT,
+    delivered_at INTEGER, decision TEXT, created_at INTEGER NOT NULL, ended_at INTEGER)`).run();
+  // What an older Pane (with todo_id, before install_id) runs to save a card.
+  const olderSave = (id: string, todoId: number | null) => db.prepare(`
+    INSERT INTO approvals (id, machine, connected_kind, connected_id, connected_name, origin_kind, addressee, state, item_json, created_at, todo_id)
+    VALUES (@id, 'Tylers-MacBook-Pro', 'session', 's1', 'Sales', 'orchestrator', 'person', 'waiting', @item_json, 1000, @todo_id)
+    ON CONFLICT(id) DO UPDATE SET machine = excluded.machine, state = excluded.state, item_json = excluded.item_json, todo_id = COALESCE(excluded.todo_id, approvals.todo_id)`)
+    .run({ id, todo_id: todoId, item_json: JSON.stringify(item({ id })) });
+
+  it('stores this machine\'s install id beside its name on a card and on an inbox report', () => {
+    const store = new ApprovalStore(db, 'mini', 'install-mini');
+    store.saveItem(item({ todo: { number: 28, title: 'BAA' } }));
+    store.saveInboxItem(report(), 'Sales');
+    expect(rowOf('a1')).toEqual({ machine: 'mini', install_id: 'install-mini', todo_id: 28 });
+    expect(rowOf('in-1')).toEqual({ machine: 'mini', install_id: 'install-mini', todo_id: null });
+  });
+
+  it('leaves it empty when this machine has no install id yet', () => {
+    new ApprovalStore(db, 'mini').saveItem(item());
+    expect(rowOf('a1')).toEqual({ machine: 'mini', install_id: null, todo_id: null });
+  });
+
+  it('upgrades an older table: adds an optional column, rewrites no todo_id and fills no install id in', () => {
+    createOldestTable();
+    db.prepare('ALTER TABLE approvals ADD COLUMN todo_id INTEGER').run();
+    olderSave('q-84', 28);
+    olderSave('q-85', null);
+    new ApprovalStore(db, 'mini', 'install-mini');
+    const added = columns().find(column => column.name === 'install_id');
+    expect(added).toMatchObject({ notnull: 0, dflt_value: null });
+    expect(rowOf('q-84')).toEqual({ machine: 'Tylers-MacBook-Pro', install_id: null, todo_id: 28 });
+    expect(rowOf('q-85')).toEqual({ machine: 'Tylers-MacBook-Pro', install_id: null, todo_id: null });
+    // Twice is the same as once.
+    new ApprovalStore(db, 'mini', 'install-mini');
+    expect(columns().filter(column => column.name === 'install_id')).toHaveLength(1);
+  });
+
+  it('upgrades the oldest table too, adding todo_id and install_id', () => {
+    createOldestTable();
+    new ApprovalStore(db, 'mini', 'install-mini');
+    expect(columns().map(column => column.name)).toEqual(expect.arrayContaining(['todo_id', 'install_id']));
+  });
+
+  it('an older Pane on the upgraded table still saves and reads, and keeps the install id it does not know', () => {
+    const store = new ApprovalStore(db, 'mini', 'install-mini');
+    store.saveItem(item({ todo: { number: 28, title: 'BAA' } }));
+    olderSave('a1', null);
+    olderSave('older', 5);
+    expect(rowOf('a1')).toEqual({ machine: 'Tylers-MacBook-Pro', install_id: 'install-mini', todo_id: 28 });
+    expect(rowOf('older')).toEqual({ machine: 'Tylers-MacBook-Pro', install_id: null, todo_id: 5 });
+    expect(new ApprovalStore(db, 'mini', 'install-mini').openItems().map(saved => saved.id)).toEqual(['a1', 'older']);
+  });
+});
