@@ -2,9 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { ChevronDown, ChevronRight, Gauge, Plus, SlidersHorizontal } from 'lucide-react';
 import { todoRef, type TodoAction } from '../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
-import { useNavigationStore } from '../../stores/navigationStore';
+import { useNavigationStore, type SelectedTodo } from '../../stores/navigationStore';
+import { todoKey } from '../../../../shared/todoKey';
 import { openOnMachine } from '../../utils/machineRowActions';
-import { useRemoteTodosPoll, useTodosStore, type CreatedTodo } from '../../stores/todosStore';
+import { useRemoteTodosPoll, useShownHostId, useTodosStore, type CreatedTodo } from '../../stores/todosStore';
 import { cn } from '../../utils/cn';
 import { Dropdown } from '../ui/Dropdown';
 import { useNow } from '../notify/useNow';
@@ -123,21 +124,24 @@ function KeyHint({ keys, label }: { keys: string[]; label: string }) {
  * to-do, and Esc goes back to where you were. A selected to-do's page shows in place of the list.
  */
 export function TodosView() {
-  const selected = useNavigationStore(state => state.selectedTodoNumber);
+  const chosen = useNavigationStore(state => state.selectedTodo);
   const selectTodo = useNavigationStore(state => state.selectTodo);
+  const shownHost = useShownHostId();
   useRemoteTodosPoll();
-  // Back on the list, the row you opened stays selected (round 7 QA, R1).
-  const [lastOpened, setLastOpened] = useState<number | null>(null);
-  useEffect(() => { if (selected !== null) setLastOpened(selected); }, [selected]);
+  // A page is the to-do of the computer it was opened on (T-51): once the window shows another, it is not shown.
+  const selected = chosen?.machineId === shownHost ? chosen.number : null;
+  // Back on the list, the row you opened stays selected (round 7 QA, R1), on the computer it was opened on.
+  const [lastOpened, setLastOpened] = useState<SelectedTodo | null>(null);
+  useEffect(() => { if (chosen !== null) setLastOpened(chosen); }, [chosen]);
   if (selected !== null) {
     // The whole main area: the to-do page and one file may be its two splits (D-448).
     return (
       <SplitAreaContext.Provider value={MAIN_AREA}>
-        <TodoPage key={selected} number={selected} onBack={() => selectTodo(null)} onOpenTodo={number => selectTodo(number)} />
+        <TodoPage key={todoKey(shownHost, selected)} number={selected} onBack={() => selectTodo(null)} onOpenTodo={number => selectTodo(number)} />
       </SplitAreaContext.Provider>
     );
   }
-  return <TodosList onOpen={number => selectTodo(number)} lastOpened={lastOpened} />;
+  return <TodosList onOpen={number => selectTodo(number)} lastOpened={lastOpened?.machineId === shownHost ? lastOpened.number : null} />;
 }
 
 function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; lastOpened: number | null }) {

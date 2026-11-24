@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { PaneNavigationView } from '../../../shared/types/hostNavigation';
-import { isTodosEnabled, useConfigStore } from './configStore';
+import { isTodosEnabled, shownHostId, useConfigStore } from './configStore';
 
 export type SidebarNavigationScope = 'repositories' | 'pinned' | 'orchestration';
 
@@ -99,8 +99,12 @@ interface NavigationState {
    * remembers the view and Pane you left (`returnPaneId`), which `leaveTodos` hands back.
    */
   navigateToTodos: (options?: TodosNavigationOptions) => void;
-  /** The to-do whose page To-dos shows; null shows the list. */
-  selectedTodoNumber: number | null;
+  /**
+   * The to-do whose page To-dos shows, on the machine it was opened on (T-51); null shows the list.
+   * Every machine has its own T-5, so a page opened on one is never shown as another's.
+   */
+  selectedTodo: SelectedTodo | null;
+  /** Opens to-do `number` of the computer this window shows; null shows the list. */
   selectTodo: (number: number | null) => void;
   todosReturn: ApprovalsReturn | null;
   /** Leaves To-dos for the view it was opened from, and says which Pane was active there. */
@@ -108,6 +112,17 @@ interface NavigationState {
   /** The to-do a Session was last opened from (round 8, T-4): that Session's breadcrumb returns to it. */
   todoSessionOrigin: TodoSessionOrigin | null;
   setTodoSessionOrigin: (origin: TodoSessionOrigin | null) => void;
+}
+
+/** A to-do page: its number on machine `machineId` (`local`, or the saved machine the window was switched to). */
+export interface SelectedTodo {
+  machineId: string;
+  number: number;
+}
+
+/** To-do `number` of the computer this window shows now. */
+function shownTodo(number: number | null): SelectedTodo | null {
+  return number === null ? null : { machineId: shownHostId(useConfigStore.getState().config), number };
 }
 
 export interface TodosNavigationOptions {
@@ -310,11 +325,11 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
       activeView: 'todos',
       activeProjectId: null,
       todosReturn,
-      selectedTodoNumber: options?.number === undefined ? state.selectedTodoNumber : options.number,
+      selectedTodo: options?.number === undefined ? state.selectedTodo : shownTodo(options.number),
     });
   },
-  selectedTodoNumber: null,
-  selectTodo: (number) => set({ selectedTodoNumber: number }),
+  selectedTodo: null,
+  selectTodo: (number) => set({ selectedTodo: shownTodo(number) }),
   todosReturn: null,
   leaveTodos: () => {
     const back = get().todosReturn ?? { view: 'sessions', projectId: null, paneId: null };

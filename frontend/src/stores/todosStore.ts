@@ -9,11 +9,11 @@ import { machineOfItem, todoKey, todoRefOn, type TodoKey } from '../../../shared
 import { sessionTodoEntries } from '../components/todos/sessionTodosList';
 import type { TodoEntry } from '../components/todos/todoList';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
-import { isTodosEnabled, useConfigStore } from './configStore';
-import type { AppConfig } from '../types/config';
+import { isTodosEnabled, shownHostId, useConfigStore } from './configStore';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { showActionError } from './errorStore';
 import { selectNotifyItems, sessionTodoApprovals, useNotifyStore } from './notifyStore';
+import { useNavigationStore } from './navigationStore';
 import type { NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
 import type { AutopilotDocument } from '../../../shared/types/autopilot';
 
@@ -158,12 +158,17 @@ interface TodosState {
   snapshot: TodosSnapshot | null;
   /** The host answered that To-dos is turned off (T-39), as opposed to not read yet: open To-dos screens close. */
   hostTodosOff: boolean;
-  /** Pages read so far, by to-do number; reread on every change. */
-  details: ReadonlyMap<number, TodoDetail>;
-  /** To-do pages on screen, so a change rereads only those. */
-  watched: ReadonlyMap<number, number>;
+  /**
+   * Pages read so far, by machine and number (T-51), each stamped with the machine it was read from;
+   * reread on every change.
+   */
+  details: ReadonlyMap<TodoKey, TodoDetail>;
+  /** To-do pages on screen, by machine and number, so a change rereads only the shown computer's. */
+  watched: ReadonlyMap<TodoKey, WatchedTodo>;
   refresh: () => Promise<void>;
+  /** Reads to-do `number` of the computer this window shows. */
   loadDetail: (number: number) => Promise<TodoDetail | null>;
+  /** Keeps to-do `number` of the computer this window shows current; returns the stop. */
   watch: (number: number) => () => void;
   /** Creates and returns the to-do, or null after showing why it failed. */
   create: (input: TodoCreateInput) => Promise<TodoRecord | null>;
@@ -193,11 +198,27 @@ interface TodosState {
   requestSnooze: (key: TodoKey | null) => void;
 }
 
+/** A page on screen: which machine's to-do, and how many views watch it. */
+interface WatchedTodo {
+  machineId: string;
+  number: number;
+  count: number;
+}
+
 let refreshGeneration = 0;
 /** Bumped when To-dos turns off (T-51): a saved machine's read still in flight then lands nowhere. */
 let remoteGeneration = 0;
-/** Each to-do's newest detail read, so an older answer never replaces a newer one. */
-const detailGenerations = new Map<number, number>();
+/**
+ * Each to-do's newest detail read, so an older answer never replaces a newer one. One count for every read,
+ * never reset, so a read from before a computer switch can't match one made after it (T-51).
+ */
+let detailReads = 0;
+const detailGenerations = new Map<TodoKey, number>();
+
+/** The computer this window shows now, by the id its to-dos are keyed under. */
+function shownNow(): string {
+  return shownHostId(useConfigStore.getState().config);
+}
 
 export const useTodosStore = create<TodosState>((set, get) => ({
   snapshot: null,
@@ -217,7 +238,9 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     if (response && !response.success && refusedAsOff(response.error)) { set({ snapshot: null, details: new Map(), hostTodosOff: true }); return; }
     if (!response?.success || !response.data) return;
     set({ snapshot: api.hostIsHere ? asThisMachine(response.data) : response.data, hostTodosOff: false });
-    await Promise.all([...get().watched.keys()].map(number => get().loadDetail(number)));
+    // Only the shown computer's pages: one still open from before a switch is another machine's to-do.
+    const shown = shownNow();
+    await Promise.all([...get().watched.values()].filter(page => page.machineId === shown).map(page => get().loadDetail(page.number)));
   },
 
   loadDetail: async (number) => {
@@ -225,24 +248,31 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     if (!api) return null;
     // Reads overlap (an action's refresh and the change event): only the newest may land, or an older
     // answer would put back a to-do without what was just attached (round 8 CI, T-5).
-    const generation = (detailGenerations.get(number) ?? 0) + 1;
-    detailGenerations.set(number, generation);
+    const machineId = shownNow();
+    const key = todoKey(machineId, number);
+    const generation = ++detailReads;
+    detailGenerations.set(key, generation);
     const response = await api.detail(number).catch(() => null);
-    if (detailGenerations.get(number) !== generation) return get().details.get(number) ?? null;
+    // The window switched computers while this read was out (T-51): the answer is the old machine's, so it lands nowhere.
+    if (shownNow() !== machineId) return null;
+    if (detailGenerations.get(key) !== generation) return get().details.get(key) ?? null;
     if (!response?.success || !response.data) return null;
-    const detail = api.hostIsHere ? detailAsThisMachine(response.data) : response.data;
-    set(state => ({ details: new Map(state.details).set(number, detail) }));
+    // Stamped with its machine, so its layout memory and "Open its Session" name the right one (T-51).
+    const detail = { ...(api.hostIsHere ? detailAsThisMachine(response.data) : response.data), machineId };
+    set(state => ({ details: new Map(state.details).set(key, detail) }));
     return detail;
   },
 
   watch: (number) => {
-    set(state => ({ watched: new Map(state.watched).set(number, (state.watched.get(number) ?? 0) + 1) }));
+    const machineId = shownNow();
+    const key = todoKey(machineId, number);
+    set(state => ({ watched: new Map(state.watched).set(key, { machineId, number, count: (state.watched.get(key)?.count ?? 0) + 1 }) }));
     void get().loadDetail(number);
     return () => set(state => {
       const watched = new Map(state.watched);
-      const count = (watched.get(number) ?? 1) - 1;
-      if (count <= 0) watched.delete(number);
-      else watched.set(number, count);
+      const page = watched.get(key);
+      if (!page || page.count <= 1) watched.delete(key);
+      else watched.set(key, { ...page, count: page.count - 1 });
       return { watched };
     });
   },
@@ -423,12 +453,20 @@ export function useRemoteTodosPoll(): void {
   }, []);
 }
 
-/** The to-do page's data, kept current while it is on screen. */
+/** The page of to-do `number` of the computer this window shows, kept current while it is on screen. */
 export function useTodoDetail(number: number | null): TodoDetail | null {
-  const detail = useTodosStore(state => (number === null ? null : state.details.get(number) ?? null));
+  const shown = useShownHostId();
+  const key = number === null ? null : todoKey(shown, number);
+  const detail = useTodosStore(state => (key === null ? null : state.details.get(key) ?? null));
   const watch = useTodosStore(state => state.watch);
-  useEffect(() => (number === null ? undefined : watch(number)), [number, watch]);
+  // The key names the machine too: after a switch this watches the new computer's to-do, never the old one's.
+  useEffect(() => (number === null || key === null ? undefined : watch(number)), [number, key, watch]);
   return detail;
+}
+
+/** To-do `number`'s page of the computer this window shows, as last read; none before it is read. */
+export function todoDetailNow(number: number): TodoDetail | undefined {
+  return useTodosStore.getState().details.get(todoKey(shownNow(), number));
 }
 
 /** This machine's to-dos' own Sessions, kept out of the Sessions sidebar, All machines and Mod+1–9 (D-409). */
@@ -463,12 +501,15 @@ export function useTodosRefresh(): void {
 
 /**
  * The desktop switched this window to another computer (All machines, T-37): forgets the outgoing host's
- * list and pages, so the to-do screens read as loading, then reads the incoming host. Pages still open
- * stay watched, so the read brings back theirs. An older read that lands late is dropped.
+ * list and pages, so the to-do screens read as loading, then reads the incoming host. A to-do page open
+ * on the outgoing computer closes (T-51): the incoming one's T-n with the same number is another to-do.
+ * A read from the outgoing computer that lands late is dropped.
  */
 export async function switchTodosHost(): Promise<void> {
   refreshGeneration += 1;
   detailGenerations.clear();
+  const selected = useNavigationStore.getState().selectedTodo;
+  if (selected && selected.machineId !== shownNow()) useNavigationStore.getState().selectTodo(null);
   useTodosStore.setState({ snapshot: null, details: new Map() });
   await useTodosStore.getState().refresh();
 }
@@ -548,11 +589,6 @@ function detailAsThisMachine(detail: TodoDetail): TodoDetail {
 /** Each approval linked to a to-do, with its state: what a to-do's status reads from Approvals. */
 function approvalStates(snapshot: NotifySnapshot | null): string {
   return (snapshot?.items ?? []).filter(item => item.todo).map(item => `${item.id}:${item.state}`).join(',');
-}
-
-/** The computer this window shows: this one (`local`), or the saved machine it was switched to (All machines, T-37). */
-export function shownHostId(config: AppConfig | null): string {
-  return getActiveRemoteHostId(config?.remoteDaemon) ?? LOCAL_MACHINE_ID;
 }
 
 export function useShownHostId(): string {

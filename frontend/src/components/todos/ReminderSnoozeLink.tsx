@@ -2,8 +2,8 @@ import { Moon } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { machineOfItem, todoKey } from '../../../../shared/todoKey';
 import { todoRef } from '../../../../shared/types/todos';
-import { shownHostId, useTodosStore } from '../../stores/todosStore';
-import { useConfigStore } from '../../stores/configStore';
+import { useTodosStore } from '../../stores/todosStore';
+import { shownHostId, useConfigStore } from '../../stores/configStore';
 
 /**
  * Under a reminder card's four answers (round 9, T-17): "Snooze to another time…" opens the to-do

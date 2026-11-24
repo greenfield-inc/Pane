@@ -3,7 +3,8 @@ import { ChevronLeft, ChevronRight, Columns2, MoreHorizontal, PanelRight, Play, 
 import type { TodoAction, TodoAttachment, TodoDetail } from '../../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
 import { normalizeKeyboardShortcutOverrides, resolveEffectiveChord } from '../../../../../shared/utils/keyboardBindings';
-import { useTodoDetail, useTodosStore } from '../../../stores/todosStore';
+import { useShownHostId, useTodoDetail, useTodosStore } from '../../../stores/todosStore';
+import { todoKey } from '../../../../../shared/todoKey';
 import { countsAsWaiting, notifyItem, useNotifyStore } from '../../../stores/notifyStore';
 import { todoApprovalSurface, useApprovalColumnStore } from '../../../stores/approvalColumnStore';
 import { useOrchestrationSessionStore } from '../../../stores/orchestrationSessionStore';
@@ -34,7 +35,7 @@ import {
 const THREAD_FLOOR_PX = 360;
 /** The split's narrowest useful width. */
 const SPLIT_FLOOR_PX = 240;
-import { pruneSplitMemory, readClosedTabs, readSplitHidden, todoSplitKey, writeClosedTabs, writeSplitHidden } from './todoSplitMemory';
+import { pruneClosedTodos, readClosedTabs, readSplitHidden, writeClosedTabs, writeSplitHidden } from './todoSplitMemory';
 import { recallTodoView, rememberTodoView, restoreActiveTab } from './todoPageView';
 import { SnoozeMenu } from '../SnoozeMenu';
 import { SnoozeBanner, SnoozeHeaderButton, canSnoozeTodo, snoozeTarget, usePageSnooze } from './TodoSnoozed';
@@ -115,7 +116,8 @@ function useAnsweredNow(detail: TodoDetail | null): TodoDetail | null {
 }
 
 function useSplitMemory(detail: TodoDetail, areaPx: number) {
-  const key = todoSplitKey(detail.machineId ?? LOCAL_MACHINE_ID, detail.todo.number);
+  // Keyed by the machine the page was read from (T-51), so two machines' T-5 keep their own layouts.
+  const key = todoKey(detail.machineId ?? LOCAL_MACHINE_ID, detail.todo.number);
   // A visit that opened under 1,000 px starts hidden, and showing the split lasts for that visit only.
   const [narrowVisit] = useState(() => areaPx < NARROW_TODO_AREA_PX);
   const [hiddenAtOpen] = useState(() => startsHidden(safeRead(key), areaPx));
@@ -136,17 +138,17 @@ function useSplitMemory(detail: TodoDetail, areaPx: number) {
       // Storage blocked: the split simply isn't remembered.
     }
   }, [key, narrowVisit]);
-  // Closed to-dos on this machine leave the memory.
+  // Closed to-dos on the computer this window shows leave the memory; other machines' stay (T-51).
   const rows = useTodosStore((state) => state.snapshot?.rows);
+  const shownHost = useShownHostId();
   useEffect(() => {
     if (!rows) return;
-    const open = new Set(rows.filter((row) => row.status.status !== 'done' && row.status.status !== 'dropped').map((row) => todoSplitKey(LOCAL_MACHINE_ID, row.todo.number)));
     try {
-      pruneSplitMemory(window.localStorage, (stored) => !stored.startsWith(`${LOCAL_MACHINE_ID}:`) || open.has(stored));
+      pruneClosedTodos(window.localStorage, shownHost, rows);
     } catch {
       // Storage blocked: nothing to prune.
     }
-  }, [rows]);
+  }, [rows, shownHost]);
   return { hiddenAtOpen, remember, closedAtOpen, rememberClosed };
 }
 
@@ -201,7 +203,7 @@ function TodoPageLoaded({ detail, areaPx, rootRef, onBack, onOpenTodo, embedded,
   const number = detail.todo.number;
   const { hiddenAtOpen, remember, closedAtOpen, rememberClosed } = useSplitMemory(detail, areaPx);
   const overview = useSplitOverviewSession(detail);
-  const viewKey = todoSplitKey(detail.machineId ?? LOCAL_MACHINE_ID, number);
+  const viewKey = todoKey(detail.machineId ?? LOCAL_MACHINE_ID, number);
   const [leftAs] = useState(() => recallTodoView(viewKey));
   const [split, dispatch] = useReducer(todoSplitReducer, undefined, () => restoreActiveTab(initialSplit(detail.attachments, hiddenAtOpen, overview, closedAtOpen), leftAs?.tab ?? null, leftAs?.todoShown ?? true));
   const [detailsOpen, setDetailsOpen] = useState(false);
