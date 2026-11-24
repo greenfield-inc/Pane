@@ -300,6 +300,13 @@ const notifyItemSchema = boundary.object({
   }))),
   readyAgain: boundary.optional(boundary.number),
   relayedBy: boundary.optional(boundary.object({ panelId: boundary.string, name: boundary.string })),
+  // The to-do it is linked to, by its number on the asking machine (T-51): the renderer reads it with the card's
+  // machineId, so another machine's T-28 names that machine and never matches this one's. Absent from older machines.
+  todo: boundary.optional(boundary.object({
+    number: boundary.number,
+    title: boundary.string,
+    kind: boundary.optional(boundary.enumeration('review', 'stuck', 'question', 'reminder')),
+  })),
 });
 const notifySharedStateSchema = boundary.object({
   machine: boundary.string,

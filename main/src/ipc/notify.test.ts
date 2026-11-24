@@ -119,6 +119,23 @@ describe('Notify across machines, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
+  it('T-51: another machine\'s card keeps its to-do link, on the first read and on every change, so it can name that machine\'s T-n', async () => {
+    const pane = await startPane();
+    const linked = (id: string, title: string): NotifyItem => ({ ...question(id, title, 1_000), todo: { number: 28, title: 'Phone-number sign-up', kind: 'review' } });
+    const saved = savedMachines({ macbook: stateOf('Tylers-MacBook-Pro', linked('q-84', 'Q-84: Which sign-up flow?')) });
+    followSavedMachines(saved.machines);
+    await flush();
+    expect(pane.notify.snapshot().items.find(item => item.id === 'macbook:q-84')).toMatchObject({ machineId: 'macbook', todo: { number: 28, title: 'Phone-number sign-up', kind: 'review' } });
+
+    saved.emit({ type: 'event', machineId: 'macbook', channel: 'notify:shared-changed', args: [{ ...stateOf('Tylers-MacBook-Pro', linked('q-84', 'Q-84: Which sign-up flow?'), question('q-85', 'Unlinked?', 2_000)), revision: 2 }] });
+    await settle();
+    const items = pane.notify.snapshot().items;
+    expect(items.find(item => item.id === 'macbook:q-84')?.todo).toEqual({ number: 28, title: 'Phone-number sign-up', kind: 'review' });
+    // An older machine sends none: the card simply has no link.
+    expect(items.find(item => item.id === 'macbook:q-85')?.todo).toBeUndefined();
+    pane.notify.dispose();
+  });
+
   it('refuses a secret card a teammate posts, so the owner never sees one to answer', async () => {
     const host = await startPane();
     setPaneRuntime({ eventSink: { send: () => undefined }, getConfigManager: () => new ConfigManager(), getPtyHostRuntime: () => null, getWebviewContextMap: () => new Map() });
