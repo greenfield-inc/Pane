@@ -65,3 +65,24 @@ describe('resolveApprovalLink: the linking card itself', () => {
     expect(resolveApprovalLink([again, before], again, 'Q-1')).toBe('old');
   });
 });
+
+describe('resolveApprovalLink: review fixes', () => {
+  it('F-2: two calls from outside Pane on one machine share no scope, so a Q-n finds nothing; an id still opens', () => {
+    const outside = (id: string, title: string, name: string, extra: Partial<NotifyItem> = {}) => card(id, title, {
+      source: { name, agent: 'Claude' }, connected: { kind: 'machine', id: 'mini', name }, ...extra,
+    });
+    const linking = outside('x-q2', 'Q-2: Ship it?', 'repo-a', { links: [{ label: 'Q-1', approval: 'Q-1' }] });
+    const stranger = outside('y-q1', 'Q-1: Rotate the keys?', 'repo-b');
+    expect(resolveApprovalLink([stranger, linking], linking, 'Q-1')).toBeUndefined();
+    expect(resolveApprovalLink([stranger, linking], linking, 'y-q1')).toBe('y-q1');
+  });
+
+  it('F-3: a saved machine\'s card linking by its own raw id opens that machine\'s card, never a local one with that id', () => {
+    const remoteLinking = card('macbook:q2', 'Q-2: Ship it?', { ...onMacbook, links: [{ label: 'The plan card', approval: 'q1' }] });
+    const remoteTarget = card('macbook:q1', 'Q-1: Phone-number accounts?', onMacbook);
+    const localSameId = card('q1', 'Q-1: Which database?');
+    expect(resolveApprovalLink([localSameId, remoteTarget, remoteLinking], remoteLinking, 'q1')).toBe('macbook:q1');
+    expect(resolveApprovalLink([localSameId, remoteLinking], remoteLinking, 'q1')).toBeUndefined();
+    expect(resolveApprovalLink([remoteTarget, remoteLinking], remoteLinking, 'macbook:q1')).toBe('macbook:q1');
+  });
+});

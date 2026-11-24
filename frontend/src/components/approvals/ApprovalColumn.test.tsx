@@ -133,6 +133,13 @@ describe('ApprovalColumn: a link to another approval by Q-n', () => {
         const remote = { ...linking, machineId: 'macbook', machine: 'tylers-macbook-pro' };
         expect(tab(remote, undefined)).toContain("only among this Session's approvals on tylers-macbook-pro,");
       });
+
+      it('F-2: a card asked outside a Session or Pane says a Q-n can\'t be looked up, and an id link that\'s gone says only that', () => {
+        const outside: NotifyItem = { ...linking, source: { name: 'repo-a', agent: 'Claude' }, connected: { kind: 'machine', id: 'mini', name: 'repo-a' } };
+        expect(tab(outside, undefined)).toBe("Q-1 can't be opened from here: this approval was asked outside a Session or Pane, so Q-1 could be any caller's. A link by the approval's id opens it.");
+        const byId = text(renderToStaticMarkup(<LinkTab item={linking} link={{ label: 'The plan card', approval: 'q-abc' }} target={undefined} onOpenApproval={() => undefined} />));
+        expect(byId).toBe("The plan card isn't here any more.");
+      });
     });
   }
 });

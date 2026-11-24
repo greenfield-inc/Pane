@@ -4,7 +4,8 @@ import type { NotifyAnswer, NotifyItem, NotifyLink } from '../../../../shared/ty
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { cn } from '../../utils/cn';
 import { runNotify, sendNotify, useNotifyStore } from '../../stores/notifyStore';
-import { resolveApprovalLink } from './approvalLink';
+import { approvalLinkScope, resolveApprovalLink } from './approvalLink';
+import { leadingQn } from '../../../../shared/autopilotDecision';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
 import { draftKey as draftKeyOf, useApprovalColumnStore, type ApprovalSurface } from '../../stores/approvalColumnStore';
 import { AutopilotDocument, AutopilotWebPage } from '../autopilot/AutopilotDocument';
@@ -715,7 +716,7 @@ export function LinkTab({ item, link, target, onOpenApproval }: { item: NotifyIt
     if (!target) {
       return (
         <div className="p-6 text-[13.5px] text-text-secondary" data-testid="approval-link-missing">
-          <p>{link.label} isn&apos;t here any more. Pane looks for {link.approval} only among {sessionWords(item)}, so it won&apos;t open another one with that name.</p>
+          <p>{missingLinkWords(item, link.label, link.approval)}</p>
         </div>
       );
     }
@@ -731,11 +732,21 @@ export function LinkTab({ item, link, target, onOpenApproval }: { item: NotifyIt
   return <MachineFileFrame item={item} label={link.label}><MachineDocument key={link.path} item={item} path={link.path} label={link.label} machine={item.machine ?? 'the asking machine'} /></MachineFileFrame>;
 }
 
-/** Where a Q-n link looks, in words: "this Session's approvals", and the machine when it's another one. */
-function sessionWords(item: NotifyItem): string {
-  const where = item.source.session || item.connected?.kind === 'session' ? "this Session's approvals" : 'the approvals asked from the same place as this one';
+/** Where a Q-n link looks, in words, and the machine when it's another one; `undefined` when a Q-n can't be looked up. */
+function sessionWords(item: NotifyItem): string | undefined {
+  const scope = approvalLinkScope(item);
+  if (!scope) return undefined;
+  const where = scope === 'session' ? "this Session's approvals" : scope === 'pane' ? "this Pane's approvals" : "Autopilot's approvals";
   const machine = otherMachine(item);
   return machine ? `${where} on ${machine}` : where;
+}
+
+/** Why an approval link opens nothing: its card is gone, or a Q-n has no card in this one's own place. */
+function missingLinkWords(item: NotifyItem, label: string, ref: string): string {
+  if (leadingQn(ref) !== ref.trim()) return `${label} isn't here any more.`;
+  const where = sessionWords(item);
+  if (!where) return `${label} can't be opened from here: this approval was asked outside a Session or Pane, so ${ref.trim()} could be any caller's. A link by the approval's id opens it.`;
+  return `${label} isn't here any more. Pane looks for ${ref.trim()} only among ${where}, so it won't open another one with that name.`;
 }
 
 /** A file read from the approval's machine, under a header naming the file and, when it's another computer, that machine. */
