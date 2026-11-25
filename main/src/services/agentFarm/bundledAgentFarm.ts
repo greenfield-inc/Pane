@@ -464,7 +464,7 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
     log(`[AgentFarm] Bundled Agent Farm ${bundle.version} is already set up in ${configRoot} (manifest hash unchanged); nothing reinstalled.`);
     return status;
   }
-  log(`[AgentFarm] Setting up bundled Agent Farm ${bundle.version} in ${configRoot} (${previous ? `bundle changed from ${previous.agentFarmVersion}` : 'first start'}).`);
+  log(`[AgentFarm] Setting up bundled Agent Farm ${bundle.version} in ${configRoot} (${!previous ? 'first start' : previous.hash !== hash ? `bundle changed from ${previous.agentFarmVersion}` : 'a plugin changed or is missing here'}).`);
   const plugins: Record<string, string> = {};
   const edited: string[] = [];
   const installingPath = path.join(configRoot, INSTALLING_FILE);
