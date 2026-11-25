@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { type NotifyItem, type NotifyLink, type NotifySubQuestion, type NotifySummaryPage } from '../../../../shared/types/notify';
+import { NOTIFY_PAGE_LIMIT_BYTES, type NotifyItem, type NotifyLink, type NotifySubQuestion, type NotifySummaryPage } from '../../../../shared/types/notify';
 import { withSummaryPolicy } from '../../../../shared/utils/summaryPolicy';
+import { readUpTo } from '../../utils/boundedRead';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 /**
@@ -12,7 +13,6 @@ import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../sh
  */
 
 /** A Summary page larger than this isn't shown inline; open the file instead. */
-const PAGE_LIMIT_BYTES = 4 * 1024 * 1024;
 
 export type SummaryTheme = 'light' | 'dark';
 
@@ -113,8 +113,11 @@ ${references}
 </main></body></html>`);
 }
 
+/** The asker's own page, or why not: gone (or not a file), or over the page limit. */
+type AskerPage = Exclude<NotifySummaryPage, { kind: 'template' }> | { kind: 'too-large'; path: string; message: string };
+
 /** The asker's own page, read with the policy added, or why it can't be. */
-function askerPage(file: string): NotifySummaryPage {
+function askerPage(file: string): AskerPage {
   let stat: fs.Stats;
   try {
     stat = fs.statSync(file);
@@ -122,17 +125,30 @@ function askerPage(file: string): NotifySummaryPage {
     return { kind: 'missing', path: file, message: `The Summary page ${path.basename(file)} wasn't found at ${file}, so Pane can't show it. Its worktree may have been removed, or the path is wrong.` };
   }
   if (!stat.isFile()) return { kind: 'missing', path: file, message: `${file} is not a file, so Pane can't show it as the Summary.` };
-  if (stat.size > PAGE_LIMIT_BYTES) return { kind: 'missing', path: file, message: `${path.basename(file)} is larger than 4 MiB, too large to show here. Open it from References instead.` };
-  return { kind: 'page', path: file, html: withSummaryPolicy(fs.readFileSync(file, 'utf8')) };
+  // A review page inlines its screenshots: several MiB is a real Summary (T-76).
+  const tooLarge = { kind: 'too-large' as const, path: file, message: `${path.basename(file)} is larger than ${NOTIFY_PAGE_LIMIT_BYTES / (1024 * 1024)} MiB, too large to show here. Open it from References instead.` };
+  if (stat.size > NOTIFY_PAGE_LIMIT_BYTES) return tooLarge;
+  let bytes: Buffer | null;
+  try {
+    bytes = readUpTo(file, NOTIFY_PAGE_LIMIT_BYTES);
+  } catch {
+    return { kind: 'missing', path: file, message: `The Summary page ${path.basename(file)} wasn't found at ${file}, so Pane can't show it. Its worktree may have been removed, or the path is wrong.` };
+  }
+  // It grew past the limit after the stat (a page still being written, say).
+  if (!bytes) return tooLarge;
+  return { kind: 'page', path: file, html: withSummaryPolicy(bytes.toString('utf8')) };
 }
 
 /** The approval's Summary: the asker's page when it sent one, else Pane's template. */
 export function summaryPage(item: NotifyItem, theme: SummaryTheme = 'light'): NotifySummaryPage {
   if (item.summaryPage) {
     const page = askerPage(item.summaryPage);
-    // A page that's gone falls back to the template, which says so in its footer's place.
-    if (page.kind !== 'missing') return page;
-    return { kind: 'template', html: summaryTemplate(item, theme).replace('(no Summary was sent)', `(the Summary page it sent wasn’t found at ${escape(item.summaryPage)})`) };
+    // A page that's gone or too large falls back to the template, which says which in its footer's place.
+    if (page.kind === 'page') return page;
+    const why = page.kind === 'too-large'
+      ? `the Summary page it sent, ${escape(path.basename(item.summaryPage))}, is larger than ${NOTIFY_PAGE_LIMIT_BYTES / (1024 * 1024)} MiB, too large to show here`
+      : `the Summary page it sent wasn’t found at ${escape(item.summaryPage)}`;
+    return { kind: 'template', html: summaryTemplate(item, theme).replace('(no Summary was sent)', `(${why})`) };
   }
   return { kind: 'template', html: summaryTemplate(item, theme) };
 }
