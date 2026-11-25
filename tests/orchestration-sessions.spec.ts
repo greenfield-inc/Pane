@@ -2732,6 +2732,13 @@ test('New offers Session and Pane in one dialog and restores keyboard focus', as
   await expect(dialog.getByRole('combobox', { name: 'Start a Session with', exact: true })).toBeFocused();
   await expect(dialog.getByRole('combobox', { name: 'Run on', exact: true })).toBeVisible();
   await expect(dialog.getByRole('radiogroup', { name: 'Machine' })).toHaveCount(0);
+  // Tab moves through the whole dialog here, not only between the filter and Run on as in the palette.
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('combobox', { name: 'Run on', exact: true })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog.getByRole('combobox', { name: 'Start a Session with', exact: true })).not.toBeFocused();
+  await expect(dialog.getByRole('combobox', { name: 'Run on', exact: true })).not.toBeFocused();
   await dialog.getByRole('radio', { name: 'Pane', exact: true }).click();
   await expect(dialog.getByLabel('Repository', { exact: true })).toHaveValue('1');
   await dialog.getByRole('radio', { name: 'Session', exact: true }).click();

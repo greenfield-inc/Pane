@@ -102,6 +102,8 @@ interface SessionPickerProps {
   onBusyChange?: (busy: boolean) => void;
   /** The top of the picker: the palette's own search row, or the New dialog's header. */
   autoFocus?: boolean;
+  /** Tab moves only between the filter and Run on: the palette alone. Inside the New dialog Tab moves through the dialog. */
+  trapTab?: boolean;
   className?: string;
 }
 
@@ -109,7 +111,7 @@ interface SessionPickerProps {
  * The New Session picker (T-63): type to filter Claude, Codex, profiles and Other agents; ↑↓ choose;
  * Tab moves to the Run on popup and back; Return creates. The Session is named from its first message.
  */
-export function SessionPicker({ entries, onSwitchMachine, onClose, onBusyChange, autoFocus = true, className }: SessionPickerProps) {
+export function SessionPicker({ entries, onSwitchMachine, onClose, onBusyChange, autoFocus = true, trapTab = false, className }: SessionPickerProps) {
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const runOnRef = useRef<HTMLSelectElement>(null);
@@ -205,7 +207,7 @@ export function SessionPicker({ entries, onSwitchMachine, onClose, onBusyChange,
     if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && inInput) {
       event.preventDefault();
       move(event.key === 'ArrowDown' ? 1 : -1);
-    } else if (event.key === 'Tab' && !event.altKey && !event.metaKey && !event.ctrlKey && (inInput || inRunOn)) {
+    } else if (trapTab && event.key === 'Tab' && !event.altKey && !event.metaKey && !event.ctrlKey && (inInput || inRunOn)) {
       // Tab and Shift+Tab move between the filter and Run on only, as the footer says. The modal's
       // focus trap would otherwise see Run on as its last stop and wrap focus back to the filter.
       event.preventDefault();
@@ -344,7 +346,7 @@ function NewSessionPalette({ entries, onSwitchMachine, onClose }: Pick<SessionPi
       size="lg"
       className="!max-w-[600px] !rounded-[calc(var(--modal-radius)*2)]"
     >
-      <SessionPicker entries={entries} onSwitchMachine={onSwitchMachine} onClose={onClose} onBusyChange={setBusy} />
+      <SessionPicker entries={entries} onSwitchMachine={onSwitchMachine} onClose={onClose} onBusyChange={setBusy} trapTab />
     </Modal>
   );
 }
