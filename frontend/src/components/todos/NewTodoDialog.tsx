@@ -62,7 +62,7 @@ async function readRepos(machineId: string): Promise<RepoOption[]> {
   return answer?.data ?? [];
 }
 
-/** Agents this machine can run as an orchestrator, as the Create Session dialog offers them. */
+/** Agents this machine can run as an orchestrator, as New Session offers them. */
 function orchestratorAgents(): PaneChatAgent[] {
   const visible = new Set(visibleAgentPresets().map(preset => preset.id));
   const agents = CONFIGURED_AGENT_IDS.filter(id => visible.has(id));

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import { usePanelStore } from '../stores/panelStore';
-import { SessionActivityCount, SessionActivityDot, SessionActivityIcon } from './SessionActivity';
+import { SessionActivityCount, SessionActivityDot, SessionActivityIcon, SessionWorkingSpinner } from './SessionActivity';
 
 // SAFETY: the components read only id and internalSessionId.
 const session = { id: 's1', internalSessionId: 'owner' } as OrchestrationSessionRecord;
@@ -39,6 +39,20 @@ describe('Session activity icon (Option 1, D-363)', () => {
     const working = renderToStaticMarkup(<SessionActivityIcon state="working" />);
     expect(box(idle)).toBe(box(working));
     expect(box(idle)).toContain('w-3 h-3');
+  });
+});
+
+describe('Session row spinner (T-63)', () => {
+  it('shows nothing while the Session is idle', () => {
+    expect(renderToStaticMarkup(<SessionWorkingSpinner session={session} />)).toBe('');
+  });
+
+  it('spins in grey, never in a status colour, in the same 12 px box', () => {
+    const html = renderToStaticMarkup(<SessionActivityIcon state="working" neutral />);
+    expect(html).toContain('animate-spin');
+    expect(html).toContain('border-t-text-secondary');
+    expect(html).not.toContain('status-');
+    expect(html).toContain('w-3 h-3');
   });
 });
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { configuredAgent } from '../../../../shared/agents';
 import { PROFILE_REF_PATTERN } from '../../../../shared/types/agentFarmProfiles';
-import { panePluginFiles, parseProfileList, parseProfileListLine, plainProfileAgent, plainProfileAgents, plainProfileRef } from './agentFarmProfiles';
+import { panePluginFiles, parseProfileList, parseProfileListLine } from './agentFarmProfiles';
+import { plainProfileAgent, plainProfileAgents, plainProfileRef } from '../../../../shared/agentProfiles';
 
 // Lines as Agent Farm 0.2.34's `profiles list` prints them.
 const LIST = [

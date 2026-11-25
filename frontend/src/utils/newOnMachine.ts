@@ -3,6 +3,7 @@ import { machineLetter } from '../../../shared/utils/machineMarks';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { MachineCommand, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
 import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
+import { agentFarmProfileListSchema, type AgentFarmProfileList } from '../../../shared/types/agentFarmProfiles';
 import type { CreateSessionRequest } from '../types/session';
 import type { MachineEntry, MachineOs } from './machineList';
 import { startOwnPaneCreation } from './ownPaneCreations';
@@ -100,7 +101,6 @@ const branchesSchema = boundary.array(boundary.object({
   hasWorktree: boundary.boolean,
   isRemote: boundary.boolean,
 }));
-const runtimesSchema = boundary.object({ distributions: boundary.array(boundary.string) });
 const sessionNamesSchema = boundary.object({ sessions: boundary.array(boundary.object({ name: boundary.string })) });
 const createdPaneSchema = boundary.object({ id: boundary.nonEmptyString, clientRequestId: boundary.optional(boundary.string) });
 /** `orchestration-sessions:create` answers with the Session's view; its record is `session`. */
@@ -138,9 +138,9 @@ export async function readBranches(machine: Pick<NewMachine, 'id' | 'name'>, rep
   return { success: true, data: await read(machine.id, machine.name, 'projects:list-branches', [String(repositoryId)], branchesSchema) };
 }
 
-/** The WSL distributions a Session can run in there; none outside Windows. */
-export async function readRuntimes(machine: Pick<NewMachine, 'id' | 'name'>): Promise<{ success: boolean; data?: { distributions: string[] } }> {
-  return { success: true, data: await read(machine.id, machine.name, 'orchestration-sessions:runtimes', [], runtimesSchema) };
+/** The Agent Farm profiles a Session can start with on that machine (T-63); Pane's plain ones are marked hidden. */
+export function readProfiles(machine: Pick<NewMachine, 'id' | 'name'>): Promise<AgentFarmProfileList> {
+  return read(machine.id, machine.name, 'chat-tab:profiles', [], agentFarmProfileListSchema);
 }
 
 /** The names of the machine's Sessions, so an unnamed Session gets the next free name there. */

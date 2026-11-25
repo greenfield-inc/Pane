@@ -4,6 +4,7 @@ import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../s
 import type { TailnetMachineList } from '../shared/types/workspaceAccess';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { notifyFixture } from './fixtures/notifySnapshot';
+import { layoutBox } from './orchestrationSessionsFixture';
 
 type MachinesMock = {
   getMachineRuns: () => Array<{ machineId: string; command: MachineCommand }>;
@@ -156,7 +157,7 @@ test('agent events move no Session or Pane row', async ({ page }) => {
   await expect(sessionRows(page)).toHaveText([/Spring sale launch/, /Backup rotation/]);
 
   // build-box's worker starts working, then asks you something. Its Session spins while build-box
-  // says it is working, and goes back to the idle ring (never red) when it waits on you.
+  // says it is working, and the spinner goes (never red) when it waits on you (T-63).
   const icon = () => sessionRows(page).filter({ hasText: 'Backup rotation' }).getByTestId('session-activity-icon');
   for (const state of ['working', 'blocked'] as const) {
     await (await mock(page)).evaluate((api, build) => {
@@ -170,9 +171,13 @@ test('agent events move no Session or Pane row', async ({ page }) => {
       'orchestration-sessions:activity-list': { success: true, data: [{ sessionId: 's1', state: state === 'working' ? 'working' : 'idle', workingPanes: state === 'working' ? 1 : 0 }] },
     });
     // The event landed: build-box's activity was read again and its Session shows it.
-    await expect(icon()).toHaveAttribute('data-state', state === 'working' ? 'working' : 'idle');
-    if (state === 'working') await expect(sessionRows(page).filter({ hasText: 'Backup rotation' })).toContainText('1 working');
-    await expect(icon()).not.toHaveClass(/status-error/);
+    if (state === 'working') {
+      await expect(icon()).toHaveAttribute('data-state', 'working');
+      await expect(sessionRows(page).filter({ hasText: 'Backup rotation' })).toContainText('1 working');
+    } else {
+      await expect(icon()).toHaveCount(0);
+    }
+    await expect(sessionRows(page).filter({ hasText: 'Backup rotation' }).locator('.border-status-error, .text-status-error')).toHaveCount(0);
     await expect(projectRows(page, 'acme-web')).toHaveText(before);
     await expect(sessionRows(page)).toHaveText([/Spring sale launch/, /Backup rotation/]);
   }
@@ -186,13 +191,39 @@ test('All machines shows each machine\'s own Session activity, and an offline ma
     { type: 'event', machineId: 'build', channel: 'orchestration-sessions:activity', args: [] }, { build },
   ), { 'orchestration-sessions:activity-list': { success: true, data: [{ sessionId: 's1', state: 'working', workingPanes: 1 }] } });
   await expect(icon('Backup rotation')).toHaveAttribute('data-state', 'working');
-  await expect(icon('Spring sale launch')).toHaveAttribute('data-state', 'idle');
+  await expect(icon('Spring sale launch')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('j13-all-machines-working.png') });
   // build-box goes offline: past the grace its rows dim and its Session reads idle.
   const offline = machines.map(machine => machine.id === 'build' ? { ...machine, status: 'offline' as const, offlineSince: new Date(Date.now() - 60_000).toISOString() } : machine);
   await (await mock(page)).evaluate((api, list) => api.emitMachineEvent({ type: 'machines', machines: list }), offline);
-  await expect(icon('Backup rotation')).toHaveAttribute('data-state', 'idle');
+  await expect(icon('Backup rotation')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('j13-all-machines-offline.png') });
+});
+
+test('a Session row shows its avatar where the activity icon was, and a spinner just left of its machine mark while it works (T-63, J18)', async ({ page }, testInfo) => {
+  const withProfile = { ...reads, build: { ...reads.build, 'orchestration-sessions:list': { success: true, data: { sessions: [
+    { ...session('s1', 'Backup rotation', ['b2']), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' } },
+  ] } } } };
+  await openAllMachines(page, 'light', { extra: { machineConnections: { machines, reads: withProfile } } });
+  const row = sessionRows(page).filter({ hasText: 'Backup rotation' });
+  const plain = sessionRows(page).filter({ hasText: 'Spring sale launch' });
+  await expect(row.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Profile Greenfield orchestrator');
+  await expect(plain.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Claude, no profile');
+  // The 16px avatar takes the 12px icon's place (with -2px each side), so the name starts where it did.
+  const nameX = async (target: typeof row) => (await layoutBox(target.locator('span.truncate').first())).x;
+  const toggleRight = async (target: typeof row) => { const box = await layoutBox(target.getByRole('button', { name: /^(Expand|Collapse) / })); return box.x + box.width; };
+  expect(await nameX(row) - await toggleRight(row)).toBe(6 + 12 + 6);
+  await expect(row.getByTestId('session-activity-icon')).toHaveCount(0);
+  await (await mock(page)).evaluate((api, build) => api.emitMachineEvent(
+    { type: 'event', machineId: 'build', channel: 'orchestration-sessions:activity', args: [] }, { build },
+  ), { 'orchestration-sessions:activity-list': { success: true, data: [{ sessionId: 's1', state: 'working', workingPanes: 0 }] } });
+  const spinner = row.getByTestId('session-activity-icon');
+  await expect(spinner).toHaveAttribute('data-state', 'working');
+  const spinnerBox = await layoutBox(spinner);
+  const markBox = await layoutBox(row.getByTestId('all-machines-mark-slot'));
+  expect(markBox.x - (spinnerBox.x + spinnerBox.width)).toBeLessThanOrEqual(6);
+  expect(await nameX(row) - await toggleRight(row)).toBe(6 + 12 + 6);
+  await page.screenshot({ path: testInfo.outputPath('j18-all-machines-rows.png') });
 });
 
 test('switching to All machines opens no project, and what you open is remembered across a relaunch', async ({ page, browser }) => {

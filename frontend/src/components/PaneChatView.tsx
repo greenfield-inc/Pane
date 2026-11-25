@@ -1,4 +1,5 @@
 import { registerRemoteWorkspaceRestore } from '../utils/remoteRestoration';
+import { requestOpenNewSessionPalette } from '../utils/openNewSessionPalette';
 import { useApprovalColumnStore } from '../stores/approvalColumnStore';
 import { SessionApprovalColumn, SessionApprovalsButton } from './approvals/SessionApprovals';
 import { openNewSessionApprovals } from './approvals/useSessionApprovals';
@@ -152,7 +153,7 @@ export function PaneChatView() {
               variant="primary"
               size="sm"
               className="mt-4"
-              onClick={() => window.dispatchEvent(new Event('open-create-orchestration-session'))}
+              onClick={() => requestOpenNewSessionPalette()}
             >
               New Session
             </Button>

@@ -1,6 +1,7 @@
 import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { NewDialog } from './NewDialog';
 import { onOpenNewDialogRequest } from '../utils/openNewDialog';
+import { NewSessionPaletteHost } from './NewSessionPalette';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
@@ -969,6 +970,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
         </div>
 
         {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} onClose={() => setShowNewDialog(false)} />}
+        <NewSessionPaletteHost entries={machines} onSwitchMachine={selectMachine} />
 
         <CompactSessionMenu
           menu={compactSessionMenu}
@@ -1137,6 +1139,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
         </div>
     </div>
     {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} onClose={() => setShowNewDialog(false)} />}
+    <NewSessionPaletteHost entries={machines} onSwitchMachine={selectMachine} />
     </>
   );
 }

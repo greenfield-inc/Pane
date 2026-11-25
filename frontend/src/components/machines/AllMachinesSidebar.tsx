@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Archive, ArrowRightLeft, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
 import { PausedGlyph } from '../ui/AgentStatusDot';
 import { SessionActivityIcon } from '../SessionActivity';
+import { ProfileAvatar } from '../profiles/ProfileAvatar';
 import { Button } from '../ui/Button';
 import { PopoverButton, TerminalPopover } from '../terminal/TerminalPopover';
 import { RenameDialog } from '../CompactSessionMenu';
@@ -289,9 +290,10 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
         >
           {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         </button>
+        {/* The avatar takes the 12px activity icon's place: 16px wide with -2px each side, so names start where they did. */}
         {dimmed
           ? <PausedGlyph size="sm" className="pointer-events-none flex-shrink-0" />
-          : <SessionActivityIcon state={row.activity} className="pointer-events-none" />}
+          : <ProfileAvatar profileRef={session.agentProfile?.ref} agent={session.agent} size={16} className="pointer-events-none -mx-0.5" />}
         <span className={cn('pointer-events-none min-w-0 flex-1 truncate text-[13px]', dimmed ? 'text-text-muted' : 'font-semibold text-text-primary')}>{session.name}</span>
         {moveLabel ? (
           <span data-testid="session-move-label" className="pointer-events-none max-w-[55%] flex-shrink-0 truncate text-[11px] text-text-tertiary">{moveLabel}</span>
@@ -305,6 +307,8 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
           />
         )}
         {session.isPinned && <PinnedMark />}
+        {/* While the Session works, a spinner sits just left of its machine mark (T-63). */}
+        {!dimmed && row.activity === 'working' && <SessionActivityIcon state="working" neutral className="pointer-events-none" />}
         <MarkSlot machine={machine} label={session.name} onMenu={openMenu} />
       </div>
       {expanded && row.panes.map(renderPane)}
