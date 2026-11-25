@@ -11,7 +11,7 @@ export function referencedFile(file: string, cwd: string | undefined, root: stri
   if (parts.some(part => part === '..' || part === '') || /^~|^[a-zA-Z]:/.test(file)) return undefined;
   const path = parts.filter(part => part !== '.').join('/');
   if (!path) return undefined;
-  const posix = (value: string) => value.replaceAll('\\', '/').replace(/\/+$/, '');
+  const posix = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '');
   if (!cwd || !root || posix(cwd) === posix(root)) return path;
   return posix(cwd).startsWith(`${posix(root)}/`) ? `${posix(cwd).slice(posix(root).length + 1)}/${path}` : undefined;
 }

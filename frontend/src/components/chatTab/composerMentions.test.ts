@@ -3,7 +3,10 @@ import { applyPick, commandRows, commandText, composerPlaceholder, detectCompose
 import { referencedFile } from './chatReferences';
 
 /** `|` is the caret. */
-const at = (marked: string) => detectComposerTrigger(marked.replace('|', ''), marked.indexOf('|'));
+const at = (marked: string) => {
+  const caret = marked.indexOf('|');
+  return detectComposerTrigger(marked.slice(0, caret) + marked.slice(caret + 1), caret);
+};
 
 describe('when the menu opens', () => {
   it.each([
