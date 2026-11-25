@@ -12,6 +12,7 @@ import { LeftAlone, writeOwnedBlock, type BlockMarkers } from './instructionsBlo
 import { withTodosText } from '../../../shared/todosText';
 import { todosOn } from './todos/todosFeature';
 import { quoteShellWord } from './agents/shellWord';
+import { PaneError } from '../../../shared/paneError';
 
 const START = '<!-- pane-session-context:start -->';
 const END = '<!-- pane-session-context:end -->';
@@ -87,6 +88,46 @@ export function prepareSessionWorkspace(
     writeManagedInstructions(path.join(cwd, 'runtime-context.md'), wslRouting(record));
   }
   return cwd;
+}
+
+const PROFILE_START = '<!-- pane-session-profile:start -->';
+const PROFILE_END = '<!-- pane-session-profile:end -->';
+const PROFILE_MARKERS: BlockMarkers = { begin: PROFILE_START, end: PROFILE_END, repair: 'try again' };
+/** The Session's Agent Farm profile instructions, which Pane rewrites at every start of its agent (T-63). */
+const SESSION_PROFILE_FILE = 'PROFILE.md';
+
+/**
+ * Puts a Session's Agent Farm profile instructions in its folder: PROFILE.md, and the same text in
+ * its own marked section of AGENTS.md (which CLAUDE.md imports), because a resumed conversation
+ * reads instruction files again but not a launch's system prompt. Both are rewritten at every
+ * start, so a reload or switch reaches the agent. Only a folder under Pane's sessions folder is written.
+ */
+export function writeSessionProfile(sessionFolder: string, profile: string, instructions: string): void {
+  const root = path.resolve(sessionGitCeiling());
+  const cwd = path.resolve(sessionFolder);
+  if (path.dirname(cwd) !== root || fs.lstatSync(cwd).isSymbolicLink()) {
+    throw new PaneError('SESSION_PROFILE_FOLDER', `Pane writes a Session's profile only into its own Session folder, not ${sessionFolder}.`, 'Start the Session again from its row in the sidebar.');
+  }
+  const text = instructions.trim();
+  const file = path.join(cwd, SESSION_PROFILE_FILE);
+  if (fs.existsSync(file) && !fs.lstatSync(file).isFile()) throw new PaneError('SESSION_PROFILE_FILE', `${file} is not a regular file, so Pane did not write the Session's profile there.`, `Remove ${file}, then start the Session again.`);
+  fs.writeFileSync(file, `# Agent Farm profile: ${profile}\n\nPane writes this file from the profile at every start of this Session's agent; edit the profile instead.\n\n${text}\n`, { mode: 0o600 });
+  const section = [
+    '## Agent Farm profile',
+    `This Session runs the Agent Farm profile ${profile}. Its instructions follow (Pane keeps the same text in ${SESSION_PROFILE_FILE}). Where they disagree with the Pane Session rules above, the Pane rules win.`,
+    '',
+    text,
+  ].join('\n');
+  try {
+    writeOwnedBlock(path.join(cwd, 'AGENTS.md'), PROFILE_MARKERS, [PROFILE_START, ...escapeProfileMarkers(section).split('\n'), PROFILE_END], { createMode: 0o600 });
+  } catch (error) {
+    if (error instanceof LeftAlone) throw new PaneError('SESSION_PROFILE_FILE', `Pane couldn't put the profile into ${path.join(cwd, 'AGENTS.md')}: ${error.message}`, 'Fix the file, then start the Session again.');
+    throw error;
+  }
+}
+
+function escapeProfileMarkers(content: string): string {
+  return escapeMarkers(content).split(PROFILE_START).join('<!-- pane-session-profile start -->').split(PROFILE_END).join('<!-- pane-session-profile end -->');
 }
 
 /** The Session folder's copy of the bundled /wrap-up guide, or undefined when the bundle is unreadable. */

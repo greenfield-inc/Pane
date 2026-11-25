@@ -71,6 +71,8 @@ interface OrchestrationSessionRecord {
   /** Set while the Session's chat and every Pane in it are paused. */
   paused?: PausedMark;
   agent: RunpaneAgent;
+  /** The Agent Farm profile the Session's agent runs (`pane/claude` is Claude on its own) and its plugin's content hash; absent for a Session that starts its agent directly. */
+  agentProfile?: { ref: string; hash: string };
   internalSessionId: string;
   /** Each agent's Session panel id, keyed by agent id; older Pane versions send fewer agents. */
   panelIds: JsonObject;
@@ -1574,6 +1576,7 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
   isPinned: boundary.optional(boundary.boolean),
   paused: boundary.optional(pausedMarkSchema),
   agent: agentSchema,
+  agentProfile: boundary.optional(boundary.object({ ref: boundary.nonEmptyString, hash: boundary.string })),
   internalSessionId: boundary.nonEmptyString,
   panelIds: boundary.jsonObject,
   launchCommand: boundary.optional(boundary.string),

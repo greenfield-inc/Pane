@@ -309,6 +309,81 @@ describe('OrchestrationSessionManager', () => {
     }
   });
 
+  describe('through Agent Farm (T-63)', () => {
+    const agentFarm = (installed: string[] = ['pane', 'greenfield']) => ({
+      pluginHash: vi.fn(async (plugin: string) => installed.includes(plugin) ? `hash-${plugin}` : undefined),
+      profiles: vi.fn(async () => ({ profiles: [
+        { ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false },
+        { ref: 'greenfield/product-researcher', plugin: 'greenfield', version: '0.0.46', harness: 'codex', hidden: false },
+      ] })),
+    });
+    const withChatTabs = async (run: (fixture: ReturnType<typeof createFixture>, port: ReturnType<typeof agentFarm>) => Promise<void>, installed?: string[]) => {
+      const fixture = createFixture();
+      const port = agentFarm(installed);
+      fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+      fixture.manager.attachAgentFarm(port);
+      Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true });
+      try { await run(fixture, port); }
+      finally { Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false }); }
+    };
+
+    it('starts a new Session with no profile as the plain agent, pane/<agent>, keeping its full access', async () => withChatTabs(async fixture => {
+      const claude = await fixture.manager.create({ name: 'Plain Claude', agent: 'claude' });
+      expect(claude.session.agentProfile).toEqual({ ref: 'pane/claude', hash: 'hash-pane' });
+      expect(claude.panel.state.customState).toMatchObject({ agent: 'claude', launch: { kind: 'profile', profile: 'pane/claude', fullAccess: true } });
+      const codex = await fixture.manager.create({ name: 'Plain Codex', agent: 'codex', launchCommand: 'codex' });
+      expect(codex.session.agentProfile?.ref).toBe('pane/codex');
+      expect(codex.panel.state.customState).toMatchObject({ agent: 'codex', launch: { kind: 'profile', profile: 'pane/codex' } });
+      expect(JSON.stringify(codex.panel.state.customState)).not.toContain('fullAccess');
+      // Saved with the record, so it survives a restart.
+      expect(fixture.store.read().sessions.find(session => session.id === claude.session.id)?.agentProfile).toEqual({ ref: 'pane/claude', hash: 'hash-pane' });
+    }));
+
+    it('records a launch command\'s own profile and keeps its launch', async () => withChatTabs(async fixture => {
+      const created = await fixture.manager.create({ name: 'From the dialog', agent: 'claude', launchCommand: 'agent-farm run greenfield/orchestrator --arg task=x' });
+      expect(created.session.agentProfile).toEqual({ ref: 'greenfield/orchestrator', hash: 'hash-greenfield' });
+      expect(created.panel.state.customState).toMatchObject({ launch: { kind: 'profile', profile: 'greenfield/orchestrator', args: { task: 'x' } } });
+    }));
+
+    it('starts a named profile with the agent it runs, and refuses one this computer lacks', async () => withChatTabs(async fixture => {
+      const created = await fixture.manager.create({ name: 'Researcher', agentProfile: 'greenfield/product-researcher' });
+      expect(created.session).toMatchObject({ agent: 'codex', launchCommand: '', agentProfile: { ref: 'greenfield/product-researcher', hash: 'hash-greenfield' } });
+      expect(created.panel.state.customState).toMatchObject({ agent: 'codex', launch: { kind: 'profile', profile: 'greenfield/product-researcher' } });
+      await expect(fixture.manager.create({ name: 'Unknown', agentProfile: 'team/missing' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNKNOWN' });
+      await expect(fixture.manager.create({ name: 'Resumed', agent: 'claude', agentProfile: 'pane/claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNSUPPORTED' });
+      expect(fixture.store.read().sessions.map(session => session.name)).not.toEqual(expect.arrayContaining(['Unknown']));
+      expect(fixture.store.read().sessions.map(session => session.name)).not.toEqual(expect.arrayContaining(['Resumed']));
+    }));
+
+    it('starts the agent directly when Pane\'s plugin is missing, a Session keeps a terminal, or the agent has no plain profile', async () => withChatTabs(async fixture => {
+      const missing = await fixture.manager.create({ name: 'No plugin', agent: 'claude' });
+      expect(missing.session.agentProfile).toBeUndefined();
+      expect(missing.panel.state.customState).toMatchObject({ launch: { kind: 'agent' } });
+    }, []));
+
+    it('leaves a Session from before T-63 starting its agent directly', async () => withChatTabs(async fixture => {
+      fixture.manager.attachAgentFarm(agentFarm([]));
+      const old = await fixture.manager.create({ name: 'Before', agent: 'claude' });
+      expect(old.session.agentProfile).toBeUndefined();
+      fixture.manager.attachAgentFarm(agentFarm());
+      // Repaired at startup (its tab gone), it still starts the agent directly.
+      await panelManager.deletePanel(old.panel.id);
+      const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager, fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+      restarted.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+      restarted.attachAgentFarm(agentFarm());
+      await restarted.initialize();
+      const view = await restarted.getView({ sessionId: old.session.id });
+      expect(view.session.agentProfile).toBeUndefined();
+      expect(view.panel.state.customState).toMatchObject({ launch: { kind: 'agent' } });
+    }));
+
+    it('moves a plain Session to the new agent\'s plain profile when its agent changes', async () => withChatTabs(async fixture => {
+      const created = await fixture.manager.create({ name: 'Changes agent', agent: 'claude' });
+      const updated = await fixture.manager.update({ sessionId: created.session.id }, { agent: 'codex' });
+      expect(updated.agentProfile).toEqual({ ref: 'pane/codex', hash: 'hash-pane' });
+    }));
+  });
+
   it('starts a Session created by a phone app too old for chat tabs in a terminal (D-203)', async () => {
     const fixture = createFixture();
     fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });

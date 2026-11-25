@@ -63,7 +63,8 @@ export const AGENTS_CONFIG = {
         "paneMcpHttp": true,
         "registryIds": [
           "claude-acp"
-        ]
+        ],
+        "profileModel": "claude-opus-5-5"
       },
       "models": {
         "flag": "--model",
@@ -145,7 +146,8 @@ export const AGENTS_CONFIG = {
         "skills": "dollar",
         "registryIds": [
           "codex-acp"
-        ]
+        ],
+        "profileModel": "gpt-6-astra"
       },
       "models": {
         "flag": "-m",

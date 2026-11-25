@@ -21,6 +21,7 @@ import {
   orchestrationReportSchema,
   orchestrationTextArraySchema,
   orchestrationTextSchema,
+  orchestrationAgentProfileSchema,
 } from '../services/orchestrationSessionPayload';
 import { configuredAgentSchema } from '../../../shared/agents';
 
@@ -37,6 +38,7 @@ const createSchema = boundary.object({
   agent: boundary.optional(configuredAgentSchema),
   launchCommand: boundary.optional(orchestrationTextSchema),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
+  agentProfile: orchestrationAgentProfileSchema,
   openingPrompt: boundary.optional(orchestrationTextSchema),
   profile: boundary.optional(orchestrationTextSchema),
   goal: boundary.optional(orchestrationTextSchema),

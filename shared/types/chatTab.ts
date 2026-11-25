@@ -20,7 +20,11 @@ export type ChatTabLaunch =
    * one, otherwise through Pane answering each approval with the agent's "allow once".
    */
   | { kind: 'agent'; mode?: string; fullAccess?: true }
-  | { kind: 'profile'; profile: string; args?: Record<string, string> };
+  /**
+   * An Agent Farm profile. `fullAccess` applies only to Pane's plain profiles (pane/claude, pane/codex),
+   * which keep the permissions the agent had before Agent Farm ran it; every other profile sets its own.
+   */
+  | { kind: 'profile'; profile: string; args?: Record<string, string>; fullAccess?: true };
 
 /** Last known runtime state. `stopped` always carries a `problem` or an explicit stop. */
 export type ChatTabStatus = 'starting' | 'idle' | 'working' | 'blocked' | 'stopped';

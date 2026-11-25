@@ -46,6 +46,11 @@ const sessionCreatePayloadSchema = boundary.object({
   isPinned: boundary.optional(boundary.boolean),
   agent: boundary.optional(agentSchema),
   launchCommand: boundary.optional(textSchema),
+  agentProfile: boundary.optional(boundary.refine(
+    boundary.nonEmptyString,
+    value => /^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*(?::[a-z][a-z0-9_-]*)?$/.test(value),
+    'expected an Agent Farm profile such as greenfield/orchestrator',
+  )),
   profile: boundary.optional(textSchema),
   goal: boundary.optional(textSchema),
   context: boundary.optional(textSchema),

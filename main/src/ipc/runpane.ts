@@ -105,6 +105,7 @@ import {
   orchestrationReportSchema,
   orchestrationTextArraySchema,
   orchestrationTextSchema,
+  orchestrationAgentProfileSchema,
 } from '../services/orchestrationSessionPayload';
 import type {
   RunpaneAgentId,
@@ -461,6 +462,7 @@ const orchestrationSessionCreateSchema = boundary.object({
   isPinned: boundary.optional(boundary.boolean),
   agent: boundary.optional(configuredAgentSchema),
   launchCommand: boundary.optional(orchestrationTextSchema),
+  agentProfile: orchestrationAgentProfileSchema,
   resume: boundary.optional(boundary.nonEmptyString),
   profile: boundary.optional(orchestrationTextSchema),
   goal: boundary.optional(orchestrationTextSchema),
