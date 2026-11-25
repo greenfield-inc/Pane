@@ -269,7 +269,7 @@ export interface NotifyCardsOn {
 
 export const DEFAULT_NOTIFY_SETTINGS: NotifySettings = {
   enabled: true,
-  showOutsidePane: true,
+  showOutsidePane: false,
   position: 'bottom-center',
   shortcut: 'Control+Shift+Space',
   updatesHideAfterSeconds: 6,
@@ -694,7 +694,7 @@ export interface NotifyFixCommand {
  * Where main asks the window to go. `toggle-inbox` is the Notify shortcut
  * pressed while Pane is in front: Approvals, or back to where you were (D-251).
  */
-export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | { approval: string } | { askAgent: string } | { link: string; paneId: string };
+export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | 'resources' | { approval: string } | { askAgent: string } | { link: string; paneId: string };
 
 /** The floating windows report their card's size so main can fit and place them. */
 export interface NotifyWindowSize {

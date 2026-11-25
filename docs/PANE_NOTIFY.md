@@ -331,7 +331,7 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   Stack"), and Autopilot's decision cards gain **Open**. In a Session and in
   Autopilot, the chat tab is live too: an orchestrator's item shows its
   Session, and a worker's or a Pane's item shows the tab that asked.
-- **The strip**: while Pane isn't in front, a borderless card at the bottom
+- **The strip**: with Show outside Pane on, while Pane isn't in front, a borderless card at the bottom
   center of the screen with the pointer. It never takes keyboard focus when it
   appears; click a choice to answer, or click its text field to type. After
   you answer, it shows "Sent to <agent>" with **Undo** for 3 seconds before
@@ -552,6 +552,14 @@ Alerts interrupt you on the device you're using (D-144):
   2 minutes with its screen unlocked, for its own items and other machines'. If
   two computers are both in use, both ring. In-Pane cards still show while Pane
   is in front.
+- **With Show outside Pane off** (the default), an approval that starts ringing
+  while Pane is in the background sends one system notification, titled
+  "<Pane> needs your answer". Clicking it opens that approval. Several that came
+  in while you were away or paused make one notification. It follows Settings ›
+  Notifications, and the same in-use and Show cards on rules. A Claude
+  permission prompt sends its tab's "needs your input" notification instead.
+- **The app badge** counts what waits, on the Dock (macOS) or the launcher
+  (Linux desktops that support it). On Windows it is a dot on the taskbar button.
 - **The phone** gets a push about 90 seconds after an approval arrives, only if
   it is still waiting. Answering it, closing it or turning Approvals off cancels
   the push.
@@ -648,7 +656,7 @@ cards on is shared the same way.
 | --- | --- |
 | Approvals | On. Off hides the sidebar's Approvals row, expires open cards, returns `unavailable` ("Approvals are off in Pane.") to every waiting agent. Agents, Session orchestrators included, then ask in their own tab. Applies to all your machines ([how the switch travels](SHARED_CREDENTIALS.md#the-approvals-switch)). |
 | Show cards on | Whichever computer is in use. Or this computer, or a saved machine that has connected since Pane started: only that computer pops up cards and chimes ([Alerts](#alerts)). Applies to all your machines, saved as `notify.cardsOn`. |
-| Show outside Pane | On. It controls the floating cards over other apps. Off shows no floating card; inside Pane you answer from the Approvals row and screen, and the tray dot still shows. |
+| Show outside Pane | Off. It controls the floating cards over other apps. Off, an approval that arrives while Pane is in the background sends one [system notification](#alerts), the app badge counts what waits, and you answer from the Approvals row and screen. A value you saved before the default changed stays. |
 | Position | Bottom center. Also top right or bottom right. |
 | Answer-all shortcut | ⌃⇧Space. Settings says so when another app already holds it. |
 | Updates hide after | 6 seconds |

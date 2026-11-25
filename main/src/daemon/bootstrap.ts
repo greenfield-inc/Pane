@@ -1007,7 +1007,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   }
   const healthCards = new HealthCardController({
     now: () => Date.now(),
-    notificationsOn: () => configManager.getConfig().machineHealth?.notifications !== false,
+    notificationsOn: () => configManager.getConfig().machineHealth?.notifications === true,
     ask: (question, id) => {
       const queue = services.notifyService?.queue;
       if (!queue) return Promise.resolve({ unavailable: 'Approvals are not running.', next: 'Turn on Approvals in Settings.' });
@@ -1018,18 +1018,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       });
     },
     withdraw: (id, reason) => services.notifyService?.queue.withdraw(id, reason),
-    inventory: () => machineHealth.cachedInventory(),
-    idleOffer: () => memoryRelief.idleOffer(),
-    pauseIdleHours: () => configManager.getConfig().machineHealth?.pauseIdleHours ?? 2,
     paneName: paneId => databaseService.getSession(paneId)?.name ?? paneId,
     paneState,
     tabName: panelId => panelManager.getPanel(panelId)?.title ?? null,
     canRestart: leak => canRestartProcess(machineHealth.latestSnapshot(), leak, paneId => logsManager.isRunning(paneId)),
-    cleanUp: async itemIds => {
-      await machineCleanup.run({ source: 'card', tiers: [1, 2], ids: itemIds });
-      // Rescan so Resources and the CLI stop listing what the card removed.
-      void machineHealth.scanInventory().catch(() => undefined);
-    },
     readKept: () => {
       try {
         return decodeOptionalBoundary(JSON.parse(databaseService.getUserPreference(KEPT_PROCESSES_PREFERENCE) ?? '[]'), boundary.array(boundary.string)) ?? [];
@@ -1038,13 +1030,12 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       }
     },
     writeKept: identities => databaseService.setUserPreference(KEPT_PROCESSES_PREFERENCE, JSON.stringify(identities)),
-    pauseIdle: async () => { await memoryRelief.pauseIdle('card'); },
     stopProcess: async leak => { await commandRegistry.invoke(MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, [{ source: 'card', processes: [{ pid: leak.pid, started: leak.started }] }]); },
     stopProcesses: processes => memoryRelief.stopProcesses(processes, 'card'),
     restartProcess: async leak => { await commandRegistry.invoke(MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, [{ pid: leak.pid, started: leak.started }]); },
     ignoreLeak: leak => machineHealth.ignoreLeak(leak.pid, leak.started),
     archive: async paneIds => { await finishedPanes.archive(paneIds, 'card'); },
-    alert: (title, body) => showDesktopAlert(services, services.notifyService?.queue.alertsHere() ?? true, title, body),
+    alert: (title, body) => showDesktopAlert(services, services.notifyService?.queue.alertsHere() ?? true, title, body, () => services.notifyService?.openResources()),
     log: message => logger.warn(message),
   });
   if (duties.housekeeping) {

@@ -46,12 +46,15 @@ export const app = {
   getVersion: vi.fn(() => '0.1.0'),
   on: vi.fn(),
   focus: vi.fn(),
+  setBadgeCount: vi.fn(),
 };
 
 export const globalShortcut = {
   register: vi.fn(() => true),
   unregister: vi.fn(),
 };
+
+export const Notification = { isSupported: vi.fn(() => false) };
 
 export class Tray {
   setImage = vi.fn();

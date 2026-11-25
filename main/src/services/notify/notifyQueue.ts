@@ -325,6 +325,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly remotes = new Map<string, RemoteQueue>();
   /** The machine the app is on: `local`, or a saved machine's id. Open in Pane works only there. */
   private activeMachineId = LOCAL_MACHINE;
+  /** Questions that rang and were neither seen nor announced yet (takeUnannounced). */
+  private unannounced = new Set<string>();
   /** Orders this machine's shared states for other screens (see NotifySharedState). */
   private readonly epoch = randomUUID();
   private revision = 0;
@@ -465,7 +467,7 @@ export class NotifyQueue extends EventEmitter {
     this.queue.push(item.id);
     // A question never waits behind an update; the update stays under For your information.
     if (this.transient?.view.kind === 'info') this.clearTransient();
-    this.chime();
+    this.chime(item.id);
     const result = this.wait(entry, request.returnAfterMs, signal);
     this.changed();
     return result;
@@ -782,7 +784,7 @@ export class NotifyQueue extends EventEmitter {
     if (this.env.todosOff?.() && isTodosOwnCard(entry.item)) return;
     entry.item.quiet = undefined;
     this.save(entry);
-    if (entry.item.staleSince === undefined) this.chime();
+    if (entry.item.staleSince === undefined) this.chime(entry.item.id);
     this.changed();
   }
 
@@ -1393,7 +1395,7 @@ export class NotifyQueue extends EventEmitter {
   /** Whether in use and "Show cards on" change what shows: a strip, or a picked machine's status in Settings. */
   inUseMatters(): boolean {
     const picked = this.env.settings().cardsOn;
-    return this.strip() !== null || (picked?.id !== undefined && picked.id !== this.env.machineId);
+    return this.strip() !== null || this.unannounced.size > 0 || (picked?.id !== undefined && picked.id !== this.env.machineId);
   }
 
   /** The phone push for this item went out, so a restart doesn't send it again. */
@@ -1417,9 +1419,27 @@ export class NotifyQueue extends EventEmitter {
     return this.inUse() && this.cardsOn().kind !== 'elsewhere';
   }
 
-  private chime(): void {
+  private chime(id: string): void {
+    this.unannounced.add(id);
     const settings = this.env.settings();
     if (settings.enabled && settings.sound && !this.isPaused() && this.alertsHere()) this.emit('chime');
+  }
+
+  /**
+   * Questions that started ringing and need a system notification: Pane is in the background and no
+   * floating card shows them. They wait while the person is away or Approvals is paused. Each is
+   * returned once. A machine health card has its own alert, and a permission prompt in a tab of the
+   * machine shown here already sends that tab's "needs your input".
+   */
+  takeUnannounced(): NotifyItem[] {
+    const settings = this.env.settings();
+    if (this.unannounced.size === 0 || !settings.enabled || this.isPaused() || !this.alertsHere()) return [];
+    const ids = this.unannounced;
+    this.unannounced = new Set();
+    if (this.paneFocused || this.roundOpen || this.canShowStrip()) return [];
+    const { items, hidden } = this.snapshot();
+    return items.filter(item => ids.has(item.id) && item.state === 'waiting' && !hidden.includes(item.id) && !item.machineHealth
+      && !(item.originKind === 'claude-prompt' && (item.machineId ?? LOCAL_MACHINE) === this.activeMachineId));
   }
 
   /** What no surface should raise, whatever it's asked: quiet and stale items, and what's hidden. */
@@ -1594,14 +1614,14 @@ export class NotifyQueue extends EventEmitter {
         if (item.state === 'waiting') {
           if (this.transient?.view.kind === 'info') this.clearTransient();
           // The computer you're using rings for every machine's items (D-144), but not for what's quiet or stale.
-          if (!item.quiet && item.staleSince === undefined && !item.relay) this.chime();
+          if (!item.quiet && item.staleSince === undefined && !item.relay) this.chime(item.id);
         } else if (item.state === 'info') {
           const current = this.strip();
           if (this.canShowStrip() && (current === null || current.kind === 'info')) this.showInfo(item.id);
         }
         continue;
       }
-      if (before.quiet && !item.quiet && item.state === 'waiting' && item.staleSince === undefined) this.chime();
+      if (before.quiet && !item.quiet && item.state === 'waiting' && item.staleSince === undefined) this.chime(item.id);
       if (before.state === 'waiting' && item.state === 'sent' && (this.answeredHere.has(item.id) || stripId === item.id)) {
         if (this.transient?.view.kind === 'sent' && this.transient.view.itemId === item.id) continue;
         this.setTransient({ kind: 'sent', itemId: item.id }, NOTIFY_UNDO_MS);
@@ -2171,6 +2191,7 @@ export class NotifyQueue extends EventEmitter {
       entry.remindTimer = setTimeout(() => {
         entry.item.snoozedUntil = undefined;
         this.hidden.delete(id);
+        this.unannounced.add(id);
         this.changed();
       }, REMIND_AFTER_MS[after]);
     }

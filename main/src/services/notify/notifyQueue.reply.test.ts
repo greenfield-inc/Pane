@@ -28,7 +28,8 @@ describe('NotifyQueue replies (the reply contract)', () => {
   let closedTabs: Set<string>;
 
   const queueWith = (extra: Partial<NotifyQueueEnvironment> = {}) => new NotifyQueue({
-    settings: () => DEFAULT_NOTIFY_SETTINGS,
+    // The floating strip is off by default; these tests read it.
+    settings: () => ({ ...DEFAULT_NOTIFY_SETTINGS, showOutsidePane: true }),
     showOutsideSupported: true,
     shortcutRegistered: () => true,
     instructionFiles: () => [],

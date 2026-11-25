@@ -20,7 +20,8 @@ describe('NotifyQueue with its store', () => {
   let using: boolean;
 
   const queueWith = (extra: Partial<NotifyQueueEnvironment> = {}) => new NotifyQueue({
-    settings: () => DEFAULT_NOTIFY_SETTINGS,
+    // The floating strip is off by default; these tests are about it.
+    settings: () => ({ ...DEFAULT_NOTIFY_SETTINGS, showOutsidePane: true }),
     showOutsideSupported: true,
     shortcutRegistered: () => true,
     instructionFiles: () => [],

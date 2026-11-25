@@ -33,7 +33,7 @@ import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed, type M
 import { PaneError, paneErrorText, reasonOf } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
-import { NotifyTray } from './notifyTray';
+import { NotifyTray, taskbarDot } from './notifyTray';
 import { syncNotifyInstructions, syncWslNotifyInstructions } from './notifyInstructions';
 import { isPaneHomeSkillEnabled } from '../paneHomeSkill';
 import type { RunpaneInboxItem } from '../../../../shared/types/runpaneOrchestration';
@@ -131,6 +131,8 @@ export interface NotifyServiceDependencies {
   typeIntoTab?: NotifyQueueEnvironment['typeIntoTab'];
   /** Seconds since the person last used this computer; Infinity while its screen is locked. Absent: in use. */
   idleSeconds?: () => number;
+  /** Shows a system notification under the person's desktop notification rules. */
+  alert?: (title: string, body: string, onClick: () => void) => void;
   /** Where "Show cards on" leaves this machine (`cardsOnStatus`). Absent: whichever computer is in use. */
   cardsOn?: NotifyQueueEnvironment['cardsOn'];
   /** Whether a tab still exists. */
@@ -701,6 +703,7 @@ export class NotifyService {
     for (const timer of this.pushTimers.values()) clearTimeout(timer);
     this.queue.dispose();
     if (this.shortcut) globalShortcut.unregister(this.shortcut);
+    if (!this.deps.headless) this.showBadge(0);
     this.tray.destroy();
     this.windows.destroy();
   }
@@ -887,14 +890,41 @@ export class NotifyService {
       if (snapshot.stripSurface === 'pane') this.queue.noteStripShown();
     }
     if (!this.windows.isRoundOpen()) this.queue.setRoundOpen(false);
+    const waiting = this.queue.waitingItems().filter(item => item.staleSince === undefined && !item.quiet);
     this.tray.update({
       settings: snapshot.settings,
-      waiting: this.queue.waitingItems().filter(item => item.staleSince === undefined && !item.quiet),
+      waiting,
       paused: snapshot.pausedUntil !== null,
       showOutsideSupported: snapshot.showOutsideSupported,
     });
+    this.showBadge(snapshot.settings.enabled ? waiting.length : 0);
+    this.announce();
     this.sendToMainWindow('notify:snapshot', snapshot);
     for (const contents of this.windows.webContents()) contents.send('notify:snapshot', snapshot);
+  }
+
+  /** The count on Pane's Dock icon or launcher; on Windows, which has no count, a dot on the taskbar button. */
+  private showBadge(count: number): void {
+    if (process.platform === 'win32') {
+      const window = this.deps.getMainWindow();
+      if (window && !window.isDestroyed()) window.setOverlayIcon(count > 0 ? taskbarDot() : null, count > 0 ? `${count} waiting in Approvals` : '');
+    } else {
+      app.setBadgeCount(count);
+    }
+  }
+
+  /** One system notification for what started waiting while Pane is in the background. */
+  private announce(): void {
+    const items = this.queue.takeUnannounced();
+    const [first] = items;
+    if (!first) return;
+    if (items.length === 1) this.deps.alert?.(`${first.source.name} needs your answer`, first.title, () => { void this.openInPane(first.id); });
+    else this.deps.alert?.(`${items.length} approvals are waiting`, first.title, () => this.navigate('inbox'));
+  }
+
+  /** The disk alert's click: Pane comes to the front on this computer's Resources. */
+  openResources(): void {
+    this.navigate('resources');
   }
 
   /** Connected screens and phones get the shared state when it changes, not on this screen's own moves. */

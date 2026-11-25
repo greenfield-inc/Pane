@@ -42,7 +42,7 @@ const pendingAlerts = new Set<Notification>();
  * where alerts go right now (the person is away from it), so the caller can try again later; true when the
  * alert was shown or the rules say it should not be (notifications off, Pane in front, handed off).
  */
-export function showDesktopAlert(services: Pick<AppServices, 'configManager' | 'getMainWindow' | 'workspaceWatchLeases'>, alertsHere: boolean, title: string, body: string): boolean {
+export function showDesktopAlert(services: Pick<AppServices, 'configManager' | 'getMainWindow' | 'workspaceWatchLeases'>, alertsHere: boolean, title: string, body: string, onClick?: () => void): boolean {
   if (services.configManager.getConfig().notifications?.enabled === false) return true;
   if (!alertsHere) return false;
   if (services.getMainWindow()?.isFocused() || isDesktopAlertHandedOff(services.workspaceWatchLeases) || !Notification.isSupported()) return true;
@@ -51,7 +51,7 @@ export function showDesktopAlert(services: Pick<AppServices, 'configManager' | '
   const release = () => pendingAlerts.delete(notification);
   notification.once('close', release);
   notification.once('failed', release);
-  notification.once('click', release);
+  notification.once('click', () => { release(); onClick?.(); });
   notification.show();
   return true;
 }

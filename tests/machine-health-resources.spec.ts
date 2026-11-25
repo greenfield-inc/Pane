@@ -181,7 +181,8 @@ test.describe('Resources page', () => {
   test('Settings saves only the changed key; Idle days refuses 0; Run now scans first', async ({ page }) => {
     await open(page, 'view=settings', 'Machine health');
     await expect(page.getByText('Stop leftover processes automatically')).toHaveCount(0);
-    await expect(page.getByText('When off, Pane still notifies when free disk drops below 5 GB or memory runs critically low.', { exact: false })).toBeVisible();
+    await expect(page.getByText('When off, Pane still warns you when free disk drops below 5 GB.', { exact: false })).toBeVisible();
+    await expect(page.getByRole('switch', { name: 'Cards and notifications' })).toHaveAttribute('aria-checked', 'false');
     await page.getByRole('switch', { name: 'Cards and notifications' }).click();
     await page.getByRole('switch', { name: 'Archive finished Panes automatically' }).click();
     const idleDays = page.getByLabel('Idle days');
@@ -191,7 +192,7 @@ test.describe('Resources page', () => {
     await page.getByRole('button', { name: 'Run now' }).click();
     await expect(page.getByRole('status').filter({ hasText: 'Scanning. Pane removes its leftovers when the scan ends' })).toBeVisible();
     expect(await page.evaluate(() => window.qaInvokes)).toEqual([{ channel: 'resource-monitor:machine-inventory', args: [{ refresh: true }] }]);
-    expect(await page.evaluate(() => window.qaConfigUpdates)).toEqual([{ machineHealth: { notifications: false } }, { machineHealth: { autoArchiveFinished: true } }]);
+    expect(await page.evaluate(() => window.qaConfigUpdates)).toEqual([{ machineHealth: { notifications: true } }, { machineHealth: { autoArchiveFinished: true } }]);
   });
 
   test('screenshots, light and dark', async ({ page }) => {

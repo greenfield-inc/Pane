@@ -214,7 +214,7 @@ export function NotifySettings({ persistence }: { persistence: SettingsPersisten
           settingId="notify-show-outside"
           label="Show outside Pane"
           description={showOutsideSupported
-            ? 'Cards appear over any app, like your browser.'
+            ? 'Cards appear over any app, like your browser. When off, a waiting approval sends a system notification instead.'
             : 'Unavailable on native Wayland, where Pane can’t place a window over other apps. Cards show inside Pane.'}
           saveState={persistence.saveStates['notify-show-outside']}
           disabled={off || !showOutsideSupported}

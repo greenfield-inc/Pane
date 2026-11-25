@@ -76,21 +76,26 @@ and Restore brings it back. A deleted file is gone once the delete finishes.
 
 ## Cards
 
-Pane raises five cards in Approvals. Each lists every item its action covers;
-Review in Resources lets you choose item by item.
+Cards are off by default: only a nearly full disk interrupts you
+([Turning cards and notifications on](#turning-cards-and-notifications-on)).
+Memory pressure never raises a card or a notification; it shows in Resources.
+
+Pane raises four cards in Approvals. The disk card only warns and opens
+Resources. Each of the others lists every item its action covers; Review in
+Resources lets you choose item by item.
 
 Inside the Pane window, a waiting card also shows as a small popup in the
 bottom-left corner, with **Open Resources** and ✕. It never takes keyboard
 focus. A warning popup hides after Settings › Approvals › Updates hide after
 (6 seconds by default), held while the pointer is over the popups. A critical one (disk under the
-alert figure, memory critical) is tinted red and stays until you dismiss it or
+alert figure) is tinted red and stays until you dismiss it or
 the condition clears. ✕ dismisses it as on Notify's strip: the card keeps
 waiting in Approvals with every choice. Up to three popups stack, critical
 first.
 
-- **Disk almost full**, with what Pane can free and Clean up.
-- **Memory is tight**, with what uses the most memory and Pause idle Panes
-  (Panes idle 2 hours, with the same skips as auto-pause).
+- **Disk space is low** (under the warning figure) and **Disk is almost full**
+  (under the alert figure), with the free space and Open Resources. Neither
+  offers a cleanup.
 - **A process keeps using more memory**, when one Pane process grew at least
   500 MB and 50% across the last 30 minutes and set a new high in every
   5-minute slice, named with its Pane and tab. Restart it (for a run script),
@@ -110,27 +115,27 @@ first.
   so it does not credit those to a Pane.
 
 A card shows once and again only after 6 hours or when it gets worse; Not now
-holds it for 24 hours. A disk or memory card that turns critical replaces its
+holds it for 24 hours. A disk card that turns critical replaces its
 warning card. A critical card whose level returns to normal leaves Approvals,
 closed with the reason, and the next time the level turns critical raises a
-new card. A warning card keeps waiting after the level recovers. When disk or memory turns critical, a desktop
-notification also fires, following your notification settings, and says what
-to do. Ask an agent, on a card or on Resources, hands the items to the agent of
+new card. A warning card keeps waiting after the level recovers. When disk turns critical, a desktop
+notification also fires, following your notification settings; clicking it
+opens Resources. Ask an agent, on a card or on Resources, hands the items to the agent of
 a Session named "Clean up <machine>", starting that Session when none is open,
 and shows it. The agent runs on the machine the window is on when the items are
 about that machine, and on this computer otherwise (the window switches back to
 it).
 
-### Turning notifications off
+### Turning cards and notifications on
 
-Settings › Machine health › Cards and notifications turns the cards and notifications
-off. It is on by default and shared with your other computers the way the
-Approvals switch is ([Shared integration keys](SHARED_CREDENTIALS.md#the-approvals-switch)),
-so turning it off once quiets all of them. Off, Pane still raises the card
-and the desktop notification once per episode when free disk drops below the
-alert figure (5 GB by default) or memory turns critical (the table above).
-A card you answered Not now stays held for its 24 hours. Resources keeps
-showing everything, and the switches under Do it automatically keep working.
+Settings › Machine health › Cards and notifications turns the cards on. It is
+off by default, and once you set it, it is shared with your other computers the
+way the Approvals switch is ([Shared integration keys](SHARED_CREDENTIALS.md#the-approvals-switch)).
+A value you saved before the default changed stays. Off, Pane still raises the
+disk card and the desktop notification once per episode when free disk drops
+below the alert figure (5 GB by default). A card you answered Not now stays held
+for its 24 hours. Resources keeps showing everything, and the switches under Do
+it automatically keep working.
 
 ## Other apps
 

@@ -29,11 +29,12 @@ test.describe('Machine health cards', () => {
     await expect(page.getByText('Opens a Session with this list; the agent works on build-box.')).toBeVisible();
   });
 
-  test('disk: every item Clean up deletes is listed, with what it frees', async ({ page }) => {
-    await open(page, 'kind=disk');
-    for (const label of ['u-2.4.212', 'sessions.db.pre-panel-buffers.bak', 'qa1344.noindex', 'qa1351.noindex', 'u-2.4.208']) await expect(page.getByText(label, { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Clean up · 25 GB' }).click();
-    expect(await page.evaluate(() => window.qaAnswers)).toEqual(['Clean up']);
+  test('disk: warns and opens Resources, with no cleanup to offer', async ({ page }) => {
+    await open(page, 'kind=disk&review=1');
+    await expect(page.getByRole('button', { name: /Open Resources/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Clean up|Ask an agent/ })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Not now' }).click();
+    expect(await page.evaluate(() => window.qaAnswers)).toEqual(['Not now']);
   });
 
   test('leak: Restart it, Stop it and Ignore for this process each answer the card', async ({ page }) => {
@@ -65,7 +66,7 @@ test.describe('Machine health cards', () => {
     const popups = page.getByTestId('health-popup');
     await expect(popups).toHaveCount(2);
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(page.getByRole('status', { name: 'Disk almost full' })).toHaveAttribute('data-level', 'warning');
+    await expect(page.getByRole('status', { name: 'Disk space is low' })).toHaveAttribute('data-level', 'warning');
     const box = await page.getByTestId('health-popups').boundingBox();
     expect(box && box.x < 40 && box.y + box.height > 900 - 40).toBe(true);
     await expect(page.getByLabel('Composer')).toBeFocused();
@@ -114,10 +115,10 @@ test.describe('Machine health cards', () => {
 
   test('screenshots of every card, light and dark', async ({ page }) => {
     test.skip(!shots, 'Set MACHINE_HEALTH_SHOTS to a folder to capture screenshots.');
-    for (const kind of ['memory', 'disk', 'leak', 'finished', 'leftovers', 'memory&remote=1']) {
+    for (const kind of ['memory', 'disk', 'disk&review=1', 'leak', 'finished', 'leftovers', 'memory&remote=1']) {
       for (const theme of ['light', 'dark']) {
         await open(page, `kind=${kind}&theme=${theme}`);
-        await page.locator('#root > div > div').screenshot({ path: `${shots}/card-${kind.replace('&remote=1', '-remote')}-${theme}.png` });
+        await page.locator('#root > div > div').screenshot({ path: `${shots}/card-${kind.replace('&remote=1', '-remote').replace('&review=1', '-review')}-${theme}.png` });
       }
     }
     for (const level of ['warning', 'critical']) {
