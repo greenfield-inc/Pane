@@ -444,6 +444,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     photos: (): Promise<IPCResponse> => ipcRenderer.invoke('profiles:photos'),
     setPhoto: (ref: string, base64: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:set-photo', ref, base64),
     removePhoto: (ref: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:remove-photo', ref),
+    setDetails: (plugin: string, profile: string, details: { title: string; description: string }): Promise<IPCResponse> => ipcRenderer.invoke('profiles:set-details', plugin, profile, details),
+    parseYaml: (source: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:parse-yaml', source),
   },
   /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
   paneSecrets: {

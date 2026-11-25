@@ -160,6 +160,9 @@ interface ElectronAPI {
     photos: () => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfilePhotos>>;
     setPhoto: (ref: string, base64: string) => Promise<IPCResponse<void>>;
     removePhoto: (ref: string) => Promise<IPCResponse<void>>;
+    setDetails: (plugin: string, profile: string, details: import('../../../shared/types/profileEditor').ProfileDetails) => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfileSaveResult>>;
+    /** YAML as data for a preview, or why it doesn't parse. */
+    parseYaml: (source: string) => Promise<IPCResponse<{ data?: import('../../../shared/validation/boundaryDecoder').JsonValue; error?: string }>>;
   };
   paneSecrets: {
     list: () => Promise<IPCResponse<PaneSecretsOverview>>;

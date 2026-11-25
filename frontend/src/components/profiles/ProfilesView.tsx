@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { Bot, ChevronDown, ChevronRight, FileText, Folder, ImageIcon, Plus, RefreshCw, RotateCcw, Save, Sparkles, X } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight, FileText, ImageIcon, Pencil, Pin, Plus, RefreshCw, RotateCcw, Sparkles, X } from 'lucide-react';
 import { DEFAULT_AGENT_ID, agentLabel, configuredAgent } from '../../../../shared/agents';
 import { plainProfileAgents } from '../../../../shared/agentProfiles';
 import { PROFILE_NAME_PATTERN, PROFILE_SYNC_AVAILABLE, type ProfileNewFileKind, type ProfilePlugin, type ProfileSummary } from '../../../../shared/types/profileEditor';
 import { useConfigStore } from '../../stores/configStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
-import { fileKey, profilePhotoSource, useProfilesStore } from '../../stores/profilesStore';
+import { profilePhotoSource, useProfilesStore } from '../../stores/profilesStore';
 import { usePausableDismiss } from '../../hooks/usePausableDismiss';
 import { cn } from '../../utils/cn';
-import { isMac } from '../../utils/platformUtils';
 import { requestOpenSettings } from '../../utils/openSettings';
 import { profileDisplayName } from '../../utils/profileAvatar';
 import { Modal } from '../ui/Modal';
@@ -18,11 +17,12 @@ import { ConfirmDialog } from '../ConfirmDialog';
 import { isTypingTarget, overlayOpen } from '../todos/todosNavigation';
 import { TODOS_HEADER_BUTTON, TODOS_PILL, TODOS_PILL_OFF } from '../todos/todoStyles';
 import { ProfileAvatar } from './ProfileAvatar';
-import { fileTreeRows } from './profileFileTree';
+import { ProfileFilePane } from './ProfileFilePane';
+import { ProfileTree } from './ProfileTree';
+import { isPinned, pinnedFirst, togglePinnedProfile, usePinnedProfiles } from './profilePins';
 import { PHOTO_SAMPLES, readFileAsDataUrl, squarePhoto } from './profilePhotos';
 import { leaveProfiles } from './profilesNavigation';
 
-const MOD = isMac() ? '⌘' : 'Ctrl+';
 /** How often the open tab looks for changes made outside it. */
 const PROFILES_REFRESH_MS = 3000;
 const SYNC_LATER = 'Sync to your other computers arrives in the next update';
@@ -39,6 +39,17 @@ function useSessionsByProfile(): Map<string, number> {
     }
     return counts;
   }, [sessions]);
+}
+
+/** A profile's name as people see it: its title from Edit details, else the one Pane makes from its ref. */
+function titleOf(profile: ProfileSummary): string {
+  return profile.title ?? profileDisplayName(profile.ref);
+}
+
+/** How many subagents a profile calls directly. */
+function subagentCount(profile: ProfileSummary): number {
+  const folder = profile.tree.find(node => node.kind === 'folder' && node.label === 'Subagents');
+  return folder?.kind === 'folder' ? folder.children.length : 0;
 }
 
 /** A short notice at the bottom of the tab, which fades after a few seconds unless hovered. */
@@ -62,11 +73,30 @@ function arrowKeys(event: ReactKeyboardEvent<HTMLElement>): void {
   next.focus();
 }
 
+/** Pin or unpin a profile; pinned ones lead the list and New Session. */
+function PinButton({ profile, pinned, className }: { profile: ProfileSummary; pinned: boolean; className?: string }) {
+  const label = `${pinned ? 'Unpin' : 'Pin'} ${titleOf(profile)}`;
+  return (
+    <button
+      type="button"
+      aria-pressed={pinned}
+      aria-label={label}
+      title={pinned ? 'Unpin' : 'Pin to the top of Profiles and New Session'}
+      data-testid={`profile-pin-${profile.ref}`}
+      onClick={event => { event.stopPropagation(); togglePinnedProfile(profile.ref); }}
+      className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-md hover:bg-surface-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive', pinned ? 'text-interactive' : 'text-text-tertiary', className)}
+    >
+      <Pin className={cn('h-3.5 w-3.5', pinned && 'fill-current')} aria-hidden="true" />
+    </button>
+  );
+}
+
 /**
- * Profiles (T-63 PR 5, the chosen design): this computer's Agent Farm profiles in one list, then a
- * profile's files with the open file beside them, and Back. Save checks the plugin with Agent Farm
- * first; Sessions using it then show the changed dot. Pane's own profiles can be edited, become
- * "Edited", and Restore brings Pane's version back (A-3). Esc or ⌘[ goes back; ⌘S saves.
+ * Profiles (T-63 PR 5, design round 4 "Tree + preview"): this computer's top-level Agent Farm
+ * profiles, pinned first. A profile opens on its cover page, with only its own files in a tree
+ * beside it, previewed first and edited with Edit. Save checks the plugin with Agent Farm; Sessions
+ * using it then show the changed dot. Pane's own profiles can be edited, become "Edited", and
+ * Restore brings Pane's version back (A-3). Esc or ⌘[ goes back.
  */
 export function ProfilesView() {
   const place = useProfilesStore(state => state.place);
@@ -83,7 +113,8 @@ export function ProfilesView() {
 
   // Changes made outside the tab (an agent, `runpane profiles`, sync from another computer) show
   // within a few seconds: while the tab is visible it reads the list and the open file again, and at
-  // once when the window regains focus. Both are local file reads, with no Agent Farm process.
+  // once when the window regains focus. Both are local file reads; Agent Farm is asked which
+  // profiles are listed only when a profile file changed.
   useEffect(() => {
     const refresh = () => { if (document.visibilityState === 'visible') void useProfilesStore.getState().refresh(); };
     const timer = window.setInterval(refresh, PROFILES_REFRESH_MS);
@@ -104,8 +135,8 @@ export function ProfilesView() {
       if (event.defaultPrevented || overlayOpen()) return;
       const goBack = event.key === 'Escape' || ((event.metaKey || event.ctrlKey) && event.key === '[');
       if (!goBack) return;
-      // Esc in the editor also goes back: unsaved edits stay, marked on their files.
-      if (isTypingTarget(event.target) && !(event.target instanceof HTMLTextAreaElement)) return;
+      // Esc in the editor cancels the edit first (ProfileFilePane); typing elsewhere keeps its keys.
+      if (isTypingTarget(event.target)) return;
       event.preventDefault();
       if (useProfilesStore.getState().place.level === 'profile') back();
       else leaveProfiles();
@@ -117,7 +148,7 @@ export function ProfilesView() {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary text-[14px] text-text-primary" data-testid="profiles-view">
       {plugin && profile && place.level === 'profile'
-        ? <ProfileDetail plugin={plugin} profile={profile} file={place.file} notify={notify} />
+        ? <ProfileDetail key={profile.ref} plugin={plugin} profile={profile} file={place.file} notify={notify} />
         : (
           <>
             <div className="flex h-[50px] shrink-0 items-center gap-2 border-b border-border-primary px-4">
@@ -152,53 +183,74 @@ export function ProfilesView() {
   );
 }
 
-function ProfileList({ plugins }: { plugins: ProfilePlugin[] }) {
+function ProfileRow({ plugin, profile, pinned, sessions, first }: { plugin: ProfilePlugin; profile: ProfileSummary; pinned: boolean; sessions: number; first: boolean }) {
   const open = useProfilesStore(state => state.open);
+  const subagents = subagentCount(profile);
+  const meta = [subagents ? `${subagents} subagent${subagents === 1 ? '' : 's'}` : '', sessions ? `${sessions} Session${sessions === 1 ? '' : 's'}` : '', agentLabel(profile.harness)].filter(Boolean).join(' · ');
+  return (
+    <div role="listitem" className="group relative flex items-center rounded-lg hover:bg-surface-hover focus-within:bg-surface-hover">
+      <button
+        type="button"
+        data-profiles-item
+        // Keyboard focus arriving from the sidebar (Enter on Profiles) lands on the first profile.
+        data-focus-entry={first ? '' : undefined}
+        data-testid={`profile-row-${plugin.name}-${profile.name}`}
+        onClick={() => open(plugin.name, profile.name)}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-lg py-[7px] pl-2 pr-[72px] text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+      >
+        <ProfileAvatar profileRef={profile.ref} size={30} />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-[13.5px] font-medium text-text-primary">{titleOf(profile)}</span>
+            {plugin.edited && <span className="shrink-0 rounded-full border border-status-warning px-1.5 text-[10.5px] text-status-warning" data-testid={`profiles-edited-${plugin.name}`}>Edited</span>}
+          </span>
+          <span className="truncate text-[12px] text-text-tertiary">{profile.ref}{profile.description ? ` · ${profile.description}` : ''}</span>
+        </span>
+        <span className="shrink-0 whitespace-nowrap text-[12.5px] text-text-secondary">{meta}</span>
+      </button>
+      <PinButton profile={profile} pinned={pinned} className={cn('absolute right-8', !pinned && 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100')} />
+      <ChevronRight className="pointer-events-none absolute right-2.5 h-4 w-4 text-text-tertiary" aria-hidden="true" />
+    </div>
+  );
+}
+
+/**
+ * The list (build-6 feedback items 1 and 2): top-level profiles only, as Agent Farm lists them (a
+ * subagent profile shows inside the profile that calls it), with pinned ones first.
+ */
+function ProfileList({ plugins }: { plugins: ProfilePlugin[] }) {
   const used = useSessionsByProfile();
+  const pins = usePinnedProfiles();
   const listRef = useRef<HTMLDivElement>(null);
+  const all = plugins.flatMap(plugin => plugin.profiles.map(profile => ({ plugin, profile })));
+  const listed = all.filter(item => item.profile.listed);
+  const pinned = pinnedFirst(all.filter(item => isPinned(pins, item.profile.ref)), pins, item => item.profile.ref);
+  const rest = listed.filter(item => !isPinned(pins, item.profile.ref));
+  const hidden = all.length - listed.length;
   // Keys belong to the list once it is open: the first profile takes focus.
   useEffect(() => { listRef.current?.querySelector<HTMLElement>('[data-profiles-item]')?.focus({ preventScroll: true }); }, []);
-  if (!plugins.length) {
+  if (!all.length) {
     return <p className="mx-auto mt-8 max-w-[820px] px-6 text-[13px] text-text-secondary">No profiles here yet. Use New profile to make one.</p>;
   }
+  const first = (pinned[0] ?? rest[0])?.profile.ref;
+  const row = ({ plugin, profile }: { plugin: ProfilePlugin; profile: ProfileSummary }) => (
+    <ProfileRow key={profile.ref} plugin={plugin} profile={profile} pinned={isPinned(pins, profile.ref)} sessions={used.get(profile.ref) ?? 0} first={profile.ref === first} />
+  );
   return (
     <div ref={listRef} role="list" aria-label="Profiles" className="mx-auto max-w-[820px] px-6 pb-8 pt-4" onKeyDown={arrowKeys} data-testid="profiles-list">
-      {plugins.map(plugin => (
-        <div key={plugin.name} role="presentation">
-          <div className="mb-1 mt-5 flex items-center gap-2 px-2 text-[12.5px]" data-testid={`profiles-plugin-${plugin.name}`}>
-            <span className="font-semibold text-text-primary">{plugin.name}</span>
-            <span className="text-text-tertiary">{plugin.version}</span>
-            {plugin.bundled && <span className="rounded-full border border-border-primary px-2 py-px text-[11px] text-text-secondary">Ships with Pane</span>}
-            {plugin.edited && <span className="rounded-full border border-status-warning px-2 py-px text-[11px] text-status-warning" data-testid={`profiles-edited-${plugin.name}`}>Edited</span>}
+      {pinned.length > 0 && (
+        <>
+          <div role="presentation" className="mb-1 mt-3 flex items-center gap-1.5 px-2 text-[12.5px] font-semibold text-text-primary" data-testid="profiles-pinned-heading">
+            <Pin className="h-3.5 w-3.5 text-text-tertiary" aria-hidden="true" />Pinned
           </div>
-          {plugin.profiles.map(profile => {
-            const count = used.get(profile.ref) ?? 0;
-            return (
-              <div key={profile.ref} role="listitem">
-              <button
-                type="button"
-                data-profiles-item
-                // Keyboard focus arriving from the sidebar (Enter on Profiles) lands on the first profile.
-                data-focus-entry={plugin === plugins[0] && profile === plugin.profiles[0] ? '' : undefined}
-                data-testid={`profile-row-${plugin.name}-${profile.name}`}
-                onClick={() => open(plugin.name, profile.name)}
-                className="flex w-full items-center gap-3 rounded-lg px-2 py-[7px] text-left hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
-              >
-                <ProfileAvatar profileRef={profile.ref} size={30} />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-[13.5px] font-medium text-text-primary">{profileDisplayName(profile.ref)}</span>
-                  <span className="truncate text-[12px] text-text-tertiary">{profile.ref}{profile.description ? ` · ${profile.description}` : ''}</span>
-                </span>
-                <span className="shrink-0 whitespace-nowrap text-[12.5px] text-text-secondary">
-                  {count ? `${count} Session${count === 1 ? '' : 's'} · ` : ''}{agentLabel(profile.harness)}
-                </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
-              </button>
-              </div>
-            );
-          })}
-        </div>
-      ))}
+          {pinned.map(row)}
+        </>
+      )}
+      <div role="presentation" className="mb-1 mt-5 flex items-center gap-1.5 px-2 text-[12.5px]" data-testid="profiles-all-heading">
+        <span className="font-semibold text-text-primary">{pinned.length ? 'All profiles' : 'Profiles'}</span>
+        <span className="text-text-tertiary">· {rest.length}{hidden ? ' · subagents appear inside the profile that uses them' : ''}</span>
+      </div>
+      {rest.map(row)}
     </div>
   );
 }
@@ -208,12 +260,12 @@ function ProfilesFooter() {
   const telemetry = useConfigStore(state => state.config?.agentFarmTelemetry === true);
   const used = useSessionsByProfile();
   if (!overview) return null;
-  const profiles = overview.plugins.reduce((total, plugin) => total + plugin.profiles.length, 0);
+  const profiles = overview.plugins.reduce((total, plugin) => total + plugin.profiles.filter(profile => profile.listed).length, 0);
   const known = new Set(overview.plugins.flatMap(plugin => plugin.profiles.map(profile => profile.ref)));
   const sessions = [...used].filter(([ref]) => known.has(ref)).reduce((total, [, count]) => total + count, 0);
   return (
     <div className="flex h-[34px] shrink-0 items-center gap-4 border-t border-border-primary px-4 text-[12px] text-text-secondary" data-testid="profiles-footer">
-      <span>{overview.plugins.length} plugin{overview.plugins.length === 1 ? '' : 's'} · {profiles} profile{profiles === 1 ? '' : 's'} · {sessions} Session{sessions === 1 ? ' uses' : 's use'} one</span>
+      <span>{profiles} profile{profiles === 1 ? '' : 's'} · {sessions} Session{sessions === 1 ? ' uses' : 's use'} one</span>
       <span className="truncate text-text-tertiary" data-testid="profiles-sync-status">{PROFILE_SYNC_AVAILABLE ? '' : SYNC_LATER}</span>
       <span className="ml-auto shrink-0">
         Agent Farm telemetry: {telemetry ? 'on' : 'off'} ·{' '}
@@ -226,9 +278,17 @@ function ProfilesFooter() {
 function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugin; profile: ProfileSummary; file: string; notify: (text: string) => void }) {
   const back = useProfilesStore(state => state.back);
   const restore = useProfilesStore(state => state.restore);
+  const openFile = useProfilesStore(state => state.openFile);
+  const pins = usePinnedProfiles();
   const [newKind, setNewKind] = useState<ProfileNewFileKind | null>(null);
   const [restoring, setRestoring] = useState(false);
-  const backRef = useRef<HTMLButtonElement>(null);
+  const [details, setDetails] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const show = (id: string | null, next: string) => {
+    setSelectedId(id);
+    openFile(next);
+  };
 
   const runRestore = async () => {
     try {
@@ -241,16 +301,20 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
 
   return (
     <>
-      <div className="flex h-[50px] shrink-0 items-center gap-2.5 border-b border-border-primary px-4">
-        <button ref={backRef} type="button" className={cn(TODOS_PILL, TODOS_PILL_OFF)} data-testid="profiles-back" title="Back to Profiles (Esc)" onClick={back}>‹ Profiles</button>
+      <div className="flex h-[54px] shrink-0 items-center gap-2.5 border-b border-border-primary px-4">
+        <button type="button" className={cn(TODOS_PILL, TODOS_PILL_OFF)} data-testid="profiles-back" title="Back to Profiles (Esc)" onClick={back}>‹ Profiles</button>
         <PhotoMenu profile={profile} notify={notify} />
         <span className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-[15px] font-semibold" data-testid="profiles-title">{profileDisplayName(profile.ref)}</span>
-          <span className="truncate text-[11.5px] text-text-tertiary">
-            {profile.ref} · {agentLabel(profile.harness)}{plugin.bundled ? ` · ships with Pane${plugin.edited ? ', edited' : ''}` : ''}
+          <span className="truncate text-[15px] font-semibold" data-testid="profiles-title">{titleOf(profile)}</span>
+          <span className="truncate text-[11.5px] text-text-tertiary" data-testid="profiles-subtitle">
+            {profile.ref}{profile.description ? ` · ${profile.description}` : ` · ${agentLabel(profile.harness)}`}{plugin.bundled ? ` · ships with Pane${plugin.edited ? ', edited' : ''}` : ''}
           </span>
         </span>
+        <PinButton profile={profile} pinned={isPinned(pins, profile.ref)} />
         <span className="flex-1" />
+        <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-edit-details" onClick={() => setDetails(true)}>
+          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />Edit details
+        </button>
         <Dropdown
           trigger={(
             <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-add">
@@ -273,16 +337,17 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
         )}
       </div>
       <div className="flex min-h-0 flex-1">
-        <FileTree plugin={plugin} profile={profile} file={file} />
-        <FileEditor plugin={plugin} profile={profile} file={file} notify={notify} />
+        <ProfileTree plugin={plugin.name} profile={profile} file={file} selectedId={selectedId} onSelect={show} />
+        <ProfileFilePane plugin={plugin} profile={profile} file={file} notify={notify} onShow={show} />
       </div>
-      {newKind && <NewFileDialog kind={newKind} plugin={plugin} profile={profile} onClose={() => setNewKind(null)} notify={notify} />}
+      {newKind && <NewFileDialog kind={newKind} plugin={plugin} profile={profile} onClose={() => setNewKind(null)} notify={notify} onCreated={path => show(null, path)} />}
+      {details && <EditDetailsDialog plugin={plugin} profile={profile} onClose={() => setDetails(false)} notify={notify} />}
       <ConfirmDialog
         isOpen={restoring}
         onClose={() => setRestoring(false)}
         onConfirm={() => { void runRestore(); }}
         title={`Restore Pane’s ${plugin.name}?`}
-        message={`Your edits to ${plugin.name} are replaced by the version that ships with this Pane (${plugin.version}). Your photos stay.`}
+        message={`Your edits to ${plugin.name} are replaced by the version that ships with this Pane (${plugin.version}). Your photos, titles and descriptions stay.`}
         confirmText="Restore"
         variant="danger"
       />
@@ -290,161 +355,75 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
   );
 }
 
-function FileTree({ plugin, profile, file }: { plugin: ProfilePlugin; profile: ProfileSummary; file: string }) {
-  const openFile = useProfilesStore(state => state.openFile);
-  const drafts = useProfilesStore(state => state.drafts);
-  const rows = useMemo(() => fileTreeRows(plugin.files), [plugin.files]);
-  const uses = useMemo(() => new Set(profile.uses), [profile.uses]);
-  const treeRef = useRef<HTMLDivElement>(null);
-  // Opening a profile puts the keys in its files, on the open one.
-  useEffect(() => {
-    const open = treeRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
-    open?.focus({ preventScroll: true });
-    open?.scrollIntoView({ block: 'nearest' });
-  }, [profile.ref]);
-  return (
-    <div className="flex w-[280px] shrink-0 flex-col overflow-y-auto border-r border-border-primary py-2" data-testid="profiles-tree">
-      <div ref={treeRef} role="tree" aria-label={`${plugin.name} files`} onKeyDown={arrowKeys}>
-        {rows.map(row => {
-          const pad = { paddingLeft: 10 + row.depth * 16 };
-          if (row.kind === 'folder') {
-            return (
-              <div key={`folder:${row.path}`} role="presentation" className="flex h-[26px] items-center gap-1.5 pr-2 text-[13px] text-text-secondary" style={pad}>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
-                <Folder className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
-                <span className="truncate">{row.name}</span>
-                {row.hint && <span className="ml-auto shrink-0 text-[11px] text-text-tertiary">{row.hint}</span>}
-              </div>
-            );
-          }
-          const selected = row.path === file;
-          const dirty = drafts[fileKey(plugin.name, row.path)] !== undefined;
-          return (
-            <button
-              key={row.path}
-              type="button"
-              role="treeitem"
-              aria-selected={selected}
-              data-profiles-item
-              data-focus-entry={selected ? '' : undefined}
-              data-testid={`profiles-file-${row.path}`}
-              title={row.path}
-              onClick={() => {
-                openFile(row.path);
-                requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-testid="profiles-editor"]')?.focus());
-              }}
-              className={cn('mx-1.5 flex h-[26px] w-[calc(100%-0.75rem)] items-center gap-1.5 rounded-md pr-2 text-left text-[13px] focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive',
-                selected ? 'bg-surface-hover text-text-primary' : 'text-text-primary hover:bg-surface-hover')}
-              style={{ paddingLeft: pad.paddingLeft - 6 }}
-            >
-              <FileText className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
-              <span className="truncate">{row.name}</span>
-              {uses.has(row.path) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-interactive" title={`Used by ${profile.ref}`} aria-label={`used by ${profile.ref}`} />}
-              {dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-status-warning" title="Unsaved changes" aria-label="unsaved" data-testid="profiles-file-dirty" />}
-              {row.path === profile.entry && <span className="ml-auto shrink-0 text-[11px] text-text-secondary">identity</span>}
-            </button>
-          );
-        })}
-      </div>
-      <p className="px-3.5 pt-3 text-[12px] leading-snug text-text-tertiary">
-        <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-interactive align-middle" aria-hidden="true" />
-        Used by {profile.ref}. A plugin’s files are shared by its {plugin.profiles.length} profile{plugin.profiles.length === 1 ? '' : 's'}.
-      </p>
-    </div>
-  );
-}
+/**
+ * Edit details (build-6 feedback item 6): a profile's photo, title and description. The title and
+ * description go in the plugin's pane.yaml, so the agent's own file is untouched; the photo is kept
+ * on this computer, as the photo menu keeps it.
+ */
+function EditDetailsDialog({ plugin, profile, onClose, notify }: { plugin: ProfilePlugin; profile: ProfileSummary; onClose: () => void; notify: (text: string) => void }) {
+  const setProfileDetails = useProfilesStore(state => state.setDetails);
+  const photos = useProfilesStore(state => state.photos);
+  const setPhoto = useProfilesStore(state => state.setPhoto);
+  const removePhoto = useProfilesStore(state => state.removePhoto);
+  const [title, setTitle] = useState(profile.title ?? '');
+  const [description, setDescription] = useState(profile.description ?? '');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const ownPhoto = profilePhotoSource(photos, profile.ref) === 'yours';
 
-function FileEditor({ plugin, profile, file, notify }: { plugin: ProfilePlugin; profile: ProfileSummary; file: string; notify: (text: string) => void }) {
-  const key = fileKey(plugin.name, file);
-  const saved = useProfilesStore(state => state.saved[key]);
-  const draft = useProfilesStore(state => state.drafts[key]);
-  const readFile = useProfilesStore(state => state.readFile);
-  const edit = useProfilesStore(state => state.edit);
-  const save = useProfilesStore(state => state.save);
-  const used = useSessionsByProfile();
-  const [readError, setReadError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const upload = (chosen: File) => {
+    readFileAsDataUrl(chosen).then(squarePhoto).then(base64 => setPhoto(profile.ref, base64))
+      .catch(cause => setError(cause instanceof Error ? cause.message : String(cause)));
+  };
 
-  const onDisk = useProfilesStore(state => state.onDisk[key]);
-  const resolveDiskChange = useProfilesStore(state => state.resolveDiskChange);
-
-  // Opening a file always reads it again, so a change made outside the tab shows (profileDiskSync.ts).
-  useEffect(() => {
-    setReadError(null);
-    setSaveError(null);
-    readFile(plugin.name, file).catch(error => setReadError(error instanceof Error ? error.message : String(error)));
-  }, [file, plugin.name, readFile]);
-
-  const dirty = draft !== undefined;
-  const value = draft ?? saved ?? '';
-
-  const runSave = async () => {
-    if (!dirty || saving) return;
-    setSaving(true);
-    setSaveError(null);
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
     try {
-      await save(plugin.name, file);
-      const sessions = plugin.profiles.reduce((total, entry) => total + (used.get(entry.ref) ?? 0), 0);
-      notify(`Saved ${plugin.name}/${file}.${sessions ? ` ${sessions} Session${sessions === 1 ? '' : 's'} can reload it.` : ''}`);
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSaving(false);
+      await setProfileDetails(plugin.name, profile.name, { title, description });
+      notify(`Saved ${title.trim() || titleOf(profile)}’s details.`);
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setBusy(false);
     }
   };
 
-  const status = dirty
-    ? 'Unsaved changes'
-    : plugin.bundled
-      ? plugin.edited ? 'Edited: Pane updates won’t replace your copy' : 'Ships with Pane. Saving makes it yours on this computer'
-      : `${agentLabel(profile.harness)}${profile.model ? ` · ${profile.model}` : ''}`;
-
   return (
-    <div className="flex min-w-0 flex-1 flex-col" data-testid="profiles-editor-pane">
-      <div className="flex h-[44px] shrink-0 items-center gap-2 border-b border-border-primary px-4">
-        <FileText className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
-        <span className="truncate font-mono text-[13px] font-semibold" data-testid="profiles-path">{plugin.name}/{file}</span>
-        <span className="flex-1" />
-        <Button size="sm" onClick={() => { void runSave(); }} disabled={!dirty || saving} data-testid="profiles-save" title={`Save (${MOD}S)`}>
-          <Save className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{saving ? 'Saving…' : 'Save'}
-        </Button>
-      </div>
-      {onDisk !== undefined && (
-        <div role="status" data-testid="profiles-disk-changed" className="flex shrink-0 items-center gap-3 border-b border-status-warning/30 bg-status-warning/10 px-4 py-2 text-[13px] text-text-primary">
-          <span className="min-w-0 flex-1">
-            {onDisk === null
-              ? 'This file was removed outside Pane. Your unsaved edits are still here; Save puts the file back.'
-              : 'This file changed outside Pane while you were editing. Reload it, or keep your edits (Save then replaces the other version).'}
-          </span>
-          <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-disk-reload" onClick={() => resolveDiskChange(plugin.name, file, 'disk')}>
-            {onDisk === null ? 'Discard my edits' : 'Reload from disk'}
+    <Modal isOpen onClose={onClose} size="md" ariaLabel="Edit details" initialFocusRef={titleRef}>
+      <form className="p-6 pt-2" onSubmit={event => { event.preventDefault(); void submit(); }} data-testid="profiles-details-dialog">
+        <h3 className="mb-4 text-lg font-medium text-text-primary">Edit details</h3>
+        <div className="mb-4 flex items-center gap-3">
+          <ProfileAvatar profileRef={profile.ref} agent={profile.harness} size={56} />
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" data-testid="profiles-details-photo-file"
+            onChange={event => { const chosen = event.target.files?.[0]; event.target.value = ''; if (chosen) upload(chosen); }} />
+          <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-details-upload" onClick={() => fileRef.current?.click()}>
+            <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />Upload photo…
           </button>
-          <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-disk-keep" onClick={() => resolveDiskChange(plugin.name, file, 'mine')}>Keep mine</button>
+          <button type="button" className="rounded px-2 py-1 text-[13px] text-text-secondary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive disabled:opacity-50"
+            data-testid="profiles-details-initials" disabled={!ownPhoto} onClick={() => { removePhoto(profile.ref).catch(cause => setError(cause instanceof Error ? cause.message : String(cause))); }}>
+            Use initials
+          </button>
         </div>
-      )}
-      {readError && saved === undefined
-        ? <p role="alert" className="p-4 text-[13px] text-status-error">{readError}</p>
-        : (
-          <textarea
-            aria-label={`Edit ${plugin.name}/${file}`}
-            data-testid="profiles-editor"
-            spellCheck={false}
-            value={value}
-            disabled={saved === undefined}
-            onChange={event => edit(plugin.name, file, event.target.value)}
-            onKeyDown={event => {
-              if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-                event.preventDefault();
-                void runSave();
-              }
-            }}
-            className="min-h-0 flex-1 resize-none bg-bg-primary px-4 py-3 font-mono text-[13px] leading-[1.55] text-text-primary focus:outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--color-interactive)]"
-          />
-        )}
-      {saveError && <p role="alert" className="border-t border-border-primary px-4 py-2 text-[12.5px] text-status-error" data-testid="profiles-save-error">{saveError}</p>}
-      <div className="flex h-[34px] shrink-0 items-center border-t border-border-primary px-4 text-[12px] text-text-secondary" data-testid="profiles-editor-status">{status}</div>
-    </div>
+        <label className="mb-1 block text-[12.5px] font-medium text-text-primary" htmlFor="profiles-details-title">Title</label>
+        <input id="profiles-details-title" ref={titleRef} value={title} onChange={event => setTitle(event.target.value)} placeholder={profileDisplayName(profile.ref)} autoComplete="off"
+          className="mb-3 h-8 w-full rounded-md border border-border-primary bg-surface-primary px-2.5 text-[13px] text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive" />
+        <label className="mb-1 block text-[12.5px] font-medium text-text-primary" htmlFor="profiles-details-description">Description</label>
+        <textarea id="profiles-details-description" value={description} onChange={event => setDescription(event.target.value)} rows={3}
+          className="mb-2 w-full rounded-md border border-border-primary bg-surface-primary px-2.5 py-1.5 text-[13px] text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive" />
+        <p className="mb-4 text-[12px] text-text-secondary">
+          Saved in {plugin.name}/pane.yaml. The agent’s own description in {profile.entry} is not changed. The photo is kept on this computer.
+        </p>
+        {error && <p role="alert" className="mb-3 text-[12.5px] text-status-error">{error}</p>}
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={busy} data-testid="profiles-details-save">{busy ? 'Saving…' : 'Save'}</Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -555,7 +534,8 @@ function NewProfileDialog({ onClose, notify }: { onClose: () => void; notify: (t
     setError(null);
     try {
       const result = await newProfile(name, agent);
-      open(result.plugin.name, result.plugin.profiles[0]?.name ?? name, result.path);
+      // A new profile opens on its cover page, like any other.
+      open(result.plugin.name, result.plugin.profiles[0]?.name ?? name);
       notify(`Created ${name}.`);
       onClose();
     } catch (cause) {
@@ -594,9 +574,8 @@ const NEW_FILE_TEXT = {
   reference: { title: 'New reference', placeholder: 'style-guide' },
 } satisfies Record<ProfileNewFileKind, { title: string; placeholder: string }>;
 
-function NewFileDialog({ kind, plugin, profile, onClose, notify }: { kind: ProfileNewFileKind; plugin: ProfilePlugin; profile: ProfileSummary; onClose: () => void; notify: (text: string) => void }) {
+function NewFileDialog({ kind, plugin, profile, onClose, notify, onCreated }: { kind: ProfileNewFileKind; plugin: ProfilePlugin; profile: ProfileSummary; onClose: () => void; notify: (text: string) => void; onCreated: (path: string) => void }) {
   const newFile = useProfilesStore(state => state.newFile);
-  const openFile = useProfilesStore(state => state.openFile);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -612,7 +591,7 @@ function NewFileDialog({ kind, plugin, profile, onClose, notify }: { kind: Profi
     setError(null);
     try {
       const result = await newFile(plugin.name, profile.name, kind, name);
-      openFile(result.path);
+      onCreated(result.path);
       notify(`Created ${plugin.name}/${result.path}.`);
       onClose();
     } catch (cause) {

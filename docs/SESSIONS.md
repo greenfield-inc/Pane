@@ -74,7 +74,8 @@ open **Create New** instead of the dialogs below. It asks, in order:
    (until T-83) To shows only a short list of installed profiles,
    `greenfield/orchestrator`, `greenfield/business` and `greenfield/seo`
    (`shared/agentProfiles.ts`); any other installed profile isn't offered yet.
-   It starts on the last choice made here.
+   Profiles pinned in the Profiles tab (`pinnedProfiles` in config.json) come
+   first. It starts on the last choice made here.
 2. **Name** (optional): left empty, the Session is named from its first message.
 3. **Message** (optional): the agent's first message, sent once as a one-time
    opening prompt. PNG, JPEG, WebP and GIF images up to 5 MB (a chat's limit)

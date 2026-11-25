@@ -1,0 +1,102 @@
+import type { ProfileTreeNode } from '../../../../shared/types/profileEditor';
+
+export interface FrontMatterSplit {
+  /** The YAML between the leading `---` lines; null when the file has none. */
+  frontMatter: string | null;
+  body: string;
+}
+
+export interface CoverFacts {
+  skills: string[];
+  references: string[];
+  subagents: { id: string; label: string }[];
+}
+
+/**
+ * The profile page's preview (T-63, build-6 feedback items 3-5): what kind of view a file gets, its
+ * front-matter, a sandboxed HTML page, and the facts a generated cover lists.
+ */
+
+export type PreviewKind = 'html' | 'markdown' | 'yaml' | 'text';
+
+export function previewKind(path: string): PreviewKind {
+  if (/\.html?$/i.test(path)) return 'html';
+  if (/\.(md|markdown)$/i.test(path)) return 'markdown';
+  if (/\.ya?ml$/i.test(path)) return 'yaml';
+  return 'text';
+}
+
+/** A Markdown file's front-matter (the YAML between its leading `---` lines) and its body. */
+export function splitFrontMatter(source: string): FrontMatterSplit {
+  const text = source.replace(/\r\n/g, '\n');
+  if (!text.startsWith('---\n')) return { frontMatter: null, body: source };
+  const end = text.indexOf('\n---', 3);
+  if (end < 0) return { frontMatter: null, body: source };
+  const afterFence = text.indexOf('\n', end + 4);
+  return { frontMatter: text.slice(4, end), body: afterFence < 0 ? '' : text.slice(afterFence + 1) };
+}
+
+/**
+ * An HTML file as a page the preview frame can show safely: a Content-Security-Policy that loads
+ * nothing from the network and runs no script (the frame's sandbox also forbids scripts), allowing
+ * only its own styles and inline images.
+ */
+const POLICY = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; font-src data:">';
+
+/** `baseCss` goes before the page's own styles (Pane's theme colours), so the page can override it. */
+export function sandboxedHtml(html: string, baseCss = ''): string {
+  const start = `${POLICY}${baseCss ? `<style>${baseCss.replace(/<\//g, '<\\/')}</style>` : ''}`;
+  const head = /<head[^>]*>/i.exec(html);
+  if (head) return `${html.slice(0, head.index + head[0].length)}${start}${html.slice(head.index + head[0].length)}`;
+  return `${start}${html}`;
+}
+
+/** What a generated cover lists: the profile's skills, reference files and subagents (top level only). */
+export function coverFacts(tree: readonly ProfileTreeNode[]): CoverFacts {
+  const folder = (label: string) => tree.find((node): node is Extract<ProfileTreeNode, { kind: 'folder' }> => node.kind === 'folder' && node.label === label);
+  const files = (nodes: readonly ProfileTreeNode[]): string[] => nodes.flatMap(node => (node.kind === 'file' ? [node.label] : node.kind === 'folder' ? files(node.children) : []));
+  return {
+    skills: (folder('Skills')?.children ?? []).map(node => node.label),
+    references: files(folder('References')?.children ?? []),
+    subagents: (folder('Subagents')?.children ?? []).flatMap(node => (node.kind === 'subagent' ? [{ id: node.id, label: node.label }] : [])),
+  };
+}
+
+export function findNode(tree: readonly ProfileTreeNode[], id: string): ProfileTreeNode | undefined {
+  for (const node of tree) {
+    if (node.id === id) return node;
+    if (node.kind !== 'file') {
+      const inside = findNode(node.children, id);
+      if (inside) return inside;
+    }
+  }
+  return undefined;
+}
+
+export interface TreeRow {
+  node: ProfileTreeNode;
+  depth: number;
+  /** The folder or subagent it sits in, for ← (go to parent). */
+  parent?: string;
+}
+
+/** The rows the tree shows: every node whose folders are open, in order, with its depth. */
+export function visibleRows(tree: readonly ProfileTreeNode[], open: ReadonlySet<string>, depth = 0, parent?: string): TreeRow[] {
+  return tree.flatMap(node => {
+    const row: TreeRow = { node, depth };
+    if (parent) row.parent = parent;
+    return [row, ...(node.kind !== 'file' && open.has(node.id) ? visibleRows(node.children, open, depth + 1, node.id) : [])];
+  });
+}
+
+/** The folders and subagents to open so `id` shows. */
+export function ancestorsOf(tree: readonly ProfileTreeNode[], id: string, trail: string[] = []): string[] | undefined {
+  for (const node of tree) {
+    if (node.id === id) return trail;
+    if (node.kind !== 'file') {
+      const found = ancestorsOf(node.children, id, [...trail, node.id]);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}

@@ -3,6 +3,7 @@ import {
   profilePhotosSchema,
   profileSaveResultSchema,
   profilesOverviewSchema,
+  type ProfileDetails,
   type ProfileNewFileKind,
   type ProfilePhotos,
   type ProfilePhotoSource,
@@ -11,7 +12,8 @@ import {
   type ProfilesOverview,
 } from '../../../shared/types/profileEditor';
 import { reconcileFromDisk, type FileCopy } from '../components/profiles/profileDiskSync';
-import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
+import { findNode } from '../components/profiles/profilePreview';
+import { boundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 /** Where the Profiles tab is: the list, or a profile's files with one file open. */
 type ProfilesPlace = { level: 'list' } | { level: 'profile'; plugin: string; profile: string; file: string };
@@ -45,6 +47,10 @@ interface ProfilesState {
   newProfile: (name: string, agent: string) => Promise<ProfileSaveResult>;
   newFile: (plugin: string, profile: string, kind: ProfileNewFileKind, name: string) => Promise<ProfileSaveResult>;
   restore: (plugin: string) => Promise<ProfileSaveResult>;
+  /** Edit details: a profile's title and description, saved in its plugin's pane.yaml. */
+  setDetails: (plugin: string, profile: string, details: ProfileDetails) => Promise<ProfileSaveResult>;
+  /** YAML as data for a preview (main parses it), or why it doesn't parse. */
+  parseYaml: (source: string) => Promise<{ data?: JsonValue; error?: string }>;
   setPhoto: (ref: string, base64: string) => Promise<void>;
   removePhoto: (ref: string) => Promise<void>;
 }
@@ -52,6 +58,29 @@ interface ProfilesState {
 const EMPTY_PHOTOS: ProfilePhotos = { profiles: {}, plugins: {} };
 
 export const fileKey = (plugin: string, file: string): string => `${plugin}/${file}`;
+
+/**
+ * The profile page shows a cover page or a file. A cover is `cover:` plus the tree id of the
+ * subagent it belongs to (empty for the profile itself); no file path starts with `cover:`.
+ */
+export const coverPlace = (subagentId = ''): string => `cover:${subagentId}`;
+export const isCoverPlace = (file: string): boolean => file.startsWith('cover:');
+
+/** The file a page place shows on disk: the file itself, or a cover's own file when it has one. */
+export function shownFile(overview: ProfilesOverview | null, plugin: string, profile: string, file: string): string | undefined {
+  if (!isCoverPlace(file)) return file;
+  const entry = overview?.plugins.find(item => item.name === plugin);
+  const summary = entry?.profiles.find(item => item.name === profile);
+  const id = file.slice('cover:'.length);
+  if (!id) return summary?.cover;
+  const node = summary ? findNode(summary.tree, id) : undefined;
+  const ref = node?.kind === 'subagent' ? node.profile : undefined;
+  return ref ? entry?.profiles.find(item => item.ref === ref)?.cover : undefined;
+}
+
+const yamlAnswer = boundary.object({ data: boundary.optional(boundary.json), error: boundary.optional(boundary.string) });
+/** Parsed YAML by source: previews ask again on every render. */
+const parsedYaml = new Map<string, { data?: JsonValue; error?: string }>();
 
 function api() {
   const profiles = window.electronAPI?.profiles;
@@ -142,10 +171,8 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
         set({ photosLoaded: true });
       }
     },
-    open: (plugin, profile, file) => {
-      const entry = get().overview?.plugins.find(item => item.name === plugin)?.profiles.find(item => item.name === profile);
-      set({ place: { level: 'profile', plugin, profile, file: file ?? entry?.entry ?? 'plugin.yaml' } });
-    },
+    // A profile opens on its cover page (build-6 feedback item 3).
+    open: (plugin, profile, file) => set({ place: { level: 'profile', plugin, profile, file: file ?? coverPlace() } }),
     openFile: (file) => {
       const place = get().place;
       if (place.level === 'profile') set({ place: { ...place, file } });
@@ -163,25 +190,23 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
         const overview = await answer(api().list(), profilesOverviewSchema).catch(() => undefined);
         if (overview && JSON.stringify(overview) !== JSON.stringify(get().overview)) set({ overview, error: null });
         const place = get().place;
-        const openKey = place.level === 'profile' ? fileKey(place.plugin, place.file) : null;
+        const shown = place.level === 'profile' ? shownFile(get().overview, place.plugin, place.profile, place.file) : undefined;
+        const openKey = place.level === 'profile' && shown ? fileKey(place.plugin, shown) : null;
         // Files you aren't looking at and haven't edited are read again when opened.
         set(state => ({ saved: Object.fromEntries(Object.entries(state.saved).filter(([key]) => key === openKey || key in state.drafts)) }));
-        if (place.level !== 'profile' || !openKey) return;
+        if (place.level !== 'profile' || !openKey || !shown) return;
         const plugin = get().overview?.plugins.find(entry => entry.name === place.plugin);
         if (!plugin) return;
         let disk: string | null | undefined = null;
-        if (plugin.files.includes(place.file)) disk = await answer(api().read(place.plugin, place.file), boundary.string).catch(() => undefined);
+        if (plugin.files.includes(shown)) disk = await answer(api().read(place.plugin, shown), boundary.string).catch(() => undefined);
         if (disk === undefined) return;
         set(state => {
           // You may have opened another file while it was read.
           const now = state.place;
-          if (now.level !== 'profile' || fileKey(now.plugin, now.file) !== openKey) return {};
+          if (now.level !== 'profile' || now.file !== place.file || now.plugin !== place.plugin) return {};
           const next = withCopy(state, openKey, reconcileFromDisk(copyOf(state, openKey), disk));
-          // A file removed on disk with nothing of yours in it gives way to the profile's identity.
-          if (disk === null && !(openKey in next.drafts)) {
-            const entry = plugin.profiles.find(item => item.name === now.profile)?.entry;
-            return { ...next, place: { ...now, file: entry ?? 'plugin.yaml' } };
-          }
+          // A file removed on disk with nothing of yours in it gives way to the profile's cover page.
+          if (disk === null && !(openKey in next.drafts) && !isCoverPlace(now.file)) return { ...next, place: { ...now, file: coverPlace() } };
           return next;
         });
       } finally {
@@ -198,10 +223,9 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
           return withCopy(state, key, { saved: copy.onDisk ?? copy.saved, draft: copy.draft });
         }
         if (copy.onDisk !== null) return withCopy(state, key, { saved: copy.onDisk });
-        // Taking the disk's version of a removed file: it is gone, so open the profile's identity.
+        // Taking the disk's version of a removed file: it is gone, so open the profile's cover page.
         const place = state.place;
-        const entry = place.level === 'profile' ? state.overview?.plugins.find(item => item.name === place.plugin)?.profiles.find(item => item.name === place.profile)?.entry : undefined;
-        return { ...withCopy(state, key, {}), place: place.level === 'profile' && entry ? { ...place, file: entry } : place };
+        return { ...withCopy(state, key, {}), place: place.level === 'profile' && place.file === file ? { ...place, file: coverPlace() } : place };
       });
     },
     edit: (plugin, file, content) => {
@@ -239,14 +263,23 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
     restore: async (plugin) => {
       const result = applied(await answer(api().restore(plugin), profileSaveResultSchema));
       set(state => {
-        // A file you added (New subagent, New skill) is gone after a restore: open the profile's identity instead.
+        // A file you added (New subagent, New skill) is gone after a restore: open the profile's cover instead.
         const current = state.place;
-        const place = current.level === 'profile' && current.plugin === plugin && !result.plugin.files.includes(current.file)
-          ? { ...current, file: result.plugin.profiles.find(item => item.name === current.profile)?.entry ?? result.path }
+        const place = current.level === 'profile' && current.plugin === plugin && !isCoverPlace(current.file) && !result.plugin.files.includes(current.file)
+          ? { ...current, file: coverPlace() }
           : current;
         return { place, saved: withoutPlugin(state.saved, plugin), drafts: withoutPlugin(state.drafts, plugin), onDisk: withoutPlugin(state.onDisk, plugin) };
       });
       return result;
+    },
+    setDetails: async (plugin, profile, details) => applied(await answer(api().setDetails(plugin, profile, details), profileSaveResultSchema)),
+    parseYaml: async (source) => {
+      const known = parsedYaml.get(source);
+      if (known) return known;
+      const parsed = await answer(api().parseYaml(source), yamlAnswer).catch(error => ({ error: error instanceof Error ? error.message : String(error) }));
+      if (parsedYaml.size > 200) parsedYaml.clear();
+      parsedYaml.set(source, parsed);
+      return parsed;
     },
     setPhoto: async (ref, base64) => {
       await answer(api().setPhoto(ref, base64), nothing);
