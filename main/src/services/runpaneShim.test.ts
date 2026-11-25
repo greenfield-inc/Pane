@@ -179,7 +179,13 @@ describe('the agent-farm shim', () => {
     expect(telemetry()).toBe('TELEMETRY=off');
     fs.mkdirSync(configRoot, { recursive: true });
     fs.writeFileSync(path.join(configRoot, 'settings.json'), JSON.stringify({ telemetry: { enabled: true } }));
+    // Review F-2: Pane's saved switch (config.json) decides; settings.json alone doesn't turn it on.
+    expect(telemetry()).toBe('TELEMETRY=off');
+    fs.writeFileSync(path.join(appDirectory, 'config.json'), JSON.stringify({ agentFarmTelemetry: true }));
     expect(telemetry()).toBe('TELEMETRY=undefined');
+    fs.writeFileSync(path.join(appDirectory, 'config.json'), JSON.stringify({ agentFarmTelemetry: false }));
+    expect(telemetry()).toBe('TELEMETRY=off');
+    fs.writeFileSync(path.join(appDirectory, 'config.json'), JSON.stringify({ agentFarmTelemetry: true }));
     fs.writeFileSync(path.join(configRoot, 'settings.json'), JSON.stringify({ telemetry: { enabled: false } }));
     expect(telemetry()).toBe('TELEMETRY=off');
     expect(telemetry({ AGENT_FARM_TELEMETRY: 'on' })).toBe('TELEMETRY=on');

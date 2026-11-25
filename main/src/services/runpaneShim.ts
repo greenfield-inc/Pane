@@ -252,8 +252,8 @@ function windowsNodeShim(execPath: string): string {
  * agent-farm.cjs: runs the bundled Agent Farm CLI in this process with `--config-root` added
  * before any `--`. A command that names its own config root, or needs none (version, help), runs
  * as typed. The bare menu, init and doctor only ever use ~/.config/agent-farm, which Pane leaves
- * alone, so they are refused. With Pane's telemetry switch off it sets AGENT_FARM_TELEMETRY=off,
- * as bundledAgentFarmProcess does.
+ * alone, so they are refused. Unless Pane's saved telemetry switch and settings.json both say on,
+ * it sets AGENT_FARM_TELEMETRY=off, as bundledAgentFarmProcess does.
  */
 function agentFarmLauncher(target: AgentFarmShimTarget): string {
   return [
@@ -262,6 +262,7 @@ function agentFarmLauncher(target: AgentFarmShimTarget): string {
     "'use strict';",
     `const entry = ${JSON.stringify(target.entry)};`,
     `const configRoot = ${JSON.stringify(target.configRoot)};`,
+    `const paneConfig = ${JSON.stringify(path.join(path.dirname(target.configRoot), 'config.json'))};`,
     'const args = process.argv.slice(2);',
     "const end = args.includes('--') ? args.indexOf('--') : args.length;",
     'const options = args.slice(0, end);',
@@ -273,10 +274,13 @@ function agentFarmLauncher(target: AgentFarmShimTarget): string {
     '} else {',
     "  const asTyped = (args.length === 1 && ['version', '--version', '-v'].includes(first)) || first === 'help'",
     "    || options.some(arg => arg === '--help' || arg === '-h' || arg === '--config-root' || arg.startsWith('--config-root='));",
-    "  // Pane's telemetry switch (settings.json) loses to a repository's workspace.yaml; AGENT_FARM_TELEMETRY doesn't.",
+    "  // A repository's workspace.yaml outranks settings.json; AGENT_FARM_TELEMETRY outranks it. Pane's saved",
+    "  // switch (config.json) and settings.json must both say on, so a saved opt-out always wins.",
     "  if (!process.env.AGENT_FARM_TELEMETRY) {",
-    "    let on = false;",
-    "    try { on = JSON.parse(require('fs').readFileSync(require('path').join(configRoot, 'settings.json'), 'utf8')).telemetry.enabled === true; } catch {}",
+    "    const read = file => { try { return JSON.parse(require('fs').readFileSync(file, 'utf8')); } catch { return undefined; } };",
+    "    const saved = read(paneConfig);",
+    "    const settings = read(require('path').join(configRoot, 'settings.json'));",
+    "    const on = !!saved && saved.agentFarmTelemetry === true && !!settings && !!settings.telemetry && settings.telemetry.enabled === true;",
     "    if (!on) process.env.AGENT_FARM_TELEMETRY = 'off';",
     '  }',
     "  process.argv = [process.argv[0], entry, ...(asTyped ? args : [...options, '--config-root', configRoot, ...args.slice(end)])];",

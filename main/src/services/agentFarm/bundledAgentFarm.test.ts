@@ -1,4 +1,5 @@
-import { execFileSync } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
+import { promisify } from 'util';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
@@ -121,8 +122,15 @@ describe('bundledAgentFarmProcess', () => {
     expect(env()).toBe('off');
     await writeAgentFarmTelemetry(paneDir, false);
     expect(env()).toBe('off');
+    writeFileSync(path.join(paneDir, 'config.json'), JSON.stringify({ agentFarmTelemetry: true }));
     await writeAgentFarmTelemetry(paneDir, true);
     expect(env()).toBeUndefined();
+    // Review F-2: Pane's saved switch is off but settings.json still says on (its write failed).
+    writeFileSync(path.join(paneDir, 'config.json'), JSON.stringify({ agentFarmTelemetry: false }));
+    expect(env()).toBe('off');
+    writeFileSync(path.join(paneDir, 'config.json'), '{ not json');
+    expect(env()).toBe('off');
+    writeFileSync(path.join(paneDir, 'config.json'), JSON.stringify({ agentFarmTelemetry: true }));
     await writeAgentFarmTelemetry(paneDir, false);
     expect(bundledAgentFarmProcess(bundle, ['run', 'p'], agentFarmConfigRoot(paneDir), { AGENT_FARM_TELEMETRY: 'on' }).env.AGENT_FARM_TELEMETRY).toBe('on');
   });
@@ -174,6 +182,28 @@ describe('installBundledAgentFarm with the pinned package', () => {
     const status = await installBundledAgentFarm({ paneDir, bundle: { ...bundle, version: '9.9.8' }, log: () => undefined });
     expect(status.error).toBeUndefined();
     expect(status).toMatchObject({ state: 'ready', edited: ['dcouple'] });
+  }, 180_000);
+});
+
+describe('installBundledAgentFarm after a partial install (review F-1)', () => {
+  /** Runs Agent Farm for real, but fails the named plugin's install as a timeout or crash would. */
+  const failing = (plugin?: string) => async (agentFarm: AgentFarmProcess) => {
+    if (plugin && agentFarm.args.includes(plugin)) throw Object.assign(new Error('Command failed'), { stderr: 'error: timed out\n' });
+    return (await promisify(execFile)(agentFarm.executable, agentFarm.args, { env: agentFarm.env })).stdout;
+  };
+
+  it('keeps an edit to a plugin that finished installing when a later plugin failed, and installs the failed one on retry', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    const failed = await installBundledAgentFarm({ paneDir, run: failing('dcouple'), log: () => undefined });
+    expect(failed.state).toBe('failed');
+    const advisor = path.join(configRoot, 'plugins', 'greenfield', 'agents', 'advisor.md');
+    writeFileSync(advisor, '\nMine.\n', { flag: 'a' });
+    const retried = await installBundledAgentFarm({ paneDir, run: failing(), log: () => undefined });
+    expect(retried.error).toBeUndefined();
+    expect(retried).toMatchObject({ state: 'ready', edited: ['greenfield'] });
+    expect(readFileSync(advisor, 'utf8')).toContain('Mine.');
+    expect(readFileSync(path.join(configRoot, '.plugins', 'dcouple.json'), 'utf8')).toContain('"name": "dcouple"');
   }, 180_000);
 });
 
