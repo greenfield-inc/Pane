@@ -3,6 +3,7 @@ import * as Clipboard from 'expo-clipboard';
 import { ActivityIndicator, Image, Pressable, StyleSheet, View } from 'react-native';
 import { useMarkdown } from 'react-native-marked';
 
+import { referenceSegments } from '@shared/composerMentions';
 import { deviceMarkerOf } from '@shared/deviceMarker';
 import type { PlanEntry, StepGroup, WorkerNote } from '@shared/chatTabPresentation';
 import { describeChatContent } from '@shared/agentChatPresentation';
@@ -23,6 +24,10 @@ export interface ChatRowActions {
   onOpenWorker?: (paneId: string) => void;
   /** Opens a device tab, from a device_open step's Open. */
   onOpenDevice?: (panelId: string) => void;
+  /** The agent's skills, marked in sent messages. */
+  skills?: ReadonlySet<string>;
+  /** Opens a file a sent message names. */
+  onOpenFile?: (path: string) => void;
   /** Draws a `block` row (a fenced block in a language the screen registered). */
   renderBlock?: (language: string, content: string) => ReactNode;
 }
@@ -87,6 +92,20 @@ function UserBubble({ children, at }: { children: ReactNode; at?: string }) {
     <View style={[styles.user, { backgroundColor: theme.chat.muted }]}>{children}</View>
     {shown && <Text accessibilityLiveRegion="polite" variant="footnote" style={{ color: theme.chat.mutedForeground, textAlign: 'right' }}>{at}</Text>}
   </Pressable>;
+}
+
+const NO_SKILLS: ReadonlySet<string> = new Set();
+
+/** A sent message's text with its references marked; a tap on a file opens it. */
+function UserText({ text, actions }: { text: string; actions: ChatRowActions }) {
+  const theme = useTheme();
+  const tint = { color: theme.chat.foreground, backgroundColor: theme.chat.border };
+  return <Text style={{ color: theme.chat.foreground }}>{referenceSegments(text, actions.skills ?? NO_SKILLS).map(segment => {
+    const { reference } = segment;
+    if (!reference) return segment.text;
+    if (reference.kind !== 'file' || !actions.onOpenFile) return <Text key={segment.start} style={tint}>{segment.text}</Text>;
+    return <Text key={segment.start} testID={`chat-open-file-${reference.path}`} accessibilityRole="link" style={tint} onPress={() => actions.onOpenFile!(reference.path)}>{segment.text}</Text>;
+  })}</Text>;
 }
 
 const STEP_ICONS = {
@@ -161,7 +180,7 @@ export const ChatRowView = memo(function ChatRowView({ row, actions }: { row: Ch
       const copy = userMarkdown({ id: row.key, user: row.message, items: [], running: false });
       return <View style={styles.userRow}>
         <UserBubble at={row.at}>{row.message.parts.map((part, index) => {
-          if (part.type === 'text') return <Text key={index} style={{ color: theme.chat.foreground }}>{part.text}</Text>;
+          if (part.type === 'text') return <UserText key={index} text={part.text} actions={actions} />;
           const picture = part.type === 'content' ? imageOf(part.content) : undefined;
           return picture ? <Image key={index} accessibilityLabel="Attached image" source={{ uri: `data:${picture.mimeType};base64,${picture.data}` }} style={styles.image} /> : null;
         })}</UserBubble>

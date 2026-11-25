@@ -1,5 +1,8 @@
 import { AttachmentPrimitive, ComposerPrimitive, useAuiState } from '@assistant-ui/react-native';
-import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { Image, Pressable, ScrollView, StyleSheet, Text as RNText, View } from 'react-native';
+
+import type { ComposerMark } from '@shared/composerMentions';
 
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
@@ -20,6 +23,19 @@ function ChatAttachment({ locked }: { locked: boolean }) {
   </AttachmentPrimitive.Root>;
 }
 
+/** The draft as styled text: React Native draws a TextInput's children in place of its value. */
+function markedText(text: string, marks: readonly ComposerMark[], tint: string) {
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (const { start, end } of marks) {
+    if (start > at) parts.push(<RNText key={at}>{text.slice(at, start)}</RNText>);
+    parts.push(<RNText key={start} style={{ backgroundColor: tint }}>{text.slice(start, end)}</RNText>);
+    at = end;
+  }
+  if (at < text.length) parts.push(<RNText key={at}>{text.slice(at)}</RNText>);
+  return parts;
+}
+
 export interface ChatTabComposerProps {
   agent: string;
   placeholder: string;
@@ -38,7 +54,12 @@ export interface ChatTabComposerProps {
   canConfigure: boolean;
   /** Shows the agent's settings control; false leaves its space empty (Autopilot's chat has none to change). */
   settings?: boolean;
+  /** The picked references to tint in the message box. */
+  marks: readonly ComposerMark[];
+  /** Where a pick left the caret, until the input reports it there. */
+  caret?: number;
   onDraft: (text: string) => void;
+  onCaret: (start: number, end: number) => void;
   onAttach: () => void;
   onSettings: () => void;
   onStop: () => void;
@@ -48,10 +69,11 @@ export interface ChatTabComposerProps {
  * The phone's composer on assistant-ui's primitives: the runtime holds the text and
  * the attached images and hands a send to the screen's onNew. Pane draws it.
  */
-export function ChatTabComposer({ agent, placeholder, disabled, pending, working, canStop, canAttach, model, effort, riskyMode, canConfigure, settings = true, onDraft, onAttach, onSettings, onStop }: ChatTabComposerProps) {
+export function ChatTabComposer({ agent, placeholder, disabled, pending, working, canStop, canAttach, model, effort, riskyMode, canConfigure, settings = true, marks, caret, onDraft, onCaret, onAttach, onSettings, onStop }: ChatTabComposerProps) {
   const theme = useTheme();
   const empty = useAuiState(state => state.composer.isEmpty);
   const attached = useAuiState(state => state.composer.attachments.length > 0);
+  const text = useAuiState(state => state.composer.text);
   const sendDisabled = disabled || pending || empty;
   // Settings › Autocorrect (D-155). A message is prose, so it keeps sentence capitals and
   // smart punctuation, unlike the terminal's box.
@@ -61,7 +83,10 @@ export function ChatTabComposer({ agent, placeholder, disabled, pending, working
       <ComposerPrimitive.Attachments>{() => <ChatAttachment locked={pending} />}</ComposerPrimitive.Attachments>
     </ScrollView>}
     <ComposerPrimitive.Input {...autocorrect} autoCapitalize="sentences" testID="chat-input" accessibilityLabel={`Message ${agent}`} placeholder={placeholder} placeholderTextColor={theme.chat.mutedForeground}
-      onChange={event => onDraft(event.nativeEvent.text)} editable={!pending} multiline style={[styles.input, { color: theme.chat.foreground }]} />
+      onChange={event => onDraft(event.nativeEvent.text)} onSelectionChange={event => onCaret(event.nativeEvent.selection.start, event.nativeEvent.selection.end)}
+      selection={caret === undefined ? undefined : { start: caret, end: caret }}
+      editable={!pending} multiline style={[styles.input, { color: theme.chat.foreground }]}
+      {...(marks.length ? { value: undefined, children: markedText(text, marks, theme.chat.border) } : undefined)} />
     <View style={styles.actions}>
       {canAttach && <ComposerPrimitive.AddAttachment testID="chat-attach" accessibilityLabel="Attach image" disabled={disabled || pending} onPress={onAttach}
         style={[styles.target, { opacity: disabled || pending ? 0.5 : 1 }]}>
