@@ -97,12 +97,13 @@ function titleCase(name: string): string {
  * Why an Agent Farm command failed, in one line: its `error:` line (a YAML error prints a code
  * snippet after it, ending in a caret line), else its last line, else `fallback`. Each of `folders` is shown as `shownAs`.
  */
-function agentFarmReason(failure: { stderr: string; fallback: string }, folders: string[] = [], shownAs = ''): string {
+export function agentFarmReason(failure: { stderr: string; fallback: string }, folders: string[] = [], shownAs = ''): string {
   const lines = failure.stderr.split('\n').map(line => line.trim()).filter(Boolean);
   const line = lines.find(entry => /^error:/i.test(entry)) ?? lines.at(-1) ?? failure.fallback;
   let reason = line.replace(/^(error:\s*)+/i, '').replace(/[:.]+$/, '');
   for (const folder of folders) reason = reason.split(folder).join(shownAs);
-  return reason;
+  // A plugin-relative path reads with / on every system (Windows prints labtest\agents\writer.md).
+  return shownAs ? reason.replace(new RegExp(`${shownAs}[\\\\/][^\\s:]*`, 'g'), match => match.split('\\').join('/')) : reason;
 }
 
 const stderrSchema = boundary.object({ stderr: boundary.string });

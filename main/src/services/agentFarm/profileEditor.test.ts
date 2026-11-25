@@ -3,7 +3,7 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { agentFarmConfigRoot, bundledAgentFarm, bundledAgentFarmProcess, installBundledAgentFarm, listPaneAgentFarmProfiles } from './bundledAgentFarm';
-import { ProfileEditor } from './profileEditor';
+import { ProfileEditor, agentFarmReason } from './profileEditor';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
@@ -202,4 +202,13 @@ describe('ProfileEditor: Pane\'s own plugins (A-3)', () => {
     expect(manifest.edited ?? []).not.toContain('dcouple');
     await expect(profiles.restore('labtest')).rejects.toMatchObject({ code: 'PROFILE_NOT_BUNDLED' });
   }, 240_000);
+});
+
+describe('agentFarmReason', () => {
+  it('takes the error line over a YAML snippet, and shows the staged folder as the plugin with / on Windows too', () => {
+    const stderr = 'error: C:\\Pane\\agent-farm\\drafts\\.staging-labtest-1\\agents\\writer.md: Flow sequence at line 3, column 8:\n\n  bad: [x\n  ^\n';
+    expect(agentFarmReason({ stderr, fallback: 'failed' }, ['C:\\Pane\\agent-farm\\drafts\\.staging-labtest-1'], 'labtest'))
+      .toBe('labtest/agents/writer.md: Flow sequence at line 3, column 8');
+    expect(agentFarmReason({ stderr: '', fallback: 'spawn failed' })).toBe('spawn failed');
+  });
 });
