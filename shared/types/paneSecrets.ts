@@ -96,7 +96,7 @@ export interface PaneLoginUse {
   pane: string;
   /** ISO time. */
   at: string;
-  /** The machine it happened on, when Settings lists more than this one. */
+  /** The machine it happened on, as Settings lists it. */
   machine?: string;
 }
 

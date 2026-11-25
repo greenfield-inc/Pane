@@ -227,7 +227,7 @@ function registerSettingsChannels(ipcMain: Pick<IpcMain, 'handle'>, secrets: () 
       machines,
       leaseLengths: config.secretLeaseLengths ?? {},
       moveVault: config.onePasswordMoveVault ?? null,
-      loginUses: [...await uses().recent(), ...loginUses].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)),
+      loginUses: [...(await uses().recent()).map(use => ({ ...use, machine: localHostLabel() })), ...loginUses].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)),
     };
   }));
   ipcMain.handle('pane-secrets:set-reference', (_event, project: PaneCommandValue, name: PaneCommandValue, reference: PaneCommandValue, sites: PaneCommandValue) => respond(async () => {
