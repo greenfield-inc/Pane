@@ -372,8 +372,10 @@ chosen }`).
 
 ### The Session row's avatar and spinner
 
-On the desktop, a Session row starts with its profile's avatar where an activity
-icon used to be, so names start where they did: a profile's initials on a tinted
+On the desktop, a Session row starts with its profile's avatar at the row's left
+padding, with no slot reserved before it. A Session with Panes shows its expand
+chevron in the avatar's place while you hover the row or the chevron has keyboard
+focus. The avatar is a profile's initials on a tinted
 circle (the `--color-avatar-1` to `--color-avatar-8` theme tokens), or Claude's
 or Codex's logo for the agent on its own and for a Session from before profiles,
 or another agent's initial. Profile photos arrive with the Profiles tab. A grey

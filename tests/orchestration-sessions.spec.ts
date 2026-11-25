@@ -321,13 +321,14 @@ test('a Session row shows its profile\'s avatar where the activity icon was, and
   await expect(row('plain').getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Codex, no profile');
   // A Session from before profiles shows its agent's logo.
   await expect(row('older').getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Claude, no profile');
-  // The 16px avatar takes the 12px icon's place (-2px each side): names start 8 + 12 + 8 px into the row, as before.
+  // No reserved left slot: the avatar starts at the row's 8px padding and the name 8px after it.
   for (const id of ['profiled', 'plain', 'older']) {
     const button = await layoutBox(row(id));
     const name = await layoutBox(row(id).locator('span.truncate').first());
-    expect(name.x - button.x).toBe(28);
     const avatar = await layoutBox(row(id).getByTestId('profile-avatar'));
+    expect(avatar.x - button.x).toBe(8);
     expect(avatar.width).toBe(16);
+    expect(name.x - button.x).toBe(8 + 16 + 8);
   }
   await expect(row('profiled').getByTestId('session-activity-icon')).toHaveAttribute('data-state', 'working');
   await expect(row('plain').getByTestId('session-activity-icon')).toHaveCount(0);
@@ -336,6 +337,33 @@ test('a Session row shows its profile\'s avatar where the activity icon was, and
   const button = await layoutBox(row('profiled'));
   expect(button.x + button.width - (spinner.x + spinner.width)).toBeLessThanOrEqual(8);
   await page.screenshot({ path: testInfo.outputPath('j18-session-rows.png') });
+});
+
+test('a Session with Panes shows its expand chevron in the avatar\'s place on hover and keyboard focus (T-63)', async ({ page }) => {
+  const at = '2026-09-16T12:00:00.000Z';
+  await installSessionsFixture(page, [
+    { ...sessionFixture('parent', 'Parent', '', '', at, [{ paneId: 'child', panelIds: [], attachedAt: at }]), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' } },
+    { ...sessionFixture('lone', 'Lone', '', '', at), agentProfile: { ref: 'pane/claude', hash: 'h' } },
+  ], [paneFixture('child', 'feature/child')]);
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+  const parent = page.getByTestId('orchestration-session-parent');
+  const toggle = page.getByRole('button', { name: 'Expand Parent Panes', exact: true });
+  await expect(page.getByRole('button', { name: /Lone Panes/ })).toHaveCount(0);
+  // The chevron sits exactly over the avatar, hidden until wanted.
+  expect(await layoutBox(toggle)).toEqual(await layoutBox(parent.getByTestId('profile-avatar')));
+  await page.mouse.move(900, 600);
+  await expect(toggle).toHaveCSS('opacity', '0');
+  await expect(parent.getByTestId('profile-avatar')).toBeVisible();
+  await parent.focus();
+  await page.keyboard.press('Tab');
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toHaveCSS('opacity', '1');
+  await expect(toggle).toHaveCSS('box-shadow', /rgb/);
+  await expect(parent.getByTestId('profile-avatar')).toBeHidden();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('button', { name: 'Collapse Parent Panes', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#orchestration-session-panes-sessions-parent')).toBeVisible();
 });
 
 test('Run on another machine lists that machine\'s own profiles and creates the Session there', async ({ page }) => {

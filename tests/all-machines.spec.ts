@@ -209,10 +209,20 @@ test('a Session row shows its avatar where the activity icon was, and a spinner 
   const plain = sessionRows(page).filter({ hasText: 'Spring sale launch' });
   await expect(row.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Profile Greenfield orchestrator');
   await expect(plain.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Claude, no profile');
-  // The 16px avatar takes the 12px icon's place (with -2px each side), so the name starts where it did.
-  const nameX = async (target: typeof row) => (await layoutBox(target.locator('span.truncate').first())).x;
-  const toggleRight = async (target: typeof row) => { const box = await layoutBox(target.getByRole('button', { name: /^(Expand|Collapse) / })); return box.x + box.width; };
-  expect(await nameX(row) - await toggleRight(row)).toBe(6 + 12 + 6);
+  // No reserved left slot: the avatar starts at the row's 8px padding and the name 6px after it,
+  // and a Session with Panes shows its chevron over the avatar only on hover or keyboard focus.
+  const offsets = async (target: typeof row) => {
+    const box = await layoutBox(target);
+    return { avatar: (await layoutBox(target.getByTestId('profile-avatar'))).x - box.x, name: (await layoutBox(target.locator('span.truncate').first())).x - box.x };
+  };
+  expect(await offsets(row)).toEqual({ avatar: 8, name: 8 + 16 + 6 });
+  expect(await offsets(plain)).toEqual({ avatar: 8, name: 8 + 16 + 6 });
+  const toggle = row.getByRole('button', { name: 'Expand Backup rotation', exact: true });
+  expect(await layoutBox(toggle)).toEqual(await layoutBox(row.getByTestId('profile-avatar')));
+  await page.mouse.move(900, 600);
+  await expect(toggle).toHaveCSS('opacity', '0');
+  await row.hover();
+  await expect(toggle).toHaveCSS('opacity', '1');
   await expect(row.getByTestId('session-activity-icon')).toHaveCount(0);
   await (await mock(page)).evaluate((api, build) => api.emitMachineEvent(
     { type: 'event', machineId: 'build', channel: 'orchestration-sessions:activity', args: [] }, { build },
@@ -222,7 +232,7 @@ test('a Session row shows its avatar where the activity icon was, and a spinner 
   const spinnerBox = await layoutBox(spinner);
   const markBox = await layoutBox(row.getByTestId('all-machines-mark-slot'));
   expect(markBox.x - (spinnerBox.x + spinnerBox.width)).toBeLessThanOrEqual(6);
-  expect(await nameX(row) - await toggleRight(row)).toBe(6 + 12 + 6);
+  expect(await offsets(row)).toEqual({ avatar: 8, name: 8 + 16 + 6 });
   await page.screenshot({ path: testInfo.outputPath('j18-all-machines-rows.png') });
 });
 

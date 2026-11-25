@@ -443,6 +443,14 @@ export function OrchestrationSessionNav({
     const moveLabel = session.move && session.move.state !== 'moved' ? moveMarkLabel(session.move) : null;
     const arriving = session.move?.state === 'arriving';
     const loopName = loopsBySessionTarget.get(session.id)?.name;
+    // The row's first mark (avatar, loop or paused glyph) starts at its left padding, in one 16px box
+    // (T-63). A Session with Panes shows its expand chevron in that box on hover or keyboard focus.
+    const leading = (mark: ReactNode) => (
+      <span className={cn(
+        'flex h-4 w-4 flex-shrink-0 items-center justify-center',
+        paneRows.length > 0 && 'group-hover/orchestration-row:invisible group-has-[[data-session-panes-toggle]:focus-visible]/orchestration-row:invisible',
+      )}>{mark}</span>
+    );
     const rowButton = (
       <button
         type="button"
@@ -464,19 +472,18 @@ export function OrchestrationSessionNav({
       >
         {moveLabel ? (
           <>
-            <PausedGlyph size="sm" className="flex-shrink-0" />
+            {leading(<PausedGlyph size="sm" />)}
             <span className="min-w-0 flex-1 truncate text-[13px] text-text-muted">{label}</span>
             <span data-testid="session-move-label" className="max-w-[55%] flex-shrink-0 truncate text-[11px] text-text-tertiary">{moveLabel}</span>
           </>
         ) : session.paused ? (
           <>
-            <PausedGlyph size="sm" className="flex-shrink-0" />
+            {leading(<PausedGlyph size="sm" />)}
             <span className="min-w-0 flex-1 truncate text-[13px] text-text-muted">{label}</span>
           </>
         ) : (
           <>
-            {/* The avatar takes the 12px activity icon's place: 16px wide with -2px each side, so names start where they did. */}
-            {loopName !== undefined ? <LoopMark loopName={loopName} /> : <ProfileAvatar profileRef={session.agentProfile?.ref} agent={session.agent} size={16} className="-mx-0.5" />}
+            {leading(loopName !== undefined ? <LoopMark loopName={loopName} /> : <ProfileAvatar profileRef={session.agentProfile?.ref} agent={session.agent} size={16} />)}
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
             {loopName !== undefined && <LoopLabel loopName={loopName} />}
             <SessionApprovalsCount sessionId={session.id} opensApprovals otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
@@ -499,15 +506,16 @@ export function OrchestrationSessionNav({
           'group/orchestration-row relative mx-2 flex h-7 w-[calc(100%-1rem)] items-center rounded-md text-[13px] transition-colors',
           isOpen ? 'bg-surface-selected text-text-primary' : 'text-text-secondary hover:bg-surface-hover',
         )}>
-          {paneRows.length > 0 ? (
+          {session.paused && !moveLabel ? <Tooltip content={<PausedTooltipLines mark={session.paused} />} side="right">{rowButton}</Tooltip> : rowButton}
+          {paneRows.length > 0 && (
             <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} Panes`}
               aria-expanded={expanded} aria-controls={panesId}
+              data-session-panes-toggle
               onClick={() => toggleSessionExpanded(session.id)}
-              className="ml-1 flex h-6 w-4 flex-shrink-0 items-center justify-center rounded hover:bg-surface-hover focus:outline-none">
+              className="absolute left-2 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-text-tertiary opacity-0 hover:text-text-primary focus:outline-none focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-interactive group-hover/orchestration-row:opacity-100">
               {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             </button>
-          ) : <span className="ml-1 h-6 w-4 flex-shrink-0" aria-hidden="true" />}
-          {session.paused && !moveLabel ? <Tooltip content={<PausedTooltipLines mark={session.paused} />} side="right">{rowButton}</Tooltip> : rowButton}
+          )}
           {/* Same masked hover slot as Pane rows; it covers the activity summary while shown. */}
           <div className={cn(
             'absolute inset-y-0.5 right-2 z-10 flex items-center bg-surface-secondary pr-0.5 opacity-0 transition-opacity group-hover/orchestration-row:opacity-100 group-focus-within/orchestration-row:opacity-100',
