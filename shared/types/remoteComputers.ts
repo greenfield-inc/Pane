@@ -320,7 +320,10 @@ export function withRoutes(routes: readonly ComputerRoute[], added: readonly Com
     if (at >= 0) {
       // A found route never downgrades one that was linked or added by hand.
       const existing = next[at];
-      next[at] = route.source === 'found' && existing.source !== 'found' ? { ...route, source: existing.source } : route;
+      const kept = route.source === 'found' && existing.source !== 'found' ? { ...route, source: existing.source } : route;
+      // Who shared a watched computer is known only from its link; a report about the same token keeps it.
+      const sharedBy = existing.relay?.sharedBy;
+      next[at] = sharedBy && kept.relay && !kept.relay.sharedBy && kept.token === existing.token ? { ...kept, relay: { ...kept.relay, sharedBy } } : kept;
       continue;
     }
     const before = next.findIndex((existing) => rank(existing.kind) > rank(route.kind));

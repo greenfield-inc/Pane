@@ -17,7 +17,7 @@ import { useMachines } from '../../../hooks/useMachines';
 import { useConfigStore } from '../../../stores/configStore';
 import { THIS_COMPUTER, type MachineEntry } from '../../../utils/machineList';
 import { cn } from '../../../utils/cn';
-import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
+import { ipcErrorCode, ipcErrorMessage } from '../../../utils/ipcErrorMessage';
 import { Dropdown } from '../../ui/Dropdown';
 import { Bone, Skeleton, LoadingStatus, useSkeletonHold } from '../../ui/Skeleton';
 import { computerRelayId } from '../../../../../shared/types/remoteComputers';
@@ -472,6 +472,8 @@ async function runEverywhere(controller: RemoteAccessController, channel: string
     const result: { removed: string[]; notReached: string[] } = await window.electronAPI.invoke(channel, args);
     return everywhereResult(subject, result, unlinked, readOnly);
   } catch (cause) {
+    // A refusal that says what to do is shown as it is.
+    if (ipcErrorCode(cause) === 'ERR_READ_ONLY_SHARER_UNREACHABLE') return ipcErrorMessage(cause, '');
     return `Nothing was removed: ${ipcErrorMessage(cause, "Pane couldn't reach your other computers")}. Try again.`;
   } finally {
     void controller.reload();

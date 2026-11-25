@@ -8,7 +8,7 @@ import type { RelayComputer, RelayLinkLifetime, RelayPairedEvent } from '../../.
 import { boundary, decodeBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import type { AppConfig } from '../../types/config';
 import { PaneCommandRegistry, type PaneCommandValue } from '../commandRegistry';
-import { isWatchedComputer } from '../../../../shared/types/remoteComputers';
+import { applyRoutesReport, isWatchedComputer } from '../../../../shared/types/remoteComputers';
 import { exchangeRelayPairing, fetchNewRelayProfiles, relayProfile, withNewProfiles, type RelayCommandClient, type RelayConnectionProfile } from '../../../../shared/remoteClient/relay';
 import { mayInvoke } from '../accessLevel';
 import { authenticateRemoteDaemonBearerToken } from '../auth';
@@ -498,6 +498,13 @@ describe('a read-only link', () => {
     expect(await net.reaches(parsa, a2)).toBe(false);
     expect([tyler.disconnected, a2.disconnected]).toEqual([[record?.id], [onA2?.id]]);
 
+    // After Parsa's computer connected to each and saved the routes they report.
+    parsa.seed(parsa.config().client.computers.map((computer) => {
+      const via = computer.routes.find((route) => route.kind === 'relay');
+      const relayId = via?.relay?.computerId;
+      const from = [tyler, a2].find((candidate) => candidate.info.id === relayId);
+      return via && from ? applyRoutesReport([computer], computer.id, via, { machineId: computer.machineId ?? `${from.name}-install`, name: from.name, relay: { id: from.info.id, address: from.info.address, fingerprint: from.info.fingerprint, local: [] } }).computers[0] : computer;
+    }));
     // Shared again later, its saved computers work again, the linked one too.
     await parsa.redeem(await tyler.link('10m', 'read'));
     expect(await net.reaches(parsa, tyler)).toBe(true);

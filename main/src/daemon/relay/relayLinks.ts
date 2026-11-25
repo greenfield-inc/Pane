@@ -673,7 +673,9 @@ export class RelayLinks {
         if (!sharer) throw new Error('it is not linked with this computer');
         await this.deps.call(sharer, RELAY_COMPUTER_COMMANDS.removeReadDevice, [device]);
       } catch (error) {
-        throw new PaneError('ERR_READ_ONLY_SHARER_UNREACHABLE', `${record.label} is shared by ${record.linkedBy ?? 'another computer'}, which could not be asked to stop (${reasonOf(error)}), so nothing was removed.`, `Wake that computer and try again, remove it there, or unlink that computer here.`);
+        this.deps.log?.(`[relay] ${sharer?.label ?? record.grantedBy} was not asked to stop sharing with ${record.label}: ${reasonOf(error)}`);
+        const by = record.linkedBy ?? 'the computer that shares it';
+        throw new PaneError('ERR_READ_ONLY_SHARER_UNREACHABLE', `${record.label} is shared by ${by}, which didn't answer, so nothing was removed.`, `Wake ${by} and try again, or remove it there.`);
       }
       await this.revokeLocally({ clients: (client) => client.id === record.id });
       return { removed: [sharer.label, here], notReached: [] };
