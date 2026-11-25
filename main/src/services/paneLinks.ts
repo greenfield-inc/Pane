@@ -7,7 +7,6 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { parseRelayPairingLink } from '../../../shared/remoteClient/relay';
 import type { RelayLinkOpenedEvent } from '../../../shared/types/relay';
 import { getPaneEventSink } from '../core/runtime';
-import { ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX } from '../../../shared/types/orchestrationSession';
 import { agentLabel, CONFIGURED_AGENT_IDS, configuredAgentSchema, type ConfiguredAgentId } from '../../../shared/agents';
 import { sanitizePaneName } from '../../../shared/utils/paneName';
 import { MAX_START_LINK_LENGTH, normalizeLinkPrompt } from '../../../shared/startLinks';
@@ -168,11 +167,15 @@ const linkedSessionSchema = boundary.object({
 
 /** The Session a start link names, by id or by name. */
 async function findLinkedSession(commandRegistry: PaneCommandRegistry, selector: string) {
-  const query = selector.startsWith(ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX) ? { sessionId: selector } : { name: selector };
   let session;
   try {
-    ({ session } = decodeBoundary(await commandRegistry.invoke('runpane:sessions:get', [query]), linkedSessionSchema));
-  } catch {
+    // An id-shaped selector that names no Session is tried as a name, so any Session's id or name works.
+    ({ session } = decodeBoundary(await commandRegistry.invoke('runpane:sessions:get', [{ sessionId: selector }]), linkedSessionSchema));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/ambiguous/i.test(message)) {
+      throw new Error(`Several Sessions are named "${selector}". Use the Session's id from \`runpane sessions list\` in the link.`);
+    }
     throw new Error(`No Session matches "${selector}". Use a Session's name or id from \`runpane sessions list\`, or leave session out to start a new Session.`);
   }
   if (session.archived) throw new Error(`Session "${session.name}" is archived. Restore it in Pane, then open the link again.`);
@@ -199,7 +202,8 @@ function acceptedAnswer(request: Omit<StartLinkRequest, 'requestId'>, answer: Om
   if (!target) return null;
   if (target.kind === 'session') return { agent: target.agent, target };
   const offered = request.agents.find((option) => option.id === answer.agent);
-  if (!offered || !(offered.installed || offered.id === request.agent)) return null;
+  // Only an installed agent can start; with none installed the dialog offers no Start.
+  if (!offered?.installed) return null;
   return { agent: offered.id, target };
 }
 
@@ -222,6 +226,8 @@ interface PaneLinkOpener {
   installedAgents: () => Promise<ConfiguredAgentId[]>;
   /** The person's default agent ("Your default" in Settings). */
   defaultAgent: () => ConfiguredAgentId;
+  /** Runs a `runpane:panels:submit` so it writes nothing once a shell, not the agent, has the tab's foreground. */
+  submitToAgent: (panelId: string, submit: () => Promise<PaneCommandValue>) => Promise<PaneCommandValue>;
   /** Asks the person in Pane's window; resolves with their answer, which counts only when it matches the request. */
   confirmStart: (request: Omit<StartLinkRequest, 'requestId'>) => Promise<Omit<StartLinkAnswer, 'requestId'>>;
   /** Tells the person a link could not do what it asked, in Pane. */
@@ -252,8 +258,15 @@ export function registerPaneLinkHandler(commandRegistry: PaneCommandRegistry, op
       const target = parsePaneLink(text);
       if (target.kind === 'new') {
         if (asking) throw new Error('Pane is already asking about another start link. Answer that one, then open this link again.');
-        const request = await startLinkRequest(commandRegistry, opener, target);
+        // Held from here, so a second link that arrives while this one resolves is refused too.
         asking = true;
+        let request: Omit<StartLinkRequest, 'requestId'>;
+        try {
+          request = await startLinkRequest(commandRegistry, opener, target);
+        } catch (error) {
+          asking = false;
+          throw error;
+        }
         // The CLI's request returns now; the work starts only if the person presses Start.
         void startFromLink(commandRegistry, opener, request).finally(() => { asking = false; });
         const linked = request.targets[0];
@@ -323,23 +336,47 @@ async function startFromLink(commandRegistry: PaneCommandRegistry, opener: PaneL
     } else if (target.kind === 'session') {
       where = `Session "${target.sessionName}"`;
       const session = await findLinkedSession(commandRegistry, target.sessionId);
-      await sendToSession(commandRegistry, opener, { sessionId: session.id, panelId: session.panelId }, request.prompt, where);
+      await sendToSession(commandRegistry, opener, { sessionId: session.id, panelId: session.panelId, agent: session.agent }, request.prompt, where);
     } else {
       const created = await createLinkedSession(commandRegistry, startLinkSessionName(request.prompt), agent);
       where = 'the new Session';
-      await sendToSession(commandRegistry, opener, created, request.prompt, where);
+      await sendToSession(commandRegistry, opener, { ...created, agent }, request.prompt, where);
     }
   } catch (error) {
     opener.showError(`Pane could not start the linked task in ${where}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-/** Opens the Session on its agent tab, waits for the agent, and submits the prompt there. */
-async function sendToSession(commandRegistry: PaneCommandRegistry, opener: PaneLinkOpener, session: { sessionId: string; panelId: string }, prompt: string, where: string): Promise<void> {
+const resumeResultSchema = boundary.object({
+  readiness: boundary.optional(boundary.object({
+    ok: boundary.boolean,
+    blocked: boundary.optional(boundary.object({ message: boundary.string })),
+    reason: boundary.optional(boundary.object({ code: boundary.string, message: boundary.string })),
+    state: boundary.object({ running: boundary.boolean, agentType: boundary.optional(boundary.string), activityStatus: boundary.optional(boundary.string) }),
+  })),
+});
+
+/**
+ * Opens the Session on its agent tab, waits for its agent, and submits the prompt to the agent
+ * only: a prompt from a link is never typed where a shell could read it. With no ready agent of
+ * the Session's kind, nothing is sent and the person is told why.
+ */
+async function sendToSession(commandRegistry: PaneCommandRegistry, opener: PaneLinkOpener, session: { sessionId: string; panelId: string; agent: ConfiguredAgentId }, prompt: string, where: string): Promise<void> {
   opener.navigate({ kind: 'session', sessionId: session.sessionId, panelId: session.panelId });
-  await commandRegistry.invoke('runpane:panels:resume', [{ panelId: session.panelId, waitReady: true }]);
+  const { readiness } = decodeBoundary(await commandRegistry.invoke('runpane:panels:resume', [{ panelId: session.panelId, waitReady: true }]), resumeResultSchema);
+  const agent = agentLabel(session.agent);
+  if (readiness?.blocked) {
+    opener.showError(`${where}'s ${agent} is stopped at a prompt in its tab, so the link's prompt was not sent. Answer it there, then open the link again.`);
+    return;
+  }
+  const running = readiness !== undefined && readiness.state.running && readiness.state.agentType === session.agent;
+  const working = readiness?.reason?.code === 'agent-not-ready' && readiness.state.activityStatus === 'active';
+  if (!running || !(readiness.ok || working)) {
+    opener.showError(`${agent} is not running in ${where}'s tab, so the link's prompt was not sent. Start ${agent} in that tab (or install it), then open the link again.`);
+    return;
+  }
   const submitted = decodeBoundary(
-    await commandRegistry.invoke('runpane:panels:submit', [{ panelId: session.panelId, input: prompt, source: 'user', expectReport: false }]),
+    await opener.submitToAgent(session.panelId, () => commandRegistry.invoke('runpane:panels:submit', [{ panelId: session.panelId, input: prompt, source: 'user', expectReport: false }])),
     boundary.object({ ok: boundary.boolean }),
   );
   if (!submitted.ok) opener.showError(`Pane could not confirm that ${where} got the prompt. Open the Session to check whether it arrived.`);

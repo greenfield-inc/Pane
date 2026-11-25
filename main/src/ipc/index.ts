@@ -60,6 +60,7 @@ import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { registerPaneLinkHandler } from '../services/paneLinks';
 import { RepositoryIdentities } from '../services/repositoryIdentity';
 import { registerStartLinkConfirm } from './startLinkConfirm';
+import { submitOnlyToAgent } from './runpane';
 import { isOnPath } from '../utils/onPath';
 import { configuredAgent, CONFIGURED_AGENT_IDS } from '../../../shared/agents';
 import { normalizePaneChatAgent } from '../../../shared/types/paneChat';
@@ -178,6 +179,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
     },
     defaultAgent: () => normalizePaneChatAgent(services.configManager.getConfig().defaultOrchestratorAgent),
     confirmStart: registerStartLinkConfirm(ipcMain, raiseMainWindow),
+    submitToAgent: (panelId, submit) => submitOnlyToAgent(panelId, submit),
     showError: (message) => void showMessage({ type: 'warning', message: 'Pane could not open this link', detail: message }),
     navigate: (target) => {
       raiseMainWindow();

@@ -62,6 +62,8 @@ function StartLinkDialog({ request, onAnswer }: { request: StartLinkRequest; onA
   const runningLabel = label(runningAgent);
   const preview = promptPreview(request.prompt);
   const linkAgentMissing = request.linkAgent !== null && !request.agents.some((option) => option.id === request.linkAgent && option.installed);
+  // A new Pane or Session needs an installed agent; an existing Session runs its own.
+  const noAgentInstalled = target?.kind !== 'session' && !request.agents.some((option) => option.installed);
 
   const cancel = () => onAnswer({ start: false });
   // Enter cancels unless it lands on a button, which presses that button (Cancel has focus first).
@@ -100,7 +102,12 @@ function StartLinkDialog({ request, onAnswer }: { request: StartLinkRequest; onA
               </button>
             )}
           </div>
-          {linkAgentMissing && request.linkAgent && target?.kind !== 'session' && (
+          {noAgentInstalled && (
+            <p className="text-sm text-status-warning">
+              No agent Pane can start is installed on this computer. Install {request.agents.slice(0, 2).map((option) => option.label).join(' or ')}, then open the link again.
+            </p>
+          )}
+          {!noAgentInstalled && linkAgentMissing && request.linkAgent && target?.kind !== 'session' && (
             <p className="text-sm text-text-secondary">The link asks for {label(request.linkAgent)}, which isn't installed on this computer, so {runningLabel} runs instead.</p>
           )}
           <p className="text-sm text-text-secondary">{runningLabel} runs with full access: it can edit files and run commands without asking.</p>
@@ -192,7 +199,7 @@ function StartLinkDialog({ request, onAnswer }: { request: StartLinkRequest; onA
           <Button ref={cancelRef} type="button" variant="secondary" onClick={cancel}>Cancel</Button>
           <Button
             type="button"
-            disabled={!startReady || !target}
+            disabled={!startReady || !target || noAgentInstalled}
             onClick={() => onAnswer({ start: true, agent: runningAgent, target: targetIndex })}
           >
             Start

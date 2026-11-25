@@ -152,3 +152,12 @@ test('Start sends the agent and target chosen under Options', async ({ page }) =
   await expect(dialog).toBeHidden();
   expect(await answers(page)).toEqual([{ requestId: 'r-1', start: true, agent: 'codex', target: 1 }]);
 });
+
+test('Start stays off with an install hint when no agent Pane can start is installed', async ({ page }) => {
+  await boot(page, { activePaneId: '' });
+  const dialog = await emitRequest(page, request({ agents: AGENTS.map((option) => ({ ...option, installed: false })) }));
+  await expect(dialog.getByText('No agent Pane can start is installed on this computer.', { exact: false })).toBeVisible();
+  // Past the 700 ms delay, Start still can't be pressed.
+  await page.waitForTimeout(900);
+  await expect(dialog.getByRole('button', { name: 'Start' })).toBeDisabled();
+});

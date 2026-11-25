@@ -23,6 +23,9 @@ const REPOS = [
 const SESSIONS = [
   { id: '__orchestration_session_1__', name: 'Build fixes', agent: 'codex', panelIds: { claude: 'claude-tab', codex: 'codex-tab', cursor: 'cursor-tab' } },
   { id: '__orchestration_session_2__', name: 'Old work', agent: 'claude', archived: true, panelIds: { claude: 'old-tab', codex: 'x', cursor: 'y' } },
+  { id: 'legacy-pane-chat', name: 'Pane Chat', agent: 'claude', panelIds: { claude: 'claude-tab', codex: 'x', cursor: 'y' } },
+  { id: '__orchestration_session_3__', name: 'Twin', agent: 'claude', panelIds: { claude: 'claude-tab', codex: 'x', cursor: 'y' } },
+  { id: '__orchestration_session_4__', name: 'Twin', agent: 'claude', panelIds: { claude: 'claude-tab', codex: 'x', cursor: 'y' } },
 ];
 
 type Answer = Omit<StartLinkAnswer, 'requestId'>;
@@ -37,6 +40,8 @@ function setup(options: {
   installed?: ConfiguredAgentId[];
   defaultAgent?: ConfiguredAgentId;
   createResult?: PaneCommandValue;
+  /** What `panels:resume` reports for a tab: its agent running (the default), a shell, or a prompt it is stopped at. */
+  resume?: (panelId: string) => PaneCommandValue;
 } = {}) {
   const registry = new PaneCommandRegistry();
   const created: PaneCommandValue[] = [];
@@ -50,15 +55,23 @@ function setup(options: {
   });
   registry.register('runpane:sessions:get', (selector: PaneCommandValue) => {
     const wanted = decodeBoundary(selector, boundary.object({ sessionId: boundary.optional(boundary.string), name: boundary.optional(boundary.string) }));
-    const session = SESSIONS.find((candidate) => candidate.id === wanted.sessionId || candidate.name === wanted.name);
-    if (!session) throw new Error('No Session matches');
+    // As the Session manager does: an id that names no Session is tried as a name.
+    const matches = SESSIONS.filter((candidate) => candidate.id === wanted.sessionId);
+    const byName = matches.length > 0 ? matches : SESSIONS.filter((candidate) => candidate.name === (wanted.name ?? wanted.sessionId));
+    if (byName.length > 1) throw new Error(`Session selector ${wanted.sessionId} is ambiguous`);
+    const session = byName[0];
+    if (!session) throw new Error(`Session ${wanted.sessionId} not found`);
     return { ok: true, session };
   });
   registry.register('runpane:sessions:create', (request: PaneCommandValue) => {
     sessionsCreated.push(request);
     return { ok: true, session: { id: '__orchestration_session_new__' }, panelId: 'session-agent-tab' };
   });
-  registry.register('runpane:panels:resume', () => ({ ok: true }));
+  const agentOfTab = new Map([['codex-tab', 'codex'], ['claude-tab', 'claude'], ['session-agent-tab', 'codex']]);
+  registry.register('runpane:panels:resume', (request: PaneCommandValue) => {
+    const { panelId } = decodeBoundary(request, boundary.object({ panelId: boundary.string }));
+    return options.resume?.(panelId) ?? { readiness: { ok: true, state: { running: true, agentType: agentOfTab.get(panelId) } } };
+  });
   registry.register('runpane:panels:submit', (request: PaneCommandValue) => {
     submitted.push(request);
     return { ok: true };
@@ -76,6 +89,7 @@ function setup(options: {
     repoExists: (repoId) => repoId === 7,
     listRepos: async () => REPOS,
     installedAgents: async () => options.installed ?? ['claude', 'codex'],
+    submitToAgent: (_panelId, submit) => submit(),
     defaultAgent: () => options.defaultAgent ?? 'claude',
     confirmStart: async (request) => {
       confirmed.push(request);
@@ -244,6 +258,15 @@ describe('pane:// links', () => {
     expect(created[0]).toMatchObject({ panes: [{ tool: { initialInput: 'Summarize the README.\n\nThen stop.' } }] });
   });
 
+  it('keeps an emoji with its variation selector in the prompt', async () => {
+    const { open, confirmed } = setup();
+
+    await open(`pane://new?repo=app&prompt=${encodeURIComponent('Fix the ⚠️ warning')}`);
+
+    await vi.waitFor(() => expect(confirmed).toHaveLength(1));
+    expect(confirmed[0].prompt).toBe('Fix the ⚠️ warning');
+  });
+
   it('names the Pane "Linked task" when the prompt has no letters a branch name can use', async () => {
     const { open, created } = setup();
 
@@ -310,6 +333,45 @@ describe('pane:// links', () => {
     expect(submitted[0]).toMatchObject({ panelId: 'codex-tab', input: 'Rerun the flaky test', source: 'user' });
     expect(navigated).toEqual([{ kind: 'session', sessionId: '__orchestration_session_1__', panelId: 'codex-tab' }]);
     expect(sessionsCreated).toEqual([]);
+  });
+
+  it.each([
+    ['a shell has the tab (the agent exited at launch)', { readiness: { ok: true, state: { running: false } } }, 'is not running'],
+    ['another agent has the tab', { readiness: { ok: true, state: { running: true, agentType: 'claude' } } }, 'is not running'],
+    ['the agent is stopped at a prompt', { readiness: { ok: false, blocked: { message: 'Trust this folder?' }, state: { running: true, agentType: 'codex' } } }, 'stopped at a prompt'],
+  ])("sends nothing to a Session when %s, and says why", async (_case, resume, message) => {
+    const { open, submitted, errors } = setup({ resume: () => resume });
+
+    await open('pane://new?session=Build+fixes&prompt=hi');
+
+    await vi.waitFor(() => expect(errors).toEqual([expect.stringContaining(message)]));
+    expect(submitted).toEqual([]);
+  });
+
+  it("names a Session by any id, such as Pane Chat's", async () => {
+    const { open, submitted } = setup({ resume: () => ({ readiness: { ok: true, state: { running: true, agentType: 'claude' } } }) });
+
+    await open('pane://new?session=legacy-pane-chat&prompt=hi');
+
+    await vi.waitFor(() => expect(submitted).toEqual([expect.objectContaining({ panelId: 'claude-tab', input: 'hi' })]));
+  });
+
+  it('says when several Sessions share the name, and asks nothing', async () => {
+    const { open, confirmed } = setup();
+
+    expect(await open('pane://new?session=Twin&prompt=hi')).toEqual({ success: false, error: expect.stringContaining('Several Sessions are named "Twin"') });
+    expect(confirmed).toEqual([]);
+  });
+
+  it('starts nothing when no agent is installed, even if the answer names the preselected one', async () => {
+    const { open, confirmed, created } = setup({ installed: [] });
+
+    await open('pane://new?repo=app&prompt=hi');
+
+    await vi.waitFor(() => expect(confirmed).toHaveLength(1));
+    expect(confirmed[0].agents.every((option) => !option.installed)).toBe(true);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(created).toEqual([]);
   });
 
   it('runs where the person chose: a new Session instead of the linked repository', async () => {
@@ -386,6 +448,11 @@ describe('pane:// links', () => {
     ['a line separator in the prompt', 'pane://new?repo=app&prompt=a%E2%80%A8b'],
     ['a paragraph separator in the prompt', 'pane://new?repo=app&prompt=a%E2%80%A9b'],
     ['a byte-order mark at the start of the prompt', 'pane://new?repo=app&prompt=%EF%BB%BFhi'],
+    ['a variation selector that is not an emoji\'s', 'pane://new?repo=app&prompt=a%EF%B8%80b'],
+    ['a run of emoji variation selectors, as hidden text uses', 'pane://new?repo=app&prompt=a%EF%B8%8F%EF%B8%8Fb'],
+    ['a supplementary variation selector', 'pane://new?repo=app&prompt=a%F3%A0%84%80b'],
+    ['a combining grapheme joiner', 'pane://new?repo=app&prompt=a%CD%8Fb'],
+    ['a Hangul filler', 'pane://new?repo=app&prompt=a%E3%85%A4b'],
     ['a prompt that starts with a dash, which an agent would read as an option', 'pane://new?repo=app&prompt=--settings%3D%2Ftmp%2Fx'],
     ['an unknown agent', 'pane://new?repo=app&prompt=hi&agent=sh'],
     ['an unknown parameter', 'pane://new?repo=app&prompt=hi&yes=1'],
