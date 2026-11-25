@@ -45,9 +45,12 @@ const IN_APP_REFUSED_SIGN_INS: ReadonlyArray<{ site: string; matches: (url: URL)
   { site: 'AWS', matches: url => (url.hostname === 'signin.aws.amazon.com' && url.pathname.startsWith('/signin')) || url.hostname === 'signin.aws' || url.hostname.endsWith('.signin.aws') },
 ];
 
-/** The error code in Google's OAuth error page (/signin/oauth/error), whose authError is base64 with the code first. */
+/**
+ * The error code in Google's OAuth error page (/signin/oauth/error, or its /v2 form). Its authError
+ * is a base64 protobuf whose first field is the code: a tag byte, a length byte, then the text.
+ */
 function googleAuthError(url: URL): string | undefined {
-  const authError = url.pathname.endsWith('/signin/oauth/error') ? url.searchParams.get('authError') : null;
+  const authError = /\/signin\/oauth\/error(?:\/v2)?$/.test(url.pathname) ? url.searchParams.get('authError') : null;
   if (!authError) return undefined;
   return /^[\s\S]{2}([a-z_]+)/.exec(Buffer.from(authError, 'base64').toString('latin1'))?.[1];
 }

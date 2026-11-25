@@ -34,7 +34,7 @@ export interface RemotePwaMockOptions {
   /** Each Session's activity the host reports; null for a host too old to have it. */
   sessionActivity?: RemotePwaMockHost['sessionActivity'];
   /** The host streams its browser tabs (S2); without it the host is older and the PWA loads its own copy. */
-  browserStream?: { driver?: { by: 'agent'; agent: string } | { by: 'person' } };
+  browserStream?: { driver?: { by: 'agent'; agent: string } | { by: 'person' }; signIn?: { site: string; url: string } };
 }
 
 /**
@@ -58,7 +58,7 @@ export interface RemotePwaMockHost {
   /** The `orchestration-sessions:activity-list` baseline; null for a host without it. */
   sessionActivity: Array<{ sessionId: string; state: 'working' | 'idle'; workingPanes: number }> | null;
   /** A streaming host's tab state, and every browser:input, browser:watch and browser:driver call it got. */
-  browserStream: (RemotePwaMockOptions['browserStream'] & { calls: Array<{ channel: string; args: JsonValue[] }>; version: number }) | null;
+  browserStream: (RemotePwaMockOptions['browserStream'] & { calls: Array<{ channel: string; args: JsonValue[] }>; version: number; servedVersion?: number }) | null;
 }
 
 /** A small JPEG the streaming mock host sends as every frame. */
@@ -432,6 +432,14 @@ export async function emitRemoteHostEvent(page: Page, channel: string, ...args: 
   }, { channel, args });
 }
 
+/** Sets the sign-in the host's tab stopped (browser:view signIn), or clears it as the page's next load does. */
+export function setRemoteBrowserSignIn(page: Page, signIn: { site: string; url: string } | undefined): void {
+  const stream = pageHosts.get(page)?.browserStream;
+  if (!stream) throw new Error('The mock host does not stream its browser tab.');
+  stream.signIn = signIn;
+  stream.version += 1;
+}
+
 /** Sets the driver in the host's browser tab state, as an agent's call or a Take over does, and tells the web app. */
 export async function setRemoteBrowserDriver(page: Page, driver: { by: 'agent'; agent: string } | { by: 'person'; agentWaiting?: string } | undefined): Promise<void> {
   const host = pageHosts.get(page);
@@ -655,7 +663,9 @@ async function answerBrowser(host: RemotePwaMockHost, channel: string, args: Jso
   if (channel === 'browser:view') {
     if (Number(args[1]) >= stream.version) await wait();
     const view: JsonValue = { version: stream.version, url: 'https://example.com/signup', title: 'Sign up', loading: false, canGoBack: true, canGoForward: false, pointer: 'default', downloads: [], host: 'MacBook Pro' };
-    return stream.driver ? { ...view, driver: stream.driver } : view;
+    stream.servedVersion = stream.version;
+    const withSignIn = stream.signIn ? { ...view, signIn: stream.signIn } : view;
+    return stream.driver ? { ...withSignIn, driver: stream.driver } : withSignIn;
   }
   stream.calls.push({ channel, args });
   if (channel === 'browser:driver') {

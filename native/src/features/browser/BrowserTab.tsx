@@ -293,6 +293,8 @@ function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBa
   }, [fileChooser, host, send]);
 
   const [signInOpened, setSignInOpened] = useState<string | null>(null);
+  // The host drops the sign-in when the page loads again, so the next refusal shows its line.
+  if (!view?.signIn && signInOpened !== null) setSignInOpened(null);
   const download = view?.downloads.at(-1);
   const seenDownload = useRef<number | null>(null);
   useEffect(() => {
