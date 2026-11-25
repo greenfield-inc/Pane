@@ -6,6 +6,8 @@ const REPO_ID = /^[1-9][0-9]{0,15}$/;
 /** A repository id, saved name, or `owner/repo` for a start link, as Pane's URL handler accepts it. */
 const REPO_SELECTOR = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}(?:\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}){0,2}$/;
 const MAX_LINK_PROMPT_LENGTH = 4000;
+/** The longest start link Pane opens, after URL encoding. */
+const MAX_START_LINK_LENGTH = 16_384;
 
 /** A numeric repository id, as app channels and repo links take it. */
 export function parseRepoId(repo: string): number {
@@ -45,6 +47,9 @@ export function buildPaneLink(target: LinkTarget | StartLinkTarget): string {
 export function runLinksCreate(parsed: ParsedArgs): number {
   const target = linkTargetFrom(parsed);
   const url = buildPaneLink(target);
+  if (url.length > MAX_START_LINK_LENGTH) {
+    throw new Error(`--prompt makes a ${url.length}-character link once encoded; Pane opens links up to ${MAX_START_LINK_LENGTH}. Shorten the prompt.`);
+  }
   if (parsed.json) {
     console.log(JSON.stringify({ ok: true, url, target }, null, 2));
   } else {
@@ -83,7 +88,7 @@ function startLinkTargetFrom(parsed: ParsedArgs, prompt: string): StartLinkTarge
   const text = prompt.trim();
   if (!text) throw new Error('--prompt must not be empty.');
   if ([...text].length > MAX_LINK_PROMPT_LENGTH) throw new Error(`--prompt must be at most ${MAX_LINK_PROMPT_LENGTH} characters for a link.`);
-  if ([...text].some(isUnsafeCharacter)) throw new Error('--prompt must not contain control characters other than tab and newline.');
+  if ([...text].some(isUnsafeCharacter)) throw new Error('--prompt must not contain control characters (other than tab and newline) or text-direction characters.');
   const target: StartLinkTarget = { kind: 'new', id: parsed.repo, prompt: text };
   if (parsed.agent) target.agent = parsed.agent;
   return target;

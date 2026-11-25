@@ -104,7 +104,7 @@ function parseStartLink(params: Map<string, string>): PaneStartLink {
   const prompt = (params.get('prompt') ?? '').trim();
   if (!prompt) throw new Error('A pane://new link needs a prompt=<text>');
   if ([...prompt].length > MAX_LINK_PROMPT_LENGTH) throw new Error(`The link's prompt is longer than ${MAX_LINK_PROMPT_LENGTH} characters`);
-  if (hasUnsafeCharacters(prompt)) throw new Error("The link's prompt holds control characters, which Pane does not send to an agent");
+  if (hasUnsafeCharacters(prompt)) throw new Error("The link's prompt holds control or text-direction characters, which Pane does not send to an agent");
   const agentId = params.get('agent');
   let agent: ConfiguredAgentId = DEFAULT_AGENT_ID;
   if (agentId !== undefined) {

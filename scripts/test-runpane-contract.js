@@ -537,12 +537,14 @@ async function checkStartLinkParity() {
     [['links', 'create', '--repo', 'a/../b', '--prompt', 'hi'], 1],
     [['links', 'create', '--repo', '3', '--prompt', 'a\u001b[2Jb'], 1],
     [['links', 'create', '--repo', '3', '--prompt', 'x'.repeat(4001)], 1],
+    // 1,400 emoji fit the 4,000-character cap but encode to more than the 16,384 characters Pane opens.
+    [['links', 'create', '--repo', '3', '--prompt', '\u{1F600}'.repeat(1400)], 1],
   ];
   try {
     for (const [args, code] of cases) {
       const [npm, pip] = await Promise.all([runCliOnce('npm', args, paneDir), runCliOnce('pip', args, paneDir)]);
       assert.strictEqual(npm.code, code, `npm ${args.slice(0, 4).join(' ')} exited ${npm.code}: ${npm.stderr}`);
-      assert.deepStrictEqual({ code: pip.code, stdout: pip.stdout, stderr: pip.stderr }, { code: npm.code, stdout: npm.stdout, stderr: npm.stderr }, `Python and Node differ on links create ${args.slice(2, 4).join(' ')}`);
+      assert.deepStrictEqual({ code: pip.code, stdout: lf(pip.stdout), stderr: lf(pip.stderr) }, { code: npm.code, stdout: lf(npm.stdout), stderr: lf(npm.stderr) }, `Python and Node differ on links create ${args.slice(2, 4).join(' ')}`);
     }
     const { url, target } = JSON.parse((await runCliOnce('npm', cases[0][0], paneDir)).stdout);
     assert.deepStrictEqual(target, { kind: 'new', id: 'owner/app', prompt, agent: 'codex' });

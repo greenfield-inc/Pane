@@ -16,6 +16,8 @@ REPO_ID = re.compile(r"^[1-9][0-9]{0,15}$")
 # A repository id, saved name, or owner/repo for a start link, as Pane's URL handler accepts it.
 REPO_SELECTOR = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}(?:/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}){0,2}\Z")
 MAX_LINK_PROMPT_LENGTH = 4000
+# The longest start link Pane opens, after URL encoding.
+MAX_START_LINK_LENGTH = 16384
 
 
 def repo_id(repo: Optional[str]) -> Optional[int]:
@@ -123,7 +125,7 @@ def start_link_target(parsed: Any, prompt: str) -> Dict[str, str]:
     if len(text) > MAX_LINK_PROMPT_LENGTH:
         raise ValueError(f"--prompt must be at most {MAX_LINK_PROMPT_LENGTH} characters for a link.")
     if any(is_unsafe_character(character) for character in text):
-        raise ValueError("--prompt must not contain control characters other than tab and newline.")
+        raise ValueError("--prompt must not contain control characters (other than tab and newline) or text-direction characters.")
     target = {"kind": "new", "id": parsed.repo, "prompt": text}
     if parsed.agent:
         target["agent"] = parsed.agent
@@ -134,6 +136,8 @@ def run_links_create(parsed: Any) -> int:
     if parsed.initial_input is not None:
         target = start_link_target(parsed, parsed.initial_input)
         url = build_start_link(target["id"], target["prompt"], target.get("agent"))
+        if len(url) > MAX_START_LINK_LENGTH:
+            raise ValueError(f"--prompt makes a {len(url)}-character link once encoded; Pane opens links up to {MAX_START_LINK_LENGTH}. Shorten the prompt.")
         if parsed.json:
             print(json.dumps({"ok": True, "url": url, "target": target}, indent=2, ensure_ascii=False))
         else:
