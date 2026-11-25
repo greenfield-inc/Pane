@@ -283,17 +283,31 @@ describe('ProfileEditor: the profile page', () => {
     expect(new Set(ids).size).toBe(ids.length);
   }, 60_000);
 
-  it('saves a title and description in pane.yaml, leaving the identity alone, and lists the plugin\'s cover page', async () => {
+  it('writes the description into the agent\'s own identity front-matter, and the title (for now) into pane.yaml', async () => {
     const paneDir = tempDir();
     await installTeam(paneDir);
     const profiles = editor(paneDir);
     const identity = await profiles.read('team', 'agents/lead.md');
-    const result = await profiles.setDetails('team', 'lead', { title: 'Team lead', description: 'Runs one workstream end to end.' });
-    expect(result.plugin.profiles.find(profile => profile.name === 'lead')).toMatchObject({ title: 'Team lead', description: 'Runs one workstream end to end.' });
-    expect(await profiles.read('team', 'agents/lead.md')).toBe(identity);
-    expect(await profiles.read('team', 'pane.yaml')).toContain('Team lead');
+    const result = await profiles.setDetails('team', 'lead', { title: 'Team lead', description: 'Runs one workstream: "plan, build, review".' });
+    expect(result.plugin.profiles.find(profile => profile.name === 'lead')).toMatchObject({ title: 'Team lead', description: 'Runs one workstream: "plan, build, review".' });
+    // Only the description line changed in the identity, and Agent Farm still accepts the plugin.
+    const described = await profiles.read('team', 'agents/lead.md');
+    expect(described).toBe(identity.replace('description: Runs the work\n', 'description: "Runs one workstream: \\"plan, build, review\\"."\n'));
+    const run = bundledAgentFarmProcess(bundle!, ['plugin', 'validate', path.join(agentFarmConfigRoot(paneDir), 'plugins', 'team')], agentFarmConfigRoot(paneDir));
+    await execFileAsync(run.executable, run.args, { env: run.env });
+    // pane.yaml holds the title only (a stopgap until Agent Farm has a title field, T-83).
+    const pane = await profiles.read('team', 'pane.yaml');
+    expect(pane).toContain('Team lead');
+    expect(pane).not.toContain('Runs one workstream');
+    // An identity without a description gains one; clearing it removes the line.
+    await profiles.save('team', [{ path: 'agents/planner.md', content: '---\nharness: claude\nmodel: claude-opus-5-5\nskills:\n  - plan\n---\n\n# Planner\n' }]);
+    await profiles.setDetails('team', 'planner', { title: '', description: 'Plans the work' });
+    expect(await profiles.read('team', 'agents/planner.md')).toContain('description: "Plans the work"');
+    await profiles.setDetails('team', 'planner', { title: '', description: '' });
+    expect(await profiles.read('team', 'agents/planner.md')).not.toContain('description:');
+    await profiles.setDetails('team', 'planner', { title: '', description: 'Plans' });
     // The subagent row of a profile with a title shows that title.
-    const planner = await profiles.setDetails('team', 'planner', { title: 'Planner', description: '' });
+    const planner = await profiles.setDetails('team', 'planner', { title: 'Planner', description: 'Plans' });
     const lead = planner.plugin.profiles.find(profile => profile.name === 'lead');
     expect(outline(lead!.tree)).toContain('  @Planner [team/planner]');
     expect(planner.plugin.profiles.find(profile => profile.name === 'planner')?.description).toBe('Plans');
@@ -307,13 +321,16 @@ describe('ProfileEditor: the profile page', () => {
     await expect(profiles.setDetails('team', 'nobody', { title: 'x', description: '' })).rejects.toMatchObject({ code: 'PROFILE_NOT_FOUND' });
   }, 60_000);
 
-  it('keeps a bundled plugin un-Edited when only its details change', async () => {
+  it('keeps a bundled plugin un-Edited when only its title changes', async () => {
     const paneDir = tempDir();
     await installBundledAgentFarm({ paneDir, bundle, log: () => undefined });
     const profiles = editor(paneDir);
     const first = (await profiles.list()).plugins.find(plugin => plugin.name === 'dcouple')!.profiles[0];
-    const result = await profiles.setDetails('dcouple', first.name, { title: 'My business', description: '' });
+    // A title alone (pane.yaml) leaves it un-Edited; a new description is an edit of the agent's own file.
+    const result = await profiles.setDetails('dcouple', first.name, { title: 'My business', description: first.description ?? '' });
     expect(result.plugin.edited).toBe(false);
+    const described = await profiles.setDetails('dcouple', first.name, { title: 'My business', description: 'Keeps the tracker current.' });
+    expect(described.plugin.edited).toBe(true);
   }, 240_000);
 
   it('hides a profile Agent Farm reports as not listed, and lists everything with an Agent Farm that has no --json', async () => {

@@ -120,7 +120,13 @@ function checkName(name: string, what = 'plugin'): void {
   if (!PROFILE_NAME_PATTERN.test(name) || (what === 'plugin' && name === PANE_PROFILE_PLUGIN)) throw nameError(name, what);
 }
 
-/** Pane's own file in a plugin: each profile's title and description (Edit details). Agent Farm ignores it. */
+/**
+ * TEMPORARY (T-63, test build only): each profile's title from Edit details, in a file of Pane's own
+ * in the plugin, which Agent Farm ignores. Profile metadata doesn't live in Pane (the person's rule):
+ * before anything merges, the title (and the photo, kept in avatars/ today) move into Agent Farm's
+ * profile format (to-do T-83) and this file goes. The description is already Agent Farm's own
+ * (`description:` in the identity's front-matter).
+ */
 const PANE_META_FILE = 'pane.yaml';
 /** A profile's cover page, `covers/<profile>.html` or `.md`. Agent Farm ignores the folder. */
 const COVER_FILE = /^covers\/([a-z][a-z0-9_-]*)\.(html|md)$/;
@@ -187,13 +193,12 @@ async function pluginFiles(root: string): Promise<string[]> {
   return files.sort();
 }
 
-/** One profile's details in pane.yaml. */
+/** One profile's details in pane.yaml (TEMPORARY, see PANE_META_FILE). */
 interface PaneMetaEntry {
   title?: string;
-  description?: string;
 }
 
-/** Each profile's title and description from pane.yaml (`profiles: { <name>: { title, description } }`). */
+/** TEMPORARY (see PANE_META_FILE): each profile's title from pane.yaml (`profiles: { <name>: { title } }`). */
 function paneMeta(source: string): Map<string, PaneMetaEntry> {
   const meta = new Map<string, PaneMetaEntry>();
   let data: JsonObject | undefined;
@@ -204,9 +209,7 @@ function paneMeta(source: string): Map<string, PaneMetaEntry> {
     if (!entry) continue;
     const details: PaneMetaEntry = {};
     const title = text(entry.title);
-    const description = text(entry.description);
     if (title) details.title = title;
-    if (description) details.description = description;
     meta.set(name, details);
   }
   return meta;
@@ -431,7 +434,8 @@ export class ProfileEditor {
       const model = modelName(front?.data.model);
       if (model) summary.model = model;
       const details = meta.get(profile);
-      const description = details?.description ?? text(front?.data.description);
+      // The description is the agent's own (Agent Farm's `description:`); Edit details writes it there.
+      const description = text(front?.data.description);
       if (description) summary.description = description;
       if (details?.title) summary.title = details.title;
       const cover = [`covers/${profile}.html`, `covers/${profile}.md`].find(file => files.includes(file));
@@ -586,16 +590,24 @@ export class ProfileEditor {
   }
 
   /**
-   * Edit details: a profile's title and description, saved in its plugin's pane.yaml (which Agent
-   * Farm ignores and install receipts don't cover), so the agent's own file is untouched and a
-   * bundled plugin isn't marked Edited. An empty value removes it.
+   * Edit details. The description is the agent's own Agent Farm field, `description:` in the
+   * identity's front-matter: it is edited by line, keeping the rest of the file as it is, and saved
+   * like any edit, so Agent Farm checks it (and a bundled plugin becomes Edited). The title goes in
+   * pane.yaml, TEMPORARY until Agent Farm has a title field (T-83, see PANE_META_FILE). An empty
+   * value removes it.
    */
   async setDetails(plugin: string, profile: string, details: ProfileDetails): Promise<ProfileSaveResult> {
     const root = await this.requirePlugin(plugin);
     checkName(profile, 'profile');
-    if (!(await fs.lstat(path.join(root, 'profiles', `${profile}.yaml`)).catch(() => undefined))?.isFile()) {
-      throw new PaneError('PROFILE_NOT_FOUND', `${plugin} has no profile named ${profile}.`, 'Open Profiles again to see its profiles.');
-    }
+    const summary = (await this.readPlugin(plugin)).profiles.find(entry => entry.name === profile);
+    if (!summary) throw new PaneError('PROFILE_NOT_FOUND', `${plugin} has no profile named ${profile}.`, 'Open Profiles again to see its profiles.');
+    const identity = await this.read(plugin, summary.entry);
+    const front = parseFrontmatter(identity);
+    if (!front) throw new PaneError('PROFILE_INVALID', `${plugin}/${summary.entry} has no frontmatter to put a description in.`, 'Fix its frontmatter (between --- lines), then try again.');
+    const description = details.description.trim();
+    if (description !== (text(front.data.description) ?? '')) await this.save(plugin, [{ path: summary.entry, content: withDescription(front, description) }]);
+
+    // TEMPORARY (T-83): the title, in pane.yaml, until Agent Farm's profile format has one.
     await checkNoLinks(root, [PANE_META_FILE]);
     const file = path.join(root, PANE_META_FILE);
     let data: JsonObject = {};
@@ -606,16 +618,17 @@ export class ProfileEditor {
     }
     const profiles: JsonObject = { ...decodeOptionalBoundary(data.profiles, boundary.jsonObject) };
     const entry: JsonObject = { ...decodeOptionalBoundary(profiles[profile], boundary.jsonObject) };
-    for (const key of ['title', 'description'] as const) {
-      const value = details[key].trim();
-      if (value) entry[key] = value;
-      else delete entry[key];
-    }
+    const title = details.title.trim();
+    if (title) entry.title = title;
+    else delete entry.title;
+    // An earlier test build kept the description here; it is the identity's now.
+    delete entry.description;
     if (Object.keys(entry).length) profiles[profile] = entry;
     else delete profiles[profile];
-    await writeAtomic(file, yaml.dump({ ...data, profiles }, { lineWidth: -1 }));
+    const next = yaml.dump({ ...data, profiles }, { lineWidth: -1 });
+    if (next !== existing && (existing !== undefined || Object.keys(profiles).length)) await writeAtomic(file, next);
     this.options.onChanged?.(plugin);
-    return { plugin: await this.readPlugin(plugin), path: PANE_META_FILE };
+    return { plugin: await this.readPlugin(plugin), path: summary.entry };
   }
 
   /** Restore Pane's version (A-3): the bundled copy replaces your edits to greenfield or dcouple. */
@@ -696,6 +709,26 @@ async function withoutPackChecksums(manifestFile: string): Promise<void> {
   if (!data || !('checksums' in data)) return;
   const { checksums: _packed, ...rest } = data;
   await fs.writeFile(manifestFile, yaml.dump(rest, { lineWidth: -1 }));
+}
+
+/**
+ * The identity with its `description:` set (or removed when empty), changing only that line (or
+ * block) so the rest of the file keeps its formatting; when the result wouldn't parse to the new
+ * value (an unusual layout), the frontmatter is written out again from its data.
+ */
+function withDescription(front: Frontmatter, description: string): string {
+  const lines = [...front.lines];
+  const block = keyBlock(lines, 'description');
+  const line = `description: ${JSON.stringify(description)}`;
+  if (block) lines.splice(block.index, block.end - block.index, ...(description ? [line] : []));
+  else if (description) lines.push(line);
+  const candidate = renderFrontmatter(lines, front.body);
+  const parsed = parseFrontmatter(candidate);
+  if (parsed && (text(parsed.data.description) ?? '') === description) return candidate;
+  const data = { ...front.data };
+  if (description) data.description = description;
+  else delete data.description;
+  return `---\n${yaml.dump(data, { lineWidth: -1 })}---\n${front.body}`;
 }
 
 /** A top-level key's line in frontmatter, and the lines of its block after it. */
