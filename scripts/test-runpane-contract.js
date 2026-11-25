@@ -545,6 +545,11 @@ async function checkStartLinkParity() {
     [['links', 'create', '--repo', '3', '--prompt', '\uFEFFhi'], 1],
     [['links', 'create', '--repo', '3', '--prompt', '\u001Chi'], 1],
     [['links', 'create', '--repo', '3', '--prompt', 'a\u2028b'], 1],
+    // Default-ignorable characters; one emoji variation selector after a visible character is kept.
+    [['links', 'create', '--repo', '3', '--prompt', 'a\uFE00b'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'a\uFE0F\uFE0Fb'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'a\u3164b'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'Fix the \u26A0\uFE0F warning'], 0],
     [['links', 'create', '--repo', '3', '--prompt', '--settings=/tmp/x'], 1],
     [['links', 'create', '--repo', '3', '--prompt', 'Fix it.   \n\n\n\n  \nThen stop.', '--json'], 0],
     // No repo: a new Session. A Session by name. --repo with --session, --agent with --session.

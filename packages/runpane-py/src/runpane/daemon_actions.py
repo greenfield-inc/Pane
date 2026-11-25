@@ -119,9 +119,33 @@ def escape_html(text: str) -> str:
     return text.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+# Unicode's Default_Ignorable_Code_Point ranges (Unicode 17), as Pane's \p{Default_Ignorable_Code_Point} matches them.
+DEFAULT_IGNORABLE = (
+    (0xAD, 0xAD), (0x34F, 0x34F), (0x61C, 0x61C), (0x115F, 0x1160), (0x17B4, 0x17B5), (0x180B, 0x180F),
+    (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF),
+)
+EMOJI_VARIATION_SELECTORS = ("\uFE0E", "\uFE0F")
+
+
 def is_unsafe_character(character: str) -> bool:
     """Controls other than tab and newline, format characters, line and paragraph separators; Pane refuses them in a link's prompt."""
     return character not in "\t\n" and unicodedata.category(character) in ("Cc", "Cf", "Zl", "Zp")
+
+
+def has_unsafe_prompt_characters(text: str) -> bool:
+    """is_unsafe_character, plus default-ignorable characters except one U+FE0E or U+FE0F right after a visible character."""
+    previous = None
+    for character in text:
+        if is_unsafe_character(character):
+            return True
+        if character in EMOJI_VARIATION_SELECTORS:
+            if previous is None or previous.isspace() or previous in EMOJI_VARIATION_SELECTORS:
+                return True
+        elif any(low <= ord(character) <= high for low, high in DEFAULT_IGNORABLE):
+            return True
+        previous = character
+    return False
 
 
 def is_unprintable_character(character: str) -> bool:
@@ -146,7 +170,7 @@ def start_link_target(parsed: Any, prompt: str) -> Dict[str, str]:
     session = None if parsed.session_id is None else parsed.session_id.strip()
     if parsed.session_id is not None and (any(is_unprintable_character(character) for character in parsed.session_id) or not session or len(session) > MAX_SESSION_SELECTOR_LENGTH):
         raise ValueError(f"--session must be a Session id or name of at most {MAX_SESSION_SELECTOR_LENGTH} characters on one line, with no control or invisible characters. Run `runpane sessions list` to find it.")
-    if any(is_unsafe_character(character) for character in prompt):
+    if has_unsafe_prompt_characters(prompt):
         raise ValueError("--prompt must not contain control characters (other than tab and newline), or text-direction or invisible characters.")
     text = collapse_padding(prompt)
     if not text:

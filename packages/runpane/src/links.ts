@@ -145,8 +145,12 @@ function startLinkTargetFrom(parsed: ParsedArgs, prompt: string): StartLinkTarge
   return target;
 }
 
-/** Characters Pane refuses in a link's prompt: controls other than tab and newline, format characters, line and paragraph separators. */
-const UNSAFE_CHARACTER = /[^\t\n\P{Cc}]|[\p{Cf}\p{Zl}\p{Zp}]/u;
+/**
+ * Characters Pane refuses in a link's prompt: controls other than tab and newline, format
+ * characters, line and paragraph separators, and other default-ignorable characters, except one
+ * U+FE0E or U+FE0F right after a visible character (an emoji's variation selector).
+ */
+const UNSAFE_CHARACTER = /[^\t\n\P{Cc}]|[\p{Cf}\p{Zl}\p{Zp}]|[^\P{Default_Ignorable_Code_Point}︎️]|(?:^|[\s︎️])[︎️]/u;
 
 /** The prompt as Pane shows and sends it: trailing spaces and runs of blank lines removed. */
 function collapsePadding(text: string): string {

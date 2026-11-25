@@ -13,10 +13,12 @@ export const START_LINK_WEB_BASE = 'https://runpane.com/open';
 
 /**
  * Characters a confirmation can't show but an agent reads: controls other than tab and newline,
- * format characters (direction marks, zero-width and tag characters, the byte-order mark) and line
- * or paragraph separators.
+ * format characters (direction marks, zero-width and tag characters, the byte-order mark), line or
+ * paragraph separators, and other default-ignorable characters (variation selectors, fillers). An
+ * emoji's own text or emoji variation selector (U+FE0E, U+FE0F) is kept, one right after a visible
+ * character: a run of them, as hidden-text encodings use, is refused.
  */
-const UNSAFE_CHARACTER = /[^\t\n\P{Cc}]|[\p{Cf}\p{Zl}\p{Zp}]/u;
+const UNSAFE_CHARACTER = /[^\t\n\P{Cc}]|[\p{Cf}\p{Zl}\p{Zp}]|[^\P{Default_Ignorable_Code_Point}︎️]|(?:^|[\s︎️])[︎️]/u;
 
 /** The prompt as Pane shows and sends it (trailing spaces and runs of blank lines removed), or why Pane refuses it. */
 export function normalizeLinkPrompt(raw: string): { prompt: string } | { problem: string } {
