@@ -7,8 +7,11 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { parseRelayPairingLink } from '../../../shared/remoteClient/relay';
 import type { RelayLinkOpenedEvent } from '../../../shared/types/relay';
 import { getPaneEventSink } from '../core/runtime';
-import { agentLabel, configuredAgentSchema, DEFAULT_AGENT_ID, type ConfiguredAgentId } from '../../../shared/agents';
+import { ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX } from '../../../shared/types/orchestrationSession';
+import { agentLabel, CONFIGURED_AGENT_IDS, configuredAgentSchema, type ConfiguredAgentId } from '../../../shared/agents';
 import { sanitizePaneName } from '../../../shared/utils/paneName';
+import { MAX_START_LINK_LENGTH, normalizeLinkPrompt } from '../../../shared/startLinks';
+import type { StartLinkAgentOption, StartLinkAnswer, StartLinkRequest, StartLinkTarget } from '../../../shared/types/startLinks';
 
 /**
  * pane:// deep links: `pane://open?pane=<id>[&panel=<id>]`, `pane://open?repo=<id>`, or
@@ -16,9 +19,10 @@ import { sanitizePaneName } from '../../../shared/utils/paneName';
  * opens that tab's oldest waiting question in Approvals, as Open in Pane does. It never answers a card or changes
  * other Pane state, and anything that doesn't parse exactly is rejected.
  *
- * `pane://new?repo=<id|name|owner/repo>&prompt=<text>[&agent=<id>]` starts work from anywhere (a chat
- * bot's button, a web page), so it never runs on its own: Pane names the repository and agent and
- * shows the whole prompt, and creates the Pane only when the person presses Start.
+ * `pane://new?prompt=<text>[&agent=<id>][&repo=<id|name|owner/repo> | &session=<id|name>]` starts
+ * work from anywhere (a docs page's button, a chat bot), so it never runs on its own: Pane shows the
+ * prompt, the agent and where it runs, and starts only when the person presses Start. With no repo
+ * or session it starts a new Session; with a Session it sends the prompt to that Session's agent.
  *
  * `pane://pair#…` is another computer's one-time link (the relay landing page's "Open Pane"): it
  * opens the confirm page on `relay:link-opened`, and links nothing until the person confirms there.
@@ -32,30 +36,19 @@ const REPO_ID = /^[1-9][0-9]{0,15}$/;
 /** A saved repository's id, its name, or its origin remote as `owner/repo` (or `host/owner/repo`). */
 const REPO_SELECTOR = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}(?:\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}){0,2}$/;
 const ALLOWED_PARAMS = new Set(['pane', 'panel', 'repo', 'session']);
-const START_PARAMS = new Set(['repo', 'prompt', 'agent']);
+const START_PARAMS = new Set(['repo', 'session', 'prompt', 'agent']);
+/** A Session's id or its name: printable, one line. */
+const SESSION_SELECTOR = /^[^\p{C}\p{Zl}\p{Zp}]{1,100}$/u;
 const MAX_LINK_LENGTH = 2048;
-/** A start link carries a whole prompt, so it may be longer; the prompt itself is capped below. */
-const MAX_START_LINK_LENGTH = 16_384;
-export const MAX_LINK_PROMPT_LENGTH = 4_000;
 
-/** A `pane://new` link: start an agent on a prompt in a new Pane, once the person confirms. */
+/** A `pane://new` link: start an agent on a prompt, once the person confirms. */
 export interface PaneStartLink {
   kind: 'new';
-  repo: string;
   prompt: string;
-  agent: ConfiguredAgentId;
-}
-
-/**
- * Characters the confirmation can't show but an agent reads: controls other than tab and newline,
- * format characters (direction marks, zero-width characters, tag characters, the byte-order mark)
- * and line or paragraph separators.
- */
-const UNSAFE_CHARACTER = /[^\t\n\P{Cc}]|[\p{Cf}\p{Zl}\p{Zp}]/u;
-
-/** Trailing spaces and runs of blank lines removed, so the dialog shows the prompt on one screen. */
-function collapsePadding(text: string): string {
-  return text.split('\n').map((line) => line.trimEnd()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  /** The agent the link names, or null to use the person's default. */
+  agent: ConfiguredAgentId | null;
+  repo?: string;
+  session?: string;
 }
 
 export function parsePaneLink(link: string): PaneLinkTarget | PaneStartLink {
@@ -69,7 +62,7 @@ export function parsePaneLink(link: string): PaneLinkTarget | PaneStartLink {
   const action = url.hostname;
   if (url.protocol !== `${PANE_LINK_SCHEME}:` || !['open', 'new'].includes(action) || !['', '/'].includes(url.pathname)
     || url.username || url.password || url.port || url.hash) {
-    throw new Error('Pane links look like pane://open?pane=<id> or pane://new?repo=<repo>&prompt=<text>');
+    throw new Error('Pane links look like pane://open?pane=<id> or pane://new?prompt=<text>');
   }
   if (action === 'open' && link.length > MAX_LINK_LENGTH) throw new Error('Pane link is too long');
   const params = new Map<string, string>();
@@ -97,28 +90,31 @@ export function parsePaneLink(link: string): PaneLinkTarget | PaneStartLink {
 }
 
 function parseStartLink(params: Map<string, string>): PaneStartLink {
-  const repo = params.get('repo') ?? '';
-  if (!REPO_SELECTOR.test(repo)) {
+  const repo = params.get('repo');
+  const session = params.get('session');
+  if (repo !== undefined && session !== undefined) throw new Error('A pane://new link names a repo or a session, not both');
+  if (repo !== undefined && !REPO_SELECTOR.test(repo)) {
     throw new Error('A pane://new link names its repository as repo=<id>, repo=<name> or repo=<owner/repo>');
   }
-  const raw = params.get('prompt') ?? '';
-  if (UNSAFE_CHARACTER.test(raw)) {
-    throw new Error("The link's prompt holds control, text-direction or invisible characters, which Pane does not send to an agent");
+  if (session !== undefined && (!SESSION_SELECTOR.test(session) || session.trim() !== session)) {
+    throw new Error('A pane://new link names its Session as session=<id> or session=<name>');
   }
-  const prompt = collapsePadding(raw);
-  if (!prompt) throw new Error('A pane://new link needs a prompt=<text>');
-  if ([...prompt].length > MAX_LINK_PROMPT_LENGTH) throw new Error(`The link's prompt is longer than ${MAX_LINK_PROMPT_LENGTH} characters`);
-  if (prompt.startsWith('-')) throw new Error(`The link's prompt starts with "-", which an agent would read as an option`);
+  if (!params.has('prompt')) throw new Error('A pane://new link needs a prompt=<text>');
+  const normalized = normalizeLinkPrompt(params.get('prompt') ?? '');
+  if ('problem' in normalized) throw new Error(`Pane won't send this link's prompt. ${normalized.problem}`);
   const agentId = params.get('agent');
-  let agent: ConfiguredAgentId = DEFAULT_AGENT_ID;
+  let agent: ConfiguredAgentId | null = null;
   if (agentId !== undefined) {
     try {
       agent = decodeBoundary(agentId, configuredAgentSchema);
     } catch {
-      throw new Error(`Unknown agent in pane link: ${agentId}`);
+      throw new Error(`Unknown agent in pane link: ${agentId}. Use one of ${CONFIGURED_AGENT_IDS.join(', ')}, or leave agent out for the person's default.`);
     }
   }
-  return { kind: 'new', repo, prompt, agent };
+  const link: PaneStartLink = { kind: 'new', prompt: normalized.prompt, agent };
+  if (repo !== undefined) link.repo = repo;
+  if (session !== undefined) link.session = session;
+  return link;
 }
 
 interface LinkedRepo {
@@ -155,6 +151,58 @@ function startLinkPaneName(prompt: string): string {
   return /[A-Za-z0-9]/.test(name) ? name : 'Linked task';
 }
 
+/** A Session name from the first words of the prompt's first line; a Session has no branch, so any letters do. */
+function startLinkSessionName(prompt: string): string {
+  return prompt.split('\n')[0].split(/\s+/).slice(0, 6).join(' ').slice(0, 48).trim() || 'Linked task';
+}
+
+const linkedSessionSchema = boundary.object({
+  session: boundary.object({
+    id: boundary.string,
+    name: boundary.string,
+    agent: configuredAgentSchema,
+    archived: boundary.optional(boundary.boolean),
+    panelIds: boundary.record(boundary.string),
+  }),
+});
+
+/** The Session a start link names, by id or by name. */
+async function findLinkedSession(commandRegistry: PaneCommandRegistry, selector: string) {
+  const query = selector.startsWith(ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX) ? { sessionId: selector } : { name: selector };
+  let session;
+  try {
+    ({ session } = decodeBoundary(await commandRegistry.invoke('runpane:sessions:get', [query]), linkedSessionSchema));
+  } catch {
+    throw new Error(`No Session matches "${selector}". Use a Session's name or id from \`runpane sessions list\`, or leave session out to start a new Session.`);
+  }
+  if (session.archived) throw new Error(`Session "${session.name}" is archived. Restore it in Pane, then open the link again.`);
+  const panelId = session.panelIds[session.agent];
+  if (!panelId) throw new Error(`Session "${session.name}" has no ${agentLabel(session.agent)} tab to send the prompt to.`);
+  return { ...session, panelId };
+}
+
+/**
+ * The agent preselected in the dialog: the link's if installed, else the person's default if
+ * installed, else the first installed agent. With none installed, the link's or the default.
+ */
+function preselectedAgent(linkAgent: ConfiguredAgentId | null, defaultAgent: ConfiguredAgentId, installed: readonly ConfiguredAgentId[]): ConfiguredAgentId {
+  for (const candidate of [linkAgent, defaultAgent]) {
+    if (candidate && installed.includes(candidate)) return candidate;
+  }
+  return installed[0] ?? linkAgent ?? defaultAgent;
+}
+
+/** What the person chose, if it is one of the choices offered; anything else counts as Cancel. */
+function acceptedAnswer(request: Omit<StartLinkRequest, 'requestId'>, answer: Omit<StartLinkAnswer, 'requestId'>): { agent: ConfiguredAgentId; target: StartLinkTarget } | null {
+  if (!answer.start || answer.target === undefined || !Number.isInteger(answer.target)) return null;
+  const target = request.targets[answer.target];
+  if (!target) return null;
+  if (target.kind === 'session') return { agent: target.agent, target };
+  const offered = request.agents.find((option) => option.id === answer.agent);
+  if (!offered || !(offered.installed || offered.id === request.agent)) return null;
+  return { agent: offered.id, target };
+}
+
 /** A `pane://pair#…` one-time link, which the renderer's confirm page redeems. */
 export function isPanePairLink(link: string): boolean {
   return link.length <= MAX_LINK_LENGTH && link.startsWith(`${PANE_LINK_SCHEME}://pair`) && parseRelayPairingLink(link) !== null;
@@ -170,8 +218,12 @@ interface PaneLinkOpener {
   repoExists: (repoId: number) => boolean;
   /** Saved repositories with their origin identities, for `pane://new` links. */
   listRepos: () => Promise<LinkedRepo[]>;
-  /** Shows the repository, agent and whole prompt with Start and Cancel; true only on Start. */
-  confirmStart: (request: { repoName: string; agentLabel: string; prompt: string }) => Promise<boolean>;
+  /** The agents whose CLI is installed on this computer. */
+  installedAgents: () => Promise<ConfiguredAgentId[]>;
+  /** The person's default agent ("Your default" in Settings). */
+  defaultAgent: () => ConfiguredAgentId;
+  /** Asks the person in Pane's window; resolves with their answer, which counts only when it matches the request. */
+  confirmStart: (request: Omit<StartLinkRequest, 'requestId'>) => Promise<Omit<StartLinkAnswer, 'requestId'>>;
   /** Tells the person a link could not do what it asked, in Pane. */
   showError: (message: string) => void;
   /** Opens Approvals on the tab's oldest waiting question, as Open in Pane does; does nothing when none waits. */
@@ -199,12 +251,19 @@ export function registerPaneLinkHandler(commandRegistry: PaneCommandRegistry, op
       }
       const target = parsePaneLink(text);
       if (target.kind === 'new') {
-        const repo = findLinkedRepo(await opener.listRepos(), target.repo);
         if (asking) throw new Error('Pane is already asking about another start link. Answer that one, then open this link again.');
+        const request = await startLinkRequest(commandRegistry, opener, target);
         asking = true;
-        // The CLI's request returns now; the Pane is created only if the person presses Start.
-        void startFromLink(commandRegistry, opener, repo, target).finally(() => { asking = false; });
-        return { success: true, data: { opened: { kind: 'new', repoId: repo.id, agent: target.agent, confirming: true } } };
+        // The CLI's request returns now; the work starts only if the person presses Start.
+        void startFromLink(commandRegistry, opener, request).finally(() => { asking = false; });
+        const linked = request.targets[0];
+        return { success: true, data: { opened: {
+          kind: 'new',
+          target: linked.kind,
+          ...(linked.kind === 'repo' ? { repoId: linked.repoId } : linked.kind === 'session' ? { sessionId: linked.sessionId } : {}),
+          agent: request.agent,
+          confirming: true,
+        } } };
       }
       if (target.kind === 'pane') {
         // The same code path as `runpane panes focus`: validates the pane and panel, raises the window.
@@ -223,21 +282,72 @@ export function registerPaneLinkHandler(commandRegistry: PaneCommandRegistry, op
   });
 }
 
-async function startFromLink(commandRegistry: PaneCommandRegistry, opener: PaneLinkOpener, repo: LinkedRepo, link: PaneStartLink): Promise<void> {
+/** The question for the person: where the link can run, which agents are installed, and the prompt. */
+async function startLinkRequest(commandRegistry: PaneCommandRegistry, opener: PaneLinkOpener, link: PaneStartLink): Promise<Omit<StartLinkRequest, 'requestId'>> {
+  const targets: StartLinkTarget[] = [];
+  if (link.repo !== undefined) {
+    const repo = findLinkedRepo(await opener.listRepos(), link.repo);
+    targets.push({ kind: 'repo', repoId: repo.id, repoName: repo.name, identity: repo.identity });
+  } else if (link.session !== undefined) {
+    const session = await findLinkedSession(commandRegistry, link.session);
+    targets.push({ kind: 'session', sessionId: session.id, sessionName: session.name, agent: session.agent });
+  }
+  // A new Session is always on offer: it needs no repository.
+  targets.push({ kind: 'new-session' });
+  const installed = await opener.installedAgents();
+  const agents: StartLinkAgentOption[] = [...CONFIGURED_AGENT_IDS]
+    .sort((a, b) => Number(installed.includes(b)) - Number(installed.includes(a)))
+    .map((id) => ({ id, label: agentLabel(id), installed: installed.includes(id) }));
+  return { prompt: link.prompt, agents, agent: preselectedAgent(link.agent, opener.defaultAgent(), installed), linkAgent: link.agent, targets };
+}
+
+async function startFromLink(commandRegistry: PaneCommandRegistry, opener: PaneLinkOpener, request: Omit<StartLinkRequest, 'requestId'>): Promise<void> {
+  let where = 'a new Session';
   try {
-    if (!await opener.confirmStart({ repoName: repo.name, agentLabel: agentLabel(link.agent), prompt: link.prompt })) return;
-    const created = await commandRegistry.invoke('runpane:panes:create', [{
-      repo: { id: repo.id },
-      panes: [{ name: startLinkPaneName(link.prompt), tool: { agent: link.agent, initialInput: link.prompt } }],
-      focus: true,
-      source: 'user',
-    }]);
-    const failure = decodeBoundary(created, boundary.object({
-      items: boundary.array(boundary.object({ error: boundary.optional(boundary.object({ message: boundary.string })) })),
-    })).items.find((item) => item.error)?.error;
-    if (failure) opener.showError(`Pane could not start the linked task in ${repo.name}: ${failure.message}`);
+    const choice = acceptedAnswer(request, await opener.confirmStart(request));
+    if (!choice) return;
+    const { agent, target } = choice;
+    if (target.kind === 'repo') {
+      where = target.repoName;
+      const created = await commandRegistry.invoke('runpane:panes:create', [{
+        repo: { id: target.repoId },
+        panes: [{ name: startLinkPaneName(request.prompt), tool: { agent, initialInput: request.prompt } }],
+        focus: true,
+        source: 'user',
+      }]);
+      const failure = decodeBoundary(created, boundary.object({
+        items: boundary.array(boundary.object({ error: boundary.optional(boundary.object({ message: boundary.string })) })),
+      })).items.find((item) => item.error)?.error;
+      if (failure) opener.showError(`Pane could not start the linked task in ${where}: ${failure.message}`);
+    } else if (target.kind === 'session') {
+      where = `Session "${target.sessionName}"`;
+      const session = await findLinkedSession(commandRegistry, target.sessionId);
+      opener.navigate({ kind: 'session', sessionId: session.id, panelId: session.panelId });
+      await commandRegistry.invoke('runpane:panels:resume', [{ panelId: session.panelId, waitReady: true }]);
+      const submitted = decodeBoundary(await commandRegistry.invoke('runpane:panels:submit', [{ panelId: session.panelId, input: request.prompt, source: 'user', expectReport: false }]), boundary.object({ ok: boundary.boolean }));
+      if (!submitted.ok) opener.showError(`Pane could not confirm that ${where} got the prompt. Open the Session to check whether it arrived.`);
+    } else {
+      const created = await createLinkedSession(commandRegistry, startLinkSessionName(request.prompt), agent, request.prompt);
+      opener.navigate({ kind: 'session', sessionId: created.sessionId, panelId: created.panelId });
+    }
   } catch (error) {
-    opener.showError(`Pane could not start the linked task in ${repo.name}: ${error instanceof Error ? error.message : String(error)}`);
+    opener.showError(`Pane could not start the linked task in ${where}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/** A new Session whose agent starts on the prompt; a taken name gets a number, as loops do. */
+async function createLinkedSession(commandRegistry: PaneCommandRegistry, name: string, agent: ConfiguredAgentId, prompt: string): Promise<{ sessionId: string; panelId: string }> {
+  for (let attempt = 1; ; attempt += 1) {
+    const candidate = attempt === 1 ? name : `${name} ${attempt}`;
+    try {
+      const created = decodeBoundary(
+        await commandRegistry.invoke('runpane:sessions:create', [{ name: candidate, agent, launchCommand: '', openingPrompt: prompt }]),
+        boundary.object({ session: boundary.object({ id: boundary.string }), panelId: boundary.string }),
+      );
+      return { sessionId: created.session.id, panelId: created.panelId };
+    } catch (error) {
+      if (attempt >= 9 || !/already exists/i.test(error instanceof Error ? error.message : String(error))) throw error;
+    }
   }
 }
 

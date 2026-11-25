@@ -63,6 +63,7 @@ import type { ProjectEnvVarInput } from '../../shared/types/projectEnvVars';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../shared/types/listeningPorts';
 import type { RelayLinkOpenedEvent, RelayPairedEvent, RelayStatus } from '../../shared/types/relay';
+import { START_LINK_ANSWER_CHANNEL, START_LINK_REQUEST_CHANNEL, type StartLinkAnswer, type StartLinkRequest } from '../../shared/types/startLinks';
 import type { SshRouteProgress } from './daemon/sshRouteSetup';
 import type {
   PanePermissionRequest as PermissionRequest,
@@ -1100,6 +1101,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('relay:link-opened', wrappedCallback);
       return () => ipcRenderer.removeListener('relay:link-opened', wrappedCallback);
     },
+    /** A `pane://new` link asks the person to start an agent: the renderer shows the confirm dialog. */
+    onStartLinkRequest: (callback: (request: StartLinkRequest) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, request: StartLinkRequest) => callback(request);
+      ipcRenderer.on(START_LINK_REQUEST_CHANNEL, wrappedCallback);
+      return () => ipcRenderer.removeListener(START_LINK_REQUEST_CHANNEL, wrappedCallback);
+    },
     /** A step of Add a device › SSH connecting a host. */
     onSshRouteProgress: (callback: (progress: SshRouteProgress) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, progress: SshRouteProgress) => callback(progress);
@@ -1548,6 +1555,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     openPaneLink: async (link: string): Promise<void> => {
       await invokeIpc('window:open-pane-link', link);
+    },
+    answerStartLink: async (answer: StartLinkAnswer): Promise<void> => {
+      await invokeIpc(START_LINK_ANSWER_CHANNEL, answer);
     },
   },
 
