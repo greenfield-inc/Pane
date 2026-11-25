@@ -166,6 +166,12 @@ export class ComputerCertificate {
     // Loaded on first use: with its x509 and axios dependencies it delayed app ready
     // at every launch, and only issuing a certificate needs it.
     const acme = await import('acme-client');
+    // acme-client otherwise sleeps out a 429's Retry-After (days for a rate limit) and waits on a
+    // silent server forever, so the order hangs with no error. Failing shows the reason, and
+    // relayService retries with its own backoff.
+    // SAFETY: acme-client's axios instance has acmeSettings at runtime; its types leave it out.
+    (acme.axios.defaults as typeof acme.axios.defaults & { acmeSettings: { retryMaxAttempts: number } }).acmeSettings.retryMaxAttempts = 0;
+    acme.axios.defaults.timeout = 30_000;
     const [, csr] = await acme.crypto.createCsr({ commonName: base, altNames: [base, `*.${base}`] }, key.privateKeyPem);
     const savedAccountKey = await authority.accountStore.read();
     const accountKey = savedAccountKey ?? (await acme.crypto.createPrivateEcdsaKey('P-256')).toString();

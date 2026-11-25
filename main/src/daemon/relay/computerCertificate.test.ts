@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
 import { generateKeyPairSync, X509Certificate } from 'crypto';
 import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import http from 'http';
 import net from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -49,6 +50,36 @@ describe('computer certificate', () => {
     expect(certificate.getStatus()).toBeNull();
     expect(certificate.needsRenewal()).toBe(true);
   });
+
+  it('fails at once with the reason when the ACME server rate-limits the order, instead of sleeping out its Retry-After', async () => {
+    const server = http.createServer((request, response) => {
+      const base = `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`;
+      response.setHeader('Replay-Nonce', `nonce-${Date.now()}`);
+      if (request.url === '/dir') {
+        response.setHeader('Content-Type', 'application/json');
+        response.end(JSON.stringify({ newNonce: `${base}/nonce`, newAccount: `${base}/account`, newOrder: `${base}/order` }));
+      } else if (request.url === '/account') {
+        response.writeHead(201, { 'Content-Type': 'application/json', Location: `${base}/account/1` });
+        response.end(JSON.stringify({ status: 'valid' }));
+      } else if (request.url === '/order') {
+        response.writeHead(429, { 'Content-Type': 'application/problem+json', 'Retry-After': '86400' });
+        response.end(JSON.stringify({ type: 'urn:ietf:params:acme:error:rateLimited', detail: 'too many certificates (50) already issued for "relay.test"' }));
+      } else {
+        response.end();
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as net.AddressInfo;
+    try {
+      const certificate = new ComputerCertificate({
+        key: await loadComputerKey(memory()), domain: 'relay.test', certificateStore: memory(), accountStore: memory(),
+        setTxt: async () => undefined, directoryUrl: `http://127.0.0.1:${port}/dir`,
+      });
+      await expect(certificate.ensure()).rejects.toThrow(/too many certificates/);
+    } finally {
+      server.close();
+    }
+  }, 10_000);
 });
 
 describe('a certificate authority that refuses for its rate limits', () => {
