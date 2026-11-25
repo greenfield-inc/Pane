@@ -911,7 +911,7 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost, onS
       x={menu?.x ?? 0}
       y={menu?.y ?? 0}
       onClose={onClose}
-      className="w-48"
+      className="w-60"
     >
       <div ref={menuRef} role="menu" aria-label={`Session actions for ${menu?.sessionName ?? 'Session'}`} onKeyDown={handleMenuKeyDown}>
         {!menu?.loopOwned && (
