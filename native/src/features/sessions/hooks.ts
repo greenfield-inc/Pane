@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 
 import type {
   OrchestrationSessionListResult,
@@ -8,6 +9,7 @@ import type {
 import type { RunpanePauseResult } from '@shared/types/runpaneOrchestration';
 
 import { useDaemon, useDaemonEvent, useDaemonQueryKey, useInvokeMutation, useInvokeQuery } from '@/daemon';
+import { useOpenSessions } from '@/features/panes/useOpenSessions';
 
 type SessionView = OrchestrationSessionView<{ id: string; name: string }>;
 
@@ -29,6 +31,11 @@ export function useSessions() {
     // An open Session follows the desktop when its agent changes.
     void queryClient.invalidateQueries({ queryKey: [profile.id, GET] });
   });
+  // A list read since this screen mounted says which Sessions are gone; one painted from the phone may miss a newer one.
+  const fresh = sessions.isFetchedAfterMount && !sessions.isError ? sessions.data?.sessions : undefined;
+  useEffect(() => {
+    if (fresh) useOpenSessions.getState().keepSessions(profile.id, fresh.map(session => session.id));
+  }, [fresh, profile.id]);
   return { ...sessions, unavailable: sessionsUnavailable(sessions.error) };
 }
 
