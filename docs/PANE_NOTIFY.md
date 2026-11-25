@@ -35,6 +35,11 @@ directory), `{label, url}` for an http or https page, or `{label, approval}`
 for another approval (its id or Q-n). Older Panes ignore them.
 In Approvals, clicking a chip opens it as a tab beside the card: a file in an
 editor tab, a page in a browser tab, another approval in place, with **Back**.
+A Q-n names an approval from the same Session (or, outside one, the same Pane
+or Autopilot) on the same machine as the card, a waiting one first; when there
+is none the tab says so rather than open another Session's Q-n of that name. A
+card asked from outside Pane has no such place, so only a link by id opens
+another approval from it.
 
 Pane builds each approval's **Summary** from these fields (D-225), unless the
 asker linked its own `.html` Summary page (a worker's `--summary-file`, or
@@ -138,6 +143,12 @@ question reaches you only when you are the requester or the requester can't
 settle it. Review cards (`runpane todos review`, with Accept and Ask for
 changes) and the supervisor's stuck cards are linked approvals too. Pane
 stores the link in the `todo_id` column of the `approvals` table.
+
+Each row also names the machine that wrote it twice: `machine`, its
+hostname-style name, which macOS changes with the network (`Mac`,
+`Tylers-MacBook-Pro`, `tylers-mbp`), and `install_id`, the stable install id
+made on first start (`machineId` in `config.json`). Nothing keys on
+`machine`. Rows written before `install_id` was added keep it empty.
 
 ## Claude's own prompts
 
@@ -301,7 +312,9 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   sidebar (Files, Changes, To-dos) is never covered. The Session's title
   bar shows **Approvals n · n ready**, and a Session row's count in the
   sidebar opens the newest ready-again approval, or the first waiting one. A
-  Session's orchestrator chat docks one compact card above its composer:
+  Session's orchestrator chat docks one compact card above its composer, for
+  the cards of the machine the Session is on (none from a machine gone
+  offline):
   who asks, the title and subtitle across the card, and a bottom row with ‹ n
   of m ›, the reference count, Summary and **Open**; its pager stays in step
   with the column's. Its ✕ (**Dismiss**) takes the card out of that chat
@@ -456,7 +469,11 @@ runpane notify --update Q-20 --asked "Can it be undone?" \
 
 `--took` and `--update` take an item id or Q-n and no `--ui`. `--took Q-20
 answer` changes nothing: the reply is already the answer. `--update` reopens an
-answered approval as its new version. It needs `--what-changed` (one line per
+answered approval as its new version. A Q-n that names cards from two askers, or
+about two Sessions, that the caller reads (Autopilot reading or asking about
+several Sessions, each with its own Q-1) is
+refused with `ERR_NOTIFY_AMBIGUOUS` and both ids, unless only one of their
+replies came to the caller; run it again with the id. It needs `--what-changed` (one line per
 change), and `--asked` (the person's question) when it answers a question they
 typed; an update of your own, such as a loop's next run refreshing its card,
 leaves `--asked` out and shows no "You asked". It replaces whichever of

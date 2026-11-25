@@ -53,8 +53,10 @@ test('an orchestrator creates a to-do: own hidden Session, requester asked first
     await json(pane, ['todos', 'comment', 'T-1', 'EUR'], sessionA);
     await expect.poll(() => transcript(page, orchestrator), { timeout: 30_000 }).toContain('via To-dos T-1] EUR');
     await json(pane, ['todos', 'comment', 'T-1', 'I am not sure, ask the person', '--escalate'], sessionA);
+    // oxlint-disable-next-line pane/no-bare-todo-number -- one isolated Pane, so every card here is this machine's.
     await expect.poll(async () => (await approvals(page)).items.find(item => item.todo?.number === 1 && item.state === 'waiting')?.title, { timeout: 15_000 }).toBe('Which currency?');
     expect(await statusOf(page, 1)).toBe('waiting');
+    // oxlint-disable-next-line pane/no-bare-todo-number -- one isolated Pane, so every card here is this machine's.
     const question = (await approvals(page)).items.find(item => item.todo?.number === 1 && item.state === 'waiting');
     await page.evaluate(async id => { await window.electronAPI.notify.run({ type: 'answer', id, answer: { text: 'EUR' } }); }, question?.id ?? '');
 
@@ -94,6 +96,7 @@ test('the supervisor reminds, restarts and asks you on a quiet to-do, on a fast 
     await expect.poll(async () => (await detail(page, 1)).activity.map(row => row.body).join('\n'), { timeout: 90_000, intervals: [2_000] })
       .toMatch(/Pane restarted the orchestrator|was down or hung/);
     await expect.poll(() => statusOf(page, 1), { timeout: 90_000, intervals: [2_000] }).toBe('waiting');
+    // oxlint-disable-next-line pane/no-bare-todo-number -- one isolated Pane, so every card here is this machine's.
     const card = (await approvals(page)).items.find(item => item.todo?.number === 1 && item.state === 'waiting');
     expect(card?.title).toMatch(/^T-1 has been stuck for \d+ minutes/);
     // J17: its own Session stays out of the sidebar even with a card waiting.

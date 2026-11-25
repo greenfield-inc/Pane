@@ -1276,6 +1276,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       todo.updatedAt = Date.now();
       detail.status = status;
+      // oxlint-disable-next-line pane/no-bare-todo-number -- the mock stands in for one machine's to-do API, which main keys by number.
       const listed = state.snapshot.rows.find((row) => row.todo.number === todo.number);
       if (listed) {
         listed.todo = clone(todo);
@@ -2572,6 +2573,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           remoteDaemonConfig.client.mode = 'remote';
           remoteDaemonConfig.client.activeProfileId = computerId;
           configState.remoteDaemon = clone(remoteDaemonConfig);
+          // As main does, the window's machine is now that computer, when it is a saved one (T-51).
+          const computer = remoteDaemonConfig.client.computers.find((candidate) => candidate.id === computerId);
+          if (computer) {
+            setRemoteConnectionState({
+              mode: 'remote', status: 'connected', activeProfileId: computerId, activeProfileLabel: computer.label,
+              activeBaseUrl: computer.routes[0]?.baseUrl ?? null, activeRouteId: computer.routes[0]?.id ?? null, lastError: null,
+            });
+          }
           if (todosState) {
             todosState.snapshot = clone(todos.snapshot);
             todosState.details = clone(todos.details);

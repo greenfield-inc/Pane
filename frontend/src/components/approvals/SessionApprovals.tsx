@@ -1,8 +1,11 @@
+import { useEffect } from 'react';
 import { Inbox } from 'lucide-react';
+import { notifyItem, useNotifyStore } from '../../stores/notifyStore';
+import { sessionTodoMachine, useShownHostId } from '../../stores/todosStore';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { ApprovalColumn } from './ApprovalColumn';
 import { ApprovalOrigin } from './ApprovalOrigin';
-import { firstToOpen, readyCount } from './approvalCard';
+import { firstToOpen, readyCount, sessionColumnNext } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
 
 /**
@@ -62,6 +65,16 @@ export function SessionApprovalColumn({ sessionId, sessionName, inChat, closeLab
   const open = useApprovalColumnStore((state) => state.open[surface]);
   const close = useApprovalColumnStore((state) => state.close);
   const waiting = useSessionApprovals(sessionId);
+  const machine = sessionTodoMachine(undefined, useShownHostId());
+  const selected = useNotifyStore((state) => notifyItem(state.snapshot, open?.itemId));
+  // Its card's machine went offline, or the card is another machine's (T-51): the next card, or none.
+  const next = sessionColumnNext(selected, waiting, machine);
+  const nextId = 'open' in next ? next.open : 'close' in next ? null : undefined;
+  useEffect(() => {
+    if (nextId === undefined) return;
+    if (nextId === null) close(surface);
+    else openSessionApproval(sessionId, nextId);
+  }, [nextId, close, surface, sessionId]);
   if (!open) return null;
   return (
     <ApprovalColumn

@@ -168,7 +168,8 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
   improves that card and rings it.
 - Stay free to talk. When the person asks about an item, answer in this tab;
   the card keeps waiting.
-- A relayed answer goes straight to the worker's tab, so don't forward it;
+- A relayed answer goes straight to the worker's tab, so don't forward it or
+  send an \`answer:\` or \`recorded:\` line of your own;
   record it with \`runpane inbox ack <item> --decision <D-n>\`. When
   \`runpane inbox\` lists the answer with \`undelivered\`, Pane can't type it
   there: pass it on with \`runpane panels submit\`, unless the reason is that
@@ -775,7 +776,9 @@ After every change, verify state through RunPane.
 
 ## Liveness Contract
 
-The daemon owns liveness. Never write or run an ad-hoc watcher.
+The daemon owns liveness. Never write or run an ad-hoc watcher (a scheduled
+prompt, timer, \`sleep\` loop, or file or disk poll), even when a profile
+describes one, and don't ask the person whether to set one up.
 
 Arm at session start:
 

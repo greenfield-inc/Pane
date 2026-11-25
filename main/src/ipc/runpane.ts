@@ -574,7 +574,8 @@ export function registerRunpaneHandlers(
   services.workspaceStateReader = workspaceStateReader;
   services.workspaceCursorStore = workspaceCursorStore;
   if (!services.sessionInbox) {
-    const approvalStore = new ApprovalStore(databaseService.getDb(), thisMachineName());
+    // Some handler tests register without a config; their rows then carry no install id.
+    const approvalStore = new ApprovalStore(databaseService.getDb(), thisMachineName(), configManager?.getConfig().machineId);
     const sessionName = (sessionId: string) => services.orchestrationSessionManager?.approvalSessionRecord(sessionId)?.name ?? 'Closed Session';
     // A one-time move of the file older builds kept (D-160). A failure leaves the file alone, shows in Approvals, and retries on the next start.
     services.approvalImport = importJsonStoreOnce(databaseService.getDb(), {
@@ -2007,18 +2008,29 @@ export function registerRunpaneHandlers(
       const todoService = activeTodoService(services);
       const normalized = todoService ? parsed : { ...parsed, todo: undefined };
       const panel = resolveAgentPanel(normalized.panelId);
-      // To-dos (D-408): a --todo that names no open to-do is refused before anything is recorded.
-      if (normalized.todo) todoService?.todoLinkFor(panel.id, normalized.todo);
+      // To-dos (D-408): a --todo that names no open to-do is refused before anything is recorded, when this
+      // machine can tell the to-do is its own. T-51 (D-4): a Pane in no Session here may be a member of a
+      // Session on another machine, which reads the number as its own to-do; this machine then records nothing.
+      // The check writes nothing: progress is recorded once the report is stored (review F-2).
+      const todoCheck = normalized.todo && todoService
+        ? todoService.checkReportTodo(panel.id, normalized.todo, services.orchestrationSessionManager?.approvalSession(panel.sessionId, panel.id) !== undefined)
+        : undefined;
       if (normalized.paneId && normalized.paneId !== panel.sessionId) {
         throw new Error(`Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${normalized.paneId}.`);
       }
       // Its buttons take notify's own checks (count, distinct labels, choices or questions).
       checkNotifyOptions(normalized.choices, normalized.questions);
       const report = normalizeAgentReport(normalized, new Date().toISOString());
+      // T-51: which machine sent the number, for the Session's machine.
+      const installId = report.todo ? services.configManager.getConfig().machineId : undefined;
+      if (installId) report.installId = installId;
       // A blocked report becomes an approval card: it takes the card check before it's recorded (P3).
       const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath, readStatusFile: report.summaryTruncated, choices: report.choices, questions: report.questions }).warnings : [];
+      if (todoCheck?.warning) warnings.push(todoCheck.warning);
       if (panel.type === 'chat') getChatTabManager().setReport(panel.id, report);
       else await storePanelAgentReport(panel, report);
+      // T-51 review F-2: progress only once the report passed every check and is stored.
+      if (todoCheck) todoService?.recordReportTodo(todoCheck);
       const panelSummary = panelToSummary(panelManager.getPanel(panel.id) ?? panel);
       const { liveWatchers } = workspaceJournal.deliverPaneEntry(panel.sessionId, {
         kind: 'agent.report',

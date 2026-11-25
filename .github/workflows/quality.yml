@@ -235,7 +235,7 @@ jobs:
     # result, which runs it every time at the end of the critical path.
     - name: Test the CI result gate and the pre-push hook
       if: ${{ !cancelled() }}
-      run: node --test scripts/ci-gate.test.mjs scripts/ci-timings.test.mjs scripts/pre-push.test.mjs scripts/ci-test-inventory.test.mjs
+      run: node --test scripts/ci-gate.test.mjs scripts/ci-timings.test.mjs scripts/pre-push.test.mjs scripts/ci-test-inventory.test.mjs scripts/todo-key-lint.test.mjs
 
     # Every tracked test file runs in a lane of this workflow (or another
     # workflow), or is listed with its reason in scripts/ci-test-inventory.mjs.

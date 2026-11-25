@@ -445,6 +445,7 @@ export class TodoStore {
   /** Current attachments per to-do, in one read. */
   attachmentCounts(): Map<number, number> {
     const rows = decodeBoundary(this.db.prepare('SELECT todo_id, COUNT(*) AS count FROM todo_attachments WHERE removed_at IS NULL GROUP BY todo_id').all(), boundary.array(boundary.object({ todo_id: boundary.number, count: boundary.number })));
+    // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
     return new Map(rows.map(row => [row.todo_id, row.count]));
   }
 

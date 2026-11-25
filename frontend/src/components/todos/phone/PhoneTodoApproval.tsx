@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { leadingQn } from '../../../../../shared/autopilotDecision';
 import { countsAsWaiting, selectNotifyItems, useNotifyStore } from '../../../stores/notifyStore';
 import { todoApprovalSurface, useApprovalColumnStore } from '../../../stores/approvalColumnStore';
-import { useTodoDetail, useTodosStore } from '../../../stores/todosStore';
+import { snoozeRequestedFor, useTodoDetail, useTodosStore } from '../../../stores/todosStore';
 import { ApprovalColumn } from '../../approvals/ApprovalColumn';
 import { PhoneHeader, PhoneScreen } from './phoneParts';
 
@@ -38,7 +38,7 @@ export function PhoneTodoApproval({ number, id, onSelect, onBack }: PhoneTodoApp
   // The column is this screen's alone: leaving it forgets it.
   useEffect(() => () => useApprovalColumnStore.getState().close(surface), [surface]);
   // A reminder's "Snooze to another time…" (round 9): back to the to-do, whose page opens the snooze sheet.
-  const snoozeAsked = useTodosStore((state) => state.snoozeRequest === number);
+  const snoozeAsked = useTodosStore((state) => snoozeRequestedFor(state.snoozeRequest, number));
   const wentBack = useRef(false);
   useEffect(() => {
     if (!snoozeAsked || wentBack.current) return;

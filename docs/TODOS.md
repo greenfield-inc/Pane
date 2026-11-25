@@ -26,7 +26,15 @@ only while To-dos is on.
   saved machine that is this computer (or, in remote mode, the computer the
   window shows) isn't read a second time. Opening another machine's to-do
   (its row reads Open on devbox) switches the window to that machine and
-  shows the to-do there; an offline machine says so instead.
+  shows the to-do there; an offline machine says so instead. Every machine
+  numbers its own to-dos, so a to-do's page belongs to the machine it was
+  opened on: switching the window to another computer closes it rather than
+  showing that computer's to-do with the same number, its split and closed
+  tabs are remembered per machine and number, and its Open its Session opens
+  the Session on that machine. A page or list read from a saved computer
+  names it by the label it is saved under (T-5 · devbox), never "This Mac".
+  Just after a switch the list waits for the new computer's own list, and a
+  Session's To-dos tab keeps its open to-do per machine.
 - **Kept moving.** A plain-code supervisor on each machine notices a to-do
   that has gone quiet, reminds its orchestrator, restarts it, and then asks
   you. See [The supervisor](#the-supervisor).
@@ -54,7 +62,9 @@ only while To-dos is on.
 - **A requester.** Whoever created the to-do: you, or the orchestrator of the
   Session whose chat it came from. Sub-to-dos share their parent's requester.
 - **A number.** To-dos are numbered T-1, T-2 and so on per machine, and a
-  number is never handed out twice.
+  number is never handed out twice. Two machines can each have a T-28, so
+  Pane always reads a number with its machine: another machine's to-do reads
+  **T-28 · tylers-macbook-pro**, by the name that machine is saved under.
 
 ## Statuses
 
@@ -319,6 +329,10 @@ none open or closed this week it says so in one quiet line, as Changes does for
 a Session with no Panes. On All machines, a Session on another machine shows
 that machine's to-dos: switching rereads them, and only that machine's
 approvals count, so another computer's T-14 never adds to this one's.
+A Session's chat card, approval column, ⌥⌘A and sidebar count take only
+the cards of the machine the Session is on, and none from a machine that has
+gone offline until it is back; another machine's cards stay in Approvals under
+that machine.
 
 In the web app, an open Session's header has a **To-dos** button with the same
 count. It opens that list full screen; a to-do opens on the phone's to-do
@@ -509,7 +523,7 @@ wakes it and delivers them at once.
   the orchestrator's first message), **Snooze 1 hour**, **Snooze to the next
   morning** (9:00 AM tomorrow in the zone it was set in, or Monday instead of
   a weekend day) and "Snooze to another time…", which opens the to-do with
-  the menu. It is in Approvals and the floating strip like any card, covers
+  the menu (on its own machine, for another machine's reminder). It is in Approvals and the floating strip like any card, covers
   the to-do's split, and opens full screen on the phone.
 
 **Waking early.** Wake now, R on a snoozed row and `runpane todos wake` wake
@@ -702,6 +716,24 @@ runpane todos wake T-n
 - `--todo T-n` on `runpane notify`, `runpane report` and `runpane agents start`
   links that card, report or new agent to a to-do. An agent started with
   `--todo` is assigned that to-do.
+- A worker in a Pane on another machine, in a Session on this one, means this
+  machine's T-n: the Session's machine reads the number against its own
+  to-dos and links the card there; a number it has no open to-do for leaves
+  the card unlinked. The worker's machine keeps no record that its Pane is in
+  another machine's Session, so it checks `report --todo` only when the Pane
+  is in a Session there or the to-do is assigned to that tab (a number with no
+  open to-do is then refused). Otherwise it records nothing on its own
+  to-dos and the report says so in a warning. Progress is recorded only once
+  the report is accepted, so a refused report changes no to-do.
+- That rule needs an updated Pane on the worker's machine. A worker's machine
+  on an older Pane still checks `--todo` against its own to-dos: it refuses
+  the report when it has no open to-do with that number (so nothing reaches
+  the Session's machine), and otherwise records progress on its own,
+  unrelated T-n. An updated Session's machine still links its own T-n to any
+  report that arrives.
+- To-do links, the to-dos snapshot and a report with `--todo` carry the owning
+  machine's install id (`installId`); a card whose link names another install
+  id than the machine that sent it shows unlinked. Older machines send none.
 
 The full contract is in [RUNPANE_CLI_CONTRACT.md](RUNPANE_CLI_CONTRACT.md).
 

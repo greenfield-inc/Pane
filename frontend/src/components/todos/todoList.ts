@@ -2,6 +2,7 @@ import { LOCAL_MACHINE_ID, type MachineState } from '../../../../shared/types/ma
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { isOpenTodoState, type TodoListRow, type TodoShownStatus, type TodoStatus, type TodosSnapshot } from '../../../../shared/types/todos';
 import type { RemoteTodos } from '../../stores/todosStore';
+import { todoKeyOfRow } from '../../../../shared/todoKey';
 import { TODO_STATUS_LABEL } from './TodoStatusIcon';
 
 /**
@@ -82,13 +83,13 @@ export function mergeTodoEntries(local: TodosSnapshot | null, remotes: readonly 
   const entries: TodoEntry[] = [];
   for (const row of local?.rows ?? []) {
     if (row.todo.parentNumber !== null) continue;
-    entries.push({ key: `${LOCAL_MACHINE_ID}:${row.todo.number}`, row, machineId: LOCAL_MACHINE_ID, remote: false, offline: false });
+    entries.push({ key: todoKeyOfRow(LOCAL_MACHINE_ID, row), row, machineId: LOCAL_MACHINE_ID, remote: false, offline: false });
   }
   for (const remote of remotes) {
     for (const row of remote.snapshot?.rows ?? []) {
       if (row.todo.parentNumber !== null) continue;
       const shown: TodoListRow = remote.offline ? offlineRow(row, remote.label) : { ...row, machine: remote.label };
-      entries.push({ key: `${remote.machineId}:${row.todo.number}`, row: { ...shown, machineId: remote.machineId }, machineId: remote.machineId, remote: true, offline: remote.offline });
+      entries.push({ key: todoKeyOfRow(remote.machineId, row), row: { ...shown, machineId: remote.machineId }, machineId: remote.machineId, remote: true, offline: remote.offline });
     }
   }
   return entries.sort((a, b) => b.row.todo.updatedAt - a.row.todo.updatedAt);

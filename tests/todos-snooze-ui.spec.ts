@@ -66,8 +66,10 @@ function activity(number: number): TodoActivity[] {
 function fixture(): TodosMockOptions {
   const details: Record<number, TodoDetail> = {};
   for (const listed of rows) {
+    // oxlint-disable-next-line pane/no-bare-todo-number -- this mock serves one machine's to-dos by number, as main does.
     details[listed.todo.number] = {
       ...listed, subTodos: [], attachments: [{ attachments: [] }], activity: activity(listed.todo.number),
+      // oxlint-disable-next-line pane/no-bare-todo-number -- this mock serves one machine's to-dos by number, as main does.
       approvalIds: listed.todo.number === 23 ? ['r23'] : listed.todo.number === 15 ? ['q31'] : [],
       chatTarget: { panelId: 'orch', name: 'orchestrator', kind: 'orchestrator' }, orchestrator: { panelId: 'orch', name: 'orchestrator', agentId: 'claude' },
       load: { gate: 'normal', canPause: true }, keepMoving: 'quiet 2m · 0 reminders',

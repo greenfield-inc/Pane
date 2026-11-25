@@ -160,8 +160,9 @@ python3 -m pip index versions runpane
 ```
 
 The release is done when `Build & Release` succeeds for the tag and the GitHub
-release is published. Also check that `Code Quality` and `Deploy Remote PWA
-Preview` passed on the release commit.
+release is published. A green run can still have skipped Homebrew, so look for
+its "Homebrew cask not published" warning. Also check that `Code Quality` and
+`Deploy Remote PWA Preview` passed on the release commit.
 
 Auto-update reads `latest-mac.yml`, `latest-linux.yml`,
 `latest-linux-arm64.yml` and `latest.yml` from the release, so a published
@@ -185,8 +186,11 @@ artifact, and publishes nothing. Its artifacts are kept for one day. Uncheck
 A run with `publish` checked always signs, and stops at once if `sign` is
 unchecked. Manual runs are named after their choices, for example
 `Build & Release v0.0.0-bench (publish=false, sign=false)`.
-`HOMEBREW_TAP_TOKEN` permits the cask push; without it, the Homebrew job logs
-a notice and skips. npm publishes with `--provenance`.
+`HOMEBREW_TAP_TOKEN` permits the cask push. Without it the `homebrew` job still
+passes and the release succeeds, but the run shows a "Homebrew cask not
+published" warning and the same line in its summary, and the tap keeps the
+previous cask. The next release after the secret is set updates the tap. npm
+publishes with `--provenance`.
 
 ### Claude plugin
 
@@ -378,6 +382,7 @@ Names only; values live in the GitHub repository settings.
 | `GITHUB_TOKEN` | all | Provided by Actions |
 | `NPM_TOKEN`, `PYPI_API_TOKEN` | `build.yml` | Fallback only. npm and PyPI publish through trusted publishing (repository `greenfield-inc/Pane`, workflow `build.yml`, PyPI environment `pypi`). Use a token only for manual recovery, never commit `.npmrc` or `.pypirc`, and revoke the token afterwards |
 | `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_SPECIFIC_PASSWORD` | `build.yml` | macOS signing. It turns on only when all five are set and the `sign` input is not unchecked; otherwise builds are unsigned |
+| `HOMEBREW_TAP_TOKEN` | `build.yml` | Pushes the Homebrew cask. Needs contents write on `greenfield-inc/homebrew-tap`. See [Package-manager distribution](#package-manager-distribution) |
 | `SITE_REPO_DISPATCH_TOKEN` | `build.yml`, `notify-website.yml` | Sends the `pane-release` event to the website repo |
 | `TRAFFIC_TOKEN` | `traffic-snapshot.yml` | Reads repository traffic |
 | `PANE_RELAY_ACME_EMAIL`, `PANE_RELAY_APNS_KEY_ID`, `PANE_RELAY_APNS_TEAM_ID`, `PANE_RELAY_ANDROID_CERT_SHA256` variables | `relay-deploy.yml` | Relay certificates, iOS alerts and app links; see [relay/deploy/RUNBOOK.md](relay/deploy/RUNBOOK.md) |

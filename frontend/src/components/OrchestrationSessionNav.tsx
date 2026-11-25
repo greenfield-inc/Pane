@@ -7,7 +7,7 @@ import { openApprovalsFromCount } from './approvals/useSessionApprovals';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useLoopsStore } from '../stores/loopsStore';
-import { useTodoSessionIds } from '../stores/todosStore';
+import { useSessionMachineScope, useTodoSessionIds } from '../stores/todosStore';
 import { visibleOrchestrationSessions } from './orchestrationSessionVisibility';
 import { sessionWaitingCount, useNotifyStore } from '../stores/notifyStore';
 import { LoopLabel, LoopMark } from './loops/LoopMark';
@@ -126,14 +126,16 @@ export function OrchestrationSessionNav({
   const notifySnapshot = useNotifyStore(state => state.snapshot);
   const openSessionId = useNavigationStore(state => state.activeView === 'pane-chat') ? selectedSessionIdForList : undefined;
   const todoSessionIds = useTodoSessionIds();
+  // Only the cards of the computer this window shows, whose Sessions these are (T-51).
+  const machineScope = useSessionMachineScope();
   // A loop's Session lives under Loops and joins the list only while a card from it waits on you, or while
   // it is open. A to-do's own Session lives under To-dos (D-409) and never joins it (T-7).
   const activeSessions = useMemo(
     () => visibleOrchestrationSessions(sessions, {
       todoSessionIds, openSessionId, loopSessionIds: loopsBySessionTarget,
-      waitingCount: sessionId => sessionWaitingCount(notifySnapshot, sessionId),
+      waitingCount: sessionId => sessionWaitingCount(notifySnapshot, sessionId, machineScope),
     }),
-    [sessions, loopsBySessionTarget, todoSessionIds, notifySnapshot, openSessionId],
+    [sessions, loopsBySessionTarget, todoSessionIds, notifySnapshot, openSessionId, machineScope],
   );
   const pinnedSessions = useMemo(
     () => activeSessions.filter(session => session.isPinned === true && !loopsBySessionTarget.has(session.id)),

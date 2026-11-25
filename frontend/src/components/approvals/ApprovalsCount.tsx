@@ -14,7 +14,7 @@ import { useSessionTodoScope } from '../../stores/todosStore';
 export function SessionApprovalsCount({ sessionId, machineId, otherwise, opensApprovals = false }: { sessionId: string; machineId?: string; otherwise: ReactNode; opensApprovals?: boolean }) {
   // Its to-dos' approvals (their own hidden Sessions' too) count on its row, each once (T-22).
   const todos = useSessionTodoScope(sessionId, machineId);
-  const count = useNotifyStore((state) => sessionWaitingCount(state.snapshot, sessionId, machineId, todos));
+  const count = useNotifyStore((state) => sessionWaitingCount(state.snapshot, sessionId, todos));
   const waiting = useSessionApprovals(sessionId, machineId);
   const ready = readyCount(waiting);
   return (

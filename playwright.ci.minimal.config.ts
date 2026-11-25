@@ -95,6 +95,8 @@ const BROWSER_SPECS = [
   'terminal-selection-popover.spec.ts',
   'terminal-upload-button.spec.ts',
   'theme-screenshots.spec.ts',
+  'todo-machine-keys.spec.ts',
+  'todo-page-machine-key.spec.ts',
   'todo-session-approvals.spec.ts',
   'todo-session-sidebar.spec.ts',
   'todo-split-rule.spec.ts',
