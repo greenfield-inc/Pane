@@ -33,7 +33,7 @@ import { useTheme, withAlpha } from '@/theme';
 import { Icon, SkeletonSwap, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
 
-import { ActivityRow, ApprovalRow, BoardHeader, BoardSkeleton, Card, CardSkeleton, EmptyCard, GroupRow, HistoryLine, RowDivider } from './BoardRows';
+import { ActivityRow, ApprovalRow, BoardHeader, BoardSkeleton, Card, CardSkeleton, EmptyCard, GroupRow, HistoryLine } from './BoardRows';
 import { useBoardTile } from './boardTile';
 import { bottomBarHeight, HomeBottomBar } from './HomeBottomBar';
 import { homeScroll, useHomeView } from './homeView';
@@ -310,7 +310,7 @@ export function HomeScreen() {
           <GroupRow testID="sidebar-section-pinned" icon={{ ios: 'pin', android: 'push_pin' }} title="Pinned" count={pinnedCount} open={expanded.pinned} onPress={() => toggleSection('pinned')} />
           {expanded.pinned ? shownPinned.map((item, index) => (
             <View key={item.key}>
-              {index === 0 ? <View style={[styles.hairline, { backgroundColor: theme.colors.border }]} /> : <RowDivider inset={36} />}
+              {index === 0 ? <View style={[styles.hairline, { backgroundColor: theme.colors.border }]} /> : null}
               {item.type === 'pane' && !item.nested ? (
                 <PaneRow
                   pane={item.pane}
@@ -371,19 +371,23 @@ export function HomeScreen() {
     </View>
   );
   const place = all ? 'all' : profile.id;
+  const scroll = homeScroll(place);
   const list = (
     // The skeleton draws the tiles too, so the board doesn't fade them in again.
     <SkeletonSwap loading={loading} skeleton={skeleton} style={styles.fill} fade={false}>
       <LegendList
         // All and each machine keep their own place.
         key={place}
-        initialScrollOffset={homeScroll.get(place) ?? 0}
-        onScroll={event => { if (!searching) homeScroll.set(place, Math.max(0, event.nativeEvent.contentOffset.y)); }}
+        // The header's height too, or the offset stops where the rows alone would end.
+        initialScrollOffset={scroll.offset}
+        estimatedHeaderSize={scroll.headerSize}
+        onMetricsChange={({ headerSize }) => { if (!searching) scroll.headerSize = headerSize; }}
+        onScroll={event => { if (!searching) scroll.offset = Math.max(0, event.nativeEvent.contentOffset.y); }}
         testID="panes-list"
         data={rows}
         keyExtractor={row => row.key}
         getItemType={row => row.kind}
-        estimatedItemSize={52}
+        estimatedItemSize={tile === 'all' && all ? 60 : 52}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         // Search results scroll clear of the keyboard.

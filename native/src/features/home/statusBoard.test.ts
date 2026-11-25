@@ -123,6 +123,12 @@ describe('sessionWaiting', () => {
     expect([...sessionWaiting(buildAllMachinesList([box], ''))]).toEqual([['box:ship', 2]]);
   });
 
+  it('counts a question one of its Panes asked outside any Session', () => {
+    const asked = notify([{ id: 'q', createdAt: 1, source: { name: 'prompt', agent: 'Codex', paneId: 'prompt' } }]);
+    // "prompt" now waits through its question instead of its terminal.
+    expect([...sessionWaiting(buildAllMachinesList([{ ...box, snapshot: { ...box.snapshot!, notify: asked } }], ''))]).toEqual([['box:ship', 2]]);
+  });
+
   it('counts nothing on a machine that went offline', () => {
     expect([...sessionWaiting(buildAllMachinesList([{ ...box, offlineSince: 1 }], ''))]).toEqual([]);
   });

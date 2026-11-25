@@ -11,5 +11,11 @@ export const useHomeView = create<HomeViewState>(set => ({
   setQuery: query => set({ query }),
 }));
 
-/** How far down Home's list was, per machine (or All), for the remount a switch brings. */
-export const homeScroll = new Map<string, number>();
+const scrolls = new Map<string, { offset: number; headerSize: number | undefined }>();
+
+/** How far down Home's list was on a machine (or All), and its header's height, for the remount a switch brings. */
+export function homeScroll(place: string) {
+  const scroll = scrolls.get(place) ?? { offset: 0, headerSize: undefined };
+  scrolls.set(place, scroll);
+  return scroll;
+}

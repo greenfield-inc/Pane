@@ -43,16 +43,21 @@ export function terminalWaiting(list: Pick<AllMachinesList, 'waiting' | 'recent'
 }
 
 /**
- * A Session row's amber count, by `sessionKey`: the approvals from it (D-38) and its Panes waiting
- * in their terminal, so a collapsed Session still says something in it needs you.
+ * A Session row's amber count, by `sessionKey`: the approvals from it (D-38), the ones its Panes
+ * asked outside any Session, and its Panes waiting in their terminal, so a collapsed Session still
+ * says something in it needs you.
  */
 export function sessionWaiting(list: Pick<AllMachinesList, 'waiting' | 'recent'>, held: AllMachinesList['waiting'] = []): ReadonlyMap<string, number> {
   const counts = new Map(waitingCounts(list.waiting).bySession);
-  for (const { machineKey, pane } of terminalWaiting(list, held)) {
-    if (!pane.sessionId) continue;
-    const key = sessionKey(machineKey, pane.sessionId);
+  const sessionOf = new Map(paneRows(list.recent).map(({ machineKey, pane }) => [`${machineKey}:${pane.id}`, pane.sessionId]));
+  const add = (machineKey: string, paneId: string | undefined) => {
+    const sessionId = sessionOf.get(`${machineKey}:${paneId}`);
+    if (!sessionId) return;
+    const key = sessionKey(machineKey, sessionId);
     counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
+  };
+  for (const row of list.waiting) if (row.waiting && !row.session && row.type === 'question') add(row.machineKey, row.item.source.paneId);
+  for (const row of terminalWaiting(list, held)) add(row.machineKey, row.pane.id);
   return counts;
 }
 
