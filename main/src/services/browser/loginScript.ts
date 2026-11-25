@@ -156,9 +156,8 @@ function loginWorld() {
     const inspect = (node: Node) => {
       if (node.nodeType === Node.TEXT_NODE) {
         const text = (node.textContent ?? '').replace(/\s+/g, '');
-        // A drawn digit is a piece of the value, just after the fill and while its boxes are still there.
-        const live = armed() && holding();
-        if (holds(text) || (live && (text.includes(plain) || piece(text)))) conceal(node.parentElement);
+        // Text quoting the value, while a field holding it is on the page; a drawn digit is a piece of it, just after the fill.
+        if (holds(text) || (holding() && (text.includes(plain) || (armed() && piece(text))))) conceal(node.parentElement);
       } else if (node instanceof Element) {
         if (node.shadowRoot) watch(node.shadowRoot);
         node.childNodes.forEach(inspect);

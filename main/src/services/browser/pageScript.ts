@@ -435,7 +435,12 @@ function pageScript(limit: number) {
 
   function check(text: string | null, url: string | null, ref: string | null): PageCheck {
     if (url !== null && !location.href.includes(url)) return { met: false };
-    if (text !== null && !(document.body && hidesLogin(document.body) ? flatText(document.body) : document.body?.innerText ?? '').includes(text)) return { met: false };
+    // Read through slots and masks, text is spaced between elements, so it is compared without spaces.
+    const unspaced = (words: string) => words.replace(/\s+/g, '');
+    const found = document.body && hidesLogin(document.body)
+      ? (words: string) => unspaced(flatText(document.body)).includes(unspaced(words))
+      : (words: string) => (document.body?.innerText ?? '').includes(words);
+    if (text !== null && !found(text)) return { met: false };
     if (ref !== null) {
       const el = lookup(ref);
       if ('stale' in el) return { met: false, stale: el.stale };

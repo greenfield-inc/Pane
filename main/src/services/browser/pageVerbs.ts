@@ -78,7 +78,7 @@ export async function runVerb(page: PageDriver, contents: BrowserPageContents, r
       const outcome = after(filled);
       outcome.filledSite = site;
       const what = sure ? `Filled ${request.login.key}.` : `The page changed while Pane filled ${request.login.key}, so it may hold it, part of it or nothing: a page that submits by itself does this. Call browser_snapshot to see where it is.`;
-      outcome.note = [`${what} Its value shows as dots, and scripts don't run on this page until the tab loads a new one.`, outcome.note].filter(Boolean).join(' ');
+      outcome.note = [`${what} Its value shows as dots. Until the tab loads a new page, scripts don't run on it and snapshots show every field's value as dots.`, outcome.note].filter(Boolean).join(' ');
       return outcome;
     }
     case 'press':

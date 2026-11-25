@@ -110,7 +110,8 @@ runpane browser fill --ref e7 --project bank --name PIN
 - **The value stays out of reach.** It goes from Pane's main process to the page, and is in no tool
   input or output, log, command, environment or screen. The filled field becomes a password field
   and stays one, and so does any other field the page puts it in, so a screenshot, the stream and
-  your own window show dots; digits the page draws from it show as dots too. While the page holds it, snapshots withhold every field's value.
+  your own window show dots; digits the page draws from it show as dots too. Snapshots withhold every field's value on that page until the tab loads a new one, so after a
+  sign-in that stays on one page, reload it (`browser_navigate --history reload`) to read fields again.
 - **No scripts beside it.** `browser_evaluate` is refused on the filled page until the tab loads a
   new one (`ERR_BROWSER_LOGIN_ON_PAGE`). A tab where it already ran takes no login
   (`ERR_BROWSER_LOGIN_SCRIPTED`): open the page in a new tab, and fill before any script.
