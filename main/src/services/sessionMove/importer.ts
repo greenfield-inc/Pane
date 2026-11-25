@@ -14,6 +14,7 @@ import type { AppServices } from '../../ipc/types';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { getShellPath } from '../../utils/shellPath';
 import { paneAgentFarmProcess } from '../agentFarm/bundledAgentFarm';
+import { profilesOn } from '../agentFarm/profilesFeature';
 import { panelManager } from '../panelManager';
 import { terminalPanelManager } from '../terminalPanelManager';
 import { getChatTabManager } from '../chatTabs';
@@ -195,17 +196,22 @@ export async function cliVersion(executable: string, args: string[] = ['--versio
   }
 }
 
-/** Runs Pane's own Agent Farm (the bundled copy, Pane's config root), as chat launches and Pane's terminals do. */
-async function runAgentFarm(args: string[], options: { cwd?: string; timeout: number }): Promise<{ stdout: string }> {
-  const agentFarm = paneAgentFarmProcess(getAppDirectory(), args, { ...process.env, PATH: getShellPath() });
+/**
+ * Runs Pane's own Agent Farm (the bundled copy, Pane's config root) while Profiles is on, as chat
+ * launches and Pane's terminals do then; while it is off, `agent-farm` on PATH, as before T-63.
+ */
+async function runAgentFarm(args: string[], options: { cwd?: string; timeout: number; shellPath?: () => string }): Promise<{ stdout: string }> {
+  const env = { ...process.env, PATH: (options.shellPath ?? getShellPath)() };
+  if (!profilesOn()) return run('agent-farm', args, { cwd: options.cwd, env, timeout: options.timeout });
+  const agentFarm = paneAgentFarmProcess(getAppDirectory(), args, env);
   if (!agentFarm) throw new PaneError('ERR_MOVE_AGENT_FARM_MISSING', `This Pane build on ${thisMachineName()} lacks its bundled Agent Farm.`, `Reinstall Pane from runpane.com on ${thisMachineName()}, then check again.`);
   return run(agentFarm.executable, agentFarm.args, { cwd: options.cwd, env: agentFarm.env, timeout: options.timeout, windowsHide: true });
 }
 
-/** Agent Farm profile versions from `agent-farm profiles list`, by qualified name. */
-export async function agentFarmProfiles(): Promise<Record<string, string>> {
+/** Agent Farm profile versions from `agent-farm profiles list`, by qualified name. `shellPath` is the PATH it runs with. */
+export async function agentFarmProfiles(shellPath: () => string = getShellPath): Promise<Record<string, string>> {
   try {
-    const { stdout } = await runAgentFarm(['profiles', 'list'], { timeout: 20_000 });
+    const { stdout } = await runAgentFarm(['profiles', 'list'], { timeout: 20_000, shellPath });
     const profiles: Record<string, string> = {};
     for (const line of stdout.split('\n')) {
       const match = /^(\S+)\s.*\|\s*plugin\s+\S+\s+(\d[\w.-]*)/.exec(line.trim());

@@ -16,6 +16,7 @@ import { chatAgentName, getAgentRegistry } from '../services/agentRegistry';
 import { chatTabSecrets } from '../services/chatTabs/secrets';
 import { AgentFarmProfiles, printedCli } from '../services/chatTabs/agentFarm';
 import { bundledAgentFarm, paneAgentFarmProcess } from '../services/agentFarm/bundledAgentFarm';
+import { profilesOn } from '../services/agentFarm/profilesFeature';
 import { worktreePaneFolder } from '../services/worktreePaneFolder';
 import { chatTabEnv } from '../services/chatTabs/launch';
 import { adapterEntry, adapterFileForPlainNode, checkAgentCli } from '../services/agentChat/adapterSetup';
@@ -54,6 +55,8 @@ const panelId = (value: PaneCommandValue) => decodeBoundary(value, boundary.nonE
 
 /** Agent Farm profiles (package 2's run --print-acp) with Pane's bundled adapters. */
 const agentFarmProfiles = new AgentFarmProfiles({
+  profilesOn,
+  executable: () => findExecutableInPath('agent-farm') ?? undefined,
   bundled: async (args, cwd, env) => {
     if (!bundledAgentFarm()) return undefined;
     // `run` writes its launch bundle to <worktree>/.agent-farm/generated; hide that from git like .pane/ (workspace.yaml beside it is meant to be committed).

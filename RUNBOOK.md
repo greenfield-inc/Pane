@@ -226,9 +226,10 @@ namespace. Check the listing with
 
 ## Bumping the bundled Agent Farm
 
-Pane ships `@greenfieldco/agent-farm` and runs it for every chat launch, Session
-move check and `agent-farm` in its terminals
-([docs/CHAT_TABS.md](docs/CHAT_TABS.md#agent-farm-profiles)). To ship a new one:
+Pane ships `@greenfieldco/agent-farm`. With Settings › Advanced › *Profiles* on,
+it runs it for every chat launch, Session move check and `agent-farm` in its
+terminals; with it off, for chat launches on a computer without its own
+agent-farm ([docs/CHAT_TABS.md](docs/CHAT_TABS.md#profiles-switch)). To ship a new one:
 
 1. Set the same exact version in `package.json` and `main/package.json`, then run
    `pnpm install` and `pnpm run generate-notices`, and commit `NOTICES`.

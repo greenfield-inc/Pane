@@ -5,7 +5,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
 import { reasonOf } from '../../../../shared/paneError';
-import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { hashDirectory } from '../skillCacheManager';
 
 const execFileAsync = promisify(execFile);
@@ -15,6 +15,8 @@ const AGENT_FARM_PACKAGE = '@greenfieldco/agent-farm';
 /** Plugins the bundled package carries that Pane installs into its own config root; greenfield first. */
 export const BUNDLED_AGENT_FARM_PLUGINS = ['greenfield', 'dcouple'] as const;
 const MANIFEST_FILE = 'pane-manifest.json';
+/** The telemetry `enabled` Pane last wrote into settings.json while Profiles was on, so turning Profiles off takes back only Pane's own. */
+const TELEMETRY_MARKER_FILE = 'pane-telemetry.json';
 /** Written while Pane installs one bundled plugin, naming it; still there at the next start means that install never finished. */
 const INSTALLING_FILE = 'pane-installing.json';
 /** The folders of a plugin Agent Farm's install receipt covers, besides plugin.yaml (Agent Farm's plugins.js). */
@@ -55,31 +57,33 @@ export interface AgentFarmProcess {
 }
 
 /**
- * Whether launches may record telemetry: Pane's saved switch (`agentFarmTelemetry` in
- * <PANE_DIR>/config.json, beside the config root) and Agent Farm's settings.json must both say
- * on. The saved switch is what Settings shows, so turning it off wins even when the
- * settings.json write failed (review F-2). Anything missing or unreadable counts as off. The shim
- * launcher in runpaneShim.ts decides the same way.
+ * Whether Pane holds launches' telemetry off. Only while Profiles is on (`sessionProfilesEnabled`
+ * in <PANE_DIR>/config.json, beside the config root): with it off, Agent Farm's own default
+ * decides, as before T-63. With it on, Pane's saved switch (`agentFarmTelemetry`) and Agent Farm's
+ * settings.json must both say on. The saved switch is what Settings shows, so turning it off wins
+ * even when the settings.json write failed (review F-2). Anything missing or unreadable counts as
+ * off. The shim launcher in runpaneShim.ts decides the same way.
  */
-function telemetrySwitchOn(configRoot: string): boolean {
+function telemetryHeldOff(configRoot: string): boolean {
   const read = (file: string) => {
     try { return decodeOptionalBoundary(JSON.parse(readFileSync(file, 'utf8')), boundary.jsonObject); }
     catch { return undefined; }
   };
-  const saved = read(path.join(path.dirname(configRoot), 'config.json'))?.agentFarmTelemetry === true;
+  const saved = read(path.join(path.dirname(configRoot), 'config.json'));
+  if (saved?.sessionProfilesEnabled !== true) return false;
   const settings = read(path.join(configRoot, 'settings.json'));
-  return saved && decodeOptionalBoundary(settings?.telemetry, boundary.jsonObject)?.enabled === true;
+  return !(saved.agentFarmTelemetry === true && decodeOptionalBoundary(settings?.telemetry, boundary.jsonObject)?.enabled === true);
 }
 
 /**
- * `agent-farm <args> --config-root <root>` with the bundled copy. With Pane's telemetry switch off
+ * `agent-farm <args> --config-root <root>` with the bundled copy. While Pane holds telemetry off
  * it sets AGENT_FARM_TELEMETRY=off, the one setting that outranks a repository's
  * .agent-farm/workspace.yaml, unless the environment already chose a value.
  */
 export function bundledAgentFarmProcess(bundle: BundledAgentFarm, args: string[], configRoot: string, env: NodeJS.ProcessEnv = process.env, runtime: string = process.execPath): AgentFarmProcess {
   const rest = { ...env };
   delete rest.AGENT_FARM_CONFIG_ROOT;
-  if (!rest.AGENT_FARM_TELEMETRY && !telemetrySwitchOn(configRoot)) rest.AGENT_FARM_TELEMETRY = 'off';
+  if (!rest.AGENT_FARM_TELEMETRY && telemetryHeldOff(configRoot)) rest.AGENT_FARM_TELEMETRY = 'off';
   return { executable: runtime, args: [bundle.entry, ...args, '--config-root', configRoot], env: { ...rest, ELECTRON_RUN_AS_NODE: '1' } };
 }
 
@@ -135,23 +139,34 @@ function installedVersion(stdout: string): string | undefined {
 /**
  * Agent Farm collects launch telemetry unless its config root's settings.json turns it off, and
  * writes it under ~/.local/state/agent-farm unless that file names another folder. Pane's copy
- * keeps it off unless Settings › AI & Agents turns it on (`agentFarmTelemetry`), and keeps it in its
- * own config root either way. Other settings in the file are kept.
+ * keeps it in its own config root either way. While Profiles is on, it is off unless Settings ›
+ * AI & Agents turns it on (`agentFarmTelemetry`): `enabled` is that switch. While Profiles is off
+ * (`enabled` undefined), Pane leaves on or off to Agent Farm, as before T-63, and takes back an
+ * `enabled` it wrote itself (pane-telemetry.json records it), leaving one written by hand. Other
+ * settings in the file are kept.
  *
  * Known exception, accepted for T-63 (D-T63-1): while the switch is on, a trusted repository's
  * .agent-farm/workspace.yaml can still name its own telemetry directory, which Agent Farm ranks
  * above this file. The files stay local; Pane doesn't force its folder over the workspace's.
  */
-export async function writeAgentFarmTelemetry(paneDir: string, enabled: boolean): Promise<void> {
+export async function writeAgentFarmTelemetry(paneDir: string, enabled: boolean | undefined): Promise<void> {
   const configRoot = agentFarmConfigRoot(paneDir);
   const file = path.join(configRoot, 'settings.json');
+  const markerFile = path.join(configRoot, TELEMETRY_MARKER_FILE);
   const directory = path.join(configRoot, 'telemetry');
   const text = await fs.readFile(file, 'utf8').catch(() => undefined);
   const settings = (text === undefined ? undefined : decodeOptionalBoundary(JSON.parse(text), boundary.jsonObject)) ?? {};
   const telemetry = decodeOptionalBoundary(settings.telemetry, boundary.jsonObject) ?? {};
-  if (telemetry.directory === directory && telemetry.enabled === enabled) return;
+  const marker = await fs.readFile(markerFile, 'utf8').then(value => decodeOptionalBoundary(JSON.parse(value), boundary.object({ enabled: boundary.boolean })), () => undefined);
+  const next: JsonObject = { ...telemetry, directory };
+  if (enabled !== undefined) next.enabled = enabled;
+  else if (marker && telemetry.enabled === marker.enabled) delete next.enabled;
+  const unchanged = telemetry.directory === directory && telemetry.enabled === next.enabled && (enabled === undefined ? !marker : marker?.enabled === enabled);
+  if (unchanged) return;
   await fs.mkdir(configRoot, { recursive: true });
-  await fs.writeFile(file, `${JSON.stringify({ ...settings, telemetry: { ...telemetry, enabled, directory } }, null, 2)}\n`);
+  await fs.writeFile(file, `${JSON.stringify({ ...settings, telemetry: next }, null, 2)}\n`);
+  if (enabled === undefined) await fs.rm(markerFile, { force: true });
+  else await fs.writeFile(markerFile, `${JSON.stringify({ enabled })}\n`);
 }
 
 /** Every file a receipt covers in an installed plugin, relative with `/`, and its SHA-256 (Agent Farm's hash). */
@@ -210,7 +225,10 @@ async function clearUnfinishedInstall(configRoot: string, plugins: readonly stri
 
 export interface InstallBundledAgentFarmOptions {
   paneDir: string;
-  /** Settings › AI & Agents › Save Agent Farm telemetry on this computer; off when absent. */
+  /**
+   * Settings › AI & Agents › Save Agent Farm telemetry on this computer while Profiles is on;
+   * undefined while Profiles is off, when Agent Farm's own default decides (as before T-63).
+   */
   telemetry?: boolean;
   bundle?: BundledAgentFarm;
   run?: AgentFarmRunner;
@@ -236,7 +254,7 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
     return status;
   }
   try {
-    await writeAgentFarmTelemetry(options.paneDir, options.telemetry === true);
+    await writeAgentFarmTelemetry(options.paneDir, options.telemetry);
   } catch (error) {
     log(`[AgentFarm] Pane couldn't write Agent Farm's telemetry setting in ${configRoot}: ${reasonOf(error)}.`);
   }
