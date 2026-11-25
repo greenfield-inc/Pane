@@ -271,7 +271,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
         data-sidebar-selected={active || undefined}
         onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
         className={cn(
-          'group/row relative mx-2 flex min-h-7 w-[calc(100%-1rem)] items-center gap-1.5 rounded-md py-0.5 pl-1 pr-2 transition-colors',
+          'group/row relative mx-2 flex min-h-7 w-[calc(100%-1rem)] items-center gap-1.5 rounded-md py-0.5 pl-2 pr-2 transition-colors',
           active ? 'bg-surface-selected' : 'hover:bg-surface-hover',
         )}
       >
@@ -287,20 +287,26 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
           aria-label={`Session ${session.name} on ${machine.name}${moveLabel ? ` (${moveLabel})` : ''}`}
           className="absolute inset-0 z-0 rounded-md focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
         />
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={expanded}
-          aria-label={`${expanded ? 'Collapse' : 'Expand'} ${session.name}`}
-          disabled={row.panes.length === 0}
-          className="relative z-10 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:text-text-primary disabled:invisible"
-        >
-          {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        </button>
-        {/* The avatar takes the 12px activity icon's place: 16px wide with -2px each side, so names start where they did. */}
-        {dimmed
-          ? <PausedGlyph size="sm" className="pointer-events-none flex-shrink-0" />
-          : <ProfileAvatar profileRef={session.agentProfile?.ref} agent={session.agent} size={16} className="pointer-events-none -mx-0.5" />}
+        {/* The row's first mark starts at its left padding, in one 16px box (T-63). A Session with
+            Panes shows its expand chevron in that box on hover or keyboard focus. */}
+        <span className={cn(
+          'pointer-events-none flex h-4 w-4 flex-shrink-0 items-center justify-center',
+          row.panes.length > 0 && 'group-hover/row:invisible group-has-[[data-session-panes-toggle]:focus-visible]/row:invisible',
+        )}>
+          {dimmed ? <PausedGlyph size="sm" /> : <ProfileAvatar profileRef={session.agentProfile?.ref} agent={session.agent} size={16} />}
+        </span>
+        {row.panes.length > 0 && (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={expanded}
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${session.name}`}
+            data-session-panes-toggle
+            className="absolute left-2 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-text-tertiary opacity-0 hover:text-text-primary focus:outline-none focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-interactive group-hover/row:opacity-100"
+          >
+            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          </button>
+        )}
         <span className={cn('pointer-events-none min-w-0 flex-1 truncate text-[13px]', dimmed ? 'text-text-muted' : 'font-semibold text-text-primary')}>{session.name}</span>
         {moveLabel ? (
           <span data-testid="session-move-label" className="pointer-events-none max-w-[55%] flex-shrink-0 truncate text-[11px] text-text-tertiary">{moveLabel}</span>
