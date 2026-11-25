@@ -64,14 +64,16 @@ test.describe('Machine health cards', () => {
     await open(page, 'popup=warning');
     await page.getByLabel('Composer').focus();
     const popups = page.getByTestId('health-popup');
+    // An older linked Pane's memory card never pops up.
     await expect(popups).toHaveCount(2);
+    await expect(page.getByText('Memory is tight')).toHaveCount(0);
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByRole('status', { name: 'Disk space is low' })).toHaveAttribute('data-level', 'warning');
     const box = await page.getByTestId('health-popups').boundingBox();
     expect(box && box.x < 40 && box.y + box.height > 900 - 40).toBe(true);
     await expect(page.getByLabel('Composer')).toBeFocused();
     // Hovering the stack holds every popup in it; leaving lets them hide after Notify's update time.
-    await page.getByRole('status', { name: 'Memory is tight' }).hover();
+    await page.getByRole('status', { name: 'Archive 6 finished Panes' }).hover();
     await page.waitForTimeout(3000);
     await expect(popups).toHaveCount(2);
     await page.mouse.move(700, 100);
@@ -85,7 +87,7 @@ test.describe('Machine health cards', () => {
     await expect(critical).toHaveAttribute('data-level', 'critical');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     // The warning hides on its own; the critical card is still there after it.
-    await expect(page.getByRole('status', { name: 'Memory is tight' })).toHaveCount(0, { timeout: 4000 });
+    await expect(page.getByRole('status', { name: 'Archive 6 finished Panes' })).toHaveCount(0, { timeout: 4000 });
     await page.waitForTimeout(500);
     await expect(critical).toBeVisible();
     await critical.getByRole('button', { name: 'Dismiss' }).click();
@@ -98,9 +100,9 @@ test.describe('Machine health cards', () => {
     await open(page, 'popup=critical');
     // Rest the pointer near the top of the upper card: the single popup that arrives later shows
     // at the bottom and never under it, since a popup under a resting pointer is held, as it should be.
-    await page.getByRole('status', { name: 'Memory is tight' }).hover({ position: { x: 40, y: 8 } });
+    await page.getByRole('status', { name: 'Archive 6 finished Panes' }).hover({ position: { x: 40, y: 8 } });
     // Both cards end while the pointer rests on the stack, so it unmounts without a pointer leave.
-    await page.evaluate(() => { window.qaResolve('m1'); window.qaResolve('d1'); });
+    await page.evaluate(() => { window.qaResolve('f1'); window.qaResolve('d1'); });
     await expect(page.getByTestId('health-popups')).toHaveCount(0);
     await page.evaluate(() => window.qaAdd('l1'));
     await expect(page.getByTestId('health-popup')).toHaveCount(1);

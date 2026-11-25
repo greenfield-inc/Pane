@@ -12,6 +12,7 @@ const MAX_SHOWN = 3;
  * bottom-left corner that never takes focus. A warning hides after Notify's update time
  * (paused while the pointer is over it); a critical card is tinted red and stays until
  * dismissed or resolved. Either way the card keeps waiting in Approvals, with every choice.
+ * Memory never pops up (D-175): only an older linked Pane still sends that card.
  */
 export function HealthCardPopups({ suppressed }: { suppressed: boolean }) {
   const snapshot = useNotifyStore(state => state.snapshot);
@@ -20,7 +21,7 @@ export function HealthCardPopups({ suppressed }: { suppressed: boolean }) {
   // Dismissed or snoozed cards are in `hidden`, as on Notify's strip.
   const hidden = new Set(snapshot?.hidden);
   const cards = (snapshot?.items ?? [])
-    .filter((item): item is HealthNotifyItem => isHealthCard(item) && item.state === 'waiting' && !item.unreachable && !item.dismissedAt
+    .filter((item): item is HealthNotifyItem => isHealthCard(item) && item.machineHealth.kind !== 'memory' && item.state === 'waiting' && !item.unreachable && !item.dismissedAt
       && !hidden.has(item.id) && !timedOut.has(item.id))
     // Critical first, then the newest.
     .sort((a, b) => Number(b.machineHealth.level === 'critical') - Number(a.machineHealth.level === 'critical') || b.createdAt - a.createdAt)
