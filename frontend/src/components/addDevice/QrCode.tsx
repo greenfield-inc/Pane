@@ -30,21 +30,21 @@ export function QrCode({ url, label }: { url: string; label: string }) {
 /** Cameras read dark modules on a light ground, so a code keeps these colors in every theme. */
 export const QR_PAPER = 'rounded-xl border border-border-secondary bg-white p-2 text-black';
 
-/** The iPhone app's public TestFlight beta (D-140). */
-const TESTFLIGHT_URL = 'https://testflight.apple.com/join/eKJmnzXF';
+/** No country in the path, so people reach their own App Store. */
+const APP_STORE_URL = 'https://apps.apple.com/app/id6808839038';
 
-export function TestFlightLine() {
+export function AppStoreLine() {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg bg-surface-secondary px-4 py-3 text-sm text-text-secondary">
-      <span className="min-w-0">No Pane app yet? The iPhone beta is open in TestFlight.</span>
+      <span className="min-w-0">No Pane app yet? The iPhone app is on the App Store.</span>
       <Button
         type="button"
         variant="secondary"
         size="sm"
         className="flex-none"
-        onClick={() => void window.electronAPI.openExternal(TESTFLIGHT_URL)}
+        onClick={() => void window.electronAPI.openExternal(APP_STORE_URL)}
       >
-        Join the beta
+        Open App Store
       </Button>
     </div>
   );

@@ -21,14 +21,26 @@ a.btn { display: block; padding: 12px 16px; margin-top: 12px; border-radius: 10p
 a.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
 p.note { margin: 24px 0 0; font-size: 14px; }
 p.note a { color: var(--fg); font-weight: 500; }
+[hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <main>
   <h1>Pair your glasses</h1>
   <p>Glasses pair through the Pane app on your phone, in Settings › Glasses.</p>
-  <a class="btn primary" href="pane://glasses">Open in Pane app</a>
-  <p class="note">No Pane app yet? The iPhone beta is open in TestFlight.<br><a href="https://testflight.apple.com/join/eKJmnzXF" target="_blank" rel="noopener">Join the beta</a></p>
+  <a class="btn primary" id="store" href="https://apps.apple.com/app/id6808839038" hidden>Get Pane on the App Store</a>
+  <a class="btn primary" id="app" href="pane://glasses">Open in Pane app</a>
+  <p class="note" id="phone-note">No Pane app yet? The iPhone app is on the App Store.<br><a href="https://apps.apple.com/app/id6808839038" target="_blank" rel="noopener">Get Pane for iPhone</a></p>
 </main>
+<script>
+(function () {
+  // A link tapped on an iPhone opens the installed app, so this page is for one without it.
+  if (/iPhone|iPod/.test(navigator.userAgent)) {
+    document.getElementById("store").hidden = false;
+    document.getElementById("app").classList.remove("primary");
+    document.getElementById("phone-note").textContent = "After installing, come back here and tap Open in Pane app, or scan the code again.";
+  }
+})();
+</script>
 </body>
 </html>
