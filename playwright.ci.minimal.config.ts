@@ -86,6 +86,7 @@ const BROWSER_SPECS = [
   'smoke.spec.ts',
   'split-groups.spec.ts',
   'ssh-hosts.spec.ts',
+  'start-link-dialog.spec.ts',
   'startup-notice.spec.ts',
   'summary-policy.spec.ts',
   'tailnet-https-banner.spec.ts',

@@ -784,6 +784,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onTodosChanged') {
           return (callback: MockEventCallback) => subscribe('todos:changed', callback);
         }
+        if (prop === 'onStartLinkRequest') {
+          return (callback: MockEventCallback) => subscribe('pane:start-link-request', callback);
+        }
         return () => unsubscribe;
       },
     });
@@ -1405,6 +1408,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         isFocused: () => Promise.resolve(mockOptions.initialWindowFocused !== false),
         reportVisibility: () => {},
+        answerStartLink: (answer: JsonObject) => {
+          trackCall('pane:start-link-answer', [answer]);
+          return Promise.resolve();
+        },
       },
       getPlatform: () => Promise.resolve(mockOptions.platform ?? 'linux'),
       windowControlsOverlayEnabled: mockOptions.windowControlsOverlayEnabled === true,
@@ -2363,6 +2370,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         /** Stands in for main pushing a connection change, such as a host that stopped answering. */
         emitRemoteConnectionState(updates: Partial<RemotePaneConnectionState>) {
           setRemoteConnectionState(updates);
+        },
+        /** Stands in for main asking the window to confirm a `pane://new` link; answers land in getInvokeCalls('pane:start-link-answer'). */
+        emitStartLinkRequest(request: JsonObject) {
+          emit('pane:start-link-request', clone(request));
         },
         emitNativeAppearanceUpdated(prefersDark: boolean) {
           emit('window:appearance-native-updated', { prefersDark });
