@@ -115,6 +115,35 @@ keyboard focus. While it works, a grey spinner sits on the right, before the
 approvals count and, in All machines, the machine mark; an idle row shows none.
 With Profiles off, New, the `+` and the rows are as described below.
 
+### Switch and Reload profile (Profiles on)
+
+With Profiles on, a Session's right-click menu (or Shift+F10 on its row, then →) has **Switch
+profile ›**, which lists Claude, Codex and this computer's profiles with a filter,
+and **Reload profile**, which takes the profile's saved files again. Both wait for
+the agent to finish its current reply, then restart its chat tab on the new launch
+(`ChatTabManager.relaunch`) and draw a divider in the chat where it happened.
+
+- Between Claude profiles the switch happens at once and the conversation goes on
+  (ACP `session/load` re-reads the Session folder's instructions, the profile's
+  skills and its subagents); an Undo toast switches back. Reload always keeps the
+  conversation.
+- Between Claude and Codex, and between two Codex profiles (Agent Farm keeps a
+  Codex home per profile, so the thread can't be found under another one), Pane
+  asks first. A new conversation then starts in the Session's tab for that agent
+  and is given the old one, saved as `transcripts/<conversation>.md` in the
+  Session folder. Agents say which kind they are with the contract's
+  `chat.profileSwitchKeepsConversation`.
+- If the agent can't load the conversation after a Reload or Switch, Pane starts
+  a new one given the saved transcript, and the divider says so. It never drops
+  the history silently.
+- When a profile's plugin changes after a Session took it, the row shows an amber
+  dot and Reload profile is marked; listing Sessions re-checks the plugins at most
+  every 10 seconds. A Session whose agent runs in a terminal, or one from before
+  profiles (Reload only), refuses with why.
+
+With Profiles off, the menu has neither item, `orchestration-sessions:switch-profile`
+and `:reload-profile` refuse (`SESSION_PROFILES_OFF`), and rows show no amber dot.
+
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,
 a **Machine** picker sits between them. It starts on the machine you last

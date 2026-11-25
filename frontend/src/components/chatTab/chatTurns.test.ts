@@ -10,6 +10,14 @@ const foldLabel = (turn: ChatTurn) => turnDisplay(turn).fold?.label;
 const end = (id: string, seconds: number, stopReason = 'end_turn'): AgentChatMessage => ({ id, role: 'assistant', parts: [{ type: 'content', content: { type: 'pane_turn', stopReason, startedAt: '2026-11-03T10:00:00.000Z', endedAt: new Date(Date.parse('2026-11-03T10:00:00.000Z') + seconds * 1000).toISOString() } }] });
 
 describe('chat turns', () => {
+  it('draws a profile divider as a turn of its own between turns (T-63)', () => {
+    const divider: AgentChatMessage = { id: 'divider:1', role: 'assistant', parts: [{ type: 'content', content: { type: 'pane_divider', text: 'Switched to Lab · conversation kept', at: '2026-11-25T10:00:00.000Z' } }] };
+    const turns = chatTurns([user('u1', 'Hi'), say('a1', 'Hello.'), end('t1', 2), divider, say('a2', 'Back.')], { running: true });
+    expect(turns.map(turn => turn.divider?.text ?? turn.items.map(item => item.type === 'text' ? item.text : item.type).join(','))).toEqual(['Hello.', 'Switched to Lab · conversation kept', 'Back.']);
+    expect(turns[1].running).toBe(false);
+    expect(turns[2].running).toBe(true);
+  });
+
   it('starts a turn at each user message and groups consecutive steps between replies', () => {
     const turns = chatTurns([
       user('u1', 'Fix it'),

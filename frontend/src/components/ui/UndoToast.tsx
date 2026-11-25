@@ -1,8 +1,11 @@
+import type React from 'react';
 import { usePausableDismiss } from '../../hooks/usePausableDismiss';
 import { cn } from '../../utils/cn';
 
 interface UndoToastProps {
   message: string;
+  /** Shown before the message, such as the avatar of the profile a Session now runs. */
+  lead?: React.ReactNode;
   onUndo: () => void;
   onDismiss: () => void;
   durationMs?: number;
@@ -14,7 +17,7 @@ interface UndoToastProps {
  * A transient "done · Undo" notice. Its timer pauses while hovered or focused.
  * Remount it (change its key) to restart the timer.
  */
-export function UndoToast({ message, onUndo, onDismiss, durationMs = 6000, className }: UndoToastProps) {
+export function UndoToast({ message, lead, onUndo, onDismiss, durationMs = 6000, className }: UndoToastProps) {
   const pauseHandlers = usePausableDismiss(onDismiss, durationMs);
 
   return (
@@ -23,6 +26,7 @@ export function UndoToast({ message, onUndo, onDismiss, durationMs = 6000, class
       {...pauseHandlers}
       className={cn('fixed bottom-4 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-md border border-border-primary bg-surface-primary px-3 py-2 text-[13px] text-text-primary shadow-dropdown', className)}
     >
+      {lead && <span className="flex flex-shrink-0 items-center">{lead}</span>}
       <span className="min-w-0 truncate">{message}</span>
       <button
         type="button"

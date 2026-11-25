@@ -10,7 +10,7 @@ import { chatMessageSchema } from '../../../../shared/types/chatTabDecoders';
 import { steeredMessageId } from '../../../../shared/chatTabPresentation';
 import { contentTexts } from './skillDispatch';
 import type { SentMessage } from './sentMessages';
-import { patchTool, type ChatTabChange, type ChatTabEvent, type ChatTabTranscript, type ChatToolPatch, type ChatTurnTime } from '../../../../shared/types/chatTab';
+import { patchTool, type ChatDivider, type ChatDividerContent, type ChatTabChange, type ChatTabEvent, type ChatTabTranscript, type ChatToolPatch, type ChatTurnTime } from '../../../../shared/types/chatTab';
 
 export interface ChatTranscriptOptions {
   /** Where messages that leave the memory window are kept for paging. */
@@ -21,6 +21,8 @@ export interface ChatTranscriptOptions {
   turnTimes?: readonly ChatTurnTime[];
   /** Messages of the loaded conversation the agent was sent in another form; history replay shows them as typed. */
   sentMessages?: readonly SentMessage[];
+  /** This conversation's profile dividers (T-63), put back the same way; see `ChatDivider`. */
+  dividers?: readonly ChatDivider[];
 }
 
 /** Marks the end of a live turn, for the folded turn line (duration and how it ended). */
@@ -59,12 +61,24 @@ export class ChatTranscript {
   private restore?: ChatTurnTime;
   private readonly awaited: SentMessage[];
   private readonly replayedUser = new Set<string>();
+  /** Saved dividers by the message they follow. */
+  private readonly dividersAfter = new Map<string, ChatDivider[]>();
+  /** Dividers that go before the first message, then those for the end of the replay. */
+  private leading: ChatDivider[] = [];
+  private trailing: ChatDivider[] = [];
+  /** Dividers whose message just replayed; they go in after its time row. */
+  private restoreDividers: ChatDivider[] = [];
 
   constructor(readonly panelId: string, readonly generation: number, private readonly options: ChatTranscriptOptions) {
     this.windowMessages = options.windowMessages ?? 1000;
     this.windowBytes = options.windowBytes ?? 24 * 1024 * 1024;
     this.awaited = [...options.sentMessages ?? []];
     this.turnTimes = new Map((options.turnTimes ?? []).map(turn => [turn.after, turn]));
+    for (const divider of options.dividers ?? []) {
+      if (divider.after) this.dividersAfter.set(divider.after, [...this.dividersAfter.get(divider.after) ?? [], divider]);
+      else if (divider.leading) this.leading.push(divider);
+      else this.trailing.push(divider);
+    }
     mkdirSync(path.dirname(options.spoolFile), { recursive: true, mode: 0o700 });
     rmSync(options.spoolFile, { force: true });
   }
@@ -121,11 +135,32 @@ export class ChatTranscript {
     return { event, saved: after ? { after, stopReason: marker.stopReason, startedAt: marker.startedAt, endedAt: marker.endedAt } : undefined };
   }
 
-  /** History replay finished: the last replayed turn's time row goes in now. */
+  /**
+   * The id of the newest message the agent gives again when it replays the conversation, for a divider
+   * to follow; undefined when the window holds none.
+   */
+  lastReplayedId(): string | undefined {
+    for (let index = this.residentMessages.length - 1; index >= 0; index--) {
+      const id = this.residentMessages[index].id;
+      if (replayedId(id)) return id;
+    }
+    return undefined;
+  }
+
+  /** Draws a profile divider at the end of the conversation now (T-63). */
+  divider(divider: Pick<ChatDivider, 'text' | 'at'>): ChatTabEvent | undefined {
+    this.chunk = undefined;
+    this.echo = undefined;
+    this.anchor = undefined;
+    return this.commitDivider(divider);
+  }
+
+  /** History replay finished (or a new conversation began): the last replayed turn's time row goes in now, and dividers left over. */
   replayed(): void {
     this.showAsTyped();
     this.anchor = undefined;
     this.insertRestored();
+    for (const divider of [...this.leading.splice(0), ...this.trailing.splice(0)]) this.commitDivider(divider);
   }
 
   /** The prompt as typed; `steered` when Send now delivered it into the running turn. An echo from the agent of the text it was `sent` is folded into it. */
@@ -238,7 +273,8 @@ export class ChatTranscript {
     let message: AgentChatMessage;
     if (index === undefined) {
       if (change.type === 'tool') return undefined;
-      if (this.restore && !id.startsWith('turn:')) this.insertRestored();
+      if ((this.restore || this.restoreDividers.length) && !id.startsWith('turn:')) this.insertRestored();
+      if (this.leading.length && !id.startsWith('divider:')) for (const divider of this.leading.splice(0)) this.commitDivider(divider);
       index = this.count();
       message = change.type === 'replace' ? structuredClone(change.message) : { id, role: change.role, parts: [structuredClone(change.part)] };
       this.indexes.set(id, index);
@@ -246,7 +282,11 @@ export class ChatTranscript {
       this.residentSizes.push(0);
       // Only a turn whose last message replays with the same id can find its place again.
       this.anchor = replayedId(id) ? id : undefined;
-      if (this.anchor) this.restore = this.turnTimes.get(this.anchor);
+      if (this.anchor) {
+        this.restore = this.turnTimes.get(this.anchor);
+        this.restoreDividers = this.dividersAfter.get(this.anchor) ?? [];
+        this.dividersAfter.delete(this.anchor);
+      }
     } else {
       const local = index - this.base;
       message = this.residentMessages[local];
@@ -295,10 +335,19 @@ export class ChatTranscript {
 
   private insertRestored(): void {
     const turn = this.restore;
+    const dividers = this.restoreDividers;
     this.restore = undefined;
-    if (!turn) return;
-    const marker: TurnMarker = { type: 'pane_turn', stopReason: turn.stopReason, startedAt: turn.startedAt, endedAt: turn.endedAt };
-    this.commit({ type: 'replace', message: { id: `turn:${turn.after}`, role: 'assistant', parts: [{ type: 'content', content: { ...marker } }] } });
+    this.restoreDividers = [];
+    if (turn) {
+      const marker: TurnMarker = { type: 'pane_turn', stopReason: turn.stopReason, startedAt: turn.startedAt, endedAt: turn.endedAt };
+      this.commit({ type: 'replace', message: { id: `turn:${turn.after}`, role: 'assistant', parts: [{ type: 'content', content: { ...marker } }] } });
+    }
+    for (const divider of dividers) this.commitDivider(divider);
+  }
+
+  private commitDivider(divider: Pick<ChatDivider, 'text' | 'at'>): ChatTabEvent | undefined {
+    const content: ChatDividerContent = { type: 'pane_divider', text: divider.text, at: divider.at };
+    return this.commit({ type: 'replace', message: { id: `divider:${divider.at}:${++this.sequence}`, role: 'assistant', parts: [{ type: 'content', content: { ...content } }] } });
   }
 
   private evict(): void {
@@ -343,7 +392,7 @@ export class ChatTranscript {
 
 /** Ids the agent gives again when it replays history: its own message ids and tool call ids. Pane's own ids are rebuilt per generation. */
 function replayedId(id: string): boolean {
-  return id.startsWith('tool:') || !/^(user|assistant|turn|plan|update):/.test(id);
+  return id.startsWith('tool:') || !/^(user|assistant|turn|plan|update|divider):/.test(id);
 }
 
 function estimateSize(message: AgentChatMessage): number {

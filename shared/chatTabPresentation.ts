@@ -75,8 +75,11 @@ export interface ChatTurn {
   startedAt?: string;
   endedAt?: string;
   stopReason?: string;
+  /** A line across the chat where the Session's profile changed (T-63); such a turn has nothing else. */
+  divider?: { text: string; at: string };
 }
 
+const dividerContent = boundary.object({ type: boundary.literal('pane_divider'), text: boundary.string, at: boundary.string });
 const marker = boundary.object({ type: boundary.literal('pane_turn'), stopReason: boundary.string, startedAt: boundary.string, endedAt: boundary.string });
 const plan = boundary.object({ type: boundary.literal('plan'), entries: boundary.array(boundary.object({ content: boundary.string, status: boundary.string, priority: boundary.optional(boundary.string) })) });
 const diffContent = boundary.object({ type: boundary.literal('diff'), path: boundary.string, oldText: boundary.optional(boundary.nullable(boundary.string)), newText: boundary.string });
@@ -235,6 +238,14 @@ export function chatTurns(messages: readonly AgentChatMessage[], options: { runn
     if (message.role === 'user') { open(`turn:${message.id}`, message, -1, message); continue; }
     for (const [index, part] of message.parts.entries()) {
       const id = `${message.id}:${index}`;
+      const divider = part.type === 'content' ? decodeOptionalBoundary(part.content, dividerContent) : undefined;
+      if (divider) {
+        // A turn of its own, already over: whatever follows opens the next turn.
+        const line = open(`divider:${id}`, message, index);
+        line.divider = { text: divider.text, at: divider.at };
+        line.endedAt = divider.at;
+        continue;
+      }
       const end = part.type === 'content' ? decodeOptionalBoundary(part.content, marker) : undefined;
       // A finished turn stays finished: what the agent does afterwards, with no prompt open, is a turn of its own.
       if (end && turn?.endedAt) continue;
