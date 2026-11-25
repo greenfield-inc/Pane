@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -196,6 +196,8 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       behavior="padding"
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
+      {/* A watched terminal pans sideways, so swipe-back there starts from the left edge only. */}
+      <Stack.Screen options={{ fullScreenGestureEnabled: !(readOnly && terminalActive) }} />
       {/* Dictation's audio, here so a recording survives switching tabs; mounted on first use. */}
       {voice.audio ? <VoiceAudio {...voice.audio} /> : null}
       {topBar ?? <TerminalTopBar paneName={title} onClearScrollback={terminalActive && !readOnly ? () => terminalActions.current?.clearScrollback() : undefined} />}
@@ -420,7 +422,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
       <View style={[styles.fill, { backgroundColor: theme.terminal.background }]} onLayout={event => setTerminalHeight(event.nativeEvent.layout.height)}>
         <Dimmed dimmed={disabled} style={styles.fill}>
           <View style={styles.screen}>
-            <TerminalTouchSurface rows={terminal.rows} onScrollLines={terminal.scrollLines}>
+            <TerminalTouchSurface rows={terminal.rows} onScrollLines={terminal.scrollLines} onPan={readOnly ? terminal.pan : undefined}>
               <TerminalWebView
                 ref={terminal.webView}
                 onMessage={terminal.onMessage}

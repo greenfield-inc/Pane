@@ -11,6 +11,7 @@ import { streamingFetch } from '@/daemon/createClient';
 import { ReadOnlyChip } from '@/features/hosts/ReadOnlyChip';
 import { Button, ListRow, ListSection, Text } from '@/ui';
 
+import { readOnlyLink } from './readOnlyLink';
 import { usePairing } from './usePairing';
 
 /**
@@ -29,7 +30,10 @@ export function RelayPairPrompt({ code, link, onPaired }: { code: string; link: 
   const ownDomain = domain === DEFAULT_RELAY_DOMAIN;
   useEffect(() => {
     let active = true;
-    void relayLinkJoin(streamingFetch, { secret, computerId, domain, name }, useHostsStore.getState().profiles).then(result => {
+    const opened = { secret, computerId, domain, name };
+    void relayLinkJoin(streamingFetch, opened, useHostsStore.getState().profiles).then(async joining => {
+      // A link that pairs without asking still shows that it only watches.
+      const result = joining ?? await readOnlyLink(streamingFetch, opened);
       if (!active) return;
       setJoin(result);
       if (!result && ownDomain) mutate({ code });
@@ -54,7 +58,7 @@ export function RelayPairPrompt({ code, link, onPaired }: { code: string; link: 
         {watchOnly ? <ReadOnlyChip /> : null}
         <Text variant="callout" tone="secondary">
           {watchOnly
-            ? `${READ_ONLY_GRANT_HELP} The computers already on this phone stay unlinked from ${join.maker}.`
+            ? `${READ_ONLY_GRANT_HELP}${join.here.length ? ` The computers already on this phone stay unlinked from ${join.maker}.` : ''}`
             : `Pairing links ${join.maker} with the computers on this phone, and each computer can run agents on the others.`}
         </Text>
         {!ownDomain ? <DomainNote domain={link.domain} /> : null}

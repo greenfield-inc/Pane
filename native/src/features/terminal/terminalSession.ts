@@ -23,6 +23,8 @@ export interface TerminalSessionOptions {
   /** Identifies this viewer to the host's visibility tracking. */
   viewerId: string;
   sink: TerminalSink;
+  /** Runs before a restore reads the host's screen: learns the size to draw it at. */
+  beforeSnapshot?: () => Promise<void>;
   /** A restore failed; the screen shows stale or no output until the next one. */
   onError?: (error: unknown) => void;
   /** This screen is starting the panel: its shell, and any agent in it, are only now launching. */
@@ -75,6 +77,7 @@ export class TerminalSession {
         // An unstarted panel ignores it and starts at the size below instead.
         this.sizeHostAt(cols(), rows()),
         invoke('terminal:setVisibility', [panelId, true, viewerId]),
+        this.options.beforeSnapshot?.(),
       ]);
       if (generation !== this.generation) return;
       if (initialized !== true) {

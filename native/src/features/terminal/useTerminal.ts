@@ -3,7 +3,9 @@ import { AppState } from 'react-native';
 import type { WebView, WebViewMessageEvent } from 'react-native-webview';
 
 import { CONNECTION_GRACE_MS } from '@shared/remoteClient';
+import type { MissionControlSnapshotResult } from '@shared/types/missionControl';
 
+import { isReadOnlyProfile } from '@/auth/access';
 import { invokeChannel, useDaemon, useDaemonEvent, useReadOnlyHost } from '@/daemon';
 import { useTheme } from '@/theme';
 
@@ -18,6 +20,8 @@ import { lastTerminalSize, rememberTerminalSize, TERMINAL_FONT_SIZE } from './te
 const VISIBILITY_REFRESH_MS = 60_000;
 /** Keyboard and rotation animations resize the view every frame; tell the PTY once it settles. */
 const RESIZE_SETTLE_MS = 150;
+/** A watched terminal's owner may resize it at any time, and nothing announces it. */
+const OWNER_SIZE_CHECK_MS = 10_000;
 /** The computer says an agent is ready when it first draws, or after 10 s regardless. */
 const AGENT_READY_LIMIT_MS = 12_000;
 
@@ -53,6 +57,8 @@ export function useTerminal(panelId: string, sessionId: string) {
   const pageLoads = useRef(0);
   // The last restore found the tab not running, with nothing this phone may start.
   const notRunning = useRef(false);
+  // While this phone only watches: the size the terminal runs at on its computer.
+  const ownerSize = useRef<TerminalSize | null>(null);
   const pendingScreen = useRef<string | null>(null);
 
   // Output arrives in bursts of small events; hand it to xterm once per frame.
@@ -73,6 +79,7 @@ export function useTerminal(panelId: string, sessionId: string) {
 
   /** Draws a screen read from the host: the terminal now matches the computer. */
   const showScreen = (data: string) => {
+    if (ownerSize.current) send({ type: 'grid', cols: ownerSize.current.cols, rows: ownerSize.current.rows });
     send({ type: 'reset', data });
     // A screen read after a return, open or switch.
     connectionMark('terminal-screen', { repeat: true });
@@ -80,6 +87,13 @@ export function useTerminal(panelId: string, sessionId: string) {
     setHasContent(true);
     setStatus(notRunning.current ? 'stopped' : 'ready');
     setError(null);
+  };
+
+  /** The terminal's size on its computer; null when it isn't running or the computer didn't answer. */
+  const readOwnerSize = async (): Promise<TerminalSize | null> => {
+    const answer = await invokeChannel<MissionControlSnapshotResult>(client, 'mission-control:snapshots', [{ panelIds: [panelId], maxLines: 1 }]).catch(() => null);
+    const found = answer?.snapshots.find(snapshot => snapshot.panelId === panelId);
+    return found?.cols && found.rows ? { cols: found.cols, rows: found.rows } : null;
   };
 
   const [session] = useState(() => new TerminalSession({
@@ -100,6 +114,10 @@ export function useTerminal(panelId: string, sessionId: string) {
         pending.current += data;
         frame.current ??= requestAnimationFrame(flush);
       },
+    },
+    // The output only lines up at the owner's size, which a phone that only watches never changes.
+    beforeSnapshot: async () => {
+      if (isReadOnlyProfile(profile)) ownerSize.current = await readOwnerSize() ?? ownerSize.current;
     },
     onStart: () => setStartedAt(Date.now()),
     onNotRunning: () => {
@@ -139,8 +157,14 @@ export function useTerminal(panelId: string, sessionId: string) {
   });
 
   useEffect(() => client.onRestore(async signal => {
-    if (!signal.aborted && size) await session.restore(size);
-  }, 'terminal'), [client, session, size]);
+    if (signal.aborted || !size) return;
+    if (!isReadOnlyProfile(profile)) {
+      await session.restore(size);
+      return;
+    }
+    // The owner's size can only be read once connected. A screen not drawn yet restores there anyway (below).
+    if (session.isLive) void client.whenConnected(CONNECTION_GRACE_MS).then(() => session.restore(size), () => undefined);
+  }, 'terminal'), [client, profile, session, size]);
 
   // Restore once the page has measured itself. A connection that comes back, after a drop or a
   // return to the app, restores through the listener above: the event stream does not replay
@@ -173,6 +197,18 @@ export function useTerminal(panelId: string, sessionId: string) {
       session.detach();
     };
   }, [session]);
+
+  const checkOwnerSize = useEffectEvent(async () => {
+    const shown = ownerSize.current;
+    const now = await readOwnerSize();
+    if (now && size && session.isLive && (now.cols !== shown?.cols || now.rows !== shown.rows)) await session.restore(size);
+  });
+  const watching = readOnly && status === 'ready' && connection.status === 'connected';
+  useEffect(() => {
+    if (!watching) return undefined;
+    const timer = setInterval(() => void checkOwnerSize(), OWNER_SIZE_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [watching]);
 
   // Settle resizes before telling the host.
   useEffect(() => {
@@ -274,6 +310,8 @@ export function useTerminal(panelId: string, sessionId: string) {
       if (size) await session.restore(size);
     },
     scrollLines: (lines: number) => send({ type: 'scroll', lines }),
+    /** Watching: moves the view over the owner's grid. */
+    pan: (dx: number, dy: number) => send({ type: 'pan', dx, dy }),
     scrollToBottom: () => send({ type: 'scrollToBottom' }),
   };
 }
