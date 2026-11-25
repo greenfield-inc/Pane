@@ -145,11 +145,12 @@ test('searching, no match and a failed search say so; with no rows Enter sends',
   await expect(page.getByText('No skills found.')).toBeVisible();
 });
 
-test('an agent that marks no skills, and an older host', async ({ page }) => {
+test('an agent that marks no skills, and an older host', async ({ page }, testInfo) => {
   let input = await open(page, 'mentions=files');
   await page.goto('/chat-tab-composer.html?mentions=files&skills=1&width=640');
   input = page.getByRole('textbox', { name: 'Message Claude' });
-  await expect(input).toHaveAttribute('placeholder', 'Ask anything, @ for files, / for commands');
+  // The composer is under 480px wide in the phone project, so the box says it the phone's shorter way.
+  await expect(input).toHaveAttribute('placeholder', testInfo.project.name === 'phone' ? 'Ask anything, @ files, / commands' : 'Ask anything, @ for files, / for commands');
   await input.pressSequentially('$s');
   await expect(options(page)).toHaveCount(0);
   await page.goto('/chat-tab-composer.html?skills=1&width=640');
