@@ -8,14 +8,14 @@ describe('what Claude is sent for a message that names a skill', () => {
   it.each([
     ['$simplify', ['/simplify']],
     ['  $simplify the diff', ['/simplify the diff']],
-    ['Fix this, then $simplify', ['Fix this, then', '/simplify']],
-    ['Fix this, then $simplify the rest\nand test', ['Fix this, then', '/simplify the rest\nand test']],
-    ['Run $audit first, then $simplify it', ['Run /audit first, then', '/simplify it']],
-    ['$audit first, then $simplify it', ['$audit first, then', '/simplify it']],
-    ['Do $simplify a, then $simplify b', ['Do /simplify a, then', '/simplify b']],
-    ['Please use $simplify.', ['Please use', '/simplify .']],
-    ['Now $plugin:ship: fast', ['Now', '/plugin:ship : fast']],
-    ['/tmp/build is old. Then $simplify', ['/tmp/build is old. Then', '/simplify']],
+    ['Fix this, then $simplify', ['Fix this, then /simplify', '/simplify']],
+    ['Fix this, then $simplify the rest\nand test', ['Fix this, then /simplify the rest\nand test', '/simplify the rest\nand test']],
+    ['Run $audit first, then $simplify it', ['Run /audit first, then /simplify it', '/simplify it']],
+    ['$audit first, then $simplify it', ['$audit first, then $simplify it', '/simplify it']],
+    ['Do $simplify a, then $simplify b', ['Do /simplify a, then /simplify b', '/simplify b']],
+    ['Please use $simplify.', ['Please use /simplify.', '/simplify .']],
+    ['Now $plugin:ship: fast', ['Now /plugin:ship: fast', '/plugin:ship : fast']],
+    ['/tmp/build is old. Then $simplify', ['/tmp/build is old. Then /simplify', '/simplify']],
   ])('%j runs its last skill', (text, expected) => expect(parts(text)).toEqual(expected));
 
   it.each([
@@ -26,7 +26,7 @@ describe('what Claude is sent for a message that names a skill', () => {
 
   it('puts images before the skill, which Claude runs only as the last part', () => {
     const content = agentContent({ text: 'What is this? $simplify', images: [{ mimeType: 'image/png', data: 'AA==' }] }, commands, 'meta');
-    expect(content.map(block => block.type === 'text' ? block.text : block.type)).toEqual(['image', 'What is this?', '/simplify']);
+    expect(content.map(block => block.type === 'text' ? block.text : block.type)).toEqual(['image', 'What is this? /simplify', '/simplify']);
   });
 
   it('leaves the text to an agent that reads $name itself', () => {

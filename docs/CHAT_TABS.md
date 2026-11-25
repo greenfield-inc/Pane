@@ -217,9 +217,9 @@ on desktop, the web app and the phone, and a pick goes into the text.
   (`chat.skills` in the agents config). For other agents `$` opens nothing and `/` lists
   everything, at the start only.
 - **What the agent gets**: Codex reads `$name` in the text. Claude runs one skill per message,
-  as the last part of it, so Pane sends the last `$name` outside code as a part of its own
-  (`/name` and the text after it), after the text before it and any images. Earlier skills
-  stay named in the text. A message that starts with a command goes as typed. The chat shows
+  as the last part of it, so Pane sends the message whole with its skills as `/name`, then the last
+  `$name` outside code and the text after it as a part of its own, after any images. Claude runs
+  that one; earlier skills stay named in the text. A message that starts with a command goes as typed. The chat shows
   the message as typed, also after a restart: Pane keeps its text beside the tab, since
   Claude's own history holds only the skill's part.
 

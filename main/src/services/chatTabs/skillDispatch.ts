@@ -38,9 +38,8 @@ export function promptContent(body: PromptBody): ContentBlock[] {
 /**
  * The content an agent is sent. Claude expands one skill per message, only where `/name` starts the last
  * text part, and everything after the name is its arguments
- * (https://github.com/anthropics/claude-code/issues/87113). So the last `$name` of a message that names a
- * skill goes as a part of its own, after the text before it and after the images. Earlier skills stay
- * named in the first part.
+ * (https://github.com/anthropics/claude-code/issues/87113). So a message that names a skill goes whole, with
+ * its skills as `/name`, then its last skill and the text after it as a part of its own, after the images.
  */
 export function agentContent(body: PromptBody, commands: readonly ChatTabCommand[], skills: 'meta' | 'dollar' | undefined): ContentBlock[] {
   const parts = skills === 'meta' ? skillParts(body.text ?? '', commands) : undefined;
@@ -52,21 +51,21 @@ function skillParts(text: string, commands: readonly ChatTabCommand[]): string[]
   // A message that starts with an agent command is that command's.
   if (first && commands.some(command => skillName(command) === first)) return undefined;
   const mentions = skillReferences(text, skillNames(commands));
-  const last = mentions.pop();
+  const last = mentions.at(-1);
   if (!last) return undefined;
   const rest = text.slice(last.end);
   const command = `/${last.name}${!rest || /^\s/.test(rest) ? rest : ` ${rest}`}`.trimEnd();
-  const before = text.slice(0, last.start);
-  if (!before.trim()) return [command];
-  // A first part that starts with `/skill` would run instead of the last one.
-  if (mentions.length && !before.slice(0, mentions[0].start).trim()) return [before.trimEnd(), command];
-  let lead = '';
+  if (!text.slice(0, last.start).trim()) return [command];
+  // The whole message comes first, so the request around the skill keeps its sense. A first part that
+  // starts with `/skill` would run that skill instead of the last one, so then every skill stays `$name`.
+  if (!text.slice(0, mentions[0].start).trim()) return [text.trimEnd(), command];
+  let whole = '';
   let at = 0;
   for (const mention of mentions) {
-    lead += `${before.slice(at, mention.start)}/${mention.name}`;
+    whole += `${text.slice(at, mention.start)}/${mention.name}`;
     at = mention.end;
   }
-  return [`${lead}${before.slice(at)}`.trimEnd(), command];
+  return [`${whole}${text.slice(at)}`.trimEnd(), command];
 }
 
 function textBlocks(parts: readonly string[]): ContentBlock[] {

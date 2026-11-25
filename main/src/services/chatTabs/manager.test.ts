@@ -601,7 +601,7 @@ describe('chat tab manager', () => {
       await expect.poll(() => manager.receipt('p1', `op-${index}`)?.state, { timeout: 10_000 }).toBe('completed');
     }
     expect(replyText(manager.view('p1'))).toBe([
-      'Parts: ["/simplify two"]', 'Parts: ["First this, then","/simplify two"]', 'Parts: ["Then that:","/simplify two"]',
+      'Parts: ["/simplify two"]', 'Parts: ["First this, then /simplify two","/simplify two"]', 'Parts: ["Then that: /simplify two","/simplify two"]',
     ].join('|'));
     expect(userTexts(manager.view('p1'))).toEqual(texts);
     await manager.restart('p1');
