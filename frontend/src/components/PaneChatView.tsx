@@ -535,6 +535,8 @@ function SessionTile({
         'relative flex h-full w-full flex-1 min-w-0 min-h-0 flex-col overflow-hidden bg-bg-primary',
       )}
       data-session-tile={sessionId}
+      // A Session shown beside something else (SessionBeside) is not a tile of the layout.
+      data-session-inline={inline || undefined}
       data-session-focused={isFocused}
       onMouseDownCapture={focusThisTile}
       onFocusCapture={focusThisTile}

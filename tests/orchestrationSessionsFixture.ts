@@ -80,6 +80,8 @@ export type SessionFixtureOptions = {
   notifySnapshot?: NotifySnapshot;
   initialPanels?: JsonObject[];
   initialLayout?: JsonObject;
+  /** Machines for All machines (T-45): the other machines, their reads, and this computer's name. */
+  machines?: Pick<NonNullable<Parameters<typeof installElectronApiMock>[1]>, 'initialPreferences' | 'machineConnections' | 'workspaceAccess' | 'platform'>;
   /** To-dos and saved machines, for a Session whose to-dos meet another machine's (T-51). */
   todos?: ElectronApiMockOptions['todos'];
   machineConnections?: ElectronApiMockOptions['machineConnections'];
@@ -181,6 +183,7 @@ export async function installSessionsFixture(
     todos: fixtureOptions.todos,
     machineConnections: fixtureOptions.machineConnections,
     computers: fixtureOptions.computers,
+    ...fixtureOptions.machines,
   });
   await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes, distributions }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]>; distributions: string[] }) => {
     type SessionRecord = UiSessionFixture;
