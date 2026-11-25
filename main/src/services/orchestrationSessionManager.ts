@@ -4,7 +4,7 @@ import { sessionRuntimePath } from './sessionRuntime';
 import { findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { CLI_AGENT_TYPES, resolveAgentTypeFromCommand } from './agents/agentIdentity';
 import { assertDirectOpenCodeLaunchCommand } from './agents/opencodeLaunch';
-import { prepareSessionWorkspace, sessionWorkspacePath, discardSessionScaffold, isPristineSessionWorkspace } from './sessionWorkspace';
+import { prepareSessionWorkspace, sessionWorkspacePath, discardSessionScaffold, isPristineSessionWorkspace, clearSessionProfile } from './sessionWorkspace';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
@@ -15,6 +15,7 @@ import { getChatTabManager } from './chatTabs';
 import { sessionChatLaunch } from './chatTabs/launch';
 import { agentFarmConfigRoot, listPaneAgentFarmProfiles } from './agentFarm/bundledAgentFarm';
 import { installedPluginHash, plainProfileAgent, plainProfileRef, profilePlugin } from './agentFarm/agentFarmProfiles';
+import { profilesEnabled } from './agentFarm/profilesFeature';
 import type { AgentFarmProfileList, SessionAgentProfile } from '../../../shared/types/agentFarmProfiles';
 import type { SessionAdoption } from './chatTabs/switchToChat';
 import type { ChatPanelState, ChatTabLaunch } from '../../../shared/types/chatTab';
@@ -1363,6 +1364,8 @@ export class OrchestrationSessionManager extends EventEmitter {
   private async ensurePanelForAgent(record: OrchestrationSessionRecord, terminal = false): Promise<ToolPanel> {
     if (!Object.values(record.panelIds).some(id => this.agentStarted(id))) {
       prepareSessionWorkspace(record.id, record.profile, record);
+      // A profile written while Profiles was on doesn't follow the agent once it is off.
+      if (!this.profilesOn()) clearSessionProfile(sessionWorkspacePath(record.id));
     }
     await this.finishPromotion(record);
     const panelId = record.panelIds[record.agent];
@@ -1410,13 +1413,17 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
     // T-63: a Session with a profile runs it through Agent Farm; the agent on its own is pane/<agent>,
     // which keeps the full access its launch command gave it. A launch command's own profile stays as it is.
-    if (!record.agentProfile || !('launch' in result) || result.launch.kind !== 'agent') return result;
+    // With Profiles off (Settings › Advanced), a saved profile is ignored and the agent starts as on main.
+    if (!record.agentProfile || !this.profilesOn() || !('launch' in result) || result.launch.kind !== 'agent') return result;
     const launch: ChatTabLaunch = { kind: 'profile', profile: record.agentProfile.ref };
     if (result.launch.fullAccess === true || result.launch.mode) launch.fullAccess = true;
     return { launch };
   }
 
   private agentFarmPort?: SessionAgentFarm;
+
+  /** Settings › Advanced › Profiles (T-63): off, Sessions start their agent directly, as before T-63. */
+  private profilesOn(): boolean { return profilesEnabled(this.configManager.getConfig()); }
 
   /** Pane's own Agent Farm, for a Session's profile; tests pass their own. */
   attachAgentFarm(port: SessionAgentFarm): void { this.agentFarmPort = port; }
@@ -1432,9 +1439,11 @@ export class OrchestrationSessionManager extends EventEmitter {
    * The profile a new chat Session runs when the caller named none (T-63): the launch command's own
    * Agent Farm profile, or the agent on its own (`pane/<agent>`). Undefined when the Session keeps a
    * terminal, its agent isn't one Agent Farm runs, or Pane's plugin isn't installed: it then starts
-   * its agent directly, as before.
+   * its agent directly, as before. Always undefined while Profiles is off, so a Session created or
+   * changed then has no profile.
    */
   private async implicitAgentProfile(record: Pick<OrchestrationSessionRecord, 'agent' | 'runtime' | 'resume' | 'customResume' | 'launchCommand'>): Promise<SessionAgentProfile | undefined> {
+    if (!this.profilesOn()) return undefined;
     const chat = this.chatLaunch({ ...record, promotedFrom: undefined, agentProfile: undefined });
     if (!chat || !('launch' in chat)) return undefined;
     const ref = chat.launch.kind === 'profile' ? chat.launch.profile : plainProfileRef(record.agent);
@@ -1451,6 +1460,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   private async explicitAgentProfile(input: OrchestrationSessionCreateInput, promoted: boolean, terminal: (agent: PaneChatAgent) => boolean): Promise<{ profile: SessionAgentProfile; agent: PaneChatAgent }> {
     const ref = input.agentProfile ?? '';
     const refuse = (code: string, message: string, next: string): never => { throw new PaneError(code, `${message} No Session was created.`, next); };
+    if (!this.profilesOn()) refuse('SESSION_PROFILE_UNSUPPORTED', `Profiles is off on this computer, so the Session can't start with ${ref}.`, 'Turn on Profiles in Settings > Advanced > Experimental, or leave out the profile.');
     if (promoted || input.resume) refuse('SESSION_PROFILE_UNSUPPORTED', `A Session that continues an earlier conversation can't start with the profile ${ref}.`, 'Create the Session without a profile.');
     if (input.runtime === 'wsl') refuse('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which don't run in WSL, so the Session can't start with ${ref}.`, 'Create a native Session, or leave out the profile.');
     if (this.configManager.getConfig().chatTabsEnabled !== true) refuse('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which are off on this computer, so the Session can't start with ${ref}.`, 'Turn on Chat tabs in Settings > AI & Agents, then try again.');

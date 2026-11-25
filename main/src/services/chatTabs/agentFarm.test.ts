@@ -155,12 +155,12 @@ describe('Agent Farm profiles in chat tabs with Profiles off', () => {
 
 describe('a Session\'s orchestrator through Agent Farm (T-63)', () => {
   const panel: ToolPanel = { id: 'orch', sessionId: 'internal', type: 'chat', title: 'Session', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
-  function session(profile: string, agent: 'claude' | 'codex', extra: Partial<ChatPanelState['launch']> = {}) {
+  function session(profile: string, agent: 'claude' | 'codex', extra: Partial<ChatPanelState['launch']> = {}, on = true) {
     const folder = scratch();
     const written: Array<{ folder: string; profile: string; instructions: string }> = [];
     const grants: string[] = [];
     const profiles = new AgentFarmProfiles({
-      ...PROFILES_ON, bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined,
+      ...(on ? PROFILES_ON : { profilesOn: () => false, executable: () => undefined }), bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined,
       sessionProfile: async (target, name, instructions) => { written.push({ folder: target, profile: name, instructions }); },
       grantPaneMcp: tab => { grants.push(tab.panelId); return { PANE_MCP_URL: 'http://127.0.0.1:1/mcp', PANE_MCP_TOKEN: 'token' }; },
     });
@@ -187,6 +187,19 @@ describe('a Session\'s orchestrator through Agent Farm (T-63)', () => {
     expect(launch.command.env).toMatchObject({ PANE_MCP_TOKEN: 'token' });
     // A real profile keeps the permission mode Agent Farm gives it.
     expect(launch.mode).toBe('bypassPermissions');
+  });
+
+  // Profiles off (T-63's flag): no PROFILE.md and no MCP or permission rewrites; the launch runs as printed, as on main.
+  it('leaves a Session\'s profile launch as Agent Farm printed it with Profiles off', async () => {
+    const { written, grants, resolve } = session('greenfield/orchestrator', 'claude', {}, false);
+    const launch = await resolve();
+    expect(written).toEqual([]);
+    expect(grants).toEqual([]);
+    expect(launch.meta?.systemPrompt).toEqual({ append: expect.stringContaining('LAUNCH CONTEXT') });
+    expect(launch.mcpServers).toBeUndefined();
+    expect(launch.mode).toBe('bypassPermissions');
+    const plain = await session('pane/claude', 'claude', {}, false).resolve();
+    expect(plain.mode).toBe('bypassPermissions');
   });
 
   it('runs plain Claude with the permissions it had before Agent Farm, and full access only when the Session asked', async () => {

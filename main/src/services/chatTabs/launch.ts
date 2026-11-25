@@ -22,6 +22,8 @@ import { boundary, decodeOptionalBoundary, type JsonObject } from '../../../../s
 import { claudeSessionFolderSettings, isSessionFolderSettings } from '../agents/sessionFolderAccess';
 import type { ResolvedProjectEnv } from '../projectEnvVars';
 import { sessionGitCeiling } from '../sessionWorkspace';
+import { plainProfileAgent } from '../agentFarm/agentFarmProfiles';
+import { profilesOn } from '../agentFarm/profilesFeature';
 
 /** API keys a person may set for chat tabs on this machine, kept in the OS secure store. */
 export interface ChatTabSecrets { apiKey(agent: ChatAgent): string | undefined }
@@ -98,7 +100,8 @@ export class AgentChatLauncher implements ChatTabLauncher {
     findExecutable?: (name: string) => string | null;
   }) {}
 
-  async resolve(panel: ToolPanel, state: ChatPanelState): Promise<ResolvedLaunch> {
+  async resolve(panel: ToolPanel, saved: ChatPanelState): Promise<ResolvedLaunch> {
+    const state = withoutPlainProfile(saved);
     const unsupported = this.options.context.unsupportedHost(panel);
     if (unsupported) throw new PaneError('CHAT_UNSUPPORTED_HOST', unsupported, `Open "${agentLabel(state.agent)} in Terminal" from the + menu instead.`);
     // A Session orchestrator's Pane belongs to no project, as in terminals.
@@ -300,3 +303,13 @@ export function sessionFolderMeta(state: Pick<ChatPanelState, 'agent' | 'cwd' | 
   return { [namespace]: { options: { settings: claudeSessionFolderSettings(state.sessionFolder) } } };
 }
 
+
+/**
+ * A tab saved with Pane's plain profile (pane/<agent>, T-63) while Profiles was on starts its agent
+ * on its own once Profiles is off, with the access the profile kept, as main starts it. Every other
+ * launch is returned as it is.
+ */
+export function withoutPlainProfile(state: ChatPanelState, on: () => boolean = profilesOn): ChatPanelState {
+  if (state.launch.kind !== 'profile' || plainProfileAgent(state.launch.profile) !== state.agent || on()) return state;
+  return { ...state, launch: state.launch.fullAccess ? { kind: 'agent', fullAccess: true } : { kind: 'agent' } };
+}

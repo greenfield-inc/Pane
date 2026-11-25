@@ -131,6 +131,8 @@ export class AgentFarmProfiles implements ChatProfileResolver {
       throw new PaneError('CHAT_PROFILE_AGENT_CHANGED', `The profile ${state.launch.profile} now runs ${printed.harness}, but this tab was started for ${state.agent}.`, 'Open a new chat tab for the profile.');
     }
     const launch = printed.launch;
+    // Profiles off: the launch runs as Agent Farm printed it, as before T-63 (no PROFILE.md, no plain permissions).
+    if (!this.options.profilesOn()) return launch;
     if (plainProfileAgent(state.launch.profile)) plainPermissions(launch, printed.harness, state.launch.fullAccess === true);
     if (state.orchestrationSessionId && state.sessionFolder) await this.sessionLaunch(panel, state, state.launch.profile, printed.harness, launch);
     return launch;

@@ -158,6 +158,22 @@ function lstatOrMissing(file: string): fs.Stats | undefined {
   }
 }
 
+/**
+ * Takes a Session's profile out of its folder (PROFILE.md and its AGENTS.md section) while Profiles
+ * is off (T-63), so its agent starts with main's instructions. Best effort: a file Pane can't change
+ * is logged and left as it is.
+ */
+export function clearSessionProfile(sessionFolder: string): void {
+  const cwd = path.resolve(sessionFolder);
+  try {
+    const file = path.join(cwd, SESSION_PROFILE_FILE);
+    if (lstatOrMissing(file)?.isFile()) fs.rmSync(file, { force: true });
+    writeOwnedBlock(path.join(cwd, 'AGENTS.md'), PROFILE_MARKERS, undefined);
+  } catch (error) {
+    console.warn(`[Sessions] Pane couldn't take the Agent Farm profile out of ${cwd}: ${error instanceof Error ? error.message : String(error)}. Remove PROFILE.md and the profile section of AGENTS.md there by hand.`);
+  }
+}
+
 function escapeProfileMarkers(content: string): string {
   return escapeMarkers(content).split(PROFILE_START).join('<!-- pane-session-profile start -->').split(PROFILE_END).join('<!-- pane-session-profile end -->');
 }
