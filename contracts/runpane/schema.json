@@ -892,6 +892,11 @@
           "description": "Chat tabs pass Pane's MCP server to the agent over HTTP in session/new, and the agent uses it in place of a user-level server of the same name.",
           "type": "boolean"
         },
+        "profileModel": {
+          "description": "The model of Pane's plain Agent Farm profile for this agent (pane/<agent>), which a Session started without a profile runs. Only agents Agent Farm runs (claude, codex) have one.",
+          "type": "string",
+          "minLength": 1
+        },
         "registryIds": {
           "description": "ACP Registry ids this agent covers; Settings > Agents hides them.",
           "type": "array",

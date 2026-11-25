@@ -176,7 +176,8 @@
           "paneMcpHttp": true,
           "registryIds": [
             "claude-acp"
-          ]
+          ],
+          "profileModel": "claude-opus-5-5"
         },
         "models": {
           "flag": "--model",
@@ -257,7 +258,8 @@
           "terminalConversationsLoad": true,
           "registryIds": [
             "codex-acp"
-          ]
+          ],
+          "profileModel": "gpt-6-astra"
         },
         "models": {
           "flag": "-m",
@@ -27834,7 +27836,7 @@
           "JSON isPinned: true/false sets the UI pin star. Creation defaults to false; update preserves the pin when omitted.",
           "Create-time isPinned requires an updated Pane app. Older apps may ignore the field; use sessions pin after creation and read back the result.",
           "runtime appears only on WSL Sessions (\"wsl\", with wslDistribution, Windows only). A Session on the native host has no runtime field on any OS; \"windows\" is accepted on input as a legacy name for the native host and is not stored.",
-          "Payload fields (all optional on update; name required on create): name, goal, context, nextAction, launchCommand, profile (strings); isPinned and, on update, archived (booleans); agent (codex|claude|cursor); decisions and blockers (arrays of strings); evidence and outputs (arrays of links); create also takes runtime (windows|wsl) and wslDistribution; update also takes report, expectedRevision (the revision you read; the update is refused if the Session has moved on) and source (user|agent).",
+          "Payload fields (all optional on update; name required on create): name, goal, context, nextAction, launchCommand, profile (strings); isPinned and, on update, archived (booleans); agent (codex|claude|cursor); decisions and blockers (arrays of strings); evidence and outputs (arrays of links); create also takes runtime (windows|wsl), wslDistribution and agentProfile (an Agent Farm profile such as greenfield/orchestrator, which then picks the agent; with chat tabs on, a new Session without one runs pane/<agent>, the agent on its own, through Agent Farm, and sessions get shows it as agentProfile); update also takes report, expectedRevision (the revision you read; the update is refused if the Session has moved on) and source (user|agent).",
           "A link is {\"label\": non-empty string, \"url\": an https://, http://, file:// or grain:// URL, \"addedAt\": ISO 8601 date such as 2026-10-14T09:30:00Z, \"kind\"?: evidence|output|ticket|pull-request|other, \"provenance\"?: string}.",
           "Arrays replace the stored value: send the whole list, not only new items.",
           "Every problem in the payload is reported at once in one ERR_SESSION_PAYLOAD_INVALID error (paths such as outputs[0].addedAt, \"missing\" for an absent required field), and nothing is changed.",
@@ -27886,7 +27888,7 @@
         "notes": [
           "Structured input accepts launchCommand (full command including arguments; empty uses the selected agent default) and profile (Session behavior instructions). Creating/opening a Session submits no automatic prompt. Create starts the Session's agent; to give it a first prompt, run `runpane panels wait --panel <panelId> --for ready`, then `runpane panels submit --panel <panelId>`. Changes apply on next terminal launch.",
           "JSON isPinned: true/false sets the UI pin star. Creation defaults to false; update preserves the pin when omitted.",
-          "Payload fields (all optional on update; name required on create): name, goal, context, nextAction, launchCommand, profile (strings); isPinned and, on update, archived (booleans); agent (codex|claude|cursor); decisions and blockers (arrays of strings); evidence and outputs (arrays of links); create also takes runtime (windows|wsl) and wslDistribution; update also takes report, expectedRevision (the revision you read; the update is refused if the Session has moved on) and source (user|agent).",
+          "Payload fields (all optional on update; name required on create): name, goal, context, nextAction, launchCommand, profile (strings); isPinned and, on update, archived (booleans); agent (codex|claude|cursor); decisions and blockers (arrays of strings); evidence and outputs (arrays of links); create also takes runtime (windows|wsl), wslDistribution and agentProfile (an Agent Farm profile such as greenfield/orchestrator, which then picks the agent; with chat tabs on, a new Session without one runs pane/<agent>, the agent on its own, through Agent Farm, and sessions get shows it as agentProfile); update also takes report, expectedRevision (the revision you read; the update is refused if the Session has moved on) and source (user|agent).",
           "A link is {\"label\": non-empty string, \"url\": an https://, http://, file:// or grain:// URL, \"addedAt\": ISO 8601 date such as 2026-10-14T09:30:00Z, \"kind\"?: evidence|output|ticket|pull-request|other, \"provenance\"?: string}.",
           "archived: true also archives every Pane associated with the Session, as `panes archive --pane` would. A Pane that check refuses stays open (agent-busy, unsent-input, uncommitted-changes, unpushed-commits, uncommitted-and-unpushed, status-unknown), and so does one whose archive fails. The result's `panes` lists `archivedPaneIds`, `keptPanes` (with `code`) and `failedPanes` (with `error`); check a kept Pane with `panes archive --pane <id> --dry-run --json`. Undo is the person's: `panes restore`.",
           "Arrays replace the stored value: send the whole list, not only new items.",

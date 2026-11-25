@@ -15,13 +15,14 @@ import { configureChatTabs, getChatAgentCatalog, getChatTabManager } from '../se
 import { chatAgentName, getAgentRegistry } from '../services/agentRegistry';
 import { chatTabSecrets } from '../services/chatTabs/secrets';
 import { AgentFarmProfiles, printedCli } from '../services/chatTabs/agentFarm';
-import { bundledAgentFarm, paneAgentFarmProcess } from '../services/agentFarm/bundledAgentFarm';
+import { bundledAgentFarm, listPaneAgentFarmProfiles, paneAgentFarmProcess } from '../services/agentFarm/bundledAgentFarm';
 import { profilesOn } from '../services/agentFarm/profilesFeature';
+import { writeSessionProfile } from '../services/sessionWorkspace';
 import { worktreePaneFolder } from '../services/worktreePaneFolder';
 import { chatTabEnv } from '../services/chatTabs/launch';
 import { adapterEntry, adapterFileForPlainNode, checkAgentCli } from '../services/agentChat/adapterSetup';
 import { DEFAULT_AGENT_ID, agentConfig, agentLabel, configuredChatAgentIds } from '../../../shared/agents';
-import { findExecutableInPath } from '../utils/shellPath';
+import { findExecutableInPath, getShellPath } from '../utils/shellPath';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { switchToChat, terminalConversation, terminalRestored, type SwitchToChatPorts, type TranscriptLookup } from '../services/chatTabs/switchToChat';
 import { getDockTerminalPanel } from '../../../shared/utils/terminalDock';
@@ -71,9 +72,10 @@ const agentFarmProfiles = new AgentFarmProfiles({
     return adapterFileForPlainNode(entry, path.join(getAppDirectory(), 'agent-adapters'));
   },
   checkCli: (agent, context) => checkAgentCli(agent, printedCli(agent, context.env, findExecutableInPath), context),
+  sessionProfile: async (folder, profile, instructions) => writeSessionProfile(folder, profile, instructions),
 });
 
-const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key', 'agents', 'registry', 'install-agent', 'remove-agent'] as const;
+const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key', 'agents', 'profiles', 'registry', 'install-agent', 'remove-agent'] as const;
 
 function chatTabsEnabled(): boolean { return getRuntimeConfigManager().getConfig().chatTabsEnabled === true; }
 
@@ -141,6 +143,8 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
   });
   registry.register('chat-tab:keys', () => chatTabSecrets.status());
   registry.register('chat-tab:agents', () => getChatAgentCatalog().entries());
+  // The Agent Farm profiles a Session can start with on this machine (T-63); another machine reads it over machines:run.
+  registry.register('chat-tab:profiles', () => listPaneAgentFarmProfiles(getAppDirectory(), { ...process.env, PATH: getShellPath() }));
   // Settings > Agents: the ACP Registry's agents (D-15). Installing runs third-party code on this machine, so only its owner can.
   registry.register('chat-tab:registry', (refresh?: PaneCommandValue) => getAgentRegistry().list(decodeBoundary(refresh ?? false, boundary.boolean)));
   registry.register('chat-tab:install-agent', async (id: string, options?: PaneCommandValue) => {

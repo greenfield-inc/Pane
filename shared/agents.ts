@@ -20,6 +20,8 @@ export interface AgentChatConfig {
   riskyModes?: readonly string[];
   terminalConversationsLoad: boolean;
   paneMcpHttp?: boolean;
+  /** The model of Pane's plain Agent Farm profile, pane/<agent> (T-63). */
+  profileModel?: string;
   legacyClients?: boolean;
   registryIds?: readonly string[];
 }

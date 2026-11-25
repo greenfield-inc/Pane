@@ -62,7 +62,8 @@ export const AGENTS_CONFIG = {
         "paneMcpHttp": true,
         "registryIds": [
           "claude-acp"
-        ]
+        ],
+        "profileModel": "claude-opus-5-5"
       },
       "models": {
         "flag": "--model",
@@ -143,7 +144,8 @@ export const AGENTS_CONFIG = {
         "terminalConversationsLoad": true,
         "registryIds": [
           "codex-acp"
-        ]
+        ],
+        "profileModel": "gpt-6-astra"
       },
       "models": {
         "flag": "-m",

@@ -596,6 +596,31 @@ small state of its own (workspace trust, launch records, MCP logins) under
 `app.asar`, carries no native binaries, and answers `--version` under Electron
 as Node.
 
+### A Session's Agent Farm profile
+
+A Session's orchestrator chat runs an Agent Farm profile (see
+[SESSIONS.md](SESSIONS.md#sessions-run-through-agent-farm)). With no profile it is
+Pane's own plugin, `pane`, which Pane writes from its agents contract
+(`chat.profileModel`) and installs beside the bundled plugins at every start
+(`main/src/services/agentFarm/agentFarmProfiles.ts`); its profiles `pane/claude`
+and `pane/codex` hold only the harness and model, and an edit there is replaced.
+When Pane resolves a Session's printed launch it:
+
+- moves the profile's instructions (Claude's `_meta.systemPrompt.append`, Codex's
+  `CODEX_CONFIG` `developer_instructions`, both with LAUNCH CONTEXT) into the
+  Session folder as `PROFILE.md` and a marked section of its `AGENTS.md`, which
+  `CLAUDE.md` imports. A resumed conversation reads instruction files again but not
+  a launch's system prompt, so a later reload or switch of profile reaches it;
+- turns Claude's `strictMcpConfig` off, so the person's own MCP servers stay, and
+  adds Pane's MCP server over HTTP with the deny for the Claude plugin's own `pane`
+  server, as a plain chat tab does. Codex keeps its config through Agent Farm's
+  private Codex home, which links `~/.codex`;
+- for `pane/*`, drops Agent Farm's full-access mode: the agent asks as it did when
+  Pane started it directly, unless the Session's launch gave it full access
+  (`fullAccess` on the profile launch). Every other profile keeps Agent Farm's mode.
+
+A profile chat tab outside a Session runs exactly as printed.
+
 ## Older clients
 
 Phone apps released before chat tabs would crash on a tab kind they don't know,

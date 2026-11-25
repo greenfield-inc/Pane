@@ -33,6 +33,25 @@ A Session already running in a terminal can move to chat with
 terminal agent tab in it (see
 [CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)).
 
+### Sessions run through Agent Farm
+
+A new chat Session runs its agent through Pane's own Agent Farm (see
+[CHAT_TABS.md](CHAT_TABS.md#a-sessions-agent-farm-profile)). The record saves which
+profile in `agentProfile`, `{ ref, hash }`: the ref is `pane/claude` or
+`pane/codex` when the Session has no profile (the agent on its own, which adds
+nothing of Agent Farm's), the launch command's profile for `agent-farm run
+<profile>`, or the `agentProfile` passed to `runpane sessions create --from-json`
+(for example `greenfield/orchestrator`, which then picks the agent). `hash` is the
+content hash of the profile's plugin when the Session took it. The profile's
+instructions go into the Session folder as `PROFILE.md` and a section of its
+`AGENTS.md`, rewritten at every start. Sessions created before this, Sessions that
+keep a terminal, and Cursor, OpenCode and Pi Sessions have no `agentProfile` and
+start their agent directly, as before; so does a new Session when Pane's own
+plugin isn't installed yet. Changing a Session's agent or launch command keeps it
+on Agent Farm. `chat-tab:profiles` lists the profiles a Session can start with on a
+computer (another machine reads it through `machines:read`); Pane's plain profiles
+are marked `hidden`.
+
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,
 a **Machine** picker sits between them. It starts on the machine you last

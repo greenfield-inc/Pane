@@ -269,6 +269,8 @@ interface ElectronAPI {
     /** Installs the registry's current version. A binary with no checksum is refused (AGENT_REGISTRY_UNVERIFIED) until `allowUnverified`. */
     installAgent(id: string, options?: { allowUnverified?: boolean }): Promise<import('../../../shared/types/agentRegistry').RegistryAgentList>;
     removeAgent(id: string): Promise<import('../../../shared/types/agentRegistry').RegistryAgentList>;
+    /** The Agent Farm profiles a Session can start with on this computer; Pane's plain ones are marked hidden. */
+    profiles(): Promise<import('../../../shared/types/agentFarmProfiles').AgentFarmProfileList>;
   };
 
   paneChat: {

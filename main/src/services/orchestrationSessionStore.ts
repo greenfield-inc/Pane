@@ -1,4 +1,5 @@
 import { customCommandResumeSchema } from '../../../shared/types/customCommandResume';
+import { sessionAgentProfileSchema } from '../../../shared/types/agentFarmProfiles';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
@@ -124,6 +125,7 @@ const sessionSchema = boundary.object({
   resume: boundary.optional(boundary.nonEmptyString),
   openingPrompt: boundary.optional(boundary.nonEmptyString),
   profile: boundary.optional(boundary.string),
+  agentProfile: boundary.optional(sessionAgentProfileSchema),
   internalSessionId: boundary.nonEmptyString,
   // One panel id per configured agent, rebuilt in sanitizeSession.
   panelIds: boundary.jsonObject,
@@ -429,6 +431,8 @@ function sanitizeSession(value: JsonValue, index: number, problems: string[]): O
     problems.push(`${label}: dropped the WSL distribution of a native Session`);
     delete fields.wslDistribution;
   }
+  // A Session whose profile can't be read starts its agent directly, as before T-63, rather than being dropped.
+  if (fields.agentProfile !== undefined && !decodes(fields.agentProfile, sessionAgentProfileSchema, `${label} agent profile`, problems)) delete fields.agentProfile;
   try {
     const session = decodeBoundary(fields, sessionSchema);
     // Each agent keeps its saved panel id. A Session saved before an agent joined gets that

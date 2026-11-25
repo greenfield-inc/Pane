@@ -5,6 +5,7 @@ import type { PaneChatAgent } from './paneChat';
 import type { TerminalAgentReport, TerminalPausedMark, ToolPanel, ToolPanelType } from './panels';
 import type { RunpanePaneArchiveBlockCode } from './runpaneOrchestration';
 import { boundary, decodeOptionalBoundary, type JsonObject } from '../validation/boundaryDecoder';
+import type { SessionAgentProfile } from './agentFarmProfiles';
 
 /** Stable identifier of the built-in orchestration session imported from Pane Chat. */
 export const LEGACY_ORCHESTRATION_SESSION_ID = 'legacy-pane-chat';
@@ -139,6 +140,12 @@ export interface OrchestrationSessionRecord {
   openingPrompt?: string;
   /** Snapshot of the behavior profile, independent of app defaults. */
   profile?: string;
+  /**
+   * The Agent Farm profile the Session's agent runs (T-63): `pane/claude` or `pane/codex` for the agent
+   * on its own, or a profile such as `greenfield/orchestrator`, with its plugin's content hash. Sessions
+   * from before T-63, and those whose agent keeps a terminal, have none and start the agent directly.
+   */
+  agentProfile?: SessionAgentProfile;
   /** Hidden detached Pane session that owns the durable terminal conversation. */
   internalSessionId: string;
   /** Deterministic terminal panel for each supported agent. */
@@ -267,6 +274,11 @@ export interface OrchestrationSessionCreateInput {
   agent?: PaneChatAgent;
   launchCommand?: string;
   customResume?: CustomCommandResume | null;
+  /**
+   * An Agent Farm profile (`plugin/profile[:variant]`) for the Session's agent, which then runs the
+   * profile's harness. Omitted: the agent on its own (`pane/<agent>`), or the launch command's profile.
+   */
+  agentProfile?: string;
   /**
    * A native session id of `agent` to resume: the Session's agent tab resumes that conversation
    * when it first opens, instead of starting a new one. `runpane handoff` uses it to move a Session.

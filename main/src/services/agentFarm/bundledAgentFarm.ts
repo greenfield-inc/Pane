@@ -7,6 +7,8 @@ import { promisify } from 'util';
 import { reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { hashDirectory } from '../skillCacheManager';
+import { PANE_PROFILE_PLUGIN, panePluginFiles, parseProfileList, writePanePluginSource } from './agentFarmProfiles';
+import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
 
 const execFileAsync = promisify(execFile);
 
@@ -21,6 +23,8 @@ const TELEMETRY_MARKER_FILE = 'pane-telemetry.json';
 const INSTALLING_FILE = 'pane-installing.json';
 /** The folders of a plugin Agent Farm's install receipt covers, besides plugin.yaml (Agent Farm's plugins.js). */
 const RECEIPT_SECTIONS = ['profiles', 'agents', 'skills', 'instructions', 'references'];
+/** Where Pane writes its own plugin's source before installing it (agentFarmProfiles.ts). */
+const PANE_PLUGIN_SOURCE = 'pane-plugin';
 
 /** The bundled Agent Farm package: its CLI entry, version and plugin sources. */
 export interface BundledAgentFarm {
@@ -109,6 +113,22 @@ export function bundledAgentFarmProcess(bundle: BundledAgentFarm, args: string[]
 export function paneAgentFarmProcess(paneDir: string, args: string[], options: { profiles?: boolean; env?: NodeJS.ProcessEnv; bundle?: BundledAgentFarm | null; runtime?: string }): AgentFarmProcess | undefined {
   const bundle = options.bundle === undefined ? bundledAgentFarm() : options.bundle;
   return bundle ? bundledAgentFarmProcess(bundle, args, agentFarmConfigRoot(paneDir), options.env ?? process.env, options.runtime, options.profiles) : undefined;
+}
+
+/**
+ * The profiles installed in Pane's own Agent Farm (`agent-farm profiles list`), Pane's plain ones
+ * marked hidden. Never throws: a missing bundle or a failed read comes back as an empty list with
+ * an error that says what to do. Session move and the Session list both read it.
+ */
+export async function listPaneAgentFarmProfiles(paneDir: string, env: NodeJS.ProcessEnv = process.env, run: AgentFarmRunner = runAgentFarm): Promise<AgentFarmProfileList> {
+  const agentFarm = paneAgentFarmProcess(paneDir, ['profiles', 'list'], env);
+  if (!agentFarm) return { profiles: [], error: `This Pane build does not include ${AGENT_FARM_PACKAGE}, so it has no Agent Farm profiles. Reinstall Pane from runpane.com.` };
+  try {
+    return { profiles: parseProfileList(await run(agentFarm)) };
+  } catch (error) {
+    const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);
+    return { profiles: [], error: `Pane couldn't list its Agent Farm profiles: ${reason}. Restart Pane, then try again.` };
+  }
 }
 
 /** The bundled Agent Farm's state after a start's install. */
@@ -309,7 +329,9 @@ export interface InstallBundledAgentFarmOptions {
  * bundled Agent Farm, when the bundle (its version and plugin files) differs from what the
  * manifest there records; an unchanged bundle installs nothing. A bundled plugin someone changed
  * since Pane installed it (its files no longer match Agent Farm's install receipt) is kept as it
- * is and reported in `edited`: it is theirs now (T-63, A-3). Called at startup without waiting.
+ * is and reported in `edited`: it is theirs now (T-63, A-3). Pane's own plugin, `pane` (the plain
+ * Claude and Codex profiles, agentFarmProfiles.ts), is installed beside them and always replaced.
+ * Called at startup without waiting.
  * Never throws: a failure is logged and returned in the status.
  */
 export async function installBundledAgentFarm(options: InstallBundledAgentFarmOptions): Promise<BundledAgentFarmStatus> {
@@ -330,14 +352,15 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
   const manifestPath = path.join(configRoot, MANIFEST_FILE);
   let hash: string;
   try {
-    hash = `${bundle.version}:${await hashDirectory(path.join(bundle.root, 'plugins'))}`;
+    // Pane's own plugin is part of the bundle: a Pane whose agents contract changed reinstalls it.
+    hash = `${bundle.version}:${await hashDirectory(path.join(bundle.root, 'plugins'))}:${createHash('sha256').update(JSON.stringify([...panePluginFiles()])).digest('hex')}`;
   } catch (error) {
     status = { state: 'failed', configRoot, version: bundle.version, plugins: {}, edited: [], error: `Pane couldn't read the bundled Agent Farm's plugins: ${reasonOf(error)}. Reinstall Pane from runpane.com.` };
     log(`[AgentFarm] ${status.error}`);
     return status;
   }
   const previous = await fs.readFile(manifestPath, 'utf8').then((text) => decodeOptionalBoundary(JSON.parse(text), manifestSchema)).catch(() => undefined);
-  const installed = previous && BUNDLED_AGENT_FARM_PLUGINS.every((name) => existsSync(path.join(configRoot, 'plugins', name)));
+  const installed = previous && [...BUNDLED_AGENT_FARM_PLUGINS, PANE_PROFILE_PLUGIN].every((name) => existsSync(path.join(configRoot, 'plugins', name)));
   if (previous && installed && previous.hash === hash) {
     status = { state: 'ready', configRoot, version: bundle.version, plugins: previous.plugins, edited: previous.edited ?? [] };
     log(`[AgentFarm] Bundled Agent Farm ${bundle.version} is already set up in ${configRoot} (manifest hash unchanged); nothing reinstalled.`);
@@ -375,6 +398,11 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
       plugins[name] = installedVersion(stdout) ?? 'unknown';
       await fs.rm(installingPath, { force: true });
     }
+    // Pane's own plugin is always Pane's: an edit there is replaced, not kept.
+    const source = path.join(configRoot, PANE_PLUGIN_SOURCE, PANE_PROFILE_PLUGIN);
+    await writePanePluginSource(source);
+    await clearUnfinishedInstall(configRoot, [PANE_PROFILE_PLUGIN]);
+    plugins[PANE_PROFILE_PLUGIN] = installedVersion(await run(bundledAgentFarmProcess(bundle, ['plugin', 'install', source], configRoot))) ?? 'unknown';
     await fs.writeFile(manifestPath, `${JSON.stringify({ hash, agentFarmVersion: bundle.version, plugins, edited }, null, 2)}\n`);
   } catch (error) {
     const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);

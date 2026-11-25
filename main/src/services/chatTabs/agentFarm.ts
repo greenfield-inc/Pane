@@ -3,12 +3,15 @@ import { promisify } from 'util';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { ChatAgent, ChatPanelState } from '../../../../shared/types/chatTab';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
-import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import type { ChatAgentEnv, ChatProfileResolver } from './launch';
 import type { ResolvedLaunch } from './manager';
 import { hostCommand, type HostCommand } from '../agentChat/hostCommand';
 import { agentConfig } from '../../../../shared/agents';
 import type { AgentFarmProcess } from '../agentFarm/bundledAgentFarm';
+import { plainProfileAgent } from '../agentFarm/agentFarmProfiles';
+import { grantPaneMcp, paneMcpChatServer } from '../paneMcpEndpoint';
+import { PANE_MCP_PLUGIN_DENY_SETTINGS } from '../paneMcpNames';
 
 const execFileAsync = promisify(execFile);
 
@@ -47,6 +50,58 @@ export interface AgentFarmOptions {
   adapter: (agent: ChatAgent) => Promise<string>;
   /** Checks the CLI a printed launch will run, in that launch's folder and environment (#1236). */
   checkCli: (agent: ChatAgent, context: { cwd: string; env: ChatAgentEnv }) => Promise<void>;
+  /**
+   * Puts a Session's profile instructions in its folder (PROFILE.md, which the folder's AGENTS.md
+   * includes), where the agent reads them again when it reloads a conversation (T-63).
+   */
+  sessionProfile: (sessionFolder: string, profile: string, instructions: string) => Promise<void>;
+  /** Pane's MCP token for a tab (paneMcpEndpoint.ts); tests pass their own. */
+  grantPaneMcp?: typeof grantPaneMcp;
+}
+
+/** Agent Farm's own adapter settings (CONFIGURATION.md, "ACP sessions"), which Pane reads and rewrites for a Session. */
+const CLAUDE_SYSTEM_PROMPT_META = 'systemPrompt';
+const CODEX_CONFIG_ENV = 'CODEX_CONFIG';
+const CODEX_INITIAL_MODE_ENV = 'INITIAL_AGENT_MODE';
+
+/**
+ * Takes the profile's instructions (with Agent Farm's LAUNCH CONTEXT) out of a printed launch:
+ * Claude's system-prompt append, or Codex's developer_instructions. Empty when it has none.
+ */
+function takeInstructions(launch: ResolvedLaunch): string {
+  const parts: string[] = [];
+  const prompt = decodeOptionalBoundary(launch.meta?.[CLAUDE_SYSTEM_PROMPT_META], boundary.object({ append: boundary.string }));
+  if (prompt && launch.meta) {
+    parts.push(prompt.append);
+    const { [CLAUDE_SYSTEM_PROMPT_META]: _taken, ...rest } = launch.meta;
+    launch.meta = rest;
+  }
+  const codexConfig = launch.command.env[CODEX_CONFIG_ENV];
+  if (codexConfig) {
+    let config: JsonObject | undefined;
+    try { config = decodeOptionalBoundary(JSON.parse(codexConfig), boundary.jsonObject); }
+    catch { config = undefined; }
+    const developer = decodeOptionalBoundary(config?.developer_instructions, boundary.string);
+    if (config && developer !== undefined) {
+      parts.push(developer);
+      const { developer_instructions: _taken, ...rest } = config;
+      launch.command.env[CODEX_CONFIG_ENV] = JSON.stringify(rest);
+    }
+  }
+  return parts.join('\n\n');
+}
+
+/**
+ * Pane's plain profiles add nothing, permissions included: the agent asks as it did when Pane
+ * started it directly, unless the Session gave it full access (launch.ts fullAccessLaunch).
+ */
+function plainPermissions(launch: ResolvedLaunch, harness: ChatAgent, fullAccess: boolean): void {
+  delete launch.mode;
+  delete launch.command.env[CODEX_INITIAL_MODE_ENV];
+  if (!fullAccess) return;
+  const chat = agentConfig(harness)?.chat;
+  if (chat?.fullAccess?.mode) launch.mode = chat.fullAccess.mode;
+  else launch.approveOnce = true;
 }
 
 /**
@@ -69,13 +124,42 @@ export function printedCli(agent: ChatAgent, env: ChatAgentEnv, lookup: (name: s
 export class AgentFarmProfiles implements ChatProfileResolver {
   constructor(private readonly options: AgentFarmOptions) {}
 
-  async resolve(_panel: ToolPanel, state: ChatPanelState, env: ChatAgentEnv): Promise<ResolvedLaunch> {
+  async resolve(panel: ToolPanel, state: ChatPanelState, env: ChatAgentEnv): Promise<ResolvedLaunch> {
     if (state.launch.kind !== 'profile') throw new PaneError('CHAT_PROFILE_MISSING', 'This chat tab has no Agent Farm profile.', 'Open a new chat tab.');
     const printed = await this.print(state.launch.profile, state.launch.args ?? {}, state.agent, state.cwd, env);
     if (printed.harness !== state.agent) {
       throw new PaneError('CHAT_PROFILE_AGENT_CHANGED', `The profile ${state.launch.profile} now runs ${printed.harness}, but this tab was started for ${state.agent}.`, 'Open a new chat tab for the profile.');
     }
-    return printed.launch;
+    const launch = printed.launch;
+    if (plainProfileAgent(state.launch.profile)) plainPermissions(launch, printed.harness, state.launch.fullAccess === true);
+    if (state.orchestrationSessionId && state.sessionFolder) await this.sessionLaunch(panel, state, state.launch.profile, printed.harness, launch);
+    return launch;
+  }
+
+  /**
+   * A Session's orchestrator (T-63): the profile's instructions move from the launch into the
+   * Session folder, where a reloaded conversation reads them again (a launch flag is read only
+   * once), and the agent keeps the person's own MCP servers and gets Pane's, as before Agent Farm.
+   */
+  private async sessionLaunch(panel: ToolPanel, state: ChatPanelState, profile: string, harness: ChatAgent, launch: ResolvedLaunch): Promise<void> {
+    const instructions = takeInstructions(launch);
+    await this.options.sessionProfile(state.sessionFolder ?? state.cwd, profile, instructions);
+    const chat = agentConfig(harness)?.chat;
+    const namespace = chat?.adapter?.sessionFolderSettingsMeta;
+    const options = namespace ? decodeOptionalBoundary(launch.meta?.[namespace], boundary.object({ options: boundary.jsonObject }))?.options : undefined;
+    const paneMcp = chat?.paneMcpHttp ? (this.options.grantPaneMcp ?? grantPaneMcp)({ panelId: panel.id, env: Object.fromEntries(Object.entries(launch.command.env).flatMap(([key, value]) => value === undefined ? [] : [[key, value]])), cwd: launch.command.cwd, agentLabel: agentConfig(harness)?.label ?? harness }) : undefined;
+    if (!namespace || (!options && !paneMcp)) return;
+    const next: JsonObject = { ...options };
+    // Strict MCP would keep only the profile's servers and drop the person's own.
+    if (next.strictMcpConfig === true) next.strictMcpConfig = false;
+    if (paneMcp) {
+      Object.assign(launch.command.env, paneMcp);
+      launch.mcpServers = [paneMcpChatServer()];
+      // One Pane server: the Claude plugin's own `pane` server steps aside for the HTTP one.
+      const settings = decodeOptionalBoundary(next.settings, boundary.jsonObject) ?? {};
+      next.settings = { ...settings, ...PANE_MCP_PLUGIN_DENY_SETTINGS };
+    }
+    launch.meta = { ...launch.meta, [namespace]: { ...decodeOptionalBoundary(launch.meta?.[namespace], boundary.jsonObject), options: next } };
   }
 
   /** Prints a profile's launch. `agent` picks the adapter to pass; the printed harness is the truth. */
