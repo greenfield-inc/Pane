@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { VersionUpdateInfo } from '../frontend/src/types/session';
 import { notifyFixture } from './fixtures/notifySnapshot';
+import type { NotifySnapshot } from '../shared/types/notify';
 import type { PanelAgentStatusEvent } from '../shared/types/agentStatus';
 
 declare global {
@@ -124,7 +125,7 @@ test('a tab blocked on a prompt that has an approval leaves the notification to 
     window.__emitNotificationStatus({ panelId: 'input-terminal-1', sessionId: 'terminal-input-session', state: 'blocked', reason: null });
   });
   // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
-  await page.evaluate((snapshot) => (window as typeof window & { __paneTestElectronMock: { emitNotifySnapshot: (value: unknown) => void } }).__paneTestElectronMock.emitNotifySnapshot(snapshot),
+  await page.evaluate((snapshot) => (window as typeof window & { __paneTestElectronMock: { emitNotifySnapshot: (snapshot: NotifySnapshot) => void } }).__paneTestElectronMock.emitNotifySnapshot(snapshot),
     { ...fixture, items: [prompt], queue: ['prompt'], strip: null, stripSurface: null });
   await expect.poll(() => page.evaluate(() => Object.values(window.__visibleNotifications))).toEqual(['Input Terminal needs your input']);
   await page.waitForTimeout(500);
