@@ -11,6 +11,7 @@ import tls from 'tls';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
 import { PaneCommandRegistry } from '../commandRegistry';
 import { PaneRemoteHttpApiServer } from '../httpApiServer';
+import { confirmedSharers } from './confirmedSharers';
 import { RelayService } from './relayService';
 import { createComputerCaller, createComputerPoster, RelayLinks, relayComputerSchema } from './relayLinks';
 import { ComputerLinking, createPairingRoute } from './computerLinking';
@@ -187,6 +188,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
       self: () => service.computerInfo(),
       call,
       disconnect: (ids) => server?.disconnectClients(ids),
+      sharerConfirmed: (id) => confirmedSharers.confirm(id),
       connectedClientIds: () => new Set(),
     });
     const linking = new ComputerLinking({ links, self: () => service.computerInfo(), routesReport: () => undefined, post: createComputerPoster({ dial, extraCa }), call });
@@ -368,6 +370,8 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
 
       expect(await reader.registry.invoke('relay:redeem-link', [{ link, access: 'read' }])).toEqual({ linked: ['Studio Mac', 'Travel Laptop'], access: 'read' });
 
+      // As the relay host does when its list changes: until then the laptop holds the token it handed out.
+      await studio.links.tellReadDevices();
       const call = createComputerCaller({ dial, extraCa });
       for (const profile of reader.links.reachable()) {
         expect(await call(profile, 'sessions:get-all-with-projects', [])).toEqual([{ id: `${profile.label} session` }]);

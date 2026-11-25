@@ -15,6 +15,7 @@ import { buildRoutesReport } from '../computerCommands';
 import { disconnectActiveRemoteHostClients } from '../remoteTransportController';
 import { remoteHostRuntimeStateStore } from '../remoteHostRuntimeState';
 import { readFileSync } from 'fs';
+import { confirmedSharers } from './confirmedSharers';
 import { setRelayPushChannel } from '../mobilePushSender';
 import { isDevelopmentBuild } from '../../utils/appDirectory';
 
@@ -79,6 +80,7 @@ export async function createRelayHost(deps: {
       disconnectActiveRemoteHostClients(ids);
       for (const id of ids) previews.revokeClient(id);
     },
+    sharerConfirmed: (id) => confirmedSharers.confirm(id),
     connectedClientIds: () => new Set(remoteHostRuntimeStateStore.getState().connectedClients.map((client) => client.clientId).filter((id): id is string => id !== null)),
     log: deps.log,
   });
@@ -155,7 +157,10 @@ export async function createRelayHost(deps: {
       routesReport: buildRoutesReport,
       onPaired: (event) => getPaneEventSink().send('relay:paired', event),
     }),
-    suspend: () => relay.suspend(),
+    suspend: () => {
+      confirmedSharers.clear();
+      relay.suspend();
+    },
     resume: () => relay.resume(),
     stop: async () => {
       setRelayPushChannel(null);

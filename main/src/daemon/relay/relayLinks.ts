@@ -82,6 +82,8 @@ export interface RelayLinksDeps {
   /** Drops live connections of revoked clients. */
   disconnect(clientIds: string[]): void;
   connectedClientIds(): ReadonlySet<string>;
+  /** A linked computer said which devices it still shares with. */
+  sharerConfirmed(computerId: string): void;
   log?(line: string): void;
 }
 
@@ -507,6 +509,7 @@ export class RelayLinks {
       return client.access === 'read' && client.grantedBy === granter && (device === null || !kept.has(readDeviceKey(device)));
     };
     if (this.remote().host.clients.some(stale)) await this.revokeLocally({ clients: stale });
+    this.deps.sharerConfirmed(granter);
   }
 
   /** Tells each linked computer which devices are still paired Read only here. One that is asleep asks when it wakes (`followReadDevices`). */

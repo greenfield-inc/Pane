@@ -123,7 +123,7 @@ function network() {
     };
     const routes: ComputerRoutesReport = { ...report, name, relay: { id, address: info.address, fingerprint: info.fingerprint, local: [] } };
     const disconnected: string[] = [];
-    const links: RelayLinks = new RelayLinks({ config: configManager, self: () => info, call, disconnect: (ids) => disconnected.push(...ids), connectedClientIds: () => new Set() });
+    const links: RelayLinks = new RelayLinks({ config: configManager, self: () => info, call, sharerConfirmed: () => undefined, disconnect: (ids) => disconnected.push(...ids), connectedClientIds: () => new Set() });
     const exchange = new PairingExchange({ now: () => now, addClient: (record) => links.addClient(record) });
     const linking = new ComputerLinking({ links, self: () => info, routesReport: () => routes, post, call });
     const paired: RelayPairedEvent[] = [];

@@ -11,6 +11,7 @@ import type { TerminalPanelState } from '../../../shared/types/panels';
 import { isDaemonOwnedChannel } from './daemonChannels';
 import { PaneCommandRegistry, readOnlyPaneCaller } from './commandRegistry';
 import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
+import { confirmedSharers } from './relay/confirmedSharers';
 import { isPaneDaemonEventChannel } from './server';
 
 // The commands and events a second person may read, as the plan approved them (D-169). The host's
@@ -59,7 +60,7 @@ function namedInSource(owned: (name: string) => boolean): string[] {
 }
 
 const servers: PaneRemoteHttpApiServer[] = [];
-afterEach(async () => { for (const server of servers.splice(0)) await server.stop(); });
+afterEach(async () => { confirmedSharers.clear(); for (const server of servers.splice(0)) await server.stop(); });
 
 function readerConfig(): RemoteDaemonConfig {
   const config = createDefaultRemoteDaemonConfig();
@@ -241,5 +242,24 @@ describe('a device paired Read only', () => {
     await vi.waitFor(() => expect(reader.text().match(/heartbeat/gu)?.length).toBeGreaterThan(2));
     config.host.clients = config.host.clients.filter((client) => client.id !== 'reader');
     await reader.ended;
+  });
+
+  it('waits, with a token another computer handed out, until that computer confirms it since this one woke', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('todos:snapshot', () => null);
+    const config = readerConfig();
+    config.host.clients[0].grantedBy = 'tyler';
+    config.host.clients[0].linkedBy = 'Tyler';
+    const { invoke, stream } = await serve(registry, config);
+    expect(await invoke('todos:snapshot')).toMatchObject({ status: 503, body: { error: { code: 'ERR_READ_ONLY_UNCONFIRMED', message: expect.stringContaining('Tyler') } } });
+    expect((await invoke('todos:snapshot', 'owner-token')).status).toBe(200);
+
+    confirmedSharers.confirm('tyler');
+    expect((await invoke('todos:snapshot')).status).toBe(200);
+    const reader = await stream();
+    // Asleep and awake again: closed until Tyler says so.
+    confirmedSharers.clear();
+    await reader.ended;
+    expect((await invoke('todos:snapshot')).status).toBe(503);
   });
 });

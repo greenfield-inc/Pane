@@ -52,6 +52,7 @@ import { PaneError, toPaneDaemonError } from '../../../shared/paneError';
 import type { VoiceStreamErrorCode } from '../../../shared/voice/deepgramLive';
 import { voiceKeyProblem } from '../../../shared/voice/voiceKeys';
 import { streamWorktreePreview } from '../services/mediaStream';
+import { confirmedSharers } from './relay/confirmedSharers';
 import { RecentWrites, type InvokeAnswer } from './recentWrites';
 import type { ForwardedClient } from './relay/computerTlsServer';
 import { trackPairingCompleted, type PairingRouteKind } from '../services/pairingAnalytics';
@@ -180,6 +181,9 @@ type RemoteRequestAuthResult =
       kind?: 'glasses' | 'computer';
       /** "read" for a device paired Read only; absent for full access. */
       access?: ReadOnlyMark;
+      /** A read-only token another computer handed out: that computer's relay id, and its name. */
+      grantedBy?: string;
+      linkedBy?: string;
     } | null;
   }
   | {
@@ -1606,6 +1610,21 @@ export class PaneRemoteHttpApiServer {
   }
 
   private authenticateRequest(request: IncomingMessage, token?: string | null): RemoteRequestAuthResult {
+    const auth = this.identify(request, token);
+    const sharer = auth.ok && auth.client?.access === 'read' ? auth.client.grantedBy : undefined;
+    if (sharer === undefined || confirmedSharers.has(sharer)) return auth;
+    return {
+      ok: false,
+      statusCode: 503,
+      error: {
+        message: `${auth.ok ? auth.client?.linkedBy ?? 'The computer that shared this one' : ''} hasn't confirmed since this computer woke that it still shares with this device, so nothing was read. It does once it is online.`,
+        code: 'ERR_READ_ONLY_UNCONFIRMED',
+      },
+    };
+  }
+
+  /** Who a request is from, by its token or Tailscale login. */
+  private identify(request: IncomingMessage, token?: string | null): RemoteRequestAuthResult {
     if (this.workspace) {
       // A linked computer's or paired phone's token is accepted on every listener, Tailscale's too (D-51).
       const paired = authenticateRemoteDaemonBearerToken(
@@ -1750,7 +1769,8 @@ export class PaneRemoteHttpApiServer {
   /** Whether the device is still paired with this computer, by the token it signed in with. */
   private hasClient(id: string | null, tokenHash: string | null): boolean {
     if (!id || !tokenHash) return false;
-    return this.getRemoteConfig().host.clients.some((client) => client.id === id && client.tokenHash === tokenHash);
+    return this.getRemoteConfig().host.clients.some((client) => client.id === id && client.tokenHash === tokenHash
+      && (client.access !== 'read' || client.grantedBy === undefined || confirmedSharers.has(client.grantedBy)));
   }
 
   private dropEventClient(clientConnectionId: string): void {
