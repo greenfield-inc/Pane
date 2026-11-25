@@ -366,13 +366,13 @@ async function sendToSession(commandRegistry: PaneCommandRegistry, opener: PaneL
   const { readiness } = decodeBoundary(await commandRegistry.invoke('runpane:panels:resume', [{ panelId: session.panelId, waitReady: true }]), resumeResultSchema);
   const agent = agentLabel(session.agent);
   if (readiness?.blocked) {
-    opener.showError(`${where}'s ${agent} is stopped at a prompt in its tab, so the link's prompt was not sent. Answer it there, then open the link again.`);
+    opener.showError(`${agent} is stopped at a prompt in the tab of ${where}, so the link's prompt was not sent. Answer it there, then open the link again.`);
     return;
   }
   const running = readiness !== undefined && readiness.state.running && readiness.state.agentType === session.agent;
   const working = readiness?.reason?.code === 'agent-not-ready' && readiness.state.activityStatus === 'active';
   if (!running || !(readiness.ok || working)) {
-    opener.showError(`${agent} is not running in ${where}'s tab, so the link's prompt was not sent. Start ${agent} in that tab (or install it), then open the link again.`);
+    opener.showError(`${agent} is not running in the tab of ${where}, so the link's prompt was not sent. Start ${agent} in that tab (or install it), then open the link again.`);
     return;
   }
   const submitted = decodeBoundary(

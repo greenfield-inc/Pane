@@ -157,6 +157,8 @@ test('Start stays off with an install hint when no agent Pane can start is insta
   await boot(page, { activePaneId: '' });
   const dialog = await emitRequest(page, request({ agents: AGENTS.map((option) => ({ ...option, installed: false })) }));
   await expect(dialog.getByText('No agent Pane can start is installed on this computer.', { exact: false })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'No agent to start this prompt' })).toBeVisible();
+  await expect(dialog.getByText('runs with full access', { exact: false })).toHaveCount(0);
   // Past the 700 ms delay, Start still can't be pressed.
   await page.waitForTimeout(900);
   await expect(dialog.getByRole('button', { name: 'Start' })).toBeDisabled();

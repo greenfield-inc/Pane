@@ -95,7 +95,7 @@ After **Start**, in Pane only:
 
 | Message | Cause |
 | --- | --- |
-| &lt;Agent&gt; is not running in &lt;where&gt;'s tab, so the link's prompt was not sent. Start &lt;agent&gt; in that tab (or install it), then open the link again. | The Session's tab has a shell or another program, not its agent. Pane never types a link's prompt into a shell. |
-| &lt;where&gt;'s &lt;agent&gt; is stopped at a prompt in its tab, so the link's prompt was not sent. Answer it there, then open the link again. | The agent is waiting on a question, such as trusting a folder. |
+| &lt;Agent&gt; is not running in the tab of &lt;where&gt;, so the link's prompt was not sent. Start &lt;agent&gt; in that tab (or install it), then open the link again. | The Session's tab has a shell or another program, not its agent. Pane never types a link's prompt into a shell. |
+| &lt;Agent&gt; is stopped at a prompt in the tab of &lt;where&gt;, so the link's prompt was not sent. Answer it there, then open the link again. | The agent is waiting on a question, such as trusting a folder. |
 | Pane could not start the linked task in &lt;where&gt;: &lt;reason&gt; | Creating the Pane or Session failed after Start. |
 | Pane could not confirm that &lt;where&gt; got the prompt. Open the Session to check whether it arrived. | The prompt went to an existing Session, and Pane could not confirm it arrived. |

@@ -77,7 +77,7 @@ function StartLinkDialog({ request, onAnswer }: { request: StartLinkRequest; onA
     <Modal isOpen onClose={cancel} size="md" showCloseButton={false} initialFocusRef={cancelRef}>
       <div onKeyDown={onKeyDown} className="flex min-h-0 flex-col" data-testid="start-link-dialog">
         <ModalHeader
-          title={`Start ${runningLabel} on this prompt?`}
+          title={noAgentInstalled ? 'No agent to start this prompt' : `Start ${runningLabel} on this prompt?`}
           description={`Runs ${target ? wherePhrase(target) : 'in a new Session'}.`}
           onClose={cancel}
         />
@@ -110,7 +110,9 @@ function StartLinkDialog({ request, onAnswer }: { request: StartLinkRequest; onA
           {!noAgentInstalled && linkAgentMissing && request.linkAgent && target?.kind !== 'session' && (
             <p className="text-sm text-text-secondary">The link asks for {label(request.linkAgent)}, which isn't installed on this computer, so {runningLabel} runs instead.</p>
           )}
-          <p className="text-sm text-text-secondary">{runningLabel} runs with full access: it can edit files and run commands without asking.</p>
+          {!noAgentInstalled && (
+            <p className="text-sm text-text-secondary">{runningLabel} runs with full access: it can edit files and run commands without asking.</p>
+          )}
           <div>
             <button
               type="button"
