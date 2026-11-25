@@ -22,6 +22,9 @@ import {
   orchestrationAgentProfileSchema,
 } from '../services/orchestrationSessionPayload';
 import { configuredAgentSchema } from '../../../shared/agents';
+import { PROFILE_REF_PATTERN } from '../../../shared/types/agentFarmProfiles';
+
+const profileRefSchema = boundary.refine(boundary.nonEmptyString, value => PROFILE_REF_PATTERN.test(value), 'expected an Agent Farm profile such as greenfield/orchestrator');
 
 const selectorSchema = boundary.object({
   sessionId: boundary.optional(boundary.nonEmptyString),
@@ -186,6 +189,17 @@ export function registerOrchestrationSessionHandlers(
     ));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:set-agent');
+
+  // T-63: Switch profile and Reload profile from the Session's right-click menu.
+  commandRegistry.register('orchestration-sessions:switch-profile', async (value: PaneCommandValue, ref?: PaneCommandValue) => {
+    return invokeSafely(() => requireManager().switchProfile(decodeSelector(value), decodeBoundary(ref, profileRefSchema)));
+  });
+  commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:switch-profile');
+
+  commandRegistry.register('orchestration-sessions:reload-profile', async (value: PaneCommandValue) => {
+    return invokeSafely(() => requireManager().reloadProfile(decodeSelector(value)));
+  });
+  commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:reload-profile');
 
   commandRegistry.register('orchestration-sessions:associate', async (value: PaneCommandValue, association?: PaneCommandValue) => {
     const decoded = association === undefined

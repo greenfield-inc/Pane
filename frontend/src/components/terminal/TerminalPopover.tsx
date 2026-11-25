@@ -24,6 +24,8 @@ export interface TerminalPopoverProps {
   className?: string;
   onMouseEnter?: React.MouseEventHandler<HTMLDivElement>;
   onMouseLeave?: React.MouseEventHandler<HTMLDivElement>;
+  /** A submenu of another popover: a click in it doesn't close that popover. */
+  submenu?: boolean;
 }
 
 export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
@@ -36,6 +38,7 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   className,
   onMouseEnter,
   onMouseLeave,
+  submenu = false,
 }) => {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -80,6 +83,8 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
     const handleClickOutside = (e: MouseEvent) => {
       // SAFETY: The registered DOM/custom-event source establishes this target and detail shape.
       if (ref.current && !ref.current.contains(e.target as Node)) {
+        // A submenu's own popover is part of this one.
+        if (!submenu && e.target instanceof Element && e.target.closest('[data-terminal-popover-submenu]')) return;
         onClose();
       }
     };
@@ -101,7 +106,7 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [visible, onClose]);
+  }, [visible, onClose, submenu]);
 
   if (!visible) return null;
 
@@ -109,6 +114,7 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
     <div
       ref={ref}
       data-terminal-popover
+      data-terminal-popover-submenu={submenu || undefined}
       className={cn('fixed z-[10001] w-56 max-w-[calc(100vw-20px)] max-h-[calc(100vh-20px)] overflow-y-auto bg-surface-primary border border-border-primary rounded-lg shadow-dropdown-elevated p-1', className)}
       style={{ left: position.left, top: position.top }}
       onMouseEnter={onMouseEnter}
@@ -126,6 +132,8 @@ TerminalPopover.displayName = 'TerminalPopover';
 export interface PopoverButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'default' | 'primary' | 'danger';
   children: React.ReactNode;
+  /** React 19 passes it through to the button. */
+  ref?: React.Ref<HTMLButtonElement>;
 }
 
 const popoverButtonVariants = {

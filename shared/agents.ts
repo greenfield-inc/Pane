@@ -22,6 +22,8 @@ export interface AgentChatConfig {
   paneMcpHttp?: boolean;
   /** The model of Pane's plain Agent Farm profile, pane/<agent> (T-63). */
   profileModel?: string;
+  /** A switch to another Agent Farm profile of this agent keeps the conversation (T-63). */
+  profileSwitchKeepsConversation?: boolean;
   legacyClients?: boolean;
   registryIds?: readonly string[];
 }

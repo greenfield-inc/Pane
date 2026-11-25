@@ -1,4 +1,4 @@
-import { CONFIGURED_AGENT_IDS, agentConfig, configuredAgent, type ConfiguredAgentId } from './agents';
+import { CONFIGURED_AGENT_IDS, agentConfig, agentLabel, configuredAgent, type ConfiguredAgentId } from './agents';
 
 /**
  * Pane's own Agent Farm plugin (T-63), as main writes it and the renderer shows it: one plain
@@ -34,4 +34,32 @@ export function plainProfileAgent(ref: string): ConfiguredAgentId | undefined {
   if (plugin !== PANE_PROFILE_PLUGIN || !rest) return undefined;
   const agent = rest.split(':')[0];
   return plainProfileAgents().find(id => id === agent);
+}
+
+/**
+ * What switching a Session's agent from one profile to another does to its conversation (T-63):
+ * `current` when nothing changes; `kept` when the agent continues the same conversation with the new
+ * profile; `new-conversation` when it can't (another agent, or an agent whose conversations Agent Farm
+ * keeps per profile), so a new one starts and is given the old transcript. Pane asks first only then.
+ */
+export type ProfileSwitchEffect = 'current' | 'kept' | 'new-conversation';
+
+export function profileSwitchEffect(from: { agent: string; ref?: string }, to: { agent: string; ref: string }): ProfileSwitchEffect {
+  if (from.agent !== to.agent) return 'new-conversation';
+  if (from.ref === to.ref) return 'current';
+  return agentConfig(to.agent)?.chat?.profileSwitchKeepsConversation === true ? 'kept' : 'new-conversation';
+}
+
+function capitalized(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+/** "Greenfield orchestrator" for `greenfield/orchestrator`; a plain profile is its agent's name. */
+export function profileDisplayName(ref: string): string {
+  const plain = plainProfileAgent(ref);
+  if (plain) return agentLabel(plain);
+  const [name, variant] = ref.split(':');
+  const [plugin = '', profile = ''] = name.split('/');
+  const base = plugin === profile || !profile ? capitalized(plugin) : `${capitalized(plugin)} ${profile}`;
+  return variant ? `${base} (${variant})` : base;
 }

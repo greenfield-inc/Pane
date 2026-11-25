@@ -295,6 +295,10 @@ interface ElectronAPI {
     /** Saves the order of the listed Sessions among the places they hold; leaves every Session record unchanged. */
     reorder: (sessionIds: string[]) => Promise<IPCResponse<OrchestrationSessionListResult>>;
     setAgent: (selector: OrchestrationSessionSelector, agent: PaneChatAgent) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
+    /** Switch profile (T-63): runs `ref` from the agent's next start, after its current reply. */
+    switchProfile: (selector: OrchestrationSessionSelector, ref: string) => Promise<IPCResponse<import('../../../shared/types/orchestrationSession').OrchestrationSessionProfileSwitch>>;
+    /** Reload profile (T-63): takes the profile's saved files at the agent's next start, keeping the conversation. */
+    reloadProfile: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     detach: (selector: OrchestrationSessionSelector, paneId?: string) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     overview: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionOverview>>;

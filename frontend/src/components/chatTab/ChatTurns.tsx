@@ -219,6 +219,17 @@ export function WorkerNoteLine({ note, onOpen }: { note: WorkerNote; onOpen?: (p
  * the turn runs the row says what it's doing now; afterwards, how long it worked.
  */
 export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions, latest = false }: { turn: ChatTurn; waiting: ReadonlySet<string>; actions: ChatTurnActions; latest?: boolean }) {
+  if (turn.divider) return <ProfileDivider text={turn.divider.text} at={turn.divider.at} />;
+  return <ChatTurnBody turn={turn} waiting={waiting} actions={actions} latest={latest} />;
+});
+
+/** Where the Session's profile changed (T-63): "Switched to Greenfield planner · conversation kept". */
+function ProfileDivider({ text, at }: { text: string; at: string }) {
+  const time = messageTime(at);
+  return <p className="chat-divider" role="separator" data-testid="chat-profile-divider" title={time?.full}><span>{text}</span></p>;
+}
+
+function ChatTurnBody({ turn, waiting, actions, latest }: { turn: ChatTurn; waiting: ReadonlySet<string>; actions: ChatTurnActions; latest: boolean }) {
   const [open, setOpen] = useState(false);
   // D-202: the latest turn says when it finished; every message shows its time on hover.
   const { before, after, activity, fold: row, ended } = turnDisplay(turn, { latest, waiting });
@@ -248,4 +259,4 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions,
     </div>}
     {stoppedText(turn) && <p className="chat-turn-stopped">{stoppedText(turn)}</p>}
   </div>;
-});
+}

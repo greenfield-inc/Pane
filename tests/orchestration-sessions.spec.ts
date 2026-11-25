@@ -3299,13 +3299,13 @@ test('Move to machine… sits between Rename and Archive in the Session menu, by
   await row.click({ button: 'right' });
   const menu = page.getByRole('menu', { name: 'Session actions for Alpha' });
   // Chat tabs are off in this fixture, so Switch to chat says so and offers to turn them on (D-337).
-  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', 'Switch to chat…Chat tabs are off on this machine', 'Turn on chat tabs', 'Move to machine…', 'Archive Session']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', 'Switch profile', 'Reload profileno profile', 'Switch to chat…Chat tabs are off on this machine', 'Turn on chat tabs', 'Move to machine…', 'Archive Session']);
   await page.keyboard.press('Escape');
 
   await row.focus();
   await page.keyboard.press('Shift+F10');
   await expect(menu.getByRole('menuitem', { name: 'Pin Session' })).toBeFocused();
-  for (let step = 0; step < 5; step++) await page.keyboard.press('ArrowDown');
+  for (let step = 0; step < 7; step++) await page.keyboard.press('ArrowDown');
   await expect(menu.getByRole('menuitem', { name: 'Move to machine…' })).toBeFocused();
   await page.screenshot({ path: 'tmp/verify/session-move-host/01-menu-keyboard.png' });
   // Closing the dialog returns focus to the row the menu was opened from, not the page.
@@ -3326,7 +3326,7 @@ test('Move to machine… sits between Rename and Archive in the Session menu, by
 
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
   await page.getByTestId('compact-orchestration-session-alpha').click({ button: 'right' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', 'Switch to chat…Chat tabs are off on this machine', 'Turn on chat tabs', 'Move to machine…', 'Archive Session']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', 'Switch profile', 'Reload profileno profile', 'Switch to chat…Chat tabs are off on this machine', 'Turn on chat tabs', 'Move to machine…', 'Archive Session']);
   await page.screenshot({ path: 'tmp/verify/session-move-host/01b-menu-rail.png' });
 });
 
@@ -4137,3 +4137,94 @@ test('A Session opens behind one skeleton of its workspace: bones only past 150 
   await expect(page.locator('[data-skeleton="waiting"]')).toHaveCount(0);
   await expect(page.locator('[data-skeleton="visible"]').first()).toBeAttached();
 });
+
+const profileCalls = (page: Page) => page.evaluate(() => {
+  // SAFETY: installSessionsFixture adds this control before the app loads.
+  const mockWindow = window as typeof window & { __paneTestElectronMock: { getProfileCalls: () => Array<{ action: string; sessionId: string; ref?: string }> } };
+  return mockWindow.__paneTestElectronMock.getProfileCalls();
+});
+
+for (const theme of ['light', 'night-owl']) {
+  test(`Switch profile switches at once with Undo, asks first across agents, and Reload clears the changed dot (T-63, J7, J8, ${theme})`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    const profile = (ref: string, harness: string, hidden = false) => ({ ref, plugin: ref.split('/')[0], version: '1.0.0', harness, hidden });
+    await installSessionsFixture(page, [
+      { ...sessionFixture('plan', 'Session profiles plan', '', '', '2026-09-16T12:00:00.000Z'), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' }, agentProfileChanged: true },
+      { ...sessionFixture('blog', 'Weekend blog post', '', '', '2026-09-16T12:01:00.000Z'), agentProfile: { ref: 'pane/claude', hash: 'h' } },
+    ], [], {
+      initialConfig: { theme, chatTabsEnabled: true },
+      agentFarmProfiles: { profiles: [
+        profile('pane/claude', 'claude', true), profile('pane/codex', 'codex', true),
+        profile('greenfield/orchestrator', 'claude'), profile('greenfield/planner', 'claude'), profile('greenfield/reviewer', 'codex'),
+      ] },
+    });
+    await gotoApp(page);
+    await dismissStartupDialogs(page);
+    const row = page.getByTestId('orchestration-session-plan');
+    const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}-${theme}.png`) });
+
+    // A changed profile shows the amber dot on the row and in the menu.
+    await expect(row.getByTestId('session-profile-changed')).toBeVisible();
+    await row.click({ button: 'right' });
+    const reload = page.getByTestId('session-reload-profile');
+    await expect(reload).toContainText('Reload profile');
+    await expect(reload.getByText('changed')).toHaveCount(1);
+    await page.getByTestId('session-switch-profile').hover();
+    const submenu = page.getByTestId('session-switch-profile-menu');
+    await expect(submenu).toBeVisible();
+    await expect(submenu.getByText('Profiles on this computer')).toBeVisible();
+    await expect(submenu.getByRole('menuitemradio', { name: /Greenfield orchestrator/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(submenu.getByTestId('session-switch-choice-profile:greenfield/reviewer')).toContainText('greenfield/reviewer · new conversation');
+    await expect(submenu.getByTestId('session-switch-choice-agent:codex')).toContainText('no profile · new conversation');
+    await shot('j15-switch-submenu');
+
+    // A Claude profile: at once, with Undo.
+    await submenu.getByRole('textbox', { name: 'Filter profiles' }).fill('plan');
+    await expect(submenu.getByRole('menuitemradio')).toHaveCount(1);
+    await submenu.getByRole('textbox', { name: 'Filter profiles' }).press('Enter');
+    await expect(submenu).toHaveCount(0);
+    const toast = page.getByRole('status').filter({ hasText: 'now runs Greenfield planner' });
+    await expect(toast).toContainText('Session profiles plan now runs Greenfield planner · conversation kept');
+    await expect(row.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Profile Greenfield planner');
+    await shot('j7-switch-undo-toast');
+    await toast.getByRole('button', { name: 'Undo' }).click();
+    await expect.poll(() => profileCalls(page)).toEqual([
+      { action: 'switch', sessionId: 'plan', ref: 'greenfield/planner' },
+      { action: 'switch', sessionId: 'plan', ref: 'greenfield/orchestrator' },
+    ]);
+    await expect(row.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Profile Greenfield orchestrator');
+
+    // Codex: asks first, and Cancel changes nothing. By keyboard: Shift+F10, then → opens the submenu.
+    await row.focus();
+    await page.keyboard.press('Shift+F10');
+    await page.getByTestId('session-switch-profile').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(submenu.getByRole('textbox', { name: 'Filter profiles' })).toBeFocused();
+    await page.keyboard.type('review');
+    await page.keyboard.press('Enter');
+    const sheet = page.getByRole('dialog', { name: 'Start a new Codex conversation?' });
+    await expect(sheet).toContainText('Codex can\'t continue a Claude conversation, so a new one starts here and is given this transcript to read first.');
+    await expect(sheet).toContainText('Same Session, folder, Panes and to-dos.');
+    await shot('j8-cross-agent-confirm');
+    await sheet.getByRole('button', { name: 'Cancel' }).click();
+    await expect(sheet).toHaveCount(0);
+    expect((await profileCalls(page)).length).toBe(2);
+    await row.click({ button: 'right' });
+    await page.getByTestId('session-switch-profile').click();
+    await page.keyboard.type('review');
+    await page.keyboard.press('Enter');
+    await sheet.getByRole('button', { name: 'Switch' }).click();
+    await expect.poll(async () => (await profileCalls(page)).at(-1)).toEqual({ action: 'switch', sessionId: 'plan', ref: 'greenfield/reviewer' });
+    // No Undo for a new conversation.
+    await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0);
+
+    // Reload clears the changed mark; a Session with nothing new says "up to date".
+    await expect(row.getByTestId('session-profile-changed')).toHaveCount(0);
+    const blog = page.getByTestId('orchestration-session-blog');
+    await blog.click({ button: 'right' });
+    await expect(page.getByTestId('session-reload-profile')).toContainText('up to date');
+    await shot('j15-session-menu');
+    await page.getByTestId('session-reload-profile').click();
+    await expect.poll(async () => (await profileCalls(page)).at(-1)).toEqual({ action: 'reload', sessionId: 'blog' });
+  });
+}

@@ -442,6 +442,80 @@ describe('OrchestrationSessionManager', () => {
       const updated = await fixture.manager.update({ sessionId: created.session.id }, { agent: 'codex' });
       expect(updated.agentProfile).toEqual({ ref: 'pane/codex', hash: 'hash-pane' });
     }));
+
+    describe('Switch and Reload profile', () => {
+      const chatTabs = () => {
+        const port = {
+          ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' as const,
+          relaunch: vi.fn(), saveTranscript: vi.fn(() => '/sessions/s/transcripts/old.md'), stop: vi.fn(async () => undefined),
+        };
+        return port;
+      };
+
+      it('switches between Claude profiles at once, keeping the conversation, and back again for Undo', async () => withChatTabs(async fixture => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const created = await fixture.manager.create({ name: 'Planner', agent: 'claude' });
+        const switched = await fixture.manager.switchProfile({ sessionId: created.session.id }, 'greenfield/orchestrator');
+        expect(switched).toMatchObject({ effect: 'kept', previous: { agent: 'claude', ref: 'pane/claude' }, session: { agent: 'claude', agentProfile: { ref: 'greenfield/orchestrator', hash: 'hash-greenfield' } } });
+        expect(port.relaunch).toHaveBeenCalledWith(created.panel.id, { launch: expect.objectContaining({ kind: 'profile', profile: 'greenfield/orchestrator' }), divider: 'Switched to Greenfield orchestrator · conversation kept' });
+        expect(fixture.store.read().sessions.find(session => session.id === created.session.id)?.activity.at(-1)?.message).toBe('Switched to Greenfield orchestrator · conversation kept.');
+        const undone = await fixture.manager.switchProfile({ sessionId: created.session.id }, 'pane/claude');
+        expect(undone).toMatchObject({ effect: 'kept', session: { agentProfile: { ref: 'pane/claude' } } });
+        // Already there: nothing restarts.
+        port.relaunch.mockClear();
+        expect((await fixture.manager.switchProfile({ sessionId: created.session.id }, 'pane/claude')).effect).toBe('current');
+        expect(port.relaunch).not.toHaveBeenCalled();
+      }));
+
+      it('switches Claude to a Codex profile in the Session\'s Codex tab, a new conversation given the transcript (A-2)', async () => withChatTabs(async fixture => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const created = await fixture.manager.create({ name: 'Crosses agents', agent: 'claude' });
+        const switched = await fixture.manager.switchProfile({ sessionId: created.session.id }, 'greenfield/product-researcher');
+        expect(switched).toMatchObject({ effect: 'new-conversation', session: { agent: 'codex', launchCommand: '', agentProfile: { ref: 'greenfield/product-researcher' } } });
+        expect(port.saveTranscript).toHaveBeenCalledWith(created.panel.id);
+        const codexPanel = panelManager.getPanel(switched.session.panelIds.codex);
+        expect(codexPanel?.type).toBe('chat');
+        expect(codexPanel?.state.customState).toMatchObject({
+          agent: 'codex', launch: { kind: 'profile', profile: 'greenfield/product-researcher' },
+          initialInput: expect.stringContaining('saved in /sessions/s/transcripts/old.md'),
+          dividers: [expect.objectContaining({ leading: true, text: 'Switched to Greenfield product-researcher · new Codex conversation, given the transcript' })],
+        });
+        expect(port.stop).toHaveBeenCalledWith(created.panel.id, expect.objectContaining({ message: expect.stringContaining('now runs Greenfield product-researcher') }));
+        // Back to Claude: its tab exists, so it restarts on a new conversation given Codex's transcript.
+        await fixture.manager.switchProfile({ sessionId: created.session.id }, 'pane/claude');
+        expect(port.relaunch).toHaveBeenLastCalledWith(created.panel.id, expect.objectContaining({ newConversation: { transcript: '/sessions/s/transcripts/old.md', reason: expect.stringContaining('can\'t continue a Codex conversation') } }));
+      }));
+
+      it('marks a Session whose profile changed, and Reload takes the new files and clears the mark', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const created = await fixture.manager.create({ name: 'Reloads', agentProfile: 'greenfield/orchestrator' });
+        farm.pluginHash.mockImplementation(async (plugin: string) => plugin === 'greenfield' ? 'hash-greenfield-2' : `hash-${plugin}`);
+        await fixture.manager.refreshPluginHashes(true);
+        const marked = (await fixture.manager.list()).sessions.find(session => session.id === created.session.id);
+        expect(marked?.agentProfileChanged).toBe(true);
+        const reloaded = await fixture.manager.reloadProfile({ sessionId: created.session.id });
+        expect(reloaded.agentProfile).toEqual({ ref: 'greenfield/orchestrator', hash: 'hash-greenfield-2' });
+        expect(reloaded.agentProfileChanged).toBeUndefined();
+        expect(port.relaunch).toHaveBeenCalledWith(created.panel.id, { launch: expect.objectContaining({ profile: 'greenfield/orchestrator' }), divider: 'Reloaded Greenfield orchestrator · conversation kept' });
+      }));
+
+      it('refuses a Session with no profile to reload, and one whose agent runs in a terminal', async () => withChatTabs(async fixture => {
+        fixture.manager.attachChatTabs(chatTabs());
+        const legacy = await fixture.manager.create({ name: 'Before profiles', agent: 'claude' });
+        // A Session from before T-63 has no profile.
+        fixture.store.write({ ...fixture.store.read(), sessions: fixture.store.read().sessions.map(session => session.id === legacy.session.id ? { ...session, agentProfile: undefined } : session) });
+        await expect(fixture.manager.reloadProfile({ sessionId: legacy.session.id })).rejects.toMatchObject({ code: 'SESSION_PROFILE_NONE' });
+        // J14: switching it gives it a profile and keeps its conversation.
+        expect((await fixture.manager.switchProfile({ sessionId: legacy.session.id }, 'greenfield/orchestrator')).effect).toBe('kept');
+        const terminal = await fixture.manager.create({ name: 'Terminal', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+        expect(terminal.panel.type).toBe('terminal');
+        await expect(fixture.manager.switchProfile({ sessionId: terminal.session.id }, 'greenfield/orchestrator')).rejects.toMatchObject({ code: 'SESSION_PROFILE_TERMINAL' });
+        await expect(fixture.manager.switchProfile({ sessionId: terminal.session.id }, 'team/missing')).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNKNOWN', message: expect.stringContaining('The Session was not switched.') });
+      }));
+    });
   });
 
   it('starts a Session created by a phone app too old for chat tabs in a terminal (D-203)', async () => {

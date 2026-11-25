@@ -124,6 +124,11 @@ export interface OrchestrationSessionRecord {
   todoNumber?: number;
   /** Set while the Session's chat and every Pane in it are paused. Computed when read, never stored. */
   paused?: TerminalPausedMark;
+  /**
+   * The profile's plugin changed since the Session's agent last took it (T-63): Reload profile takes
+   * the new one. Computed when read, never stored.
+   */
+  agentProfileChanged?: true;
   agent: PaneChatAgent;
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;
@@ -374,4 +379,13 @@ export interface SessionActivity {
   state: 'working' | 'idle';
   /** Panes of the Session with a tab working, for the "N working" label. */
   workingPanes: number;
+}
+
+/** What Switch profile did (T-63), for the Undo toast and the divider. */
+export interface OrchestrationSessionProfileSwitch {
+  session: OrchestrationSessionRecord;
+  /** The agent and profile the Session ran before; Undo switches back to them. No ref: the agent on its own, from before T-63. */
+  previous: { agent: PaneChatAgent; ref?: string };
+  /** `kept`: the same conversation goes on; `new-conversation`: a new one, given the transcript; `current`: nothing changed. */
+  effect: 'current' | 'kept' | 'new-conversation';
 }

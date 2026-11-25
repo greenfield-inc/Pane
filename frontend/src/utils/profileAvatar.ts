@@ -1,6 +1,8 @@
 import { agentConfig, agentLabel } from '../../../shared/agents';
 import { plainProfileAgent } from '../../../shared/agentProfiles';
 
+export { profileDisplayName } from '../../../shared/agentProfiles';
+
 /**
  * What a Session's or profile's avatar shows (T-63): a picture when it has one, else a profile's
  * initials on a tinted circle, else a plain agent's logo (Claude, Codex), else the agent's initial.
@@ -37,18 +39,4 @@ export function profileAvatar({ profileRef, agent, picture }: { profileRef?: str
   const id = plain ?? agent ?? '';
   if (agentConfig(id)?.chat?.profileModel) return { kind: 'logo', agent: id };
   return { kind: 'letter', text: (agentLabel(id)[0] ?? '?').toUpperCase() };
-}
-
-function capitalized(word: string): string {
-  return word.charAt(0).toUpperCase() + word.slice(1);
-}
-
-/** "Greenfield orchestrator" for `greenfield/orchestrator`; a plain profile is its agent's name. */
-export function profileDisplayName(ref: string): string {
-  const plain = plainProfileAgent(ref);
-  if (plain) return agentLabel(plain);
-  const [name, variant] = ref.split(':');
-  const [plugin = '', profile = ''] = name.split('/');
-  const base = plugin === profile || !profile ? capitalized(plugin) : `${capitalized(plugin)} ${profile}`;
-  return variant ? `${base} (${variant})` : base;
 }

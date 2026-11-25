@@ -5,7 +5,7 @@ import type { ContentBlock, InitializeResponse, McpServer, NewSessionRequest, Se
 import type { AgentState, PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import type { AgentChatMessage, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { TerminalPausedMark, ToolPanel } from '../../../../shared/types/panels';
-import { CHAT_CONVERSATION_LIMIT, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabConversation, type ChatTabSwitchBanner, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabTranscript, type ChatTabView, type ChatTurnTime } from '../../../../shared/types/chatTab';
+import { CHAT_CONVERSATION_LIMIT, CHAT_FULL_ACCESS_CONTROL, type ChatDivider, type ChatPanelState, type ChatTabRelaunch, type ChatTabConversation, type ChatTabSwitchBanner, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabTranscript, type ChatTabView, type ChatTurnTime } from '../../../../shared/types/chatTab';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { AgentCommand } from './agentProcess';
@@ -18,6 +18,7 @@ import { chatPausedViewSchema } from '../../../../shared/types/chatTabDecoders';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 import { sessionMovingError } from '../../../../shared/types/sessionMove';
 import { CHAT_STALL_MS, chatMidTurn, isRunpaneWait } from '../agentStatus/midTurn';
+import { transcriptMarkdown, transcriptPrompt, writeTranscriptFile } from './transcriptFile';
 
 /** Everything the agent process needs, rebuilt at every start. Never saved. */
 export interface ResolvedLaunch {
@@ -116,6 +117,8 @@ interface Tab {
   activeAt?: number;
   /** Tool calls of the current turn that are pending or in progress, each true when it is a runpane wait, for the Session's test. */
   toolsRunning?: Map<string, boolean>;
+  /** A Reload or Switch profile is restarting the agent (T-63). */
+  relaunching?: boolean;
 }
 
 const DEFAULT_VIEW_LIMIT = 200;
@@ -125,6 +128,8 @@ const RECEIPT_LIMIT = 256;
 const PROMPT_BYTES_LIMIT = 8 * 1024 * 1024;
 /** Characters of a queued prompt kept in the tab's saved state for the queue list. */
 const QUEUE_PREVIEW = 500;
+/** Profile dividers kept per tab; older ones are dropped. */
+const DIVIDERS_LIMIT = 50;
 
 /**
  * Host owner of every chat tab on this machine. Desktop, the remote PWA, the
@@ -364,6 +369,91 @@ export class ChatTabManager {
     await this.release(tab);
     this.update(panelId, state => ({ ...state, status: 'starting', problem: undefined }));
     await this.ensure(panelId);
+  }
+
+  /**
+   * Reload or Switch profile (T-63): the agent restarts on `request.launch` once it has finished its
+   * reply, and continues the conversation through session/load, or starts a new one given the old
+   * transcript. A later request replaces one still waiting. A divider marks the place in the chat.
+   */
+  relaunch(panelId: string, request: ChatTabRelaunch): void {
+    this.required(panelId);
+    this.update(panelId, current => ({ ...current, relaunch: structuredClone(request) }));
+    this.publish(panelId);
+    this.relaunchWhenFree(panelId);
+  }
+
+  /** Whether a Reload or Switch is waiting for the agent's reply to end or restarting it. */
+  relaunchPending(panelId: string): boolean {
+    return !!this.options.store.state(panelId)?.relaunch || this.tabs.get(panelId)?.relaunching === true;
+  }
+
+  /**
+   * Saves the conversation as Markdown in its Session folder (`transcripts/<conversation>.md`) for a
+   * new conversation to read; undefined when the tab has no Session folder or nothing was said yet.
+   */
+  saveTranscript(panelId: string): string | undefined {
+    const state = this.required(panelId);
+    if (!state.sessionFolder) return undefined;
+    const markdown = transcriptMarkdown(this.messages(panelId), this.name(state.agent));
+    if (!markdown) return undefined;
+    return writeTranscriptFile(state.sessionFolder, state.acpSessionId ?? `conversation-${Date.now()}`, markdown);
+  }
+
+  /** Applies a waiting relaunch now if the agent isn't in a reply; otherwise the reply's end does. */
+  private relaunchWhenFree(panelId: string): void {
+    const state = this.options.store.state(panelId);
+    const tab = this.tab(panelId);
+    if (!state?.relaunch || tab.relaunching || tab.starting) return;
+    if (tab.pausing) { void tab.pausing.then(() => this.relaunchWhenFree(panelId)); return; }
+    const runtime = tab.runtime;
+    if (runtime?.isAlive() && (runtime.isRunning() || runtime.isWorkingAlone() || tab.delivering || !!tab.steering || tab.loading)) return;
+    tab.relaunching = true;
+    void this.applyRelaunch(panelId, tab, state.relaunch)
+      .catch(error => console.warn(`[ChatTabs] ${panelId} could not restart on its new profile: ${reasonOf(error)}`))
+      .finally(() => { tab.relaunching = false; if (this.tabs.get(panelId) === tab) this.relaunchWhenFree(panelId); });
+  }
+
+  private async applyRelaunch(panelId: string, tab: Tab, request: ChatTabRelaunch): Promise<void> {
+    const before = this.required(panelId);
+    const at = new Date().toISOString();
+    const keep = !request.newConversation && !!before.acpSessionId;
+    // Saved before the agent stops: a new conversation reads it, and a failed load falls back to it.
+    let transcript = request.newConversation?.transcript;
+    let saveFailure: string | undefined;
+    if (!transcript && (keep || request.newConversation)) {
+      try { transcript = this.saveTranscript(panelId); }
+      catch (error) { saveFailure = reasonOf(error); console.warn(`[ChatTabs] ${panelId}'s conversation was not saved for its new profile: ${saveFailure}`); }
+    }
+    const divider: ChatDivider = keep
+      ? { sessionId: before.acpSessionId, text: request.divider, at, ...withAfter(tab.transcript?.lastReplayedId()) }
+      : { leading: true, text: request.divider, at };
+    await this.release(tab);
+    if (!keep) forgetConversation(tab);
+    this.update(panelId, current => {
+      const next: ChatPanelState = {
+        ...current, relaunch: undefined, launch: request.launch, status: 'starting', problem: undefined,
+        dividers: [...current.dividers ?? [], divider].slice(-DIVIDERS_LIMIT),
+        loadFallback: keep && transcript ? { transcript } : undefined,
+      };
+      if (!keep) Object.assign(next, { acpSessionId: undefined, turn: undefined, turnTimes: undefined, clearedAt: undefined, banner: undefined, open: undefined });
+      return next;
+    });
+    if (!keep && request.newConversation) {
+      if (transcript) this.queueTranscript(panelId, transcript, request.newConversation.reason);
+      else if (saveFailure) tab.notice = `The earlier conversation could not be saved for the new one (${saveFailure}), so it starts without it.`;
+    }
+    console.log(`[ChatTabs] ${panelId} restarts on ${request.launch.kind === 'profile' ? request.launch.profile : 'its agent'}${keep ? ', keeping its conversation' : ', in a new conversation'}.`);
+    await this.ensure(panelId);
+  }
+
+  /** Sends a new conversation its first message: read the old one's transcript. */
+  private queueTranscript(panelId: string, transcript: string, reason: string): void {
+    try { this.send(panelId, { operationId: `transcript:${Date.now()}`, text: transcriptPrompt(transcript, reason), now: true }); }
+    catch (error) {
+      console.warn(`[ChatTabs] ${panelId}'s new conversation was not given its transcript: ${reasonOf(error)}`);
+      this.tab(panelId).notice = `The new conversation was not given the earlier one (${reasonOf(error)}). It is saved in ${transcript}.`;
+    }
   }
 
   receipt(panelId: string, operationId: string): AgentChatReceipt | undefined {
@@ -700,7 +790,8 @@ export class ChatTabManager {
       // Inside the try: a chat-tabs folder that cannot be written leaves the tab stopped with Restart, not starting.
       const saved = this.required(panelId);
       const turnTimes = saved.turnTimes && saved.turnTimes.sessionId === saved.acpSessionId ? saved.turnTimes.turns : undefined;
-      transcript = tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages, turnTimes });
+      const dividers = saved.dividers?.filter(divider => divider.sessionId === saved.acpSessionId);
+      transcript = tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages, turnTimes, dividers });
       launch = await this.options.launcher.resolve(panel, this.required(panelId));
     } catch (error) {
       const failure = chatFailure(error, { code: 'CHAT_LAUNCH_FAILED', next: 'Press Restart.' });
@@ -755,15 +846,38 @@ export class ChatTabManager {
       const state = this.required(panelId);
       const request: NewSessionRequest = { cwd: state.cwd, mcpServers: launch.mcpServers ?? [] };
       if (launch.meta) request._meta = launch.meta;
+      const create = async () => {
+        const created = await runtime.create(request);
+        // A new conversation's dividers (a switch that started it) belong to it from now on.
+        this.update(panelId, current => ({
+          ...current, acpSessionId: created.sessionId, settings: { ...launch.initialSettings, ...current.settings },
+          dividers: current.dividers?.map(divider => divider.sessionId ? divider : { ...divider, sessionId: created.sessionId }),
+        }));
+        transcript.replayed();
+      };
       const open = async () => {
-        if (state.acpSessionId) {
-          tab.loading = true;
-          try { await runtime.load({ ...request, sessionId: state.acpSessionId }); } finally { tab.loading = false; }
-          transcript.replayed();
-        } else {
-          const created = await runtime.create(request);
-          this.update(panelId, current => ({ ...current, acpSessionId: created.sessionId, settings: { ...launch.initialSettings, ...current.settings } }));
-        }
+        if (!state.acpSessionId) { await create(); return; }
+        tab.loading = true;
+        let failure: unknown;
+        try { await runtime.load({ ...request, sessionId: state.acpSessionId }); }
+        catch (error) { failure = error; }
+        finally { tab.loading = false; }
+        if (failure === undefined) { transcript.replayed(); return; }
+        // T-63 fail-safe: a Reload or Switch never drops the history. The agent couldn't load the
+        // conversation on its new profile, so a new one starts, given the saved transcript.
+        const fallback = this.required(panelId).loadFallback;
+        if (!fallback || tab.run !== generation) throw failure;
+        const reason = reasonOf(failure).replace(/\.$/, '');
+        console.warn(`[ChatTabs] ${panelId} could not continue its conversation after a profile change (${reason}); it starts a new one given the transcript.`);
+        transcript.dispose();
+        transcript = tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages });
+        tab.held = undefined;
+        const at = new Date().toISOString();
+        const text = `Couldn't continue the conversation (${reason}) · new conversation, given the transcript`;
+        this.update(panelId, current => ({ ...current, acpSessionId: undefined, turnTimes: undefined, dividers: [...current.dividers ?? [], { leading: true as const, text, at }].slice(-DIVIDERS_LIMIT) }));
+        transcript.divider({ text, at });
+        await create();
+        this.queueTranscript(panelId, fallback.transcript, `${this.name(state.agent)} couldn't continue this Session's conversation after its profile changed, so Pane started a new one.`);
       };
       await open();
       if (launch.mode) await runtime.setMode(launch.mode);
@@ -783,7 +897,7 @@ export class ChatTabManager {
       if (notice) tab.notice = notice;
       tab.held = undefined;
       tab.activeAt = Date.now();
-      this.update(panelId, current => ({ ...current, status: 'idle', notice: undefined }));
+      this.update(panelId, current => ({ ...current, status: 'idle', notice: undefined, loadFallback: undefined }));
       this.publish(panelId);
       this.sendInitialInput(panelId);
       this.drain(panelId);
@@ -793,6 +907,7 @@ export class ChatTabManager {
       tab.held = undefined;
       await runtime.stop().catch(() => undefined);
       const failure = chatFailure(error, { code: 'CHAT_START_FAILED', next: 'Press Restart. If it fails again, check the agent is installed and signed in on this machine.' });
+      this.update(panelId, current => ({ ...current, loadFallback: undefined }));
       this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent, this.name));
       throw failure;
     }
@@ -857,6 +972,8 @@ export class ChatTabManager {
     const tab = this.tab(panelId);
     const runtime = tab.runtime;
     const state = this.required(panelId);
+    // A Reload or Switch goes before the next queued message, which then reaches the new profile.
+    if (state.relaunch) { this.relaunchWhenFree(panelId); return; }
     if (!runtime?.isAlive() || runtime.isRunning() || runtime.isWorkingAlone() || tab.delivering || tab.steering || tab.loading || state.status === 'starting' || state.status === 'stopped') return;
     const next = state.queue?.[0];
     if (!next) return;
@@ -1108,6 +1225,11 @@ function toAgentState(view: ChatTabView): AgentState {
   if (view.status === 'blocked' || (view.status === 'stopped' && view.problem)) return 'blocked';
   if (view.status === 'working' || view.status === 'starting') return 'working';
   return view.status === 'idle' ? 'idle' : 'unknown';
+}
+
+/** `{ after }` when there is a message to follow, else nothing (the divider goes at the end). */
+function withAfter(after: string | undefined): Pick<ChatDivider, 'after'> {
+  return after ? { after } : {};
 }
 
 /** The tab moves to another conversation: what it showed is not held through the start. */

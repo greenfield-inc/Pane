@@ -3,6 +3,7 @@ import { API } from '../utils/api';
 import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
+  OrchestrationSessionProfileSwitch,
   OrchestrationSessionRecord,
   OrchestrationSessionSelector,
   OrchestrationSessionUpdateInput,
@@ -41,6 +42,10 @@ interface OrchestrationSessionState {
   select: (selector: OrchestrationSessionSelector) => Promise<void>;
   create: (input: OrchestrationSessionCreateInput) => Promise<OrchestrationSessionView<Session>>;
   update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput) => Promise<OrchestrationSessionRecord>;
+  /** Switch profile (T-63); the record comes back at once, the agent restarts after its reply. */
+  switchProfile: (sessionId: string, ref: string) => Promise<OrchestrationSessionProfileSwitch>;
+  /** Reload profile (T-63). */
+  reloadProfile: (sessionId: string) => Promise<OrchestrationSessionRecord>;
   /**
    * Shows the listed Sessions in this order at once, within the places they hold, and saves it on
    * the host. If the host does not save it, the previous order comes back and the error is thrown.
@@ -258,6 +263,16 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     return view;
   },
 
+  switchProfile: async (sessionId, ref) => {
+    const result = ensureSuccess(await API.orchestrationSessions.switchProfile({ sessionId }, ref), 'Pane could not switch the Session\'s profile.');
+    set(state => ({ sessions: state.sessions.map(session => session.id === result.session.id ? result.session : session) }));
+    return result;
+  },
+  reloadProfile: async (sessionId) => {
+    const record = ensureSuccess(await API.orchestrationSessions.reloadProfile({ sessionId }), 'Pane could not reload the Session\'s profile.');
+    set(state => ({ sessions: state.sessions.map(session => session.id === record.id ? record : session) }));
+    return record;
+  },
   update: async (selector, input) => {
     const orchestrationApi = getOrchestrationApi();
     if (!orchestrationApi) throw new Error('Sessions are unavailable in this Pane runtime');

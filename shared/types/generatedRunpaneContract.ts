@@ -197,7 +197,8 @@ const CONTRACT_SECTION_9 = {
         "registryIds": [
           "claude-acp"
         ],
-        "profileModel": "claude-opus-5-5"
+        "profileModel": "claude-opus-5-5",
+        "profileSwitchKeepsConversation": true
       },
       "models": {
         "flag": "--model",

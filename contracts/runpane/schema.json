@@ -897,6 +897,10 @@
           "type": "string",
           "minLength": 1
         },
+        "profileSwitchKeepsConversation": {
+          "description": "A Session switched to another Agent Farm profile of this agent keeps its conversation: the agent finds it whatever the profile. Without it, Agent Farm keeps the agent's home per profile, so a switch starts a new conversation given the transcript (T-63).",
+          "type": "boolean"
+        },
         "registryIds": {
           "description": "ACP Registry ids this agent covers; Settings > Agents hides them.",
           "type": "array",

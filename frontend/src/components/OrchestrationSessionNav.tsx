@@ -44,6 +44,9 @@ import { resumeIfOpenResumes, runPauseAction } from '../utils/pause';
 import { usePanelStore } from '../stores/panelStore';
 import { panePausedMark } from '../../../shared/types/panels';
 import { moveMarkLabel } from '../utils/sessionMoveView';
+import { ProfileChangedDot, ProfileSwitchConfirm, SessionProfileMenuItems } from './SessionProfileMenu';
+import { profileSwitchText, type ProfileSwitchChoice } from '../utils/sessionProfileSwitch';
+import { plainProfileRef } from '../../../shared/agentProfiles';
 
 interface OrchestrationSessionNavProps {
   compact?: boolean;
@@ -168,6 +171,8 @@ export function OrchestrationSessionNav({
   const [sessionMenu, setSessionMenu] = useState<SessionContextMenuState | null>(null);
   const [movingSessionId, setMovingSessionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [confirmSwitch, setConfirmSwitch] = useState<{ session: OrchestrationSessionRecord; choice: ProfileSwitchChoice } | null>(null);
+  const [switchToast, setSwitchToast] = useState<{ key: number; sessionId: string; message: string; avatar: { ref?: string; agent: string }; undo?: string } | null>(null);
   const draggedSessionId = useDraggedSessionId();
   // The list a Session drag started in; the drag reorders only that list. A ref, not state:
   // the window's drop listener ends the in-flight drag (and re-renders) before the row's own
@@ -441,6 +446,59 @@ export function OrchestrationSessionNav({
     }
   }, [sessionMenu]);
 
+  /** Switch profile (T-63): at once with Undo, unless the conversation can't go on, which asks first. */
+  const runSwitch = useCallback(async (session: OrchestrationSessionRecord, choice: ProfileSwitchChoice, undoable: boolean) => {
+    setActionError(null);
+    try {
+      const result = await useOrchestrationSessionStore.getState().switchProfile(session.id, choice.ref);
+      if (!undoable || result.effect !== 'kept') { setSwitchToast(null); return; }
+      setSwitchToast({
+        key: Date.now(), sessionId: session.id, message: profileSwitchText(session, choice).done,
+        avatar: { ref: choice.avatarRef, agent: choice.agent },
+        undo: result.previous.ref ?? plainProfileRef(result.previous.agent),
+      });
+    } catch (cause) {
+      setActionError(`${session.name} did not switch to ${choice.label}. ${ipcErrorMessage(cause, 'The host did not answer.')}`);
+    }
+  }, []);
+
+  const requestSwitch = useCallback((session: OrchestrationSessionRecord, choice: ProfileSwitchChoice) => {
+    if (choice.effect === 'new-conversation') setConfirmSwitch({ session, choice });
+    else void runSwitch(session, choice, true);
+  }, [runSwitch]);
+
+  const undoSwitch = useCallback(async () => {
+    const toast = switchToast;
+    setSwitchToast(null);
+    if (!toast?.undo) return;
+    setActionError(null);
+    try { await useOrchestrationSessionStore.getState().switchProfile(toast.sessionId, toast.undo); }
+    catch (cause) { setActionError(`The switch was not undone. ${ipcErrorMessage(cause, 'The host did not answer.')}`); }
+  }, [switchToast]);
+
+  const reloadProfile = useCallback(async (session: OrchestrationSessionRecord) => {
+    setActionError(null);
+    try { await useOrchestrationSessionStore.getState().reloadProfile(session.id); }
+    catch (cause) { setActionError(`${session.name}'s profile was not reloaded. ${ipcErrorMessage(cause, 'The host did not answer.')}`); }
+  }, []);
+
+  const profileSwitchElements = (<>
+    <ProfileSwitchConfirm
+      pending={confirmSwitch}
+      onCancel={() => setConfirmSwitch(null)}
+      onConfirm={() => { const pending = confirmSwitch; setConfirmSwitch(null); if (pending) void runSwitch(pending.session, pending.choice, false); }}
+    />
+    {switchToast && (
+      <UndoToast
+        key={switchToast.key}
+        lead={<ProfileAvatar profileRef={switchToast.avatar.ref} agent={switchToast.avatar.agent} size={16} />}
+        message={switchToast.message}
+        onUndo={() => void undoSwitch()}
+        onDismiss={() => setSwitchToast(null)}
+      />
+    )}
+  </>);
+
   const sessionsVisible = availabilityIsVisible(availability);
   const hasPinnedContent = pinnedSessions.length > 0 || Boolean(pinnedPaneRows);
 
@@ -510,7 +568,8 @@ export function OrchestrationSessionNav({
             {leading(loopName !== undefined ? <LoopMark loopName={loopName} /> : <ProfileAvatar profileRef={session.agentProfile?.ref} agent={session.agent} size={16} />)}
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
             {loopName !== undefined && <LoopLabel loopName={loopName} />}
-            {/* The right side reads spinner, then the approvals badge (or Pane count) (T-63). */}
+            {/* The right side reads the changed-profile dot, spinner, then the approvals badge (or Pane count) (T-63). */}
+            <ProfileChangedDot session={session} />
             <SessionWorkingSpinner session={session} />
             <SessionApprovalsCount sessionId={session.id} opensApprovals collapseWhenEmpty otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
           </>
@@ -668,10 +727,13 @@ export function OrchestrationSessionNav({
           onArchive={() => void archiveSession()}
           onPin={() => void pinSession()}
           onMoveToHost={() => { setMovingSessionId(sessionMenu?.sessionId ?? null); setSessionMenu(null); }}
+          onSwitchProfile={requestSwitch}
+          onReloadProfile={session => void reloadProfile(session)}
         />
         {moveDialogElement}
         <CreateOrchestrationSessionDialog isOpen={showCreate} onClose={() => setShowCreate(false)} onCreate={createSession} />
         {archivedToastElement}
+        {profileSwitchElements}
         {orderAnnouncer}
       </div>
     );
@@ -772,10 +834,13 @@ export function OrchestrationSessionNav({
         onArchive={() => void archiveSession()}
         onPin={() => void pinSession()}
         onMoveToHost={() => { setMovingSessionId(sessionMenu?.sessionId ?? null); setSessionMenu(null); }}
+        onSwitchProfile={requestSwitch}
+        onReloadProfile={session => void reloadProfile(session)}
       />
       {moveDialogElement}
       <CreateOrchestrationSessionDialog isOpen={showCreate} onClose={() => setShowCreate(false)} onCreate={createSession} />
       {archivedToastElement}
+      {profileSwitchElements}
       {orderAnnouncer}
     </>
   );
@@ -790,9 +855,11 @@ interface SessionContextMenuProps {
   onArchive: () => void;
   onPin: () => void;
   onMoveToHost: () => void;
+  onSwitchProfile: (session: OrchestrationSessionRecord, choice: ProfileSwitchChoice) => void;
+  onReloadProfile: (session: OrchestrationSessionRecord) => void;
 }
 
-function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: SessionContextMenuProps) {
+function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost, onSwitchProfile, onReloadProfile }: SessionContextMenuProps) {
   const moveBlockedReason = useMoveToHostBlockedReason();
   const [renaming, setRenaming] = useState<SessionContextMenuState | null>(null);
   const [name, setName] = useState('');
@@ -802,6 +869,9 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
   // Always shown: checking, ready, or why nothing in the Session can switch.
   const switchMenu = useSessionSwitchPreview(HERE, menu?.sessionId ?? null);
   const [switching, setSwitching] = useState<{ sessionName: string; preview: SessionChatSwitchPreview } | null>(null);
+  const menuSession = useOrchestrationSessionStore(state => menu ? state.sessions.find(session => session.id === menu.sessionId) : undefined);
+  // Switch and Reload profile exist only with Profiles on (T-63); off, the menu is main's.
+  const profiles = useConfigStore(state => isProfilesEnabled(state.config));
 
   useEffect(() => {
     if (menu?.trigger) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
@@ -859,6 +929,10 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
         }}>
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename Session…</span>
         </PopoverButton>
+        {/* The legacy Pane Chat has no profile of its own to switch. */}
+        {profiles && menuSession && menuSession.id !== LEGACY_ORCHESTRATION_SESSION_ID && (
+          <SessionProfileMenuItems session={menuSession} onSwitch={onSwitchProfile} onReload={onReloadProfile} onClose={onClose} />
+        )}
         <SessionSwitchMenuItem menu={switchMenu} onOpen={preview => {
           if (!menu) return;
           menu.returnFocusTo?.focus();

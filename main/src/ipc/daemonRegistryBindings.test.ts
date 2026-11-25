@@ -99,6 +99,8 @@ const ORCHESTRATION_SESSION_CHANNELS = [
   'orchestration-sessions:archive',
   'orchestration-sessions:reorder',
   'orchestration-sessions:set-agent',
+  'orchestration-sessions:switch-profile',
+  'orchestration-sessions:reload-profile',
   'orchestration-sessions:associate',
   'orchestration-sessions:detach',
   'orchestration-sessions:activity-list',

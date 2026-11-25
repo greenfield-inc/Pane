@@ -5,6 +5,7 @@ import { PausedGlyph } from '../ui/AgentStatusDot';
 import { SessionActivityIcon } from '../SessionActivity';
 import { ProfileAvatar } from '../profiles/ProfileAvatar';
 import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
+import { ProfileChangedDot } from '../SessionProfileMenu';
 import { Button } from '../ui/Button';
 import { PopoverButton, TerminalPopover } from '../terminal/TerminalPopover';
 import { RenameDialog } from '../CompactSessionMenu';
@@ -325,7 +326,8 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
         )}
         <span className={cn('pointer-events-none min-w-0 flex-1 truncate text-[13px]', dimmed ? 'text-text-muted' : 'font-semibold text-text-primary')}>{session.name}</span>
         {profiles && session.isPinned && <PinnedMark />}
-        {/* Profiles on: the right side reads spinner, then the approvals badge (or Pane count), then the machine mark (T-63). */}
+        {/* Profiles on: the right side reads the changed-profile dot, spinner, then the approvals badge (or Pane count), then the machine mark (T-63). */}
+        {profiles && !dimmed && <ProfileChangedDot session={session} />}
         {profiles && !dimmed && row.activity === 'working' && <SessionActivityIcon state="working" neutral className="pointer-events-none" />}
         {moveLabel ? (
           <span data-testid="session-move-label" className="pointer-events-none max-w-[55%] flex-shrink-0 truncate text-[11px] text-text-tertiary">{moveLabel}</span>
