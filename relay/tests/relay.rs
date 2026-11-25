@@ -544,6 +544,7 @@ async fn the_phone_app_opens_pair_and_glasses_links() {
             body.contains("https://apps.apple.com/app/id6808839038"),
             "{path}"
         );
+        assert!(!body.contains("{{"), "{path} has an unfilled placeholder");
     }
 }
 

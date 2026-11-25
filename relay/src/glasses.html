@@ -30,15 +30,16 @@ p.note a { color: var(--fg); font-weight: 500; }
   <p>Glasses pair through the Pane app on your phone, in Settings › Glasses.</p>
   <a class="btn primary" id="store" href="https://apps.apple.com/app/id6808839038" hidden>Get Pane on the App Store</a>
   <a class="btn primary" id="app" href="pane://glasses">Open in Pane app</a>
-  <p class="note" id="phone-note">No Pane app yet? The iPhone app is on the App Store.<br><a href="https://apps.apple.com/app/id6808839038" target="_blank" rel="noopener">Get Pane for iPhone</a></p>
+  <p class="note" id="phone-note"><span id="phone-hint">No Pane app yet? The iPhone app is on the App Store.<br><a href="https://apps.apple.com/app/id6808839038" target="_blank" rel="noopener">Get Pane for iPhone</a></span>{{eu-line}}</p>
 </main>
 <script>
 (function () {
-  // A link tapped on an iPhone opens the installed app, so this page is for one without it.
+  // On runpane.net an iPhone with the app opens it instead of this page. On a self-hosted
+  // relay it lands here too, and Open in Pane app works.
   if (/iPhone|iPod/.test(navigator.userAgent)) {
     document.getElementById("store").hidden = false;
     document.getElementById("app").classList.remove("primary");
-    document.getElementById("phone-note").textContent = "After installing, come back here and tap Open in Pane app, or scan the code again.";
+    document.getElementById("phone-hint").textContent = "After installing, come back here and tap Open in Pane app, or scan the code again.";
   }
 })();
 </script>

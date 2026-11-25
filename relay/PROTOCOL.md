@@ -235,7 +235,7 @@ TLS with its own certificate.
 | `GET /v1/relays` | `{"relays":[{"region":"us","host":"us.relay.<D>","directRelay":"https://us.relay.<D>/"},...]}` |
 | `GET /v1/status/<id>` | `{"state":"online" \| "asleep" \| "offline","since":"<ISO time or null>"}` |
 | `GET /pair` | The pairing landing page (the QR's address; the secret stays in the `#fragment`). A desktop browser opens desktop Pane with `pane://pair#…`; on an iPhone the first button is the App Store. |
-| `GET /glasses` | The Wearables QR's address: the phone app opens Settings › Glasses; without the app, a page that links the iPhone app on the App Store (the first button on an iPhone). |
+| `GET /glasses` | The Wearables QR's address: the phone app opens Settings › Glasses; without the app, a page that links the iPhone app on the App Store (the first button on an iPhone) and TestFlight for the EU. |
 | `GET /.well-known/apple-app-site-association` | iOS universal links for `/pair` and `/glasses`. |
 | `GET /.well-known/assetlinks.json` | Android app links (the app's intent filters name the paths). |
 | `GET /relay`, `GET /ping` | The iroh relay for direct paths (below). |

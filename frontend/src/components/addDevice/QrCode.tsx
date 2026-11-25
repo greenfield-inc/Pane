@@ -30,22 +30,42 @@ export function QrCode({ url, label }: { url: string; label: string }) {
 /** Cameras read dark modules on a light ground, so a code keeps these colors in every theme. */
 export const QR_PAPER = 'rounded-xl border border-border-secondary bg-white p-2 text-black';
 
+/** For EU stores, under every App Store line here; remove it, and `EU_LINE` in `relay/src/api.rs`, when the app is on those stores. */
+function TestFlightLine() {
+  return (
+    <p className="px-4 text-xs text-text-tertiary">
+      In the EU?{' '}
+      <button
+        type="button"
+        className="underline underline-offset-2 hover:text-text-primary"
+        onClick={() => void window.electronAPI.openExternal('https://testflight.apple.com/join/eKJmnzXF')}
+      >
+        Get it on TestFlight
+      </button>{' '}
+      for now.
+    </p>
+  );
+}
+
 /** No country in the path, so people reach their own App Store. */
 const APP_STORE_URL = 'https://apps.apple.com/app/id6808839038';
 
 export function AppStoreLine() {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg bg-surface-secondary px-4 py-3 text-sm text-text-secondary">
-      <span className="min-w-0">No Pane app yet? The iPhone app is on the App Store.</span>
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        className="flex-none"
-        onClick={() => void window.electronAPI.openExternal(APP_STORE_URL)}
-      >
-        Open App Store
-      </Button>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3 rounded-lg bg-surface-secondary px-4 py-3 text-sm text-text-secondary">
+        <span className="min-w-0">No Pane app yet? The iPhone app is on the App Store.</span>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="flex-none"
+          onClick={() => void window.electronAPI.openExternal(APP_STORE_URL)}
+        >
+          Open App Store
+        </Button>
+      </div>
+      <TestFlightLine />
     </div>
   );
 }

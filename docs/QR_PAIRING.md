@@ -22,6 +22,8 @@ which opens on the **Phone** tab. It has four tabs:
    offers the App Store on an iPhone, and Pane in the phone's browser.
 
 Get the iPhone app on the App Store: [Pane - Remote Coding Agents](https://apps.apple.com/app/id6808839038).
+In the EU? [Get it on TestFlight](https://testflight.apple.com/join/eKJmnzXF) for now.
+
 After installing it, go back to the pairing page and tap **Open in Pane app**,
 or scan the code again. If the code expired, scan the new one in the dialog.
 Send feedback on [Discord](https://discord.gg/BdMyubeAZn).

@@ -12,6 +12,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const PAIR_HTML: &str = include_str!("pair.html");
 const GLASSES_HTML: &str = include_str!("glasses.html");
+/// The landing pages' line for EU stores, in their `{{eu-line}}`; make it "" when the app is on
+/// those stores, and remove `TestFlightLine` in `frontend/src/components/addDevice/QrCode.tsx`.
+const EU_LINE: &str = "<br>In the EU? <a href=\"https://testflight.apple.com/join/eKJmnzXF\">Get it on TestFlight</a> for now.";
 /// Paths the phone app opens: the pairing link and the Glasses screen.
 const APP_LINK_PATHS: [&str; 2] = ["/pair*", "/glasses*"];
 const IOS_APP_ID: &str = "FBM5YSF467.com.dcouple.pane.mobile";
@@ -124,6 +127,7 @@ pub async fn serve(state: Arc<State>, mut s: BoxStream, peer: IpAddr) {
 /// A landing page the phone app's links fall back to when the app isn't installed.
 async fn landing(s: &mut BoxStream, html: &str) -> std::io::Result<()> {
     let headers = "cache-control: no-store\r\nreferrer-policy: no-referrer\r\n";
+    let html = html.replace("{{eu-line}}", EU_LINE);
     respond(s, 200, "text/html; charset=utf-8", headers, html.as_bytes()).await
 }
 
