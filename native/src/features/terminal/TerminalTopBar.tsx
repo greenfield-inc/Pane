@@ -12,7 +12,6 @@ import { ReadOnlyChip } from '../hosts/ReadOnlyChip';
 import { ConnectionBar, presenceLabel } from '../hosts/ConnectionStatus';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { MachineMark } from '../machines/MachineMark';
-import { shortMachineName } from '../machines/machines';
 import { useMachines } from '../machines/useMachines';
 
 /**
@@ -59,11 +58,11 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
               <View style={styles.titleRow}>
                 <Text
                   variant="subhead"
-                  style={[styles.semibold, styles.shrink]}
+                  style={[styles.semibold, styles.machine]}
                   numberOfLines={1}
                   accessibilityLabel={presenceLabel(presence, profile.label)}
                 >
-                  {shortMachineName(profile.label, 5)}
+                  {profile.label}
                 </Text>
                 {paneName ? (
                   <>
@@ -134,7 +133,8 @@ const styles = StyleSheet.create({
   text: { flex: 1, minWidth: 0 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   semibold: { fontWeight: '600' },
-  shrink: { flexShrink: 1 },
-  pane: { flexShrink: 2 },
+  // The full name, cut short only past half the row, so the Pane's name stays readable.
+  machine: { flexShrink: 1, maxWidth: '50%' },
+  pane: { flexShrink: 1 },
   more: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
 });

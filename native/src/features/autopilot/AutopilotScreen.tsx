@@ -105,7 +105,7 @@ function Header({ snapshot }: { snapshot: AutopilotSnapshot | undefined }) {
           </Pressable>
           <AutopilotMark size={30} />
           <Text variant="title" accessibilityRole="header" numberOfLines={1} style={styles.fill}>Autopilot</Text>
-          {current ? <MachineBadge machine={current} /> : null}
+          {current ? <MachineBadge machine={current} full /> : null}
           {/* r4/J24: turning Sentinel on starts Autopilot, so it is here before Start too. */}
           {snapshot?.enabled && snapshot.state === 'stopped' ? <SentinelToggle snapshot={snapshot} /> : null}
         </View>

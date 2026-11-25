@@ -22,6 +22,8 @@ const VISIBILITY_REFRESH_MS = 60_000;
 const RESIZE_SETTLE_MS = 150;
 /** A watched terminal's owner may resize it at any time, and nothing announces it. */
 const OWNER_SIZE_CHECK_MS = 10_000;
+/** After a fold or a turn reaches the computer, how long the screen stays covered for its redraw. */
+const REDRAW_WAIT_MS = 400;
 /** The computer says an agent is ready when it first draws, or after 10 s regardless. */
 const AGENT_READY_LIMIT_MS = 12_000;
 
@@ -50,6 +52,10 @@ export function useTerminal(panelId: string, sessionId: string) {
   // Read by the page's messages: a screen scrolled back is not kept, since a revisit opens at the bottom.
   const scrolledBack = useRef(false);
   const [screenText, setScreenText] = useState('');
+  // A fold or a turn narrows or widens the view, and the old screen shows cut off until the computer
+  // redraws: covered from the first change until output follows the settled size, or REDRAW_WAIT_MS passes.
+  const [refitting, setRefitting] = useState(false);
+  const awaitingRedraw = useRef(false);
   // Starts from the size the last page measured, so the screen is read while this page loads.
   const [size, setSize] = useState<TerminalSize | null>(lastTerminalSize);
   // The page can take commands; until then a screen read waits here, and output after it waits in `pending`.
@@ -75,6 +81,10 @@ export function useTerminal(panelId: string, sessionId: string) {
     if (!pending.current || !pageReady.current) return;
     send({ type: 'write', data: pending.current });
     pending.current = '';
+    if (awaitingRedraw.current) {
+      awaitingRedraw.current = false;
+      setRefitting(false);
+    }
   };
 
   /** Draws a screen read from the host: the terminal now matches the computer. */
@@ -213,9 +223,23 @@ export function useTerminal(panelId: string, sessionId: string) {
   // Settle resizes before telling the host.
   useEffect(() => {
     if (!size || status !== 'ready') return;
-    const timer = setTimeout(() => session.resize(size), RESIZE_SETTLE_MS);
+    const timer = setTimeout(() => {
+      session.resize(size);
+      // A fold or a turn changes the space every terminal gets, so the next one opens at this size.
+      rememberTerminalSize(size);
+      awaitingRedraw.current = true;
+    }, RESIZE_SETTLE_MS);
     return () => clearTimeout(timer);
   }, [session, size, status]);
+  useEffect(() => {
+    if (!refitting) return undefined;
+    // A shell at its prompt doesn't redraw; uncover once the redraw had its time.
+    const timer = setTimeout(() => {
+      awaitingRedraw.current = false;
+      setRefitting(false);
+    }, RESIZE_SETTLE_MS + REDRAW_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [refitting, size]);
 
   const themeCommand: TerminalCommand = { type: 'theme', theme: theme.terminal, fontSize: TERMINAL_FONT_SIZE };
   const themeJson = JSON.stringify(themeCommand);
@@ -287,6 +311,14 @@ export function useTerminal(panelId: string, sessionId: string) {
     },
     status,
     hasContent,
+    /** The view's width changed and the computer hasn't redrawn yet. */
+    refitting,
+    /** The view's width changed: cover the screen until the computer redraws it at the new size. */
+    coverRefit: () => {
+      if (!hasContent) return;
+      awaitingRedraw.current = false;
+      setRefitting(true);
+    },
     keptScreen,
     /** This screen started an agent's panel and the agent hasn't drawn yet (up to 12 s). */
     agentStarting: startedAt !== null && !agentReady,

@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -79,6 +79,8 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   leading?: LeadingTabs;
 }) {
   const { panelId } = useLocalSearchParams<{ panelId?: string }>();
+  // This screen's own params: effects below run before the navigator is ready, and while another screen has focus.
+  const navigation = useNavigation<{ setParams(params: { panelId: string }): void }>();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { client, profile } = useDaemon();
@@ -135,7 +137,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   useEffect(() => {
     if (!followed) return;
     // Reading the screen's own tab (an approval), the phone stays put.
-    if (followsHost(followed) && !leadingTab) router.setParams({ panelId: followed.id });
+    if (followsHost(followed) && !leadingTab) navigation.setParams({ panelId: followed.id });
     setFollow(null);
   }, [followed, leadingTab]);
   // The tab on screen stays put until the person or a host announcement moves it,
@@ -143,7 +145,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   const shownId = panel?.id;
   const hasLeading = leading !== undefined;
   useEffect(() => {
-    if (!panelId && shownId && !hasLeading) router.setParams({ panelId: shownId });
+    if (!panelId && shownId && !hasLeading) navigation.setParams({ panelId: shownId });
   }, [panelId, shownId, hasLeading]);
   const terminalActive = view === 'terminal' && !paused;
   const title = session ? session.session.name || 'Untitled' : pane.data?.name ?? '';
@@ -168,7 +170,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   });
 
   const selectPanel = (next: ToolPanel) => {
-    router.setParams({ panelId: next.id });
+    navigation.setParams({ panelId: next.id });
     setActive.mutate([paneId, next.id]);
     if (resumeOnOpen && next.id !== panel?.id && pausedMarkOf(next)) resume(next);
   };
@@ -210,7 +212,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
           chatId={session?.panel.id}
           selectedId={leadingTab?.id ?? panel?.id ?? null}
           leading={leading?.tabs}
-          onSelectLeading={id => router.setParams({ panelId: id })}
+          onSelectLeading={id => navigation.setParams({ panelId: id })}
           onSelect={selectPanel}
           onAdd={readOnly ? undefined : () => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
           onClose={readOnly ? undefined : closePanel}
@@ -340,6 +342,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   const [showVoiceSetup, setShowVoiceSetup] = useState(false);
   const [controllerShown, setControllerShown] = useControllerShown();
   const [terminalHeight, setTerminalHeight] = useState(0);
+  const terminalWidth = useRef(0);
   const [voiceSaved, setVoiceSaved] = useState(false);
   useEffect(() => {
     if (!voiceSaved) return;
@@ -419,7 +422,15 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
 
   return (
     <>
-      <View style={[styles.fill, { backgroundColor: theme.terminal.background }]} onLayout={event => setTerminalHeight(event.nativeEvent.layout.height)}>
+      <View
+        style={[styles.fill, { backgroundColor: theme.terminal.background }]}
+        onLayout={({ nativeEvent: { layout } }) => {
+          // A fold or a turn: this layout lands before the page refits, so the cover goes up first.
+          if (terminalWidth.current > 0 && layout.width !== terminalWidth.current) terminal.coverRefit();
+          terminalWidth.current = layout.width;
+          setTerminalHeight(layout.height);
+        }}
+      >
         <Dimmed dimmed={disabled} style={styles.fill}>
           <View style={styles.screen}>
             <TerminalTouchSurface rows={terminal.rows} onScrollLines={terminal.scrollLines} onPan={readOnly ? terminal.pan : undefined}>
@@ -472,7 +483,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
           <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.terminal.background }]}>
             <EmptyState testID="terminal-not-running" title="Not running" message={`This tab isn’t running on ${profile.label}. Its output shows here once someone starts it there.`} />
           </View>
-        ) : blank && drawn ? (
+        ) : (blank && drawn) || terminal.refitting ? (
           <View testID="terminal-refreshing" style={[StyleSheet.absoluteFill, { backgroundColor: theme.terminal.background }]} />
         ) : null}
       </View>
