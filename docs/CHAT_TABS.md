@@ -220,7 +220,7 @@ on desktop, the web app and the phone, and a pick goes into the text.
   as the last part of it, so Pane sends the message whole with its skills as `/name`, then the last
   `$name` outside code and the text after it as a part of its own, after any images. Claude runs
   that one; earlier skills stay named in the text. A message that starts with a command goes as typed. The chat shows
-  the message as typed, also after a restart: Pane keeps its text beside the tab, since
+  the message as typed, also after a restart: Pane keeps its text beside the conversation, for any tab that opens it, since
   Claude's own history holds only the skill's part.
 
 ## Continuing a past conversation (/resume)

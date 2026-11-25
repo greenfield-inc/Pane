@@ -67,6 +67,8 @@ describe('what it lists and writes', () => {
   it('replaces the word at the caret and leaves one space', () => {
     expect(applyPick('then /si', at('then /si|')!, '$simplify')).toEqual({ text: 'then $simplify ', cursor: 15, mark: { start: 5, end: 14 } });
     expect(applyPick('a @c now', at('a @c| now')!, '@c.ts')).toEqual({ text: 'a @c.ts now', cursor: 8, mark: { start: 2, end: 7 } });
+    // At the end of a line the caret stays on that line, after a new space.
+    expect(applyPick('see @c\nnext', at('see @c|\nnext')!, '@c.ts')).toEqual({ text: 'see @c.ts \nnext', cursor: 10, mark: { start: 4, end: 9 } });
   });
   it('marks the matched letters of the last path segment typed', () => {
     expect(matchedParts('ChatComposer.tsx', 'comp')).toEqual([{ text: 'Chat', matched: false }, { text: 'Comp', matched: true }, { text: 'oser.tsx', matched: false }]);

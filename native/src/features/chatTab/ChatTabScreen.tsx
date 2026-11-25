@@ -145,6 +145,8 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   };
   /** The composer's send. It detached the draft; put it back until the host confirms the message. */
   const send = async (composed: AppendMessage) => {
+    // The box empties from code once the host has the message, which no edit reports: close the menu now.
+    setMenu(CLOSED_MENU);
     const text = composedText(composed);
     viewer.setDraft(text);
     runtime.thread.composer.setText(text);
@@ -193,7 +195,9 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
     viewer.setDraft(text);
   };
   const caretMoved = (start: number, end: number) => {
-    setCaret(current => current === start ? undefined : current);
+    // Any selection event hands the caret back to the input: iOS reports none for the one a pick set,
+    // so waiting for the pick's own position would pin the caret there.
+    setCaret(undefined);
     setMenu(state => start === end ? menuAfterCaret(state, viewer.snapshot().draft, end) : CLOSED_MENU);
   };
   const pick = (picked: ChatMenuPick) => {

@@ -15,8 +15,8 @@ const write = async (file: string, text = '') => {
   await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
   await fs.writeFile(path.join(root, file), text);
 };
-const find = async (query: string, options: { walk?: boolean; limit?: number } = {}) =>
-  (await search.search({ storedPath: root, pathResolver: new PathResolver({ path: root }), commandRunner: new CommandRunner({ path: root }), walk: options.walk }, query, options.limit ?? 80))
+const find = async (query: string, options: { walk?: boolean; limit?: number; fuzzy?: boolean; fresh?: boolean } = {}) =>
+  (await search.search({ storedPath: root, pathResolver: new PathResolver({ path: root }), commandRunner: new CommandRunner({ path: root }), walk: options.walk }, query, options.limit ?? 80, { fuzzy: options.fuzzy, fresh: options.fresh }))
     .map(file => file.isDirectory ? `${file.path}/` : file.path);
 
 beforeEach(async () => {
@@ -79,6 +79,21 @@ describe('a worktree', () => {
     await write('two.txt');
     expect(await find('one')).toEqual([]);
     expect(await find('')).toEqual(['two.txt']);
+  });
+
+  it('a search box gets only names that hold the text, listed fresh each time', async () => {
+    for (const file of ['src/cart.ts', 'src/cxaxrxt.ts']) await write(file);
+    expect(await find('cart', { fuzzy: false, fresh: true })).toEqual(['src/cart.ts']);
+    await write('src/cart-new.ts');
+    expect(await find('cart', { fuzzy: false, fresh: true })).toEqual(['src/cart.ts', 'src/cart-new.ts']);
+  });
+
+  it('answers only the newest of overlapping searches of a folder', async () => {
+    for (let index = 0; index < 3000; index += 1) await write(`many/file-${index}.ts`);
+    await find('');
+    const [older, newer] = await Promise.all([find('file-1'), find('file-29')]);
+    expect(older).toEqual([]);
+    expect(newer[0]).toBe('many/file-29.ts');
   });
 
   it('runs no file-watcher hook', async () => {

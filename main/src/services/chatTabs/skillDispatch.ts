@@ -54,7 +54,8 @@ function skillParts(text: string, commands: readonly ChatTabCommand[]): string[]
   const last = mentions.at(-1);
   if (!last) return undefined;
   const rest = text.slice(last.end);
-  const command = `/${last.name}${!rest || /^\s/.test(rest) ? rest : ` ${rest}`}`.trimEnd();
+  // Claude reads the arguments trimmed and replays them after one space; the part says it the same way.
+  const command = rest.trim() ? `/${last.name} ${rest.trim()}` : `/${last.name}`;
   if (!text.slice(0, last.start).trim()) return [command];
   // The whole message comes first, so the request around the skill keeps its sense. A first part that
   // starts with `/skill` would run that skill instead of the last one, so then every skill stays `$name`.

@@ -8,6 +8,8 @@ describe('what Claude is sent for a message that names a skill', () => {
   it.each([
     ['$simplify', ['/simplify']],
     ['  $simplify the diff', ['/simplify the diff']],
+    ['$simplify\nfocus on auth', ['/simplify focus on auth']],
+    ['Fix it, then $simplify\n  the diff  ', ['Fix it, then /simplify\n  the diff', '/simplify the diff']],
     ['Fix this, then $simplify', ['Fix this, then /simplify', '/simplify']],
     ['Fix this, then $simplify the rest\nand test', ['Fix this, then /simplify the rest\nand test', '/simplify the rest\nand test']],
     ['Run $audit first, then $simplify it', ['Run /audit first, then /simplify it', '/simplify it']],

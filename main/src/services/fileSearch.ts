@@ -36,13 +36,29 @@ const UNWRITABLE = /["\x00-\x1f\x7f-\x9f\u2028\u2029\ufffd]/;
  */
 export class FileSearch {
   private readonly lists = new Map<string, Listing>();
+  /** The newest search of each folder and kind: an older one still ranking gives way, so overlapping searches never queue on the main process. */
+  private readonly newest = new Map<string, number>();
+  private searches = 0;
 
-  async search(folder: SearchFolder, query: string, limit: number): Promise<ChatTabFile[]> {
+  /**
+   * `fuzzy: false` leaves out names that only hold the query's letters in order (a search box, unlike a menu).
+   * `fresh` lists the folder again for this search, as an empty query does.
+   */
+  async search(folder: SearchFolder, query: string, limit: number, options: { fuzzy?: boolean; fresh?: boolean } = {}): Promise<ChatTabFile[]> {
     const wanted = normalizeSearchQuery(query).replaceAll('\\', '/');
     const root = folder.pathResolver.toFileSystem(folder.storedPath);
-    const entries = await this.entries(root, folder, !wanted);
-    const candidates = wanted ? await ranked(entries, wanted, limit + SPARE) : topLevel(entries, limit + SPARE);
-    return inside(root, candidates, limit);
+    const kind = `${options.fuzzy === false ? 'exact' : 'fuzzy'}\0${root}`;
+    const id = ++this.searches;
+    this.newest.set(kind, id);
+    const stale = () => this.newest.get(kind) !== id;
+    try {
+      const entries = await this.entries(root, folder, !wanted || options.fresh === true);
+      if (stale()) return [];
+      const candidates = wanted ? await ranked(entries, wanted, limit + SPARE, options.fuzzy !== false, stale) : topLevel(entries, limit + SPARE);
+      return candidates && !stale() ? await inside(root, candidates, limit) : [];
+    } finally {
+      if (!stale()) this.newest.delete(kind);
+    }
   }
 
   private entries(root: string, folder: SearchFolder, refresh: boolean): Promise<Entry[]> {
@@ -138,26 +154,30 @@ function topLevel(entries: readonly Entry[], limit: number): Entry[] {
     .slice(0, limit);
 }
 
-/** Best match first: the name, then the whole path, then letters in order. */
-async function ranked(entries: readonly Entry[], query: string, limit: number): Promise<Entry[]> {
+/** Best match first: the name, then the whole path, then letters in order. Undefined once `stale`. */
+async function ranked(entries: readonly Entry[], query: string, limit: number, fuzzy: boolean, stale: () => boolean): Promise<Entry[] | undefined> {
   const wanted = query.replace(/^\.\//, '').replace(/\/+$/, '');
   if (!wanted) return topLevel(entries, limit);
   const best: RankedSearchResult<Entry>[] = [];
   const pause = slices();
   for (const item of entries) {
-    const score = scoreEntry(item, wanted);
+    const score = scoreEntry(item, wanted, fuzzy);
     const worst = best.length === limit ? best[limit - 1] : undefined;
     if (score !== null && (!worst || score <= worst.score)) insertRankedSearchResult(best, { item, score, tieBreaker: item.lower }, limit);
-    if (pause.due()) await pause.yield();
+    if (pause.due()) {
+      await pause.yield();
+      if (stale()) return undefined;
+    }
   }
   return best.map(result => result.item);
 }
 
-function scoreEntry(item: Entry, query: string): number | null {
+function scoreEntry(item: Entry, query: string, fuzzy: boolean): number | null {
   const name = item.nameStart ? item.lower.slice(item.nameStart) : item.lower;
-  return scoreQueryMatch({ value: name, query, exactBase: 0, prefixBase: 100, boundaryBase: 300, includesBase: 500, boundaryMarkers: ['-', '_', '.', ' '] })
-    ?? scoreQueryMatch({ value: item.lower, query, exactBase: 0, prefixBase: 900, boundaryBase: 1200, includesBase: 5000, boundaryMarkers: ['/'] })
-    ?? scoreQueryMatch({ value: name, query, exactBase: 0, fuzzyBase: 20_000 })
+  const exact = scoreQueryMatch({ value: name, query, exactBase: 0, prefixBase: 100, boundaryBase: 300, includesBase: 500, boundaryMarkers: ['-', '_', '.', ' '] })
+    ?? scoreQueryMatch({ value: item.lower, query, exactBase: 0, prefixBase: 900, boundaryBase: 1200, includesBase: 5000, boundaryMarkers: ['/'] });
+  if (exact !== null || !fuzzy) return exact;
+  return scoreQueryMatch({ value: name, query, exactBase: 0, fuzzyBase: 20_000 })
     ?? scoreQueryMatch({ value: item.lower, query, exactBase: 0, fuzzyBase: 40_000 });
 }
 

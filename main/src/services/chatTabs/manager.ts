@@ -143,7 +143,7 @@ export class ChatTabManager {
 
   constructor(private readonly options: ChatTabManagerOptions) {
     this.name = options.agentName ?? agentLabel;
-    this.sentMessages = new SentMessages(panelId => path.join(options.spoolDirectory, safeName(panelId), 'sent-messages.json'));
+    this.sentMessages = new SentMessages(path.join(options.spoolDirectory, 'sent-messages'));
     this.bodies = new QueuedBodies(panelId => path.join(options.spoolDirectory, safeName(panelId), 'queue'));
   }
 
@@ -567,7 +567,7 @@ export class ChatTabManager {
     const parts = contentTexts(sent);
     // A typed `/name` goes as it is, but is kept too, so its history entry is never taken for a split message's.
     const last = agentConfig(agent)?.chat?.skills === 'meta' ? parts.at(-1) : undefined;
-    if (text && acpSessionId && last?.startsWith('/')) this.sentMessages.add(panelId, { sessionId: acpSessionId, text, parts });
+    if (text && acpSessionId && last?.startsWith('/')) this.sentMessages.add(acpSessionId, { text, parts });
   }
 
   async cancel(panelId: string): Promise<void> {
@@ -673,7 +673,6 @@ export class ChatTabManager {
     await this.end(tab);
     tab.transcript?.dispose();
     this.bodies.clear(panelId);
-    this.sentMessages.remove(panelId);
     try { rmSync(this.pausedFile(panelId), { force: true }); } catch (error) { console.warn(`[ChatTabs] ${panelId}: could not remove its paused view:`, error); }
     this.tabs.delete(panelId);
     this.options.onClosed?.(panelId);
@@ -721,7 +720,7 @@ export class ChatTabManager {
       // Inside the try: a chat-tabs folder that cannot be written leaves the tab stopped with Restart, not starting.
       const saved = this.required(panelId);
       const turnTimes = saved.turnTimes && saved.turnTimes.sessionId === saved.acpSessionId ? saved.turnTimes.turns : undefined;
-      transcript = tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages, turnTimes, sentMessages: this.sentMessages.of(panelId, saved.acpSessionId) });
+      transcript = tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages, turnTimes, sentMessages: this.sentMessages.of(saved.acpSessionId) });
       launch = await this.options.launcher.resolve(panel, this.required(panelId));
     } catch (error) {
       const failure = chatFailure(error, { code: 'CHAT_LAUNCH_FAILED', next: 'Press Restart.' });

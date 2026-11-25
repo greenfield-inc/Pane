@@ -204,12 +204,13 @@ export function fileReference(file: { path: string; isDirectory: boolean }): str
 
 export interface ComposerPick { text: string; cursor: number; mark: ComposerMark }
 
-/** Puts `reference` in place of the trigger's word, followed by one space (an existing one is reused). */
+/** Puts `reference` in place of the trigger's word, followed by one space (an existing space is reused). */
 export function applyPick(text: string, trigger: ComposerTrigger, reference: string): ComposerPick {
   const before = text.slice(0, trigger.rangeStart);
   const after = text.slice(trigger.rangeEnd);
   const end = before.length + reference.length;
-  return { text: `${before}${reference}${/^\s/.test(after) ? '' : ' '}${after}`, cursor: end + 1, mark: { start: before.length, end } };
+  // A following space is reused; a line break stays where it is, after the new space.
+  return { text: `${before}${reference}${after.startsWith(' ') ? '' : ' '}${after}`, cursor: end + 1, mark: { start: before.length, end } };
 }
 
 /** A highlighted stretch of the message box. */

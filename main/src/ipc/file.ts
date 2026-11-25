@@ -912,7 +912,8 @@ export function registerFileHandlers(
       const pattern = request.pattern.replace(/^@/, '');
       const files = leavesFolder(pattern) ? [] : await fileSearch.search(
         { storedPath: storedDir, pathResolver, commandRunner, walk: !!request.sessionId && isOrchestrationInternalSessionId(request.sessionId) },
-        pattern, request.limit || 50,
+        // The Files tab's search box: names that hold the text, listed fresh each time.
+        pattern, request.limit || 50, { fuzzy: false, fresh: true },
       );
       return { success: true, files: files.map(file => ({ ...file, name: path.posix.basename(file.path) })) };
     } catch (error) {
