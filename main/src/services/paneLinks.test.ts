@@ -17,7 +17,7 @@ const REPOS = [
   { id: 10, name: 'scratch', identity: null },
 ];
 
-function setup(options: { confirm?: boolean; createResult?: PaneCommandValue } = {}) {
+function setup(options: { confirm?: boolean; answer?: () => Promise<boolean>; createResult?: PaneCommandValue } = {}) {
   const registry = new PaneCommandRegistry();
   const created: PaneCommandValue[] = [];
   const confirmed: Array<{ repoName: string; agentLabel: string; prompt: string }> = [];
@@ -40,7 +40,7 @@ function setup(options: { confirm?: boolean; createResult?: PaneCommandValue } =
     listRepos: async () => REPOS,
     confirmStart: async (request) => {
       confirmed.push(request);
-      return options.confirm ?? true;
+      return options.answer ? options.answer() : options.confirm ?? true;
     },
     showError: (message) => { errors.push(message); },
     navigate: (target) => { navigated.push(target); },
@@ -167,7 +167,43 @@ describe('pane:// links', () => {
     expect(await open('pane://new?repo=app&prompt=Say+hello')).toMatchObject({ success: true });
 
     await vi.waitFor(() => expect(confirmed).toHaveLength(1));
+    // Let the handler finish after the answer, so a create after Cancel would be seen.
+    await new Promise((resolve) => setImmediate(resolve));
     expect(created).toEqual([]);
+  });
+
+  it('asks about one link at a time and refuses another while a question is open', async () => {
+    let answer: (start: boolean) => void = () => undefined;
+    const { open, confirmed, created } = setup({ answer: () => new Promise((resolve) => { answer = resolve; }) });
+
+    await open('pane://new?repo=app&prompt=first');
+    await vi.waitFor(() => expect(confirmed).toHaveLength(1));
+    const second = await open('pane://new?repo=app&prompt=second');
+
+    expect(second).toEqual({ success: false, error: expect.stringContaining('already asking') });
+    answer(true);
+    await vi.waitFor(() => expect(created).toHaveLength(1));
+    expect(await open('pane://new?repo=app&prompt=third')).toMatchObject({ success: true });
+    expect(confirmed.map((request) => request.prompt)).toEqual(['first', 'third']);
+  });
+
+  it('shows and sends the prompt with trailing spaces and blank-line padding collapsed', async () => {
+    const { open, confirmed, created } = setup();
+
+    await open(`pane://new?repo=app&prompt=${encodeURIComponent('Summarize the README.   \n\n\n\n  \n\nThen stop.')}`);
+
+    await vi.waitFor(() => expect(created).toHaveLength(1));
+    expect(confirmed[0].prompt).toBe('Summarize the README.\n\nThen stop.');
+    expect(created[0]).toMatchObject({ panes: [{ tool: { initialInput: 'Summarize the README.\n\nThen stop.' } }] });
+  });
+
+  it('names the Pane "Linked task" when the prompt has no letters a branch name can use', async () => {
+    const { open, created } = setup();
+
+    await open(`pane://new?repo=app&prompt=${encodeURIComponent('修复登录测试 🚀')}`);
+
+    await vi.waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]).toMatchObject({ panes: [{ name: 'Linked task' }] });
   });
 
   it("uses Pane's default agent when the link names none", async () => {
@@ -203,6 +239,18 @@ describe('pane:// links', () => {
     ['an escape sequence in the prompt', 'pane://new?repo=app&prompt=hi%1B%5B2J'],
     ['a carriage return in the prompt', 'pane://new?repo=app&prompt=a%0Db'],
     ['a bidirectional override in the prompt', 'pane://new?repo=app&prompt=a%E2%80%AEb'],
+    ['a bidirectional isolate in the prompt', 'pane://new?repo=app&prompt=a%E2%81%A6b'],
+    ['DEL in the prompt', 'pane://new?repo=app&prompt=a%7Fb'],
+    ['a C1 control in the prompt', 'pane://new?repo=app&prompt=a%C2%85b'],
+    ['a Unicode tag character in the prompt', 'pane://new?repo=app&prompt=a%F3%A0%81%81b'],
+    ['a zero-width space in the prompt', 'pane://new?repo=app&prompt=a%E2%80%8Bb'],
+    ['a zero-width joiner in the prompt', 'pane://new?repo=app&prompt=a%E2%80%8Db'],
+    ['a left-to-right mark in the prompt', 'pane://new?repo=app&prompt=a%E2%80%8Eb'],
+    ['an Arabic letter mark in the prompt', 'pane://new?repo=app&prompt=a%D8%9Cb'],
+    ['a line separator in the prompt', 'pane://new?repo=app&prompt=a%E2%80%A8b'],
+    ['a paragraph separator in the prompt', 'pane://new?repo=app&prompt=a%E2%80%A9b'],
+    ['a byte-order mark at the start of the prompt', 'pane://new?repo=app&prompt=%EF%BB%BFhi'],
+    ['a prompt that starts with a dash, which an agent would read as an option', 'pane://new?repo=app&prompt=--settings%3D%2Ftmp%2Fx'],
     ['an unknown agent', 'pane://new?repo=app&prompt=hi&agent=sh'],
     ['an unknown parameter', 'pane://new?repo=app&prompt=hi&yes=1'],
     ['a pane target', 'pane://new?pane=p&prompt=hi'],

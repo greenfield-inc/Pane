@@ -539,6 +539,14 @@ async function checkStartLinkParity() {
     [['links', 'create', '--repo', '3', '--prompt', 'x'.repeat(4001)], 1],
     // 1,400 emoji fit the 4,000-character cap but encode to more than the 16,384 characters Pane opens.
     [['links', 'create', '--repo', '3', '--prompt', '\u{1F600}'.repeat(1400)], 1],
+    // Invisible and format characters, edge characters npm trim() and Python strip() treat differently, a leading dash.
+    [['links', 'create', '--repo', '3', '--prompt', 'hi\u{E0041}'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'a\u200Bb'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', '\uFEFFhi'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', '\u001Chi'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'a\u2028b'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', '--settings=/tmp/x'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'Fix it.   \n\n\n\n  \nThen stop.', '--json'], 0],
   ];
   try {
     for (const [args, code] of cases) {

@@ -47,15 +47,15 @@ export interface PaneStartLink {
 }
 
 /**
- * Control characters other than tab and newline, and bidirectional overrides, which could hide
- * part of the prompt in the confirmation.
+ * Characters the confirmation can't show but an agent reads: controls other than tab and newline,
+ * format characters (direction marks, zero-width characters, tag characters, the byte-order mark)
+ * and line or paragraph separators.
  */
-function hasUnsafeCharacters(text: string): boolean {
-  return [...text].some((character) => {
-    const code = character.codePointAt(0) ?? 0;
-    return (code < 32 && code !== 9 && code !== 10) || (code >= 127 && code < 160)
-      || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069);
-  });
+const UNSAFE_CHARACTER = /[^\t\n\P{Cc}]|[\p{Cf}\p{Zl}\p{Zp}]/u;
+
+/** Trailing spaces and runs of blank lines removed, so the dialog shows the prompt on one screen. */
+function collapsePadding(text: string): string {
+  return text.split('\n').map((line) => line.trimEnd()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 export function parsePaneLink(link: string): PaneLinkTarget | PaneStartLink {
@@ -101,10 +101,14 @@ function parseStartLink(params: Map<string, string>): PaneStartLink {
   if (!REPO_SELECTOR.test(repo)) {
     throw new Error('A pane://new link names its repository as repo=<id>, repo=<name> or repo=<owner/repo>');
   }
-  const prompt = (params.get('prompt') ?? '').trim();
+  const raw = params.get('prompt') ?? '';
+  if (UNSAFE_CHARACTER.test(raw)) {
+    throw new Error("The link's prompt holds control, text-direction or invisible characters, which Pane does not send to an agent");
+  }
+  const prompt = collapsePadding(raw);
   if (!prompt) throw new Error('A pane://new link needs a prompt=<text>');
   if ([...prompt].length > MAX_LINK_PROMPT_LENGTH) throw new Error(`The link's prompt is longer than ${MAX_LINK_PROMPT_LENGTH} characters`);
-  if (hasUnsafeCharacters(prompt)) throw new Error("The link's prompt holds control or text-direction characters, which Pane does not send to an agent");
+  if (prompt.startsWith('-')) throw new Error(`The link's prompt starts with "-", which an agent would read as an option`);
   const agentId = params.get('agent');
   let agent: ConfiguredAgentId = DEFAULT_AGENT_ID;
   if (agentId !== undefined) {
@@ -146,7 +150,9 @@ export function findLinkedRepo(repos: readonly LinkedRepo[], selector: string): 
 
 /** A Pane name from the first words of the prompt's first line. */
 function startLinkPaneName(prompt: string): string {
-  return sanitizePaneName(prompt.split('\n')[0].split(/\s+/).slice(0, 6).join(' ')).slice(0, 48).trim() || 'Linked task';
+  const name = sanitizePaneName(prompt.split('\n')[0].split(/\s+/).slice(0, 6).join(' ')).slice(0, 48).trim();
+  // The worktree and branch are named from ASCII letters and digits; a name without any gives none.
+  return /[A-Za-z0-9]/.test(name) ? name : 'Linked task';
 }
 
 /** A `pane://pair#…` one-time link, which the renderer's confirm page redeems. */
@@ -182,6 +188,8 @@ function sendPairLinkOpened(link: string): void {
 
 /** Registers `runpane:links:open`, the one path every pane:// link (OS or CLI) goes through. */
 export function registerPaneLinkHandler(commandRegistry: PaneCommandRegistry, opener: PaneLinkOpener): void {
+  // One start question at a time, so a page can't stack dialogs for a stray click on Start.
+  let asking = false;
   commandRegistry.register(OPEN_PANE_LINK_CHANNEL, async (link: PaneCommandValue) => {
     try {
       const text = decodeBoundary(link, boundary.string);
@@ -192,8 +200,10 @@ export function registerPaneLinkHandler(commandRegistry: PaneCommandRegistry, op
       const target = parsePaneLink(text);
       if (target.kind === 'new') {
         const repo = findLinkedRepo(await opener.listRepos(), target.repo);
+        if (asking) throw new Error('Pane is already asking about another start link. Answer that one, then open this link again.');
+        asking = true;
         // The CLI's request returns now; the Pane is created only if the person presses Start.
-        void startFromLink(commandRegistry, opener, repo, target);
+        void startFromLink(commandRegistry, opener, repo, target).finally(() => { asking = false; });
         return { success: true, data: { opened: { kind: 'new', repoId: repo.id, agent: target.agent, confirming: true } } };
       }
       if (target.kind === 'pane') {

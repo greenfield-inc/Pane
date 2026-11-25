@@ -85,20 +85,24 @@ function startLinkTargetFrom(parsed: ParsedArgs, prompt: string): StartLinkTarge
   if (!REPO_SELECTOR.test(parsed.repo)) {
     throw new Error('--repo must be a repository id, saved name, or owner/repo. Run `runpane repos list` to find it.');
   }
-  const text = prompt.trim();
+  if (UNSAFE_CHARACTER.test(prompt)) {
+    throw new Error('--prompt must not contain control characters (other than tab and newline), or text-direction or invisible characters.');
+  }
+  const text = collapsePadding(prompt);
   if (!text) throw new Error('--prompt must not be empty.');
   if ([...text].length > MAX_LINK_PROMPT_LENGTH) throw new Error(`--prompt must be at most ${MAX_LINK_PROMPT_LENGTH} characters for a link.`);
-  if ([...text].some(isUnsafeCharacter)) throw new Error('--prompt must not contain control characters (other than tab and newline) or text-direction characters.');
+  if (text.startsWith('-')) throw new Error('--prompt must not start with "-", which an agent would read as an option.');
   const target: StartLinkTarget = { kind: 'new', id: parsed.repo, prompt: text };
   if (parsed.agent) target.agent = parsed.agent;
   return target;
 }
 
-/** Control characters other than tab and newline, and bidirectional overrides; Pane refuses them in a link's prompt. */
-function isUnsafeCharacter(character: string): boolean {
-  const code = character.codePointAt(0) ?? 0;
-  return (code < 32 && code !== 9 && code !== 10) || (code >= 127 && code < 160)
-    || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069);
+/** Characters Pane refuses in a link's prompt: controls other than tab and newline, format characters, line and paragraph separators. */
+const UNSAFE_CHARACTER = /[^\t\n\P{Cc}]|[\p{Cf}\p{Zl}\p{Zp}]/u;
+
+/** The prompt as Pane shows and sends it: trailing spaces and runs of blank lines removed. */
+function collapsePadding(text: string): string {
+  return text.split('\n').map((line) => line.trimEnd()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function requireId(value: string | undefined, flag: string, lister: string): string {

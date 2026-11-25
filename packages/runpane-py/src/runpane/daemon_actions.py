@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import unicodedata
 from typing import Any, Dict, Optional
 from urllib.parse import quote_plus, urlencode
 
@@ -109,9 +110,13 @@ def build_start_link(repo: str, prompt: str, agent: Optional[str] = None) -> str
 
 
 def is_unsafe_character(character: str) -> bool:
-    """Control characters other than tab and newline, and bidirectional overrides; Pane refuses them in a link's prompt."""
-    code = ord(character)
-    return (code < 32 and code not in (9, 10)) or 127 <= code < 160 or 0x202A <= code <= 0x202E or 0x2066 <= code <= 0x2069
+    """Controls other than tab and newline, format characters, line and paragraph separators; Pane refuses them in a link's prompt."""
+    return character not in "\t\n" and unicodedata.category(character) in ("Cc", "Cf", "Zl", "Zp")
+
+
+def collapse_padding(text: str) -> str:
+    """The prompt as Pane shows and sends it: trailing spaces and runs of blank lines removed."""
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(line.rstrip() for line in text.split("\n"))).strip()
 
 
 def start_link_target(parsed: Any, prompt: str) -> Dict[str, str]:
@@ -119,13 +124,15 @@ def start_link_target(parsed: Any, prompt: str) -> Dict[str, str]:
         raise ValueError("A start link takes --repo and --prompt (and optionally --agent), not --pane, --panel or --session.")
     if not REPO_SELECTOR.match(parsed.repo):
         raise ValueError("--repo must be a repository id, saved name, or owner/repo. Run `runpane repos list` to find it.")
-    text = prompt.strip()
+    if any(is_unsafe_character(character) for character in prompt):
+        raise ValueError("--prompt must not contain control characters (other than tab and newline), or text-direction or invisible characters.")
+    text = collapse_padding(prompt)
     if not text:
         raise ValueError("--prompt must not be empty.")
     if len(text) > MAX_LINK_PROMPT_LENGTH:
         raise ValueError(f"--prompt must be at most {MAX_LINK_PROMPT_LENGTH} characters for a link.")
-    if any(is_unsafe_character(character) for character in text):
-        raise ValueError("--prompt must not contain control characters (other than tab and newline) or text-direction characters.")
+    if text.startswith("-"):
+        raise ValueError('--prompt must not start with "-", which an agent would read as an option.')
     target = {"kind": "new", "id": parsed.repo, "prompt": text}
     if parsed.agent:
         target["agent"] = parsed.agent

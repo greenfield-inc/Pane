@@ -175,7 +175,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
       cancelId: 1,
       noLink: true,
       message: `Start ${agentLabel} in ${repoName}?`,
-      detail: `A link asks Pane to create a new Pane in ${repoName} and send ${agentLabel} this prompt:\n\n${prompt}`,
+      detail: `A link asks Pane to create a new Pane in ${repoName} and send ${agentLabel} this prompt. ${agentLabel} runs with full access: it can edit files and run commands without asking.\n\n${prompt}`,
     })).response === 0,
     showError: (message) => void showMessage({ type: 'warning', message: 'Pane could not open this link', detail: message }),
     navigate: (target) => {
