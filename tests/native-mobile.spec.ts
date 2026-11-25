@@ -104,6 +104,7 @@ test('a secure-storage read failure does not overwrite the saved profiles', asyn
     store.get = async () => { throw new Error('Secure storage is locked'); };
   });
   await page.goto('/remote.html');
-  await expect(page.getByText('Secure storage is locked')).toBeVisible();
+  // The PWA's first load can be a cold Vite compile when this test runs early in its shard.
+  await expect(page.getByText('Secure storage is locked')).toBeVisible({ timeout: 15_000 });
   expect(await page.evaluate(() => localStorage.getItem('pane.remotePwa.savedProfiles'))).toBe('existing encrypted profiles');
 });
