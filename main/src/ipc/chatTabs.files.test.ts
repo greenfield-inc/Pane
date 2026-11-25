@@ -4,8 +4,10 @@ import os from 'os';
 import path from 'path';
 import type { IpcMain } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatPanelState, ChatTabFile } from '../../../shared/types/chatTab';
+import type { ChatPanelState } from '../../../shared/types/chatTab';
+import { decodeChatFiles } from '../../../shared/types/chatTabDecoders';
 import type { ToolPanel } from '../../../shared/types/panels';
+import type { DiffManifest } from '../../../shared/types/gitDiff';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { panelManager } from '../services/panelManager';
 import type { GitDiffManager } from '../services/gitDiffManager';
@@ -27,7 +29,8 @@ const SESSION_PANE = '__orchestration_session_test__';
 let base: string;
 let worktree: string;
 let registry: PaneCommandRegistry;
-let tab: { sessionId: string; state: Partial<ChatPanelState> };
+interface ShownTab { sessionId: string; state: Partial<ChatPanelState> }
+let tab: ShownTab;
 
 beforeEach(async () => {
   base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pane-chat-files-')));
@@ -48,10 +51,10 @@ beforeEach(async () => {
       getProjectContext: id => id === 'pane-1' ? { project: partial<Project>({ path: worktree }), pathResolver: new PathResolver({ path: worktree }), commandRunner: new CommandRunner({ path: worktree }) } : null,
     }),
     gitDiffManager: partial<GitDiffManager>({
-      getDiffManifest: async () => ({ files: [
+      getDiffManifest: async () => partial<DiffManifest>({ files: [
         { path: 'src/b.ts', kind: 'modified', additions: 1, deletions: 0, isBinary: false },
         { path: 'src/gone.ts', kind: 'deleted', additions: 0, deletions: 1, isBinary: false },
-      ] }) as Awaited<ReturnType<GitDiffManager['getDiffManifest']>>,
+      ] }),
     }),
     worktreeManager: partial<WorktreeManager>({}),
   }), registry);
@@ -61,7 +64,7 @@ afterEach(async () => {
   await fs.rm(base, { recursive: true, force: true });
 });
 
-const files = async (query: string) => (await registry.invoke('chat-tab:files', ['chat-1', query]) as ChatTabFile[])
+const files = async (query: string) => decodeChatFiles(await registry.invoke('chat-tab:files', ['chat-1', query]))
   .map(file => `${file.path}${file.isDirectory ? '/' : ''}${file.changed ? ' (changed)' : ''}`);
 
 describe('chat-tab:files', () => {
