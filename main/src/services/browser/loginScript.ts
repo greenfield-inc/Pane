@@ -169,15 +169,7 @@ function loginWorld() {
         else record.addedNodes.forEach(inspect);
       }
       look();
-      soon();
     });
-    /** Again before the next frame is drawn: setting an input's value changes nothing an observer sees. */
-    let queued = false;
-    const soon = () => {
-      if (queued) return;
-      queued = true;
-      requestAnimationFrame(() => { queued = false; look(); });
-    };
     const watch = (root: Document | ShadowRoot) => {
       if (roots.has(root)) return;
       roots.add(root);
@@ -189,8 +181,8 @@ function loginWorld() {
     };
     if (plain) {
       watch(document);
-      for (const type of ['input', 'change', 'click', 'keyup', 'focusout']) window.addEventListener(type, soon, true);
-      const everyFrame = () => { look(); if (armed()) requestAnimationFrame(everyFrame); };
+      // Setting an input's value changes nothing an observer sees, so every frame looks again.
+      const everyFrame = () => { look(); requestAnimationFrame(everyFrame); };
       requestAnimationFrame(everyFrame);
     }
     boxes.forEach(protect);

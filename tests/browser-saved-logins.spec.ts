@@ -344,9 +344,10 @@ all.forEach((box, i) => box.addEventListener('input', () => { const seen = state
     ['a first box that takes the whole code', spreading('maxlength="4"', 'maxlength="1"', 'queueMicrotask')],
     ['wide boxes spread at once', spreading('style="width:200px"', 'style="width:200px"', 'queueMicrotask')],
     ['wide boxes spread a moment later', spreading('style="width:200px"', 'style="width:200px"', '(f => setTimeout(f, 120))')],
+    ['wide boxes spread long after, with no event', spreading('style="width:200px"', 'style="width:200px"', '(f => setTimeout(f, 2500))')],
   ] as const) {
     test(`shows no digit in a picture of ${name}`, async ({ page }) => {
-      await pictures(page, html, async fresh => { await fresh.waitForTimeout(250); });
+      await pictures(page, html, async fresh => { await fresh.waitForTimeout(name.includes('long after') ? 2_700 : 250); });
     });
   }
 

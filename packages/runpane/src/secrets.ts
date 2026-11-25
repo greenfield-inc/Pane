@@ -365,7 +365,7 @@ export async function runSecretsLease(parsed: ParsedArgs, env: NodeJS.ProcessEnv
 function describeLeaseResult(result: NotifyResult): string {
   if ('status' in result && result.status === 'leased') {
     return `Leased ${result.project}/${result.names.join(', ')} until ${result.expiresAt} on ${result.machines.join(', ')}. Lease ${result.leaseId}. `
-      + `Use them with \`runpane secrets exec --project ${result.project} -- <command>\`.`;
+      + `Use them with \`runpane secrets exec --project ${result.project} -- <command>\`, and logins with \`runpane browser fill\`.`;
   }
   if (('status' in result && result.status === 'declined') || ('approved' in result && !result.approved)) return 'The person declined the lease.';
   // A Pane from before leases shows a plain approve card and starts nothing.

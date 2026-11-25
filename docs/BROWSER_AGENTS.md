@@ -132,6 +132,7 @@ What this can't do:
   The next snapshot shows which fields hold something.
 - Digits drawn as a picture, with CSS or in a canvas, and text in a page's own dialog or
   accessibility label, are not hidden.
+- A field the page fills as it draws a frame can show for that one frame.
 - The dots show how long the value is.
 - An agent that ran a script on the site in another tab could have left something the site itself
   keeps and runs, such as a stored script on a site with such a flaw.
