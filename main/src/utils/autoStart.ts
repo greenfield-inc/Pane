@@ -7,7 +7,7 @@ import { isPackagedOnDefaultDirectory } from './appDirectory';
 
 const LINUX_AUTOSTART_FILENAME = 'com.dcouple.pane.desktop';
 
-function quoteDesktopExecArg(value: string): string {
+export function quoteDesktopExecArg(value: string): string {
   return `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
 }
 

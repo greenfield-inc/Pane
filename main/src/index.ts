@@ -148,6 +148,7 @@ import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
 import { syncAutoStartOnBoot } from './utils/autoStart';
 import { addRunpaneToUserPathBestEffort } from './services/runpaneShim';
 import { syncPaneMcpForApp } from './services/paneMcpRegistration';
+import { registerAppImageLinkHandler } from './utils/linuxLinkHandler';
 import { findPaneLinkArg, forwardPaneLinkToRunningPane, isPanePairLink, OPEN_PANE_LINK_CHANNEL, PANE_LINK_SCHEME, parsePaneLink } from './services/paneLinks';
 import { createPaneDaemonHost, type PaneDaemonHost } from './daemon/bootstrap';
 import { remotePaneClientController } from './daemon/client/remotePaneClient';
@@ -1482,8 +1483,9 @@ if (launchRemoteSetup) {
       app.exit(0);
       return;
     }
-    if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1' && app.isPackaged && !app.isDefaultProtocolClient(PANE_LINK_SCHEME)) {
-      app.setAsDefaultProtocolClient(PANE_LINK_SCHEME);
+    if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1' && app.isPackaged) {
+      if (!app.isDefaultProtocolClient(PANE_LINK_SCHEME)) app.setAsDefaultProtocolClient(PANE_LINK_SCHEME);
+      registerAppImageLinkHandler();
     }
 
     console.log('[Main] App is ready, initializing services...');
