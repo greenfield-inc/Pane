@@ -18,16 +18,15 @@ which opens on the **Phone** tab. It has four tabs:
 
 1. On the computer, open **Add a device › Phone**.
 2. Point your phone's camera at the code.
-3. Tap the link. It opens the Pane app, or Pane in the phone's browser when
-   the app is not installed.
+3. Tap the link. It opens the Pane app. Without the app, it opens a page that
+   offers the App Store on an iPhone, and Pane in the phone's browser.
 
-The iPhone app is in public beta on TestFlight. Open
-<https://testflight.apple.com/join/eKJmnzXF> on the iPhone, install Apple's
-TestFlight app if asked, then tap **Accept** and **Install**. The dialog and
-the pairing page link there too. A TestFlight build expires after 90 days, and
-TestFlight installs each new one for you. Send feedback from TestFlight (take a
-screenshot, then **Send Beta Feedback**) or on
-[Discord](https://discord.gg/BdMyubeAZn).
+Get the iPhone app on the App Store: [Pane - Remote Coding Agents](https://apps.apple.com/app/id6808839038).
+In the EU? [Get it on TestFlight](https://testflight.apple.com/join/eKJmnzXF) for now.
+
+After installing it, go back to the pairing page and tap **Open in Pane app**,
+or scan the code again. If the code expired, scan the new one in the dialog.
+Send feedback on [Discord](https://discord.gg/BdMyubeAZn).
 
 The phone shows the computer's sessions a few seconds later. A QR code works
 once and expires after 10 minutes; the dialog shows a new one after each use.
