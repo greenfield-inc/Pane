@@ -110,8 +110,7 @@ export function writeSessionProfile(sessionFolder: string, profile: string, inst
   }
   const text = instructions.trim();
   const file = path.join(cwd, SESSION_PROFILE_FILE);
-  if (fs.existsSync(file) && !fs.lstatSync(file).isFile()) throw new PaneError('SESSION_PROFILE_FILE', `${file} is not a regular file, so Pane did not write the Session's profile there.`, `Remove ${file}, then start the Session again.`);
-  fs.writeFileSync(file, `# Agent Farm profile: ${profile}\n\nPane writes this file from the profile at every start of this Session's agent; edit the profile instead.\n\n${text}\n`, { mode: 0o600 });
+  writeFileWithoutFollowingLinks(file, `# Agent Farm profile: ${profile}\n\nPane writes this file from the profile at every start of this Session's agent; edit the profile instead.\n\n${text}\n`);
   const section = [
     '## Agent Farm profile',
     `This Session runs the Agent Farm profile ${profile}. Its instructions follow (Pane keeps the same text in ${SESSION_PROFILE_FILE}). Where they disagree with the Pane Session rules above, the Pane rules win.`,
@@ -122,6 +121,39 @@ export function writeSessionProfile(sessionFolder: string, profile: string, inst
     writeOwnedBlock(path.join(cwd, 'AGENTS.md'), PROFILE_MARKERS, [PROFILE_START, ...escapeProfileMarkers(section).split('\n'), PROFILE_END], { createMode: 0o600 });
   } catch (error) {
     if (error instanceof LeftAlone) throw new PaneError('SESSION_PROFILE_FILE', `Pane couldn't put the profile into ${path.join(cwd, 'AGENTS.md')}: ${error.message}`, 'Fix the file, then start the Session again.');
+    throw error;
+  }
+}
+
+/**
+ * Replaces a Pane-owned file in a Session folder without following a link an agent put in its place
+ * (review F-1): a link or any other non-file there is refused, and the new text lands through a fresh
+ * temporary file renamed over the path, which replaces a file and never writes through a link.
+ */
+function writeFileWithoutFollowingLinks(file: string, content: string): void {
+  const refuse = () => new PaneError('SESSION_PROFILE_FILE', `${file} is not a regular file (it may be a link), so Pane did not write the Session's profile there.`, `Remove ${file}, then start the Session again.`);
+  const current = lstatOrMissing(file);
+  if (current && !current.isFile()) throw refuse();
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`;
+  // 'wx' fails if anything, a link included, already sits at the temporary path.
+  fs.writeFileSync(temporary, content, { mode: 0o600, flag: 'wx' });
+  try {
+    // A link put in place since the check above is still never written through: rename replaces the link itself.
+    const now = lstatOrMissing(file);
+    if (now && !now.isFile()) throw refuse();
+    fs.renameSync(temporary, file);
+  } catch (error) {
+    fs.rmSync(temporary, { force: true });
+    throw error;
+  }
+}
+
+/** The entry at `file` without following a link, or undefined when nothing is there; any other error is thrown. */
+function lstatOrMissing(file: string): fs.Stats | undefined {
+  try { return fs.lstatSync(file); }
+  catch (error) {
+    // SAFETY: fs.lstatSync throws only Node system errors, which carry `code`.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
 }
