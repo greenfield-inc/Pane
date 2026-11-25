@@ -11,7 +11,7 @@ import { ConfigManager } from '../configManager';
 import { PaneMcpEndpoint, setPaneMcpEndpoint } from '../paneMcpEndpoint';
 import { TabListener } from '../tabListener';
 import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
-import { AgentChatLauncher } from './launch';
+import { AgentChatLauncher, withoutPlainProfile } from './launch';
 
 const bin = mkdtempSync(path.join(tmpdir(), 'pane-chat-launch-bin-'));
 
@@ -99,5 +99,18 @@ describe.skipIf(process.platform === 'win32')('how a chat tab starts each kind o
 
   it('refuses an agent the host has neither configured nor installed, saying where to install agents', async () => {
     await expect(resolve('gemini', { kind: 'agent' })).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED', next: expect.stringContaining('Settings > Agents') });
+  });
+});
+
+// T-63's Profiles switch: a Session tab saved with pane/<agent> while it was on starts the agent on its own once it is off.
+describe('a plain profile tab with Profiles off', () => {
+  const state = (launch: ChatPanelState['launch'], agent = 'claude'): ChatPanelState => ({ agent, launch, cwd: bin, status: 'starting' });
+  it('starts the agent on its own, with the access it had, only while Profiles is off', () => {
+    expect(withoutPlainProfile(state({ kind: 'profile', profile: 'pane/claude', fullAccess: true }), () => false).launch).toEqual({ kind: 'agent', fullAccess: true });
+    expect(withoutPlainProfile(state({ kind: 'profile', profile: 'pane/codex' }, 'codex'), () => false).launch).toEqual({ kind: 'agent' });
+    expect(withoutPlainProfile(state({ kind: 'profile', profile: 'pane/claude' }), () => true).launch).toEqual({ kind: 'profile', profile: 'pane/claude' });
+    // Any other profile, or a plain profile for another agent, is left for Agent Farm, as on main.
+    expect(withoutPlainProfile(state({ kind: 'profile', profile: 'greenfield/orchestrator' }), () => false).launch).toEqual({ kind: 'profile', profile: 'greenfield/orchestrator' });
+    expect(withoutPlainProfile(state({ kind: 'profile', profile: 'pane/codex' }), () => false).launch).toEqual({ kind: 'profile', profile: 'pane/codex' });
   });
 });

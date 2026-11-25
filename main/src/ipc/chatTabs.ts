@@ -151,7 +151,10 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
   registry.register('chat-tab:keys', () => chatTabSecrets.status());
   registry.register('chat-tab:agents', () => getChatAgentCatalog().entries());
   // The Agent Farm profiles a Session can start with on this machine (T-63); another machine reads it over machines:run.
-  registry.register('chat-tab:profiles', () => listPaneAgentFarmProfiles(getAppDirectory(), { ...process.env, PATH: getShellPath() }));
+  // Empty while Profiles is off (Settings › Advanced), when no Session starts with a profile.
+  registry.register('chat-tab:profiles', async () => profilesOn()
+    ? listPaneAgentFarmProfiles(getAppDirectory(), { ...process.env, PATH: getShellPath() })
+    : { profiles: [], error: 'Profiles is off on this computer. Turn it on in Settings > Advanced > Experimental.' });
   // Settings > Agents: the ACP Registry's agents (D-15). Installing runs third-party code on this machine, so only its owner can.
   registry.register('chat-tab:registry', (refresh?: PaneCommandValue) => getAgentRegistry().list(decodeBoundary(refresh ?? false, boundary.boolean)));
   registry.register('chat-tab:install-agent', async (id: string, options?: PaneCommandValue) => {

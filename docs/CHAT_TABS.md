@@ -643,8 +643,8 @@ as Node.
 
 ### A Session's Agent Farm profile
 
-A Session's orchestrator chat runs an Agent Farm profile (see
-[SESSIONS.md](SESSIONS.md#sessions-run-through-agent-farm)). With no profile it is
+With [Profiles](#profiles-switch) on, a Session's orchestrator chat runs an Agent
+Farm profile (see [SESSIONS.md](SESSIONS.md#sessions-run-through-agent-farm)). With no profile it is
 Pane's own plugin, `pane`, which Pane writes from its agents contract
 (`chat.profileModel`) and installs beside the bundled plugins at every start
 (`main/src/services/agentFarm/agentFarmProfiles.ts`); its profiles `pane/claude`
@@ -665,6 +665,15 @@ When Pane resolves a Session's printed launch it:
   (`fullAccess` on the profile launch). Every other profile keeps Agent Farm's mode.
 
 A profile chat tab outside a Session runs exactly as printed.
+
+With Profiles off, none of this happens and Sessions start as before T-63: a
+profile launch (a launch command's `agent-farm run <profile>`) runs exactly as
+printed, Session folders get no `PROFILE.md` (one written while Profiles was on is
+removed at the agent's next start), a tab saved with `pane/<agent>` starts that
+agent on its own (`withoutPlainProfile` in `chatTabs/launch.ts`), and
+`chat-tab:profiles` lists nothing. Pane still installs its `pane` plugin into its own
+Agent Farm at start either way: nothing reads it while Profiles is off, and turning
+Profiles on then needs no restart.
 
 ## Older clients
 

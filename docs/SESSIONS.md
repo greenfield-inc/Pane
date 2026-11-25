@@ -35,7 +35,8 @@ terminal agent tab in it (see
 
 ### Sessions run through Agent Farm
 
-A new chat Session runs its agent through Pane's own Agent Farm (see
+With Profiles on (Settings › Advanced › Experimental, `sessionProfilesEnabled`; off
+by default), a new chat Session runs its agent through Pane's own Agent Farm (see
 [CHAT_TABS.md](CHAT_TABS.md#a-sessions-agent-farm-profile)). The record saves which
 profile in `agentProfile`, `{ ref, hash }`: the ref is `pane/claude` or
 `pane/codex` when the Session has no profile (the agent on its own, which adds
@@ -51,6 +52,12 @@ plugin isn't installed yet. Changing a Session's agent or launch command keeps i
 on Agent Farm. `chat-tab:profiles` lists the profiles a Session can start with on a
 computer (another machine reads it through `machines:read`); Pane's plain profiles
 are marked `hidden`.
+
+With Profiles off, Sessions start as on main: no new Session gets an
+`agentProfile`, `runpane sessions create` refuses one (`SESSION_PROFILE_UNSUPPORTED`),
+a saved one is ignored and dropped when the Session's agent or launch command
+changes, and `chat-tab:profiles` returns an empty list. Turning Profiles on or off
+applies to the next start of a Session's agent.
 
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,
