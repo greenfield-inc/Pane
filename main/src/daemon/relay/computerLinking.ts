@@ -11,30 +11,33 @@ import {
   type RelayExchangeRequest,
   type RelayPairedEvent,
 } from '../../../../shared/types/relay';
+import { readOnlyMarkSchema } from '../../../../shared/types/accessLevel';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PairingRoute } from '../httpApiServer';
-import type { PairingExchangeRequest, PairingExchangeResult, PairingRefusal } from './pairingExchange';
+import type { PairingCheck, PairingExchangeRequest, PairingExchangeResult } from './pairingExchange';
 import { relayComputerSchema, type CallComputer, type LinkedComputer, type PostToComputer, type RelayLinks } from './relayLinks';
 import type { ForwardedClient } from './computerTlsServer';
 
 /** The relay service's side of a trade: checking and spending secrets, and this computer's relay identity. */
 interface PairingHost {
-  checkSecret(secret: string, source: string): { ok: true; expiresAt: string } | PairingRefusal;
+  checkSecret(secret: string, source: string): PairingCheck;
   exchangeSecret(request: PairingExchangeRequest): Promise<PairingExchangeResult & { computer?: RelayComputer }>;
   computerInfo(): RelayComputer | undefined;
   forwardedClient(remoteAddress: string | undefined, remotePort: number | undefined): ForwardedClient | null;
 }
 
+/** A computer redeeming a read-only link offers no token: the maker never calls it. */
 const offerSchema = boundary.object({
   computer: relayComputerSchema,
-  token: boundary.nonEmptyString,
+  token: boundary.optional(boundary.nonEmptyString),
   routes: boundary.optional(boundary.json),
 });
 const groupSchema = boundary.array(boundary.object({ id: boundary.nonEmptyString, name: boundary.nonEmptyString }));
-const previewSchema = boundary.object({ ok: boundary.literal(true), group: groupSchema, expiresAt: boundary.nonEmptyString });
+const previewSchema = boundary.object({ ok: boundary.literal(true), group: groupSchema, expiresAt: boundary.nonEmptyString, access: boundary.optional(readOnlyMarkSchema) });
 const exchangeSchema = boundary.object({
   ok: boundary.literal(true),
   token: boundary.nonEmptyString,
+  access: boundary.optional(readOnlyMarkSchema),
   computer: relayComputerSchema,
   linked: boundary.array(boundary.object({ computer: relayComputerSchema, token: boundary.nonEmptyString })),
   routes: boundary.optional(boundary.json),
@@ -48,7 +51,8 @@ const tokenSchema = boundary.object({ token: boundary.nonEmptyString });
  * The maker's side of a link or QR code, behind the pairing listener's `/pair/preview` and
  * `/pair/exchange`. A phone becomes a phone client; a computer that offers its own token becomes a
  * linked computer saved in `client.computers`, and every computer linked with this one hands it a
- * token too.
+ * token too. A read-only code runs one way: whoever redeems it gets read-only tokens, and nothing here
+ * is saved to call it.
  */
 export function createPairingRoute(deps: {
   host: PairingHost;
@@ -64,14 +68,15 @@ export function createPairingRoute(deps: {
       const self = host.computerInfo();
       if (!self) return { ok: false, status: 503, code: 'ERR_RELAY_NOT_READY', message: 'Phone access is still starting on this computer. Try again in a moment.' };
       const group = [{ id: self.id, name: self.name }, ...links.linked().map((profile) => ({ id: profile.relay.computerId, name: profile.label }))];
-      return { ok: true, group, expiresAt: checked.expiresAt };
+      return checked.access ? { ok: true, group, expiresAt: checked.expiresAt, access: checked.access } : { ok: true, group, expiresAt: checked.expiresAt };
     },
     exchange: async (request) => {
       if (request.computer === undefined) {
         const result = await host.exchangeSecret(request);
         if (!result.ok) return result;
-        deps.onPaired({ kind: 'phone', label: result.client.label });
-        return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, request.known ?? []) };
+        const { access } = result;
+        deps.onPaired(access ? { kind: 'phone', label: result.client.label, access } : { kind: 'phone', label: result.client.label });
+        return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId, access }, request.known ?? []) };
       }
       const offer = decodeOptionalBoundary(request.computer, offerSchema);
       if (!offer) return { ok: false, status: 400, code: 'ERR_PAIRING_BAD_REQUEST', message: 'The computer did not say who it is, so the code was not used.' };
@@ -81,9 +86,20 @@ export function createPairingRoute(deps: {
       } catch (error) {
         return { ok: false, status: 400, code: error instanceof PaneError ? error.code : 'ERR_PAIRING_BAD_REQUEST', message: reasonOf(error) };
       }
+      const { token } = offer;
+      if (token === undefined) {
+        const checked = host.checkSecret(request.secret, request.source);
+        if (!checked.ok) return checked;
+        if (checked.access !== 'read') return { ok: false, status: 400, code: 'ERR_PAIRING_BAD_REQUEST', message: 'The computer gave no token for this one to call it, so the code was not used.' };
+      }
       const result = await host.exchangeSecret({ ...request, label: offer.computer.name, computerId: offer.computer.id });
       if (!result.ok) return result;
-      const computerId = await links.saveComputer({ computer: offer.computer, token: offer.token, routes: decodeComputerRoutesReport(offer.routes) });
+      if (result.access === 'read' || token === undefined) {
+        deps.onPaired({ kind: 'computer', label: offer.computer.name, access: 'read' });
+        const [linked, routes] = await Promise.all([links.computerGrantsFor(offer.computer, request.known ?? [], 'read'), deps.routesReport()]);
+        return routes ? { ...result, linked, routes } : { ...result, linked };
+      }
+      const computerId = await links.saveComputer({ computer: offer.computer, token, routes: decodeComputerRoutesReport(offer.routes) });
       deps.onPaired({ kind: 'computer', label: offer.computer.name, computerId });
       const [linked, routes] = await Promise.all([links.computerGrantsFor(offer.computer, request.known ?? []), deps.routesReport()]);
       return routes ? { ...result, linked, routes } : { ...result, linked };
@@ -106,6 +122,7 @@ interface FetchedPreview {
   link: RelayPairingLink;
   group: Array<{ id: string; name: string }>;
   expiresAt: string;
+  access?: 'read';
 }
 
 function refusal(code: string, maker: string): PaneError {
@@ -134,7 +151,11 @@ export class ComputerLinking {
 
   /** Who the link joins this computer with, without spending it. */
   async preview(text: string): Promise<LinkPreview> {
-    const { group, expiresAt } = await this.fetchPreview(this.parse(text));
+    const { group, expiresAt, access } = await this.fetchPreview(this.parse(text));
+    if (access === 'read') {
+      // One way: nothing of this computer's group joins, so only the maker's side is named.
+      return { maker: group[0].name, makerGroup: group.map((member) => member.name), here: [], needsConfirm: true, expiresAt, access };
+    }
     const here = this.deps.links.linked();
     return {
       maker: group[0].name,
@@ -158,8 +179,9 @@ export class ComputerLinking {
         'Set the same Relay address in Settings › Remote Access › Phones and glasses on both computers, then copy a new link.');
     }
     if (link.computerId === self.id) throw new PaneError('ERR_RELAY_LINK_SELF', 'This is this computer\'s own link, so nothing was linked.', 'Open the link on another computer.');
-    const { group } = await this.fetchPreview(link);
+    const { group, access } = await this.fetchPreview(link);
     const maker = group[0].name;
+    if (access === 'read') return this.redeemReadOnly(link, self, group);
     const before = links.linked();
     const minted = await links.mintFor({ id: link.computerId, name: maker });
     let answer: { status: number; json: unknown };
@@ -204,6 +226,46 @@ export class ComputerLinking {
     return { linked: theirs.map((computer) => computer.name) };
   }
 
+  /**
+   * A read-only link, one way: saves the maker and the computers it shares as read-only, and gives
+   * none of them a token, a route or the names of this computer's own group.
+   */
+  private async redeemReadOnly(link: RelayPairingLink, self: RelayComputer, group: FetchedPreview['group']): Promise<LinkRedeemResult> {
+    const { links } = this.deps;
+    const maker = group[0].name;
+    const reached = new Set(links.reachable().map((profile) => profile.relay.computerId));
+    if (links.linked().some((profile) => profile.relay.computerId === link.computerId)) {
+      throw new PaneError('ERR_LINK_ALREADY_FULL', `This computer already has full access to ${maker}, so the read-only link was not used.`, `To watch ${maker} read-only instead, unlink it in Settings › Remote Access › Computers, then open the link again.`);
+    }
+    const offered: RelayComputer = { id: self.id, name: self.name, domain: self.domain, address: self.address, local: [], fingerprint: self.fingerprint };
+    const request: RelayExchangeRequest = {
+      secret: link.secret,
+      label: self.name,
+      // Only computers the maker named itself, so this computer's own group stays private.
+      known: group.slice(1).map((member) => member.id).filter((id) => reached.has(id)),
+      computer: { computer: offered },
+    };
+    let answer: { status: number; json: unknown };
+    try {
+      answer = await this.deps.post(relayComputerAddress(link), '/pair/exchange', request, maker);
+    } catch (error) {
+      throw new PaneError('ERR_LINK_UNREACHABLE', `Can't reach ${maker}: ${reasonOf(error)}. Nothing was linked.`, `Check that Pane is open on ${maker} with phone access on, then open the link again.`);
+    }
+    const result = decodeOptionalBoundary(answer.json, exchangeSchema);
+    if (!result || result.computer.id !== link.computerId || !isRelayComputerUnder(result.computer, link.domain)) {
+      throw result ? new PaneError('ERR_PAIRING_WRONG_COMPUTER', `A different computer answered for ${maker}, so nothing was linked.`, `Copy a new link from Add a device › Computer on ${maker}.`)
+        : refusal(decodeOptionalBoundary(answer.json, failureSchema)?.error.code ?? `HTTP_${answer.status}`, maker);
+    }
+    await links.saveComputer({ computer: result.computer, token: result.token, routes: decodeComputerRoutesReport(result.routes), access: 'read' });
+    const saved = [result.computer.name];
+    for (const { computer, token } of result.linked) {
+      if (computer.id === self.id || computer.id === result.computer.id || reached.has(computer.id) || !isRelayComputerUnder(computer, link.domain)) continue;
+      await links.saveComputer({ computer, token, linkedBy: maker, access: 'read' });
+      saved.push(computer.name);
+    }
+    return { linked: saved, access: 'read' };
+  }
+
   private parse(text: string): RelayPairingLink {
     const link = parseRelayPairingLink(text);
     if (!link) {
@@ -224,7 +286,9 @@ export class ComputerLinking {
     if (preview.group[0]?.id !== link.computerId) {
       throw new PaneError('ERR_PAIRING_WRONG_COMPUTER', `A different computer answered for ${link.name}, so nothing was linked.`, `Copy a new link from Add a device › Computer on ${link.name}.`);
     }
-    return { link, group: preview.group, expiresAt: preview.expiresAt };
+    const fetched: FetchedPreview = { link, group: preview.group, expiresAt: preview.expiresAt };
+    if (preview.access) fetched.access = preview.access;
+    return fetched;
   }
 
   private profileFor(relayId: string): LinkedComputer {

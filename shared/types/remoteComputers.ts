@@ -1,4 +1,5 @@
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../validation/boundaryDecoder';
+import { readOnlyMarkSchema, type ReadOnlyMark } from './accessLevel';
 import type { PaneRemoteConnectionImportPayload, RemotePaneConnectionProfile, RemoteRelayProfile } from './remoteDaemon';
 
 /**
@@ -41,6 +42,8 @@ export interface ComputerRoute {
   relay?: RemoteRelayProfile;
   /** SSH routes: the host alias or user@host, and the port Pane's host listens on there. */
   ssh?: { host: string; remotePort: number };
+  /** "read" when the token is a read-only device's, so this computer only watches; absent for full access. */
+  access?: ReadOnlyMark;
 }
 
 export interface RemoteComputer {
@@ -88,6 +91,7 @@ const routeSchema: BoundarySchema<ComputerRoute> = boundary.object({
     linkedBy: boundary.optional(boundary.nonEmptyString),
   })),
   ssh: boundary.optional(boundary.object({ host: boundary.nonEmptyString, remotePort: boundary.number })),
+  access: boundary.optional(readOnlyMarkSchema),
 });
 
 /** A saved computer with its routes and OS read separately, so a route or OS a later Pane added drops alone. */
@@ -235,6 +239,7 @@ export function routeFromProfile(profile: RemotePaneConnectionProfile, source?: 
   if (profile.tunnel) route.tunnel = profile.tunnel;
   if (profile.tailnetMachine) route.tailnetMachine = profile.tailnetMachine;
   if (profile.tailnetDomain) route.tailnetDomain = profile.tailnetDomain;
+  if (profile.access) route.access = profile.access;
   if (profile.relay) route.relay = { computerId: profile.relay.computerId, fingerprint: profile.relay.fingerprint };
   return route;
 }
@@ -251,6 +256,7 @@ export function routeProfile(computer: RemoteComputer, route: ComputerRoute): Re
   if (route.tunnel) profile.tunnel = route.tunnel;
   if (route.tailnetMachine) profile.tailnetMachine = route.tailnetMachine;
   if (route.tailnetDomain) profile.tailnetDomain = route.tailnetDomain;
+  if (route.access) profile.access = route.access;
   if (route.relay) {
     profile.relay = { computerId: route.relay.computerId, fingerprint: route.relay.fingerprint };
     if (computer.linkedBy) profile.relay.linkedBy = computer.linkedBy;
@@ -409,7 +415,7 @@ function httpsOrigin(address: string): string | undefined {
  * The routes a host reports for itself, all reached with the credential this computer already holds
  * there. Only `https:` addresses are kept, so the token never goes out in the clear.
  */
-export function foundRoutes(report: ComputerRoutesReport, token: string): ComputerRoute[] {
+export function foundRoutes(report: ComputerRoutesReport, token: string, access?: ReadOnlyMark): ComputerRoute[] {
   if (!token) return [];
   const routes: ComputerRoute[] = [];
   const relay = report.relay;
@@ -426,7 +432,7 @@ export function foundRoutes(report: ComputerRoutesReport, token: string): Comput
   const publicUrl = report.publicUrl && httpsOrigin(report.publicUrl);
   if (publicUrl) routes.push({ id: routeId('public', publicUrl), kind: 'public', source: 'found', baseUrl: publicUrl, token });
   if (relayAddress && pin) routes.push({ id: routeId('relay', relayAddress), kind: 'relay', source: 'found', baseUrl: relayAddress, token, relay: pin });
-  return routes;
+  return access ? routes.map((route) => ({ ...route, access })) : routes;
 }
 
 /**
@@ -450,7 +456,7 @@ export function applyRoutesReport(
     && via.relay.computerId === report.relay.id && via.relay.fingerprint === report.relay.fingerprint;
   const pinned = (route: ComputerRoute, record: RemoteComputer) => route.relay === undefined
     || record.routes.some((own) => own.relay?.computerId === route.relay?.computerId && own.relay?.fingerprint === route.relay?.fingerprint);
-  const found = foundRoutes(report, via.token).filter((route) => proven || pinned(route, computer));
+  const found = foundRoutes(report, via.token, via.access).filter((route) => proven || pinned(route, computer));
   const holder = computers.find((candidate) => candidate.id !== computerId && candidate.machineId === report.machineId);
   const confirmed = proven && holder !== undefined && reportNamesKeyOf(holder, report);
   if (computer.machineId && computer.machineId !== report.machineId && (!holder || confirmed)) {

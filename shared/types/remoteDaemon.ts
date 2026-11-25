@@ -1,3 +1,4 @@
+import { readOnlyMarkSchema, type ReadOnlyMark } from './accessLevel';
 import type { PaneChatAgent } from './paneChat';
 import type { ComputerRouteLabel } from './remoteComputers';
 import type { VoiceTranscriptionMode } from './voiceTranscription';
@@ -83,9 +84,11 @@ export interface RemoteDaemonClientRecord {
   lastUsedAt?: string;
   /**
    * "glasses": a Pane glasses app token, admitted only on the workspace listener with its narrow scope.
-   * "computer": a linked computer (QR pairing), with full access. Absent: a paired phone or client with full access.
+   * "computer": a linked computer (QR pairing). Absent: a paired phone or client.
    */
   kind?: 'glasses' | 'computer';
+  /** "read" for a device paired Read only; absent for full access. */
+  access?: ReadOnlyMark;
   /** The install id of the phone: for glasses, the phone that paired them; for a QR-paired phone, the phone itself. */
   phoneId?: string;
   /** Linked computers only: the computer's relay id. */
@@ -115,6 +118,8 @@ export interface RemotePaneConnectionProfile {
   tailnetDomain?: string;
   /** A computer reached through a relay (QR pairing): its id and key fingerprint. */
   relay?: RemoteRelayProfile;
+  /** "read" when the token is a read-only device's; absent for full access. */
+  access?: ReadOnlyMark;
 }
 
 export interface RemoteRelayProfile {
@@ -605,6 +610,7 @@ const remoteClientRecordSchema: BoundarySchema<RemoteDaemonClientRecord> = bound
   tokenHash: boundary.nonEmptyString,
   lastUsedAt: boundary.optional(boundary.nonEmptyString),
   kind: boundary.optional(boundary.enumeration('glasses', 'computer')),
+  access: boundary.optional(readOnlyMarkSchema),
   phoneId: boundary.optional(boundary.nonEmptyString),
   computerId: boundary.optional(boundary.nonEmptyString),
   linkedBy: boundary.optional(boundary.nonEmptyString),
@@ -632,6 +638,7 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
     fingerprint: boundary.nonEmptyString,
     linkedBy: boundary.optional(boundary.nonEmptyString),
   })),
+  access: boundary.optional(readOnlyMarkSchema),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {

@@ -29,10 +29,12 @@ const previewTargetSchema = boundary.union(
 );
 
 const peerRequestSchema = boundary.object({ peer: relayComputerSchema });
+const readGrantSchema = boundary.union(peerRequestSchema, boundary.object({ label: boundary.string, phoneId: boundary.optional(boundary.string) }));
+const readDeviceSchema = boundary.union(boundary.object({ computerId: boundary.nonEmptyString }), boundary.object({ phoneId: boundary.nonEmptyString }));
 const linkRequestSchema = boundary.object({ link: boundary.nonEmptyString });
 const unlinkRequestSchema = boundary.object({ computerId: boundary.nonEmptyString });
 const forgetRequestSchema = boundary.object({ computerId: boundary.nonEmptyString, keep: boundary.optional(boundary.array(boundary.string)) });
-const pairingCodeSchema = boundary.optional(boundary.object({ expiresIn: boundary.optional(boundary.enumeration('10m', '1h', '24h')) }));
+const pairingCodeSchema = boundary.optional(boundary.object({ expiresIn: boundary.optional(boundary.enumeration('10m', '1h', '24h')), access: boundary.optional(boundary.enumeration('read', 'full')) }));
 
 function onThisComputerOnly(): void {
   if (isRemotePaneCommand()) {
@@ -119,7 +121,8 @@ export function registerRelayCommands(
   // No argument: a 10-minute QR code shown on screen. A copied link names its lifetime.
   registry.register(RELAY_COMMANDS.pairingCode, (request: PaneCommandValue) => {
     onThisComputerOnly();
-    return relay.createPairingCode(decodeBoundary(request ?? undefined, pairingCodeSchema)?.expiresIn ?? '10m');
+    const wanted = decodeBoundary(request ?? undefined, pairingCodeSchema);
+    return relay.createPairingCode(wanted?.expiresIn ?? '10m', wanted?.access === 'read' ? 'read' : undefined);
   });
   registry.register(RELAY_COMMANDS.linkPreview, (request: PaneCommandValue) => {
     onThisComputerOnly();
@@ -157,6 +160,13 @@ export function registerRelayCommands(
   registry.register(RELAY_COMPUTER_COMMANDS.grantComputer, (request: PaneCommandValue, from: PaneCommandValue) => (
     links.grantComputer(decodeBoundary(request, peerRequestSchema).peer, caller(from))
   ));
+  registry.register(RELAY_COMPUTER_COMMANDS.grantRead, (request: PaneCommandValue, from: PaneCommandValue) => (
+    links.grantRead(decodeBoundary(request, readGrantSchema), caller(from))
+  ));
+  registry.register(RELAY_COMPUTER_COMMANDS.removeRead, async (request: PaneCommandValue, from: PaneCommandValue) => {
+    await links.removeRead(decodeBoundary(request, readDeviceSchema), caller(from));
+    return null;
+  });
   registry.register(RELAY_COMPUTER_COMMANDS.removePhone, async (request: PaneCommandValue, from: PaneCommandValue) => {
     await links.removePhone(decodeBoundary(request, boundary.object({ phoneId: boundary.nonEmptyString })).phoneId, caller(from));
     return null;
@@ -169,13 +179,16 @@ export function registerRelayCommands(
 
   registry.register(RELAY_COMMANDS.linkedComputers, () => {
     onThisComputerOnly();
-    return links.linked().map((profile) => ({
-      id: profile.relay.computerId,
-      name: profile.label,
-      address: profile.baseUrl,
-      token: profile.token,
-      fingerprint: profile.relay.fingerprint,
-    }));
+    return links.reachable().map((profile) => {
+      const computer = {
+        id: profile.relay.computerId,
+        name: profile.label,
+        address: profile.baseUrl,
+        token: profile.token,
+        fingerprint: profile.relay.fingerprint,
+      };
+      return profile.access ? { ...computer, access: profile.access } : computer;
+    });
   });
 
   // Desktop only: Remote Access › Phones and glasses.

@@ -72,6 +72,7 @@ import { SessionActivityService, type SessionActivityMembers } from './sessionAc
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { agentReportData, readPanelAgentReport } from './agentReport';
 import { paneChatFirstPrompt } from './paneChatMigrateOffer';
+import { readOnlyPaneCaller } from '../daemon/commandRegistry';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import type { SessionMoveMark } from '../../../shared/types/sessionMove';
 import { releaseMoveHolds } from './sessionMove/restore';
@@ -320,6 +321,12 @@ export class OrchestrationSessionManager extends EventEmitter {
       }
       if (record.move?.state === 'arriving') {
         throw new PaneError('ERR_SESSION_ARRIVING', `Session ${record.name} is still arriving from ${record.move.machine}, so it can't open yet.`, `Wait for the move to finish on ${record.move.machine}.`);
+      }
+      if (readOnlyPaneCaller()) {
+        // A read-only device's view creates no tab and moves no one's last-used tab.
+        const shown = panelManager.getPanel(record.panelIds[record.agent]);
+        if (!shown) throw new PaneError('ERR_SESSION_NOT_OPENED', `Session ${record.name} has no agent tab yet, and a read-only device can't open one.`, 'Ask the computer\'s owner to open the Session there, then try again.');
+        return await this.viewFromRecord(record, shown);
       }
       this.createInternalSession(record);
       const panel = await this.ensurePanelForAgent(record);

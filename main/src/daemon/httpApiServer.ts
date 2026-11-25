@@ -22,9 +22,8 @@ export type { WorkspaceAccessPolicy } from './auth';
 import { isPaneDaemonEventChannel } from './server';
 import { readingMachines } from './readingMachines';
 import { remoteEventStreams } from './remoteEventStreams';
+import { mayInvoke, mayReceive, readableEvent, readableResult, readOnlyAnswer, readOnlyRefusal, type CallerAccess } from './accessLevel';
 import {
-  GLASSES_CHANNELS,
-  GLASSES_EVENT_CHANNELS,
   glassesKeyInput, glassesSubmitInput,
   glassesSessionInput,
   glassesSource,
@@ -32,6 +31,7 @@ import {
   type GlassesFailureReason,
 } from './glassesAccess';
 import { GLASSES_COMMANDS, GLASSES_TOKEN_PREFIX, GLASSES_WEBSOCKET_PROTOCOL } from '../../../shared/types/glasses';
+import type { ReadOnlyMark } from '../../../shared/types/accessLevel';
 import type { RelayComputer, RelayComputerGrant } from '../../../shared/types/relay';
 import {
   createDefaultRemoteDaemonConfig,
@@ -91,17 +91,19 @@ interface ConnectedRemoteEventClient {
   remoteAddress: string | null;
   connectedAt: string;
   heartbeatTimer: NodeJS.Timeout;
+  /** What the stream carries: everything, the read-only events, or the glasses ones. */
+  access: CallerAccess;
   /** What a workspace client signed in with, checked again before each event it receives. */
   workspaceCredentials: WorkspaceCredentials | null;
   /**
-   * Set for the Pane glasses app to the origin it came in with: its stream carries only
-   * GLASSES_EVENT_CHANNELS, and ends when that origin is no longer allowed.
+   * Set for the Pane glasses app to the origin it came in with: its stream ends when that origin
+   * is no longer allowed.
    */
   glassesOrigin: string | null;
 }
 
 /** Who signed in, kept so access can be checked again after the request was admitted. */
-type AdmittedIdentity = Pick<ConnectedRemoteEventClient, 'remoteClientId' | 'remoteClientTokenHash' | 'workspaceCredentials' | 'glassesOrigin'>;
+type AdmittedIdentity = Pick<ConnectedRemoteEventClient, 'remoteClientId' | 'remoteClientTokenHash' | 'access' | 'workspaceCredentials' | 'glassesOrigin'>;
 
 interface WorkspaceRefusal {
   statusCode: number;
@@ -118,12 +120,12 @@ interface GlassesAdmission {
 }
 
 function glassesIdentity(client: NonNullable<GlassesAdmission['client']>): AdmittedIdentity {
-  return { remoteClientId: client.id, remoteClientTokenHash: client.tokenHash, workspaceCredentials: null, glassesOrigin: client.origin };
+  return { remoteClientId: client.id, remoteClientTokenHash: client.tokenHash, access: 'glasses', workspaceCredentials: null, glassesOrigin: client.origin };
 }
 
-/** Glasses streams get only the glasses channels; every other stream gets every daemon event. */
-function receives(client: ConnectedRemoteEventClient, channel: string): boolean {
-  return client.glassesOrigin === null || GLASSES_EVENT_CHANNELS.has(channel);
+/** The level an authenticated request runs at. Glasses take their own path and never reach this. */
+function accessOf(auth: RemoteRequestAuthResult): CallerAccess {
+  return auth.ok && auth.client?.access === 'read' ? 'read' : 'full';
 }
 
 interface WorkspaceCredentials {
@@ -157,6 +159,8 @@ interface RemoteReadyEventPayload {
   machineId?: string;
   /** This host's routes (D-51), saved by the client as found automatically. Hosts before it omit it. */
   computer?: ComputerRoutesReport;
+  /** Set when this device is paired Read only, so its client shows no controls. Full access, and hosts before it, omit it. */
+  access?: ReadOnlyMark;
   /** This host sends `workspace:entry` events, so a Session on another computer hears its members. Hosts before it omit it. */
   workspaceEntries: true;
 }
@@ -176,6 +180,8 @@ type RemoteRequestAuthResult =
       label: string;
       /** "computer" for a computer linked through QR pairing. */
       kind?: 'glasses' | 'computer';
+      /** "read" for a device paired Read only; absent for full access. */
+      access?: ReadOnlyMark;
     } | null;
   }
   | {
@@ -293,11 +299,11 @@ type PairingRefusal = { ok: false; status: number; code: string; message: string
 
 /** The new token, what the caller stores about this computer, and the computers it may now reach. */
 type PairingRouteResult =
-  | { ok: true; token: string; client: { id: string }; computer?: RelayComputer; linked?: RelayComputerGrant[]; routes?: ComputerRoutesReport }
+  | { ok: true; token: string; client: { id: string }; access?: ReadOnlyMark; computer?: RelayComputer; linked?: RelayComputerGrant[]; routes?: ComputerRoutesReport }
   | PairingRefusal;
 
 /** Whose code it is, without spending it: this computer, then every computer linked with it. */
-type PairingPreviewResult = { ok: true; group: Array<{ id: string; name: string }>; expiresAt: string } | PairingRefusal;
+type PairingPreviewResult = { ok: true; group: Array<{ id: string; name: string }>; expiresAt: string; access?: ReadOnlyMark } | PairingRefusal;
 
 export interface PairingRoute {
   exchange(request: PairingRequest): Promise<PairingRouteResult>;
@@ -422,14 +428,18 @@ export class PaneRemoteHttpApiServer {
             return;
           }
 
+          const eventArgs = serializeJsonTransport(args, boundary.array(boundary.json));
           const payload: RemoteDaemonEventEnvelope = {
             channel,
-            args: serializeJsonTransport(args, boundary.array(boundary.json)),
+            args: eventArgs,
             timestamp: new Date().toISOString(),
           };
 
+          const readable = mayReceive('read', channel) ? readableEvent(channel, eventArgs) : null;
+          const readPayload = readable && readable !== eventArgs ? { ...payload, args: readable } : payload;
+
           for (const [clientConnectionId, client] of this.eventClients) {
-            if (!receives(client, channel)) {
+            if (!mayReceive(client.access, channel) || (client.access === 'read' && !readable)) {
               continue;
             }
             if (!this.isStillAdmitted(client)) {
@@ -438,7 +448,7 @@ export class PaneRemoteHttpApiServer {
             }
 
             try {
-              writeSseEvent(client.stream, 'daemon-event', payload);
+              writeSseEvent(client.stream, 'daemon-event', client.access === 'read' ? readPayload : payload);
             } catch {
               this.dropEventClient(clientConnectionId);
             }
@@ -459,7 +469,7 @@ export class PaneRemoteHttpApiServer {
 
   /** Whether a connected event stream receives `channel`. */
   hasEventSubscriber(channel: string): boolean {
-    return isPaneDaemonEventChannel(channel) && [...this.eventClients.values()].some(client => receives(client, channel));
+    return isPaneDaemonEventChannel(channel) && [...this.eventClients.values()].some(client => mayReceive(client.access, channel));
   }
 
   getConnectedClients(): RemoteDaemonConnectedClient[] {
@@ -636,6 +646,10 @@ export class PaneRemoteHttpApiServer {
       writeRawHttpError(socket, auth.statusCode, auth.error.message);
       return;
     }
+    if (auth && accessOf(auth) === 'read') {
+      this.refuseReadOnlyUpgrade(socket, 'voice');
+      return;
+    }
 
     const deepgramApiKey = firstNonEmpty(this.configManager.getConfig().deepgramApiKey, process.env.DEEPGRAM_API_KEY);
     if (!deepgramApiKey) {
@@ -665,6 +679,10 @@ export class PaneRemoteHttpApiServer {
     const auth = this.authenticateRequest(request, url.searchParams.get('access_token'));
     if (!auth.ok) {
       writeRawHttpError(socket, auth.statusCode, auth.error.message, auth.error.code);
+      return;
+    }
+    if (accessOf(auth) === 'read') {
+      this.refuseReadOnlyUpgrade(socket, 'port forwarding');
       return;
     }
     // Node drops its own error listener on upgrade; a client that resets during the read would
@@ -703,11 +721,17 @@ export class PaneRemoteHttpApiServer {
     });
   }
 
+  private refuseReadOnlyUpgrade(socket: Duplex, what: string): void {
+    const refusal = readOnlyRefusal(what);
+    writeRawHttpError(socket, 403, `${refusal.message} ${refusal.next}`, refusal.code);
+  }
+
   /** Who an admitted WebSocket belongs to, so a later revoke or narrower access closes it. */
   private admittedIdentity(request: IncomingMessage, auth: Extract<RemoteRequestAuthResult, { ok: true }>, url: URL): AdmittedIdentity {
     return {
       remoteClientId: auth.client?.id ?? null,
       remoteClientTokenHash: auth.client?.tokenHash ?? null,
+      access: accessOf(auth),
       workspaceCredentials: this.workspace
         ? {
           login: request.headers['tailscale-user-login'],
@@ -990,6 +1014,22 @@ export class PaneRemoteHttpApiServer {
       throw error;
     }
 
+    // The header check only sizes the upload; access can change while the body arrives.
+    const auth = this.authenticateRequest(request, headerAuth.ok ? undefined : invokeRequest.token);
+    const access = accessOf(auth);
+    if (auth.ok && access === 'read') {
+      const answer = readOnlyAnswer(invokeRequest.channel);
+      if (answer !== undefined) {
+        this.writeJson(response, 200, { ok: true, result: answer } satisfies RemoteInvokeSuccessPayload);
+        return;
+      }
+      if (!mayInvoke(access, invokeRequest.channel)) {
+        // 409, not 403: clients take a 401 or 403 on /invoke to mean their sign-in was rejected, and stop the connection.
+        this.writeJson(response, 409, { ok: false, error: readOnlyRefusal(invokeRequest.channel) } satisfies RemoteInvokeErrorPayload);
+        return;
+      }
+    }
+
     // The glasses app pairs here with only its pairing secret, which the owner's paired phone minted.
     if (invokeRequest.channel === GLASSES_COMMANDS.pair && this.glasses && !this.workspace) {
       const refusal = this.admitGlasses(request, this.glasses, null, request.url ?? '/');
@@ -1002,8 +1042,6 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
-    // The header check only sizes the upload; access can change while the body arrives.
-    const auth = this.authenticateRequest(request, headerAuth.ok ? undefined : invokeRequest.token);
     if (!auth.ok) {
       this.writeJson(response, auth.statusCode, auth);
       return;
@@ -1064,11 +1102,14 @@ export class PaneRemoteHttpApiServer {
     // A teammate the workspace lets in may use this computer, but never its Pane secrets.
     // A paired token is the owner's own device, whichever Tailscale login carried it.
     const teammate = ownerIdentity && !this.workspaceOwnerLogin(request) ? login || 'another tailnet user' : null;
-    await this.respondToInvoke(request, response, invokeRequest.requestId, auth.client?.id ?? (login ? `login:${login}` : 'open'), () => this.commandRegistry.invokeRemote(
-      invokeRequest.channel,
-      this.getInvokeArgsForRequest(invokeRequest, auth, request),
-      { teammate, caller: invokeRequest.caller },
-    ));
+    await this.respondToInvoke(request, response, invokeRequest.requestId, auth.client?.id ?? (login ? `login:${login}` : 'open'), async () => {
+      const result = await this.commandRegistry.invokeRemote(
+        invokeRequest.channel,
+        this.getInvokeArgsForRequest(invokeRequest, auth, request),
+        { teammate, readOnly: access === 'read', caller: invokeRequest.caller },
+      );
+      return access === 'read' ? readableResult(invokeRequest.channel, serializeJsonTransport(result ?? null, boundary.json)) : result;
+    });
   }
 
   /** Answers a write; one carrying a `requestId` runs once per client and id, and a repeat gets the first answer. */
@@ -1104,6 +1145,10 @@ export class PaneRemoteHttpApiServer {
     const auth = this.authenticateRequest(request);
     if (!auth.ok) {
       this.writeJson(response, auth.statusCode, auth);
+      return;
+    }
+    if (accessOf(auth) === 'read') {
+      this.writeJson(response, 403, { ok: false, error: readOnlyRefusal('file previews') } satisfies RemoteInvokeErrorPayload);
       return;
     }
     const abort = new AbortController();
@@ -1187,6 +1232,8 @@ export class PaneRemoteHttpApiServer {
       deduplicatesRequestIds: true,
       workspaceEntries: true,
     };
+    const access: CallerAccess = glassesClient ? 'glasses' : accessOf(auth);
+    if (access === 'read') ready.access = 'read';
     if (this.paneVersion) ready.paneVersion = this.paneVersion;
     const hostMachineId = this.configManager.getConfig().machineId;
     if (hostMachineId) ready.machineId = hostMachineId;
@@ -1205,11 +1252,12 @@ export class PaneRemoteHttpApiServer {
       stream,
       remoteClientId: auth.client?.id ?? null,
       remoteClientTokenHash: auth.client?.tokenHash ?? null,
+      access,
       label: auth.client?.label ?? getClientLabelFromRequest(request, url.searchParams.get('client_label')),
       deviceLabel: getClientDeviceLabelFromHeaders(request),
       remoteRuntimeId: getRemoteRuntimeIdFromRequest(request, url.searchParams.get('runtime_id')),
       readerMachineId: glassesClient ? null : this.readerMachineId(request, auth),
-      shown: !getSingleHeaderValue(request.headers['x-pane-machine-id'])?.trim(),
+      shown: access !== 'read' && !getSingleHeaderValue(request.headers['x-pane-machine-id'])?.trim(),
       remoteAddress: getRemoteAddress(request),
       connectedAt,
       heartbeatTimer,
@@ -1413,7 +1461,7 @@ export class PaneRemoteHttpApiServer {
       refuse(401, 'ERR_GLASSES_TOKEN_REQUIRED', 'Glasses need their device token for this.', 'Pair again from the Pane app: Settings › Glasses › Pair glasses.');
       return;
     }
-    if (!GLASSES_CHANNELS.has(channel)) {
+    if (!mayInvoke('glasses', channel)) {
       this.glassesRefused(glasses, admission.source, 'channel', channel);
       refuse(403, 'ERR_GLASSES_CHANNEL_REFUSED', `Glasses can't run ${channel}; they can list Panes, read and type into terminals, dictate, answer Notify and start a Session.`);
       return;
@@ -1669,6 +1717,10 @@ export class PaneRemoteHttpApiServer {
       return Boolean(glasses && remoteClientId && remoteClientTokenHash && !this.funnelRefusesGlasses(glasses)
         && glasses.isCurrent(remoteClientId, remoteClientTokenHash) && glasses.allowsOrigin(client.glassesOrigin));
     }
+    if (client.access === 'read' && this.workspace) {
+      // A read-only device is admitted by its token alone, whichever Tailscale login carried it.
+      return this.hasClient(remoteClientId, remoteClientTokenHash);
+    }
     if (this.workspace) {
       // Narrower visibility or a new password applies to clients that are already connected.
       return workspaceCredentials !== null && authenticateWorkspaceRequest(
@@ -1686,14 +1738,13 @@ export class PaneRemoteHttpApiServer {
       return true;
     }
 
-    if (!remoteClientId || !remoteClientTokenHash) {
-      return false;
-    }
+    return this.hasClient(remoteClientId, remoteClientTokenHash);
+  }
 
-    return remoteConfig.host.clients.some((client) => (
-      client.id === remoteClientId &&
-      client.tokenHash === remoteClientTokenHash
-    ));
+  /** Whether the device is still paired with this computer, by the token it signed in with. */
+  private hasClient(id: string | null, tokenHash: string | null): boolean {
+    if (!id || !tokenHash) return false;
+    return this.getRemoteConfig().host.clients.some((client) => client.id === id && client.tokenHash === tokenHash);
   }
 
   private dropEventClient(clientConnectionId: string): void {
@@ -1784,6 +1835,7 @@ export class PaneRemoteHttpApiServer {
   private readerMachineId(request: IncomingMessage, auth: Extract<RemoteRequestAuthResult, { ok: true }>): string | null {
     const machineId = getSingleHeaderValue(request.headers['x-pane-machine-id'])?.trim().slice(0, 128);
     if (!machineId) return null;
+    if (accessOf(auth) === 'read') return null;
     const trusted = this.workspace ? this.workspaceOwnerLogin(request) !== null : Boolean(auth.client);
     return trusted ? machineId : null;
   }

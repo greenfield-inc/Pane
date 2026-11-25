@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
+import type { ReadOnlyMark } from '../../../shared/types/accessLevel';
 import type { RemoteDaemonClientRecord } from '../../../shared/types/remoteDaemon';
 
 interface RemoteDaemonAuthSuccess {
@@ -25,6 +26,14 @@ export function hashRemoteDaemonToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+/**
+ * The hash a device's record keeps. A read-only device's is over a tagged token, so a Pane from
+ * before access levels, which ignores `access`, refuses the token instead of taking it as full access.
+ */
+export function hashDeviceToken(token: string, access?: ReadOnlyMark): string {
+  return hashRemoteDaemonToken(access === 'read' ? `read:${token}` : token);
+}
+
 export function authenticateRemoteDaemonBearerToken(
   authorizationHeader: string | string[] | undefined,
   clients: readonly RemoteDaemonClientRecord[],
@@ -41,8 +50,9 @@ export function authenticateRemoteDaemonBearerToken(
     };
   }
 
-  const tokenHash = hashRemoteDaemonToken(token);
-  const client = clients.find((candidate) => safeTokenHashEquals(candidate.tokenHash, tokenHash));
+  const fullHash = hashDeviceToken(token);
+  const readHash = hashDeviceToken(token, 'read');
+  const client = clients.find((candidate) => safeTokenHashEquals(candidate.tokenHash, candidate.access === 'read' ? readHash : fullHash));
   if (!client) {
     return {
       ok: false,
