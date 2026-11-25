@@ -245,6 +245,10 @@ function App() {
       openApprovals();
       return;
     }
+    if ('resources' in target) {
+      useNavigationStore.getState().navigateToResources(target.resources);
+      return;
+    }
     if ('link' in target) {
       // A link from a floating card: show the Pane it came from, then open the link beside it.
       void useSessionStore.getState().setActiveSession(target.paneId).then(() => openLink(target.link, target.paneId));

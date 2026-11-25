@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PaneCommandRegistry, paneCommandCaller, type PaneCommandValue } from '../daemon/commandRegistry';
 import { AutopilotManager } from '../services/autopilot/autopilotManager';
 import { NotifyQueue } from '../services/notify/notifyQueue';
-import { DEFAULT_NOTIFY_SETTINGS } from '../../../shared/types/notify';
+import { DEFAULT_NOTIFY_SETTINGS, NOTIFY_PAGE_LIMIT_BYTES } from '../../../shared/types/notify';
 import { parsePaneDaemonFrame, type PaneDaemonCaller } from '../../../shared/types/daemon';
 import { readDocument, refusePersonOnly } from './autopilot';
 
@@ -158,6 +158,33 @@ describe('autopilot:read-doc', () => {
     const file = page();
     expect(readDocument(manager, file, { inline: true })).toMatchObject({ kind: 'missing', message: "This file is not on Autopilot's stack." });
     expect(readDocument(manager, file, { inline: true, links: () => [file] }).kind).toBe('html');
+  });
+
+  // T-76: a Session's review page inlines its screenshots (6.6 MB on the person's Mac mini). Another
+  // machine reads it inline, so a page refused here was a card whose file never opened on the desktop.
+  it('gives another machine a linked review page of several MiB, with its screenshots inlined', () => {
+    const file = path.join(root, 'linked', 'review', 'index.html');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const shot = `<img src="data:image/png;base64,${'A'.repeat(1024 * 1024)}">`;
+    const html = `<!doctype html><h1>PR 4 review</h1>${shot.repeat(6)}`;
+    fs.writeFileSync(file, html);
+    expect(readDocument(manager, file, { inline: true, links: () => [file] })).toMatchObject({ kind: 'html', path: file, html });
+  });
+
+  it('refuses a page past the inline limit by naming the limit, which another machine reads as too large, not gone', () => {
+    const file = path.join(root, 'linked', 'huge.html');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, Buffer.alloc(NOTIFY_PAGE_LIMIT_BYTES + 1, 'a'));
+    expect(readDocument(manager, file, { inline: true, links: () => [file] })).toMatchObject({ kind: 'missing', message: 'huge.html is larger than 16 MiB; open it in Pane instead.' });
+    // The desktop on this machine still opens it from its file URL, whatever its size.
+    expect(readDocument(manager, file, { links: () => [file] })).toMatchObject({ kind: 'html', url: expect.stringMatching(/^file:/) });
+  });
+
+  it('keeps the 2 MiB limit for a text file', () => {
+    const file = path.join(root, 'linked', 'big.log');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, Buffer.alloc(2 * 1024 * 1024 + 1, 'a'));
+    expect(readDocument(manager, file, { inline: true, links: () => [file] })).toMatchObject({ kind: 'missing', message: 'big.log is larger than 2 MiB; open it in Pane instead.' });
   });
 
   it('serves an SVG as an image data URL, which an <img> shows without running its scripts', () => {

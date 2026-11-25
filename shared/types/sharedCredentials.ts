@@ -127,7 +127,7 @@ export interface SharedNotifySwitch {
   cardsOn?: NotifyCardsOn | null;
   /** Epoch ms `cardsOn` last changed, on the host where the person changed it; 0 if never. Hosts from before it omit it. */
   cardsOnChangedAt?: number;
-  /** Settings › Machine health › Cards and notifications; a host from before it omits it. */
+  /** Settings › Machine health › Cards and notifications; omitted until somebody chooses, and by a host from before it. */
   healthNotifications?: boolean;
   /** Epoch ms `healthNotifications` last changed, on the host where the person changed it; 0 if never. Hosts from before it omit it. */
   healthNotificationsChangedAt?: number;
@@ -173,7 +173,7 @@ export function mergeNotifySwitch(current: SharedNotifySwitch, incoming: SharedN
   let notifySwitch = current;
   if (isNewerNotifySwitch(incoming, current)) notifySwitch = { ...notifySwitch, enabled: incoming.enabled, changedAt: incoming.changedAt };
   if (isNewerCardsOn(incoming, current)) notifySwitch = { ...notifySwitch, cardsOn: incoming.cardsOn ?? null, cardsOnChangedAt: incoming.cardsOnChangedAt };
-  if (isNewerHealthNotifications(incoming, current)) notifySwitch = { ...notifySwitch, healthNotifications: incoming.healthNotifications ?? true, healthNotificationsChangedAt: incoming.healthNotificationsChangedAt };
+  if (isNewerHealthNotifications(incoming, current)) notifySwitch = { ...notifySwitch, healthNotifications: incoming.healthNotifications ?? false, healthNotificationsChangedAt: incoming.healthNotificationsChangedAt };
   return { notifySwitch, changed: notifySwitch !== current };
 }
 

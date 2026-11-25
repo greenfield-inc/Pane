@@ -10,7 +10,7 @@ export type MachineDoc =
   /** An image file (a to-do's screenshot, say), as a `data:image/…` URL. */
   | { kind: 'image'; dataUrl: string }
   | { kind: 'missing' }
-  /** Over the holding machine's 2 MiB limit for sending a file: it's there, just not sent. */
+  /** Over the holding machine's limit for sending a file (2 MiB of text, 16 MiB for a page): it's there, just not sent. */
   | { kind: 'too-large' }
   | { kind: 'unreachable' };
 
@@ -44,8 +44,8 @@ function decodeDoc(answer: Awaited<ReturnType<NotifyMachineRead>>['data']): Mach
   if (image) return /^data:image\/[a-z0-9.+-]+;base64,/iu.test(image.dataUrl) ? { kind: 'image', dataUrl: image.dataUrl } : { kind: 'unreachable' };
   const missing = decodeOptionalBoundary(answer, missingSchema);
   if (!missing) return { kind: 'unreachable' };
-  // `readDocument` refuses a file over its limit with this wording; the file itself is still there.
-  return /larger than 2 MiB/u.test(missing.message ?? '') ? { kind: 'too-large' } : { kind: 'missing' };
+  // `readDocument` refuses a file over its limit (2 MiB for text, more for a page) with this wording; the file itself is still there.
+  return /is larger than \d+ MiB; open it in Pane instead\.$/u.test(missing.message ?? '') ? { kind: 'too-large' } : { kind: 'missing' };
 }
 
 /** Reads a linked file from the item's machine (a to-do's attachment passes its to-do's). Never rejects: a failed read is a state. */
@@ -70,7 +70,7 @@ export async function readMachineDoc(item: Pick<NotifyItem, 'machineId'>, path: 
 /** The one line a document that didn't load shows. */
 export function machineDocFailure(doc: MachineDoc, label: string, machine: string): string | undefined {
   if (doc.kind === 'missing') return `${label} isn't on ${machine} anymore`;
-  if (doc.kind === 'too-large') return `${label} is larger than 2 MiB, too big to show from another machine: open it on ${machine}`;
+  if (doc.kind === 'too-large') return `${label} is too big to show from another machine: open it on ${machine}`;
   if (doc.kind === 'unreachable') return `Couldn't reach ${machine}`;
   return undefined;
 }

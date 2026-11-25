@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from '../configManager';
 import type { AppConfig } from '../../types/config';
@@ -86,6 +86,66 @@ describe('NotifyService in-use poll', () => {
     reads = 0;
     await vi.advanceTimersByTimeAsync(10_000);
     expect(reads).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('NotifyService in the background', () => {
+  let dictate = false;
+  it('sends one system notification per question, whose click opens it in Approvals, and counts what waits on the app badge', async () => {
+    vi.stubEnv('PANE_DISABLE_OS_INTEGRATION', '1');
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
+    const navigated = vi.fn();
+    // The main window, with only what navigating uses.
+    const window: BrowserWindow = Object.assign(Object.create(BrowserWindow.prototype), { isDestroyed: () => false, isMinimized: () => false, restore: () => {}, show: () => {}, focus: () => {}, webContents: { send: navigated } });
+    class FakeConfigManager extends EventEmitter {
+      getConfig(): AppConfig { return { machineId: 'mini' }; }
+    }
+    const alerts: Array<{ title: string; body: string; click: () => void }> = [];
+    const service = new NotifyService({
+      // SAFETY: NotifyService reads only getConfig() and 'config-updated' from its ConfigManager.
+      configManager: new FakeConfigManager() as ConfigManager,
+      getMainWindow: () => window,
+      findPane: () => undefined,
+      rendererArguments: () => [],
+      headless: false,
+      machine: 'mini',
+      publish: () => {},
+      sendToMachine: async () => {},
+      refreshMachine: async () => {},
+      alert: (title, body, click) => { alerts.push({ title, body, click }); },
+      dictateShowsTabs: () => dictate,
+      isChatTab: (panelId) => panelId === 'chat-1',
+    });
+    const settle = () => new Promise(resolve => setImmediate(() => setImmediate(resolve)));
+    try {
+      void service.queue.ask({ question: { ui: 'ask', title: 'Ship it?' }, source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 't1' } });
+      await settle();
+      service.queue.setActiveMachine('devbox');
+      await settle();
+      expect(alerts.map(({ title, body }) => [title, body])).toEqual([['feature needs your answer', 'Ship it?']]);
+      expect(app.setBadgeCount).toHaveBeenLastCalledWith(1);
+
+      const id = service.queue.snapshot().queue[0];
+      alerts[0].click();
+      expect(navigated).toHaveBeenCalledWith('notify:navigate', { approval: id });
+
+      service.queue.run({ type: 'close', id });
+      await settle();
+      expect(app.setBadgeCount).toHaveBeenLastCalledWith(0);
+
+      // While Dictate shows this computer's blocked tabs, a tab's prompt is left to it; anything else still notifies.
+      dictate = true;
+      service.queue.setActiveMachine('local');
+      void service.queue.ask({ question: { ui: 'options', title: 'Run npm test?', choices: [{ label: 'Yes' }, { label: 'No' }], agentPrompt: { yes: 'Yes', no: 'No' } }, source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 't1' } });
+      void service.queue.ask({ question: { ui: 'ask', title: 'Which colour?' }, source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 'chat-1' } });
+      void service.queue.ask({ question: { ui: 'ask', title: 'Deploy now?' }, source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 't2' } });
+      await settle();
+      expect(alerts.slice(1).map(({ title, body }) => [title, body])).toEqual([['feature needs your answer', 'Deploy now?']]);
+    } finally {
+      service.dispose();
+      vi.restoreAllMocks();
+      vi.unstubAllEnvs();
+    }
   });
 });
 

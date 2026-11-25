@@ -1,5 +1,5 @@
 import { cn } from '../../utils/cn';
-import { QR_PAPER, QrCode, TestFlightLine } from './QrCode';
+import { QR_PAPER, QrCode, AppStoreLine } from './QrCode';
 
 /** Add a device › Wearables: glasses pair through the phone app, so the code opens its Glasses screen. */
 export function WearablesTab({ domain }: { domain: string }) {
@@ -19,7 +19,7 @@ export function WearablesTab({ domain }: { domain: string }) {
           Or open Pane on your phone:{' '}
           <span className="rounded bg-surface-secondary px-1.5 py-0.5 font-mono text-xs text-text-primary">Settings › Glasses › Pair glasses</span>
         </p>
-        <TestFlightLine />
+        <AppStoreLine />
       </div>
     </div>
   );

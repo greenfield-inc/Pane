@@ -133,14 +133,15 @@ export const sharedNotifySwitchSchema: BoundarySchema<SharedNotifySwitch> = boun
   healthNotificationsChangedAt: boundary.optional(boundary.number),
 });
 
-/** This host's Approvals switch, "Show cards on" and machine health Notifications. A missing switch means on; an off saved before sharing existed has time 0. */
+/** This host's Approvals switch, "Show cards on" and machine health Notifications. A missing Approvals switch means on; an off saved before sharing existed has time 0. */
 export function readNotifySwitch(config: AppConfig): SharedNotifySwitch {
   return {
     enabled: config.notify?.enabled ?? true,
     changedAt: config.notifyEnabledChangedAt ?? 0,
     cardsOn: config.notify?.cardsOn ?? null,
     cardsOnChangedAt: config.notifyCardsOnChangedAt ?? 0,
-    healthNotifications: config.machineHealth?.notifications !== false,
+    // Left out until somebody chooses, so a default never overwrites another host's choice.
+    ...(config.machineHealth?.notifications !== undefined && { healthNotifications: config.machineHealth.notifications }),
     healthNotificationsChangedAt: config.machineHealthNotificationsChangedAt ?? 0,
   };
 }
@@ -190,7 +191,7 @@ export async function applyNotifySwitch(configManager: ConfigManager, incoming: 
       patch.notifyCardsOnChangedAt = merged.cardsOnChangedAt;
     }
     if (merged.healthNotificationsChangedAt !== current.healthNotificationsChangedAt || merged.healthNotifications !== current.healthNotifications) {
-      patch.machineHealth = { notifications: merged.healthNotifications !== false };
+      patch.machineHealth = { notifications: merged.healthNotifications ?? false };
       patch.machineHealthNotificationsChangedAt = merged.healthNotificationsChangedAt;
     }
     if (Object.keys(notify).length > 0) patch.notify = notify;

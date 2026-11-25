@@ -615,7 +615,7 @@ test.describe('Settings → Approvals', () => {
     await boot(page);
     await openApprovalsSettings(page);
     await expect(page.getByRole('switch', { name: 'Approvals' })).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'false');
     await expect(page.getByRole('radio', { name: 'Bottom center' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('switch', { name: 'Sound' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('combobox', { name: 'Updates hide after' })).toContainText('6 seconds');
@@ -624,10 +624,10 @@ test.describe('Settings → Approvals', () => {
     await expect(instructionFiles.filter({ hasText: 'Codex' })).toContainText('Not found');
 
     await page.getByRole('switch', { name: 'Show outside Pane' }).click();
-    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'true');
     await page.getByRole('radio', { name: 'Top right' }).click();
     await expect.poll(() => configUpdates(page)).toEqual([
-      { notify: { showOutsidePane: false } },
+      { notify: { showOutsidePane: true } },
       { notify: { position: 'top-right' } },
     ]);
   });
@@ -636,10 +636,10 @@ test.describe('Settings → Approvals', () => {
     await boot(page);
     await openApprovalsSettings(page);
     const fromTray = notifyFixture();
-    fromTray.settings.showOutsidePane = false;
+    fromTray.settings.showOutsidePane = true;
     // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
     await page.evaluate((snapshot) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(snapshot), fromTray);
-    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'true');
 
     await page.getByRole('radio', { name: 'Top right' }).click();
     await expect.poll(() => configUpdates(page)).toEqual([{ notify: { position: 'top-right' } }]);

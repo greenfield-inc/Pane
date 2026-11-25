@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { EMPTY_TODO_SCOPE, inTodoScope, type TodoApprovalScope } from '../components/todos/sessionTodos';
 import { isOpenForSession } from '../../../shared/approvalOpen';
 import { machineOfItem } from '../../../shared/todoKey';
-import type { NotifyCommand, NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
+import { countsAsWaiting, type NotifyCommand, type NotifyItem, type NotifySnapshot } from '../../../shared/types/notify';
 import { showActionError } from './errorStore';
 import { isTodosEnabled, useConfigStore } from './configStore';
 
@@ -205,13 +205,7 @@ export function notifyItem(snapshot: NotifySnapshot | null, id: string | null | 
   return snapshot.items.find((item) => item.id === id);
 }
 
-/**
- * An item the person can answer now: what every count counts. A stale item waits in its own group,
- * an offline machine's collapses to one row, and a mirror from an older machine takes no answer.
- */
-export function countsAsWaiting(item: NotifyItem): boolean {
-  return item.state === 'waiting' && !item.unreachable && item.staleSince === undefined && !item.relay;
-}
+export { countsAsWaiting };
 
 /** Questions still waiting for an answer. Updates never count. */
 export function waitingCount(snapshot: NotifySnapshot | null): number {

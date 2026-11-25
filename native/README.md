@@ -1,5 +1,7 @@
 # Pane for iOS and Android (Expo)
 
+The iPhone app is on the App Store: [Pane - Remote Coding Agents](https://apps.apple.com/app/id6808839038). The rest of this page is for developing it.
+
 `native/` is the React Native companion app for Pane: Expo SDK 57, React Native 0.86 (New Architecture, Hermes), Expo Router, a dev client, TypeScript strict and the React Compiler. It sits beside the Capacitor shell in `mobile/`, which keeps working, and uses the same bundle ID (`com.dcouple.pane.mobile`).
 
 The app talks to a Pane host (daemon) over its HTTP API: `POST /invoke`, the `GET /events` SSE stream and `/health`. It uses the shared client in `shared/remoteClient`. The bearer token goes only in the `Authorization` header, never in a URL.

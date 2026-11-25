@@ -1279,7 +1279,7 @@ function HealthNotifyCard({ item, form, onCommand, className }: NotifyCardProps 
         machineName={remoteMachineName(item)}
         onAnswer={choice => onCommand({ type: 'answer', id: item.id, answer: { choice } })}
         onAskAgent={() => onCommand({ type: 'ask-agent', id: item.id })}
-        onReview={form === 'strip' ? undefined : () => { void reviewHealthCard(item); }}
+        onReview={() => { if (form === 'strip') onCommand({ type: 'open-resources', id: item.id }); else void reviewHealthCard(item); }}
       />
     </div>
   );

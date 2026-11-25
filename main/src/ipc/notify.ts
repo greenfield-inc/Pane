@@ -3,6 +3,7 @@ import { getChatTabManager, setChatTabNotify } from '../services/chatTabs';
 import { app, BrowserWindow, powerMonitor, type IpcMain } from 'electron';
 import fs from 'fs';
 import path from 'path';
+import { isDesktopAlertHandedOff, showDesktopAlert } from './desktopAlerts';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import { paneCommandSignal, teammatePaneCaller } from '../daemon/commandRegistry';
@@ -133,6 +134,7 @@ const notifyCommandSchema = boundary.union(
   idCommand('skip'),
   idCommand('open-in-pane'),
   idCommand('ask-agent'),
+  idCommand('open-resources'),
   boundary.object({ type: boundary.literal('open-link'), id: boundary.nonEmptyString, index: boundary.number, paneId: boundary.optional(boundary.nonEmptyString) }),
   boundary.object({ type: boundary.literal('open-url'), id: boundary.nonEmptyString, url: boundary.nonEmptyString }),
   boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('3m', '5m', '15m', '10m', '1h', 'pane') }),
@@ -330,7 +332,7 @@ const windowSizeSchema = boundary.object({ width: boundary.number, height: bound
 const panelAgentSchema = boundary.object({ agentType: boundary.optional(boundary.string) });
 
 /** What Notify reads from the app's services: the config, Panes by id, and the main window. */
-type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & Partial<Pick<AppServices, 'todoService'>> & {
+type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow' | 'workspaceWatchLeases'> & Partial<Pick<AppServices, 'todoService'>> & {
   sessionManager: Pick<AppServices['sessionManager'], 'getSession'> & Partial<Pick<AppServices['sessionManager'], 'on' | 'off'>>;
   databaseService?: Pick<AppServices['databaseService'], 'getAllProjects'> & Partial<Pick<AppServices['databaseService'], 'getSession' | 'getPanel'>>;
   /** Files each Approvals item under its Session. */
@@ -495,6 +497,12 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       }
       return { id: started.leaseId, expiresAt: started.expiresAt, machines: started.machines, refused };
     },
+    // The queue already held it until this computer is where alerts go. Approvals' own Sound setting
+    // chimes. Dictate shows blocked tabs, so a tab's prompt is left to it (dictateShowsTabs); it shows
+    // no other approval, so those still notify while it runs.
+    dictateShowsTabs: () => isDesktopAlertHandedOff(services.workspaceWatchLeases),
+    isChatTab: (panelId) => panelManager.getPanel(panelId)?.type === 'chat',
+    alert: (title, body, onClick) => { showDesktopAlert(services, true, title, body, { onClick, silent: true, keepFromDictate: true }); },
     publish: (state) => getPaneEventSink().send('notify:shared-changed', state),
     sendToMachine: async (machineId, command) => {
       if (!saved) throw new PaneError('ERR_MACHINE_UNKNOWN', 'Pane is still starting its machine connections. Nothing was sent.', 'Answer again in a moment.');
