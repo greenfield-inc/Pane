@@ -3,6 +3,8 @@ import { isRemotePaneConnectionProfile, type RemotePaneConnectionProfile } from 
 
 import { isDemoProfile } from '@/features/demo/demoHost';
 
+import { isReadOnlyProfile } from './access';
+
 /** The Pane hosts (daemons) this phone is paired with. */
 export interface SavedHosts {
   profiles: RemotePaneConnectionProfile[];
@@ -11,14 +13,19 @@ export interface SavedHosts {
 
 export const EMPTY_HOSTS: SavedHosts = { profiles: [], activeId: null };
 
-/** Adds a paired host and makes it active. Pairing a host again replaces its old token. */
 /** The demo lives in memory only: a code or list entry naming its address never becomes a saved host. */
 export function assertSavableHost(profile: RemotePaneConnectionProfile): void {
   if (isDemoProfile(profile)) throw new Error('This address belongs to the in-app demo. Pair with Pane on your own computer.');
 }
 
+/**
+ * Adds a paired host and makes it active. Pairing a host again replaces its old token, except that a
+ * read-only pairing never takes the place of full access to the same computer.
+ */
 export function addHost(hosts: SavedHosts, profile: RemotePaneConnectionProfile): SavedHosts {
   assertSavableHost(profile);
+  const full = profile.access === 'read' ? hosts.profiles.find(p => (p.baseUrl === profile.baseUrl || p.id === profile.id) && !isReadOnlyProfile(p)) : undefined;
+  if (full) return { profiles: hosts.profiles, activeId: full.id };
   const others = hosts.profiles.filter(p => p.baseUrl !== profile.baseUrl && p.id !== profile.id);
   return { profiles: [...others, profile], activeId: profile.id };
 }

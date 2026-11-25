@@ -75,6 +75,22 @@ describe('linking a newly paired computer with the phone’s others', () => {
 });
 
 describe('"Your computers"', () => {
+  it('tells a computer it only watches nothing of the others it reaches, but the ones that computer shared', async () => {
+    const tyler = relayProfile({ computer: { ...computer('tyler'), name: 'Tyler' }, token: 't' }, undefined, 'read');
+    const saved = [
+      tyler,
+      relayProfile({ computer: computer('tyler2'), token: 't' }, 'Tyler', 'read'),
+      relayProfile({ computer: computer('mine'), token: 't' }),
+      // A computer of this phone's own that happens to be linked by the same name.
+      relayProfile({ computer: computer('mine2'), token: 't' }, 'Tyler'),
+    ];
+    const asked: unknown[] = [];
+    const client = { invoke: async <T>(_channel: string, args?: unknown[]) => { asked.push(args?.[0]); return [] as T; } };
+    await fetchNewRelayProfiles(client, tyler, saved);
+    await fetchNewRelayProfiles(client, { ...tyler, access: undefined }, saved);
+    expect(asked).toEqual([{ known: ['tyler2'] }, { known: ['tyler', 'tyler2', 'mine', 'mine2'] }]);
+  });
+
   it('adds only computers at <id>.<domain> on the asking computer’s domain, with the key their id names', async () => {
     const from = relayProfile({ computer: computer('dohp3zsqmo4uk2kn'), token: 'tok-studio' });
     const grants = [

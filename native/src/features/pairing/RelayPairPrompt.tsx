@@ -3,15 +3,15 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { DEFAULT_RELAY_DOMAIN, RelayPairingError, type RelayPairingLink } from '@shared/remoteClient';
-import { relayLinkJoin, type RelayLinkJoin } from '@shared/remoteClient/relayLinkPreview';
+import { fullAccessRefusal, readLinkPreview, relayLinkJoin, type RelayLinkJoin } from '@shared/remoteClient/relayLinkPreview';
 import { DEVICE_ACCESS_LABELS, READ_ONLY_GRANT_HELP } from '@shared/types/accessLevel';
 
+import { withCurrentAccess } from '@/auth/access';
 import { useHostsStore } from '@/auth/hostsStore';
 import { streamingFetch } from '@/daemon/createClient';
 import { ReadOnlyChip } from '@/features/hosts/ReadOnlyChip';
 import { Button, ListRow, ListSection, Text } from '@/ui';
 
-import { readOnlyLink } from './readOnlyLink';
 import { usePairing } from './usePairing';
 
 /**
@@ -31,9 +31,10 @@ export function RelayPairPrompt({ code, link, onPaired }: { code: string; link: 
   useEffect(() => {
     let active = true;
     const opened = { secret, computerId, domain, name };
-    void relayLinkJoin(streamingFetch, opened, useHostsStore.getState().profiles).then(async joining => {
-      // A link that pairs without asking still shows that it only watches.
-      const result = joining ?? await readOnlyLink(streamingFetch, opened);
+    const saved = useHostsStore.getState().profiles.map(withCurrentAccess);
+    void relayLinkJoin(streamingFetch, opened, saved).then(async joining => {
+      // A link that would pair without asking still asks when it only watches, or is refused (usePairing).
+      const result = joining ?? (ownDomain ? await watchJoin(opened) : null);
       if (!active) return;
       setJoin(result);
       if (!result && ownDomain) mutate({ code });
@@ -89,6 +90,15 @@ export function RelayPairPrompt({ code, link, onPaired }: { code: string; link: 
       )}
     </View>
   );
+}
+
+/** What a Read only link lets this phone watch; null for a full-access one, and for a computer the phone has full access to. */
+async function watchJoin(link: RelayPairingLink): Promise<RelayLinkJoin | null> {
+  const preview = await readLinkPreview(streamingFetch, link);
+  const maker = preview?.group[0]?.name;
+  const saved = useHostsStore.getState().profiles.map(withCurrentAccess);
+  if (!maker || preview.access !== 'read' || fullAccessRefusal('phone', link.computerId, preview.access, saved)) return null;
+  return { maker, makerGroup: preview.group.map(computer => computer.name), here: [], access: 'read' };
 }
 
 function DomainNote({ domain }: { domain: string }) {

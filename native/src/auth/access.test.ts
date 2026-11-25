@@ -38,7 +38,10 @@ describe('a computer’s access level', () => {
   it('is full again on a connect whose ready event names no level', async () => {
     await connect(mine, '{"access":"read"}');
     expect(await connect(mine, '{"deduplicatesRequestIds":true}')).toEqual([false]);
-    expect(await connect(tyler, '{}')).toEqual([false]);
+  });
+
+  it('stays Read only when a computer this phone was given to watch stops saying so, so it gets no keys or links', async () => {
+    expect(await connect(tyler, '{}')).toEqual([true]);
   });
 
   it('starts over when the computer is paired again', async () => {

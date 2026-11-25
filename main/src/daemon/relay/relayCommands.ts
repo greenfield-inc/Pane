@@ -29,7 +29,7 @@ const previewTargetSchema = boundary.union(
 );
 
 const peerRequestSchema = boundary.object({ peer: relayComputerSchema });
-const readGrantSchema = boundary.union(peerRequestSchema, boundary.object({ label: boundary.string, phoneId: boundary.optional(boundary.string) }));
+const readGrantSchema = boundary.union(peerRequestSchema, boundary.object({ label: boundary.string, phoneId: boundary.nonEmptyString }));
 const readDeviceSchema = boundary.union(boundary.object({ computerId: boundary.nonEmptyString }), boundary.object({ phoneId: boundary.nonEmptyString }));
 const linkRequestSchema = boundary.object({ link: boundary.nonEmptyString });
 const unlinkRequestSchema = boundary.object({ computerId: boundary.nonEmptyString });

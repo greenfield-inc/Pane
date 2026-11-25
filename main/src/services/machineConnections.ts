@@ -169,6 +169,8 @@ export class MachineConnections {
   async invokeOn(machineId: string, channel: string, args: PaneCommandValue[], timeoutMs?: number): Promise<PaneCommandValue> {
     const machine = this.machines.get(machineId);
     if (!machine) throw unknownMachine(machineId);
+    // Only a member Pane's overview is read there; everything else is sent for this computer's own work.
+    if (channel !== 'runpane:panes:overview') refuseReadOnly(machine);
     const call = machine.client.invoke(channel, args);
     if (timeoutMs === undefined) return call;
     let timer: NodeJS.Timeout | undefined;
@@ -186,6 +188,7 @@ export class MachineConnections {
   openPortStream(machineId: string, port: number): WebSocket {
     const machine = this.machines.get(machineId);
     if (!machine) throw unknownMachine(machineId);
+    refuseReadOnly(machine);
     return machine.client.openPortStream(port);
   }
 
@@ -256,11 +259,7 @@ export class MachineConnections {
     const machine = this.machines.get(machineId);
     if (!machine) throw unknownMachine(machineId);
     // Reads work over a stream that is still connecting; a write waits for the machine to answer.
-    if (options.write && machine.state.access === 'read') {
-      throw new PaneError(READ_ONLY_ACCESS_CODE,
-        `This computer is paired Read only with ${machine.profile.label}, so the action was not sent. Nothing was changed.`,
-        `Ask ${machine.profile.label}'s owner for full access.`);
-    }
+    if (options.write) refuseReadOnly(machine);
     if (options.write && machine.state.status !== 'online') {
       throw new PaneError('ERR_MACHINE_OFFLINE',
         `${machine.profile.label} is not connected, so the action was not sent. Nothing was changed.`,
@@ -457,6 +456,14 @@ function toInvocation(command: PaneCommandValue): Invocation {
 function clearRetry(machine: RemoteMachine): void {
   if (machine.retryTimer) clearTimeout(machine.retryTimer);
   machine.retryTimer = null;
+}
+
+/** Nothing is sent to a machine this computer is paired Read only with, so it never sees what its host would refuse. */
+function refuseReadOnly(machine: RemoteMachine): void {
+  if (machine.state.access !== 'read') return;
+  throw new PaneError(READ_ONLY_ACCESS_CODE,
+    `This computer is paired Read only with ${machine.profile.label}, so the action was not sent. Nothing was changed.`,
+    `Ask ${machine.profile.label}'s owner for full access.`);
 }
 
 function unknownMachine(machineId: string): PaneError {

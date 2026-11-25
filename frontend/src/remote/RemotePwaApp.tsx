@@ -705,6 +705,7 @@ export function RemotePwaApp() {
         fetch: (url, init) => fetch(url, init),
         label: getClientLabel(),
         phoneId: getRuntimeId(),
+        saved: savedProfiles,
       });
       if (!computer) return;
       // Computers the Pane app already linked with this one come along. The browser links none itself:

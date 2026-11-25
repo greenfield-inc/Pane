@@ -97,6 +97,17 @@ describe('pairing the browser app from "Continue in browser"', () => {
       .toEqual({ maker: 'Tyler', makerGroup: ['Tyler'], here: ['Studio Mac'], access: 'read' });
   });
 
+  it('refuses a read-only link to a computer it has full access to, without spending it', async () => {
+    const saved = [relayProfile({ computer: computer('6cphy4hwgmwpp4nl', 'Studio Mac'), token: 'full' })];
+    const asked: string[] = [];
+    const fetch = async (url: string) => {
+      asked.push(new URL(url).pathname);
+      return { ok: true, status: 200, body: null, json: async () => ({ ok: true, access: 'read', group: [{ id: '6cphy4hwgmwpp4nl', name: 'Studio Mac' }] }) };
+    };
+    await expect(pairThisBrowser(page(''), 's3cret', { fetch, label: 'x', phoneId: 'y', saved })).rejects.toThrow('This browser already has full access to Studio Mac');
+    expect(asked).toEqual(['/pair/preview']);
+  });
+
   it('refuses an answer from a computer other than the one that served the page', async () => {
     const fetch = async () => ({
       ok: true,

@@ -403,7 +403,7 @@ export class RelayLinks {
    * A linked computer hands out a read-only token for a phone or computer that paired Read only with
    * it. Unlinking the granter revokes it.
    */
-  async grantRead(device: { label: string; phoneId?: string } | { peer: RelayComputer }, callerClientId: string): Promise<{ token: string }> {
+  async grantRead(device: { label: string; phoneId: string } | { peer: RelayComputer }, callerClientId: string): Promise<{ token: string }> {
     const granter = this.callerComputer(callerClientId);
     const { token, tokenHash } = newToken('read');
     const record: RemoteDaemonClientRecord = {
@@ -419,13 +419,15 @@ export class RelayLinks {
       this.checkPeer(device.peer);
       record.kind = 'computer';
       record.computerId = device.peer.id;
-    } else if (device.phoneId) record.phoneId = device.phoneId;
+    } else record.phoneId = device.phoneId;
     await this.addClient(record);
     return { token };
   }
 
   /** Tokens on every linked computer for a phone that just paired here, skipping those it has. Read-only for a read-only phone. */
   grantsFor({ access, ...phone }: { label: string; phoneId?: string; access?: ReadOnlyMark }, known: readonly string[]): Promise<RelayComputerGrant[]> {
+    // Without an id, other computers could neither replace nor remove a read-only device's token.
+    if (access === 'read' && phone.phoneId === undefined) return Promise.resolve([]);
     return this.grants(access === 'read' ? RELAY_COMPUTER_COMMANDS.grantRead : RELAY_COMPUTER_COMMANDS.grantPhone, phone, known);
   }
 

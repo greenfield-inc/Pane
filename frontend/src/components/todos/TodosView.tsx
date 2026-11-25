@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../../stores/readOnlyHostStore';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { ChevronDown, ChevronRight, Gauge, Plus, SlidersHorizontal } from 'lucide-react';
 import { todoRef, type TodoAction } from '../../../../shared/types/todos';
@@ -151,6 +152,10 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
   const gate = useTodosStore(state => shownSnapshot(state, shownHost)?.gate);
   const act = useTodosStore(state => state.act);
   const actOn = useTodosStore(state => state.actOn);
+  const readOnlyHost = useReadOnlyHost();
+  const savedMachines = useTodosStore(state => state.machines);
+  /** Its computer gives read-only access: the one this window shows, or a saved one its row names. */
+  const watched = useCallback((entry: TodoEntry) => (entry.remote ? savedMachines.find(machine => machine.id === entry.machineId)?.access === 'read' : readOnlyHost), [readOnlyHost, savedMachines]);
   const now = useNow();
   const [tab, setTab] = useState<TodosTab>('open');
   const [grouping, setGroupingState] = useState<TodosGrouping>(readGrouping);
@@ -213,10 +218,10 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
 
   const askSnooze = useCallback((entry: TodoEntry, anchor?: DOMRect) => {
     const rect = anchor ?? document.getElementById(`todo-row-${entry.key}`)?.getBoundingClientRect();
-    if (!rect || !canSnooze(entry)) return;
+    if (!rect || !canSnooze(entry) || watched(entry)) return;
     setSelectedKey(entry.key);
     setSnoozing({ entry, anchor: rect });
-  }, []);
+  }, [watched]);
 
   const runSnooze = useCallback((choice: SnoozeChoice) => {
     if (!snoozing) return;
@@ -253,10 +258,10 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
 
   const askAction = useCallback((entry: TodoEntry, kind: TodoRowActionKind, anchor?: DOMRect) => {
     const rect = anchor ?? document.getElementById(`todo-row-${entry.key}`)?.getBoundingClientRect();
-    if (!rect) return;
+    if (!rect || watched(entry)) return;
     setSelectedKey(entry.key);
     setConfirm({ kind, row: entry.row, machineId: entry.machineId, anchor: rect });
-  }, []);
+  }, [watched]);
 
   const runConfirmed = useCallback(() => {
     if (!confirm) return;
@@ -444,7 +449,8 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
                 onSelect={() => setSelectedKey(entry.key)}
                 onOpen={() => openEntry(entry)}
                 onAction={(kind, anchor) => askAction(entry, kind, anchor)}
-                onSnooze={canSnooze(entry) ? anchor => askSnooze(entry, anchor) : undefined}
+                readOnly={watched(entry)}
+                onSnooze={canSnooze(entry) && !watched(entry) ? anchor => askSnooze(entry, anchor) : undefined}
               />
             ))}
           </div>

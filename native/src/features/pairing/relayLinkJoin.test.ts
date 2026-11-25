@@ -38,6 +38,12 @@ describe('joining two groups of computers', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('asks before a full-access link links a computer this device only watches with its others', async () => {
+    const fetch = host({ status: 200, body: { ok: true, group: [{ id: 'buildbox', name: 'Build Box' }], expiresAt: '2026-11-15T10:00:00Z' } });
+    expect(await relayLinkJoin(fetch, LINK, [{ ...relayComputer('buildbox', 'Build Box'), access: 'read' }, relayComputer('studio', 'Studio Mac')]))
+      .toEqual({ maker: 'Build Box', makerGroup: ['Build Box'], here: ['Studio Mac'] });
+  });
+
   it('names both sides when the link would join a second group', async () => {
     const fetch = host({ status: 200, body: { ok: true, group: [{ id: 'buildbox', name: 'Build Box' }, { id: 'labpc', name: 'Lab PC' }], expiresAt: '2026-11-15T10:00:00Z' } });
     expect(await relayLinkJoin(fetch, LINK, [relayComputer('studio', 'Studio Mac'), relayComputer('laptop', 'Travel Laptop'), TAILSCALE]))

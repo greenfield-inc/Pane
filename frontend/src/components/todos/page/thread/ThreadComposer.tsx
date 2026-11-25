@@ -86,7 +86,7 @@ export function ThreadComposer({ detail, phone = false }: ThreadComposerProps) {
     ? { name: chatTarget.name, agentId: detail.agentId }
     : { name: orchestrator?.name ?? 'orchestrator', agentId: orchestrator?.agentId };
   return (
-    <div className={phone ? 'shrink-0 border-t border-border-primary bg-bg-primary px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2' : 'shrink-0 px-7 pb-3.5 pt-2.5'} data-testid="todo-composer">
+    <div className={phone ? 'needs-full-access shrink-0 border-t border-border-primary bg-bg-primary px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2' : 'needs-full-access shrink-0 px-7 pb-3.5 pt-2.5'} data-testid="todo-composer">
       <div
         onDragOver={drop.onDragOver}
         onDragLeave={drop.onDragLeave}

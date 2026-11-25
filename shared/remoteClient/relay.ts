@@ -274,7 +274,7 @@ export function relayComputerOf(profile: RelayConnectionProfile): RelayComputer 
 /**
  * "Your computers": asks one relay computer for the computers linked with it and returns profiles
  * for the ones this device has not saved yet, on that computer's domain. A computer this device only
- * watches hands out read-only tokens.
+ * watches hands out read-only tokens, and is told only of the computers it shared itself.
  */
 export async function fetchNewRelayProfiles(
   client: RelayCommandClient,
@@ -282,7 +282,10 @@ export async function fetchNewRelayProfiles(
   saved: readonly RemotePaneConnectionProfile[],
 ): Promise<RelayConnectionProfile[]> {
   const known = saved.flatMap(profile => (profile.relay ? [profile.relay.computerId] : []));
-  const grants = decodeBoundary(await client.invoke(RELAY_CLIENT_COMMANDS.computers, [{ known }]), boundary.array(grantSchema));
+  const told = from.access === 'read'
+    ? saved.flatMap(profile => (profile.access === 'read' && profile.relay?.linkedBy === from.label ? [profile.relay.computerId] : []))
+    : known;
+  const grants = decodeBoundary(await client.invoke(RELAY_CLIENT_COMMANDS.computers, [{ known: told }]), boundary.array(grantSchema));
   return grants
     .filter(grant => !known.includes(grant.computer.id) && isRelayComputerUnder(grant.computer, from.relay.domain))
     .map(grant => relayProfile(grant, from.label, from.access));

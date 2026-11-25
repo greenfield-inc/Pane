@@ -3,7 +3,7 @@ import {
   RelayPairingError,
   type RelayConnectionProfile,
 } from '../../../../shared/remoteClient/relay';
-import { relayLinkJoin, type RelayLinkJoin } from '../../../../shared/remoteClient/relayLinkPreview';
+import { fullAccessRefusal, readLinkPreview, relayLinkJoin, type RelayLinkJoin } from '../../../../shared/remoteClient/relayLinkPreview';
 import type { RemoteFetch } from '../../../../shared/remoteClient/remoteDaemonClient';
 import type { RemotePaneConnectionProfile } from '../../../../shared/types/remoteDaemon';
 
@@ -23,13 +23,19 @@ export function takePairingSecret({ location, history }: PairingPage): string | 
 
 /**
  * Pairs this browser with the computer that served it: trades the secret at its own
- * `/pair/exchange`. Returns that computer first, then every computer linked with it.
+ * `/pair/exchange`. A read-only link to a computer in `saved` with full access is refused unspent. Returns that computer first, then every computer linked with it.
  */
 export async function pairThisBrowser(
   page: PairingPage,
   secret: string,
-  request: { fetch: RemoteFetch; label: string; phoneId: string },
+  request: { fetch: RemoteFetch; label: string; phoneId: string; saved?: readonly RemotePaneConnectionProfile[] },
 ): Promise<RelayConnectionProfile[]> {
+  const { computerId } = servedBy(page);
+  if (fullAccessRefusal('browser', computerId, 'read', request.saved ?? [])) {
+    const preview = await readLinkPreview(request.fetch, { ...servedBy(page), secret });
+    const refusal = fullAccessRefusal('browser', computerId, preview?.access, request.saved ?? []);
+    if (refusal) throw refusal;
+  }
   return exchangeRelayPairing(request.fetch, servedBy(page), { secret, label: request.label, phoneId: request.phoneId });
 }
 

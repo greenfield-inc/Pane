@@ -1,5 +1,5 @@
 import { READ_ONLY_ACCESS_CODE } from '../../../shared/types/accessLevel';
-import { boundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { GLASSES_CHANNELS, GLASSES_EVENT_CHANNELS } from './glassesAccess';
 
 /**
@@ -13,7 +13,7 @@ export type CallerAccess = 'full' | 'read' | 'glasses';
  * missing here is refused, including every command added later.
  */
 const READ_CHANNELS: ReadonlySet<string> = new Set([
-  // Panes and repositories: names, branches, status and cached git status. Repository settings are left out (`readableResult`).
+  // Panes and repositories: names, branches, status and cached git status. Repository settings are left out (`readable`).
   'sessions:get-all',
   'sessions:get-all-with-projects',
   'sessions:get-archived-with-projects',
@@ -28,7 +28,7 @@ const READ_CHANNELS: ReadonlySet<string> = new Set([
   'sessions:get-conversation-message-count',
   'panels:get-conversation-messages',
   'panels:get-prompts',
-  // A Pane's terminal and chat tabs, their layout and whether they run. Other kinds of tab are left out (`readableResult`).
+  // A Pane's terminal and chat tabs, their layout and whether they run. Other kinds of tab are left out (`readable`).
   'panels:list',
   'panels:getActive',
   'panels:get-layout',
@@ -116,8 +116,6 @@ const READ_EVENT_CHANNELS: ReadonlySet<string> = new Set([
   // Conversations.
   'panel:prompt-added',
   'panel:response-added',
-  'session:output',
-  'session:output-available',
   'chat-tab:event',
   'chat-tab:view',
   'chat-tab:state',
@@ -175,68 +173,68 @@ export function readOnlyRefusal(what: string) {
   };
 }
 
-const panelSchema = boundary.object({ type: boundary.string });
-const envelopeSchema = boundary.object({ data: boundary.jsonObject });
-const listEnvelopeSchema = boundary.object({ data: boundary.array(boundary.jsonObject) });
-const panelListSchema = boundary.object({ panels: boundary.array(boundary.jsonObject) });
-const PROJECT_SETTINGS: ReadonlySet<string> = new Set(['system_prompt', 'run_script', 'build_script', 'archive_script', 'open_ide_command']);
+/**
+ * Settings inside a readable record: a repository's scripts and prompts, and how a tab, Session or
+ * loop launches. They are configuration and can hold a key the screen never shows. Dropped wherever
+ * they appear in a read-only device's answers and events.
+ */
+const HIDDEN_FIELDS: ReadonlySet<string> = new Set([
+  'system_prompt', 'run_script', 'build_script', 'archive_script', 'open_ide_command',
+  'launchCommand', 'initialCommand', 'initialInput', 'initialInputFile', 'environmentVars', 'customResume',
+]);
 
-/** Terminal and chat tabs; a file, diff, browser or log tab carries contents a read-only device may not open. */
-function isReadablePanel(panel: JsonValue | undefined): boolean {
-  const type = decodeOptionalBoundary(panel, panelSchema)?.type;
-  return type === 'terminal' || type === 'chat';
+/** The kinds of tab a read-only device sees; a file, diff, browser or log tab carries contents it may not open. */
+const READABLE_TAB_TYPES: ReadonlySet<string> = new Set(['terminal', 'chat']);
+
+const tabSchema = boundary.object({ type: boundary.string });
+const tabsSchema = boundary.array(tabSchema);
+
+function isReadableTab(tab: JsonValue | undefined): boolean {
+  return READABLE_TAB_TYPES.has(decodeOptionalBoundary(tab, tabSchema)?.type ?? '');
 }
 
-/** A repository without its settings: its prompts, scripts and commands are configuration. */
-function readableProject(project: JsonObject): JsonObject {
-  return Object.fromEntries(Object.entries(project).filter(([key]) => !PROJECT_SETTINGS.has(key)));
+/** A value without hidden fields, and with other kinds of tab left out of every `panels` list. */
+function readable(value: JsonValue): JsonValue {
+  return decodeBoundary(JSON.parse(JSON.stringify(value, (key, field: JsonValue) => {
+    if (HIDDEN_FIELDS.has(key)) return undefined;
+    return key === 'panels' && Array.isArray(field) && decodeOptionalBoundary(field, tabsSchema) ? field.filter(isReadableTab) : field;
+  })), boundary.json);
 }
+
+/** A chat without what waits on its owner: approvals, questions and prompts not sent yet. */
+function readableChat(view: JsonValue | undefined): JsonValue {
+  const chat = decodeOptionalBoundary(view, boundary.jsonObject);
+  return chat ? { ...chat, permissions: [], questions: [], queue: [] } : null;
+}
+
+const listAnswerSchema = boundary.object({ data: boundary.array(boundary.json) });
 
 /** A read command's answer as a read-only device gets it. */
 export function readableResult(channel: string, result: JsonValue): JsonValue {
-  switch (channel) {
-    case 'panels:list': {
-      const answer = decodeOptionalBoundary(result, boundary.jsonObject);
-      const list = decodeOptionalBoundary(result, listEnvelopeSchema);
-      return answer && list ? { ...answer, data: list.data.filter(isReadablePanel) } : result;
-    }
-    case 'runpane:panels:list': {
-      const answer = decodeOptionalBoundary(result, boundary.jsonObject);
-      const list = decodeOptionalBoundary(result, panelListSchema);
-      return answer && list ? { ...answer, panels: list.panels.filter(isReadablePanel) } : result;
-    }
-    case 'panels:getActive':
-      return isReadablePanel(result) ? result : null;
-    case 'sessions:get-all-with-projects':
-    case 'sessions:get-archived-with-projects':
-    case 'projects:get-all': {
-      const answer = decodeOptionalBoundary(result, boundary.jsonObject);
-      const list = decodeOptionalBoundary(result, listEnvelopeSchema);
-      return answer && list ? { ...answer, data: list.data.map(readableProject) } : result;
-    }
-    case 'projects:get-active': {
-      const answer = decodeOptionalBoundary(result, boundary.jsonObject);
-      const active = decodeOptionalBoundary(result, envelopeSchema);
-      return answer && active ? { ...answer, data: readableProject(active.data) } : result;
-    }
-    default:
-      return result;
+  if (channel === 'chat-tab:get') return readableChat(result);
+  if (channel === 'panels:getActive') return isReadableTab(result) ? readable(result) : null;
+  if (channel === 'panels:list') {
+    const answer = decodeOptionalBoundary(result, boundary.jsonObject);
+    const list = decodeOptionalBoundary(result, listAnswerSchema);
+    return answer && list ? { ...answer, data: list.data.filter(isReadableTab).map(readable) } : result;
   }
+  return readable(result);
 }
 
 /** An event's arguments as a read-only stream carries them, or null when it carries none of it. */
 export function readableEvent(channel: string, args: JsonValue[]): JsonValue[] | null {
   switch (channel) {
+    case 'terminal:output':
+      return args;
+    case 'chat-tab:view':
+    case 'chat-tab:state':
+      return [readableChat(args[0])];
     case 'panel:created':
     case 'panel:updated':
-      return isReadablePanel(args[0]) ? args : null;
+      return isReadableTab(args[0]) ? args.map(readable) : null;
     case 'panel:event':
-      return decodeOptionalBoundary(args[0], panelSchema)?.type.startsWith('terminal:') ? args : null;
-    case 'project:updated': {
-      const project = decodeOptionalBoundary(args[0], boundary.jsonObject);
-      return project ? [readableProject(project), ...args.slice(1)] : null;
-    }
+      return decodeOptionalBoundary(args[0], tabSchema)?.type.startsWith('terminal:') ? args : null;
     default:
-      return args;
+      return args.map(readable);
   }
 }

@@ -96,6 +96,12 @@ interface TerminalRestoreState {
   cursorY?: number;
 }
 
+/** The theme's colours; while watching, the cursor takes the background's, since xterm can't turn a focused one off. */
+function shownTerminalTheme(): ReturnType<typeof getTerminalTheme> {
+  const theme = getTerminalTheme();
+  return isReadOnlyHost() ? { ...theme, cursor: theme.background, cursorAccent: theme.foreground } : theme;
+}
+
 const WEBGL_APP_BLUR_DETACH_DELAY_MS = 10_000;
 const REFOCUS_DELAYED_REFRESH_MS = 300;
 const TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS = 200;
@@ -361,9 +367,13 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     terminal.options.vtExtensions = { ...terminal.options.vtExtensions, kittyKeyboard: kittyKeyboardEnabled };
   }, [kittyKeyboardEnabled]);
 
-  // A read-only host takes no input, so keys, pastes and query answers stop here.
+  // A read-only host takes no input: keys, pastes and query answers stop here, and no cursor invites them.
   useEffect(() => {
-    if (xtermRef.current) xtermRef.current.options.disableStdin = readOnly;
+    const terminal = xtermRef.current;
+    if (!terminal) return;
+    terminal.options.disableStdin = readOnly;
+    terminal.options.cursorInactiveStyle = readOnly ? 'none' : 'outline';
+    terminal.options.theme = shownTerminalTheme();
   }, [readOnly]);
 
   const terminalScrollSurfaceRef = useScrollSurface<HTMLDivElement>({
@@ -1172,12 +1182,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         terminal = new Terminal({
           fontSize: terminalFontSize,
           fontFamily: initialFontFamily,
-          theme: getTerminalTheme(),
+          theme: shownTerminalTheme(),
           scrollback: 2500,
           cursorBlink: false,
           cursorStyle: 'block',
           cursorWidth: 1,
-          cursorInactiveStyle: 'outline',
+          cursorInactiveStyle: isReadOnlyHost() ? 'none' : 'outline',
           allowTransparency: false,
           disableStdin: isReadOnlyHost(),
           ...terminalCapabilityOptions(kittyKeyboardEnabledRef.current),
@@ -1372,7 +1382,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             needsFullActivationRefreshRef.current = true;
             devLog.debug('[TerminalPanel] Skipped mount fit (hidden container); armed full activation refresh');
           }
-          terminal.options.theme = getTerminalTheme();
+          terminal.options.theme = shownTerminalTheme();
 
           // Load WebLinksAddon for clickable URLs
           try {
@@ -2139,7 +2149,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     const buffer = terminal.buffer.active;
     const distanceFromBottom = Math.max(0, buffer.baseY - buffer.viewportY);
     const wasNearBottom = isNearBottomRef.current || distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_ROWS;
-    const newTheme = getTerminalTheme();
+    const newTheme = shownTerminalTheme();
     terminal.options.theme = newTheme;
     terminal.options.minimumContrastRatio = getMinimumContrastRatio(highContrast);
     const rows = terminal.rows;

@@ -1647,6 +1647,8 @@ export class OrchestrationSessionManager extends EventEmitter {
       panels: [],
       machine: { ...machine, state: 'unreachable' },
     };
+    // A read-only device reaches this computer, not the owner's other ones through it.
+    if (readOnlyPaneCaller()) return known;
     const read = await this.remoteMachines?.readPane(machine.id, association.paneId).catch(() => undefined);
     if (!read || read === 'unreachable') return known;
     if (read === 'older-pane') return { ...known, machine: { ...machine, state: 'older-pane' } };

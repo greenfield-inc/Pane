@@ -4,17 +4,21 @@ import {
   type RelayConnectionProfile,
   type RelayPairingLink,
 } from '@shared/remoteClient';
+import type { LinkPreviewAnswer } from '@shared/remoteClient/relayLinkPreview';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
-import { isReadOnlyProfile } from './access';
 import { CLIENT_LABEL, createDaemonClient, DEVICE_LABEL, getRuntimeId, streamingFetch } from '@/daemon/createClient';
+
+import { isReadOnlyProfile } from './access';
 
 /**
  * Trades a scanned code's one-time secret for this phone's token. Returns the computer first,
  * then each computer linked with it that `saved` doesn't already reach, with its own token.
+ * A Read only link's computer learns of no saved computer but those its own `preview` named.
  */
-export async function exchangeRelayLink(link: RelayPairingLink, saved: readonly RemotePaneConnectionProfile[]): Promise<RelayConnectionProfile[]> {
-  const known = saved.flatMap(profile => (profile.relay ? [profile.relay.computerId] : []));
+export async function exchangeRelayLink(link: RelayPairingLink, saved: readonly RemotePaneConnectionProfile[], preview: LinkPreviewAnswer): Promise<RelayConnectionProfile[]> {
+  const reached = saved.flatMap(profile => (profile.relay ? [profile.relay.computerId] : []));
+  const known = preview?.access === 'read' ? reached.filter(id => preview.group.some(computer => computer.id === id)) : reached;
   return exchangeRelayPairing(streamingFetch, link, { secret: link.secret, label: DEVICE_LABEL ?? CLIENT_LABEL, phoneId: await getRuntimeId(), known });
 }
 

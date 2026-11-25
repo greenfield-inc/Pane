@@ -13,7 +13,11 @@ const NO_AUTOPILOT: AutopilotSnapshot = {
   stack: { entries: [], shownId: null }, walk: { sessions: [] },
 };
 
-/** Reads the app makes on every computer that a read-only one refuses, and what stands in for each, so lists load without asking. */
+/**
+ * Reads the app makes on every computer that a read-only one refuses, and what stands in for each, so lists load without asking.
+ * Apart from READ_ONLY_HOST_ANSWERS (shared/remoteClient/readOnlyHost.ts), which holds IPC envelopes and nulls for the desktop's
+ * readers; the phone's readers take unwrapped values and need Notify's and Autopilot's full empty states.
+ */
 const ANSWERS: ReadonlyMap<string, unknown> = new Map<string, unknown>([
   ['notify:remote-snapshot', NOTHING_TO_ANSWER],
   ['permission:getPending', NO_PERMISSIONS],

@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../../../stores/readOnlyHostStore';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from 'react';
 import { ChevronLeft, ChevronRight, Columns2, MoreHorizontal, PanelRight, Play, Square } from 'lucide-react';
 import { todoRef, type TodoAction, type TodoAttachment, type TodoDetail } from '../../../../../shared/types/todos';
@@ -590,9 +591,13 @@ export function stateAction(detail: TodoDetail): StateAction | null {
  * ⋯: Snooze… (round 9) and Drop while open; Archive (with its result line) and Reopen once closed; and its Session.
  * `withDone`: Mark done too, where the header has no room for its button (a Session's To-dos tab, T-23).
  */
-function moreMenu(detail: TodoDetail, run: (action: TodoAction) => Promise<void>, onSnooze?: () => void, withDone = false): DropdownItem[] {
+function moreMenu(detail: TodoDetail, run: (action: TodoAction) => Promise<void>, onSnooze?: () => void, withDone = false, readOnly = false): DropdownItem[] {
   const number = detail.todo.number;
   const closed = detail.status.status === 'done' || detail.status.status === 'dropped';
+  const hasSession = Boolean(detail.todo.sessionId ?? detail.parent?.todo.sessionId);
+  const session: DropdownItem = { id: 'session', label: 'Session · Open', description: 'Its own Session, hidden from the sidebar', separatorBefore: !readOnly, disabled: !hasSession, onClick: () => openTodoSession(detail) };
+  // A to-do on a computer you only watch offers nothing that changes it.
+  if (readOnly) return [session];
   const items: DropdownItem[] = [];
   if (onSnooze && canSnoozeTodo(detail.todo)) {
     items.push({ id: 'snooze', label: detail.todo.snooze ? 'Change snooze…' : 'Snooze…', description: 'Z · until a time, with a wake-up note', onClick: onSnooze });
@@ -605,8 +610,7 @@ function moreMenu(detail: TodoDetail, run: (action: TodoAction) => Promise<void>
   } else {
     items.push({ id: 'drop', label: 'Drop', variant: 'danger', onClick: () => void run({ kind: 'drop', number }) });
   }
-  const hasSession = Boolean(detail.todo.sessionId ?? detail.parent?.todo.sessionId);
-  items.push({ id: 'session', label: 'Session · Open', description: 'Its own Session, hidden from the sidebar', separatorBefore: true, disabled: !hasSession, onClick: () => openTodoSession(detail) });
+  items.push(session);
   return items;
 }
 
@@ -659,8 +663,9 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, spli
   const crumb = requesterSession ? { name: requesterSession.name, open: () => void openOnMachine(detail?.machineId ?? LOCAL_MACHINE_ID, { kind: 'session', id: requesterSession.id, name: requesterSession.name }) }
     : detail?.sessionName ? { name: detail.sessionName, open: () => openTodoSession(detail) } : null;
   const closed = detail ? detail.status.status === 'done' || detail.status.status === 'dropped' : false;
-  const primary = detail ? stateAction(detail) : null;
-  const menu = detail ? moreMenu(detail, run, snooze?.onOpen, embedded !== undefined) : [];
+  const readOnly = useReadOnlyHost();
+  const primary = detail && !readOnly ? stateAction(detail) : null;
+  const menu = detail ? moreMenu(detail, run, snooze?.onOpen, embedded !== undefined, readOnly) : [];
   const snoozed = detail?.todo.snooze;
   const splitWords = split?.shown ? 'Hide split' : 'Show split';
   return (
@@ -694,7 +699,7 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, spli
           {primary.label}
         </button>
       )}
-      {detail && !closed && !snoozed && !embedded && <button type="button" onClick={() => void run({ kind: 'done', number })} className={PLAIN_BUTTON} data-testid="todo-page-done">Mark done</button>}
+      {detail && !closed && !snoozed && !embedded && !readOnly && <button type="button" onClick={() => void run({ kind: 'done', number })} className={PLAIN_BUTTON} data-testid="todo-page-done">Mark done</button>}
       {detail && (
         <Dropdown
           trigger={<button type="button" aria-label="More" className="inline-flex h-7 w-8 items-center justify-center rounded-[7px] text-text-secondary hover:bg-surface-hover" data-testid="todo-page-more"><MoreHorizontal className="h-4 w-4" aria-hidden="true" /></button>}

@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../../../stores/readOnlyHostStore';
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ExternalLink, MoreHorizontal, Search, X } from 'lucide-react';
 import type { TodoAttachment, TodoDetail } from '../../../../../shared/types/todos';
@@ -87,6 +88,7 @@ export function TodoDetailsSidebar({ detail, tab, onTab, openAttachmentId, close
 
 function DetailsTab({ detail, onOpenTodo }: { detail: TodoDetail; onOpenTodo: (number: number) => void }) {
   const act = useTodosStore((state) => state.act);
+  const readOnly = useReadOnlyHost();
   const now = useNow();
   const { todo, status } = detail;
   const closed = status.status === 'done' || status.status === 'dropped';
@@ -135,13 +137,15 @@ function DetailsTab({ detail, onOpenTodo }: { detail: TodoDetail; onOpenTodo: (n
           {status.status === 'queued' ? (
             <>
               <span className="truncate text-text-secondary">held · {detail.load.reason ?? status.reason}</span>
-              <span className="shrink-0"><LinkButton onClick={() => void act({ kind: 'start', number: todo.number, anyway: true })} testId="todo-rail-start-anyway">Start anyway</LinkButton></span>
+              <span className="needs-full-access shrink-0"><LinkButton onClick={() => void act({ kind: 'start', number: todo.number, anyway: true })} testId="todo-rail-start-anyway">Start anyway</LinkButton></span>
             </>
           ) : closed ? <Muted>–</Muted> : (
             <>
               <span className="truncate">{neverPause ? 'never paused' : detail.load.canPause ? 'can pause' : detail.load.reason ?? 'won’t pause'}</span>
-              <span className="text-text-tertiary">·</span>
-              <LinkButton onClick={() => void act({ kind: 'never-pause', number: todo.number, on: !neverPause })} testId="todo-rail-never-pause">{neverPause ? 'Allow pause' : 'Never pause'}</LinkButton>
+              {!readOnly && <>
+                <span className="text-text-tertiary">·</span>
+                <LinkButton onClick={() => void act({ kind: 'never-pause', number: todo.number, on: !neverPause })} testId="todo-rail-never-pause">{neverPause ? 'Allow pause' : 'Never pause'}</LinkButton>
+              </>}
             </>
           )}
         </Prop>
@@ -215,13 +219,14 @@ function FileRow({ detail, row, now, here, open, closed, onOpen }: {
   detail: TodoDetail; row: TodoFileRow; now: number; here: boolean; open: boolean; closed: boolean; onOpen: (attachment: TodoAttachment) => void;
 }) {
   const act = useTodosStore((state) => state.act);
+  const readOnly = useReadOnlyHost();
   const { attachment } = row;
   const Icon = ATTACHMENT_KIND_ICON[attachment.kind];
   const meta = [fileOrigin(row), here ? null : `on ${attachment.machine ?? detail.machine}`, relativeAge(attachment.addedAt, now)].filter(Boolean).join(' · ');
   const menu: DropdownItem[] = [
     { id: 'open-outside', label: 'Open outside', disabled: !here, description: here ? undefined : `On ${attachment.machine ?? detail.machine}`, onClick: () => openAttachmentOutside(attachment) },
   ];
-  if (!row.from) menu.push({ id: 'detach', label: 'Detach', variant: 'danger', onClick: () => void act({ kind: 'detach', number: detail.todo.number, attachmentId: attachment.id }) });
+  if (!row.from && !readOnly) menu.push({ id: 'detach', label: 'Detach', variant: 'danger', onClick: () => void act({ kind: 'detach', number: detail.todo.number, attachmentId: attachment.id }) });
   return (
     <div className={cn('group mb-0.5 flex items-center rounded-md hover:bg-surface-hover', open && 'bg-surface-hover')} data-testid="todo-file-row">
       <button

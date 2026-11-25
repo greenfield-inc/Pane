@@ -111,9 +111,13 @@ export function useRemoteTerminal({
     if (terminal) terminal.options.cursorBlink = !caretResting;
   }, [caretResting]);
 
-  // Keys and query answers stop here while the host takes none.
+  // Keys and query answers stop here while the host takes none, and no cursor invites them.
   useEffect(() => {
-    if (terminalRef.current) terminalRef.current.options.disableStdin = readOnly;
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.disableStdin = readOnly;
+    terminal.options.cursorInactiveStyle = readOnly ? 'none' : 'outline';
+    terminal.options.theme = terminalTheme(readOnly);
   }, [readOnly]);
 
   useEffect(() => {
@@ -131,12 +135,8 @@ export function useRemoteTerminal({
       // Static AA floor: the remote PWA is browser-served with no AppConfig transport,
       // so the desktop high-contrast setting cannot be plumbed here.
       minimumContrastRatio: 4.5,
-      theme: {
-        background: '#010409',
-        foreground: '#e6edf3',
-        cursor: '#58a6ff',
-        selectionBackground: '#264f78',
-      },
+      cursorInactiveStyle: isReadOnlyHost() ? 'none' : 'outline',
+      theme: terminalTheme(isReadOnlyHost()),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -278,6 +278,13 @@ export function useRemoteTerminal({
     problem: status.kind === 'problem' ? status.message : null,
     focusTerminal, sendInput, resetTerminal, scrollLines, scrollToBottom,
   };
+}
+
+/** While watching, the cursor takes the background's colour, since xterm can't turn a focused one off. */
+function terminalTheme(readOnly: boolean) {
+  const background = '#010409';
+  const foreground = '#e6edf3';
+  return { background, foreground, cursor: readOnly ? background : '#58a6ff', cursorAccent: readOnly ? foreground : background, selectionBackground: '#264f78' };
 }
 
 function getTerminalViewerId(): string {

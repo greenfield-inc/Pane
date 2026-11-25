@@ -35,7 +35,7 @@ const READABLE_EVENTS = [
   'chat-tab:event', 'chat-tab:state', 'chat-tab:view', 'folder:created', 'folder:deleted', 'folder:updated', 'git-status-loading', 'git-status-updated', 'loops:changed',
   'orchestration-sessions:activity', 'orchestration-sessions:changed', 'orchestration-sessions:overview-updated',
   'panel:activityStatus', 'panel:agentStatus', 'panel:created', 'panel:deleted', 'panel:event', 'panel:prompt-added', 'panel:response-added', 'panel:updated',
-  'project:list-changed', 'project:updated', 'session:created', 'session:creation-failed', 'session:deleted', 'session:output', 'session:output-available', 'session:updated', 'sessions:loaded',
+  'project:list-changed', 'project:updated', 'session:created', 'session:creation-failed', 'session:deleted', 'session:updated', 'sessions:loaded',
   'terminal:alternateScreen', 'terminal:cliReady', 'terminal:exited', 'terminal:output', 'terminal:ptyReady', 'terminal:relaunched', 'todos:changed',
 ];
 
@@ -147,19 +147,24 @@ describe('a device paired Read only', () => {
     expect(await upgrade('/voice/deepgram-stream')).toBe(403);
   });
 
-  it('leaves out repository settings and the contents of file, diff and browser tabs', async () => {
+  it('leaves out settings, launch commands, what waits on the owner, and file, diff and browser tabs', async () => {
     const registry = new PaneCommandRegistry();
     const project = { id: 1, name: 'app', path: '/app', system_prompt: 'private', run_script: 'KEY=abc npm start', sessions: [{ id: 'pane' }] };
-    const panels = [{ id: 't', type: 'terminal' }, { id: 'c', type: 'chat' }, { id: 'e', type: 'explorer', state: { customState: { content: 'file text' } } }, { id: 'b', type: 'browser' }];
+    const panels = [{ id: 't', type: 'terminal', state: { customState: { agentType: 'claude', initialCommand: 'API_KEY=hidden claude' } } }, { id: 'c', type: 'chat' }, { id: 'e', type: 'explorer', state: { customState: { content: 'file text' } } }, { id: 'b', type: 'browser' }];
     registry.register('sessions:get-all-with-projects', () => ({ success: true, data: [project] }));
     registry.register('panels:list', () => ({ success: true, data: panels }));
     registry.register('panels:getActive', () => panels[2]);
     registry.register('runpane:panels:list', () => ({ ok: true, panels }));
+    registry.register('orchestration-sessions:overview', () => ({ success: true, data: { panes: [{ panels }] } }));
+    registry.register('chat-tab:get', () => ({ panelId: 'c', permissions: [{ toolCall: 'diff' }], questions: [{}], queue: [{}], messageCount: 2 }));
+    const shown = [{ id: 't', type: 'terminal', state: { customState: { agentType: 'claude' } } }, { id: 'c', type: 'chat' }];
     const { invoke, stream, server } = await serve(registry);
 
     expect((await invoke('sessions:get-all-with-projects')).body).toEqual({ ok: true, result: { success: true, data: [{ id: 1, name: 'app', path: '/app', sessions: [{ id: 'pane' }] }] } });
-    expect((await invoke('panels:list')).body).toEqual({ ok: true, result: { success: true, data: [panels[0], panels[1]] } });
-    expect((await invoke('runpane:panels:list')).body).toEqual({ ok: true, result: { ok: true, panels: [panels[0], panels[1]] } });
+    expect((await invoke('panels:list')).body).toEqual({ ok: true, result: { success: true, data: shown } });
+    expect((await invoke('runpane:panels:list')).body).toEqual({ ok: true, result: { ok: true, panels: shown } });
+    expect((await invoke('orchestration-sessions:overview')).body).toEqual({ ok: true, result: { success: true, data: { panes: [{ panels: shown }] } } });
+    expect((await invoke('chat-tab:get')).body).toEqual({ ok: true, result: { panelId: 'c', permissions: [], questions: [], queue: [], messageCount: 2 } });
     expect((await invoke('panels:getActive')).body).toEqual({ ok: true, result: null });
     expect((await invoke('sessions:get-all-with-projects', 'owner-token')).body).toEqual({ ok: true, result: { success: true, data: [project] } });
 
@@ -168,7 +173,7 @@ describe('a device paired Read only', () => {
     server.getEventSink().send('panel:updated', panels[2]);
     server.getEventSink().send('panel:updated', panels[0]);
     await vi.waitFor(() => expect(reader.text()).toContain('"id":"t"'));
-    expect(reader.text()).not.toMatch(/private|npm start|file text/u);
+    expect(reader.text()).not.toMatch(/private|npm start|file text|hidden/u);
     reader.close();
   });
 

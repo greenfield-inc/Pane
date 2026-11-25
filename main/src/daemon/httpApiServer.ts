@@ -435,20 +435,29 @@ export class PaneRemoteHttpApiServer {
             timestamp: new Date().toISOString(),
           };
 
-          const readable = mayReceive('read', channel) ? readableEvent(channel, eventArgs) : null;
-          const readPayload = readable && readable !== eventArgs ? { ...payload, args: readable } : payload;
+          // Worked out once, for the first read-only stream that carries the event.
+          let readPayload: RemoteDaemonEventEnvelope | null | undefined;
 
           for (const [clientConnectionId, client] of this.eventClients) {
-            if (!mayReceive(client.access, channel) || (client.access === 'read' && !readable)) {
+            if (!mayReceive(client.access, channel)) {
               continue;
             }
+            let shown: RemoteDaemonEventEnvelope | null = payload;
+            if (client.access === 'read') {
+              if (readPayload === undefined) {
+                const readArgs = readableEvent(channel, eventArgs);
+                readPayload = readArgs && { ...payload, args: readArgs };
+              }
+              shown = readPayload;
+            }
+            if (!shown) continue;
             if (!this.isStillAdmitted(client)) {
               this.dropEventClient(clientConnectionId);
               continue;
             }
 
             try {
-              writeSseEvent(client.stream, 'daemon-event', client.access === 'read' ? readPayload : payload);
+              writeSseEvent(client.stream, 'daemon-event', shown);
             } catch {
               this.dropEventClient(clientConnectionId);
             }
