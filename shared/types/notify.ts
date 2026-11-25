@@ -716,3 +716,10 @@ export type NotifySummaryPage =
 
 /** The policy every Summary page is served with: no scripts, no network, inline styles and data: images only. */
 export const NOTIFY_SUMMARY_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'";
+
+/**
+ * The largest HTML page a card's link or Summary sends whole, to another machine or the phone. A
+ * review or plan page inlines its screenshots as data: images (the only images the policy above
+ * allows), so a real one runs to several MiB; a text file keeps its own, smaller limit.
+ */
+export const NOTIFY_PAGE_LIMIT_BYTES = 16 * 1024 * 1024;

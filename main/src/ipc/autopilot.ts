@@ -22,6 +22,7 @@ import { PaneError } from '../../../shared/paneError';
 import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { AutopilotDocument, AutopilotSnapshot, AutopilotStackPushRequest } from '../../../shared/types/autopilot';
+import { NOTIFY_PAGE_LIMIT_BYTES } from '../../../shared/types/notify';
 import { DEFAULT_AGENT_ID, agentTerminalCommand } from '../../../shared/agents';
 import { activeTodoService } from '../services/todos/todosFeature';
 
@@ -57,6 +58,7 @@ const rewriteIdSchema = boundary.object({ id: boundary.nonEmptyString });
 const readDocOptionsSchema = boundary.object({ inline: boundary.optional(boundary.boolean) });
 
 const TEXT_LIMIT_BYTES = 2 * 1024 * 1024;
+const MIB = 1024 * 1024;
 
 type AutopilotServices = Pick<AppServices, 'configManager' | 'sessionManager' | 'orchestrationSessionManager' | 'skillCacheManager' | 'workspaceJournal' | 'todoService'>;
 
@@ -331,7 +333,10 @@ export function readDocument(manager: Pick<AutopilotManager, 'snapshot'>, file: 
   }
   const html = /\.html?$/i.test(file);
   if (html && !options.inline) return { kind: 'html', url: pathToFileURL(file).toString(), path: file };
-  if (stat.size > TEXT_LIMIT_BYTES) return { kind: 'missing', path: file, message: `${path.basename(file)} is larger than 2 MiB; open it in Pane instead.` };
+  // A page inlines its screenshots, so it may run to several MiB; another machine still reads it whole (T-76).
+  // The message names the limit: another machine's viewer reads "larger than <n> MiB" as too large, not gone.
+  const limit = html ? NOTIFY_PAGE_LIMIT_BYTES : TEXT_LIMIT_BYTES;
+  if (stat.size > limit) return { kind: 'missing', path: file, message: `${path.basename(file)} is larger than ${limit / MIB} MiB; open it in Pane instead.` };
   const text = fs.readFileSync(file, 'utf8');
   if (html) return { kind: 'html', url: pathToFileURL(file).toString(), path: file, html: text };
   return { kind: 'text', text, path: file };
