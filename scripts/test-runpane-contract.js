@@ -545,8 +545,26 @@ async function checkStartLinkParity() {
     [['links', 'create', '--repo', '3', '--prompt', '\uFEFFhi'], 1],
     [['links', 'create', '--repo', '3', '--prompt', '\u001Chi'], 1],
     [['links', 'create', '--repo', '3', '--prompt', 'a\u2028b'], 1],
+    // Default-ignorable characters; one emoji variation selector after a visible character is kept.
+    [['links', 'create', '--repo', '3', '--prompt', 'a\uFE00b'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'a\uFE0F\uFE0Fb'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'a\u3164b'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'Fix the \u26A0\uFE0F warning'], 0],
     [['links', 'create', '--repo', '3', '--prompt', '--settings=/tmp/x'], 1],
     [['links', 'create', '--repo', '3', '--prompt', 'Fix it.   \n\n\n\n  \nThen stop.', '--json'], 0],
+    // No repo: a new Session. A Session by name. --repo with --session, --agent with --session.
+    [['links', 'create', '--prompt', prompt, '--agent', 'claude', '--json'], 0],
+    [['links', 'create', '--prompt', 'hi', '--session', ' Build fixes ', '--json'], 0],
+    [['links', 'create', '--prompt', 'hi', '--repo', '3', '--session', 's'], 1],
+    [['links', 'create', '--prompt', 'hi', '--session', 's', '--agent', 'codex'], 1],
+    [['links', 'create', '--prompt', 'hi', '--session', '\u200Bs'], 1],
+    [['links', 'create', '--prompt', 'hi', '--session', 'a\tb'], 1],
+    [['links', 'create', '--prompt', 'hi', '--session', 's'.repeat(101)], 1],
+    [['links', 'create', '--pane', 'p', '--web'], 1],
+    // --web prints the runpane.com/open form, refused past the 2,048 characters Chrome and Edge pass.
+    [['links', 'create', '--prompt', prompt, '--agent', 'codex', '--web'], 0],
+    [['links', 'create', '--prompt', 'x'.repeat(2020), '--web'], 1],
+    [['links', 'create', '--prompt', 'x'.repeat(2020)], 0],
   ];
   try {
     for (const [args, code] of cases) {
@@ -554,11 +572,25 @@ async function checkStartLinkParity() {
       assert.strictEqual(npm.code, code, `npm ${args.slice(0, 4).join(' ')} exited ${npm.code}: ${npm.stderr}`);
       assert.deepStrictEqual({ code: pip.code, stdout: lf(pip.stdout), stderr: lf(pip.stderr) }, { code: npm.code, stdout: lf(npm.stdout), stderr: lf(npm.stderr) }, `Python and Node differ on links create ${args.slice(2, 4).join(' ')}`);
     }
-    const { url, target } = JSON.parse((await runCliOnce('npm', cases[0][0], paneDir)).stdout);
-    assert.deepStrictEqual(target, { kind: 'new', id: 'owner/app', prompt, agent: 'codex' });
+    const { url, webUrl, html, target } = JSON.parse((await runCliOnce('npm', cases[0][0], paneDir)).stdout);
+    assert.deepStrictEqual(target, { kind: 'new', id: 'owner/app', prompt, agent: 'codex', repo: 'owner/app' });
     const parsed = new URL(url);
     assert.strictEqual(parsed.host, 'new');
-    assert.deepStrictEqual(Object.fromEntries(parsed.searchParams), { repo: 'owner/app', prompt, agent: 'codex' });
+    assert.deepStrictEqual([...parsed.searchParams], [['agent', 'codex'], ['repo', 'owner/app'], ['prompt', prompt]]);
+    assert.strictEqual(webUrl, `https://runpane.com/open${parsed.search}`);
+    assert.strictEqual(html, `<a href="${webUrl.replace(/&/g, '&amp;')}">Open in Pane with Codex</a>`);
+    const web = await runCliOnce('npm', ['links', 'create', '--prompt', prompt, '--agent', 'codex', '--repo', 'owner/app', '--web'], paneDir);
+    assert.strictEqual(web.stdout.trim(), webUrl);
+    const session = JSON.parse((await runCliOnce('npm', ['links', 'create', '--prompt', 'hi', '--session', ' Build fixes ', '--json'], paneDir)).stdout);
+    assert.deepStrictEqual(session, {
+      ok: true,
+      url: 'pane://new?session=Build+fixes&prompt=hi',
+      webUrl: 'https://runpane.com/open?session=Build+fixes&prompt=hi',
+      html: '<a href="https://runpane.com/open?session=Build+fixes&amp;prompt=hi">Open in Pane</a>',
+      target: { kind: 'new', prompt: 'hi', session: 'Build fixes' },
+    });
+    const tooLong = await runCliOnce('npm', ['links', 'create', '--prompt', 'x'.repeat(2020), '--web'], paneDir);
+    assertIncludes(tooLong.stderr, 'Chrome and Edge open links up to 2048');
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });
   }
@@ -1517,7 +1549,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false, stackTabs: [], stackNext: false,
   todoArgs: [], noStart: false, escalate: false, remindMe: false,
-  answerApprove: false, answerDeny: false, hook: false, yaml: false,
+  answerApprove: false, answerDeny: false, hook: false, web: false, yaml: false,
 };
 
 function normalizeParsedArgs(value) {

@@ -2347,12 +2347,12 @@ const CONTRACT_SECTION_11 = [
   },
   {
     "name": "links create",
-    "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session, or that starts an agent on a prompt once the person confirms.",
+    "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session, or a start link that starts an agent on a prompt once the person confirms.",
     "usage": [
       "runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
       "runpane links create --repo <repo-id> [--json]",
       "runpane links create --session <session-id> [--json]",
-      "runpane links create --repo <repo> --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--json]"
+      "runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--repo <repo> | --session <id|name>] [--web] [--json]"
     ],
     "toolsets": [
       "core",
@@ -4294,6 +4294,10 @@ const CONTRACT_SECTION_12 = {
     {
       "name": "--remind-me",
       "description": "todos snooze only: at the time, raise a reminder card for the person instead of waking its agents."
+    },
+    {
+      "name": "--web",
+      "description": "runpane links create: print a start link in its https://runpane.com/open form, for web pages."
     }
   ]
 } as const;
@@ -5613,17 +5617,18 @@ const CONTRACT_SECTION_13 = {
       "  runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
       "  runpane links create --repo <repo-id> [--json]",
       "  runpane links create --session <session-id> [--json]",
-      "  runpane links create --repo <repo> --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--json]",
+      "  runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--repo <repo> | --session <id|name>] [--web] [--json]",
       "",
-      "Build a pane:// link that opens a Pane, panel, repository, or Session, or that starts an agent on a prompt once the person confirms.",
+      "Build a pane:// link that opens a Pane, panel, repository, or Session, or a start link that starts an agent on a prompt once the person confirms.",
       "",
       "Options:",
       "  --pane <pane-id>                Pane to open.",
       "  --panel <panel-id>              Panel inside the Pane to select.",
       "  --repo <repo-id>                Repository id from repos list; with --prompt, also a saved name or owner/repo.",
+      "  --session <session-id>          Session id from sessions list; with --prompt, also a Session name.",
       "  --prompt <task>                 Start link: the prompt Pane shows, then sends once the person presses Start.",
-      "  --agent <agent>                 Start link: the agent to start (default: Pane's default agent).",
-      "  --session <session-id>          Session id or name from sessions list.",
+      "  --agent <agent>                 Start link: the agent to start (default: the person's default agent).",
+      "  --web                           Start link: print the https://runpane.com/open form, for web pages.",
       "  --json                          Print machine-readable output."
     ],
     "links open": [
@@ -8461,17 +8466,18 @@ const CONTRACT_SECTION_13 = {
       "  runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
       "  runpane links create --repo <repo-id> [--json]",
       "  runpane links create --session <session-id> [--json]",
-      "  runpane links create --repo <repo> --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--json]",
+      "  runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--repo <repo> | --session <id|name>] [--web] [--json]",
       "",
-      "Build a pane:// link that opens a Pane, panel, repository, or Session, or that starts an agent on a prompt once the person confirms.",
+      "Build a pane:// link that opens a Pane, panel, repository, or Session, or a start link that starts an agent on a prompt once the person confirms.",
       "",
       "Options:",
       "  --pane <pane-id>                Pane to open.",
       "  --panel <panel-id>              Panel inside the Pane to select.",
       "  --repo <repo-id>                Repository id from repos list; with --prompt, also a saved name or owner/repo.",
+      "  --session <session-id>          Session id from sessions list; with --prompt, also a Session name.",
       "  --prompt <task>                 Start link: the prompt Pane shows, then sends once the person presses Start.",
-      "  --agent <agent>                 Start link: the agent to start (default: Pane's default agent).",
-      "  --session <session-id>          Session id or name from sessions list.",
+      "  --agent <agent>                 Start link: the agent to start (default: the person's default agent).",
+      "  --web                           Start link: print the https://runpane.com/open form, for web pages.",
       "  --json                          Print machine-readable output."
     ],
     "links open": [
@@ -18185,11 +18191,16 @@ const CONTRACT_SECTION_16 = {
       "url": {
         "type": "string"
       },
+      "webUrl": {
+        "type": "string"
+      },
+      "html": {
+        "type": "string"
+      },
       "target": {
         "type": "object",
         "required": [
-          "kind",
-          "id"
+          "kind"
         ],
         "properties": {
           "kind": {
@@ -18206,10 +18217,16 @@ const CONTRACT_SECTION_16 = {
           "panelId": {
             "type": "string"
           },
-          "prompt": {
+          "agent": {
             "type": "string"
           },
-          "agent": {
+          "repo": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "prompt": {
             "type": "string"
           }
         },
@@ -27390,8 +27407,8 @@ const CONTRACT_SECTION_17 = {
     },
     "links create": {
       "name": "links create",
-      "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session, or that starts an agent on a prompt once the person confirms.",
-      "details": "Use this to hand the user a clickable link. It only builds the URL. An open link navigates and never changes Pane state; a start link (--prompt) shows the repository, agent and whole prompt in Pane, and creates a Pane only when the person presses Start.",
+      "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session, or a start link that starts an agent on a prompt once the person confirms.",
+      "details": "Use this to hand the user a clickable link. It only builds the URL. An open link navigates and never changes Pane state; a start link (--prompt) shows the prompt, the agent and where it runs in Pane, and starts work only when the person presses Start.",
       "requiresPaneDaemon": false,
       "mutates": false,
       "arguments": [
@@ -27414,6 +27431,12 @@ const CONTRACT_SECTION_17 = {
           "description": "Repository id from repos list; with --prompt, also a saved name or owner/repo."
         },
         {
+          "name": "--session",
+          "value": "<session-id>",
+          "required": false,
+          "description": "Session id from sessions list; with --prompt, also a Session name."
+        },
+        {
           "name": "--prompt",
           "value": "<task>",
           "required": false,
@@ -27423,13 +27446,12 @@ const CONTRACT_SECTION_17 = {
           "name": "--agent",
           "value": "<agent>",
           "required": false,
-          "description": "Start link: the agent to start (default: Pane's default agent)."
+          "description": "Start link: the agent to start (default: the person's default agent)."
         },
         {
-          "name": "--session",
-          "value": "<session-id>",
+          "name": "--web",
           "required": false,
-          "description": "Session id or name from sessions list."
+          "description": "Start link: print the https://runpane.com/open form, for web pages."
         },
         {
           "name": "--json",
@@ -27439,14 +27461,16 @@ const CONTRACT_SECTION_17 = {
       ],
       "examples": [
         "runpane links create --pane <pane-id> --json",
-        "runpane links create --repo owner/repo --prompt \"Fix the failing test\" --agent codex --json"
+        "runpane links create --prompt \"Fix the failing test\" --agent codex --repo owner/repo --json",
+        "runpane links create --prompt \"Summarize this repository\" --agent claude --web"
       ],
       "jsonSchemas": [
         "linkCreateResult"
       ],
       "notes": [
         "Links look like `pane://open?pane=<pane-id>&panel=<panel-id>`. Give exactly one of --pane, --repo, or --session.",
-        "Start links look like `pane://new?repo=<repo>&prompt=<text>&agent=<id>`: --repo (id, saved name, or owner/repo matched against each saved repository's origin remote) and --prompt (at most 4000 characters, no control characters but tab and newline). Pane never runs one on its own."
+        "Start links look like `pane://new?agent=<id>&repo=<repo>&prompt=<text>`. Without --repo or --session the agent starts in a new Session; --repo (id, saved name, or owner/repo matched against each saved repository's origin remote) starts it in a new Pane; --session sends the prompt to that Session's agent. The prompt is at most 4000 characters, with no control or invisible characters but tab and newline. Pane never runs a start link on its own.",
+        "With --web the link is `https://runpane.com/open?...`, which opens Pane or offers its download, and must be at most 2,048 characters. --json adds `webUrl` and `html`, a one-line Open in Pane button. See docs/OPEN_IN_PANE_LINKS.md."
       ]
     },
     "links open": {

@@ -45,6 +45,7 @@ export function agentTerminalShortcutId(id: ConfiguredAgentId): AgentTerminalSho
 const STATIC_SHORTCUT_IDS = [
   'open-command-palette', 'toggle-sidebar', 'open-settings', 'focus-sidebar',
   'open-shortcut-settings', 'new-session', 'new-orchestration-session', 'new-project',
+  'create-start-link',
   'cycle-tab-prev-a', 'cycle-tab-next-d', 'add-tool-terminal', 'add-tool-explorer',
   'close-active-tab', 'archive-active-session', 'split-right', 'split-down',
   'focus-group-left', 'focus-group-right', 'focus-group-up', 'focus-group-down',
@@ -116,6 +117,7 @@ const APP_ENTRIES: readonly ShortcutCatalogEntry[] = [
   entry({ id: 'new-session', label: 'New Pane', category: 'session', scope: 'app', defaultChord: 'mod+n' }),
   entry({ id: 'new-orchestration-session', label: 'New Session', category: 'session', scope: 'app', defaultChord: null }),
   entry({ id: 'new-project', label: 'New Project', category: 'navigation', scope: 'app', defaultChord: 'mod+shift+n' }),
+  entry({ id: 'create-start-link', label: 'Create Open in Pane link…', category: 'tools', scope: 'app', defaultChord: null }),
   entry({ id: 'focus-session-tile-left', label: 'Focus Session Left', category: 'view', scope: 'app', defaultChord: null }),
   entry({ id: 'focus-session-tile-right', label: 'Focus Session Right', category: 'view', scope: 'app', defaultChord: null }),
   entry({ id: 'focus-session-tile-up', label: 'Focus Session Up', category: 'view', scope: 'app', defaultChord: null }),

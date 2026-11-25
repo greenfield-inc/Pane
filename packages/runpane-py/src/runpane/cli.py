@@ -214,6 +214,7 @@ FLAG_OWNERS = {
     "--todo": ("notify", "report", "agents start"),
     "--conversation": ("panels conversation",),
     "--hook": ("panels conversation",),
+    "--web": ("links create",),
 }
 HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 
@@ -351,6 +352,8 @@ class ParsedArgs:
     conversation_id: Optional[str] = None
     conversation_source: Optional[str] = None
     hook: bool = False
+    # links create: print the https://runpane.com/open form of a start link.
+    web: bool = False
     expect_report: Optional[bool] = None
     wait_for_result: bool = False
     wait_timeout_ms: Optional[int] = None
@@ -1196,6 +1199,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--hook":
         parsed.hook = True
+        return
+    if flag == "--web":
+        parsed.web = True
         return
     if flag == "--fix":
         raise ValueError("runpane doctor --fix updates npm installs of runpane, so it runs only in the npm CLI. Run: npx --yes runpane@latest doctor --fix")

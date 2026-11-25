@@ -59,6 +59,11 @@ import { registerCustomThemeHandlers } from './customTheme';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { registerPaneLinkHandler } from '../services/paneLinks';
 import { RepositoryIdentities } from '../services/repositoryIdentity';
+import { registerStartLinkConfirm } from './startLinkConfirm';
+import { submitOnlyToAgent } from './runpane';
+import { isOnPath } from '../utils/onPath';
+import { configuredAgent, CONFIGURED_AGENT_IDS } from '../../../shared/agents';
+import { normalizePaneChatAgent } from '../../../shared/types/paneChat';
 import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { registerWorkspaceAccessHandlers } from './workspaceAccess';
@@ -167,16 +172,14 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
       const identities = await repositoryIdentities.of(projects);
       return projects.map((project, index) => ({ id: project.id, name: project.name, identity: identities[index] ?? null }));
     },
-    // A native dialog, so nothing the link opened can press Start; Cancel is the default.
-    confirmStart: async ({ repoName, agentLabel, prompt }) => (await showMessage({
-      type: 'question',
-      buttons: ['Start', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      noLink: true,
-      message: `Start ${agentLabel} in ${repoName}?`,
-      detail: `A link asks Pane to create a new Pane in ${repoName} and send ${agentLabel} this prompt. ${agentLabel} runs with full access: it can edit files and run commands without asking.\n\n${prompt}`,
-    })).response === 0,
+    installedAgents: async () => {
+      const installed = await Promise.all(CONFIGURED_AGENT_IDS.map(async (id) =>
+        (await Promise.all(configuredAgent(id).executables.map((executable) => isOnPath(executable)))).some(Boolean)));
+      return CONFIGURED_AGENT_IDS.filter((_id, index) => installed[index]);
+    },
+    defaultAgent: () => normalizePaneChatAgent(services.configManager.getConfig().defaultOrchestratorAgent),
+    confirmStart: registerStartLinkConfirm(ipcMain, raiseMainWindow),
+    submitToAgent: (panelId, submit) => submitOnlyToAgent(panelId, submit),
     showError: (message) => void showMessage({ type: 'warning', message: 'Pane could not open this link', detail: message }),
     navigate: (target) => {
       raiseMainWindow();

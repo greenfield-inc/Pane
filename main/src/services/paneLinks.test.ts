@@ -5,10 +5,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { PaneDaemonServer } from '../daemon/server';
 import type { PaneLinkNavigation } from '../../../shared/types/paneLinks';
-import { DEFAULT_AGENT_ID } from '../../../shared/agents';
+import type { ConfiguredAgentId } from '../../../shared/agents';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { MAX_LINK_PROMPT_LENGTH } from '../../../shared/startLinks';
+import type { StartLinkAnswer, StartLinkRequest } from '../../../shared/types/startLinks';
 import { DEFAULT_NOTIFY_SETTINGS } from '../../../shared/types/notify';
 import { NotifyQueue } from './notify/notifyQueue';
-import { findLinkedRepo, forwardPaneLinkToRunningPane, MAX_LINK_PROMPT_LENGTH, OPEN_PANE_LINK_CHANNEL, registerPaneLinkHandler } from './paneLinks';
+import { findLinkedRepo, forwardPaneLinkToRunningPane, OPEN_PANE_LINK_CHANNEL, registerPaneLinkHandler } from './paneLinks';
 
 const REPOS = [
   { id: 7, name: 'app', identity: 'github.com/acme/app' },
@@ -17,14 +20,61 @@ const REPOS = [
   { id: 10, name: 'scratch', identity: null },
 ];
 
-function setup(options: { confirm?: boolean; answer?: () => Promise<boolean>; createResult?: PaneCommandValue } = {}) {
+const SESSIONS = [
+  { id: '__orchestration_session_1__', name: 'Build fixes', agent: 'codex', panelIds: { claude: 'claude-tab', codex: 'codex-tab', cursor: 'cursor-tab' } },
+  { id: '__orchestration_session_2__', name: 'Old work', agent: 'claude', archived: true, panelIds: { claude: 'old-tab', codex: 'x', cursor: 'y' } },
+  { id: 'legacy-pane-chat', name: 'Pane Chat', agent: 'claude', panelIds: { claude: 'claude-tab', codex: 'x', cursor: 'y' } },
+  { id: '__orchestration_session_3__', name: 'Twin', agent: 'claude', panelIds: { claude: 'claude-tab', codex: 'x', cursor: 'y' } },
+  { id: '__orchestration_session_4__', name: 'Twin', agent: 'claude', panelIds: { claude: 'claude-tab', codex: 'x', cursor: 'y' } },
+];
+
+type Answer = Omit<StartLinkAnswer, 'requestId'>;
+type Asked = Omit<StartLinkRequest, 'requestId'>;
+
+/** By default the person presses Start on what the dialog preselected. */
+const startAsOffered = (request: Asked): Answer => ({ start: true, agent: request.agent, target: 0 });
+
+function setup(options: {
+  confirm?: boolean;
+  reply?: (request: Asked) => Answer | Promise<Answer>;
+  installed?: ConfiguredAgentId[];
+  defaultAgent?: ConfiguredAgentId;
+  createResult?: PaneCommandValue;
+  /** What `panels:resume` reports for a tab: its agent running (the default), a shell, or a prompt it is stopped at. */
+  resume?: (panelId: string) => PaneCommandValue;
+} = {}) {
   const registry = new PaneCommandRegistry();
   const created: PaneCommandValue[] = [];
-  const confirmed: Array<{ repoName: string; agentLabel: string; prompt: string }> = [];
+  const sessionsCreated: PaneCommandValue[] = [];
+  const submitted: PaneCommandValue[] = [];
+  const confirmed: Asked[] = [];
   const errors: string[] = [];
   registry.register('runpane:panes:create', (request: PaneCommandValue) => {
     created.push(request);
     return options.createResult ?? { ok: true, items: [{ ok: true, index: 0, sessionId: 'pane-new', panelId: 'panel-new' }] };
+  });
+  registry.register('runpane:sessions:get', (selector: PaneCommandValue) => {
+    const wanted = decodeBoundary(selector, boundary.object({ sessionId: boundary.optional(boundary.string), name: boundary.optional(boundary.string) }));
+    // As the Session manager does: an id that names no Session is tried as a name.
+    const matches = SESSIONS.filter((candidate) => candidate.id === wanted.sessionId);
+    const byName = matches.length > 0 ? matches : SESSIONS.filter((candidate) => candidate.name === (wanted.name ?? wanted.sessionId));
+    if (byName.length > 1) throw new Error(`Session selector ${wanted.sessionId} is ambiguous`);
+    const session = byName[0];
+    if (!session) throw new Error(`Session ${wanted.sessionId} not found`);
+    return { ok: true, session };
+  });
+  registry.register('runpane:sessions:create', (request: PaneCommandValue) => {
+    sessionsCreated.push(request);
+    return { ok: true, session: { id: '__orchestration_session_new__' }, panelId: 'session-agent-tab' };
+  });
+  const agentOfTab = new Map([['codex-tab', 'codex'], ['claude-tab', 'claude'], ['session-agent-tab', 'codex']]);
+  registry.register('runpane:panels:resume', (request: PaneCommandValue) => {
+    const { panelId } = decodeBoundary(request, boundary.object({ panelId: boundary.string }));
+    return options.resume?.(panelId) ?? { readiness: { ok: true, state: { running: true, agentType: agentOfTab.get(panelId) } } };
+  });
+  registry.register('runpane:panels:submit', (request: PaneCommandValue) => {
+    submitted.push(request);
+    return { ok: true };
   });
   const focused: PaneCommandValue[] = [];
   const navigated: PaneLinkNavigation[] = [];
@@ -38,9 +88,13 @@ function setup(options: { confirm?: boolean; answer?: () => Promise<boolean>; cr
   registerPaneLinkHandler(registry, {
     repoExists: (repoId) => repoId === 7,
     listRepos: async () => REPOS,
+    installedAgents: async () => options.installed ?? ['claude', 'codex'],
+    submitToAgent: (_panelId, submit) => submit(),
+    defaultAgent: () => options.defaultAgent ?? 'claude',
     confirmStart: async (request) => {
       confirmed.push(request);
-      return options.answer ? options.answer() : options.confirm ?? true;
+      if (options.confirm === false) return { start: false };
+      return (options.reply ?? startAsOffered)(request);
     },
     showError: (message) => { errors.push(message); },
     navigate: (target) => { navigated.push(target); },
@@ -55,7 +109,7 @@ function setup(options: { confirm?: boolean; answer?: () => Promise<boolean>; cr
     void notify.ask({ question: { ui: 'approve', title }, source: { ...source, name: 'auth-refactor', agent: 'Claude' } });
     return notify.snapshot().items.find((item) => item.title === title)?.id;
   };
-  return { focused, navigated, shown, pairLinks, open, ask, created, confirmed, errors };
+  return { focused, navigated, shown, pairLinks, open, ask, created, sessionsCreated, submitted, confirmed, errors };
 }
 
 describe('pane:// links', () => {
@@ -149,9 +203,14 @@ describe('pane:// links', () => {
 
     const result = await open(`pane://new?repo=acme%2Fapp&agent=codex&prompt=${encodeURIComponent(prompt)}`);
 
-    expect(result).toEqual({ success: true, data: { opened: { kind: 'new', repoId: 7, agent: 'codex', confirming: true } } });
+    expect(result).toEqual({ success: true, data: { opened: { kind: 'new', target: 'repo', repoId: 7, agent: 'codex', confirming: true } } });
     await vi.waitFor(() => expect(created).toHaveLength(1));
-    expect(confirmed).toEqual([{ repoName: 'app', agentLabel: expect.any(String), prompt }]);
+    expect(confirmed).toEqual([expect.objectContaining({
+      prompt,
+      agent: 'codex',
+      linkAgent: 'codex',
+      targets: [{ kind: 'repo', repoId: 7, repoName: 'app', identity: 'github.com/acme/app' }, { kind: 'new-session' }],
+    })]);
     expect(created).toEqual([{
       repo: { id: 7 },
       panes: [{ name: 'Fix the failing login test', tool: { agent: 'codex', initialInput: prompt } }],
@@ -174,7 +233,9 @@ describe('pane:// links', () => {
 
   it('asks about one link at a time and refuses another while a question is open', async () => {
     let answer: (start: boolean) => void = () => undefined;
-    const { open, confirmed, created } = setup({ answer: () => new Promise((resolve) => { answer = resolve; }) });
+    const { open, confirmed, created } = setup({
+      reply: (request) => new Promise((resolve) => { answer = (start) => resolve({ ...startAsOffered(request), start }); }),
+    });
 
     await open('pane://new?repo=app&prompt=first');
     await vi.waitFor(() => expect(confirmed).toHaveLength(1));
@@ -197,6 +258,15 @@ describe('pane:// links', () => {
     expect(created[0]).toMatchObject({ panes: [{ tool: { initialInput: 'Summarize the README.\n\nThen stop.' } }] });
   });
 
+  it('keeps an emoji with its variation selector in the prompt', async () => {
+    const { open, confirmed } = setup();
+
+    await open(`pane://new?repo=app&prompt=${encodeURIComponent('Fix the ⚠️ warning')}`);
+
+    await vi.waitFor(() => expect(confirmed).toHaveLength(1));
+    expect(confirmed[0].prompt).toBe('Fix the ⚠️ warning');
+  });
+
   it('names the Pane "Linked task" when the prompt has no letters a branch name can use', async () => {
     const { open, created } = setup();
 
@@ -206,13 +276,141 @@ describe('pane:// links', () => {
     expect(created[0]).toMatchObject({ panes: [{ name: 'Linked task' }] });
   });
 
-  it("uses Pane's default agent when the link names none", async () => {
-    const { open, created } = setup();
+  it("preselects the person's default agent when the link names none and it is installed", async () => {
+    const { open, created, confirmed } = setup({ defaultAgent: 'codex', installed: ['claude', 'codex'] });
 
     await open('pane://new?repo=7&prompt=hi');
 
     await vi.waitFor(() => expect(created).toHaveLength(1));
-    expect(created[0]).toMatchObject({ panes: [{ tool: { agent: DEFAULT_AGENT_ID } }] });
+    expect(confirmed[0]).toMatchObject({ agent: 'codex', linkAgent: null });
+    expect(created[0]).toMatchObject({ panes: [{ tool: { agent: 'codex' } }] });
+  });
+
+  it('falls back to an installed agent when the default is not installed', async () => {
+    const { open, created, confirmed } = setup({ defaultAgent: 'claude', installed: ['codex'] });
+
+    await open('pane://new?repo=7&prompt=hi');
+
+    await vi.waitFor(() => expect(created).toHaveLength(1));
+    expect(confirmed[0].agent).toBe('codex');
+    expect(confirmed[0].agents[0]).toMatchObject({ id: 'codex', installed: true });
+    expect(confirmed[0].agents.find((option) => option.id === 'claude')).toMatchObject({ installed: false });
+    expect(created[0]).toMatchObject({ panes: [{ tool: { agent: 'codex' } }] });
+  });
+
+  it("offers an installed agent in place of a link's agent that isn't installed, and says which the link asked for", async () => {
+    const { open, confirmed } = setup({ installed: ['codex'] });
+
+    await open('pane://new?repo=7&prompt=hi&agent=claude');
+
+    await vi.waitFor(() => expect(confirmed).toHaveLength(1));
+    expect(confirmed[0]).toMatchObject({ agent: 'codex', linkAgent: 'claude' });
+  });
+
+  it('starts a new Session with the agent and the prompt when the link names no repo or Session', async () => {
+    const { open, sessionsCreated, submitted, navigated, confirmed, created } = setup();
+    const prompt = 'Explain how this project builds';
+
+    const result = await open(`pane://new?agent=codex&prompt=${encodeURIComponent(prompt)}`);
+
+    expect(result).toMatchObject({ success: true, data: { opened: { kind: 'new', target: 'new-session', agent: 'codex' } } });
+    await vi.waitFor(() => expect(submitted).toHaveLength(1));
+    expect(confirmed[0].targets).toEqual([{ kind: 'new-session' }]);
+    expect(sessionsCreated[0]).toEqual({ name: 'Explain how this project builds', agent: 'codex', launchCommand: '' });
+    expect(submitted[0]).toMatchObject({ panelId: 'session-agent-tab', input: prompt, source: 'user' });
+    expect(navigated).toEqual([{ kind: 'session', sessionId: '__orchestration_session_new__', panelId: 'session-agent-tab' }]);
+    expect(created).toEqual([]);
+  });
+
+  it("sends the prompt to a named Session's own agent, whatever agent the link names", async () => {
+    const { open, submitted, navigated, confirmed, sessionsCreated } = setup();
+
+    const result = await open('pane://new?session=Build+fixes&agent=claude&prompt=Rerun+the+flaky+test');
+
+    expect(result).toMatchObject({ success: true, data: { opened: { target: 'session', sessionId: '__orchestration_session_1__', agent: 'codex' } } });
+    await vi.waitFor(() => expect(submitted).toHaveLength(1));
+    expect(confirmed[0].targets[0]).toEqual({ kind: 'session', sessionId: '__orchestration_session_1__', sessionName: 'Build fixes', agent: 'codex' });
+    expect(submitted[0]).toMatchObject({ panelId: 'codex-tab', input: 'Rerun the flaky test', source: 'user' });
+    expect(navigated).toEqual([{ kind: 'session', sessionId: '__orchestration_session_1__', panelId: 'codex-tab' }]);
+    expect(sessionsCreated).toEqual([]);
+  });
+
+  it.each([
+    ['a shell has the tab (the agent exited at launch)', { readiness: { ok: true, state: { running: false } } }, 'is not running'],
+    ['another agent has the tab', { readiness: { ok: true, state: { running: true, agentType: 'claude' } } }, 'is not running'],
+    ['the agent is stopped at a prompt', { readiness: { ok: false, blocked: { message: 'Trust this folder?' }, state: { running: true, agentType: 'codex' } } }, 'stopped at a prompt'],
+  ])("sends nothing to a Session when %s, and says why", async (_case, resume, message) => {
+    const { open, submitted, errors } = setup({ resume: () => resume });
+
+    await open('pane://new?session=Build+fixes&prompt=hi');
+
+    await vi.waitFor(() => expect(errors).toEqual([expect.stringContaining(message)]));
+    expect(submitted).toEqual([]);
+  });
+
+  it("names a Session by any id, such as Pane Chat's", async () => {
+    const { open, submitted } = setup({ resume: () => ({ readiness: { ok: true, state: { running: true, agentType: 'claude' } } }) });
+
+    await open('pane://new?session=legacy-pane-chat&prompt=hi');
+
+    await vi.waitFor(() => expect(submitted).toEqual([expect.objectContaining({ panelId: 'claude-tab', input: 'hi' })]));
+  });
+
+  it('says when several Sessions share the name, and asks nothing', async () => {
+    const { open, confirmed } = setup();
+
+    expect(await open('pane://new?session=Twin&prompt=hi')).toEqual({ success: false, error: expect.stringContaining('Several Sessions are named "Twin"') });
+    expect(confirmed).toEqual([]);
+  });
+
+  it('starts nothing when no agent is installed, even if the answer names the preselected one', async () => {
+    const { open, confirmed, created } = setup({ installed: [] });
+
+    await open('pane://new?repo=app&prompt=hi');
+
+    await vi.waitFor(() => expect(confirmed).toHaveLength(1));
+    expect(confirmed[0].agents.every((option) => !option.installed)).toBe(true);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(created).toEqual([]);
+  });
+
+  it('runs where the person chose: a new Session instead of the linked repository', async () => {
+    const { open, created, sessionsCreated } = setup({
+      reply: (request) => ({ start: true, agent: 'claude', target: request.targets.findIndex((target) => target.kind === 'new-session') }),
+    });
+
+    await open('pane://new?repo=app&agent=codex&prompt=hi');
+
+    await vi.waitFor(() => expect(sessionsCreated).toHaveLength(1));
+    expect(sessionsCreated[0]).toMatchObject({ agent: 'claude' });
+    expect(created).toEqual([]);
+  });
+
+  it.each([
+    ['an agent that is not installed and was not preselected', { start: true, agent: 'cursor', target: 0 }],
+    // SAFETY: deliberately not an agent id, as a tampered answer would send.
+    ['an agent the dialog did not offer', { start: true, agent: 'sh' as ConfiguredAgentId, target: 0 }],
+    ['a target the dialog did not offer', { start: true, agent: 'claude', target: 5 }],
+    ['no target', { start: true, agent: 'claude' }],
+  ] satisfies Array<[string, Answer]>)('starts nothing when the answer names %s', async (_case, answer) => {
+    const { open, confirmed, created, sessionsCreated } = setup({ reply: () => answer });
+
+    await open('pane://new?repo=app&prompt=hi');
+
+    await vi.waitFor(() => expect(confirmed).toHaveLength(1));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(created).toEqual([]);
+    expect(sessionsCreated).toEqual([]);
+  });
+
+  it.each([
+    ['an unknown Session', 'pane://new?session=Nope&prompt=hi', 'No Session matches "Nope"'],
+    ['an archived Session', 'pane://new?session=Old+work&prompt=hi', 'is archived'],
+  ])('says why it cannot send to %s, and asks nothing', async (_case, link, message) => {
+    const { open, confirmed } = setup();
+
+    expect(await open(link)).toEqual({ success: false, error: expect.stringContaining(message) });
+    expect(confirmed).toEqual([]);
   });
 
   it('tells the person when the new Pane could not start', async () => {
@@ -250,6 +448,11 @@ describe('pane:// links', () => {
     ['a line separator in the prompt', 'pane://new?repo=app&prompt=a%E2%80%A8b'],
     ['a paragraph separator in the prompt', 'pane://new?repo=app&prompt=a%E2%80%A9b'],
     ['a byte-order mark at the start of the prompt', 'pane://new?repo=app&prompt=%EF%BB%BFhi'],
+    ['a variation selector that is not an emoji\'s', 'pane://new?repo=app&prompt=a%EF%B8%80b'],
+    ['a run of emoji variation selectors, as hidden text uses', 'pane://new?repo=app&prompt=a%EF%B8%8F%EF%B8%8Fb'],
+    ['a supplementary variation selector', 'pane://new?repo=app&prompt=a%F3%A0%84%80b'],
+    ['a combining grapheme joiner', 'pane://new?repo=app&prompt=a%CD%8Fb'],
+    ['a Hangul filler', 'pane://new?repo=app&prompt=a%E3%85%A4b'],
     ['a prompt that starts with a dash, which an agent would read as an option', 'pane://new?repo=app&prompt=--settings%3D%2Ftmp%2Fx'],
     ['an unknown agent', 'pane://new?repo=app&prompt=hi&agent=sh'],
     ['an unknown parameter', 'pane://new?repo=app&prompt=hi&yes=1'],
@@ -257,7 +460,8 @@ describe('pane:// links', () => {
     ['a repeated prompt', 'pane://new?repo=app&prompt=a&prompt=b'],
     ['a path as the repo', 'pane://new?repo=%2Fetc&prompt=hi'],
     ['a repo with a parent segment', 'pane://new?repo=a%2F..%2Fb&prompt=hi'],
-    ['no repo', 'pane://new?prompt=hi'],
+    ['both a repo and a session', 'pane://new?repo=app&session=Build+fixes&prompt=hi'],
+    ['a session name with a control character', 'pane://new?session=a%07b&prompt=hi'],
   ])('rejects a start link with %s and asks nothing', async (_case, link) => {
     const { open, confirmed, created } = setup();
 

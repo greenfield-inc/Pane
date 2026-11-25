@@ -3,6 +3,7 @@ import { BrowserLayer } from './components/panels/browser/BrowserLayer';
 import { askAgentAbout, isHealthCard } from './components/machineHealth/healthCardActions';
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
 import { AddDeviceHost } from './components/addDevice/AddDeviceDialog';
+import { StartLinkHost } from './components/startLink/StartLinkDialog';
 import { ConnectionChecklist } from './components/ConnectionChecklist';
 import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
 import { useConnectionPresence } from './hooks/useConnectionPresence';
@@ -1033,6 +1034,7 @@ function App() {
         </div>
         <RemoteConnectionBanner onSettings={() => openSettings({ category: 'remote-access' })} />
         <AddDeviceHost />
+        <StartLinkHost />
         <div className="pane-main-layout relative flex flex-1 min-h-0">
         <MainProcessLogger />
         {isSettingsOpen && (

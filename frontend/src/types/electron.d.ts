@@ -79,6 +79,7 @@ import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import type { RelayLinkOpenedEvent, RelayPairedEvent, RelayStatus } from '../../../shared/types/relay';
+import type { StartLinkAnswer, StartLinkRequest } from '../../../shared/types/startLinks';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../../shared/types/sessionImport';
 import type { TodoAction, TodoActionResult, TodoCreateInput, TodoDetail, TodoRecord, TodosSnapshot } from '../../../shared/types/todos';
@@ -639,6 +640,8 @@ interface ElectronAPI {
     onRelayStatusChanged: (callback: (status: RelayStatus) => void) => () => void;
     onRelayPaired: (callback: (event: RelayPairedEvent) => void) => () => void;
     onRelayLinkOpened: (callback: (event: RelayLinkOpenedEvent) => void) => () => void;
+    /** A `pane://new` link asks the person to start an agent; answer with `window.answerStartLink`. */
+    onStartLinkRequest: (callback: (request: StartLinkRequest) => void) => () => void;
     onSshRouteProgress: (callback: (progress: { host: string; step: 'connecting' | 'checking-node' | 'installing' | 'starting' | 'linked' | 'failed'; message: string }) => void) => () => void;
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => () => void;
     /** A phone or another window saved settings on this host; refetch the config. */
@@ -882,6 +885,10 @@ interface ElectronAPI {
     reportVisibility: (visible: boolean) => void;
     /** Raises the window and opens a pane:// link, like one opened from the OS. */
     openPaneLink: (link: string) => Promise<void>;
+    /** Answers a `pane:start-link-request`; main starts work only on `start: true` for the pending request. */
+    answerStartLink: (answer: StartLinkAnswer) => Promise<void>;
+    /** The start link waiting for an answer, or null; read on mount so a request sent earlier is shown. */
+    pendingStartLink: () => Promise<StartLinkRequest | null>;
   };
 
   // ptyHost: typed wrapper over the per-window MessagePort installed by the
