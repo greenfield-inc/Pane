@@ -351,4 +351,40 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     expect(relink.json).toMatchObject({ ok: false, error: { code: 'ERR_RELAY_ALREADY_LINKED' } });
     expect((await invoke(b.host, String(studioToLaptop), 'sessions:get-all-with-projects')).status).toBe(200);
   }, 90_000);
+
+  it('shares a computer and its linked ones read-only, one way, until the owner removes the device', async () => {
+    const reader = await startComputer('Parsa’s Mac', mkdtempSync(join(tmpdir(), 'pane-relay-reader-')));
+    try {
+      // Dot links the studio and the laptop from a phone, then the studio shares itself read-only.
+      const a = await pair(studio, 'Dot’s iPhone', 'phone-dot');
+      const b = await pair(laptop, 'Dot’s iPhone', 'phone-dot');
+      const [studioInfo, laptopInfo] = [a.paired.json.computer, b.paired.json.computer];
+      const laptopForStudio = await invoke(b.host, String(b.paired.json.token), 'relay:client:mint-link', [{ peer: studioInfo }]);
+      const studioForLaptop = await invoke(a.host, String(a.paired.json.token), 'relay:client:mint-link', [{ peer: laptopInfo }]);
+      // An earlier test may have left them linked already.
+      if (laptopForStudio.json.ok) await invoke(a.host, String(a.paired.json.token), 'relay:client:save-link', [{ peer: laptopInfo, token: decodeBoundary(laptopForStudio.json.result, tokenSchema).token }]);
+      if (studioForLaptop.json.ok) await invoke(b.host, String(b.paired.json.token), 'relay:client:save-link', [{ peer: studioInfo, token: decodeBoundary(studioForLaptop.json.result, tokenSchema).token }]);
+      const link = studio.service.createPairingCode('1h', 'read').url;
+
+      expect(await reader.registry.invoke('relay:redeem-link', [{ link }])).toEqual({ linked: ['Studio Mac', 'Travel Laptop'], access: 'read' });
+
+      const call = createComputerCaller({ dial, extraCa });
+      for (const profile of reader.links.reachable()) {
+        expect(await call(profile, 'sessions:get-all-with-projects', [])).toEqual([{ id: `${profile.label} session` }]);
+        for (const channel of ['terminal:input', 'runpane:panes:create', 'credentials:shared:get', 'file:read', 'relay:client:mint-link']) {
+          await expect(call(profile, channel, []), `${profile.label} ${channel}`).rejects.toMatchObject({ status: 409, code: 'ERR_READ_ONLY_ACCESS' });
+        }
+      }
+      expect(reader.links.linked()).toEqual([]);
+      expect(reader.config().host.clients).toEqual([]);
+      for (const computer of [studio, laptop]) expect(computer.config().client.computers.map((saved) => saved.label)).not.toContain('Parsa’s Mac');
+
+      const record = studio.config().host.clients.find((client) => client.access === 'read');
+      await studio.registry.invoke('relay:remove-phone-everywhere', [{ clientId: record?.id }]);
+      for (const profile of reader.links.reachable()) await expect(call(profile, 'sessions:get-all-with-projects', [])).rejects.toMatchObject({ status: 403 });
+    } finally {
+      await reader.service.stop();
+      await reader.server.stop();
+    }
+  }, 120_000);
 });
