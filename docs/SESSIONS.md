@@ -41,7 +41,7 @@ profile in `agentProfile`, `{ ref, hash }`: the ref is `pane/claude` or
 `pane/codex` when the Session has no profile (the agent on its own, which adds
 nothing of Agent Farm's), the launch command's profile for `agent-farm run
 <profile>`, or the `agentProfile` passed to `runpane sessions create --from-json`
-(for example `greenfield/orchestrator`, which then picks the agent). `hash` is the
+(for example `greenfield/orchestrator`, which then picks the agent; a named variant must exist, and one other than the default also needs `agent`). A new launch command keeps a named profile; a new agent moves the Session to that agent's plain profile. `hash` is the
 content hash of the profile's plugin when the Session took it. The profile's
 instructions go into the Session folder as `PROFILE.md` and a section of its
 `AGENTS.md`, rewritten at every start. Sessions created before this, Sessions that

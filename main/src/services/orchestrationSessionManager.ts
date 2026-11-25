@@ -569,7 +569,12 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (input.name !== undefined) delete nextRecord.nameIsDefault;
       // A Session that runs through Agent Farm keeps doing so with its new agent or launch command.
       if (current.agentProfile && (agentChanging || input.launchCommand !== undefined || input.customResume !== undefined)) {
-        const agentProfile = await this.implicitAgentProfile(nextRecord);
+        let agentProfile = await this.implicitAgentProfile(nextRecord);
+        // A named profile stays while the agent does: a new launch command alone doesn't drop it.
+        if (agentProfile && !agentChanging && !plainProfileAgent(current.agentProfile.ref) && plainProfileAgent(agentProfile.ref)) {
+          const hash = await this.agentFarm().pluginHash(profilePlugin(current.agentProfile.ref));
+          agentProfile = hash === undefined ? agentProfile : { ref: current.agentProfile.ref, hash };
+        }
         if (agentProfile) nextRecord.agentProfile = agentProfile;
         else delete nextRecord.agentProfile;
       }
@@ -1473,16 +1478,22 @@ export class OrchestrationSessionManager extends EventEmitter {
     if (promoted || input.resume) refuse('SESSION_PROFILE_UNSUPPORTED', `A Session that continues an earlier conversation can't start with the profile ${ref}.`, 'Create the Session without a profile.');
     if (input.runtime === 'wsl') refuse('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which don't run in WSL, so the Session can't start with ${ref}.`, 'Create a native Session, or leave out the profile.');
     if (this.configManager.getConfig().chatTabsEnabled !== true) refuse('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which are off on this computer, so the Session can't start with ${ref}.`, 'Turn on Chat tabs in Settings > AI & Agents, then try again.');
-    const plain = plainProfileAgent(ref);
+    const [qualified, variant] = ref.split(':');
+    const plain = plainProfileAgent(qualified);
     let agent: PaneChatAgent | undefined = plain;
+    if (plain && variant) refuse('SESSION_PROFILE_UNKNOWN', `${qualified} has no variants, so ${ref} can't start.`, `Name ${qualified} without a variant.`);
     if (!agent) {
       const list: AgentFarmProfileList = await this.agentFarm().profiles();
-      const [qualified] = ref.split(':');
       const entry = list.profiles.find(candidate => candidate.ref === qualified);
-      if (!entry) refuse('SESSION_PROFILE_UNKNOWN', `This computer's Pane has no Agent Farm profile named ${qualified}.${list.error ? ` ${list.error}` : ''}`, 'Pick one from runpane profiles list, or install its plugin first.');
-      // A variant can run another harness than the default; the caller's agent then says which.
-      agent = input.agent && ref.includes(':') ? normalizePaneChatAgent(input.agent) : entry ? normalizePaneChatAgent(entry.harness) : undefined;
-      if (!agent || !agentConfig(agent)?.chat?.adapter) refuse('SESSION_PROFILE_UNSUPPORTED', `The profile ${ref} runs ${entry?.harness ?? 'an agent'}, which Pane can't start through Agent Farm.`, 'Pick a Claude or Codex profile.');
+      if (!entry) return refuse('SESSION_PROFILE_UNKNOWN', `This computer's Pane has no Agent Farm profile named ${qualified}.${list.error ? ` ${list.error}` : ''}`, 'List them with agent-farm profiles list in a Pane terminal, or install the profile\'s plugin first.');
+      if (variant && !entry.variants?.some(candidate => candidate.name === variant)) {
+        refuse('SESSION_PROFILE_UNKNOWN', `${qualified} has no variant named ${variant}.`, entry.variants?.length ? `Pick one of ${entry.variants.map(candidate => candidate.name).join(', ')}.` : `Name ${qualified} without a variant.`);
+      }
+      // The list gives only the default variant's harness; another variant's comes from the caller.
+      const otherVariant = !!variant && variant !== entry.defaultVariant;
+      if (otherVariant && !input.agent) refuse('SESSION_PROFILE_AGENT_REQUIRED', `Pane can't tell which agent the variant ${ref} runs.`, 'Pass agent (claude or codex) with the profile.');
+      agent = normalizePaneChatAgent(otherVariant && input.agent ? input.agent : entry.harness);
+      if (!agentConfig(agent)?.chat?.adapter || (!otherVariant && agent !== entry.harness)) refuse('SESSION_PROFILE_UNSUPPORTED', `The profile ${ref} runs ${entry.harness}, which Pane can't start through Agent Farm.`, 'Pick a Claude or Codex profile.');
     }
     if (!agent || terminal(agent)) return refuse('SESSION_PROFILE_UNSUPPORTED', `This app can't show the chat tab a profile runs in, so the Session can't start with ${ref}.`, 'Create the Session from the desktop app, or leave out the profile.');
     const hash = await this.agentFarm().pluginHash(profilePlugin(ref));

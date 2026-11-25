@@ -7,7 +7,7 @@ import { promisify } from 'util';
 import { reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { hashDirectory } from '../skillCacheManager';
-import { PANE_PROFILE_PLUGIN, panePluginFiles, parseProfileList, writePanePluginSource } from './agentFarmProfiles';
+import { PANE_PROFILE_PLUGIN, panePluginFiles, panePluginInstalled, parseProfileList, writePanePluginSource } from './agentFarmProfiles';
 import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
 
 const execFileAsync = promisify(execFile);
@@ -443,7 +443,8 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
   const run = options.run ?? runAgentFarm;
   await uninstallRetiredPlugins(bundle, configRoot, run, log);
   const previous = await fs.readFile(manifestPath, 'utf8').then((text) => decodeOptionalBoundary(JSON.parse(text), manifestSchema)).catch(() => undefined);
-  const installed = previous && [...BUNDLED_AGENT_FARM_PLUGINS, PANE_PROFILE_PLUGIN].every((name) => existsSync(path.join(configRoot, 'plugins', name)));
+  // Pane's own plugin must also still be exactly what Pane writes: an edit there is replaced.
+  const installed = previous && BUNDLED_AGENT_FARM_PLUGINS.every((name) => existsSync(path.join(configRoot, 'plugins', name))) && await panePluginInstalled(configRoot);
   if (previous && installed && previous.hash === hash && BUNDLED_AGENT_FARM_PLUGINS.every((name) => name in previous.plugins)) {
     const retired: readonly string[] = RETIRED_AGENT_FARM_PLUGINS;
     const dropped = Object.keys(previous.plugins).filter((name) => retired.includes(name));
