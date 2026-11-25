@@ -520,10 +520,18 @@ config root, exactly as before. Without one, Pane runs the Agent Farm it ships
 with its Electron as Node and `--config-root <PANE_DIR>/agent-farm`, so a
 profile works on a fresh install. At each start
 (`main/src/services/agentFarm/bundledAgentFarm.ts`, called from
-`main/src/daemon/bootstrap.ts` without waiting) Pane installs the plugins that
-package carries (greenfield and dcouple) into that folder, when the package's version or plugin files differ from what
-`<PANE_DIR>/agent-farm/pane-manifest.json` records; an unchanged bundle installs
-nothing and the log says so. An install that never finished (its lock or
+`main/src/daemon/bootstrap.ts` without waiting) Pane installs one plugin from
+that package, greenfield, into that folder, when the package's version or plugin
+files differ from what `<PANE_DIR>/agent-farm/pane-manifest.json` records; an
+unchanged bundle installs nothing and the log says so. Plugins older Pane builds
+installed there (dcouple and bigbrain) are removed at each start with Agent
+Farm's `plugin uninstall`, which deletes only files unchanged since the install
+and leaves (and logs) any the person edited; a failed removal is logged and
+tried again on the next start. A retired plugin's receipt that isn't valid JSON
+would make every Agent Farm install there fail, so Pane renames it to
+`<name>.json.unreadable-<time>` (keeping its bytes and the plugin's files) and
+logs where it went. When an unchanged bundle's manifest still lists a retired
+plugin, Pane rewrites only the manifest and leaves greenfield's files alone. An install that never finished (its lock or
 half-copied plugin files) is cleared before the next one, and a failed install
 is logged and never blocks startup. Pane never writes to the person's
 `~/.config/agent-farm`. With the bundled copy, `run` writes its launch bundle to
