@@ -258,6 +258,15 @@ async function fakeLocalPane(paneDir, answer) {
 
 const UNKNOWN_CHANNEL = { error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'No Pane daemon command registered for channel "computers:list".' } };
 
+/** What a computer answers a device paired Read only; it refuses every other command with 409. */
+const READ_ONLY_RESULTS = {
+  'remote:pwa-affordances': { os: 'macOS' },
+  'runpane:sessions:list': { ok: true, sessions: [] },
+  'runpane:panels:screen': { ok: true, panelId: 'panel-1', paneId: 'pane-1', source: 'scrollback', limit: 40, returnedLineCount: 1, hasMore: false, text: 'Compiling', state: { running: true, initialized: true }, composer: { isPresent: true, hasUndeliveredText: false } },
+  'runpane:panels:list': { ok: true, paneId: 'pane-1', panels: [] },
+  'runpane:workspace:state': { ok: true, epoch: 'e1', generation: 4, entries: [{ gen: 4, at: '2026-11-25T10:00:00.000Z', kind: 'agent.busy', paneId: 'pane-1', paneName: 'fix-auth', panelId: 'panel-1', source: 'agent', baseline: true }] },
+};
+
 /**
  * Another computer with Tailscale signed out on this one: a real TLS server on localhost (trusted
  * through NODE_EXTRA_CA_CERTS, as a CA-issued certificate would be), a route that accepts TCP and
@@ -291,6 +300,13 @@ async function withComputer({ computers, tailnet = null, relay = null }, check) 
     request.on('end', () => {
       requests.push({ authorization: request.headers.authorization, channel: JSON.parse(body).channel });
       const reply = (status, payload) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(payload)); };
+      if (request.headers.authorization === 'Bearer read-token') {
+        const { channel } = JSON.parse(body);
+        const result = READ_ONLY_RESULTS[channel];
+        return result ? reply(200, { ok: true, result }) : reply(409, { ok: false, error: {
+          code: 'ERR_READ_ONLY_ACCESS', message: `This device is paired Read only with this computer, so it can't use ${channel}. Nothing was run or changed.`, next: 'Ask the computer\'s owner for full access.',
+        } });
+      }
       if (!['Bearer link-token', 'Bearer tailscale-password'].includes(request.headers.authorization)) {
         return reply(401, { ok: false, error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID', message: 'bad token' } });
       }
@@ -494,6 +510,77 @@ test('workspace list shows a saved computer without its route tokens', posixOnly
   });
 });
 
+// ---------------------------------------------------------------- a read-only computer
+
+const readRoute = (baseUrl, fingerprint) => ({ ...relayRoute(baseUrl, fingerprint), token: 'read-token', access: 'read' });
+
+test('list marks a computer whose every saved route is read-only, and learns its OS', posixOnly, async () => {
+  await withComputer({ computers: ({ laptop, keys }) => ({ computers: [{ ...travelLaptop([readRoute(laptop, keys.laptop)]), os: undefined }] }) }, async (run) => {
+    const list = await run('workspace', 'list');
+    assert.match(list.output, /^travel-laptop \(macOS, online, read only\) \[Pane relay\]: joined through Pane relay$/m);
+    const [machine] = JSON.parse((await run('workspace', 'list', '--json')).output).machines;
+    assert.equal(machine.access, 'read');
+    assert.equal(machine.joined, true);
+    assert.equal(machine.info, undefined);
+    assert.equal(machine.error, undefined);
+    assert.deepEqual(machine.routes.map(({ kind, access, answered }) => ({ kind, access, answered })), [{ kind: 'relay', access: 'read', answered: true }]);
+  });
+  // As `relay:linked-computers` lists it.
+  const linkedComputers = ({ laptop, keys }) => ({
+    linkedComputers: [{ id: 'k3x9linked0000aa', name: 'Travel Laptop', address: laptop, token: 'read-token', fingerprint: keys.laptop, access: 'read' }],
+  });
+  await withComputer({ computers: linkedComputers }, async (run) => {
+    assert.match((await run('workspace', 'list')).output, /^travel-laptop \(macOS, online, read only\)/m);
+  });
+});
+
+test('a full-access route goes before read-only ones, and the computer is not read only', posixOnly, async () => {
+  const computers = ({ laptop, keys }) => ({ computers: [travelLaptop([
+    readRoute(laptop, keys.laptop),
+    { id: `tailscale:${laptop}`, kind: 'tailscale', source: 'manual', baseUrl: laptop, token: 'tailscale-password' },
+  ])] });
+  await withComputer({ computers }, async (run, requests) => {
+    assert.equal((await run('workspace', 'travel-laptop', 'read', '~/notes.md')).output, 'from the laptop\n');
+    assert.deepEqual(requests.map((request) => request.authorization), ['Bearer tailscale-password']);
+    assert.doesNotMatch((await run('workspace', 'list')).output, /read only/);
+  });
+});
+
+test('a read-only computer answers looking, agents status included', posixOnly, async () => {
+  await withComputer({ computers: ({ laptop, keys }) => ({ computers: [travelLaptop([readRoute(laptop, keys.laptop)])] }) }, async (run) => {
+    const sessions = await run('workspace', 'travel-laptop', 'sessions', 'list', '--json');
+    assert.deepEqual(JSON.parse(sessions.output), { ok: true, sessions: [] });
+    const status = await run('workspace', 'travel-laptop', 'agents', 'status', '--panel', 'panel-1', '--json');
+    assert.equal(status.status, 0, status.output);
+    const answer = JSON.parse(status.output);
+    assert.equal(answer.status, 'working');
+    assert.equal(answer.screen, 'Compiling');
+    assert.equal(answer.link, undefined, 'a pane:// link would open on this machine');
+  });
+});
+
+test('a read-only computer\'s refusal keeps its code and next step, and no other route is tried', posixOnly, async () => {
+  const computers = ({ laptop, keys }) => ({ computers: [travelLaptop([readRoute(laptop, keys.laptop), { ...readRoute(laptop, keys.laptop), id: 'second' }])] });
+  await withComputer({ computers }, async (run, requests) => {
+    for (const args of [
+      ['workspace', 'travel-laptop', 'exec', '--json', '--', 'ls'],
+      ['workspace', 'travel-laptop', 'panes', 'create', '--repo', 'active', '--name', 'fix', '--agent', 'claude', '--yes', '--json'],
+      ['ask', '--machine', 'travel-laptop', '--agent', 'claude', '--prompt', 'hi', '--json'],
+    ]) {
+      requests.length = 0;
+      const refused = await run(...args);
+      assert.equal(refused.status, 1, refused.output);
+      const { error } = JSON.parse(refused.output.slice(0, refused.output.indexOf('\n}\n') + 2));
+      assert.equal(error.code, 'ERR_READ_ONLY_ACCESS', refused.output);
+      assert.match(error.message, /^travel-laptop: This device is paired Read only/);
+      assert.equal(error.next, 'Ask the computer\'s owner for full access.');
+      assert.equal(requests.length, 1, args.join(' '));
+    }
+    const text = await run('workspace', 'travel-laptop', 'exec', '--', 'ls');
+    assert.match(text.output, /Next: Ask the computer's owner for full access\./);
+  });
+});
+
 // ---------------------------------------------------------------- runpane link
 
 const LINK = 'https://runpane.net/pair#s=secret&c=k7xq2m4n8p3r5t6v&n=parsa-devbox';
@@ -503,7 +590,7 @@ async function withLinkPane(preview, check) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-link-'));
   const pane = await fakeLocalPane(home, (channel) => (channel === 'relay:link-preview'
     ? { expiresAt: '2026-11-15T10:00:00.000Z', ...preview }
-    : { linked: ['parsa-devbox', 'build-box'] }));
+    : preview.access ? { linked: ['parsa-devbox', 'build-box'], access: preview.access } : { linked: ['parsa-devbox', 'build-box'] }));
   const run = (...args) => new Promise((resolve) => {
     const child = spawn(process.execPath, [cli, 'link', ...args, '--pane-dir', home], { env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' } });
     let stdout = '';
@@ -578,6 +665,20 @@ test('runpane link asks on a terminal, naming both sides, and links only on yes'
   });
 });
 
+const readOnlyLink = { maker: 'parsa-devbox', makerGroup: ['parsa-devbox', 'build-box'], here: [], needsConfirm: true, access: 'read' };
+
+test('runpane link says Read only and what it means, before and after a read-only link', posixOnly, async () => {
+  const meaning = /Read only: this computer sees the Sessions, agents, transcripts and terminal output of parsa-devbox and build-box, .* They can't reach this computer\./;
+  await withLinkPane(readOnlyLink, async (run) => {
+    const { error } = JSON.parse((await run(LINK, '--json')).stdout);
+    assert.equal(error.code, 'ERR_LINK_NEEDS_CONFIRM');
+    assert.match(error.message, meaning);
+    assert.doesNotMatch(error.message, /run agents on this computer/);
+    assert.match((await run(LINK, '--yes')).stdout, meaning);
+    assert.deepEqual(JSON.parse((await run(LINK, '--yes', '--json')).stdout), { ok: true, maker: 'parsa-devbox', linked: ['parsa-devbox', 'build-box'], access: 'read' });
+  });
+});
+
 test('the Python runpane link refuses and links the same way', posixOnly, async () => {
   const runPython = (home, ...args) => new Promise((resolve) => {
     const child = spawn(process.env.PYTHON || 'python3', ['-m', 'runpane', 'link', LINK, ...args, '--pane-dir', home], {
@@ -588,7 +689,7 @@ test('the Python runpane link refuses and links the same way', posixOnly, async 
     child.stdin.end();
     child.on('close', (status) => resolve({ status, stdout }));
   });
-  await withLinkPane(joinsGroups, async (run, requests, home) => {
+  for (const preview of [joinsGroups, readOnlyLink]) await withLinkPane(preview, async (run, requests, home) => {
     for (const args of [['--json'], ['--yes', '--json']]) {
       const [npm, python] = [await run(LINK, ...args), await runPython(home, ...args)];
       assert.deepEqual({ status: python.status, output: JSON.parse(python.stdout) }, { status: npm.status, output: JSON.parse(npm.stdout) }, args.join(' '));

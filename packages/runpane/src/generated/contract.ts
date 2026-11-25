@@ -695,7 +695,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "repoListResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "repos add",
@@ -1388,7 +1389,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "paneListResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "panes cost",
@@ -1419,7 +1421,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "workspaceStateResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "workspace list",
@@ -1825,7 +1828,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "panelListResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "panels output",
@@ -1839,7 +1843,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "panelOutputResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "panels screen",
@@ -1853,7 +1858,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "panelScreenResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "panels input",
@@ -1968,7 +1974,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "panelLastMessageResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "panels conversation",
@@ -2463,7 +2470,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "agentStatusResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "agents send",
@@ -2667,7 +2675,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "sessionListResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "sessions create",
@@ -2699,7 +2708,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "sessionResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "sessions update",
@@ -2780,7 +2790,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "sessionOverviewResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "lock acquire",
@@ -2986,7 +2997,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "loopListResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "loops create",
@@ -3186,7 +3198,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "todoShowResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "todos list",
@@ -3202,7 +3215,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "todoListResult"
     ],
-    "localControl": true
+    "localControl": true,
+    "otherMachines": true
   },
   {
     "name": "todos assign",
@@ -18255,7 +18269,11 @@ const CONTRACT_SECTION_16 = {
         "items": {
           "type": "string"
         },
-        "description": "The computers this one is now linked with."
+        "description": "The computers this one can now reach."
+      },
+      "access": {
+        "const": "read",
+        "description": "The link was read-only: this computer watches the linked ones, and they can't reach it."
       }
     },
     "additionalProperties": false
@@ -18421,7 +18439,8 @@ const CONTRACT_SECTION_16 = {
         "type": "boolean"
       },
       "link": {
-        "type": "string"
+        "type": "string",
+        "description": "Opens the tab in Pane on this machine; absent for another machine's agent."
       },
       "report": {
         "$ref": "#/jsonSchemas/agentReport"
@@ -19812,7 +19831,8 @@ const CONTRACT_SECTION_16 = {
         "enum": [
           "macOS",
           "Windows",
-          "Linux"
+          "Linux",
+          "unknown"
         ]
       },
       "online": {
@@ -19835,6 +19855,10 @@ const CONTRACT_SECTION_16 = {
       "mine": {
         "type": "boolean",
         "description": "Signed in to this machine's own login."
+      },
+      "access": {
+        "const": "read",
+        "description": "Read only: this machine can look at it and change nothing there. Absent for full access."
       }
     }
   },
@@ -19910,7 +19934,7 @@ const CONTRACT_SECTION_16 = {
           "properties": {
             "joined": {
               "type": "boolean",
-              "description": "Its Pane answers workspace read, write, and exec."
+              "description": "Its Pane answers; with full access that includes workspace read, write, and exec."
             },
             "info": {
               "type": "object",
@@ -19948,7 +19972,8 @@ const CONTRACT_SECTION_16 = {
                     "type": "string"
                   }
                 }
-              }
+              },
+              "description": "Absent for a read-only computer."
             },
             "error": {
               "type": "string",
@@ -19991,6 +20016,10 @@ const CONTRACT_SECTION_16 = {
                   "answered": {
                     "type": "boolean",
                     "description": "This route answered the check."
+                  },
+                  "access": {
+                    "const": "read",
+                    "description": "This route's credential is read-only."
                   }
                 }
               }
@@ -24059,7 +24088,7 @@ const CONTRACT_SECTION_17 = {
     "link": {
       "name": "link",
       "summary": "Link this computer with the one that made a one-time link, so each can reach the other.",
-      "details": "Redeems a link copied from Pane on another computer (Add a device › Computer) through this computer's running Pane, the way opening the link does. The computer that made the link, and every computer already linked with it, become reachable from this one with runpane workspace, and this one from them. For a computer with no screen.",
+      "details": "Redeems a link copied from Pane on another computer (Add a device › Computer) through this computer's running Pane, the way opening the link does. The computer that made the link, and every computer already linked with it, become reachable from this one with runpane workspace, and this one from them. For a computer with no screen. A read-only link runs one way: this computer sees the Sessions, agents, transcripts and terminal output of the computers it shares, they get no way to reach this one, and no groups join.",
       "requiresPaneDaemon": true,
       "mutates": true,
       "arguments": [
@@ -24094,7 +24123,8 @@ const CONTRACT_SECTION_17 = {
       ],
       "notes": [
         "A computer with nothing linked links without asking. One that already reaches computers asks first, naming both sides, because the two groups become one.",
-        "Each link works once. A used link fails with \"This code was already used\", an old one with \"This code expired\"."
+        "Each link works once. A used link fails with \"This code was already used\", an old one with \"This code expired\".",
+        "A read-only link always asks first, and says Read only before and after it links. In JSON, `access` is \"read\"."
       ]
     },
     "repos list": {
@@ -27705,7 +27735,8 @@ const CONTRACT_SECTION_17 = {
         "agentStatusResult"
       ],
       "notes": [
-        "`status` is `working`, `ready`, `blocked`, `idle`, `exited`, or `unknown`. `blocked` means the agent is waiting on a person."
+        "`status` is `working`, `ready`, `blocked`, `idle`, `exited`, or `unknown`. `blocked` means the agent is waiting on a person.",
+        "For an agent on another computer: `runpane workspace <machine> agents status --pane <pane-id>`. A read-only computer answers it too."
       ]
     },
     "agents send": {
@@ -28261,7 +28292,8 @@ const CONTRACT_SECTION_17 = {
       ],
       "notes": [
         "A saved computer is tried route by route; one that does not connect within 2.5 seconds gives way to the next, so Tailscale being off falls back to the relay.",
-        "A tailnet machine Pane has not saved answers on https://<machine>.<tailnet>.ts.net:8443 when Pane runs there with workspaces on."
+        "A tailnet machine Pane has not saved answers on https://<machine>.<tailnet>.ts.net:8443 when Pane runs there with workspaces on.",
+        "A computer marked read only (`access: \"read\"` in JSON) shared itself read-only: look at it with sessions, panes, panels screen, panels output, agents status, todos and loops. Anything that changes it, and workspace read, write and exec, fails with ERR_READ_ONLY_ACCESS and a next step."
       ],
       "jsonSchemas": [
         "workspaceListResult"

@@ -27,6 +27,8 @@ export interface TerminalSessionOptions {
   onError?: (error: unknown) => void;
   /** This screen is starting the panel: its shell, and any agent in it, are only now launching. */
   onStart?: () => void;
+  /** The panel isn't running and the host didn't start it: this phone only watches. */
+  onNotRunning?: () => void;
 }
 
 export interface TerminalSize {
@@ -81,7 +83,8 @@ export class TerminalSession {
         sink.reset('');
         this.live = true;
         this.options.onStart?.();
-        await invoke('panels:initialize', [panelId, { sessionId, cols: cols(), rows: rows() }]);
+        const started = await invoke('panels:initialize', [panelId, { sessionId, cols: cols(), rows: rows() }]);
+        if (started === false && generation === this.generation) this.options.onNotRunning?.();
         return;
       }
       // The screen resized while the first trip was out.

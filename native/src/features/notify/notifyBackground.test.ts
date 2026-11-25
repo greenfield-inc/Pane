@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 const native = vi.hoisted(() => ({
   task: undefined as undefined | ((body: { data: unknown }) => Promise<void>),
   schedule: vi.fn((_request: { content: { categoryIdentifier?: string } }) => Promise.resolve('alert-id')),
-  profiles: [] as { id: string }[],
+  profiles: [] as { id: string; access?: 'read' }[],
   appState: { currentState: 'background' },
   refresh: vi.fn(),
   invoke: vi.fn((_client: { profile: string }, _channel: string, _args: unknown[]) => Promise.resolve({ ok: true })),
@@ -74,6 +74,13 @@ describe('relay grants', () => {
     // A grant for a computer this phone never paired with goes nowhere.
     native.invoke.mockClear();
     await native.task?.({ data: { data: { hostProfileId: 'stranger', paneGrant: 'other.sig' } } });
+    expect(native.invoke).not.toHaveBeenCalled();
+  });
+
+  it('hands nothing to a computer this phone is paired Read only with', async () => {
+    native.profiles = [{ id: 'host-1', access: 'read' }];
+    native.invoke.mockClear();
+    await native.task?.({ data: { data: { hostProfileId: 'host-1', paneGrant: 'studio.sig' } } });
     expect(native.invoke).not.toHaveBeenCalled();
   });
 

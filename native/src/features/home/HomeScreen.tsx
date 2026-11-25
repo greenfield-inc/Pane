@@ -16,6 +16,7 @@ import { AutopilotRow } from '@/features/autopilot/AutopilotRow';
 import { useAutopilot } from '@/features/autopilot/hooks';
 import { DemoBadge } from '@/features/demo/DemoBadge';
 import { ConnectionBar, Dimmed } from '@/features/hosts/ConnectionStatus';
+import { ReadOnlyChip } from '@/features/hosts/ReadOnlyChip';
 import { MachineChips } from '@/features/machines/MachineChips';
 import { PaneLogo } from '@/features/machines/PaneLogo';
 import { AgentPromptActions } from '@/features/notify/AgentPromptActions';
@@ -275,7 +276,7 @@ export function HomeScreen() {
           </View>
         ) : null}
         {nothingWaiting ? (
-          <EmptyCard testID="approvals-empty" title="Nothing needs you" detail="Questions, permission requests and agents waiting in their terminal land here." />
+          <EmptyCard testID="approvals-empty" title="Nothing needs you" detail={!all && current?.readOnly ? `This phone only watches ${current.name}, so its questions and permission requests stay there. Agents waiting in their terminal show here.` : 'Questions, permission requests and agents waiting in their terminal land here.'} />
         ) : null}
       </SkeletonSwap>
       <HistoryLine stale={board.staleQuestions.length} done={board.answered.length} onPress={() => router.push('/history')} />
@@ -403,6 +404,7 @@ export function HomeScreen() {
           <PaneLogo />
           <Text variant="title" numberOfLines={1} style={styles.brandTitle}>Pane</Text>
         </View>
+        {!all && current?.readOnly ? <ReadOnlyChip /> : null}
         <DemoBadge />
         <Pressable
           testID="open-settings"
@@ -433,10 +435,10 @@ export function HomeScreen() {
             </View>
           ) : null}
           {list}
-          <HomeBottomBar query={query} onQuery={setQuery} />
+          <HomeBottomBar query={query} onQuery={setQuery} canCreate={!current?.readOnly} />
         </Dimmed>
       )}
-      {all ? <HomeBottomBar query={query} onQuery={setQuery} /> : null}
+      {all ? <HomeBottomBar query={query} onQuery={setQuery} canCreate={home.saved.some(machine => !machine.readOnly)} /> : null}
       <ArchiveUndoBar held={archiving.held} onUndo={archiving.undo} bottom={bottomBarHeight(insets.bottom) + 8} />
     </View>
   );

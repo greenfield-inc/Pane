@@ -76,6 +76,15 @@ describe('listMachines', () => {
     ]);
   });
 
+  it('marks a machine this phone only watches, by its pairing or by what it last said', () => {
+    const tyler = saved('tyler', { id: 'relay:tyler', access: 'read' });
+    const machines = listMachines({
+      profiles: [studio, devbox, tyler], current: studio, connection: 'connected', presence: 'connected', tailnet: undefined,
+      levels: { [devbox.id]: { token: devbox.token, readOnly: true } },
+    });
+    expect(machines.filter(machine => machine.readOnly).map(machine => machine.name)).toEqual([devbox.label, 'tyler']);
+  });
+
   it('dims a saved machine that Tailscale reports offline, and does not let it be picked', () => {
     const machines = listMachines({
       profiles: [studio, devbox],

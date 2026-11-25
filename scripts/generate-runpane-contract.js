@@ -452,6 +452,8 @@ function renderMarkdown(contract) {
   lines.push('## Machine-Readable Schemas', '');
   lines.push('Stable `--json` response schemas live in `contracts/runpane/contract.json` under `jsonSchemas`.', '');
   lines.push('A failed command exits 1 and prints its message and a `Next:` line to stderr. With `--json` it also prints `jsonSchemas.error` to stdout: `{ "ok": false, "error": { "code": "...", "message": "...", "next": "..." } }`. Branch on `code`; `next` is the step to take when one is known. A command whose result has its own `ok: false` shape, such as an archive refusal or `panels last-message` without a transcript, prints that result instead, and `watch` reports failures as WATCH ERROR lines with exit 2.', '');
+  lines.push('');
+  lines.push('`ERR_READ_ONLY_ACCESS`: the other computer gives this one read-only access and refused a command that does more than look. Nothing was run or changed there, and runpane tries no other route. `next` says to ask its owner for full access. `workspace list --json` marks such a computer with `access: "read"`, and each read-only route the same way; `link --json` carries `access: "read"` after a read-only link. See [A read-only computer](RUNPANE_WORKSPACES.md#a-read-only-computer).');
   lines.push('OpenAPI should be generated later from the stable local HTTP/API subset of the same contract, not maintained as a second source of truth.', '');
 
   lines.push('## Download Attribution', '');

@@ -2,6 +2,7 @@ import { Alert, Linking, Platform, StyleSheet, Switch, View } from 'react-native
 
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
+import { isReadOnlyProfile, useAccessStore } from '@/auth/access';
 import { useHostsStore } from '@/auth/hostsStore';
 import { isDemoProfile } from '@/features/demo/demoHost';
 import { useTheme, type ThemeColors } from '@/theme';
@@ -46,7 +47,8 @@ export function NotificationSettings() {
 
 function ComputerRow({ profile, result }: { profile: RemotePaneConnectionProfile; result: PushSetupResult | undefined }) {
   const theme = useTheme();
-  const { summary, color, onPress } = present(profile, result);
+  const readOnly = useAccessStore(state => isReadOnlyProfile(profile, state.levels));
+  const { summary, color, onPress } = present(profile, result, readOnly);
   return (
     <ListRow
       testID={`notifications-host-${profile.label}`}
@@ -60,7 +62,8 @@ function ComputerRow({ profile, result }: { profile: RemotePaneConnectionProfile
   );
 }
 
-function present(profile: RemotePaneConnectionProfile, result: PushSetupResult | undefined): { summary: string; color: keyof ThemeColors; onPress?: () => void } {
+function present(profile: RemotePaneConnectionProfile, result: PushSetupResult | undefined, readOnly: boolean): { summary: string; color: keyof ThemeColors; onPress?: () => void } {
+  if (readOnly) return { summary: 'Read only, so it sends no alerts here', color: 'neutral' };
   if (!result) return { summary: 'Checking…', color: 'neutral' };
   switch (result.state) {
     case 'registered':

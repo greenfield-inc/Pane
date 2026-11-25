@@ -1,4 +1,5 @@
 import { readOnlyMarkSchema, type ReadOnlyMark } from '../../../../shared/types/accessLevel';
+import { READ_ONLY_HOST_ANSWERS } from '../../../../shared/remoteClient/readOnlyHost';
 import { decodeUpdateIntent } from '../../../../shared/remoteClient/updateIntent';
 import { pinnedServerIdentity } from '../relay/keyPinning';
 import { DirectPath } from '../relay/directPath';
@@ -1467,6 +1468,10 @@ export class RemotePaneClientController extends EventEmitter {
     }
 
     const client = this.activeClient;
+    if (this.state.access === 'read') {
+      const answer = READ_ONLY_HOST_ANSWERS.get(channel);
+      if (answer !== undefined) return answer;
+    }
     // A host that de-duplicates writes lets one issued while reconnecting wait for the connection.
     const waits = this.state.status === 'reconnecting' && client.resendsWrites;
     if (this.state.status !== 'connected' && !waits && !REMOTE_READ_CHANNELS.has(channel)
@@ -1971,6 +1976,8 @@ export class RemotePaneClientController extends EventEmitter {
    * ports, tabs keep the last list, or an empty one until a retry succeeds; the tunnel is untouched.
    */
   private async listTunnelledPorts(client: RemotePaneClient): Promise<JsonValue | ListeningPortsSnapshot | undefined> {
+    // A read-only host lists no ports and forwards none.
+    if (this.state.access === 'read') return { host: client.profile.label, ports: [] };
     let listed: JsonValue | undefined;
     try {
       listed = await client.invoke(PORTS_LIST_CHANNEL, []);

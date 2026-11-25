@@ -5,7 +5,7 @@ import path from 'node:path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import type { BoundarySchema, JsonValue } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
-import { answeringRoute, invokeDaemon, invokeRemoteDaemon, PaneDaemonClientError, routeLabel, type RemoteDaemonTarget, type RemoteRoute } from './daemonClient';
+import { answeringRoute, invokeDaemon, invokeRemoteDaemon, PaneDaemonClientError, READ_ONLY_ACCESS_CODE, routeLabel, type RemoteDaemonTarget, type RemoteRoute } from './daemonClient';
 import { RunpaneError } from './errors';
 
 /**
@@ -41,6 +41,8 @@ export interface TailnetMachine {
   routes?: RemoteRoute[];
   /** Other names it answers to, lowercased: its Pane id, install id, relay id, and route host names. */
   aliases?: string[];
+  /** Every saved route is paired Read only, so this machine looks at that one and changes nothing there. */
+  access?: 'read';
   /** Why a saved computer did not answer when runpane asked it. */
   unreachable?: string;
 }
@@ -262,9 +264,9 @@ function describeMachines(machines: readonly TailnetMachine[]): string {
   return machines.filter((machine) => !machine.self).map(describeMachine).join(', ');
 }
 
-/** "name (OS, online)", plus the owner's login for someone else's machine. */
+/** "name (OS, online)", plus "read only" for a computer that gives this one only that, and the owner's login for someone else's machine. */
 function describeMachine(machine: TailnetMachine): string {
-  return `${machine.name} (${machine.os === 'unknown' ? 'OS unknown' : machine.os}, ${machine.online ? 'online' : 'offline'}${machine.mine ? '' : `, owner ${machine.owner}`})`;
+  return `${machine.name} (${machine.os === 'unknown' ? 'OS unknown' : machine.os}, ${machine.online ? 'online' : 'offline'}${machine.access ? ', read only' : ''}${machine.mine ? '' : `, owner ${machine.owner}`})`;
 }
 
 function tailscaleRoute(dnsName: string): RemoteRoute {
@@ -288,6 +290,7 @@ const savedComputerSchema = boundary.object({
     token: boundary.string,
     relay: boundary.optional(boundary.object({ computerId: boundary.nonEmptyString, fingerprint: boundary.nonEmptyString })),
     tailnetMachine: boundary.optional(boundary.nonEmptyString),
+    access: boundary.optional(boundary.literal('read')),
   })),
 });
 type SavedComputer = ReturnType<typeof savedComputerSchema.decode>;
@@ -299,6 +302,7 @@ const linkedComputersSchema = boundary.array(boundary.object({
   address: boundary.string,
   token: boundary.string,
   fingerprint: boundary.nonEmptyString,
+  access: boundary.optional(boundary.literal('read')),
 }));
 
 /** "lowercase-with-dashes" for a computer name, so it reads like a Tailscale machine name. */
@@ -331,7 +335,7 @@ async function readSavedComputers(paneDir?: string): Promise<SavedComputer[]> {
         os: undefined,
         routes: [{
           kind: 'relay', baseUrl: computer.address, token: computer.token,
-          relay: { computerId: computer.id, fingerprint: computer.fingerprint }, tailnetMachine: undefined,
+          relay: { computerId: computer.id, fingerprint: computer.fingerprint }, tailnetMachine: undefined, access: computer.access,
         }],
       }));
     } catch {
@@ -399,6 +403,7 @@ function computerMachine(computer: SavedComputer, peer: TailnetMachine | undefin
     const remote: RemoteRoute = { kind: route.kind, baseUrl: route.baseUrl };
     if (route.token) remote.token = route.token;
     if (route.relay) remote.fingerprint = route.relay.fingerprint;
+    if (route.access) remote.access = route.access;
     return remote;
   });
   // On the tailnet without a saved Tailscale route: reach it there too, before the routes that are farther.
@@ -406,12 +411,14 @@ function computerMachine(computer: SavedComputer, peer: TailnetMachine | undefin
     const after = routes.findIndex((route) => ROUTE_ORDER.indexOf(route.kind) > ROUTE_ORDER.indexOf('tailscale'));
     routes.splice(after < 0 ? routes.length : after, 0, tailscaleRoute(peer.dnsName));
   }
+  // A full-access route comes before the read-only ones: a read-only answer ends the call.
+  routes.sort((left, right) => Number(left.access === 'read') - Number(right.access === 'read'));
   // The tailnet says it is offline there (Tailscale signed out on it): try Tailscale last.
   if (peer && !peer.online) routes.sort((left, right) => Number(left.kind === 'tailscale') - Number(right.kind === 'tailscale'));
   const aliases = [computer.id, computer.machineId, machineNameKey(computer.label),
     ...computer.routes.flatMap((route) => [route.relay?.computerId, route.tailnetMachine, hostOf(route.baseUrl)])]
     .filter((alias): alias is string => Boolean(alias)).map((alias) => alias.toLowerCase());
-  return {
+  const machine: TailnetMachine = {
     name: peer?.name ?? computer.routes.find((route) => route.tailnetMachine)?.tailnetMachine?.toLowerCase() ?? machineSlug(computer.label),
     dnsName: peer?.dnsName ?? hostOf(computer.routes[0].baseUrl),
     os: computer.os ?? peer?.os ?? 'unknown',
@@ -424,7 +431,11 @@ function computerMachine(computer: SavedComputer, peer: TailnetMachine | undefin
     routes,
     aliases: [...new Set(aliases)],
   };
+  if (computer.routes.every((route) => route.access === 'read')) machine.access = 'read';
+  return machine;
 }
+
+const hostOsSchema = boundary.object({ os: boundary.optional(boundary.enumeration('macOS', 'Windows', 'Linux')) });
 
 /** Asks a saved computer without a known OS for it, as the list and path routing need one. */
 async function withOs(machine: TailnetMachine, known: boolean): Promise<TailnetMachine> {
@@ -433,6 +444,11 @@ async function withOs(machine: TailnetMachine, known: boolean): Promise<TailnetM
     const info = await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS);
     return { ...machine, os: info.os, online: true };
   } catch (error) {
+    if (error instanceof PaneDaemonClientError && error.code === READ_ONLY_ACCESS_CODE) {
+      // A read-only computer keeps machine:info to itself and says its OS here.
+      const os = await invokeRemoteDaemon(workspaceTarget(machine), 'remote:pwa-affordances', [], hostOsSchema, PROBE_TIMEOUT_MS).then((host) => host.os, () => undefined);
+      return { ...machine, os: os ?? 'unknown', online: true };
+    }
     return { ...machine, online: false, unreachable: error instanceof Error ? error.message : String(error) };
   }
 }
@@ -467,11 +483,13 @@ const NOT_ANSWERING = 'Pane is not answering there; it needs a Pane with workspa
 /** With the tailnet-wide setting off, no machine can answer, so name the setting instead of the machine. */
 const CERTIFICATES_OFF = 'this tailnet has HTTPS certificates turned off. Fix: Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns.';
 
-async function probeMachine(machine: TailnetMachine, target = workspaceTarget(machine), notAnswering = NOT_ANSWERING): Promise<{ info?: MachineInfo; error?: string }> {
+async function probeMachine(machine: TailnetMachine, target = workspaceTarget(machine), notAnswering = NOT_ANSWERING): Promise<{ info?: MachineInfo; readOnly?: boolean; error?: string }> {
   if (!machine.online) return { error: machine.unreachable ?? 'offline' };
   try {
     return { info: await invokeRemoteDaemon(target, 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS) };
   } catch (error) {
+    // It answered, and lets this machine look: machine:info is for devices with full access.
+    if (error instanceof PaneDaemonClientError && error.code === READ_ONLY_ACCESS_CODE) return { readOnly: true, error: 'it gives this computer read-only access' };
     // A saved computer's error names each route it tried.
     if (!machine.routes && error instanceof PaneDaemonClientError && (error.code === 'ERR_WORKSPACE_UNREACHABLE' || error.code === 'ERR_WORKSPACE_TIMEOUT')) {
       return { error: notAnswering };
@@ -521,7 +539,9 @@ export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
     const probe = probed.has(machine) || !machine.online
       ? await probeMachine(machine, target, tailnet.httpsCertificates || machine.routes ? NOT_ANSWERING : CERTIFICATES_OFF)
       : { error: `not checked (Pane checks the first ${MAX_PROBED_MACHINES} online machines)` };
-    return { machine, probe, route: answeringRoute(target) };
+    const route = answeringRoute(target);
+    // machine:info answers only full access, such as this machine's Tailscale login there.
+    return { machine: probe.info ? { ...machine, access: undefined } : machine, probe, route };
   }));
   if (parsed.json) {
     console.log(JSON.stringify({
@@ -531,10 +551,10 @@ export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
       machines: rows.map(({ machine: { routes, aliases, unreachable: _unreachable, ...machine }, probe, route }) => ({
         ...machine,
         ids: aliases,
-        routes: routes?.map((candidate) => ({ kind: candidate.kind, baseUrl: candidate.baseUrl, fingerprint: candidate.fingerprint, answered: candidate === route })),
-        joined: Boolean(probe.info),
+        routes: routes?.map((candidate) => ({ kind: candidate.kind, baseUrl: candidate.baseUrl, fingerprint: candidate.fingerprint, access: candidate.access, answered: candidate === route })),
+        joined: Boolean(probe.info ?? probe.readOnly),
         info: probe.info,
-        error: probe.error,
+        error: probe.readOnly ? undefined : probe.error,
       })),
     }, null, 2));
     return 0;
@@ -543,7 +563,7 @@ export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
   console.log(`${tailnet.self.name} (this machine, ${tailnet.self.os}): ${relay?.enabled ? `${describeRelay(relay)}. Tailscale: ${tailscale}` : tailscale}`);
   for (const { machine, probe, route } of rows) {
     const through = route && machine.routes ? ` through ${routeLabel(route.kind)}` : '';
-    const state = probe.info ? `joined${through}, shell ${probe.info.shell}` : `not reachable: ${probe.error}`;
+    const state = probe.info ? `joined${through}, shell ${probe.info.shell}` : probe.readOnly ? `joined${through}${machine.access ? '' : ', read only on that route'}` : `not reachable: ${probe.error}`;
     const routes = machine.routes ? ` [${machine.routes.map((candidate) => routeLabel(candidate.kind)).join(', ')}]` : '';
     const offline = machine.unreachable ? `not reachable: ${machine.unreachable}` : 'offline';
     console.log(`${describeMachine(machine)}${routes}: ${machine.online ? state : offline}`);

@@ -4,9 +4,11 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { DEFAULT_RELAY_DOMAIN, RelayPairingError, type RelayPairingLink } from '@shared/remoteClient';
 import { relayLinkJoin, type RelayLinkJoin } from '@shared/remoteClient/relayLinkPreview';
+import { DEVICE_ACCESS_LABELS, READ_ONLY_GRANT_HELP } from '@shared/types/accessLevel';
 
 import { useHostsStore } from '@/auth/hostsStore';
 import { streamingFetch } from '@/daemon/createClient';
+import { ReadOnlyChip } from '@/features/hosts/ReadOnlyChip';
 import { Button, ListRow, ListSection, Text } from '@/ui';
 
 import { usePairing } from './usePairing';
@@ -14,7 +16,8 @@ import { usePairing } from './usePairing';
 /**
  * A pairing QR opened from the phone's camera or the browser landing. A phone that reaches no
  * computers yet, or reaches the link's computer already, pairs at once. A phone that would link
- * its computers with the link's computer asks first, naming both sides; cancelling spends nothing.
+ * its computers with the link's computer asks first, naming both sides; a Read only link says it
+ * only watches. Cancelling spends nothing.
  * A link through another relay domain always waits for a tap.
  */
 export function RelayPairPrompt({ code, link, onPaired }: { code: string; link: RelayPairingLink; onPaired?: () => void }) {
@@ -29,7 +32,7 @@ export function RelayPairPrompt({ code, link, onPaired }: { code: string; link: 
     void relayLinkJoin(streamingFetch, { secret, computerId, domain, name }, useHostsStore.getState().profiles).then(result => {
       if (!active) return;
       setJoin(result);
-      if (!result && ownDomain) mutate(code);
+      if (!result && ownDomain) mutate({ code });
     });
     return () => { active = false; };
   }, [code, computerId, domain, mutate, name, ownDomain, secret]);
@@ -43,21 +46,27 @@ export function RelayPairPrompt({ code, link, onPaired }: { code: string; link: 
       </View>
     );
   }
+  const watchOnly = join?.access === 'read';
   if (join && !error) {
     return (
       <View style={styles.container} testID="relay-pair-join">
-        <Text variant="title">{`Link this phone with ${join.maker}`}</Text>
+        <Text variant="title">{watchOnly ? `Watch ${join.maker}` : `Link this phone with ${join.maker}`}</Text>
+        {watchOnly ? <ReadOnlyChip /> : null}
         <Text variant="callout" tone="secondary">
-          {`Pairing links ${join.maker} with the computers on this phone, and each computer can run agents on the others.`}
+          {watchOnly
+            ? `${READ_ONLY_GRANT_HELP} The computers already on this phone stay unlinked from ${join.maker}.`
+            : `Pairing links ${join.maker} with the computers on this phone, and each computer can run agents on the others.`}
         </Text>
         {!ownDomain ? <DomainNote domain={link.domain} /> : null}
         <ListSection title="From this link">
           {join.makerGroup.map(name => <ListRow key={name} title={name} subtitle={name === join.maker ? 'Made this link' : undefined} />)}
         </ListSection>
-        <ListSection title="On this phone">
-          {join.here.map(name => <ListRow key={name} title={name} />)}
-        </ListSection>
-        <Button testID="relay-pair-confirm" title={`Link ${join.maker}`} loading={pairing.isPending} onPress={() => mutate(code)} />
+        {watchOnly ? null : (
+          <ListSection title="On this phone">
+            {join.here.map(name => <ListRow key={name} title={name} />)}
+          </ListSection>
+        )}
+        <Button testID="relay-pair-confirm" title={watchOnly ? `Pair ${DEVICE_ACCESS_LABELS.read}` : `Link ${join.maker}`} loading={pairing.isPending} onPress={() => mutate({ code, watchOnly })} />
         <Button testID="relay-pair-cancel" variant="secondary" title="Not mine, cancel" disabled={pairing.isPending} onPress={() => router.replace('/')} />
       </View>
     );
@@ -72,7 +81,7 @@ export function RelayPairPrompt({ code, link, onPaired }: { code: string; link: 
       {error instanceof RelayPairingError && error.scanAgain ? (
         <Button testID="relay-pair-scan" title="Scan the new code" onPress={() => router.replace('/scan')} />
       ) : (
-        <Button testID="relay-pair-confirm" title={error ? 'Try again' : 'Pair'} loading={pairing.isPending} onPress={() => mutate(code)} />
+        <Button testID="relay-pair-confirm" title={error ? 'Try again' : 'Pair'} loading={pairing.isPending} onPress={() => mutate({ code, watchOnly })} />
       )}
     </View>
   );

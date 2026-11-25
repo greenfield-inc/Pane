@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 
 import { fetchNewRelayProfiles, isRelayProfile } from '@shared/remoteClient';
 
+import { isReadOnlyProfile } from '@/auth/access';
 import { useHostsStore } from '@/auth/hostsStore';
 import { useDaemon } from '@/daemon';
 
@@ -16,7 +17,9 @@ export function RelayComputerSync() {
   useEffect(() => {
     if (!connected || !isRelayProfile(profile)) return;
     let cancelled = false;
-    void fetchNewRelayProfiles(client, profile, useHostsStore.getState().profiles)
+    // A computer this phone only watches hands out read-only tokens.
+    const from = isReadOnlyProfile(profile) ? { ...profile, access: 'read' as const } : profile;
+    void fetchNewRelayProfiles(client, from, useHostsStore.getState().profiles)
       .then(added => { if (!cancelled && added.length) return addHosts(added); })
       .catch((error: unknown) => console.info('[relay] could not refresh your computers', error));
     return () => { cancelled = true; };

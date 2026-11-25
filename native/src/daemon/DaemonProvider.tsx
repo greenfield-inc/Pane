@@ -5,6 +5,7 @@ import { AppState } from 'react-native';
 import type { RemoteDaemonClient, RemoteDaemonConnectionState } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
+import { isReadOnlyProfile, useAccessStore } from '@/auth/access';
 import { requestSharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
 import { AFTER_RETURN_MS, requestPushRegistration } from '@/features/notifications/usePushSetup';
 import { connectionMark, markNextFrame, startJourney } from '@/features/perf/perfMarks';
@@ -103,6 +104,10 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
     requestSharedCredentialSync();
   }), [client, profile.id, queryClient]);
 
+  // The computer's answer changed what this phone may read there: lists read under the old level read again.
+  useEffect(() => useAccessStore.subscribe((now, before) => {
+    if (isReadOnlyProfile(profile, now.levels) !== isReadOnlyProfile(profile, before.levels)) void queryClient.invalidateQueries({ queryKey: [profile.id] });
+  }), [profile, queryClient]);
 
   return <DaemonContext value={{ client, profile, connection }}>{children}</DaemonContext>;
 }

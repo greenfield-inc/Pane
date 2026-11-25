@@ -31,14 +31,15 @@ export default function NewSheet() {
   const machines = useMachines();
   const lastNew = useMachinePrefs(state => state.lastNew);
   const setLastNew = useMachinePrefs(state => state.setLastNew);
-  const saved = machines.filter(machine => machine.profile);
+  // A machine this phone only watches takes no new Session or Pane.
+  const saved = machines.filter(machine => machine.profile && !machine.readOnly);
   const current = saved.find(machine => machine.current);
   // A repository's own + names a repository on the machine the phone is on.
   const projectId = params.projectId ? Number(params.projectId) : undefined;
   const last = saved.find(machine => machine.key === lastNew);
-  const [pickedKey, setPickedKey] = useState(() => (projectId === undefined && last && reachable(last) ? last.key : current?.key));
+  const [pickedKey, setPickedKey] = useState(() => (projectId === undefined && last && reachable(last) ? last.key : (current ?? saved[0])?.key));
   const [kind, setKind] = useState<Kind>(params.kind ?? 'session');
-  const machine = saved.find(candidate => candidate.key === pickedKey) ?? current;
+  const machine = saved.find(candidate => candidate.key === pickedKey) ?? current ?? saved[0];
   // While a create is in flight the sheet stays open (no Cancel, no swipe down) and the form stays
   // mounted, so its answer still opens what it made.
   const creating = useIsMutating({ mutationKey: CREATE_ON_MACHINE }) > 0;

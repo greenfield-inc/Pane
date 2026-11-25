@@ -18,10 +18,11 @@ export function bottomBarHeight(insetBottom: number): number {
 }
 
 /**
- * Home's bottom bar, in thumb reach: Search panes, and + for a new Session or Pane. It rides up with
+ * Home's bottom bar, in thumb reach: Search panes, and + for a new Session or Pane
+ * (none when no machine takes one, `canCreate`). It rides up with
  * the keyboard, and fades the list out under it.
  */
-export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (query: string) => void }) {
+export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; onQuery: (query: string) => void; canCreate: boolean }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const keyboard = useAnimatedKeyboard();
@@ -62,7 +63,7 @@ export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (que
           </IconButton>
         ) : null}
       </View>
-      <Pressable
+      {canCreate ? <Pressable
         testID="home-new"
         accessibilityRole="button"
         accessibilityLabel="New"
@@ -71,7 +72,7 @@ export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (que
         style={({ pressed }) => [styles.new, { backgroundColor: theme.colors.accent, opacity: pressed ? 0.85 : 1 }]}
       >
         <Icon ios="plus" android="add" size={22} color={theme.colors.onAccent} />
-      </Pressable>
+      </Pressable> : null}
     </Animated.View>
   );
 }

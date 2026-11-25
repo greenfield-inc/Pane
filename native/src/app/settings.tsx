@@ -2,9 +2,12 @@ import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, Switch, View } from 'react-native';
 
-import { useDaemon } from '@/daemon';
+import { DEVICE_ACCESS_LABELS } from '@shared/types/accessLevel';
+
+import { useDaemon, useReadOnlyHost } from '@/daemon';
 import { PRIVACY_POLICY_URL } from '@/features/app/privacyPolicy';
 import { useAffordances } from '@/features/hosts/hostSettings';
+import { ReadOnlyChip } from '@/features/hosts/ReadOnlyChip';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import type { Machine } from '@/features/machines/machines';
 import { MachineMark } from '@/features/machines/MachineMark';
@@ -22,6 +25,7 @@ import { Icon, ListRow, ListSection, Screen, Text } from '@/ui';
 export default function SettingsScreen() {
   const theme = useTheme();
   const { profile } = useDaemon();
+  const readOnly = useReadOnlyHost();
   const machines = useMachines();
   const { select, connecting } = useSelectMachine();
   const affordances = useAffordances();
@@ -46,7 +50,7 @@ export default function SettingsScreen() {
             onLongPress={() => openDetails(machine)}
             accessibilityActions={[{ name: 'details', label: 'Machine details' }]}
             onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'details') openDetails(machine); }}
-            trailing={<DetailsButton machine={machine} />}
+            trailing={machine.readOnly ? <View style={styles.rowEnd}><ReadOnlyChip /><DetailsButton machine={machine} /></View> : <DetailsButton machine={machine} />}
           />
         ))}
         <ListRow
@@ -65,7 +69,8 @@ export default function SettingsScreen() {
         <AutocorrectRow />
       </ListSection>
 
-      <ListSection title="Composer" titleSuffix={on} footer="Saved on the machine, so desktop sees the same settings.">
+      {/* A machine this phone only watches keeps its settings to itself. */}
+      {readOnly ? null : <ListSection title="Composer" titleSuffix={on} footer="Saved on the machine, so desktop sees the same settings.">
         <ListRow
           testID="settings-shortcuts"
           title="Shortcuts"
@@ -75,7 +80,7 @@ export default function SettingsScreen() {
           onPress={() => router.push('/settings/shortcuts')}
         />
         <ListRow testID="settings-voice" title="Voice" leading={<RowIcon ios="mic" android="mic" />} trailing="chevron" onPress={() => router.push('/settings/voice')} />
-      </ListSection>
+      </ListSection>}
 
       <ListSection title="About">
         <AppUpdateRow />
@@ -94,7 +99,7 @@ function HeroCard({ machine }: { machine: Machine }) {
       <Pressable
         testID="settings-current-host"
         accessibilityRole="button"
-        accessibilityLabel={`${machine.name}, ${machine.os ?? 'Computer'}, ${machine.status}`}
+        accessibilityLabel={[machine.name, machine.os ?? 'Computer', machine.status, machine.readOnly ? DEVICE_ACCESS_LABELS.read : undefined].filter(Boolean).join(', ')}
         accessibilityHint="Opens machine details"
         onPress={() => openDetails(machine)}
         style={({ pressed }) => [styles.hero, {
@@ -110,6 +115,7 @@ function HeroCard({ machine }: { machine: Machine }) {
             {`${machine.os ?? 'Computer'} · ${machine.status}`}
           </Text>
         </View>
+        {machine.readOnly ? <ReadOnlyChip /> : null}
         <Icon ios="info.circle" android="info" size={22} color={theme.colors.accentText} />
       </Pressable>
       {/* Past the grace window: the same message and Retry as the bar on home and in a Pane. */}
@@ -194,5 +200,6 @@ const styles = StyleSheet.create({
   heroName: { fontSize: 22, fontWeight: '700' },
   heroFooter: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 12, paddingHorizontal: 4, paddingTop: 6 },
   retry: { fontWeight: '600' },
+  rowEnd: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   addTile: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
 });

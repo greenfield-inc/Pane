@@ -17,14 +17,14 @@ const SCREEN_LINES = 300;
 const DIMMED_OPACITY = 0.55;
 
 /**
- * A paused terminal tab: the "Paused … · last screen" bar with Resume, over the tab's saved last
+ * A paused terminal tab: the "Paused … · last screen" bar with Resume (when the phone may), over the tab's saved last
  * screen, dimmed. It starts nothing on the host; only Resume does.
  */
 export function PausedTerminal({ panelId, mark, resuming, onResume }: {
   panelId: string;
   mark: TerminalPausedMark;
   resuming: boolean;
-  onResume: () => void;
+  onResume?: () => void;
 }) {
   const theme = useTheme();
   const scroll = useRef<ScrollView>(null);
@@ -41,7 +41,7 @@ export function PausedTerminal({ panelId, mark, resuming, onResume }: {
           <Text variant="footnote" style={styles.bold}>{pausedLabel(mark, Date.now())}</Text>
           <Text variant="footnote" tone="muted">{' · last screen'}</Text>
         </Text>
-        <Pressable
+        {onResume ? <Pressable
           testID="paused-resume"
           accessibilityRole="button"
           accessibilityLabel="Resume"
@@ -58,7 +58,7 @@ export function PausedTerminal({ panelId, mark, resuming, onResume }: {
               : <Icon ios="play.fill" android="play_arrow" size={11} color={theme.colors.onAccent} />}
           </View>
           <Text variant="caption" tone="onAccent">Resume</Text>
-        </Pressable>
+        </Pressable> : null}
       </View>
       <SkeletonSwap
         loading={screen.isPending}

@@ -154,10 +154,12 @@ describe('a device paired Read only', () => {
     registry.register('sessions:get-all-with-projects', () => ({ success: true, data: [project] }));
     registry.register('panels:list', () => ({ success: true, data: panels }));
     registry.register('panels:getActive', () => panels[2]);
+    registry.register('runpane:panels:list', () => ({ ok: true, panels }));
     const { invoke, stream, server } = await serve(registry);
 
     expect((await invoke('sessions:get-all-with-projects')).body).toEqual({ ok: true, result: { success: true, data: [{ id: 1, name: 'app', path: '/app', sessions: [{ id: 'pane' }] }] } });
     expect((await invoke('panels:list')).body).toEqual({ ok: true, result: { success: true, data: [panels[0], panels[1]] } });
+    expect((await invoke('runpane:panels:list')).body).toEqual({ ok: true, result: { ok: true, panels: [panels[0], panels[1]] } });
     expect((await invoke('panels:getActive')).body).toEqual({ ok: true, result: null });
     expect((await invoke('sessions:get-all-with-projects', 'owner-token')).body).toEqual({ ok: true, result: { success: true, data: [project] } });
 

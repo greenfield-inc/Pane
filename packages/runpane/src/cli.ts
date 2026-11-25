@@ -168,7 +168,7 @@ export async function main(argv: string[]): Promise<number> {
 /** Commands that run on this machine only; everything else is a daemon call another machine can answer. */
 const THIS_MACHINE_ONLY = new Set<string>([
   'help', 'setup', 'install', 'update', 'version', 'doctor', 'daemon repair', 'agent-context', 'mcp',
-  'docs search', 'docs read', 'agents start', 'agents status', 'agents send', 'handoff', 'relay',
+  'docs search', 'docs read', 'agents start', 'agents send', 'handoff', 'relay',
   // These pick their own machine with --machine (or --all).
   'ask', 'models',
   // Workspace commands pick their own machine; `workspace state` is a daemon call and passes through.

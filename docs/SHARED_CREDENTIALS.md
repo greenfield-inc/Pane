@@ -34,7 +34,7 @@ Settings → Approvals' on/off switch (`notify.enabled`) travels the same way, o
 
 The most recent change wins, by `notifyEnabledChangedAt` in `config.json`. A host applying another host's value keeps that host's time, so two hosts never trade values. A value with no time counts as time 0 and a missing value means on; at equal times off wins, so a machine turned off before sharing existed turns the others off when they first sync. A change made by hand in `config.json` while Pane runs counts as a change; one made while it's quit doesn't get a new time.
 
-Hosts running a Pane version from before this are skipped without error; their keys still sync. The same people can reach it as the keys: the owner's login or a paired device.
+Hosts running a Pane version from before this are skipped without error; their keys still sync. The same people can reach it as the keys: the owner's login or a device paired with full access.
 
 Settings → Approvals' Show cards on (`notify.cardsOn`: the picked machine's install id and name, or null for whichever computer is in use) rides the same commands with its own time, `notifyCardsOnChangedAt`. Each part merges on its own time, so changing one never overwrites the other; at equal times "whichever computer is in use" wins. A host from before Show cards on still syncs on/off: its answers carry no Show cards on, which never clears a pick, and it isn't written for Show cards on alone.
 
@@ -42,7 +42,7 @@ Settings → Machine health's Cards and notifications switch (`machineHealth.not
 
 ## Who can read the keys
 
-Only your own devices. Over Tailscale, a host answers a request for its keys only from its owner's Tailscale login, even when its workspace lets other people on the tailnet in, so a teammate's computer neither receives nor replaces your keys. With a connection code, the caller must present a valid pairing token, and the host refuses the request when it does not require pairing. Either device can already open terminals on that host, so sharing keys with it exposes nothing new.
+Only your own devices, with full access. Over Tailscale, a host answers a request for its keys only from its owner's Tailscale login, even when its workspace lets other people on the tailnet in, so a teammate's computer neither receives nor replaces your keys. With a connection code, the caller must present the pairing token of a device with full access, and the host refuses the request when it does not require pairing. Either device can already open terminals on that host, so sharing keys with it exposes nothing new.
 
 Keys are never written to logs or events. They are stored in each host's `config.json` in the Pane data directory, as before.
 

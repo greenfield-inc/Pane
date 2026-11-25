@@ -190,7 +190,12 @@ export interface RemoteRoute {
   token?: string;
   /** Relay and same-network routes: base64url SHA-256 of the computer's SubjectPublicKeyInfo. Any other key is refused before the token is sent. */
   fingerprint?: string;
+  /** "read" when its token is a read-only device's. */
+  access?: 'read';
 }
+
+/** A computer refuses a read-only device with this code; nothing was run or changed. The CLI's copy of `READ_ONLY_ACCESS_CODE` in shared/types/accessLevel.ts. */
+export const READ_ONLY_ACCESS_CODE = 'ERR_READ_ONLY_ACCESS';
 
 /** Another machine's Pane (see `runpane workspace`), with its routes in the order they are tried. */
 export interface RemoteDaemonTarget {
@@ -341,8 +346,9 @@ export async function invokeRemoteDaemon<T>(
     const last = index === routes.length - 1;
     const outcome = await postRoute(route, target.machine, headers, text, timeoutMs, last ? undefined : route.kind === 'lan' ? LAN_ROUTE_CONNECT_TIMEOUT_MS : ROUTE_CONNECT_TIMEOUT_MS);
     const answer = readRouteOutcome(target.machine, route, channel, timeoutMs, outcome);
-    if ('result' in answer) {
+    if (!('missed' in answer)) {
       answeredRoutes.set(target, route);
+      if ('failure' in answer) throw answer.failure;
       return decodeResult(channel, answer.result, resultSchema);
     }
     missed.push(routes.length > 1 ? `${routeName(route)}: ${answer.missed}` : answer.missed);
@@ -360,8 +366,8 @@ export async function invokeRemoteDaemon<T>(
 }
 
 /**
- * What one route's attempt means: Pane's result, a miss the next route may retry (the request
- * never reached a Pane, or was refused before it ran), or a failure after the request was sent.
+ * What one route's attempt means: Pane's result, Pane's own error, a miss the next route may retry
+ * (the request never reached a Pane, or its sign-in was rejected), or a throw when the reply was lost.
  */
 function readRouteOutcome(
   machine: string,
@@ -369,7 +375,7 @@ function readRouteOutcome(
   channel: string,
   timeoutMs: number,
   outcome: RouteOutcome,
-): { result: JsonValue | undefined } | { missed: string; refusal?: PaneDaemonClientError } {
+): { result: JsonValue | undefined } | { failure: PaneDaemonClientError } | { missed: string; refusal?: PaneDaemonClientError } {
   const lost = (detail: string) => new PaneDaemonClientError(
     `Lost the reply from Pane on ${machine} (${route.baseUrl}): ${detail}. The request was sent, so Pane there may have finished ${channel}.`,
     'ERR_WORKSPACE_UNREACHABLE',
@@ -407,7 +413,7 @@ function readRouteOutcome(
   const failure = new PaneDaemonClientError(`${machine}: ${payload.error.message}${fix}`, payload.error.code, false, payload.error.next);
   // A refused credential ran nothing, so another route (with its own credential) may still answer.
   if (status === 401 || status === 403) return { missed: payload.error.message, refusal: failure };
-  throw failure;
+  return { failure };
 }
 
 /** The underlying reason; a refusal on every address of a name (an AggregateError) has no message, only a code. */

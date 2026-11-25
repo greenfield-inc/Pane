@@ -8,7 +8,7 @@ import { EventEmitter } from 'events';
 import { type LookupFunction } from 'net';
 import { hostname as getOsHostname } from 'os';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
+import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig, type RemotePaneConnectionState } from '../../../../shared/types/remoteDaemon';
 import { primaryProfile } from '../../../../shared/types/remoteComputers';
 import type { PaneEventSink } from '../../core/eventSink';
 import { RemotePaneClient, RemotePaneClientController } from './remotePaneClient';
@@ -751,6 +751,35 @@ describe('RemotePaneClient writes through a drop', () => {
 });
 
 describe('RemotePaneClientController', () => {
+  it('learns on every connect whether the host is read-only, keeps it through a drop, and asks such a host none of its own bookkeeping', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    server.setAccess('read');
+    const config = createDefaultRemoteDaemonConfig();
+    config.client = { mode: 'remote', activeProfileId: 'tyler', profiles: [
+      { id: 'tyler', label: 'Tyler', baseUrl: server.baseUrl, token: 'test-token', transport: 'http+sse' },
+    ] };
+    const controller = createController();
+    const seen: Array<'read' | undefined> = [];
+    controller.on('state-changed', (state: RemotePaneConnectionState) => { if (state.status === 'reconnecting') seen.push(state.access); });
+    controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {} } });
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(controller.getConnectionState().access).toBe('read');
+
+    await expect(controller.invoke('permission:getPending', [], async () => null)).resolves.toEqual({ success: true, data: [] });
+    expect(server.getInvokes().map((call) => call.channel)).not.toContain('permission:getPending');
+
+    server.setAccess(undefined);
+    server.closeEventStream();
+    await waitFor(() => seen.length > 0);
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(seen[0]).toBe('read');
+    expect(controller.getConnectionState().access).toBeUndefined();
+
+    await controller.switchToLocalMode();
+    expect(controller.getConnectionState().access).toBeUndefined();
+  });
+
   it('requires every current renderer to acknowledge restoration before green', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);
@@ -1343,6 +1372,7 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
   let invokeDelayMs = 0;
   let invokeCount = 0;
   let deduplicates = false;
+  let access: 'read' | undefined;
   const invokes: Array<{ channel: string; args: JsonValue[]; requestId?: string }> = [];
   const applied: Array<{ channel: string; args: JsonValue[] }> = [];
   const seenRequestIds = new Set<string>();
@@ -1419,7 +1449,7 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
       if (emitReadyEvent) {
         response.write('event: ready\n');
         const ready = { replay: 'none', resync: 'refetch-state-after-reconnect', timestamp: new Date().toISOString() };
-        response.write(`data: ${JSON.stringify(deduplicates ? { ...ready, deduplicatesRequestIds: true } : ready)}\n\n`);
+        response.write(`data: ${JSON.stringify({ ...ready, ...(deduplicates && { deduplicatesRequestIds: true }), ...(access && { access }) })}\n\n`);
       }
       request.on('close', () => {
         if (streamResponse === response) {
@@ -1449,6 +1479,7 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
     proxyMissInvoke(count) { proxyMisses = count; },
     delayInvoke(ms: number) { invokeDelayMs = ms; },
     deduplicateRequestIds() { deduplicates = true; },
+    setAccess(next: 'read' | undefined) { access = next; },
     getInvokes() { return invokes; },
     getApplied() { return applied; },
     setHeartbeatInterval(ms: number) {

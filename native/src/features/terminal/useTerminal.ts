@@ -4,7 +4,7 @@ import type { WebView, WebViewMessageEvent } from 'react-native-webview';
 
 import { CONNECTION_GRACE_MS } from '@shared/remoteClient';
 
-import { invokeChannel, useDaemon, useDaemonEvent } from '@/daemon';
+import { invokeChannel, useDaemon, useDaemonEvent, useReadOnlyHost } from '@/daemon';
 import { useTheme } from '@/theme';
 
 import { connectionMark, perfMark } from '../perf/perfMarks';
@@ -21,7 +21,8 @@ const RESIZE_SETTLE_MS = 150;
 /** The computer says an agent is ready when it first draws, or after 10 s regardless. */
 const AGENT_READY_LIMIT_MS = 12_000;
 
-export type TerminalStatus = 'loading' | 'ready' | 'error';
+/** `stopped`: not running on the host, and this phone only watches, so it can't start it. */
+export type TerminalStatus = 'loading' | 'ready' | 'error' | 'stopped';
 
 /**
  * Connects one terminal panel to the xterm WebView. Render the WebView with
@@ -29,6 +30,7 @@ export type TerminalStatus = 'loading' | 'ready' | 'error';
  */
 export function useTerminal(panelId: string, sessionId: string) {
   const { client, connection, profile } = useDaemon();
+  const readOnly = useReadOnlyHost();
   // The rows this terminal showed last time it was open, painted until its screen is read again.
   const [keptScreen] = useState(() => keptScreenOf(profile.id, panelId));
   // Set when this screen starts the panel: its agent is launching until the computer says it's ready.
@@ -49,6 +51,8 @@ export function useTerminal(panelId: string, sessionId: string) {
   // The page can take commands; until then a screen read waits here, and output after it waits in `pending`.
   const pageReady = useRef(false);
   const pageLoads = useRef(0);
+  // The last restore found the tab not running, with nothing this phone may start.
+  const notRunning = useRef(false);
   const pendingScreen = useRef<string | null>(null);
 
   // Output arrives in bursts of small events; hand it to xterm once per frame.
@@ -74,7 +78,7 @@ export function useTerminal(panelId: string, sessionId: string) {
     connectionMark('terminal-screen', { repeat: true });
     perfMark('terminal', 'screen', { repeat: true });
     setHasContent(true);
-    setStatus('ready');
+    setStatus(notRunning.current ? 'stopped' : 'ready');
     setError(null);
   };
 
@@ -88,6 +92,7 @@ export function useTerminal(panelId: string, sessionId: string) {
         // Output buffered for the old screen is replaced, but the host still needs its ack.
         if (pending.current) session.ack(pending.current.length);
         pending.current = '';
+        notRunning.current = false;
         if (pageReady.current) showScreen(data);
         else pendingScreen.current = data;
       },
@@ -97,6 +102,11 @@ export function useTerminal(panelId: string, sessionId: string) {
       },
     },
     onStart: () => setStartedAt(Date.now()),
+    onNotRunning: () => {
+      notRunning.current = true;
+      setStartedAt(null);
+      setStatus('stopped');
+    },
     onError: cause => {
       // A restore cut short by a reconnect is retried once the connection is back.
       if (client.getState().status !== 'connected') return;
@@ -105,7 +115,14 @@ export function useTerminal(panelId: string, sessionId: string) {
     },
   }));
 
-  useDaemonEvent('terminal:output', event => session.receiveOutput(event.args[0]));
+  useDaemonEvent('terminal:output', event => {
+    session.receiveOutput(event.args[0]);
+    // Someone started the tab on its computer: read its screen.
+    if (notRunning.current && (event.args[0] as { panelId?: unknown } | undefined)?.panelId === panelId) {
+      notRunning.current = false;
+      if (size) void session.restore(size);
+    }
+  });
   useDaemonEvent('terminal:cliReady', event => {
     if ((event.args[0] as { panelId?: unknown } | undefined)?.panelId !== panelId) return;
     perfMark('terminal', 'agent-ready');
@@ -205,7 +222,8 @@ export function useTerminal(panelId: string, sessionId: string) {
         // The page only generates input: replies to the agent's terminal queries and
         // scroll reports. One that cannot be sent while reconnecting is dropped; a
         // broken connection shows in the header, not over the terminal.
-        void session.sendInput(message.data).catch(() => undefined);
+        // A phone that only watches sends nothing: the computer's own screens answer the agent.
+        if (!readOnly) void session.sendInput(message.data).catch(() => undefined);
         break;
       case 'written':
         session.ack(message.units);

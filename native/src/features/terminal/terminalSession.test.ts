@@ -126,6 +126,22 @@ describe('TerminalSession.restore', () => {
     expect(starts).toEqual(['unstarted']);
   });
 
+  it('says a stopped panel is not running when the host does not start it for a read-only phone', async () => {
+    const notRunning: boolean[] = [];
+    for (const started of [false, true]) {
+      const session = new TerminalSession({
+        invoke: async channel => (channel === 'panels:initialize' ? started : false),
+        panelId: 'panel-1',
+        sessionId: 'pane-1',
+        viewerId: 'viewer-1',
+        sink: { reset: () => undefined, write: () => undefined },
+        onNotRunning: () => notRunning.push(started),
+      });
+      await session.restore({ cols: 48, rows: 30 });
+    }
+    expect(notRunning).toEqual([false]);
+  });
+
   it('shows the serialized frame of a full-screen app and forces it to repaint', async () => {
     const host = fakeHost({
       'panels:checkInitialized': () => true,

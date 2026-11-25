@@ -178,6 +178,7 @@ export function readOnlyRefusal(what: string) {
 const panelSchema = boundary.object({ type: boundary.string });
 const envelopeSchema = boundary.object({ data: boundary.jsonObject });
 const listEnvelopeSchema = boundary.object({ data: boundary.array(boundary.jsonObject) });
+const panelListSchema = boundary.object({ panels: boundary.array(boundary.jsonObject) });
 const PROJECT_SETTINGS: ReadonlySet<string> = new Set(['system_prompt', 'run_script', 'build_script', 'archive_script', 'open_ide_command']);
 
 /** Terminal and chat tabs; a file, diff, browser or log tab carries contents a read-only device may not open. */
@@ -198,6 +199,11 @@ export function readableResult(channel: string, result: JsonValue): JsonValue {
       const answer = decodeOptionalBoundary(result, boundary.jsonObject);
       const list = decodeOptionalBoundary(result, listEnvelopeSchema);
       return answer && list ? { ...answer, data: list.data.filter(isReadablePanel) } : result;
+    }
+    case 'runpane:panels:list': {
+      const answer = decodeOptionalBoundary(result, boundary.jsonObject);
+      const list = decodeOptionalBoundary(result, panelListSchema);
+      return answer && list ? { ...answer, panels: list.panels.filter(isReadablePanel) } : result;
     }
     case 'panels:getActive':
       return isReadablePanel(result) ? result : null;

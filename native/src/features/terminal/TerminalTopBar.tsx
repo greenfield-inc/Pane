@@ -8,6 +8,7 @@ import { useTheme } from '@/theme';
 import { Icon, ListRow, Text } from '@/ui';
 
 import { ComposerSheet, useAfterSheetCloses } from '../composer/ComposerSheet';
+import { ReadOnlyChip } from '../hosts/ReadOnlyChip';
 import { ConnectionBar, presenceLabel } from '../hosts/ConnectionStatus';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { MachineMark } from '../machines/MachineMark';
@@ -73,6 +74,7 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
               </View>
             </View>
           </View>
+          {current?.readOnly ? <ReadOnlyChip /> : null}
           <Pressable
             testID="terminal-more"
             accessibilityRole="button"

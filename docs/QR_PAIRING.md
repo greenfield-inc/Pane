@@ -39,15 +39,45 @@ back off, so it doesn't keep retrying in the background.
 Inside the Pane app you can also scan from **Settings › Add a machine**.
 The app still accepts `pane-remote://` connection codes.
 
+## Full access or Read only
+
+The **Phone** and **Computer** tabs ask what the code or link gives whoever
+uses it. The choice is saved with the code, so its holder can't raise it.
+
+| Access | What the device can do |
+|---|---|
+| **Full access** (selected) | Everything you can do there: type, run agents, approve, open files. For your own devices. |
+| **Read only** | Sees Sessions, Panes, agent status, transcripts, terminal output, to-dos and loops, live. Can't type, run, approve, open files or see your keys. For a teammate. |
+
+A read-only device sees everything your agents and terminals print, including
+any key or password that appears on screen. Pane shows that text as it is.
+
+The computer checks each request, on every route. It answers the reads above
+and refuses the rest with `ERR_READ_ONLY_ACCESS`: commands, files and media,
+forwarded ports, dev server previews and dictation.
+
+- **A phone or browser** that pairs Read only gets this computer and every
+  computer linked with it, all read-only. Its other computers stay apart from
+  yours.
+- **A computer** that uses a read-only link watches this computer and the ones
+  linked with it. The link runs one way: your computers get no route to that
+  computer, and the two groups stay separate.
+- **A linked computer on an older Pane** is skipped until it updates. Pair
+  the device again after the update to add it.
+- A computer that already has full access here refuses the read-only link and
+  leaves it unused. To watch instead, unlink it first.
+
+To change a device's access, remove it, then pair it again.
+
 ## Link another computer
 
-1. On the first computer, open **Add a device › Computer**, pick how long the
-   link lasts under **Expires after**, and choose **Copy link**.
+1. On the first computer, open **Add a device › Computer**, pick the access and
+   how long the link lasts (**Expires after**), and choose **Copy link**.
 2. Send the link to the other computer and open it there in a browser. The
    page opens desktop Pane (**Open Pane**), which links the two.
    Or paste the link into **Add a device › Computer › Or finish here** on the
    other computer.
-3. The first computer shows **Linked with &lt;computer&gt;**. If you don't
+3. For a full-access link, the first computer shows **Linked with &lt;computer&gt;**. If you don't
    know that computer, choose **Not you? Unlink &lt;computer&gt;**. That undoes
    the link: your computers and the ones it brought stop reaching each other,
    and each group stays as it was before.
@@ -69,11 +99,12 @@ A link works once. It expires after the time chosen when it was copied:
 
 ## Your computers
 
-Linking joins two groups of computers. Every computer in either group can
+A full-access link joins two groups of computers. Every computer in either group can
 then reach every other one, on every route it has, and run agents there.
 After that:
 
-- a new phone that pairs with any one of them gets all of them;
+- a new phone that pairs with any one of them gets all of them, with the
+  access it paired with;
 - each computer lists the others in **Settings › Remote Access › Computers**
   and the sidebar's machine menu, for ports and `runpane workspace`;
 - alerts from any of them reach every phone.
@@ -86,7 +117,8 @@ pill for every route Pane can reach it on and a dot on the route in use.
 Expand a row to see its routes in order, drag them to reorder, add one with
 **Add route** (it opens **Add a device › Computer**), and see who linked it ("Linked by Ana's iPhone"). **Also linked** lists
 computers that reach this one but that this one doesn't list; link them back
-to reach them from here. **Settings › Remote Access › Phones and glasses**
+to reach them from here. **Watching this computer** lists computers you gave
+read-only access. **Settings › Remote Access › Phones and glasses**
 lists phones and glasses.
 
 A browser reaches the computer whose link it opened, plus the computers
@@ -97,6 +129,8 @@ computer's browser app keeps its own list.
 
 A computer always asks before it uses a link, unless it already reaches the
 computer that made the link: once linked, that computer can run agents on it.
+For a read-only link, the prompt says **Read only** and names the computers to
+watch.
 A phone or browser asks when it already reaches computers and the link comes
 from a computer it doesn't reach yet. A phone or browser that reaches no
 computers yet pairs without asking, since pairing gives it access and nothing
@@ -164,11 +198,14 @@ Everything the Tailscale path does: terminals, agents and approvals, alerts
 when an agent needs you, dev server previews and HTML files on the phone, and
 the files in a worktree. Another computer reaches the same computer for
 switching to it, forwarded ports and `runpane workspace`, and glasses pair
-through a paired phone.
+through a paired phone. This is full access; see
+[Full access or Read only](#full-access-or-read-only) for what a read-only
+device gets.
 
 ## Pair glasses
 
-Glasses pair through the Pane phone app. **Add a device › Wearables** shows a
+Glasses pair through the Pane phone app, with a computer the phone has full
+access to. **Add a device › Wearables** shows a
 QR code for `https://runpane.net/glasses` (your own relay's domain when you
 run one). Scanning it with the phone opens **Settings › Glasses** in the Pane
 app; without the app, the page says how to get it. See
@@ -176,14 +213,27 @@ app; without the app, the page says how to get it. See
 
 ## Share a computer with a teammate
 
-A teammate scans a fresh code from your computer, as you do. Their phone gets
-its own sign-in, listed under **Phones and glasses** by its name, and can do
-what yours does there, pairing glasses included. Because computers are linked,
-it also reaches every computer linked with this one, and, once they confirm,
-links this computer with any computer their phone already paired.
-**Remove › Remove from &lt;this computer&gt;** signs out only their phone,
-only here; **Remove from all your computers** signs it out of
-every computer it reached through yours.
+Choose **Read only** when you share with someone else. They, and their agents,
+see what your agents are doing.
+
+1. Open **Add a device**: **Phone** for their phone, **Computer** for a link.
+2. Choose **Read only** and read the warning: they will see everything your
+   agents and terminals print, including any key or password that appears on
+   screen.
+3. Send them the link, or let them scan the code.
+4. Check the name of the device that paired, under **Phones and glasses** or
+   **Watching this computer**. Remove a device you don't know.
+
+On a linked computer, sharing covers the whole linked group: they can watch
+every computer linked with this one. On their computer,
+`runpane workspace <your computer> sessions overview --session <id>` and the
+pane MCP read your Sessions. See
+[A read-only computer](RUNPANE_WORKSPACES.md#a-read-only-computer).
+
+Share **Full access** only with someone you trust to run anything as you, on
+every computer linked with this one. Their phone can then do what yours does,
+pairing glasses included, and once they confirm, it links this computer with
+any computer it already paired.
 
 ## Remove a phone or a computer
 
@@ -193,6 +243,10 @@ every computer it reached through yours.
   connections close within seconds. The Pane app shows **Pair again**; a
   browser says the computer removed it and to scan a new code on that
   computer.
+- **Remove**, on a computer's row under **Watching this computer**, takes its
+  read-only access back here and on every computer linked with this one. A
+  read-only phone has the same two choices as any phone. A linked computer
+  that can't be reached is named; remove the device there too.
 - Removing a phone also undoes the links it made: computers that phone linked
   stop reaching each other, along with the phones they shared it with. That
   keeps a lost or stolen phone from leaving a way back in. To link them again,
@@ -202,8 +256,8 @@ every computer it reached through yours.
   phones you paired through it lose access to it. The other computers in the
   group stay linked with each other. A computer also on your
   tailnet stays as a Tailscale row.
-- **Forget**, on a computer with no Pane relay route, removes it from this
-  computer's list only.
+- **Forget**, on a computer with no Pane relay route or one you watch read-only,
+  removes it from this computer's list only.
 
 ## When something goes wrong
 
