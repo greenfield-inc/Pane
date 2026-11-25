@@ -156,7 +156,7 @@ Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine wh
 
 ### Add a phone or another computer
 
-On the computer, open Pane and choose **Pair a device** on Home, or **Add a device** in Settings › Remote Access. Point your phone's camera at the code and tap the link: it opens the Pane app, or Pane in the phone's browser. The iPhone app is in public beta: [join it in TestFlight](https://testflight.apple.com/join/eKJmnzXF). For another computer, copy a one-time link from **Add a device › Computer** and open it there. It works on any network, with terminals, alerts and dev server previews. Linked computers reach each other for remote mode, ports and `runpane workspace`, and each shows once in Settings › Remote Access › Computers, where Pane reaches it on the nearest route that answers: same network, Tailscale, SSH, a public URL or Pane's relay. Pane's servers pass the encrypted connection along without reading it, or you can [run your own relay](docs/SELF_HOSTED_RELAY.md). See [Add a device](docs/QR_PAIRING.md).
+On the computer, open Pane and choose **Pair a device** on Home, or **Add a device** in Settings › Remote Access. Point your phone's camera at the code and tap the link: it opens the Pane app, or a page that offers the app and Pane in the phone's browser. Get the iPhone app [on the App Store](https://apps.apple.com/app/id6808839038). In the EU? [Get it on TestFlight](https://testflight.apple.com/join/eKJmnzXF) for now. For another computer, copy a one-time link from **Add a device › Computer** and open it there. It works on any network, with terminals, alerts and dev server previews. Linked computers reach each other for remote mode, ports and `runpane workspace`, and each shows once in Settings › Remote Access › Computers, where Pane reaches it on the nearest route that answers: same network, Tailscale, SSH, a public URL or Pane's relay. Pane's servers pass the encrypted connection along without reading it, or you can [run your own relay](docs/SELF_HOSTED_RELAY.md). See [Add a device](docs/QR_PAIRING.md).
 
 ### Connect with a code or Tailscale
 
@@ -166,7 +166,7 @@ The original setup path, with a `pane-remote://...` code over Tailscale or SSH:
 2. Open `Settings > Remote Access > Tailscale` on that host machine.
 3. Click **Set Up Host** and copy the generated `pane-remote://...` connection code.
 4. On another desktop, open Pane, go to `Settings > Remote Access > Tailscale`, paste the code under **Paste a connection code**, and connect.
-5. On a phone or tablet, open [runpane.com/app](https://runpane.com/app/), or the Pane iPhone app ([public beta in TestFlight](https://testflight.apple.com/join/eKJmnzXF)), paste the same code, and connect.
+5. On a phone or tablet, open [runpane.com/app](https://runpane.com/app/), or the Pane iPhone app ([on the App Store](https://apps.apple.com/app/id6808839038)), paste the same code, and connect.
 
 A connected desktop reaches the host's dev servers at their usual `localhost` address: terminal links and live reload work as on the host. See [Forwarded ports](docs/SELF_HOSTED_REMOTE_DAEMON.md#forwarded-ports). Every other screen, the phone included, shows its own copy of each browser tab, and a live stream of the host's page while an agent acts on it. See [Browser tools](docs/BROWSER_AGENTS.md#on-another-screen).
 

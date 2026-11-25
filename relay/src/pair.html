@@ -30,9 +30,10 @@ p.note a { color: var(--fg); font-weight: 500; }
   <h1 id="title">Pair with Pane</h1>
   <p id="status">Connect this device to your computer.</p>
   <div id="actions" hidden>
+    <a class="btn primary" id="store" href="https://apps.apple.com/app/id6808839038" hidden>Get Pane on the App Store</a>
     <a class="btn primary" id="app" href="#">Open in Pane app</a>
     <a class="btn" id="web" href="#">Continue in browser</a>
-    <p class="note" id="phone-note">No Pane app yet? The iPhone beta is open in TestFlight.<br><a href="https://testflight.apple.com/join/eKJmnzXF" target="_blank" rel="noopener">Join the beta</a></p>
+    <p class="note" id="phone-note"><span id="phone-hint">No Pane app yet? The iPhone app is on the App Store.<br><a href="https://apps.apple.com/app/id6808839038" target="_blank" rel="noopener">Get Pane for iPhone</a></span>{{eu-line}}</p>
     <p class="note" id="desktop-note" hidden>No Pane here yet? <a href="https://runpane.com" target="_blank" rel="noopener" id="download">Download Pane</a>, then open this link again.</p>
     <p class="note" id="once" hidden>This link works once.</p>
   </div>
@@ -52,8 +53,15 @@ p.note a { color: var(--fg); font-weight: 500; }
   var app = document.getElementById("app");
   app.href = "pane://pair" + location.hash + "&d=" + encodeURIComponent(location.host);
   document.getElementById("web").href = "https://" + id + "." + location.host + "/app/#pair=" + encodeURIComponent(secret);
-  // A desktop browser hands the link to desktop Pane, which links this computer.
   var ua = navigator.userAgent;
+  // On runpane.net an iPhone with the app opens it instead of this page. On a self-hosted
+  // relay it lands here too, and Open in Pane app works.
+  if (/iPhone|iPod/.test(ua)) {
+    document.getElementById("store").hidden = false;
+    app.classList.remove("primary");
+    document.getElementById("phone-hint").textContent = "After installing, come back here and tap Open in Pane app, or scan the code again.";
+  }
+  // A desktop browser hands the link to desktop Pane, which links this computer.
   var touchMac = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
   var desktop = !/Android|iPhone|iPad|iPod|Mobile/.test(ua) && !touchMac;
   if (desktop) {

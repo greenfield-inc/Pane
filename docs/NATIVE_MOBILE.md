@@ -1,5 +1,7 @@
 # Native Pane mobile companion
 
+To use Pane on an iPhone, get [Pane - Remote Coding Agents](https://apps.apple.com/app/id6808839038) on the App Store, built from `native/`. This page is for developing the mobile apps.
+
 `mobile/` is a Capacitor companion that bundles `frontend/remote.html`; it never navigates a WebView to a remote host. Remote hosts are ordinary authenticated HTTP/SSE endpoints, so an arbitrary host never receives a privileged native bridge.
 
 Even G2 glasses pair from the native app's **Settings › Glasses**; see [Use Pane from Even G2 glasses](EVEN_G2_GLASSES.md).
