@@ -361,11 +361,13 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   // Agent Farm telemetry stays off unless Settings › AI & Agents turns it on for this computer.
   let agentFarmTelemetry = configManager.getConfig().agentFarmTelemetry === true;
   void installBundledAgentFarm({ paneDir: getAppDirectory(), telemetry: agentFarmTelemetry, log: message => logger.info(message) });
+  // Launches decide from the saved switch too, so an off that settings.json missed still holds;
+  // a failed write is retried at the next config change and the next start.
   configManager.on('config-updated', (config: AppConfig) => {
-    if ((config.agentFarmTelemetry === true) === agentFarmTelemetry) return;
-    agentFarmTelemetry = config.agentFarmTelemetry === true;
-    void writeAgentFarmTelemetry(getAppDirectory(), agentFarmTelemetry).catch(error => {
-      logger.warn(`[AgentFarm] Could not turn Agent Farm telemetry ${agentFarmTelemetry ? 'on' : 'off'} in its settings.json; the switch saved, and Pane writes it again at its next start`, error instanceof Error ? error : undefined);
+    const wanted = config.agentFarmTelemetry === true;
+    if (wanted === agentFarmTelemetry) return;
+    void writeAgentFarmTelemetry(getAppDirectory(), wanted).then(() => { agentFarmTelemetry = wanted; }, error => {
+      logger.warn(`[AgentFarm] Could not turn Agent Farm telemetry ${wanted ? 'on' : 'off'} in its settings.json. ${wanted ? 'Launches stay unrecorded' : 'Launches still stay unrecorded, since they follow the saved switch'}; Pane tries again at the next settings change and the next start.`, error instanceof Error ? error : undefined);
     });
   });
   if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {

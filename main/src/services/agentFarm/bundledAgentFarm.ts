@@ -20,7 +20,7 @@ export const BUNDLED_AGENT_FARM_PLUGINS = ['greenfield'] as const;
  */
 export const RETIRED_AGENT_FARM_PLUGINS = ['dcouple', 'bigbrain'] as const;
 const MANIFEST_FILE = 'pane-manifest.json';
-/** Written while Pane installs bundled plugins, naming them; still there at the next start means that install never finished. */
+/** Written while Pane installs one bundled plugin, naming it; still there at the next start means that install never finished. */
 const INSTALLING_FILE = 'pane-installing.json';
 /** The folders of a plugin Agent Farm's install receipt covers, besides plugin.yaml (Agent Farm's plugins.js). */
 const RECEIPT_SECTIONS = ['profiles', 'agents', 'skills', 'instructions', 'references'];
@@ -60,16 +60,20 @@ export interface AgentFarmProcess {
 }
 
 /**
- * Whether Pane's telemetry switch is on, as written to the config root's settings.json. Off when
- * the file or the field is missing or unreadable. The shim launcher in runpaneShim.ts reads it the same way.
+ * Whether launches may record telemetry: Pane's saved switch (`agentFarmTelemetry` in
+ * <PANE_DIR>/config.json, beside the config root) and Agent Farm's settings.json must both say
+ * on. The saved switch is what Settings shows, so turning it off wins even when the
+ * settings.json write failed (review F-2). Anything missing or unreadable counts as off. The shim
+ * launcher in runpaneShim.ts decides the same way.
  */
 function telemetrySwitchOn(configRoot: string): boolean {
-  try {
-    const settings = decodeOptionalBoundary(JSON.parse(readFileSync(path.join(configRoot, 'settings.json'), 'utf8')), boundary.jsonObject);
-    return decodeOptionalBoundary(settings?.telemetry, boundary.jsonObject)?.enabled === true;
-  } catch {
-    return false;
-  }
+  const read = (file: string) => {
+    try { return decodeOptionalBoundary(JSON.parse(readFileSync(file, 'utf8')), boundary.jsonObject); }
+    catch { return undefined; }
+  };
+  const saved = read(path.join(path.dirname(configRoot), 'config.json'))?.agentFarmTelemetry === true;
+  const settings = read(path.join(configRoot, 'settings.json'));
+  return saved && decodeOptionalBoundary(settings?.telemetry, boundary.jsonObject)?.enabled === true;
 }
 
 /**
@@ -181,6 +185,10 @@ async function uninstallRetiredPlugins(bundle: BundledAgentFarm, configRoot: str
  * writes it under ~/.local/state/agent-farm unless that file names another folder. Pane's copy
  * keeps it off unless Settings › AI & Agents turns it on (`agentFarmTelemetry`), and keeps it in its
  * own config root either way. Other settings in the file are kept.
+ *
+ * Known exception, accepted for T-63 (D-T63-1): while the switch is on, a trusted repository's
+ * .agent-farm/workspace.yaml can still name its own telemetry directory, which Agent Farm ranks
+ * above this file. The files stay local; Pane doesn't force its folder over the workspace's.
  */
 export async function writeAgentFarmTelemetry(paneDir: string, enabled: boolean): Promise<void> {
   const configRoot = agentFarmConfigRoot(paneDir);
@@ -237,7 +245,7 @@ async function installedState(configRoot: string, name: string): Promise<{ versi
 /**
  * Removes what an install that never finished (killed by the timeout, a crash or a quit) left
  * behind: Agent Farm's install lock, which makes every later install refuse, and the bundled
- * plugins' half-copied files: those Pane was installing then (pane-installing.json), and those
+ * plugins' half-copied files: the one Pane was installing then (pane-installing.json), and those
  * with no receipt. The config root is Pane's, so nothing else is installing.
  */
 async function clearUnfinishedInstall(configRoot: string, plugins: readonly string[]): Promise<void> {
@@ -333,14 +341,16 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
       if (!state) clear.push(name);
     }
     await clearUnfinishedInstall(configRoot, clear);
-    await fs.writeFile(installingPath, `${JSON.stringify(install)}\n`);
     for (const name of install) {
+      // Names only the plugin being installed, and only until it succeeds: one that finished
+      // has a receipt that guards its later edits, even when a plugin after it fails (review F-1).
+      await fs.writeFile(installingPath, `${JSON.stringify([name])}\n`);
       // No name installs the package's default plugin, greenfield.
       const args = name === 'greenfield' ? ['plugin', 'install'] : ['plugin', 'install', name];
       const stdout = await run(bundledAgentFarmProcess(bundle, args, configRoot));
       plugins[name] = installedVersion(stdout) ?? 'unknown';
+      await fs.rm(installingPath, { force: true });
     }
-    await fs.rm(installingPath, { force: true });
     await fs.writeFile(manifestPath, `${JSON.stringify({ hash, agentFarmVersion: bundle.version, plugins, edited }, null, 2)}\n`);
   } catch (error) {
     const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);
