@@ -60,6 +60,7 @@ import {
   type ImageAttachment,
 } from './createNewMemory';
 import { ToField } from './ToField';
+import { usePinnedProfiles } from '../profiles/profilePins';
 
 const ENVIRONMENT_BY_OS = { macOS: 'macos', Windows: 'windows', Linux: 'linux' } satisfies Record<MachineOs, ProjectEnvironment>;
 
@@ -180,11 +181,14 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
   const profilesUnavailable = wsl ? 'Profiles run in chat tabs, which don\'t run in WSL. Set Run in to Windows in More options to start one.'
     : !onOtherMachine && config && config.chatTabsEnabled !== true ? 'Profiles run in chat tabs, which are off. Turn on Chat tabs in Settings › AI & Agents to start one.'
       : undefined;
+  // Profiles pinned in the Profiles tab lead To (T-63, build-6 feedback item 2).
+  const pins = usePinnedProfiles();
   const choices = useMemo(() => sessionChoices({
     agents: availableAgents(environment, wsl),
     profiles: profilesRead?.list?.profiles ?? [],
     profilesUnavailable,
-  }), [environment, wsl, profilesRead, profilesUnavailable]);
+    pins,
+  }), [environment, wsl, profilesRead, profilesUnavailable, pins]);
   const [toKey, setToKey] = useState<string | null>(() => rememberedTo());
   const startKey = `agent:${config?.defaultOrchestratorAgent ?? ''}`;
   const usable = (choice: SessionChoice | undefined) => choice && !choice.disabledReason ? choice : undefined;

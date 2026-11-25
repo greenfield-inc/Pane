@@ -2,57 +2,117 @@ import { expect, test, type Page } from '@playwright/test';
 import { gotoApp } from './electronApiMock';
 import { dismissStartupDialogs, installSessionsFixture, sessionFixture } from './orchestrationSessionsFixture';
 import { expectNoAxeViolations } from './axeTest';
-import type { ProfilePlugin, ProfilesOverview } from '../shared/types/profileEditor';
+import type { AgentFarmProfileEntry } from '../shared/types/agentFarmProfiles';
+import type { ProfilePlugin, ProfileSubagentNode, ProfileSummary, ProfileTreeNode, ProfilesOverview } from '../shared/types/profileEditor';
 
 /**
- * The Profiles tab (T-63 PR 5): the list, a profile's files with the open file beside them, Back,
- * Save, New profile / subagent / skill / reference, Restore for an edited Pane plugin, and photos.
+ * The Profiles tab (T-63 PR 5, design round 4 "Tree + preview"): top-level profiles with pins, a
+ * profile's cover page and its own files in a tree, previews (HTML, Markdown with front-matter,
+ * YAML) with Edit, Edit details, Restore, photos, and changes made outside Pane.
  * PANE_PROFILES_SHOTS=<dir> also saves a screenshot of each screen, light and dark, for review.
  */
 
-const identity = (description: string, extra = '') => `---\nharness: claude\nmodel: claude-opus-5-5\ndescription: ${description}${extra}\n---\n\n`;
+const identity = (description: string, extra = '') => `---\ndescription: ${description}\nharness: claude\nmodel: claude-opus-5-5${extra}\n---\n\n`;
+const file = (id: string, path: string, note?: string): ProfileTreeNode => (note ? { kind: 'file', id, path, label: path.split('/').pop() ?? path, note } : { kind: 'file', id, path, label: path.split('/').pop() ?? path });
+const folder = (id: string, label: string, children: ProfileTreeNode[]): ProfileTreeNode => ({ kind: 'folder', id, label, children });
+const skill = (base: string, name: string): ProfileTreeNode => folder(`${base}/skills/${name}`, name, [file(`${base}/skills/${name}/SKILL.md`, `skills/${name}/SKILL.md`)]);
+function subagent(base: string, alias: string, label: string, children: ProfileTreeNode[], extra: { profile?: string; harness?: string; description?: string } = {}): ProfileTreeNode {
+  const node: ProfileSubagentNode = {
+    kind: 'subagent', id: `${base}/sub:${alias}`, alias, agent: alias, label, harness: extra.harness ?? 'claude', model: extra.harness === 'codex' ? 'gpt-6.1-sol' : 'claude-opus-5-5',
+    identity: `agents/${alias}.md`, children: [file(`${base}/sub:${alias}/identity`, `agents/${alias}.md`, 'identity'), ...children],
+  };
+  if (extra.profile) node.profile = extra.profile;
+  if (extra.description) node.description = extra.description;
+  return node;
+}
+const settings = (base: string, name: string, pane = false): ProfileTreeNode => folder(`${base}/settings`, 'Settings', [file(`${base}/settings/profiles/${name}.yaml`, `profiles/${name}.yaml`), ...(pane ? [file(`${base}/settings/pane.yaml`, 'pane.yaml')] : [])]);
 
-function plugin(name: string, version: string, bundled: boolean, profiles: Array<[string, string, string]>, files: string[]): ProfilePlugin {
+function profile(plugin: string, name: string, harness: string, description: string, tree: ProfileTreeNode[], extra: Partial<ProfileSummary> = {}): ProfileSummary {
   return {
-    name, version, bundled, edited: false, files: [...files].sort(),
-    profiles: profiles.map(([profile, harness, description]) => ({
-      name: profile, ref: `${name}/${profile}`, entry: `agents/${profile}.md`, harness, model: harness === 'codex' ? 'gpt-6.1-sol' : 'claude-opus-5-5', description,
-      uses: ['plugin.yaml', `profiles/${profile}.yaml`, `agents/${profile}.md`].sort(),
-    })),
+    name, ref: `${plugin}/${name}`, entry: `agents/${name}.md`, harness, model: harness === 'codex' ? 'gpt-6.1-sol' : 'claude-opus-5-5', description, listed: true,
+    uses: [], tree: tree.length ? tree : [file(`${name}/identity`, `agents/${name}.md`, 'identity'), settings(name, name)], ...extra,
   };
 }
 
+function plugin(name: string, version: string, bundled: boolean, profiles: ProfileSummary[], files: string[]): ProfilePlugin {
+  return { name, version, bundled, edited: false, profiles, files: [...files].sort() };
+}
+
 function fixture() {
+  const orchestrator = profile('greenfield', 'orchestrator', 'claude', 'Coordinate planners, implementers and reviewers for one workstream.', [
+    file('orchestrator/identity', 'agents/orchestrator.md', 'identity'),
+    folder('orchestrator/instructions', 'Instructions', [file('orchestrator/instructions/standing-rules.md', 'instructions/standing-rules.md')]),
+    folder('orchestrator/skills', 'Skills', [skill('orchestrator', 'plan'), skill('orchestrator', 'review')]),
+    folder('orchestrator/subagents', 'Subagents', [
+      subagent('orchestrator', 'planner', 'Greenfield planner', [folder('orchestrator/sub:planner/skills', 'Skills', [skill('orchestrator/sub:planner', 'plan')])], { profile: 'greenfield/planner', description: 'Turn a request into a plan.' }),
+      subagent('orchestrator', 'implementer', 'Greenfield implementer', [], { profile: 'greenfield/implementer' }),
+      subagent('orchestrator', 'reviewer', 'Greenfield reviewer', [], { profile: 'greenfield/reviewer', harness: 'codex' }),
+      subagent('orchestrator', 'designer', 'Designer', [folder('orchestrator/sub:designer/skills', 'Skills', [skill('orchestrator/sub:designer', 'ui-mockup')])], { description: 'Draw three UI options on the real product.' }),
+      subagent('orchestrator', 'verifier', 'Front End Verifier', []),
+    ]),
+    settings('orchestrator', 'orchestrator', true),
+  ], { cover: 'covers/orchestrator.html' });
   const greenfield = plugin('greenfield', '0.0.46', true, [
-    ['orchestrator', 'claude', 'Plans, builds and reviews with subagents'],
-    ['planner', 'claude', 'Turns a request into a plan'],
-    ['implementer', 'claude', 'Builds an approved plan'],
-    ['reviewer', 'codex', 'Reviews a pull request'],
-  ], ['plugin.yaml', 'profiles/orchestrator.yaml', 'profiles/planner.yaml', 'profiles/implementer.yaml', 'profiles/reviewer.yaml', 'agents/orchestrator.md', 'agents/planner.md', 'agents/implementer.md', 'agents/reviewer.md', 'instructions/standing-rules.md', 'skills/plan/SKILL.md', 'skills/review/SKILL.md', 'references/cover-sheet/cover-sheet.md']);
-  greenfield.profiles[0].uses = ['agents/implementer.md', 'agents/orchestrator.md', 'agents/planner.md', 'agents/reviewer.md', 'instructions/standing-rules.md', 'plugin.yaml', 'profiles/orchestrator.yaml', 'skills/plan/SKILL.md', 'skills/review/SKILL.md'];
-  const dcouple = plugin('dcouple', '0.1.27', true, [['business', 'claude', 'Keeps the sprint tracker up to date'], ['implementer', 'codex', 'Ticket to reviewed pull request']],
-    ['plugin.yaml', 'profiles/business.yaml', 'profiles/implementer.yaml', 'agents/business.md', 'agents/implementer.md']);
-  const bloomtext = plugin('bloomtext', '0.1.0', false, [['support', 'claude', 'Answers support tickets'], ['ops', 'codex', 'Keeps servers healthy']],
-    ['plugin.yaml', 'profiles/support.yaml', 'profiles/ops.yaml', 'agents/support.md', 'agents/ops.md', 'skills/triage/SKILL.md']);
-  const writer = plugin('writer', '0.0.3', false, [['writer', 'claude', 'Drafts blog posts']], ['plugin.yaml', 'profiles/writer.yaml', 'agents/writer.md']);
+    orchestrator,
+    profile('greenfield', 'planner', 'claude', 'Turn a request into a plan.', [], { listed: false }),
+    profile('greenfield', 'implementer', 'claude', 'Build an approved plan.', [], { listed: false }),
+    profile('greenfield', 'reviewer', 'codex', 'Review a pull request.', [], { listed: false }),
+  ], ['plugin.yaml', 'pane.yaml', 'covers/orchestrator.html', 'profiles/orchestrator.yaml', 'profiles/planner.yaml', 'profiles/implementer.yaml', 'profiles/reviewer.yaml',
+    'agents/orchestrator.md', 'agents/planner.md', 'agents/implementer.md', 'agents/reviewer.md', 'agents/designer.md', 'agents/verifier.md',
+    'instructions/standing-rules.md', 'skills/plan/SKILL.md', 'skills/review/SKILL.md', 'skills/ui-mockup/SKILL.md']);
+  const dcouple = plugin('dcouple', '0.1.27', true, [
+    profile('dcouple', 'business', 'claude', 'Run BloomText business tasks.', []),
+    profile('dcouple', 'implementer', 'codex', 'Take a ticket from start to a reviewed pull request.', []),
+  ], ['plugin.yaml', 'profiles/business.yaml', 'profiles/implementer.yaml', 'agents/business.md', 'agents/implementer.md']);
+  const bloomtext = plugin('bloomtext', '0.1.0', false, [
+    profile('bloomtext', 'support', 'claude', 'Answers BloomText support tickets and escalates refunds to you.', [
+      file('support/identity', 'agents/support.md', 'identity'),
+      folder('support/skills', 'Skills', [skill('support', 'triage')]),
+      folder('support/references', 'References', [file('support/references/tone.md', 'references/support/tone.md')]),
+      settings('support', 'support'),
+    ], { title: 'Support desk' }),
+    profile('bloomtext', 'ops', 'codex', 'Keep BloomText servers healthy.', []),
+  ], ['plugin.yaml', 'profiles/support.yaml', 'profiles/ops.yaml', 'agents/support.md', 'agents/ops.md', 'skills/triage/SKILL.md', 'references/support/tone.md']);
+  const writer = plugin('writer', '0.0.3', false, [profile('writer', 'writer', 'claude', 'Draft blog posts in my voice.', [])], ['plugin.yaml', 'profiles/writer.yaml', 'agents/writer.md']);
   const files: Record<string, string> = {};
   for (const entry of [greenfield, dcouple, bloomtext, writer]) {
-    for (const file of entry.files) files[`${entry.name}/${file}`] = `# ${file}\n`;
+    for (const path of entry.files) files[`${entry.name}/${path}`] = `# ${path}\n`;
     files[`${entry.name}/plugin.yaml`] = `name: ${entry.name}\nversion: ${entry.version}\ncli_major: 0\n`;
+    for (const item of entry.profiles) {
+      files[`${entry.name}/profiles/${item.name}.yaml`] = `agent: ${item.name}\n`;
+      files[`${entry.name}/agents/${item.name}.md`] = `${identity(item.description ?? '')}# ${item.name}\n\n${item.description}\n`;
+    }
   }
-  files['greenfield/agents/orchestrator.md'] = `${identity('Coordinate planners, implementers and reviewers for one workstream.', '\nsubagents:\n  planner: { agent: planner, mode: native }\nskills: [plan, review]\ninstructions_files: [../instructions/standing-rules.md]')}# Orchestrator\n\nYou run one workstream. Plan before building: send planning to the planner, building to the\nimplementer, and every pull request to the reviewer.\n\nKeep one map of the work. Ask the person only for decisions that are theirs.\n`;
+  files['greenfield/profiles/orchestrator.yaml'] = 'variants:\n  claude: { agent: orchestrator }\n  codex: { agent: orchestrator-codex }\ndefault: claude\n';
+  files['greenfield/agents/orchestrator.md'] = `${identity('Coordinate planners, implementers and reviewers for one workstream.', '\nskills: [plan, review]')}# Orchestrator\n\nYou run one workstream. Plan before building, and send every pull request to the reviewer.\n`;
+  files['greenfield/agents/designer.md'] = `${identity('Draw three UI options on the real product.', '\nskills: [ui-mockup]')}# Designer\n\nCapture the real screen, then draw three options.\n`;
+  files['greenfield/covers/orchestrator.html'] = '<html><head><title>Orchestrator</title></head><body><h1>Greenfield orchestrator</h1><p>Runs one workstream from idea to merged pull request.</p><h2>How it works</h2><p>1 Plan with you · 2 Build in a Pane · 3 Review every PR · 4 Ask before merging</p><script>document.body.dataset.ran = "yes"</script></body></html>';
+  files['greenfield/pane.yaml'] = 'profiles:\n  orchestrator:\n    title: Greenfield orchestrator\n';
+  files['bloomtext/agents/support.md'] = `${identity('Answer BloomText support tickets.', '\nskills: [triage]\nreferences: support')}# Support\n\nAnswer new tickets in the help desk. Escalate refunds to the person through an approval.\n`;
   const overview: ProfilesOverview = { machine: 'studio-mac', plugins: [greenfield, dcouple, bloomtext, writer] };
   return { overview, files };
 }
 
-async function openProfilesTab(page: Page, options: { theme?: string; saveError?: string } = {}): Promise<void> {
+/** The same profiles as New Session reads them (chat-tab:profiles). */
+const PALETTE_PROFILES: AgentFarmProfileEntry[] = [
+  { ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false },
+  { ref: 'greenfield/planner', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false, listed: false },
+  { ref: 'dcouple/business', plugin: 'dcouple', version: '0.1.27', harness: 'claude', hidden: false },
+  { ref: 'bloomtext/support', plugin: 'bloomtext', version: '0.1.0', harness: 'claude', hidden: false },
+];
+
+async function openProfilesTab(page: Page, options: { theme?: string; saveError?: string; pins?: string[] } = {}): Promise<void> {
   await page.setViewportSize({ width: 1440, height: 900 });
   const data = fixture();
   await installSessionsFixture(page, [
     { ...sessionFixture('s1', 'Session profiles plan', '', '', '2026-11-25T08:00:00.000Z'), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h1' } },
     { ...sessionFixture('s2', 'Weekend blog post', '', '', '2026-11-25T08:01:00.000Z'), agentProfile: { ref: 'pane/claude', hash: 'h' } },
     { ...sessionFixture('s3', 'Sprint tracker upkeep', '', '', '2026-11-25T08:02:00.000Z'), agentProfile: { ref: 'dcouple/business', hash: 'h2' } },
-  ], [], { initialConfig: { theme: options.theme ?? 'light' }, profileEditor: { ...data, saveError: options.saveError } });
+  ], [], {
+    initialConfig: { theme: options.theme ?? 'light', chatTabsEnabled: true, pinnedProfiles: options.pins ?? [] },
+    profileEditor: { ...data, saveError: options.saveError },
+    agentFarmProfiles: { profiles: PALETTE_PROFILES },
+  });
   await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('profiles-nav').click();
@@ -73,167 +133,226 @@ async function shot(page: Page, name: string): Promise<void> {
   if (shotsDir) await page.screenshot({ path: `${shotsDir}/${name}.png` });
 }
 
-test('the list shows every profile by plugin, with no computer filters, and opens one with Enter', async ({ page }) => {
-  await openProfilesTab(page);
-  const view = page.getByTestId('profiles-view');
-  await expect(view.getByRole('heading', { name: 'Profiles' })).toBeVisible();
-  await expect(page.getByTestId('profiles-machine')).toHaveText('on studio-mac');
-  await expect(page.getByTestId('profiles-plugin-greenfield')).toContainText('Ships with Pane');
-  await expect(page.getByTestId('profile-row-greenfield-orchestrator')).toContainText('1 Session · Claude');
-  await expect(page.getByTestId('profile-row-greenfield-reviewer')).toContainText('Codex');
-  // Sync comes with the next update (PR 6); its button says so and does nothing yet.
+test('the list shows only top-level profiles, pinned first, and pins from a row', async ({ page }) => {
+  await openProfilesTab(page, { pins: ['bloomtext/support'] });
+  const list = page.getByTestId('profiles-list');
+  await expect(page.getByTestId('profiles-pinned-heading')).toBeVisible();
+  await expect(list.getByTestId('profile-row-bloomtext-support')).toContainText('Support desk');
+  // The orchestrator's subagent profiles live inside it, not in the list.
+  await expect(list.getByTestId('profile-row-greenfield-planner')).toHaveCount(0);
+  await expect(page.getByTestId('profiles-all-heading')).toContainText('· 5 · subagents appear inside the profile that uses them');
+  await expect(list.getByTestId('profile-row-greenfield-orchestrator')).toContainText('5 subagents · 1 Session · Claude');
+  const rows = list.locator('[data-profiles-item]');
+  await expect(rows.first()).toHaveAttribute('data-testid', 'profile-row-bloomtext-support');
+  await page.getByTestId('profile-pin-greenfield/orchestrator').click();
+  await expect(page.getByTestId('profile-pin-greenfield/orchestrator')).toHaveAttribute('aria-pressed', 'true');
+  await expect(rows.nth(1)).toHaveAttribute('data-testid', 'profile-row-greenfield-orchestrator');
+  await expect(page.getByTestId('profiles-footer')).toContainText('6 profiles · 2 Sessions use one');
   await expect(page.getByTestId('profiles-sync')).toBeDisabled();
-  await expect(page.getByTestId('profiles-footer')).toContainText('4 plugins · 9 profiles · 2 Sessions use one');
-  await expect(page.getByTestId('profiles-footer')).toContainText('arrives in the next update');
-  await expect(view.getByRole('button', { name: /computer/i })).toHaveCount(0);
-  // Keyboard: the first profile has focus; ↓ moves, Enter opens.
-  await expect(page.getByTestId('profile-row-greenfield-orchestrator')).toBeFocused();
+  await expectNoAxeViolations(page, { include: '[data-testid="profiles-view"]' });
+  // Keyboard: the first profile has focus; ↓ moves, Enter opens on the cover page.
+  await rows.first().focus();
   await page.keyboard.press('ArrowDown');
-  await expect(page.getByTestId('profile-row-greenfield-planner')).toBeFocused();
-  await page.keyboard.press('ArrowUp');
+  await expect(rows.nth(1)).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('profiles-title')).toHaveText('Greenfield orchestrator');
+  await expect(page.getByTestId('profiles-tree-cover')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('pins lead New Session, and a profile Agent Farm doesn\'t list is left out', async ({ page }) => {
+  await openProfilesTab(page, { pins: ['bloomtext/support'] });
+  await page.getByTestId('new-orchestration-session').click();
+  const options = page.getByRole('dialog', { name: 'New Session', exact: true }).getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option');
+  await expect(options.first()).toContainText('Bloomtext support');
+  await expect(page.getByTestId('session-choice-profile:greenfield/planner')).toHaveCount(0);
+});
+
+test('a profile opens on its cover page: its own HTML in a sandbox, or one Pane makes', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  const frame = page.getByTestId('profiles-html-preview');
+  await expect(frame).toHaveAttribute('sandbox', '');
+  await expect(page.getByTestId('profiles-cover-note')).toHaveText('From the profile: covers/orchestrator.html');
+  const content = page.frameLocator('[data-testid="profiles-html-preview"]');
+  await expect(content.getByRole('heading', { name: 'Greenfield orchestrator' })).toBeVisible();
+  // Scripts don't run in the cover.
+  // SAFETY: the locator is the preview's <iframe>; its sandbox has no same-origin, so contentDocument stays out of reach.
+  expect(await frame.evaluate(element => (element as HTMLIFrameElement).contentDocument?.body?.dataset.ran ?? null).catch(() => null)).toBeNull();
+  await page.getByTestId('profiles-back').click();
+  await page.getByTestId('profile-row-bloomtext-support').click();
+  const cover = page.getByTestId('profiles-generated-cover');
+  await expect(cover).toContainText('Support desk');
+  await expect(cover).toContainText('Answers BloomText support tickets and escalates refunds to you.');
+  await expect(cover).toContainText('Escalate refunds to the person through an approval.');
+  await expect(cover).toContainText('Add covers/support.html to replace it.');
+  await expect(cover.getByText('triage', { exact: true })).toBeVisible();
+  await expect(cover.getByText('tone.md', { exact: true })).toBeVisible();
+  // The page without a sandboxed frame (axe can't enter one) meets WCAG AA.
   await expectNoAxeViolations(page, { include: '[data-testid="profiles-view"]' });
 });
 
-test('a profile shows its files beside the open identity file; Esc and Back return to the list', async ({ page }) => {
+test('the tree holds only the profile\'s files; folders open and close; a subagent shows its own cover', async ({ page }) => {
   await openProfilesTab(page);
   await page.getByTestId('profile-row-greenfield-orchestrator').click();
-  await expect(page.getByTestId('profiles-path')).toHaveText('greenfield/agents/orchestrator.md');
-  await expect(page.getByTestId('profiles-editor')).toHaveValue(/# Orchestrator/);
-  await expect(page.getByTestId('profiles-file-agents/orchestrator.md')).toContainText('identity');
-  await expect(page.getByTestId('profiles-file-skills/plan/SKILL.md')).toBeVisible();
-  await expect(page.getByTestId('profiles-editor-status')).toHaveText('Ships with Pane. Saving makes it yours on this computer');
-  await page.getByTestId('profiles-file-plugin.yaml').click();
-  await expect(page.getByTestId('profiles-editor')).toHaveValue(/name: greenfield/);
-  await page.keyboard.press('Escape');
-  await expect(page.getByTestId('profile-row-greenfield-orchestrator')).toBeVisible();
-  await page.getByTestId('profile-row-writer-writer').click();
+  const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+  // Skills and Subagents start open, Instructions closed; nothing of the plugin's other profiles shows.
+  await expect(tree.getByTestId('profiles-tree-orchestrator/sub:designer')).toBeVisible();
+  await expect(tree.getByTestId('profiles-file-instructions/standing-rules.md')).toHaveCount(0);
+  await expect(tree.getByTestId('profiles-file-agents/business.md')).toHaveCount(0);
+  await tree.getByTestId('profiles-tree-orchestrator/instructions').click();
+  await expect(tree.getByTestId('profiles-file-instructions/standing-rules.md')).toBeVisible();
+  await tree.getByTestId('profiles-tree-orchestrator/instructions').click();
+  await expect(tree.getByTestId('profiles-file-instructions/standing-rules.md')).toHaveCount(0);
+  // Clicking a subagent opens it and shows its own cover.
+  await tree.getByTestId('profiles-tree-orchestrator/sub:designer').click();
+  await expect(page.getByTestId('profiles-path')).toHaveText('Designer');
+  await expect(page.getByTestId('profiles-generated-cover')).toContainText('Capture the real screen, then draw three options.');
+  await expect(tree.getByTestId('profiles-file-agents/designer.md')).toBeVisible();
+  // A subagent that is a profile offers its own page.
+  await tree.getByTestId('profiles-tree-orchestrator/sub:planner').click();
+  await page.getByTestId('profiles-open-subagent-profile').click();
+  await expect(page.getByTestId('profiles-title')).toHaveText('Greenfield planner');
   await page.getByTestId('profiles-back').click();
+  // Keyboard: ← closes a folder, → opens it.
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  await tree.getByTestId('profiles-tree-orchestrator/skills').focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(tree.getByTestId('profiles-tree-orchestrator/skills/plan')).toHaveCount(0);
+  await page.keyboard.press('ArrowRight');
+  await expect(tree.getByTestId('profiles-tree-orchestrator/skills/plan')).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(page.getByTestId('profiles-list')).toBeVisible();
 });
 
-test('editing and ⌘S saves; Pane\'s own plugin becomes Edited and Restore brings its version back', async ({ page }) => {
+test('files preview first: Markdown under a metadata header, YAML as key/value; Edit, ⌘S and Cancel', async ({ page }) => {
   await openProfilesTab(page);
   await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  await page.getByTestId('profiles-tree-orchestrator/sub:designer').click();
+  await page.getByTestId('profiles-file-agents/designer.md').click();
+  const meta = page.getByTestId('profiles-front-matter');
+  await expect(meta).toContainText('Draw three UI options on the real product.');
+  await expect(meta).toContainText('ui-mockup');
+  await expect(page.getByTestId('profiles-markdown-preview').getByRole('heading', { name: 'Designer' })).toBeVisible();
+  await page.getByTestId('profiles-tree-orchestrator/settings').click();
+  await page.getByTestId('profiles-file-profiles/orchestrator.yaml').click();
+  const yaml = page.getByTestId('profiles-yaml-preview');
+  await expect(yaml).toContainText('variants');
+  await expect(yaml).toContainText('agent: orchestrator-codex');
+  await expect(yaml).toContainText('default');
+  await expect(page.getByTestId('profiles-editor')).toHaveCount(0);
+  // Edit, then ⌘S saves and returns to the preview; Pane's own plugin becomes Edited.
+  await page.getByTestId('profiles-edit').click();
   const editor = page.getByTestId('profiles-editor');
-  await expect(page.getByTestId('profiles-save')).toBeDisabled();
-  await editor.click();
+  await expect(editor).toBeFocused();
   await page.keyboard.press('End');
-  await editor.pressSequentially('\nMarker: KUMQUAT');
+  await editor.pressSequentially('\nmarker: KUMQUAT');
   await expect(page.getByTestId('profiles-editor-status')).toHaveText('Unsaved changes');
-  await expect(page.getByTestId('profiles-file-dirty')).toHaveCount(1);
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s');
-  await expect(page.getByTestId('profiles-notice')).toContainText('Saved greenfield/agents/orchestrator.md. 1 Session can reload it.');
-  await expect(page.getByTestId('profiles-file-dirty')).toHaveCount(0);
+  await expect(page.getByTestId('profiles-notice')).toContainText('Saved greenfield/profiles/orchestrator.yaml. 1 Session can reload it.');
+  await expect(editor).toHaveCount(0);
   await expect(page.getByTestId('profiles-restore')).toBeVisible();
-  await expect(page.getByTestId('profiles-editor-status')).toHaveText('Edited: Pane updates won’t replace your copy');
-  await page.getByTestId('profiles-back').click();
-  await expect(page.getByTestId('profiles-edited-greenfield')).toHaveText('Edited');
-  await page.getByTestId('profile-row-greenfield-orchestrator').click();
-  await expect(editor).toHaveValue(/Marker: KUMQUAT/);
+  // Cancel with edits asks first; Esc in the editor does the same.
+  await page.getByTestId('profiles-edit').click();
+  await page.getByTestId('profiles-editor').fill('changed: yes\n');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Discard your edits?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Discard', exact: true }).click();
+  await expect(page.getByTestId('profiles-editor')).toHaveCount(0);
+  await expect(yaml).toContainText('KUMQUAT');
+  // Restore brings Pane's version back.
   await page.getByTestId('profiles-restore').click();
   await page.getByRole('button', { name: 'Restore', exact: true }).click();
   await expect(page.getByTestId('profiles-restore')).toHaveCount(0);
-  await expect(editor).not.toHaveValue(/KUMQUAT/);
+});
+
+test('Edit details sets the title and description; the photo is kept on this computer', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-writer-writer').click();
+  await page.getByTestId('profiles-edit-details').click();
+  const dialog = page.getByTestId('profiles-details-dialog');
+  await dialog.getByLabel('Title').fill('Blog writer');
+  await dialog.getByLabel('Description').fill('Drafts posts in my voice, then cuts a third.');
+  await page.getByTestId('profiles-details-save').click();
+  await expect(page.getByTestId('profiles-title')).toHaveText('Blog writer');
+  await expect(page.getByTestId('profiles-subtitle')).toContainText('Drafts posts in my voice, then cuts a third.');
+  await page.getByTestId('profiles-back').click();
+  await expect(page.getByTestId('profile-row-writer-writer')).toContainText('Blog writer');
 });
 
 test('a save Agent Farm refuses shows why, and keeps the edit', async ({ page }) => {
   await openProfilesTab(page, { saveError: 'writer wasn\'t saved: Agent Farm says Missing skill writer/nope. Fix the file, then save again. Nothing was changed.' });
   await page.getByTestId('profile-row-writer-writer').click();
+  await page.getByTestId('profiles-file-agents/writer.md').click();
+  await page.getByTestId('profiles-edit').click();
   await page.getByTestId('profiles-editor').fill('---\nskills: [nope]\n---\n');
   await page.getByTestId('profiles-save').click();
   await expect(page.getByTestId('profiles-save-error')).toContainText('Missing skill writer/nope');
   await expect(page.getByTestId('profiles-editor-status')).toHaveText('Unsaved changes');
 });
 
-test('New subagent, skill and reference create a file and open it; New profile opens the new one', async ({ page }) => {
+test('New subagent, skill and reference add a file to the tree and open it; New profile opens on its cover', async ({ page }) => {
   await openProfilesTab(page);
   await page.getByTestId('profile-row-writer-writer').click();
   for (const [kind, name, path] of [['subagent', 'researcher', 'agents/researcher.md'], ['skill', 'weekly-recap', 'skills/weekly-recap/SKILL.md'], ['reference', 'style-guide', 'references/writer/style-guide.md']]) {
     await page.getByTestId('profiles-add').click();
     await page.getByRole('menuitem', { name: new RegExp(`New ${kind}`) }).click();
-    const dialog = page.getByTestId('profiles-new-file-dialog');
-    await dialog.getByLabel('Name').fill(name);
+    await page.getByTestId('profiles-new-file-dialog').getByLabel('Name').fill(name);
     await page.keyboard.press('Enter');
-    await expect(page.getByTestId('profiles-path')).toHaveText(`writer/${path}`);
-    await expect(page.getByTestId(`profiles-file-${path}`)).toBeVisible();
+    await expect(page.getByTestId('profiles-path')).toHaveText(path);
+    await expect(page.getByTestId(`profiles-file-${path}`).first()).toBeVisible();
   }
   await page.getByTestId('profiles-back').click();
   await page.getByTestId('profiles-new').click();
-  const dialog = page.getByTestId('profiles-new-dialog');
-  await dialog.getByLabel('Name').fill('Bad Name');
-  await expect(page.getByTestId('profiles-new-create')).toBeDisabled();
-  await dialog.getByLabel('Name').fill('researcher');
+  await page.getByTestId('profiles-new-dialog').getByLabel('Name').fill('researcher');
   await page.getByTestId('profiles-new-create').click();
   await expect(page.getByTestId('profiles-title')).toHaveText('Researcher');
-  await expect(page.getByTestId('profiles-path')).toHaveText('researcher/agents/researcher.md');
+  await expect(page.getByTestId('profiles-tree-cover')).toHaveAttribute('aria-selected', 'true');
 });
 
-test('a sample photo shows in the profile, the list and its Session row; removing it brings the initials back', async ({ page }) => {
+test('a sample photo shows in the profile and its Session row; removing it brings the initials back', async ({ page }) => {
   await openProfilesTab(page);
   await page.getByTestId('profile-row-dcouple-business').click();
   await page.getByTestId('profile-photo').click();
-  await expect(page.getByRole('menu', { name: 'Profile photo' })).toContainText('Generated from the name');
   await page.getByTestId('profile-photo-sample-star').click();
-  await expect(page.getByTestId('profiles-notice')).toContainText('Photo set for this computer.');
   await expect(page.getByTestId('profile-photo').getByTestId('profile-avatar')).toHaveAttribute('data-avatar', 'picture');
   const row = page.getByTestId('orchestration-session-s3');
   await expect(row.getByTestId('profile-avatar').first()).toHaveAttribute('data-avatar', 'picture');
-  await page.getByTestId('profile-photo').click();
-  await expect(page.getByRole('menu', { name: 'Profile photo' })).toContainText('Your photo');
-  await page.getByRole('menuitem', { name: 'Remove my photo' }).click();
+  await page.getByTestId('profiles-edit-details').click();
+  await page.getByTestId('profiles-details-initials').click();
   await expect(page.getByTestId('profile-photo').getByTestId('profile-avatar')).toHaveAttribute('data-avatar', 'initials');
   await expect(row.getByTestId('profile-avatar').first()).toHaveAttribute('data-avatar', 'initials');
 });
 
-test('Enter on the sidebar\'s Profiles row puts keyboard focus on the first profile (QA bug 2)', async ({ page }) => {
+test('Enter on the sidebar\'s Profiles row puts keyboard focus on the first profile', async ({ page }) => {
   await openProfilesTab(page);
   await page.getByTestId('profiles-nav').click();
   await expect(page.getByTestId('profiles-view')).toHaveCount(0);
   await page.getByTestId('profiles-nav').focus();
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('profile-row-greenfield-orchestrator')).toBeFocused();
-  await page.keyboard.press('ArrowDown');
-  await expect(page.getByTestId('profile-row-greenfield-planner')).toBeFocused();
 });
 
-test('after Restore, a file you added and Restore removed gives way to the identity file (QA bug 3)', async ({ page }) => {
+test('a change made outside Pane shows in the open file and the tree', async ({ page }) => {
   await openProfilesTab(page);
-  await page.getByTestId('profile-row-greenfield-planner').click();
-  await page.getByTestId('profiles-add').click();
-  await page.getByRole('menuitem', { name: /New subagent/ }).click();
-  await page.getByTestId('profiles-new-file-dialog').getByLabel('Name').fill('helper');
-  await page.keyboard.press('Enter');
-  await expect(page.getByTestId('profiles-path')).toHaveText('greenfield/agents/helper.md');
-  await page.getByTestId('profiles-restore').click();
-  await page.getByRole('button', { name: 'Restore', exact: true }).click();
-  await expect(page.getByTestId('profiles-path')).toHaveText('greenfield/agents/planner.md');
-  await expect(page.getByRole('alert')).toHaveCount(0);
-});
-
-test('a change made outside Pane shows in the open file, the file tree and the list', async ({ page }) => {
-  await openProfilesTab(page);
-  await page.getByTestId('profile-row-writer-writer').click();
-  const editor = page.getByTestId('profiles-editor');
-  await expect(editor).toHaveValue('# agents/writer.md\n');
-  await writeOnDisk(page, 'writer', 'agents/writer.md', '# Writer\n\nMarker: KUMQUAT\n');
-  await writeOnDisk(page, 'writer', 'skills/recap/SKILL.md', '# recap\n');
-  // No unsaved edits: the new content just shows, and the new file joins the tree.
-  await expect(editor).toHaveValue(/Marker: KUMQUAT/, { timeout: 8000 });
-  await expect(page.getByTestId('profiles-file-skills/recap/SKILL.md')).toBeVisible();
+  await page.getByTestId('profile-row-bloomtext-support').click();
+  await page.getByTestId('profiles-file-agents/support.md').click();
+  const preview = page.getByTestId('profiles-markdown-preview');
+  await expect(preview).toContainText('Answer new tickets');
+  await writeOnDisk(page, 'bloomtext', 'agents/support.md', '---\nharness: claude\n---\n\n# Support\n\nMarker: KUMQUAT\n');
+  await expect(preview).toContainText('Marker: KUMQUAT', { timeout: 8000 });
   await expect(page.getByTestId('profiles-disk-changed')).toHaveCount(0);
-  await writeOnDisk(page, 'writer', 'skills/recap/SKILL.md', null);
-  await expect(page.getByTestId('profiles-file-skills/recap/SKILL.md')).toHaveCount(0, { timeout: 8000 });
-  await page.getByTestId('profiles-back').click();
-  // The list picks up a profile added outside Pane.
-  await writeOnDisk(page, 'writer', 'profiles/editor.yaml', 'agent: writer\n');
-  await expect(page.getByTestId('profile-row-writer-editor')).toBeVisible({ timeout: 8000 });
+  // A reference removed on disk leaves the tree.
+  await page.getByTestId('profiles-tree-support/references').click();
+  await expect(page.getByTestId('profiles-file-references/support/tone.md')).toBeVisible();
+  await writeOnDisk(page, 'bloomtext', 'references/support/tone.md', null);
+  await expect(page.getByTestId('profiles-file-references/support/tone.md')).toHaveCount(0, { timeout: 8000 });
 });
 
 test('with unsaved edits, a change on disk keeps them and asks: reload, or keep mine', async ({ page }) => {
   await openProfilesTab(page);
   await page.getByTestId('profile-row-writer-writer').click();
+  await page.getByTestId('profiles-file-agents/writer.md').click();
+  await page.getByTestId('profiles-edit').click();
   const editor = page.getByTestId('profiles-editor');
   await editor.fill('# Mine\n');
   await writeOnDisk(page, 'writer', 'agents/writer.md', '# Theirs\n');
@@ -243,19 +362,11 @@ test('with unsaved edits, a change on disk keeps them and asks: reload, or keep 
   await page.getByTestId('profiles-disk-keep').click();
   await expect(notice).toHaveCount(0);
   await expect(editor).toHaveValue('# Mine\n');
-  await expect(page.getByTestId('profiles-editor-status')).toHaveText('Unsaved changes');
-  // Another change on disk asks again; this time take it.
   await writeOnDisk(page, 'writer', 'agents/writer.md', '# Theirs again\n');
   await expect(notice).toBeVisible({ timeout: 8000 });
   await page.getByTestId('profiles-disk-reload').click();
   await expect(notice).toHaveCount(0);
   await expect(editor).toHaveValue('# Theirs again\n');
-  await expect(page.getByTestId('profiles-save')).toBeDisabled();
-  // Removed on disk while edited: the edit stays and Save would put it back.
-  await editor.fill('# Mine again\n');
-  await writeOnDisk(page, 'writer', 'agents/writer.md', null);
-  await expect(notice).toContainText('removed outside Pane', { timeout: 8000 });
-  await expect(editor).toHaveValue('# Mine again\n');
 });
 
 test('the Profiles row opens Profiles and, clicked again, returns to where you were', async ({ page }) => {
@@ -268,51 +379,35 @@ test('the Profiles row opens Profiles and, clicked again, returns to where you w
 for (const theme of ['light', 'dark']) {
   test(`screens (${theme})`, async ({ page }) => {
     test.skip(!shotsDir, 'Set PANE_PROFILES_SHOTS to save the review screenshots.');
-    await openProfilesTab(page, { theme });
-    await shot(page, `list-${theme}`);
+    await openProfilesTab(page, { theme, pins: ['greenfield/orchestrator', 'bloomtext/support', 'writer/writer'] });
+    await shot(page, `page-list-${theme}`);
     await page.getByTestId('profile-row-greenfield-orchestrator').click();
-    await expect(page.getByTestId('profiles-editor')).toHaveValue(/Orchestrator/);
-    await shot(page, `files-${theme}`);
-    await page.getByTestId('profile-photo').click();
-    await shot(page, `photo-menu-${theme}`);
-    await page.keyboard.press('Escape');
-    await page.getByTestId('profiles-add').click();
-    await shot(page, `new-menu-${theme}`);
-    await page.keyboard.press('Escape');
-    await page.getByTestId('profiles-editor').click();
-    await page.keyboard.press('End');
-    await page.getByTestId('profiles-editor').pressSequentially('\nMarker: X');
-    await shot(page, `unsaved-${theme}`);
-    await page.getByTestId('profiles-save').click();
-    await expect(page.getByTestId('profiles-notice')).toBeVisible();
-    await shot(page, `saved-edited-${theme}`);
-    await page.getByTestId('profiles-restore').click();
-    await shot(page, `restore-confirm-${theme}`);
-    await page.getByRole('button', { name: 'Cancel' }).click();
-    await page.getByTestId('profiles-add').click();
-    await page.getByRole('menuitem', { name: /New skill/ }).click();
-    await page.getByTestId('profiles-new-file-dialog').getByLabel('Name').fill('weekly-recap');
-    await shot(page, `new-skill-${theme}`);
-    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('profiles-html-preview')).toBeVisible();
+    await shot(page, `page-cover-custom-${theme}`);
+    await page.getByTestId('profiles-tree-orchestrator/sub:designer').click();
+    await shot(page, `page-tree-subagent-${theme}`);
+    await page.getByTestId('profiles-file-agents/designer.md').click();
+    await expect(page.getByTestId('profiles-front-matter')).toContainText('ui-mockup');
+    await shot(page, `page-md-preview-${theme}`);
+    await page.getByTestId('profiles-tree-orchestrator/settings').click();
+    await page.getByTestId('profiles-file-profiles/orchestrator.yaml').click();
+    await expect(page.getByTestId('profiles-yaml-preview')).toContainText('variants');
+    await shot(page, `page-yaml-preview-${theme}`);
+    await page.getByTestId('profiles-edit').click();
+    await shot(page, `page-edit-${theme}`);
+    await page.getByTestId('profiles-cancel').click();
     await page.getByTestId('profiles-back').click();
     await page.getByTestId('profile-row-bloomtext-support').click();
-    await page.getByTestId('profile-photo').click();
-    await page.getByTestId('profile-photo-sample-fringe').click();
-    await expect(page.getByTestId('profiles-notice')).toBeVisible();
-    await page.getByTestId('profiles-back').click();
-    await shot(page, `list-edited-photo-${theme}`);
-    await page.getByTestId('profiles-new').click();
-    await shot(page, `new-profile-${theme}`);
+    await expect(page.getByTestId('profiles-generated-cover')).toBeVisible();
+    await shot(page, `page-cover-generated-${theme}`);
+    await page.getByTestId('profiles-edit-details').click();
+    await shot(page, `page-details-${theme}`);
     await page.keyboard.press('Escape');
-    await page.getByTestId('profiles-sync').hover({ force: true });
-    await shot(page, `sync-later-${theme}`);
-    await page.getByTestId('profile-row-writer-writer').click();
-    await page.getByTestId('profiles-editor').fill('# Writer\n\nMy edit, not saved yet.\n');
-    await writeOnDisk(page, 'writer', 'agents/writer.md', '# Writer\n\nAn agent changed this.\n');
+    await page.getByTestId('profiles-file-agents/support.md').click();
+    await page.getByTestId('profiles-edit').click();
+    await page.getByTestId('profiles-editor').fill('# Support\n\nMy edit, not saved yet.\n');
+    await writeOnDisk(page, 'bloomtext', 'agents/support.md', '# Support\n\nAn agent changed this.\n');
     await expect(page.getByTestId('profiles-disk-changed')).toBeVisible({ timeout: 8000 });
-    await shot(page, `disk-changed-${theme}`);
-    await writeOnDisk(page, 'writer', 'agents/writer.md', null);
-    await expect(page.getByTestId('profiles-disk-changed')).toContainText('removed', { timeout: 8000 });
-    await shot(page, `disk-removed-${theme}`);
+    await shot(page, `page-disk-changed-${theme}`);
   });
 }

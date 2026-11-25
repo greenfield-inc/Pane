@@ -5,16 +5,20 @@ import path from 'path';
 import yaml from 'js-yaml';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { DEFAULT_AGENT_ID, configuredAgent } from '../../../../shared/agents';
-import { PANE_PROFILE_PLUGIN, plainProfileAgents } from '../../../../shared/agentProfiles';
+import { PANE_PROFILE_PLUGIN, plainProfileAgents, profileDisplayName } from '../../../../shared/agentProfiles';
 import { boundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import {
   PROFILE_NAME_PATTERN,
+  type ProfileDetails,
   type ProfileFileChange,
   type ProfileNewFileKind,
+  type ParsedYaml,
   type ProfilePhotos,
   type ProfilePlugin,
   type ProfileSaveResult,
+  type ProfileSubagentNode,
   type ProfileSummary,
+  type ProfileTreeNode,
   type ProfilesOverview,
 } from '../../../../shared/types/profileEditor';
 import {
@@ -116,14 +120,34 @@ function checkName(name: string, what = 'plugin'): void {
   if (!PROFILE_NAME_PATTERN.test(name) || (what === 'plugin' && name === PANE_PROFILE_PLUGIN)) throw nameError(name, what);
 }
 
-/** A plugin-relative path with `/`, checked to stay inside plugin.yaml and the plugin's sections. */
+/** Pane's own file in a plugin: each profile's title and description (Edit details). Agent Farm ignores it. */
+const PANE_META_FILE = 'pane.yaml';
+/** A profile's cover page, `covers/<profile>.html` or `.md`. Agent Farm ignores the folder. */
+const COVER_FILE = /^covers\/([a-z][a-z0-9_-]*)\.(html|md)$/;
+
+/**
+ * A plugin-relative path with `/`, checked to stay inside plugin.yaml, the plugin's sections,
+ * pane.yaml and the covers folder.
+ */
 function checkRelative(relative: string): string[] {
   const parts = relative.split('/');
-  const inside = relative === 'plugin.yaml' || (SECTIONS.includes(parts[0]) && parts.length > 1);
+  const inside = relative === 'plugin.yaml' || relative === PANE_META_FILE || COVER_FILE.test(relative) || (SECTIONS.includes(parts[0]) && parts.length > 1);
   if (!inside || path.isAbsolute(relative) || relative.includes('\\') || parts.some(part => !part || part === '.' || part === '..')) {
-    throw new PaneError('PROFILE_PATH_INVALID', `"${relative}" isn't a file inside the plugin.`, 'Use a path inside its profiles, agents, skills, instructions or references folder, or plugin.yaml.');
+    throw new PaneError('PROFILE_PATH_INVALID', `"${relative}" isn't a file inside the plugin.`, 'Use a path inside its profiles, agents, skills, instructions or references folder, plugin.yaml, pane.yaml, or covers/<profile>.html.');
   }
   return parts;
+}
+
+/** YAML as data for a preview, or why it doesn't parse (with its line). */
+export function parseYaml(source: string): ParsedYaml {
+  try {
+    const data = decodeOptionalBoundary(yaml.load(source), boundary.json);
+    return { data: data ?? null };
+  } catch (error) {
+    const reason = decodeOptionalBoundary(error, boundary.object({ reason: boundary.string }))?.reason ?? reasonOf(error).split('\n')[0];
+    const line = decodeOptionalBoundary(error, boundary.object({ mark: boundary.object({ line: boundary.number, column: boundary.number }) }))?.mark;
+    return { error: line ? `${reason} at line ${line.line + 1}, column ${line.column + 1}` : reason };
+  }
 }
 
 /** Refuses a path whose folders or file are links, so nothing is read or written outside the plugin. */
@@ -156,8 +180,47 @@ async function pluginFiles(root: string): Promise<string[]> {
     }
   };
   for (const section of SECTIONS) await visit(path.join(root, section));
-  if ((await fs.lstat(path.join(root, 'plugin.yaml')).catch(() => undefined))?.isFile()) files.push('plugin.yaml');
+  for (const file of ['plugin.yaml', PANE_META_FILE]) if ((await fs.lstat(path.join(root, file)).catch(() => undefined))?.isFile()) files.push(file);
+  for (const child of await fs.readdir(path.join(root, 'covers'), { withFileTypes: true }).catch(() => [])) {
+    if (child.isFile() && COVER_FILE.test(`covers/${child.name}`)) files.push(`covers/${child.name}`);
+  }
   return files.sort();
+}
+
+/** One profile's details in pane.yaml. */
+interface PaneMetaEntry {
+  title?: string;
+  description?: string;
+}
+
+/** Each profile's title and description from pane.yaml (`profiles: { <name>: { title, description } }`). */
+function paneMeta(source: string): Map<string, PaneMetaEntry> {
+  const meta = new Map<string, PaneMetaEntry>();
+  let data: JsonObject | undefined;
+  try { data = decodeOptionalBoundary(yaml.load(source), boundary.jsonObject); }
+  catch { return meta; }
+  for (const [name, value] of Object.entries(decodeOptionalBoundary(data?.profiles, boundary.jsonObject) ?? {})) {
+    const entry = decodeOptionalBoundary(value, boundary.jsonObject);
+    if (!entry) continue;
+    const details: PaneMetaEntry = {};
+    const title = text(entry.title);
+    const description = text(entry.description);
+    if (title) details.title = title;
+    if (description) details.description = description;
+    meta.set(name, details);
+  }
+  return meta;
+}
+
+/** Files under `folder`, as nested folder and file nodes (folders first), with ids under `id`. */
+function filesAsNodes(files: string[], folder: string, id: string): ProfileTreeNode[] {
+  const inside = files.filter(file => file.startsWith(`${folder}/`)).map(file => file.slice(folder.length + 1));
+  const folders = [...new Set(inside.filter(file => file.includes('/')).map(file => file.split('/')[0]))].sort();
+  const direct = inside.filter(file => !file.includes('/')).sort();
+  return [
+    ...folders.map((name): ProfileTreeNode => ({ kind: 'folder', id: `${id}/${name}`, label: name, children: filesAsNodes(files, `${folder}/${name}`, `${id}/${name}`) })),
+    ...direct.map((name): ProfileTreeNode => ({ kind: 'file', id: `${id}/${name}`, path: `${folder}/${name}`, label: name })),
+  ];
 }
 
 /** The agent a profile file starts: `agent:`, or its default variant's. */
@@ -248,22 +311,131 @@ export class ProfileEditor {
     return [...used].filter(file => files.includes(file)).sort();
   }
 
+  /**
+   * A profile's own files, as its page's tree shows them: the identity, then Instructions, Skills
+   * (a folder each), References and Subagents (each with its own files nested, once per path so a
+   * cycle stops), and at the top level, Settings. `profileOfAgent` names the profile that runs an
+   * agent, so a subagent that is also a profile shows that profile's title.
+   */
+  private async profileTree(root: string, files: string[], agent: string, id: string, context: { plugin: string; profileOfAgent: Map<string, string>; meta: Map<string, PaneMetaEntry>; path: string[] }): Promise<ProfileTreeNode[]> {
+    const identity = `agents/${agent}.md`;
+    const nodes: ProfileTreeNode[] = [{ kind: 'file', id: `${id}/identity`, path: identity, label: `${agent}.md`, note: 'identity' }];
+    const front = parseFrontmatter(await fs.readFile(path.join(root, identity), 'utf8').catch(() => ''));
+    if (!front) return nodes;
+    const instructions = (decodeOptionalBoundary(front.data.instructions_files, stringList) ?? [])
+      .map(file => path.posix.normalize(path.posix.join('agents', file))).filter(file => files.includes(file));
+    if (instructions.length) {
+      nodes.push({ kind: 'folder', id: `${id}/instructions`, label: 'Instructions', children: instructions.map((file): ProfileTreeNode => ({ kind: 'file', id: `${id}/instructions/${file}`, path: file, label: path.posix.basename(file) })) });
+    }
+    const skills = (decodeOptionalBoundary(front.data.skills, stringList) ?? []).filter(skill => !skill.includes('/') && files.some(file => file.startsWith(`skills/${skill}/`)));
+    if (skills.length) {
+      nodes.push({ kind: 'folder', id: `${id}/skills`, label: 'Skills', children: skills.map((skill): ProfileTreeNode => ({ kind: 'folder', id: `${id}/skills/${skill}`, label: skill, children: filesAsNodes(files, `skills/${skill}`, `${id}/skills/${skill}`) })) });
+    }
+    const references = text(front.data.references);
+    if (references && !references.includes('/') && files.some(file => file.startsWith(`references/${references}/`))) {
+      nodes.push({ kind: 'folder', id: `${id}/references`, label: 'References', children: filesAsNodes(files, `references/${references}`, `${id}/references`) });
+    }
+    const subagents: ProfileTreeNode[] = [];
+    for (const [alias, binding] of Object.entries(decodeOptionalBoundary(front.data.subagents, boundary.jsonObject) ?? {})) {
+      const child = text(decodeOptionalBoundary(binding, boundary.jsonObject)?.agent);
+      if (!child || child.includes('/') || !files.includes(`agents/${child}.md`)) continue;
+      const childFront = parseFrontmatter(await fs.readFile(path.join(root, `agents/${child}.md`), 'utf8').catch(() => ''));
+      const profile = context.profileOfAgent.get(child);
+      const ref = profile ? `${context.plugin}/${profile}` : undefined;
+      const node: ProfileSubagentNode = {
+        kind: 'subagent', id: `${id}/sub:${alias}`, alias, agent: child,
+        label: (profile && context.meta.get(profile)?.title) ?? (ref ? profileDisplayName(ref) : titleCase(alias)),
+        harness: text(childFront?.data.harness) ?? DEFAULT_AGENT_ID, identity: `agents/${child}.md`,
+        children: context.path.includes(child) ? [] : await this.profileTree(root, files, child, `${id}/sub:${alias}`, { ...context, path: [...context.path, child] }),
+      };
+      const model = modelName(childFront?.data.model);
+      if (model) node.model = model;
+      const description = text(childFront?.data.description);
+      if (description) node.description = description;
+      if (ref) node.profile = ref;
+      subagents.push(node);
+    }
+    if (subagents.length) nodes.push({ kind: 'folder', id: `${id}/subagents`, label: 'Subagents', children: subagents });
+    return nodes;
+  }
+
+  /** What Agent Farm last said about each profile's `listed`, and the profile files it said it for. */
+  private listedCache?: { signature: string; listed: Map<string, boolean> };
+
+  /**
+   * Which profiles Agent Farm lists (`agent-farm profiles list --json`, `listed: false` for one
+   * another profile runs as a subagent). Asked again only when a profile file or plugin changed,
+   * since the tab reads the list every few seconds. An Agent Farm without `--json`, or a field it
+   * doesn't print, leaves every profile listed.
+   */
+  private async listedProfiles(names: string[]): Promise<Map<string, boolean>> {
+    const parts: string[] = [];
+    for (const name of names) {
+      const folder = path.join(this.pluginRoot(name), 'profiles');
+      for (const file of (await fs.readdir(folder).catch(() => [])).sort()) {
+        const stat = await fs.stat(path.join(folder, file)).catch(() => undefined);
+        parts.push(`${name}/${file}:${stat?.mtimeMs ?? 0}:${stat?.size ?? 0}`);
+      }
+    }
+    const signature = parts.join('|');
+    if (this.listedCache?.signature === signature) return this.listedCache.listed;
+    const listed = new Map<string, boolean>();
+    try {
+      const output = await this.agentFarm(['profiles', 'list', '--json']);
+      const parsed = decodeOptionalBoundary(JSON.parse(output), boundary.json);
+      const entries = decodeOptionalBoundary(parsed, boundary.array(boundary.jsonObject))
+        ?? decodeOptionalBoundary(decodeOptionalBoundary(parsed, boundary.jsonObject)?.profiles, boundary.array(boundary.jsonObject)) ?? [];
+      for (const entry of entries) {
+        const ref = text(entry.qualified) ?? text(entry.ref) ?? (text(entry.plugin) && text(entry.profile) ? `${text(entry.plugin)}/${text(entry.profile)}` : undefined);
+        const flag = decodeOptionalBoundary(entry.listed, boundary.boolean);
+        if (ref && flag !== undefined) listed.set(ref, flag);
+      }
+    } catch {
+      // Agent Farm before `listed` (no --json): every profile is listed.
+    }
+    this.listedCache = { signature, listed };
+    return listed;
+  }
+
+  /** Which profiles Agent Farm lists, by `plugin/profile`; one absent is listed. New Session hides the rest. */
+  async listedRefs(): Promise<Map<string, boolean>> {
+    return this.listedProfiles(await this.pluginNames());
+  }
+
   private async readPlugin(name: string): Promise<ProfilePlugin> {
     const root = this.pluginRoot(name);
+    const listed = await this.listedProfiles(await this.pluginNames());
     const manifest = decodeOptionalBoundary(yaml.load(await fs.readFile(path.join(root, 'plugin.yaml'), 'utf8')), boundary.jsonObject) ?? {};
     const files = await pluginFiles(root);
-    const profiles: ProfileSummary[] = [];
+    const meta = paneMeta(await fs.readFile(path.join(root, PANE_META_FILE), 'utf8').catch(() => ''));
+    const agents = new Map<string, string>();
     for (const file of files.filter(entry => /^profiles\/[^/]+\.yaml$/.test(entry))) {
       const profile = file.slice('profiles/'.length, -'.yaml'.length);
       const agent = profileAgent(await fs.readFile(path.join(root, file), 'utf8').catch(() => ''));
-      if (!agent || !PROFILE_NAME_PATTERN.test(profile)) continue;
+      if (agent && PROFILE_NAME_PATTERN.test(profile)) agents.set(profile, agent);
+    }
+    const profileOfAgent = new Map<string, string>();
+    for (const [profile, agent] of agents) if (!profileOfAgent.has(agent)) profileOfAgent.set(agent, profile);
+    const profiles: ProfileSummary[] = [];
+    for (const [profile, agent] of agents) {
       const entry = `agents/${agent}.md`;
       const front = parseFrontmatter(await fs.readFile(path.join(root, entry), 'utf8').catch(() => ''));
-      const summary: ProfileSummary = { name: profile, ref: `${name}/${profile}`, entry, harness: text(front?.data.harness) ?? DEFAULT_AGENT_ID, uses: await this.uses(root, files, profile, agent) };
+      const ref = `${name}/${profile}`;
+      const tree = await this.profileTree(root, files, agent, profile, { plugin: name, profileOfAgent, meta, path: [agent] });
+      const settings = [`profiles/${profile}.yaml`, PANE_META_FILE].filter(file => files.includes(file));
+      tree.push({ kind: 'folder', id: `${profile}/settings`, label: 'Settings', children: settings.map((file): ProfileTreeNode => ({ kind: 'file', id: `${profile}/settings/${file}`, path: file, label: path.posix.basename(file) })) });
+      const summary: ProfileSummary = {
+        name: profile, ref, entry, harness: text(front?.data.harness) ?? DEFAULT_AGENT_ID,
+        listed: listed.get(ref) ?? true, uses: await this.uses(root, files, profile, agent), tree,
+      };
       const model = modelName(front?.data.model);
       if (model) summary.model = model;
-      const description = text(front?.data.description);
+      const details = meta.get(profile);
+      const description = details?.description ?? text(front?.data.description);
       if (description) summary.description = description;
+      if (details?.title) summary.title = details.title;
+      const cover = [`covers/${profile}.html`, `covers/${profile}.md`].find(file => files.includes(file));
+      if (cover) summary.cover = cover;
       profiles.push(summary);
     }
     const bundled = BUNDLED.includes(name);
@@ -411,6 +583,39 @@ export class ProfileEditor {
     const changes: ProfileFileChange[] = [{ path: file, content }];
     if (identity !== identityText) changes.push({ path: summary.entry, content: identity });
     return this.save(plugin, changes);
+  }
+
+  /**
+   * Edit details: a profile's title and description, saved in its plugin's pane.yaml (which Agent
+   * Farm ignores and install receipts don't cover), so the agent's own file is untouched and a
+   * bundled plugin isn't marked Edited. An empty value removes it.
+   */
+  async setDetails(plugin: string, profile: string, details: ProfileDetails): Promise<ProfileSaveResult> {
+    const root = await this.requirePlugin(plugin);
+    checkName(profile, 'profile');
+    if (!(await fs.lstat(path.join(root, 'profiles', `${profile}.yaml`)).catch(() => undefined))?.isFile()) {
+      throw new PaneError('PROFILE_NOT_FOUND', `${plugin} has no profile named ${profile}.`, 'Open Profiles again to see its profiles.');
+    }
+    await checkNoLinks(root, [PANE_META_FILE]);
+    const file = path.join(root, PANE_META_FILE);
+    let data: JsonObject = {};
+    const existing = await fs.readFile(file, 'utf8').catch(() => undefined);
+    if (existing !== undefined) {
+      try { data = decodeOptionalBoundary(yaml.load(existing), boundary.jsonObject) ?? {}; }
+      catch (error) { throw new PaneError('PROFILE_INVALID', `${plugin}/pane.yaml doesn't parse: ${reasonOf(error).split('\n')[0]}.`, 'Fix pane.yaml in the profile\'s Settings, then try again.'); }
+    }
+    const profiles: JsonObject = { ...decodeOptionalBoundary(data.profiles, boundary.jsonObject) };
+    const entry: JsonObject = { ...decodeOptionalBoundary(profiles[profile], boundary.jsonObject) };
+    for (const key of ['title', 'description'] as const) {
+      const value = details[key].trim();
+      if (value) entry[key] = value;
+      else delete entry[key];
+    }
+    if (Object.keys(entry).length) profiles[profile] = entry;
+    else delete profiles[profile];
+    await writeAtomic(file, yaml.dump({ ...data, profiles }, { lineWidth: -1 }));
+    this.options.onChanged?.(plugin);
+    return { plugin: await this.readPlugin(plugin), path: PANE_META_FILE };
   }
 
   /** Restore Pane's version (A-3): the bundled copy replaces your edits to greenfield or dcouple. */

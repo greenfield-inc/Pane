@@ -211,6 +211,8 @@ export interface AppConfig {
   answerPromptsFromPane?: boolean;
   // Settings › AI & Agents: Pane's Agent Farm saves launch telemetry under <PANE_DIR>/agent-farm/telemetry on this computer (off when absent).
   agentFarmTelemetry?: boolean;
+  // Profiles pinned in the Profiles tab (`plugin/profile`), shown first there and in New Session (T-63).
+  pinnedProfiles?: string[];
   // Set once Notify has shown the one-time note about Claude prompts.
   claudePromptsNoteShown?: boolean;
   // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source
@@ -351,6 +353,8 @@ export interface UpdateConfigRequest {
   answerPromptsFromPane?: boolean;
   // Settings › AI & Agents: Pane's Agent Farm saves launch telemetry under <PANE_DIR>/agent-farm/telemetry on this computer (off when absent).
   agentFarmTelemetry?: boolean;
+  // Profiles pinned in the Profiles tab (`plugin/profile`), shown first there and in New Session (T-63).
+  pinnedProfiles?: string[];
   // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source
   htmlFileOpenMode?: HtmlFileOpenMode;
   // PostHog analytics settings

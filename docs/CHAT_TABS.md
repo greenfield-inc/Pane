@@ -559,7 +559,19 @@ turning Profiles off never lets an update overwrite a plugin edited while it
 was on. An install that never finished (its lock, a
 plugin Pane was installing then, recorded in `pane-installing.json`, or one with
 no receipt) is cleared before the next one, and a failed install is logged and
-never blocks startup. The sidebar's **Profiles** tab edits these plugins in
+never blocks startup. The sidebar's **Profiles** tab lists the top-level
+profiles (Agent Farm's `profiles list --json` marks a profile another one runs as
+a subagent `listed: false`; an Agent Farm without `--json`, or a missing field,
+lists it), pinned ones first. A profile opens on its cover page,
+`covers/<profile>.html` or `.md` in the plugin when there is one (HTML is shown in
+a sandboxed frame with no scripts and no network), otherwise one Pane makes from
+its title, description, identity, subagents, skills and references. Beside it, a
+tree holds only that profile's own files: its identity, instructions, skills,
+references and the subagents it calls, each nested with its own files, and its
+settings. Files preview first (Markdown with its front-matter as a metadata
+header, YAML as key/value) and **Edit** opens the source. **Edit details** saves a
+profile's title and description in the plugin's `pane.yaml`, which Agent Farm
+ignores, so the agent's own file is untouched. The tab edits the plugins in
 place: a save is first checked with `agent-farm plugin validate` on a staged copy
 (without a pack's stale `checksums`, which launches don't read), so nothing changes
 unless Agent Farm accepts it, and Sessions using the plugin then show the changed

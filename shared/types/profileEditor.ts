@@ -1,4 +1,4 @@
-import { boundary, type BoundarySchema } from '../validation/boundaryDecoder';
+import { boundary, type BoundarySchema, type JsonValue } from '../validation/boundaryDecoder';
 
 /**
  * The Profiles tab (T-63 PR 5): the Agent Farm plugins in this computer's Pane, their profiles and
@@ -34,9 +34,48 @@ export interface ProfileSummary {
   entry: string;
   harness: string;
   model?: string;
+  /** Its description: the one set in Edit details (pane.yaml), else the identity's own. */
   description?: string;
+  /** Its title from Edit details (pane.yaml); absent shows the name Pane makes from the ref. */
+  title?: string;
+  /**
+   * Whether it is a top-level profile, shown in the list and in New. Agent Farm reports
+   * `listed: false` for a profile another profile runs as a subagent; absent there means listed.
+   */
+  listed: boolean;
+  /** Its cover page, `covers/<profile>.html` or `.md`, when the plugin has one; else Pane makes one. */
+  cover?: string;
   /** The plugin's files this profile reads (its settings, identity, subagents, skills, references, instructions). */
   uses: string[];
+  /** Its own files and subagents, nested, as the profile page's tree shows them. */
+  tree: ProfileTreeNode[];
+}
+
+/**
+ * One row of a profile's file tree: a file, a folder (Instructions, Skills, a skill, References,
+ * Settings), or a subagent with its own files nested under it.
+ */
+export type ProfileTreeNode =
+  | { kind: 'file'; id: string; path: string; label: string; note?: string }
+  | { kind: 'folder'; id: string; label: string; children: ProfileTreeNode[] }
+  | ProfileSubagentNode;
+
+export interface ProfileSubagentNode {
+  kind: 'subagent';
+  id: string;
+  /** The name the parent calls it by. */
+  alias: string;
+  /** The agent it runs (`agents/<agent>.md`). */
+  agent: string;
+  label: string;
+  harness: string;
+  model?: string;
+  description?: string;
+  /** `plugin/profile` when a profile in the plugin runs this agent, so its own cover and avatar apply. */
+  profile?: string;
+  /** Its identity file. */
+  identity: string;
+  children: ProfileTreeNode[];
 }
 
 /** Where a profile's avatar picture comes from: your photo here, the plugin's own picture, or none (initials). */
@@ -63,6 +102,27 @@ export interface ProfileSaveResult {
   path: string;
 }
 
+/** A tree node, decoded through `treeNodeSchema` once it exists (the tree nests). */
+const anyTreeNode: BoundarySchema<ProfileTreeNode> = { decode: cursor => treeNodeSchema.decode(cursor) };
+
+const treeNodeSchema: BoundarySchema<ProfileTreeNode> = boundary.union(
+  boundary.object({ kind: boundary.literal('file'), id: boundary.string, path: boundary.string, label: boundary.string, note: boundary.optional(boundary.string) }),
+  boundary.object({ kind: boundary.literal('folder'), id: boundary.string, label: boundary.string, children: boundary.array(anyTreeNode) }),
+  boundary.object({
+    kind: boundary.literal('subagent'),
+    id: boundary.string,
+    alias: boundary.string,
+    agent: boundary.string,
+    label: boundary.string,
+    harness: boundary.string,
+    model: boundary.optional(boundary.string),
+    description: boundary.optional(boundary.string),
+    profile: boundary.optional(boundary.string),
+    identity: boundary.string,
+    children: boundary.array(anyTreeNode),
+  }),
+);
+
 const profileSummarySchema: BoundarySchema<ProfileSummary> = boundary.object({
   name: boundary.nonEmptyString,
   ref: boundary.nonEmptyString,
@@ -70,8 +130,26 @@ const profileSummarySchema: BoundarySchema<ProfileSummary> = boundary.object({
   harness: boundary.string,
   model: boundary.optional(boundary.string),
   description: boundary.optional(boundary.string),
+  title: boundary.optional(boundary.string),
+  listed: boundary.boolean,
+  cover: boundary.optional(boundary.string),
   uses: boundary.array(boundary.string),
+  tree: boundary.array(anyTreeNode),
 });
+
+/** YAML as data for a preview (main parses it), or why it doesn't parse, with its line. */
+export interface ParsedYaml {
+  data?: JsonValue;
+  error?: string;
+}
+
+/** What Edit details sets for a profile, saved in its plugin's pane.yaml. Empty clears it. */
+export interface ProfileDetails {
+  title: string;
+  description: string;
+}
+
+export const profileDetailsSchema: BoundarySchema<ProfileDetails> = boundary.object({ title: boundary.string, description: boundary.string });
 
 export const profilePluginSchema: BoundarySchema<ProfilePlugin> = boundary.object({
   name: boundary.nonEmptyString,

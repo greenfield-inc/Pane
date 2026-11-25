@@ -68,8 +68,9 @@ open **Create New** instead of the dialogs below. It asks, in order:
    machine's listed Agent Farm profiles, then Other agents (Cursor, OpenCode, Pi,
    which start directly). Type to filter, **↑**/**↓** to move, **Return** picks
    and moves on. A profile Agent Farm marks unlisted (such as a subagent's own)
-   isn't offered; an Agent Farm too old to say lists every profile. It starts on
-   the last choice made here.
+   isn't offered; an Agent Farm too old to say lists every profile. Profiles
+   pinned in the Profiles tab (`pinnedProfiles` in config.json) come first. It
+   starts on the last choice made here.
 2. **Name** (optional): left empty, the Session is named from its first message.
 3. **Message** (optional): the agent's first message, sent once as a one-time
    opening prompt. PNG, JPEG, WebP and GIF images can be attached (the button,
