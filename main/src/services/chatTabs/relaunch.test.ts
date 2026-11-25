@@ -129,7 +129,7 @@ describe('chat tab relaunch (T-63 Reload and Switch profile)', () => {
     const file = path.join(folder, 'transcripts', `${old}.md`);
     expect(existsSync(file)).toBe(true);
     const shown = rows(manager.view('p1'));
-    expect(shown[0]).toMatch(/^--- Couldn't continue the conversation \(.+\) · new conversation, given the transcript ---$/);
+    expect(shown[0]).toBe('--- Couldn\'t continue the conversation · new conversation, given the transcript ---');
     expect(shown[1]).toContain(`saved in ${file}`);
   });
 

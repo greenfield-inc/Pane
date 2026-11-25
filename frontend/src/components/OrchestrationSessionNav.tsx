@@ -876,6 +876,11 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost, onS
   useEffect(() => {
     if (menu?.trigger) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, [menu]);
+  // Opening the menu reads the Sessions again, so the host re-checks their profiles and Reload shows a change (T-63).
+  const menuSessionId = menu?.sessionId;
+  useEffect(() => {
+    if (menuSessionId) void useOrchestrationSessionStore.getState().refresh().catch(() => undefined);
+  }, [menuSessionId]);
 
   const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {

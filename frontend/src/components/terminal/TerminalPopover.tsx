@@ -43,38 +43,44 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
 
-  // Smart positioning to keep popover on screen
+  // Smart positioning to keep popover on screen, again whenever its content changes size (a list that loads).
   useLayoutEffect(() => {
     if (!visible || !ref.current) return;
+    const element = ref.current;
+    const place = () => {
+      const rect = element.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const viewportWidth = window.innerWidth;
 
-    const rect = ref.current.getBoundingClientRect();
-    const viewportHeight = window.innerHeight;
-    const viewportWidth = window.innerWidth;
+      let top = y;
+      let left = x;
 
-    let top = y;
-    let left = x;
+      // Flip up if near bottom
+      if (top + rect.height > viewportHeight - 10) {
+        top = flipY - rect.height;
+      }
 
-    // Flip up if near bottom
-    if (top + rect.height > viewportHeight - 10) {
-      top = flipY - rect.height;
-    }
+      // Keep on screen horizontally
+      if (left + rect.width > viewportWidth - 10) {
+        left = viewportWidth - rect.width - 10;
+      }
 
-    // Keep on screen horizontally
-    if (left + rect.width > viewportWidth - 10) {
-      left = viewportWidth - rect.width - 10;
-    }
+      // Don't go off left edge
+      if (left < 10) {
+        left = 10;
+      }
 
-    // Don't go off left edge
-    if (left < 10) {
-      left = 10;
-    }
+      // Don't go off top edge
+      if (top < 10) {
+        top = 10;
+      }
 
-    // Don't go off top edge
-    if (top < 10) {
-      top = 10;
-    }
-
-    setPosition({ top, left });
+      setPosition(current => current.top === top && current.left === left ? current : { top, left });
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(element);
+    return () => observer.disconnect();
   }, [visible, x, y, flipY]);
 
   useEffect(() => {
