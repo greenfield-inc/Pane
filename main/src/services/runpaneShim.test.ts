@@ -9,6 +9,7 @@ import {
   addRunpaneToUserPath,
   installRunpaneShim,
   PANE_MANAGED_SHIM_MARKER,
+  syncAgentFarmShim,
   withRunpaneBinOnPath,
   withRunpaneOnPath,
   writeBrowserShim,
@@ -238,6 +239,25 @@ describe('the agent-farm shim', () => {
     fs.writeFileSync(path.join(state.binDir, 'agent-farm'), '#!/bin/sh\necho mine\n');
     installWithAgentFarm();
     expect(fs.readFileSync(path.join(state.binDir, 'agent-farm'), 'utf8')).toBe('#!/bin/sh\necho mine\n');
+  });
+
+  // Profiles off (T-63): `agent-farm` in Pane's terminals is whatever is on PATH, as on main.
+  it('follows the Profiles switch: removed with it off, at start and on a change, back with it on', () => {
+    const files = (state: RunpaneShimState) => ['agent-farm', 'agent-farm.cmd', 'agent-farm.cjs'].filter(name => fs.existsSync(path.join(state.binDir, name)));
+    const on = installWithAgentFarm('win32', 'C:\\Program Files\\Pane\\Pane.exe');
+    expect(files(on)).toEqual(['agent-farm', 'agent-farm.cmd', 'agent-farm.cjs']);
+    // A start with Profiles off removes what an earlier start wrote.
+    const off = install();
+    expect(files(off)).toEqual([]);
+    syncAgentFarmShim({ entry, configRoot }, off, 'darwin');
+    expect(files(off)).toEqual(['agent-farm', 'agent-farm.cjs']);
+    expect(fs.readFileSync(path.join(off.binDir, 'agent-farm'), 'utf8')).toContain(off.electronExecPath);
+    syncAgentFarmShim(undefined, off, 'darwin');
+    expect(files(off)).toEqual([]);
+    // A file of that name Pane didn't write stays.
+    fs.writeFileSync(path.join(off.binDir, 'agent-farm'), '#!/bin/sh\necho mine\n');
+    syncAgentFarmShim(undefined, off, 'darwin');
+    expect(fs.readFileSync(path.join(off.binDir, 'agent-farm'), 'utf8')).toBe('#!/bin/sh\necho mine\n');
   });
 });
 

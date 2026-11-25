@@ -19,10 +19,11 @@
  * Beside it, a `pane-node` shim runs any script with the same binary as Node,
  * so bundled skill scripts work on a machine without Node.
  *
- * An `agent-farm` shim (and `agent-farm.cmd`) runs the Agent Farm bundled with this build,
- * with the same binary as Node and `--config-root <PANE_DIR>/agent-farm`, so every
- * `agent-farm` in Pane's terminals is Pane's own copy (T-63). Its launcher, `agent-farm.cjs`,
- * adds the config root before any `--` passthrough.
+ * While Profiles is on (Settings › Advanced, T-63), an `agent-farm` shim (and `agent-farm.cmd`)
+ * runs the Agent Farm bundled with this build, with the same binary as Node and
+ * `--config-root <PANE_DIR>/agent-farm`, so every `agent-farm` in Pane's terminals is Pane's own
+ * copy. Its launcher, `agent-farm.cjs`, adds the config root before any `--` passthrough. While
+ * Profiles is off Pane removes its copy, and `agent-farm` is whatever is on PATH, as before.
  *
  * A `pane-browser` command is BROWSER in Pane's terminals: it opens a link a command-line tool
  * opens (gh pr view --web, Python's webbrowser) in a Pane browser tab beside the terminal, or in
@@ -73,6 +74,8 @@ export interface RunpaneShimState {
   bashRcFile: string;
   /** Windows only: the rcfile WSL terminals start bash with. */
   wslBashRcFile?: string;
+  /** Pane's own Electron binary, which runs the agent-farm shim as Node (it can read app.asar). */
+  electronExecPath: string;
 }
 
 export interface InstallRunpaneShimOptions {
@@ -83,7 +86,7 @@ export interface InstallRunpaneShimOptions {
   platform?: NodeJS.Platform;
   /** Settings > Links: where pane-browser opens links. */
   openLinksIn?: LinksOpenIn;
-  /** The bundled Agent Farm the agent-farm shim runs; no shim without one. */
+  /** The bundled Agent Farm the agent-farm shim runs, while Profiles is on; without one Pane's shim is removed. */
   agentFarm?: AgentFarmShimTarget;
 }
 
@@ -334,6 +337,28 @@ function writeAgentFarmShim(binDir: string, execPath: string, target: AgentFarmS
   if (!writeManagedFile(launcher, agentFarmLauncher(target), PANE_MANAGED_SHIM_MARKER, 0o644)) return;
   writeManagedFile(path.join(binDir, 'agent-farm'), posixAgentFarmShim(execPath, launcher, platform), PANE_MANAGED_SHIM_MARKER, 0o755);
   if (platform === 'win32') writeManagedFile(path.join(binDir, 'agent-farm.cmd'), windowsAgentFarmShim(execPath, launcher), PANE_MANAGED_SHIM_MARKER, 0o755);
+}
+
+const AGENT_FARM_SHIM_FILES = ['agent-farm', 'agent-farm.cmd', 'agent-farm.cjs'];
+
+/** Removes Pane's agent-farm shim files; a user's own file of that name (no marker) or a link stays. */
+function removeAgentFarmShim(binDir: string): void {
+  for (const name of AGENT_FARM_SHIM_FILES) {
+    const file = path.join(binDir, name);
+    if (isSymlink(file) || !fs.existsSync(file)) continue;
+    if (fs.readFileSync(file, 'utf8').includes(PANE_MANAGED_SHIM_MARKER)) fs.rmSync(file, { force: true });
+  }
+}
+
+/**
+ * The agent-farm shim follows the Profiles switch (T-63): written with a target (Profiles on and
+ * this build has the package), removed without one. Runs at install and on every switch change,
+ * so new commands in open terminals follow it without a restart.
+ */
+export function syncAgentFarmShim(target: AgentFarmShimTarget | undefined, state: RunpaneShimState | null = currentState, platform: NodeJS.Platform = process.platform): void {
+  if (!state) return;
+  if (target) writeAgentFarmShim(state.binDir, state.electronExecPath, target, platform);
+  else removeAgentFarmShim(state.binDir);
 }
 
 /** The OS command that opens a URL in the system browser. */
@@ -606,7 +631,6 @@ export function installRunpaneShim(options: InstallRunpaneShimOptions): RunpaneS
   // pane-node is a convenience: a user's own file of that name stays, and runpane still works.
   writeManagedFile(path.join(binDir, 'pane-node'), posixNodeShim(execPath, platform), PANE_MANAGED_SHIM_MARKER, 0o755);
   if (platform === 'win32') writeManagedFile(path.join(binDir, 'pane-node.cmd'), windowsNodeShim(execPath), PANE_MANAGED_SHIM_MARKER, 0o755);
-  if (options.agentFarm) writeAgentFarmShim(binDir, options.execPath, options.agentFarm, platform);
 
   const zshDotDir = path.join(options.appDirectory, 'shell', 'zsh');
   const bashDir = path.join(options.appDirectory, 'shell', 'bash');
@@ -618,8 +642,9 @@ export function installRunpaneShim(options: InstallRunpaneShimOptions): RunpaneS
   const bashRc = path.join(bashDir, 'rcfile');
   writeManagedFile(bashRc, bashRcFile(binDir), MANAGED_SHELL_MARKER, 0o644);
   const browserPath = path.join(binDir, platform === 'win32' ? 'pane-browser.ps1' : 'pane-browser');
-  currentState = { binDir, shimPath, cli: { executable: execPath, script: cliPath }, browserPath, zshDotDir, bashRcFile: bashRc };
+  currentState = { binDir, shimPath, cli: { executable: execPath, script: cliPath }, browserPath, zshDotDir, bashRcFile: bashRc, electronExecPath: options.execPath };
   writeBrowserShim(options.openLinksIn ?? 'pane', currentState, platform);
+  syncAgentFarmShim(options.agentFarm, currentState, platform);
   if (platform === 'win32') {
     const wslRc = path.join(bashDir, 'wsl-rcfile');
     if (writeManagedFile(wslRc, wslBashRcFile(binDir), MANAGED_SHELL_MARKER, 0o644)) currentState.wslBashRcFile = wslRc;
