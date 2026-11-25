@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Check } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { filterSessionChoices, type SessionChoice } from '../../utils/sessionChoices';
@@ -27,6 +27,9 @@ interface ToFieldProps {
 export const ToField = forwardRef<HTMLInputElement, ToFieldProps>(function ToField({ choices, value, onPick, onPicked, profilesStatus, disabled, onOpenChange }, ref) {
   const listboxId = useId();
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // SAFETY: the input is always rendered, so the ref is set before a parent reads it after mount.
+  useImperativeHandle(ref, () => inputRef.current as HTMLInputElement);
   const [open, setOpen] = useState(false);
   useEffect(() => { onOpenChange?.(open); }, [open, onOpenChange]);
   const [query, setQuery] = useState('');
@@ -34,6 +37,13 @@ export const ToField = forwardRef<HTMLInputElement, ToFieldProps>(function ToFie
   const shown = useMemo(() => filterSessionChoices(choices, query), [choices, query]);
   const active = shown.find(choice => choice.key === activeKey) ?? (query ? shown[0] : shown.find(choice => choice.key === value?.key) ?? shown[0]);
   const optionId = (choice: SessionChoice) => `${listboxId}-${choice.key.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
+  // The choice shown can change while the field is focused (the remembered profile arrives once
+  // the profiles are read); keep it selected so typing still replaces it.
+  useEffect(() => {
+    const input = inputRef.current;
+    if (input && document.activeElement === input && !query) input.select();
+  }, [value?.key, query]);
 
   useEffect(() => {
     if (!open || !active) return;
@@ -122,7 +132,7 @@ export const ToField = forwardRef<HTMLInputElement, ToFieldProps>(function ToFie
       )}>
         {!query && value && <ProfileAvatar profileRef={value.profileRef} agent={value.agent} size={20} />}
         <input
-          ref={ref}
+          ref={inputRef}
           type="text"
           role="combobox"
           aria-label="To"

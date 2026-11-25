@@ -13,7 +13,7 @@ import { useSessionPreferencesStore, type SessionCreationPreferences } from '../
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
-import { areKeyboardShortcutsEnabled, useConfigStore } from '../stores/configStore';
+import { areKeyboardShortcutsEnabled, isProfilesEnabled, useConfigStore } from '../stores/configStore';
 import { generatePaneName, sanitizePaneName } from '../utils/paneName';
 
 // Interface for branch information
@@ -135,6 +135,8 @@ export function CreatePaneForm({
   const { preferences, loadPreferences, updatePreferences } = useSessionPreferencesStore();
   const existingSessions = useSessionStore(state => state.sessions);
   const keyboardShortcutsEnabled = useConfigStore((state) => areKeyboardShortcutsEnabled(state.config));
+  // With Profiles on (T-63), New Pane shows no hotkey hint, like Create New.
+  const profiles = useConfigStore((state) => isProfilesEnabled(state.config));
 
   // Load session creation preferences when dialog opens
   useEffect(() => {
@@ -835,7 +837,7 @@ export function CreatePaneForm({
             undefined
           }
         >
-          {isSubmitting ? 'Creating...' : <>{`Create${sessionCount > 1 ? ` ${sessionCount} Panes` : machineName ? ' Pane' : ''}${machineName ? ` on ${machineName}` : ''}`}<span className="ml-1.5 opacity-60">↵</span></>}
+          {isSubmitting ? 'Creating...' : <>{`Create${sessionCount > 1 ? ` ${sessionCount} Panes` : machineName ? ' Pane' : ''}${machineName ? ` on ${machineName}` : ''}`}{!profiles && <span className="ml-1.5 opacity-60">↵</span>}</>}
         </Button>
       </ModalFooter>}
     </>
