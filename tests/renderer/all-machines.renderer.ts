@@ -171,14 +171,15 @@ test('a Session created on R from New opens there once the switch lands, with no
   await open(page, 'chat&new&layoutR=d&pickR=c');
   const f = fixture(page);
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('combobox', { name: 'Run on', exact: true }).selectOption({ label: 'Remote R' });
+  await dialog.getByRole('radio', { name: /Remote R/ }).click();
+  await dialog.getByLabel('Session name (optional)').fill('Doozy');
   await page.evaluate(() => window.allMachinesTest.reset());
-  await dialog.getByTestId('session-choice-agent:claude').click();
+  await dialog.getByRole('button', { name: 'Create Session on Remote R', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await landOnRemote(page);
   await settle(page);
 
-  expect(await f.state()).toEqual({ activeMachine: 'R', selectedSessionId: 'n', selectionError: null, availability: 'ready', highlighted: ['Session New chat on Remote R'], shownError: null });
+  expect(await f.state()).toEqual({ activeMachine: 'R', selectedSessionId: 'n', selectionError: null, availability: 'ready', highlighted: ['Session Doozy on Remote R'], shownError: null });
   expect(await f.memory('R'), 'R remembers the new Session').toBe('n');
   expect((await f.calls()).filter(call => call.method === 'select' && call.refused)).toEqual([]);
   expect((await f.storedLayout('R'))?.root).toMatchObject({ type: 'session', sessionId: 'n' });

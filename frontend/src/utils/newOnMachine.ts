@@ -102,6 +102,7 @@ const branchesSchema = boundary.array(boundary.object({
   hasWorktree: boundary.boolean,
   isRemote: boundary.boolean,
 }));
+const runtimesSchema = boundary.object({ distributions: boundary.array(boundary.string) });
 const sessionNamesSchema = boundary.object({ sessions: boundary.array(boundary.object({ name: boundary.string })) });
 const createdPaneSchema = boundary.object({ id: boundary.nonEmptyString, clientRequestId: boundary.optional(boundary.string) });
 /** `orchestration-sessions:create` answers with the Session's view; its record is `session`. */
@@ -137,6 +138,11 @@ export function readRepositories(machine: Pick<NewMachine, 'id' | 'name'>): Prom
 /** The repository's branches on that machine, answered as `projects:list-branches` answers today. */
 export async function readBranches(machine: Pick<NewMachine, 'id' | 'name'>, repositoryId: number): Promise<{ success: boolean; data?: BranchOption[] }> {
   return { success: true, data: await read(machine.id, machine.name, 'projects:list-branches', [String(repositoryId)], branchesSchema) };
+}
+
+/** The WSL distributions a Session can run in there; none outside Windows. */
+export async function readRuntimes(machine: Pick<NewMachine, 'id' | 'name'>): Promise<{ success: boolean; data?: { distributions: string[] } }> {
+  return { success: true, data: await read(machine.id, machine.name, 'orchestration-sessions:runtimes', [], runtimesSchema) };
 }
 
 /** The Agent Farm profiles a Session can start with on that machine (T-63); Pane's plain ones are marked hidden. */

@@ -95,6 +95,8 @@ export function parseProfileListLine(line: string): AgentFarmProfileEntry | unde
   const entry: AgentFarmProfileEntry = { ref: head[1], plugin: plugin[1], version: plugin[2], harness, hidden: plugin[1] === PANE_PROFILE_PLUGIN };
   if (model) entry.model = model;
   if (effort && effort !== 'default') entry.effort = effort;
+  // Agent Farm appends `| unlisted` for a profile its plugin hides from pickers; older ones never do.
+  if (fields.slice(5).some(field => field.trim() === 'unlisted')) entry.listed = false;
   const variants = head[2]?.split(' · ').map(part => /^([a-z][a-z0-9_-]*): (\S+)(?: (\S+))?/.exec(part)).filter(match => !!match)
     .map(match => {
       const variant: AgentFarmProfileVariant = { name: match[1], model: match[2] };

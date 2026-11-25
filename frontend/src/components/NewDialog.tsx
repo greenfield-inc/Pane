@@ -2,19 +2,25 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { GitBranch, MessageSquare } from 'lucide-react';
 import type { Project } from '../types/project';
 import type { CreateSessionRequest } from '../types/session';
+import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useErrorStore } from '../stores/errorStore';
+import { nextHostRestored } from '../hooks/useIPCEvents';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
-import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
-import type { MachineEntry } from '../utils/machineList';
-import { useMachineStates } from '../hooks/useMachineStates';
-import { openAfterSwitch } from '../utils/openAfterSwitch';
+import { nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
+import { LOCAL_MACHINE_ID, type MachineState } from '../../../shared/types/machineConnections';
+import type { ProjectEnvironment } from '../../../shared/types/panels';
+import type { MachineEntry, MachineOs } from '../utils/machineList';
 import {
   createPaneOn,
+  createSessionOn,
   lastNewMachineId,
   newMachines,
   readBranches,
   readRepositories,
+  readRuntimes,
+  readSessionNames,
   rememberNewMachine,
   startingNewMachineId,
   type NewMachine,
@@ -22,7 +28,10 @@ import {
 } from '../utils/newOnMachine';
 import { cn } from '../utils/cn';
 import { openPaneTarget } from './terminal/openPaneLink';
-import { SessionPicker } from './NewSessionPalette';
+import { rememberOnMachine } from '../utils/machineRowActions';
+import { OrchestrationSessionForm } from './CreateOrchestrationSessionDialog';
+import { CreateNewDialog } from './createNew/CreateNewDialog';
+import { isProfilesEnabled, useConfigStore } from '../stores/configStore';
 import { CreatePaneForm } from './CreateSessionDialog';
 import { MachineMark } from './machines/MachineMark';
 import { SegmentedControl } from './settings/SettingsControls';
@@ -30,7 +39,9 @@ import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Bone, Skeleton, TextBone, LoadingStatus, useSkeletonHold } from './ui/Skeleton';
 
-interface NewDialogProps {
+export interface NewDialogProps {
+  /** Create New (Profiles on) only: open as New Session (the + beside Sessions), else as last used. */
+  initialMode?: 'session' | 'pane';
   /** The repositories of the machine the app is on. */
   projects: Project[];
   defaultProjectId?: number;
@@ -40,10 +51,60 @@ interface NewDialogProps {
   onClose: () => void;
 }
 
+/** A machine switch reloads every list first; give a slow machine this long before opening anyway. */
+const SWITCH_RESTORE_TIMEOUT_MS = 60_000;
+
 const KIND_OPTIONS = [
   { id: 'session', label: <span className="inline-flex items-center gap-1.5"><MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />Session</span> },
   { id: 'pane', label: <span className="inline-flex items-center gap-1.5"><GitBranch className="h-3.5 w-3.5" aria-hidden="true" />Pane</span> },
 ] as const;
+
+const ENVIRONMENT_BY_OS = { macOS: 'macos', Windows: 'windows', Linux: 'linux' } satisfies Record<MachineOs, ProjectEnvironment>;
+
+/** Every machine the desktop keeps a connection to, live; null until first listed. */
+function useMachineStates(): MachineState[] | null {
+  const [states, setStates] = useState<MachineState[] | null>(() => window.electronAPI?.machines ? null : []);
+  useEffect(() => {
+    const api = window.electronAPI?.machines;
+    if (!api) return;
+    let live = true;
+    void api.list().then(list => { if (live) setStates(list); }).catch(() => { if (live) setStates([]); });
+    const unsubscribe = api.onEvent(event => { if (event.type === 'machines') setStates(event.machines); });
+    return () => { live = false; unsubscribe(); };
+  }, []);
+  return states;
+}
+
+/** Switches the app to the machine something was just created on, then opens it there. */
+async function openAfterSwitch(machineName: string, select: (() => Promise<MachineSelectOutcome>) | null, open: () => Promise<void>): Promise<void> {
+  const failed = (why: string) => useErrorStore.getState().showError({
+    title: `Created on ${machineName}`,
+    error: `It was created on ${machineName}, but Pane could not switch there: ${why} Pick ${machineName} in the machine menu to open it.`,
+  });
+  if (!select) return failed('the machine menu does not list it yet.');
+  try {
+    const restored = nextHostRestored(SWITCH_RESTORE_TIMEOUT_MS);
+    const outcome = await select();
+    if (!outcome.ok) return failed(outcome.needsPassword ? 'it needs its password.' : outcome.error);
+    await restored;
+    await open();
+  } catch (cause) {
+    failed(cause instanceof Error ? cause.message : 'Pane did not say why.');
+  }
+}
+
+/**
+ * Opens the new Session once the switch has landed. The switch restores the Session
+ * New left in the machine's memory, so it is normally open already; selecting it
+ * then would reach a machine that is still restoring and be refused.
+ */
+async function openSession(sessionId: string): Promise<void> {
+  if (useOrchestrationSessionStore.getState().selectedSessionId !== sessionId) {
+    await useOrchestrationSessionStore.getState().select({ sessionId });
+  }
+  if (useSessionStore.getState().activeSessionId !== null) await useSessionStore.getState().setActiveSession(null);
+  useNavigationStore.getState().navigateToPaneChat();
+}
 
 /** Opens the first new Pane once it is listed; one still being set up opens itself when it arrives. */
 async function openCreatedPane(createdIds: readonly string[]): Promise<void> {
@@ -93,8 +154,14 @@ function MachinePicker({ machines, selectedId, lastUsedId, disabled, onPick }: {
 }
 
 // One modal owns focus for both forms. The section + controls continue to use
-// the standalone New Session palette and Create Pane dialog around these same forms.
-export function NewDialog({ projects, defaultProjectId, machines: entries, onSwitchMachine, onClose }: NewDialogProps) {
+// the standalone dialogs around these same forms.
+export function NewDialog(props: NewDialogProps) {
+  // With Profiles on (T-63), New is the Create New dialog; off, it stays as it was.
+  const profiles = useConfigStore(state => isProfilesEnabled(state.config));
+  return profiles ? <CreateNewDialog {...props} /> : <ClassicNewDialog {...props} />;
+}
+
+function ClassicNewDialog({ projects, defaultProjectId, machines: entries, onSwitchMachine, onClose }: NewDialogProps) {
   const [kind, setKind] = useState<'session' | 'pane'>('session');
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [readAttempt, setReadAttempt] = useState(0);
@@ -111,8 +178,7 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
   const machineId = machine?.id;
   const machineName = machine?.name;
   const onOtherMachine = machine !== undefined && !machine.current;
-  // A Session picks its machine in the picker's own Run on; a Pane picks it here.
-  const showPicker = kind === 'pane' && machines.length > 1;
+  const showPicker = machines.length > 1;
 
   // The latest switch action, read when a create finishes rather than tracked by the forms.
   const switchTo = useRef<(() => Promise<MachineSelectOutcome>) | null>(null);
@@ -140,6 +206,9 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
       return reply;
     },
   } : undefined, [onOtherMachine, machineId, machineName]);
+  const otherRuntimes = useMemo(() => onOtherMachine && machineId && machineName
+    ? () => readRuntimes({ id: machineId, name: machineName })
+    : undefined, [onOtherMachine, machineId, machineName]);
 
   const repositories: RepositoryOption[] | undefined = !onOtherMachine ? projects
     : otherRepositories?.machineId === machineId ? otherRepositories?.list : undefined;
@@ -148,6 +217,7 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
     ?? (chosenRepository ? repositories.find(item => item.name === chosenRepository.name) : undefined)
     ?? (!onOtherMachine ? repositories.find(item => item.id === defaultProjectId) : undefined)
     ?? repositories[0]);
+  const environment = machine?.os ? ENVIRONMENT_BY_OS[machine.os] : undefined;
   const repositoriesError = otherRepositories?.machineId === machineId ? otherRepositories?.error : undefined;
   const repositoriesHold = useSkeletonHold(kind === 'pane' && onOtherMachine && !repositories && !repositoriesError);
 
@@ -173,8 +243,30 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
   </>;
 
   return <Modal isOpen onClose={() => { if (!isSubmitting) onClose(); }} size="md" closeOnOverlayClick={false} closeOnEscape={!branchDropdownOpen && !isSubmitting}>
-    {kind === 'session' ? <>{header}<SessionPicker entries={entries} onSwitchMachine={onSwitchMachine} onClose={onClose} onBusyChange={setIsSubmitting} className="mt-4" /></>
-      : !machine ? <>{header}<ModalBody>{null}</ModalBody></>
+    {!machine ? <>{header}<ModalBody>{null}</ModalBody></>
+      : kind === 'session' ? <OrchestrationSessionForm key={machine.id} isOpen header={header} onClose={onClose} onSubmittingChange={setIsSubmitting}
+        machineName={formMachineName} environment={environment} readRuntimes={otherRuntimes}
+        onCreate={async ({ name: requestedName, ...input }) => {
+          if (onOtherMachine) {
+            const name = requestedName || nextOrchestrationSessionName(await readSessionNames(machine));
+            const sessionId = await createSessionOn(machine, { ...input, name, nameFromFirstMessage: !requestedName });
+            rememberNewMachine(machine.id);
+            // Without the memory the switch still works; openSession then selects it after the restore.
+            await rememberOnMachine(machine.id, { kind: 'session', id: sessionId, name }).catch(() => undefined);
+            onClose();
+            void openAfterSwitch(machine.name, switchTo.current, () => openSession(sessionId));
+            return;
+          }
+          if (!window.electronAPI?.orchestrationSessions) throw new Error('This host does not support Sessions.');
+          const store = useOrchestrationSessionStore.getState();
+          await store.load();
+          const name = requestedName || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
+          await store.create({ ...input, name, nameFromFirstMessage: !requestedName });
+          rememberNewMachine(machine.id);
+          useSessionStore.getState().setActiveSession(null);
+          useNavigationStore.getState().navigateToPaneChat();
+          onClose();
+        }} />
       : repositoriesError ? notice(repositoriesError)
       : repositoriesHold.holding ? <>
         {header}

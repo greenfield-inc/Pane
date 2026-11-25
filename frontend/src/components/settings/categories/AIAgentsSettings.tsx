@@ -177,21 +177,9 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
 
       <SettingsSection title="Session defaults">
         <SettingRow
-          settingId="session-start-pinned"
-          label="Start new Sessions pinned"
-          description="New Sessions open in the Pinned section. Pin or unpin one Session from its right-click menu."
-          saveState={persistence.saveStates['session-start-pinned']}
-        >
-          <ImmediateToggle
-            label="Start new Sessions pinned"
-            value={config.defaultSessionPinned === true}
-            onSave={(value) => persistence.saveConfig('session-start-pinned', { defaultSessionPinned: value })}
-          />
-        </SettingRow>
-        <SettingRow
           settingId="session-defaults"
-          label="Launch command and behavior (advanced)"
-          description="Used for new Sessions that start an agent on its own; a profile brings its own. One Session can still change them with runpane sessions update. Existing Sessions keep their saved settings."
+          label="Launch command and behavior"
+          description="Used for new Sessions. Existing Sessions keep their saved settings."
           saveState={persistence.saveStates['session-defaults']}
           align="start"
         >

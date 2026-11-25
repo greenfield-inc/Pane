@@ -4,8 +4,9 @@ import type { OrchestrationSessionCreateInput } from '../../../shared/types/orch
 import { profileDisplayName } from './profileAvatar';
 
 /**
- * What the New Session palette offers (T-63): Claude and Codex on their own, the machine's Agent
- * Farm profiles, and the other agents, which start directly with no profile (A-1).
+ * What Create New's To offers (T-63), in this order: Claude and Codex on their own, the machine's
+ * listed Agent Farm profiles, and the other agents, which start directly with no profile (A-1).
+ * Pinned profiles go first once the Profiles tab can pin them.
  */
 export interface SessionChoice {
   key: string;
@@ -52,7 +53,9 @@ export function sessionChoices({ agents, profiles, profilesUnavailable }: {
     const model = agentConfig(agent)?.chat?.profileModel;
     return { key: `agent:${agent}`, group: 'agents', label: agentLabel(agent), detail: `${model ? modelDisplayName(model) : agentLabel(agent)} · nothing added`, agent };
   });
-  const named = profiles.filter(entry => !entry.hidden && agents.includes(entry.harness) && runsThroughAgentFarm(entry.harness)).map((entry): SessionChoice => {
+  // Pane's own plain profiles are hidden; a profile Agent Farm marks unlisted (a subagent's own) is
+  // left out, and one from an Agent Farm that doesn't say counts as listed.
+  const named = profiles.filter(entry => !entry.hidden && entry.listed !== false && agents.includes(entry.harness) && runsThroughAgentFarm(entry.harness)).map((entry): SessionChoice => {
     const choice: SessionChoice = {
       key: `profile:${entry.ref}`, group: 'profiles', label: profileDisplayName(entry.ref), detail: `${entry.ref} · ${agentLabel(entry.harness)}`,
       agent: entry.harness, profileRef: entry.ref,

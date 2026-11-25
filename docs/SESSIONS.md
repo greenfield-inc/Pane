@@ -6,30 +6,14 @@ opens one chat, and its sidebar row can expand to show associated Panes. The
 recent activity together while the chat remains the focused work surface. A tab
 shares its parent Pane's worktree.
 
-In the sidebar, `+` (or **New Session** in Search, or its shortcut once you set
-one) opens the **New Session** palette near the top of the window. It lists
-**Agents** (Claude and Codex on their own, which add nothing), **Profiles** (the
-Agent Farm profiles of the computer in **Run on**), and **Other agents** (Cursor,
-OpenCode and Pi, which start directly, with no profile). Type to filter by name
-or profile ref, **↑**/**↓** to choose, **Tab** to move to **Run on** and back,
-**Return** to create, **Esc** to cancel. A profile that can't start there (Chat
-tabs are off, or Run on is a WSL distribution) stays listed and says why. Pane
-remembers an agent picked on its own as the default the palette starts on, while
-existing Sessions keep their own agent. The palette asks for no name: a new
-Session starts as `New chat` or `New chat 2`, and the Session agent renames it
-once, in 3 to 5 words, when it replies to your first task. A name you set later
-is kept. Each new Session opens as one Pane Chat and can be renamed later from
-its Overview. Expand a Session to see its associated Panes and open any Pane in
-its existing sidebar view.
-
-**Run on** lists this computer first, then each of its WSL distributions on
-Windows, then your other machines (offline or still connecting ones are listed
-but can't be picked). On another machine the palette lists that machine's own
-profiles and agents, creates the Session there, then switches to that machine
-and opens it. Start pinned and the launch command and behavior are not in the
-palette: their defaults are in Settings → AI & Agents → Session defaults, and
-one Session changes its own in Session settings or with `runpane sessions
-update`.
+In the sidebar, `+` opens an agent picker, an optional Session name field, and
+an optional "What is this Session for?" field that becomes the Session's goal.
+Pane remembers the chosen agent as the default for future Sessions while
+existing Sessions keep their own agent. A blank name starts as `New chat` or
+`New chat 2`, and the Session agent renames it once, in 3 to 5 words, when it
+replies to your first task. A name you type or set later is kept. Each new Session opens as one Pane
+Chat and can be renamed later from its Overview. Expand a Session to see
+its associated Panes and open any Pane in its existing sidebar view.
 
 With [chat tabs](CHAT_TABS.md) on (Settings → AI & Agents → Chat tabs), a new
 Session runs its orchestrator in a chat tab instead of a terminal for any agent
@@ -78,15 +62,14 @@ changes, and `chat-tab:profiles` returns an empty list. Turning Profiles on or o
 applies to the next start of a Session's agent.
 
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
-on top and that kind's form below. A Session is the same picker as the New
-Session palette, with its own **Run on**. For a Pane, when the desktop has saved
-other machines, a **Machine** picker sits between them. It starts on the
-machine you last created on from this computer (the first time, the machine the
-app is on) and dims machines that are offline or still connecting; they can't be
-picked until they answer. Repositories and branches come from the picked
-machine. Create runs there; Pane then switches to that machine and opens what
-you created. A Pane created on another machine starts at the repository level
-and does not join the Session you have open.
+on top and that kind's form below. When the desktop has saved other machines,
+a **Machine** picker sits between them. It starts on the machine you last
+created on from this computer (the first time, the machine the app is on) and
+dims machines that are offline or still connecting; they can't be picked until
+they answer. Repositories, branches, WSL distributions and agents come from the
+picked machine. Create runs there; Pane then switches to that machine and opens
+what you created. A Pane created on another machine starts at the repository
+level and does not join the Session you have open.
 
 The Sessions section below the divider can be collapsed from its header; the
 `+` remains available while it is collapsed. Sessions are opened from this
@@ -126,16 +109,14 @@ startup; no transcript or workspace files are deleted by this migration.
 
 Sessions use the same built-in launch presets and saved custom commands as
 ordinary project/worktree panels, including custom arguments. The application
-default (Settings → AI & Agents → Session defaults → **Launch command and
-behavior (advanced)**) seeds every new Session that starts an agent on its own;
-a profile brings its own launch, so a Session started with one ignores the
-default command. Each Session saves its own launch configuration and behavior,
-and changes them in Session settings or with `runpane sessions update`.
-Changing defaults does not overwrite existing Sessions. Launch changes take
-effect on the next explicit restart. Use **Edit behavior…** in Settings or in
-Session settings to open the separate behavior editor. **Back** discards the
-draft; **Save behavior** applies it to the form, which is persisted when you
-apply the defaults or save settings.
+default seeds new Sessions. Creating a Session remembers its launch command and
+arguments for the next creation; cancelling, or a create Pane refuses, leaves that default unchanged.
+Selecting the agent default clears the remembered custom command. Each Session saves its own launch configuration
+and behavior. Changing defaults does not overwrite existing Sessions.
+Launch changes take effect on the next explicit restart.
+Use **Edit behavior…** during creation or in Session settings to open the
+separate behavior editor. **Back** discards the draft; **Save behavior** applies it
+to the form, which is persisted when you create the Session or save settings.
 
 The command, Session behavior, and saved task context have separate purposes.
 A command selects how the agent runs; the behavior describes how it should act;
@@ -170,11 +151,10 @@ Project implementation belongs in an appropriate Pane/worktree.
 
 ## Windows and WSL runtimes
 
-On Windows, the New Session palette's **Run on** lists each installed WSL
-distribution after this computer. This computer (Windows) is the default on
-every creation. Choose a named distribution to run the agent there; install the
-agent inside that distribution first. Cursor is available when WSL is selected;
-profiles are not, since they run in chat tabs, which don't run in WSL.
+On Windows, **Create Session → Run agent in** appears directly below the agent
+picker when WSL reports installed distributions. Windows is the default on every
+creation. Choose a named distribution to run the agent there; install the agent
+inside that distribution first. Cursor is available when WSL is selected.
 The runtime and distribution belong to the Session and survive reopening,
 application restart, and terminal supervisor restart. Only WSL Sessions carry a
 `runtime` (`"wsl"`); a Session on the native host omits it on every OS. Older
@@ -299,10 +279,10 @@ To reopen an older conversation by hand, run
 ## Session sidebar and archive
 
 Pinned is the first sidebar category and can contain both Session chats and
-Panes. Right-click a Session, or use the ⋯ button that appears on hover, to pin or unpin it. To pin every new
-Session from the start, turn on **Start new Sessions pinned** in Settings → AI &
-Agents → Session defaults (in the remote web app, **Start pinned** in its
-Create Session sheet, remembered on that device). The pin preference survives restarts; an archived Session stays
+Panes. Right-click a Session, or use the ⋯ button that appears on hover, to pin or unpin it, or turn on **Start pinned** in
+Create Session to pin it from the start. The dialog remembers that toggle for
+the next Session (on the desktop in Pane's config, in the remote web app on
+that device). The pin preference survives restarts; an archived Session stays
 out of Pinned until it is restored. RunPane can set the same preference with
 `sessions pin` or `sessions unpin --session <id|name>`. Create JSON accepts
 `isPinned` (default false), and update JSON accepts it without changing the
@@ -373,20 +353,11 @@ ignored, timestamps are kept), `sessions:sort-panes` (`{ order: "newest" |
 "oldest" }`) and `sessions:get-pane-order` (`{ newPanes: "top" | "bottom",
 chosen }`).
 
-### The Session row's avatar and spinner
+### The Session row's icon
 
-On the desktop, a Session row starts with its profile's avatar at the row's left
-padding, with no slot reserved before it. A Session with Panes shows its expand
-chevron in the avatar's place while you hover the row or the chevron has keyboard
-focus. The avatar is a profile's initials on a tinted
-circle (the `--color-avatar-1` to `--color-avatar-8` theme tokens), or Claude's
-or Codex's logo for the agent on its own and for a Session from before profiles,
-or another agent's initial. Profile photos arrive with the Profiles tab. A grey
-spinner shows on the row's right only while the Session really works, and nothing
-shows while it is idle. The right side reads, in order: the spinner, the amber
-approvals count (or the Pane count), then in **All machines** the machine mark. The phone and web app keep the spinner and the empty ring in place of the
-avatar. Neither is ever red (the amber approvals count and the expanded Pane
-rows show what needs you). The spinner shows once the orchestrator's agent tab, or
+A Session row's icon spins only while the Session really works, and is an empty
+grey ring otherwise; it is never red (the amber approvals count and the expanded
+Pane rows show what needs you). It spins once the orchestrator's agent tab, or
 an agent tab in one of the Session's Panes (not archived), has been mid-turn
 without a break for 10 s, and stops 10 s after the last one ends, so a short
 wake-up never shows. Mid-turn is stricter than a Pane's own status dot:

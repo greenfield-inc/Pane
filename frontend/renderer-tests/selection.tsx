@@ -4,7 +4,6 @@ import { ThemeProvider } from '../src/contexts/ThemeProvider';
 import { useIPCEvents } from '../src/hooks/useIPCEvents';
 import { createRoot } from 'react-dom/client';
 import { OrchestrationSessionNav } from '../src/components/OrchestrationSessionNav';
-import { NewSessionPaletteHost } from '../src/components/NewSessionPalette';
 import { ProjectSessionList } from '../src/components/ProjectSessionList';
 import { SessionView } from '../src/components/SessionView';
 import { WindowTitleBar } from '../src/components/WindowTitleBar';
@@ -60,11 +59,8 @@ window.addEventListener('project-sessions-refresh', () => { runtimeRefreshes += 
 const api = {
   invoke: (channel: string, id: string) => channel === 'panels:shouldAutoCreate' ? Promise.resolve(false) : channel === 'panels:get-layout' ? wait('layout', id) : channel === 'ports:list' ? Promise.resolve({ host: 'test', ports: [] }) : defaultMethod(),
   events: new Proxy({}, { get: (_target, key) => (listener: (event: RuntimeEvent) => void) => { const listeners = handlers.get(key) ?? new Set(); listeners.add(listener); handlers.set(key, listeners); return () => { listeners.delete(listener); }; } }),
-  // This computer alone, for New Session's Run on.
-  machines: { list: () => Promise.resolve([]), onEvent: () => () => {} },
   orchestrationSessions: { create: (input: OrchestrationSessionCreateInput) => {
-    // ?refuse stands in for a host that refuses the launch, as main refuses a wrapper OpenCode can't run.
-    if (location.search.includes('refuse')) {
+    if (input.launchCommand === 'bash -c opencode') {
       transportCalls.push({ method: 'orchestrationSessions.create', payload: input });
       return Promise.resolve({ success: false, error: 'OpenCode Session launch was refused' });
     }
@@ -139,4 +135,4 @@ function SettingsFixture() {
   const persistence = useSettingsPersistence(true);
   return persistence.config ? <AIAgentsSettings persistence={persistence} onDirtyChange={noop} /> : <p role="status">Loading mock settings</p>;
 }
-createRoot(document.getElementById('root')!).render(<Profiler id="selection" onRender={captureCommit}><ThemeProvider>{location.search.includes('settings') ? <SettingsFixture /> : <>{location.search.includes('runtime') && <RuntimeEvents />}<WindowTitleBar projects={[{ id: 1, name: 'Test', path: '/test', active: true, created_at: '2026-01-01', updated_at: '2026-01-01' }]} sidebarWidth={250} sidebarCollapsed={false} /><div style={{ display: 'flex', height: 700 }}><aside style={{ width: 250 }}>{location.search.includes('compact') ? <OrchestrationSessionNav compact /> : <ProjectSessionList projects={[]} onProjectsChange={noop} onProjectsRefresh={noop} pinnedSectionExpanded repositoriesSectionExpanded onPinnedSectionExpandedChange={noop} onRepositoriesSectionExpandedChange={noop} sshHostsSectionExpanded onSshHostsSectionExpandedChange={noop} sessionsSectionExpanded onSessionsSectionExpandedChange={noop} />}</aside><SessionView /></div><NewSessionPaletteHost entries={[]} onSwitchMachine={async () => ({ ok: false, error: 'The fixture has one machine.' })} /></>}</ThemeProvider></Profiler>);
+createRoot(document.getElementById('root')!).render(<Profiler id="selection" onRender={captureCommit}><ThemeProvider>{location.search.includes('settings') ? <SettingsFixture /> : <>{location.search.includes('runtime') && <RuntimeEvents />}<WindowTitleBar projects={[{ id: 1, name: 'Test', path: '/test', active: true, created_at: '2026-01-01', updated_at: '2026-01-01' }]} sidebarWidth={250} sidebarCollapsed={false} /><div style={{ display: 'flex', height: 700 }}><aside style={{ width: 250 }}>{location.search.includes('compact') ? <OrchestrationSessionNav compact /> : <ProjectSessionList projects={[]} onProjectsChange={noop} onProjectsRefresh={noop} pinnedSectionExpanded repositoriesSectionExpanded onPinnedSectionExpandedChange={noop} onRepositoriesSectionExpandedChange={noop} sshHostsSectionExpanded onSshHostsSectionExpandedChange={noop} sessionsSectionExpanded onSessionsSectionExpandedChange={noop} />}</aside><SessionView /></div></>}</ThemeProvider></Profiler>);

@@ -31,6 +31,13 @@ describe('parseProfileList', () => {
     ]);
   });
 
+  it('marks a profile its plugin unlists, and leaves listing unsaid for an Agent Farm that says nothing (T-63)', () => {
+    expect(parseProfileListLine('greenfield/planner -> planner | plugin greenfield 0.0.47 | claude | claude-opus-5-5 high | native default | unlisted'))
+      .toMatchObject({ ref: 'greenfield/planner', listed: false });
+    expect(parseProfileListLine('greenfield/orchestrator -> orchestrator | plugin greenfield 0.0.47 | claude | claude-opus-5-5 high | native default'))
+      .not.toHaveProperty('listed');
+  });
+
   it('skips a line in another shape', () => {
     expect(parseProfileListLine('pane/claude -> claude')).toBeUndefined();
     expect(parseProfileListLine('Not/A profile | plugin x 1 | claude | m')).toBeUndefined();
