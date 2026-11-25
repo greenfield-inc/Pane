@@ -41,8 +41,9 @@ const RECOVERED = 'free disk is back above the warning line';
 /**
  * Raises the machine health cards from samples and checks, each through
  * CardGate, and runs the answer on this machine. Every action covers exactly the
- * rows its card lists. Memory pressure raises none: it shows only in Resources (D-175). Review in Resources and Ask an agent are buttons on the
- * card's own body, so they act on whichever machine shows it.
+ * rows its card lists. Review in Resources and Ask an agent are buttons on the
+ * card's own body, so they act on whichever machine shows it. Memory pressure
+ * raises no card: it shows only in Resources (D-175).
  */
 export class HealthCardController {
   private readonly gate: CardGate;

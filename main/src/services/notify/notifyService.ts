@@ -880,6 +880,7 @@ export class NotifyService {
 
   private broadcast(): void {
     this.publishShared();
+    const unannounced = this.queue.takeUnannounced();
     if (this.deps.headless) return;
     const snapshot = this.queue.snapshot();
     if (snapshot.stripSurface === 'window') {
@@ -898,7 +899,7 @@ export class NotifyService {
       showOutsideSupported: snapshot.showOutsideSupported,
     });
     this.showBadge(snapshot.settings.enabled ? waiting.length : 0);
-    this.announce();
+    this.announce(unannounced);
     this.sendToMainWindow('notify:snapshot', snapshot);
     for (const contents of this.windows.webContents()) contents.send('notify:snapshot', snapshot);
   }
@@ -914,8 +915,7 @@ export class NotifyService {
   }
 
   /** One system notification for what started waiting while Pane is in the background. */
-  private announce(): void {
-    const items = this.queue.takeUnannounced();
+  private announce(items: NotifyItem[]): void {
     const [first] = items;
     if (!first) return;
     if (items.length === 1) this.deps.alert?.(`${first.source.name} needs your answer`, first.title, () => { void this.openInPane(first.id); });

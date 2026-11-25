@@ -1395,7 +1395,7 @@ export class NotifyQueue extends EventEmitter {
   /** Whether in use and "Show cards on" change what shows: a strip, or a picked machine's status in Settings. */
   inUseMatters(): boolean {
     const picked = this.env.settings().cardsOn;
-    return this.strip() !== null || this.unannounced.size > 0 || (picked?.id !== undefined && picked.id !== this.env.machineId);
+    return this.strip() !== null || (picked?.id !== undefined && picked.id !== this.env.machineId);
   }
 
   /** The phone push for this item went out, so a restart doesn't send it again. */
@@ -1432,6 +1432,7 @@ export class NotifyQueue extends EventEmitter {
    * machine shown here already sends that tab's "needs your input".
    */
   takeUnannounced(): NotifyItem[] {
+    for (const id of this.unannounced) if (this.find(id)?.state !== 'waiting') this.unannounced.delete(id);
     const settings = this.env.settings();
     if (this.unannounced.size === 0 || !settings.enabled || this.isPaused() || !this.alertsHere()) return [];
     const ids = this.unannounced;
