@@ -433,6 +433,18 @@ let machineEventListeners = 0;
 window.addEventListener('online', () => ipcRenderer.send('remote-daemon:network-online'));
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  /** The Profiles tab (T-63): this computer's Agent Farm plugins, their files and photos. */
+  profiles: {
+    list: (): Promise<IPCResponse> => ipcRenderer.invoke('profiles:list'),
+    read: (plugin: string, file: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:read', plugin, file),
+    save: (plugin: string, changes: { path: string; content: string }[]): Promise<IPCResponse> => ipcRenderer.invoke('profiles:save', plugin, changes),
+    newProfile: (name: string, agent: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:new-profile', name, agent),
+    newFile: (plugin: string, profile: string, kind: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:new-file', plugin, profile, kind, name),
+    restore: (plugin: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:restore', plugin),
+    photos: (): Promise<IPCResponse> => ipcRenderer.invoke('profiles:photos'),
+    setPhoto: (ref: string, base64: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:set-photo', ref, base64),
+    removePhoto: (ref: string): Promise<IPCResponse> => ipcRenderer.invoke('profiles:remove-photo', ref),
+  },
   /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
   paneSecrets: {
     list: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:list'),

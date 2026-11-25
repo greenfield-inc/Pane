@@ -110,7 +110,9 @@ A project's `+` opens Create New as a Pane in that project, on this computer.
 Session rows show the profile's avatar at the row's left padding (a profile's
 initials on a tint, `--color-avatar-1` to `--color-avatar-8`; Claude's or Codex's
 logo for the agent on its own and for older Sessions; another agent's initial).
-A Session with Panes shows its expand chevron in the avatar's place on hover or
+A photo set in the Profiles tab replaces the initials (yours, stored on this
+computer in `<PANE_DIR>/agent-farm/avatars/`, overrides a plugin's own
+`avatar.png`). A Session with Panes shows its expand chevron in the avatar's place on hover or
 keyboard focus. While it works, a grey spinner sits on the right, before the
 approvals count and, in All machines, the machine mark; an idle row shows none.
 With Profiles off, New, the `+` and the rows are as described below.

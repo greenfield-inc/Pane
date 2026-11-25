@@ -188,9 +188,9 @@ const uninstallOutput = boundary.object({
 });
 
 /** Runs one Agent Farm command and returns its stdout. */
-type AgentFarmRunner = (process: AgentFarmProcess) => Promise<string>;
+export type AgentFarmRunner = (process: AgentFarmProcess) => Promise<string>;
 
-const runAgentFarm: AgentFarmRunner = async ({ executable, args, env, cwd }) => {
+export const runAgentFarm: AgentFarmRunner = async ({ executable, args, env, cwd }) => {
   const { stdout } = await execFileAsync(executable, args, { env, cwd, timeout: 120_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
   return stdout;
 };
@@ -391,7 +391,7 @@ async function installedVersionOf(configRoot: string, name: string): Promise<str
  * or a first install that never finished), or unreadable when its plugin folder is there but
  * Pane can't read the receipt that would tell an edit apart: the folder is kept (review F-10).
  */
-async function installedState(configRoot: string, name: string): Promise<{ version: string } | 'edited' | { unreadable: string } | undefined> {
+export async function installedState(configRoot: string, name: string): Promise<{ version: string } | 'edited' | { unreadable: string } | undefined> {
   const receipt = await readReceipt(configRoot, name);
   if (receipt.state === 'missing') return undefined;
   if (receipt.state === 'unreadable') return existsSync(path.join(configRoot, 'plugins', name)) ? { unreadable: receipt.reason } : undefined;
@@ -528,9 +528,7 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
       // Names only the plugin being installed, and only until it succeeds: one that finished
       // has a receipt that guards its later edits, even when a plugin after it fails (review F-1).
       await fs.writeFile(installingPath, `${JSON.stringify([name])}\n`);
-      // No name installs the package's default plugin, greenfield.
-      const args = name === 'greenfield' ? ['plugin', 'install'] : ['plugin', 'install', name];
-      const stdout = await run(bundledAgentFarmProcess(bundle, args, configRoot));
+      const stdout = await run(bundledAgentFarmProcess(bundle, bundledInstallArgs(name), configRoot));
       plugins[name] = installedVersion(stdout) ?? 'unknown';
       await fs.rm(installingPath, { force: true });
     }
@@ -550,4 +548,30 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
   status = { state: 'ready', configRoot, version: bundle.version, plugins, edited };
   log(`[AgentFarm] Bundled Agent Farm ${bundle.version} set up: ${Object.entries(plugins).map(([name, version]) => `${name} ${version}`).join(', ')}.`);
   return status;
+}
+
+/** The `plugin install` arguments for a bundled plugin: no name installs the package's default, greenfield. */
+function bundledInstallArgs(name: string): string[] {
+  return name === 'greenfield' ? ['plugin', 'install'] : ['plugin', 'install', name];
+}
+
+/**
+ * Restore Pane's version (T-63, A-3): replaces a bundled plugin someone edited with the copy this
+ * Pane ships, and records in the manifest that Pane updates replace it again. Throws when the
+ * install fails; the plugin is then missing until the next start reinstalls it.
+ */
+export async function reinstallBundledPlugin(paneDir: string, name: string, bundle: BundledAgentFarm, run: AgentFarmRunner = runAgentFarm): Promise<string> {
+  const configRoot = agentFarmConfigRoot(paneDir);
+  await clearUnfinishedInstall(configRoot, [name]);
+  const installingPath = path.join(configRoot, INSTALLING_FILE);
+  await fs.writeFile(installingPath, `${JSON.stringify([name])}\n`);
+  const version = installedVersion(await run(bundledAgentFarmProcess(bundle, bundledInstallArgs(name), configRoot))) ?? 'unknown';
+  await fs.rm(installingPath, { force: true });
+  const manifestPath = path.join(configRoot, MANIFEST_FILE);
+  const manifest = await fs.readFile(manifestPath, 'utf8').then((text) => decodeOptionalBoundary(JSON.parse(text), manifestSchema)).catch(() => undefined);
+  if (manifest) {
+    const next = { ...manifest, plugins: { ...manifest.plugins, [name]: version }, edited: (manifest.edited ?? []).filter((entry) => entry !== name) };
+    await fs.writeFile(manifestPath, `${JSON.stringify(next, null, 2)}\n`);
+  }
+  return version;
 }

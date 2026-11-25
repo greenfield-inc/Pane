@@ -149,6 +149,18 @@ interface ElectronAPI {
     settings: () => Promise<IPCResponse<DeviceSettingsView>>;
     updateSettings: (patch: { enabled?: boolean; iosMachineId?: string | null; maxBooted?: number }) => Promise<IPCResponse<DeviceSettings>>;
   };
+  /** The Profiles tab (T-63): this computer's Agent Farm plugins, their files and photos. */
+  profiles: {
+    list: () => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfilesOverview>>;
+    read: (plugin: string, file: string) => Promise<IPCResponse<string>>;
+    save: (plugin: string, changes: import('../../../shared/types/profileEditor').ProfileFileChange[]) => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfileSaveResult>>;
+    newProfile: (name: string, agent: string) => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfileSaveResult>>;
+    newFile: (plugin: string, profile: string, kind: import('../../../shared/types/profileEditor').ProfileNewFileKind, name: string) => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfileSaveResult>>;
+    restore: (plugin: string) => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfileSaveResult>>;
+    photos: () => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfilePhotos>>;
+    setPhoto: (ref: string, base64: string) => Promise<IPCResponse<void>>;
+    removePhoto: (ref: string) => Promise<IPCResponse<void>>;
+  };
   paneSecrets: {
     list: () => Promise<IPCResponse<PaneSecretsOverview>>;
     /** Data is true when it replaced a saved value. With `sites` it saves a login. */

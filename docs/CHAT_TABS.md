@@ -604,7 +604,15 @@ turning Profiles off never lets an update overwrite a plugin edited while it
 was on. An install that never finished (its lock, a
 plugin Pane was installing then, recorded in `pane-installing.json`, or one with
 no receipt) is cleared before the next one, and a failed install is logged and
-never blocks startup. `run` writes its launch bundle to
+never blocks startup. The sidebar's **Profiles** tab edits these plugins in
+place: a save is first checked with `agent-farm plugin validate` on a staged copy
+(without a pack's stale `checksums`, which launches don't read), so nothing changes
+unless Agent Farm accepts it, and Sessions using the plugin then show the changed
+dot. Saving greenfield or dcouple makes it **Edited** this way, and **Restore
+Pane's version** reinstalls the bundled copy and takes it off `edited`. A new
+profile is a plugin installed with `agent-farm plugin install`, since Agent Farm
+finds plugins by their receipts. Saving to your other computers arrives with
+profile sync. `run` writes its launch bundle to
 `<worktree>/.agent-farm/generated`, which Pane hides from git through
 `info/exclude` as it does `.pane/`.
 

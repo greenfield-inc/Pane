@@ -111,6 +111,13 @@ interface NavigationState {
   /** The to-do a Session was last opened from (round 8, T-4): that Session's breadcrumb returns to it. */
   todoSessionOrigin: TodoSessionOrigin | null;
   setTodoSessionOrigin: (origin: TodoSessionOrigin | null) => void;
+  /**
+   * Opens Profiles (T-63): this computer's Agent Farm profiles. Like To-dos, the first entry
+   * remembers the view and Pane you left (`returnPaneId`), which `leaveProfiles` hands back.
+   */
+  navigateToProfiles: (options?: { returnPaneId?: string | null }) => void;
+  profilesReturn: ApprovalsReturn | null;
+  leaveProfiles: () => ApprovalsReturn;
 }
 
 /** A to-do page: its number on machine `machineId` (`local`, or the saved machine the window was switched to). */
@@ -333,4 +340,19 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   },
   todoSessionOrigin: null,
   setTodoSessionOrigin: (origin) => set({ todoSessionOrigin: origin }),
+
+  // Profiles are this computer's, so it clears the project scope.
+  navigateToProfiles: (options) => {
+    const state = get();
+    const profilesReturn = state.activeView === 'profiles'
+      ? state.profilesReturn
+      : { view: state.activeView, projectId: state.activeProjectId, paneId: options?.returnPaneId ?? null };
+    set({ activeView: 'profiles', activeProjectId: null, profilesReturn });
+  },
+  profilesReturn: null,
+  leaveProfiles: () => {
+    const back = get().profilesReturn ?? { view: 'sessions', projectId: null, paneId: null };
+    set({ activeView: back.view === 'profiles' ? 'sessions' : back.view, activeProjectId: back.projectId, profilesReturn: null });
+    return back;
+  },
 }));
