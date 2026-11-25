@@ -16,6 +16,8 @@ interface LoginFill { problem?: string; partly?: boolean }
 function loginWorld() {
   const TYPES = new Set(['text', 'password', 'email', 'tel', 'number', 'search', 'url']);
   const ARMED_MS = 2_000;
+  /** How long after the page last changed Pane still looks at every frame, for a field the page fills without a change an observer sees. */
+  const QUIET_MS = 10_000;
   let target: HTMLInputElement | null = null;
 
   const parentOf = (el: Element): Element | null => el.assignedSlot ?? el.parentElement ?? (el.parentNode instanceof ShadowRoot ? el.parentNode.host : null);
@@ -164,10 +166,11 @@ function loginWorld() {
       }
     };
     let ticking = false;
+    let changedAt = Date.now();
     const holding = () => Array.from(hidden).some(el => el instanceof HTMLInputElement && el.isConnected);
     const everyFrame = () => {
       look();
-      ticking = holding();
+      ticking = holding() || Date.now() - changedAt < QUIET_MS;
       if (ticking) requestAnimationFrame(everyFrame);
     };
     const observer = new MutationObserver(records => {
@@ -176,7 +179,8 @@ function loginWorld() {
         else record.addedNodes.forEach(inspect);
       }
       look();
-      if (!ticking && holding()) {
+      changedAt = Date.now();
+      if (!ticking) {
         ticking = true;
         requestAnimationFrame(everyFrame);
       }
@@ -193,7 +197,7 @@ function loginWorld() {
     if (plain) {
       watch(document);
       // Setting an input's value changes nothing an observer sees, so every frame looks again while a field
-      // holding the login is on the page; once none is, the observer starts it again when one comes back.
+      // holding the login is on the page, and for a while after the page last changed.
       ticking = true;
       requestAnimationFrame(everyFrame);
     }

@@ -153,6 +153,8 @@ test.describe('filling a saved login', () => {
     const shots: Record<string, { shot: string; frame: string; state: JsonValue }> = {};
     for (const value of ['1111', '8888']) {
       const fresh = await page.context().newPage();
+      // In front, so its pictures are of what it draws now.
+      await fresh.bringToFront();
       const t = await tab(fresh, { [`${SITE}/`]: pin });
       await fresh.goto(SITE);
       await fill(t, 'PIN', login(t, { value }));
@@ -223,6 +225,8 @@ test.describe('only on its own site', () => {
     const spy = `${FORM}<script>window.got=[];document.addEventListener('input', e => window.got.push(e.target.value), true);</script>`;
     for (const destination of ['https://evil.test/', `${SITE}/`]) {
       const fresh = await page.context().newPage();
+      // In front, so its pictures are of what it draws now.
+      await fresh.bringToFront();
       const t = await tab(fresh, { [`${SITE}/`]: spy, 'https://evil.test/': spy });
       await fresh.goto(SITE);
       const moved = login(t, { record: async () => { await fresh.goto(destination); } });
@@ -324,15 +328,18 @@ all.forEach((box, i) => box.addEventListener('input', () => { const seen = state
     const seen = [];
     for (const value of ['1111', '8888']) {
       const fresh = await page.context().newPage();
+      // In front, so its pictures are of what it draws now.
+      await fresh.bringToFront();
       const t = await tab(fresh, { [`${SITE}/`]: `<style>*{caret-color:transparent!important;outline:0!important}</style>${html}` });
       await fresh.goto(SITE);
       await fill(t, 'Digit 1', login(t, { value }));
       await act(fresh, t);
       await fresh.evaluate('new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))');
+      // Pictures before the snapshot, which reads the page and so could set off a check of its own.
+      seen.push({ shot: (await t.driver.screenshot(false)).png.toString('base64'), frame: (await t.driver.still(90)).data });
+      expect((await t.driver.snapshot()).snapshot).not.toContain(value[0].repeat(2));
       // The pictures could be of a page that never got it: it did.
       expect(await fresh.evaluate('[...document.querySelectorAll("input")].map(el => el.value).join("")')).toContain(value);
-      expect((await t.driver.snapshot()).snapshot).not.toContain(value[0].repeat(2));
-      seen.push({ shot: (await t.driver.screenshot(false)).png.toString('base64'), frame: (await t.driver.still(90)).data });
       await fresh.close();
     }
     expect(seen[0]).toEqual(seen[1]);
@@ -352,12 +359,13 @@ all.forEach((box, i) => box.addEventListener('input', () => { const seen = state
   }
 
   test('shows no digit when the page draws the filled field, or its boxes, again', async ({ page }) => {
-    const redraw = '<script>function again() { const old = [...document.querySelectorAll("input")]; const kept = old.map(el => el.value); document.querySelector("#f").textContent = "Signing in"; setTimeout(() => { document.querySelector("#f").innerHTML = kept.map((v, i) => "<input aria-label=\'Digit " + (i + 1) + "\' style=\'width:40px;height:40px\'>").join(""); document.querySelectorAll("input").forEach((el, i) => { el.value = kept[i]; }); }, 2300); }</script>';
+    const redraw = '<script>function again() { const old = [...document.querySelectorAll("input")]; const kept = old.map(el => el.value); document.querySelector("#f").textContent = "Signing in"; setTimeout(() => { document.querySelector("#f").innerHTML = kept.map((v, i) => "<input aria-label=\'Digit " + (i + 1) + "\' style=\'width:40px;height:40px\'>").join(""); setTimeout(() => document.querySelectorAll("input").forEach((el, i) => { el.value = kept[i]; }), window.late); }, 2300); }</script>';
     const field = (count: number) => `<div id="f">${Array.from({ length: count }, (_, i) => `<input aria-label="Digit ${i + 1}" style="width:${count === 1 ? 200 : 40}px;height:40px">`).join('')}</div>${redraw}`;
-    for (const count of [1, 4]) {
-      await pictures(page, field(count), async fresh => {
+    // Its values come back with the new fields, or silently a moment after them.
+    for (const [count, late] of [[1, 0], [4, 0], [1, 200]]) {
+      await pictures(page, `<script>window.late = ${late}</script>${field(count)}`, async fresh => {
         await fresh.evaluate('again()');
-        await fresh.waitForTimeout(2500);
+        await fresh.waitForTimeout(2_700);
       });
     }
   });
