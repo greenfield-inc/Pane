@@ -172,7 +172,19 @@ export interface ChatTabQuestion {
   toolCallId?: string;
 }
 
-export interface ChatTabCommand { name: string; description?: string; hint?: string }
+/** `skill`: the agent marks this entry as a skill; it runs anywhere in a message as `$name`. */
+export interface ChatTabCommand { name: string; description?: string; hint?: string; skill?: true }
+
+/** What the composer can mention in a tab. A host from before mentions sends none. */
+export interface ChatTabMentions {
+  /** @ lists the tab's folder (chat-tab:files). */
+  files?: true;
+  /** The tab's agent marks its skills, so $ and a mid-message / list them. */
+  skills?: true;
+}
+
+/** One chat-tab:files result: a path under the tab's folder, with `/`. Folders carry no trailing slash. */
+export interface ChatTabFile { path: string; isDirectory: boolean; changed?: true }
 
 /** A window onto the conversation: `start` messages come before `messages[0]` and are paged with chat-tab:history. */
 export interface ChatTabTranscript {
@@ -213,6 +225,7 @@ export interface ChatTabView {
   clearedAt?: string;
   /** Send now delivers into the running turn, which goes on with its subagents; absent, Send now stops the turn first. */
   sendNowSteers?: true;
+  mentions?: ChatTabMentions;
 }
 
 /** Tokens in the conversation's context and the size of its window. */
@@ -301,6 +314,8 @@ export interface ChatTabClient {
   resume(panelId: string, sessionId: string): Promise<void>;
   /** Closes the Switch to chat banner or note. */
   dismissBanner(panelId: string): Promise<void>;
+  /** The files and folders of the tab's own folder that match `query`, best first; the host picks the folder. */
+  files(panelId: string, query: string): Promise<ChatTabFile[]>;
   signIn(panelId: string): Promise<{ panelId: string }>;
   /** The agents the host can open as chat tabs (its catalog). */
   agents(): Promise<ChatAgentEntry[]>;

@@ -590,6 +590,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     conversations: (panelId: string) => invokeIpc('chat-tab:conversations', panelId),
     resume: (panelId: string, sessionId: string) => invokeIpc('chat-tab:resume', panelId, sessionId),
     dismissBanner: (panelId: string) => invokeIpc('chat-tab:dismiss-banner', panelId),
+    files: (panelId: string, query: string) => invokeIpc('chat-tab:files', panelId, query),
     signIn: (panelId: string) => invokeIpc('chat-tab:sign-in', panelId),
     keys: () => invokeIpc('chat-tab:keys'),
     setKey: (agent: string, key: string | null) => invokeIpc('chat-tab:set-key', agent, key),

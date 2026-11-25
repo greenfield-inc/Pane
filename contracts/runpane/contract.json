@@ -173,6 +173,7 @@
             "dontAsk"
           ],
           "terminalConversationsLoad": true,
+          "skills": "meta",
           "paneMcpHttp": true,
           "registryIds": [
             "claude-acp"
@@ -255,6 +256,7 @@
             "agent-full-access"
           ],
           "terminalConversationsLoad": true,
+          "skills": "dollar",
           "registryIds": [
             "codex-acp"
           ]

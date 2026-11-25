@@ -7,7 +7,7 @@ import { shell } from 'electron';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
-import { glob } from 'glob';
+import { fileSearch, leavesFolder } from '../services/fileSearch';
 import { hasCommitMessageTitle } from '../../../shared/utils/commitMessage';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
@@ -885,9 +885,7 @@ export function registerFileHandlers(
   commandRegistry.register('file:search', async (request: FileSearchRequest) => {
     try {
       // Determine the search directory and get path resolver
-      // storedDir = Linux path (for CommandRunner cwd), searchDirectory = filesystem path (for fs ops)
       let storedDir: string;
-      let searchDirectory: string;
       let pathResolver;
       let commandRunner;
 
@@ -900,7 +898,6 @@ export function registerFileHandlers(
         pathResolver = ctx.pathResolver;
         commandRunner = ctx.commandRunner;
         storedDir = session.worktreePath;
-        searchDirectory = pathResolver.toFileSystem(storedDir);
       } else if (request.projectId) {
         const ctx = sessionManager.getProjectContextByProjectId(request.projectId);
         if (!ctx) throw new Error('Project not found');
@@ -908,136 +905,16 @@ export function registerFileHandlers(
         pathResolver = ctx.pathResolver;
         commandRunner = ctx.commandRunner;
         storedDir = project.path;
-        searchDirectory = pathResolver.toFileSystem(storedDir);
       } else {
         throw new Error('Either sessionId or projectId must be provided');
       }
 
-      // Normalize the pattern for searching
-      const searchPattern = request.pattern.replace(/^@/, '').toLowerCase();
-      
-      // If the pattern contains a path separator, search from that path
-      const pathParts = searchPattern.split(/[/\\]/);
-      const searchDir = pathParts.length > 1 
-        ? path.join(searchDirectory, ...pathParts.slice(0, -1))
-        : searchDirectory;
-      const filePattern = pathParts[pathParts.length - 1] || '';
-      
-      // Check if searchDir exists
-      try {
-        await fs.access(searchDir);
-      } catch {
-        return { success: true, files: [] };
-      }
-
-      // Get list of tracked files (not gitignored) using git
-      const gitTrackedFiles = new Set<string>();
-      let isGitRepo = true;
-      try {
-        // Get list of all tracked files in the repository
-        // Use storedDir (Linux path) for CommandRunner, not filesystem path
-        const { stdout: trackedStdout } = await commandRunner.execAsync(
-          'git ls-files',
-          storedDir
-        );
-
-        if (trackedStdout) {
-          trackedStdout.split('\n').forEach((file: string) => {
-            if (file.trim()) {
-              gitTrackedFiles.add(file.trim());
-            }
-          });
-        }
-
-        // Also get untracked files that are not ignored
-        const { stdout: untrackedStdout } = await commandRunner.execAsync(
-          'git ls-files --others --exclude-standard',
-          storedDir
-        );
-
-        if (untrackedStdout) {
-          untrackedStdout.split('\n').forEach((file: string) => {
-            if (file.trim()) {
-              gitTrackedFiles.add(file.trim());
-            }
-          });
-        }
-      } catch (err) {
-        // Git command failed, likely not a git repo
-        isGitRepo = false;
-        console.log('Could not get git tracked files:', err);
-      }
-
-      // Use glob to find matching files
-      const globPattern = filePattern ? `**/*${filePattern}*` : '**/*';
-      const files = await glob(globPattern, {
-        cwd: searchDir,
-        ignore: [
-          '**/node_modules/**', 
-          '**/.git/**', 
-          '**/dist/**', 
-          '**/build/**',
-          '**/worktrees/**' // Exclude worktree folders
-        ],
-        nodir: false,
-        dot: true,
-        absolute: false,
-        maxDepth: 5
-      });
-
-      // Convert to relative paths from the original directory
-      const results = await Promise.all(
-        files.map(async (file) => {
-          const fullPath = path.join(searchDir, file);
-          const relativePath = pathResolver.relative(searchDirectory, fullPath);
-          
-          // Skip worktree directories
-          if (relativePath.includes('worktrees/') || relativePath.startsWith('worktrees/')) {
-            return null;
-          }
-          
-          // If we're in a git repo, only include tracked/untracked-but-not-ignored files
-          if (isGitRepo && gitTrackedFiles.size > 0 && !gitTrackedFiles.has(relativePath)) {
-            // Check if it's a directory - directories might not be in git ls-files
-            try {
-              const stats = await fs.stat(fullPath);
-              if (!stats.isDirectory()) {
-                return null; // Skip non-directory files that aren't tracked
-              }
-            } catch {
-              return null;
-            }
-          }
-          
-          try {
-            const stats = await fs.stat(fullPath);
-            return {
-              path: relativePath,
-              isDirectory: stats.isDirectory(),
-              name: path.basename(file)
-            };
-          } catch {
-            return null;
-          }
-        })
+      const pattern = request.pattern.replace(/^@/, '');
+      const files = leavesFolder(pattern) ? [] : await fileSearch.search(
+        { storedPath: storedDir, pathResolver, commandRunner, walk: !!request.sessionId && isOrchestrationInternalSessionId(request.sessionId) },
+        pattern, request.limit || 50,
       );
-
-      // Filter out null results and apply pattern matching
-      const filteredResults = results
-        .filter((file): file is NonNullable<typeof file> => file !== null)
-        .filter(file => {
-          // Filter by the full search pattern
-          return file.path.toLowerCase().includes(searchPattern);
-        })
-        .sort((a, b) => {
-          // Sort directories first, then by path
-          if (a.isDirectory && !b.isDirectory) return -1;
-          if (!a.isDirectory && b.isDirectory) return 1;
-          return a.path.localeCompare(b.path);
-        })
-        .slice(0, request.limit || 50);
-
-      return { success: true, files: filteredResults };
+      return { success: true, files: files.map(file => ({ ...file, name: path.posix.basename(file.path) })) };
     } catch (error) {
       console.error('Error searching files:', error);
       return { 

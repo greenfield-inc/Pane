@@ -59,6 +59,7 @@ export const AGENTS_CONFIG = {
           "dontAsk"
         ],
         "terminalConversationsLoad": true,
+        "skills": "meta",
         "paneMcpHttp": true,
         "registryIds": [
           "claude-acp"
@@ -141,6 +142,7 @@ export const AGENTS_CONFIG = {
           "agent-full-access"
         ],
         "terminalConversationsLoad": true,
+        "skills": "dollar",
         "registryIds": [
           "codex-acp"
         ]

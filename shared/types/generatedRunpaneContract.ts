@@ -193,6 +193,7 @@ const CONTRACT_SECTION_9 = {
           "dontAsk"
         ],
         "terminalConversationsLoad": true,
+        "skills": "meta",
         "paneMcpHttp": true,
         "registryIds": [
           "claude-acp"
@@ -275,6 +276,7 @@ const CONTRACT_SECTION_9 = {
           "agent-full-access"
         ],
         "terminalConversationsLoad": true,
+        "skills": "dollar",
         "registryIds": [
           "codex-acp"
         ]
