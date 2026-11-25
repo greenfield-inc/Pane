@@ -1442,7 +1442,7 @@ export class NotifyQueue extends EventEmitter {
     if (this.paneFocused || this.roundOpen || this.canShowStrip()) return [];
     const { items, hidden } = this.snapshot();
     return items.filter(item => ids.has(item.id) && item.state === 'waiting' && !hidden.includes(item.id)
-      && (!item.machineHealth || (item.machineId !== undefined && item.machineHealth.kind === 'disk' && item.machineHealth.level === 'critical')));
+      && (!item.machineHealth || (item.machineId !== undefined && item.machineId !== LOCAL_MACHINE && item.machineHealth.kind === 'disk' && item.machineHealth.level === 'critical')));
   }
 
   /** What no surface should raise, whatever it's asked: quiet and stale items, and what's hidden. */

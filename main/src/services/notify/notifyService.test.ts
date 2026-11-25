@@ -90,6 +90,7 @@ describe('NotifyService in-use poll', () => {
 });
 
 describe('NotifyService in the background', () => {
+  let dictate = false;
   it('sends one system notification per question, whose click opens it in Approvals, and counts what waits on the app badge', async () => {
     vi.stubEnv('PANE_DISABLE_OS_INTEGRATION', '1');
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
@@ -112,6 +113,8 @@ describe('NotifyService in the background', () => {
       sendToMachine: async () => {},
       refreshMachine: async () => {},
       alert: (title, body, click) => { alerts.push({ title, body, click }); },
+      dictateShowsTabs: () => dictate,
+      isChatTab: (panelId) => panelId === 'chat-1',
     });
     const settle = () => new Promise(resolve => setImmediate(() => setImmediate(resolve)));
     try {
@@ -129,6 +132,15 @@ describe('NotifyService in the background', () => {
       service.queue.run({ type: 'close', id });
       await settle();
       expect(app.setBadgeCount).toHaveBeenLastCalledWith(0);
+
+      // While Dictate shows this computer's blocked tabs, a tab's prompt is left to it; anything else still notifies.
+      dictate = true;
+      service.queue.setActiveMachine('local');
+      void service.queue.ask({ question: { ui: 'options', title: 'Run npm test?', choices: [{ label: 'Yes' }, { label: 'No' }], agentPrompt: { yes: 'Yes', no: 'No' } }, source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 't1' } });
+      void service.queue.ask({ question: { ui: 'ask', title: 'Which colour?' }, source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 'chat-1' } });
+      void service.queue.ask({ question: { ui: 'ask', title: 'Deploy now?' }, source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 't2' } });
+      await settle();
+      expect(alerts.slice(1).map(({ title, body }) => [title, body])).toEqual([['feature needs your answer', 'Deploy now?']]);
     } finally {
       service.dispose();
       vi.restoreAllMocks();

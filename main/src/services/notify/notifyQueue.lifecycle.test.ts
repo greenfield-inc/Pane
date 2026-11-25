@@ -649,6 +649,9 @@ describe('NotifyQueue with its store', () => {
       expect(titles(queue)).toEqual(['disk critical']);
       expect(queue.snapshot().items.map(entry => entry.title)).toEqual(['disk warning', 'disk critical']);
       expect(queue.snapshot().queue).toEqual(['b:d1', 'b:d2']);
+      // This computer's own nearly full disk has its own alert, even with a machine linked.
+      void queue.ask({ question: { ui: 'options', title: 'Disk is almost full', choices: [{ label: 'Not now' }], machineHealth: { kind: 'disk', level: 'critical', hostname: 'mini', rows: [], agentPrompt: '' } }, source: { name: 'Pane', agent: 'Pane' } });
+      expect(titles(queue)).toEqual([]);
     });
   });
 

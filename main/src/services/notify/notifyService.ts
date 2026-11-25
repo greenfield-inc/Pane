@@ -132,6 +132,13 @@ export interface NotifyServiceDependencies {
   typeIntoTab?: NotifyQueueEnvironment['typeIntoTab'];
   /** Seconds since the person last used this computer; Infinity while its screen is locked. Absent: in use. */
   idleSeconds?: () => number;
+  /**
+   * Whether Dictate shows this computer's blocked tabs right now; a prompt asked in one of them
+   * (`isTabPrompt`) then has its notice there.
+   */
+  dictateShowsTabs?: () => boolean;
+  /** A chat tab on this computer: its questions block the tab, as a Claude prompt does. */
+  isChatTab?: (panelId: string) => boolean;
   /** Shows a system notification under the person's desktop notification rules. */
   alert?: (title: string, body: string, onClick: () => void) => void;
   /** Where "Show cards on" leaves this machine (`cardsOnStatus`). Absent: whichever computer is in use. */
@@ -924,13 +931,20 @@ export class NotifyService {
   }
 
   /** One system notification for what started waiting while Pane is in the background. */
-  private announce(items: NotifyItem[]): void {
+  private announce(announced: NotifyItem[]): void {
+    const items = this.deps.dictateShowsTabs?.() ? announced.filter(item => !this.isTabPrompt(item)) : announced;
     const [first] = items;
     if (!first) return;
     const open = () => { void this.openInPane(first.id); };
     if (items.length === 1 && first.machineHealth) this.deps.alert?.(`${first.machine}: ${first.title}`, first.context ?? '', open);
     else if (items.length === 1) this.deps.alert?.(`${first.source.name} ${first.readyAgain ? 'updated its question' : 'needs your answer'}`, first.title, open);
     else this.deps.alert?.(`${items.length} approvals are waiting`, first.title, () => this.navigate('inbox'));
+  }
+
+  /** A prompt asked in one of this computer's tabs, which reads blocked while it waits. */
+  private isTabPrompt(item: NotifyItem): boolean {
+    if ((item.machineId ?? 'local') !== 'local') return false;
+    return item.originKind === 'claude-prompt' || (item.source.panelId !== undefined && this.deps.isChatTab?.(item.source.panelId) === true);
   }
 
   /** The disk alert's click: Pane comes to the front on this computer's Resources. */

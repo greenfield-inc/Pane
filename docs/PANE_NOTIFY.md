@@ -559,7 +559,9 @@ Alerts interrupt you on the device you're using (D-144):
   in while you were away or paused make one notification. It follows Settings ›
   Notifications, and the same in-use and Show cards on rules. A snooze
   that ends sends one again. A Claude prompt or chat-tab question sends this one,
-  never its tab's "needs your input" too. It shows even while Dictate runs.
+  never its tab's "needs your input" too. While Dictate runs, it shows a tab's prompt as that tab
+  needing input, so Pane sends nothing more for it; every other approval still
+  notifies from Pane.
 - **The app badge** counts what you can answer now, as Approvals does, on the Dock (macOS) or the launcher
   (Linux desktops that support it). On Windows it is a dot on the taskbar button.
 - **The phone** gets a push about 90 seconds after an approval arrives, only if
