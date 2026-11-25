@@ -1,7 +1,6 @@
-import type { HealthCardRow, HealthLevel, HealthProcess, LeakWarning, MachineHealthCard, MachineHealthSnapshot, ReclaimItem } from '../../../../shared/types/machineHealth';
+import type { HealthCardRow, HealthLevel, HealthProcess, LeakWarning, MachineHealthCard, MachineHealthSnapshot } from '../../../../shared/types/machineHealth';
 import { formatBytes, formatMB } from '../../../../shared/utils/formatBytes';
 import type { FinishedPane } from './finishedPanes';
-import type { IdleOffer } from './memoryRelief';
 
 const HOUR = 3_600_000;
 const REPEAT_AFTER_MS = 6 * HOUR;
@@ -54,8 +53,6 @@ export class CardGate {
 const MB = 1024 * 1024;
 
 export const NOT_NOW = 'Not now';
-export const CLEAN_UP = 'Clean up';
-export const PAUSE_IDLE = 'Pause idle Panes';
 export const STOP_IT = 'Stop it';
 export const RESTART_IT = 'Restart it';
 export const IGNORE_PROCESS = 'Ignore for this process';
@@ -85,56 +82,19 @@ function listed(rows: HealthCardRow[]): string {
   return lines.length > 0 ? `\n\nThe card listed:\n${lines.join('\n')}` : '';
 }
 
-function topConsumers(snapshot: MachineHealthSnapshot): HealthCardRow[] {
-  const rows: HealthCardRow[] = snapshot.panes.flatMap(pane => pane.processes.map(proc => ({
-    label: proc.name.split('/').pop() ?? proc.name, detail: pane.name, bytes: Math.round(proc.rssMB * MB),
-  })));
-  rows.push({ label: 'Pane', detail: 'the app', bytes: Math.round(snapshot.app.rssMB * MB) });
-  return rows.sort((a, b) => b.bytes - a.bytes).slice(0, 5);
-}
-
-/** The card for a disk below the warning level: free space, and the items Clean up deletes, every one listed. */
-export function diskCard(snapshot: MachineHealthSnapshot, items: readonly ReclaimItem[]): CardQuestion {
+/** The card for a low disk: how much is free. It warns and opens Resources; it never offers a cleanup. */
+export function diskCard(snapshot: MachineHealthSnapshot): CardQuestion {
   const volume = [...snapshot.disk.volumes].sort((a, b) => a.freeBytes - b.freeBytes)[0];
   const free = volume?.freeBytes ?? 0;
-  const frees = items.reduce((sum, item) => sum + item.sizeBytes, 0);
-  const rows = items.map(item => ({ label: item.path.split(/[\\/]/u).pop() ?? item.path, detail: item.reason, bytes: item.sizeBytes, note: `Tier ${item.tier}` }));
-  const critical = snapshot.disk.level === 'critical';
-  const canFree = frees > 0 ? ` Pane can free about ${formatBytes(frees)} of its own leftovers and finished work.` : '';
-  // Critical always notifies, so it says what to do.
-  const todo = critical ? ` Open Resources to see what uses the disk${frees > 0 ? ' and clean up' : ''}.` : '';
   return {
-    title: critical ? 'Disk is almost full' : 'Disk almost full',
-    context: `${formatBytes(free)} free.${canFree}${todo}`,
-    choices: frees > 0 ? [CLEAN_UP, NOT_NOW] : [NOT_NOW],
+    title: snapshot.disk.level === 'critical' ? 'Disk is almost full' : 'Disk space is low',
+    context: `${formatBytes(free)} free. Open Resources to see what uses the disk.`,
+    choices: [NOT_NOW],
     card: {
       kind: 'disk', level: snapshot.disk.level, hostname: snapshot.hostname,
-      freeBytes: free, totalBytes: volume?.totalBytes, rows, freesBytes: frees,
-      agentPrompt: `${snapshot.hostname} has ${formatBytes(free)} of disk free. Run \`runpane machine health --json\` to see what Pane can free, by tier. ${agentRule}${listed(rows)}`,
-    },
-  };
-}
-
-/** The card for memory pressure: top consumers and an early pause of idle Panes. */
-export function memoryCard(snapshot: MachineHealthSnapshot, offer: IdleOffer, hours: number): CardQuestion {
-  const used = snapshot.memory.totalBytes - snapshot.memory.freeBytes;
-  const swap = snapshot.memory.swapUsedBytes ? `, plus ${formatBytes(snapshot.memory.swapUsedBytes)} of swap` : '';
-  const rows = topConsumers(snapshot);
-  const critical = snapshot.memory.level === 'critical';
-  // Critical always notifies, so it says what to do.
-  const effect = critical
-    ? `Apps may freeze. Quit apps you don't need${offer.paneIds.length > 0 ? ' or pause idle Panes' : ''}; Resources shows what uses the most.`
-    : 'Agents and dev servers may slow down.';
-  return {
-    title: critical ? 'Memory is almost out' : 'Memory is tight',
-    context: `Using ${formatBytes(used)} of ${formatBytes(snapshot.memory.totalBytes)}${swap}. ${effect}`,
-    choices: offer.paneIds.length > 0 ? [PAUSE_IDLE, NOT_NOW] : [NOT_NOW],
-    card: {
-      kind: 'memory', level: snapshot.memory.level, hostname: snapshot.hostname,
-      usedBytes: used, totalBytes: snapshot.memory.totalBytes, swapUsedBytes: snapshot.memory.swapUsedBytes,
-      rows,
-      pauseOffer: { paneCount: offer.paneIds.length, memoryMB: Math.round(offer.memoryMB), hours },
-      agentPrompt: `${snapshot.hostname} is short of memory. Run \`runpane machine health --json\` to see which Panes and processes use the most. ${agentRule}${listed(rows)}`,
+      freeBytes: free, totalBytes: volume?.totalBytes, rows: [],
+      // An older linked Pane still offers Ask an agent on this card.
+      agentPrompt: `${snapshot.hostname} has ${formatBytes(free)} of disk free. Run \`runpane machine health --json\` to see what uses it. ${agentRule}`,
     },
   };
 }
