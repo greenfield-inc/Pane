@@ -121,7 +121,8 @@ export function paneAgentFarmProcess(paneDir: string, args: string[], options: {
  * an error that says what to do. Session move and the Session list both read it.
  */
 export async function listPaneAgentFarmProfiles(paneDir: string, env: NodeJS.ProcessEnv = process.env, run: AgentFarmRunner = runAgentFarm): Promise<AgentFarmProfileList> {
-  const agentFarm = paneAgentFarmProcess(paneDir, ['profiles', 'list'], env);
+  // Only read while Profiles is on (chat-tab:profiles and a Session's named profile check that first).
+  const agentFarm = paneAgentFarmProcess(paneDir, ['profiles', 'list'], { env, profiles: true });
   if (!agentFarm) return { profiles: [], error: `This Pane build does not include ${AGENT_FARM_PACKAGE}, so it has no Agent Farm profiles. Reinstall Pane from runpane.com.` };
   try {
     return { profiles: parseProfileList(await run(agentFarm)) };
