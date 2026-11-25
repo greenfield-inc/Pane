@@ -9,6 +9,7 @@ import type { ChatTabClient, ChatTabSend } from '../../../../shared/types/chatTa
 import { chatTurns, messageTime, steeredMessageId, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine, type WorkingAgent } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
+import { switchMark } from '../../../../shared/switchMarks';
 import { toAssistantMessage } from '../agentChat/convertMessage';
 import type { ActiveMachine } from '../../stores/activeMachineStore';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
@@ -221,6 +222,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const loadConversations = useCallback(() => client.conversations(panelId), [client, panelId]);
   const resumeConversation = useCallback((sessionId: string) => client.resume(panelId, sessionId), [client, panelId]);
   const messages = useMemo(() => snapshot.transcript?.messages ?? [], [snapshot.transcript?.messages]);
+  useEffect(() => { switchMark('chat:mount', { panelId }); }, [panelId]);
+  useLayoutEffect(() => { switchMark('chat:commit', { panelId, n: messages.length }); }, [panelId, messages.length]);
   const followLiveEnd = useRef<(() => void) | undefined>(undefined);
   /** The sent message's transcript ID: when the host's copy of it renders, the chat follows the live end once more. */
   const followSent = useRef<string | undefined>(undefined);

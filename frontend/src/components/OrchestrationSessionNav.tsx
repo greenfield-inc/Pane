@@ -41,6 +41,7 @@ import { resumeIfOpenResumes, runPauseAction } from '../utils/pause';
 import { usePanelStore } from '../stores/panelStore';
 import { panePausedMark } from '../../../shared/types/panels';
 import { moveMarkLabel } from '../utils/sessionMoveView';
+import { switchMark } from '../../../shared/switchMarks';
 
 interface OrchestrationSessionNavProps {
   compact?: boolean;
@@ -228,6 +229,7 @@ export function OrchestrationSessionNav({
   }, []);
 
   const openSession = useCallback(async (sessionId: string) => {
+    switchMark('open', sessionId);
     // Navigation belongs to the click, never to the order of remote replies.
     void setActiveSession(null);
     navigateToPaneChat();

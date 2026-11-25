@@ -49,6 +49,7 @@ import { configuredAgent } from '../../../shared/agents';
 import { useHotkey } from '../hooks/useHotkey';
 import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../utils/sessionDrag';
 import type { DropZone, LayoutDirection } from '../utils/layoutTree';
+import { switchMark } from '../../../shared/switchMarks';
 import {
   closeSessionTile,
   dropSessionOnTile,
@@ -449,7 +450,9 @@ function SessionTile({
     setIsLoading(true);
     setError(null);
     try {
+      switchMark('session:get:start', sessionId);
       const response = await API.orchestrationSessions.get({ sessionId });
+      switchMark('session:get:end', sessionId);
       if (generation !== requestGeneration.current) return;
       const responseFailure = responseError(response, 'Failed to open Session');
       if (responseFailure || !response.data) throw responseFailure ?? new Error('Failed to open Session');

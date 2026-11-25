@@ -498,6 +498,31 @@ jobs:
         PANE_DIR: ${{ runner.temp }}/pane-stabilizing-electron
         PANE_ELECTRON_E2E: '1'
 
+    # Session switch latency against the production renderer (frontend/dist), on
+    # shard 2, which has no stabilizing step. Timing is reported only, in the job
+    # summary and the uploaded samples; its hard checks (DOM kept per switch, one
+    # chat mount per switch, Enter focus) fail the job.
+    - name: Build production renderer for the switch benchmark
+      if: ${{ !cancelled() && matrix.shard == 2 }}
+      run: pnpm build:frontend
+
+    - name: Run Session switch benchmark
+      id: session-switch
+      if: ${{ !cancelled() && matrix.shard == 2 }}
+      run: xvfb-run -a pnpm test:session-switch --output=test-results/session-switch-playwright
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-session-switch
+        SESSION_SWITCH_OUT: test-results/session-switch
+
+    - name: Upload Session switch samples
+      if: ${{ !cancelled() && matrix.shard == 2 }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: session-switch-latency
+        path: test-results/session-switch/
+        retention-days: 30
+        if-no-files-found: ignore
+
     # Traces and screenshots of failed Electron journeys, to diagnose a failure
     # without rerunning it.
     - name: Upload Electron test results
