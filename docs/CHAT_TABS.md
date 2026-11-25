@@ -611,8 +611,12 @@ never blocks startup. `run` writes its launch bundle to
 Telemetry with Profiles off is Agent Farm's own default, as before T-63: Pane
 writes only `telemetry.directory` as `<PANE_DIR>/agent-farm/telemetry` into that
 folder's `settings.json`, sets no `AGENT_FARM_TELEMETRY`, and shows no switch.
-Turning Profiles off takes back a `telemetry.enabled` Pane wrote itself
-(`pane-telemetry.json` beside it records it) and leaves one written by hand.
+When Profiles first comes on, Pane records the `telemetry.enabled` that was there
+(or that there was none) in `pane-telemetry.json` beside it, before writing its
+own. Turning Profiles off puts that back, so an opt-out you set earlier survives;
+a value changed by hand while Profiles was on is left as it is. Startup and every
+settings change write through one queue (`agentFarmTelemetrySync`) that ends on
+the latest switches, so quick toggles never leave a stale value.
 
 With Profiles on, telemetry is off unless Settings › AI & Agents › *Save Agent Farm telemetry on
 this computer* (`agentFarmTelemetry` in `<PANE_DIR>/config.json`) is on: Pane writes
@@ -622,7 +626,9 @@ whenever the switch changes. Each computer keeps its own switch. A repository's
 `.agent-farm/workspace.yaml` outranks `settings.json` in Agent Farm, so every
 Agent Farm Pane runs (chat launches, Session move, the terminal shim) also gets
 `AGENT_FARM_TELEMETRY=off`, the one setting that outranks a workspace, unless the
-saved switch and `settings.json` both say on. The saved switch is what Settings
+saved switch and `settings.json` both say on. Chat launches pass Pane's live
+Profiles state, so a `config.json` that can't be read never lifts that hold;
+without a caller's state, an unreadable `config.json` counts as telemetry off. The saved switch is what Settings
 shows, so turning it off holds even if writing `settings.json` failed; Pane retries
 that write at the next settings change and the next start. While the switch is
 on, a repository's settings can still turn telemetry off or name another folder;

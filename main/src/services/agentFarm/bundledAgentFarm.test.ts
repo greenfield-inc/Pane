@@ -9,6 +9,7 @@ import {
   RETIRED_AGENT_FARM_PLUGINS,
   agentFarmConfigRoot,
   bundledAgentFarm,
+  agentFarmTelemetrySync,
   bundledAgentFarmProcess,
   installBundledAgentFarm,
   paneAgentFarmProcess,
@@ -238,18 +239,37 @@ describe('bundledAgentFarmProcess', () => {
 
 describe('bundledAgentFarmProcess with Profiles off', () => {
   // As main launches it: Agent Farm's own default decides, whatever Pane's telemetry switch says.
-  it('leaves telemetry to Agent Farm, for a missing, unreadable or switched-off config', () => {
+  it('leaves telemetry to Agent Farm, for a missing or switched-off config, or when the caller says Profiles is off', () => {
     const paneDir = tempDir();
     const bundle = { root: '/app', entry: '/app/dist/cli.js', version: '0.2.34' };
-    const env = () => bundledAgentFarmProcess(bundle, ['run', 'p'], agentFarmConfigRoot(paneDir), { PATH: '/bin' }).env;
+    const env = (profiles?: boolean) => bundledAgentFarmProcess(bundle, ['run', 'p'], agentFarmConfigRoot(paneDir), { PATH: '/bin' }, undefined, profiles).env;
     expect(env()).toEqual({ PATH: '/bin', ELECTRON_RUN_AS_NODE: '1' });
     writeFileSync(path.join(paneDir, 'config.json'), '{ not json');
-    expect(env().AGENT_FARM_TELEMETRY).toBeUndefined();
+    expect(env(false).AGENT_FARM_TELEMETRY).toBeUndefined();
     writeFileSync(path.join(paneDir, 'config.json'), JSON.stringify({ agentFarmTelemetry: false, sessionProfilesEnabled: false }));
     expect(env().AGENT_FARM_TELEMETRY).toBeUndefined();
     // The removed Profiles engine's key turns nothing on.
     writeFileSync(path.join(paneDir, 'config.json'), JSON.stringify({ profilesEnabled: true }));
     expect(env().AGENT_FARM_TELEMETRY).toBeUndefined();
+  });
+});
+
+// Review F-7: Pane still has Profiles on (its last good config) while config.json on disk is broken.
+describe('bundledAgentFarmProcess with an unreadable config.json', () => {
+  it('holds telemetry off when the caller says Profiles is on, and when nobody says', () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    const bundle = { root: '/app', entry: '/app/dist/cli.js', version: '0.2.34' };
+    mkdirSync(configRoot, { recursive: true });
+    writeFileSync(path.join(configRoot, 'settings.json'), JSON.stringify({ telemetry: { enabled: true } }));
+    writeFileSync(path.join(paneDir, 'config.json'), '{ not json');
+    const env = (profiles?: boolean) => bundledAgentFarmProcess(bundle, ['run', 'p'], configRoot, { PATH: '/bin' }, undefined, profiles).env.AGENT_FARM_TELEMETRY;
+    expect(env(true)).toBe('off');
+    expect(env()).toBe('off');
+    // Readable again, with the switch on, the caller's Profiles state still decides.
+    writeFileSync(path.join(paneDir, 'config.json'), JSON.stringify({ agentFarmTelemetry: true }));
+    expect(env(true)).toBeUndefined();
+    expect(env(false)).toBeUndefined();
   });
 });
 
@@ -366,11 +386,88 @@ describe('writeAgentFarmTelemetry', () => {
   });
 });
 
+// Review F-5: an opt-out (or opt-in) set before Profiles came on is what Profiles off gives back.
+describe('writeAgentFarmTelemetry keeps what was there before Profiles', () => {
+  for (const before of [false, true, undefined]) {
+    it(`restores enabled: ${before} after Profiles goes on and off, through on and off of the switch`, async () => {
+      const paneDir = tempDir();
+      const configRoot = agentFarmConfigRoot(paneDir);
+      const directory = path.join(configRoot, 'telemetry');
+      mkdirSync(configRoot, { recursive: true });
+      writeFileSync(path.join(configRoot, 'settings.json'), JSON.stringify({ telemetry: before === undefined ? { directory } : { enabled: before, directory } }));
+      const settings = () => JSON.parse(readFileSync(path.join(configRoot, 'settings.json'), 'utf8')).telemetry;
+      await writeAgentFarmTelemetry(paneDir, false);
+      expect(settings().enabled).toBe(false);
+      await writeAgentFarmTelemetry(paneDir, true);
+      await writeAgentFarmTelemetry(paneDir, false);
+      await writeAgentFarmTelemetry(paneDir, undefined);
+      expect(settings()).toEqual(before === undefined ? { directory } : { enabled: before, directory });
+      expect(existsSync(path.join(configRoot, 'pane-telemetry.json'))).toBe(false);
+    });
+  }
+});
+
+// Review F-6: Profiles on then off while the first write is still pending; the last toggle wins.
+describe('agentFarmTelemetrySync', () => {
+  it('writes one at a time and ends on the latest wanted value', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    let wanted: boolean | undefined = false;
+    const order: Array<boolean | undefined> = [];
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let started: () => void = () => undefined;
+    const firstStarted = new Promise<void>(resolve => { started = resolve; });
+    let active = 0;
+    const sync = agentFarmTelemetrySync(paneDir, () => wanted, {
+      write: async (dir, value) => {
+        active += 1;
+        expect(active).toBe(1);
+        order.push(value);
+        if (order.length === 1) { started(); await gate; }
+        await writeAgentFarmTelemetry(dir, value);
+        active -= 1;
+      },
+      onError: error => { throw error; },
+    });
+    const first = sync.sync();
+    await firstStarted;
+    // Profiles turned off while the first write is still pending.
+    wanted = undefined;
+    const second = sync.sync();
+    release();
+    await Promise.all([first, second]);
+    expect(order).toEqual([false, undefined]);
+    expect(JSON.parse(readFileSync(path.join(configRoot, 'settings.json'), 'utf8')).telemetry).toEqual({ directory: path.join(configRoot, 'telemetry') });
+    // Nothing more to do when nothing changed.
+    await sync.sync();
+    expect(order).toHaveLength(2);
+  });
+
+  it('reports a failed write and tries again at the next sync', async () => {
+    const paneDir = tempDir();
+    const errors: unknown[] = [];
+    let fail = true;
+    const writes: Array<boolean | undefined> = [];
+    const sync = agentFarmTelemetrySync(paneDir, () => true, {
+      write: async (_dir, value) => { writes.push(value); if (fail) throw new Error('read-only'); },
+      onError: error => errors.push(error),
+    });
+    await sync.sync();
+    expect(errors).toHaveLength(1);
+    fail = false;
+    await sync.sync();
+    expect(writes).toEqual([true, true]);
+    expect(errors).toHaveLength(1);
+  });
+});
+
 describe('paneAgentFarmProcess', () => {
   it('is the bundled copy with Pane\'s config root, or undefined without a bundle', () => {
     const bundle = { root: '/app', entry: '/app/dist/cli.js', version: '0.2.34' };
-    expect(paneAgentFarmProcess('/pane', ['profiles', 'list'], { PATH: '/bin' }, bundle, '/Pane')).toEqual({ executable: '/Pane', args: ['/app/dist/cli.js', 'profiles', 'list', '--config-root', path.join('/pane', 'agent-farm')], env: { PATH: '/bin', ELECTRON_RUN_AS_NODE: '1' } });
-    expect(paneAgentFarmProcess('/pane', ['profiles', 'list'], {}, null)).toBeUndefined();
+    expect(paneAgentFarmProcess('/pane', ['profiles', 'list'], { env: { PATH: '/bin' }, bundle, runtime: '/Pane', profiles: false })).toEqual({ executable: '/Pane', args: ['/app/dist/cli.js', 'profiles', 'list', '--config-root', path.join('/pane', 'agent-farm')], env: { PATH: '/bin', ELECTRON_RUN_AS_NODE: '1' } });
+    expect(paneAgentFarmProcess('/pane', ['profiles', 'list'], { env: { PATH: '/bin' }, bundle, runtime: '/Pane', profiles: true })?.env.AGENT_FARM_TELEMETRY).toBe('off');
+    expect(paneAgentFarmProcess('/pane', ['profiles', 'list'], { env: {}, bundle: null })).toBeUndefined();
   });
 });
 

@@ -241,6 +241,19 @@ describe('the agent-farm shim', () => {
     expect(fs.readFileSync(path.join(state.binDir, 'agent-farm'), 'utf8')).toBe('#!/bin/sh\necho mine\n');
   });
 
+  // Review F-8: an open bash that ran Pane's shim finds the PATH one once Profiles is turned off.
+  it.skipIf(process.platform === 'win32')('lets an open bash terminal find agent-farm on PATH again after the shim is removed', () => {
+    const state = installWithAgentFarm();
+    const own = path.join(root, 'own-bin');
+    fs.mkdirSync(own, { recursive: true });
+    fs.writeFileSync(path.join(own, 'agent-farm'), '#!/bin/sh\necho own-agent-farm\n', { mode: 0o755 });
+    const home = path.join(root, 'bash-home');
+    fs.mkdirSync(home, { recursive: true });
+    const script = `agent-farm --version >/dev/null 2>&1; rm -f ${JSON.stringify(path.join(state.binDir, 'agent-farm'))}; agent-farm`;
+    const result = spawnSync('/bin/bash', ['--rcfile', state.bashRcFile, '-i', '-c', script], { encoding: 'utf8', env: { PATH: `${own}:/usr/bin:/bin`, HOME: home, TERM: 'dumb' } });
+    expect(result.stdout.trim()).toBe('own-agent-farm');
+  });
+
   // Profiles off (T-63): `agent-farm` in Pane's terminals is whatever is on PATH, as on main.
   it('follows the Profiles switch: removed with it off, at start and on a change, back with it on', () => {
     const files = (state: RunpaneShimState) => ['agent-farm', 'agent-farm.cmd', 'agent-farm.cjs'].filter(name => fs.existsSync(path.join(state.binDir, name)));

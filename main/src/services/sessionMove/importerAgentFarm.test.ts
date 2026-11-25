@@ -4,6 +4,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentFarmProfiles } from './importer';
 import { readProfilesSwitchFrom } from '../agentFarm/profilesFeature';
+import { installBundledAgentFarm } from '../agentFarm/bundledAgentFarm';
 
 /** Which Agent Farm a Session move asks for profiles (T-63): PATH's with Profiles off, as on main; Pane's with it on. */
 
@@ -36,6 +37,11 @@ describe('a Session move\'s Agent Farm', () => {
 
   it.skipIf(process.platform === 'win32')('is Pane\'s bundled copy while Profiles is on, never the one on PATH', async () => {
     readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: true }));
-    expect(await agentFarmProfiles(shellPath)).not.toHaveProperty('mine/own');
+    // Review F-9: positive evidence. Pane's copy lists the plugins installed in its own config root.
+    const status = await installBundledAgentFarm({ paneDir: path.join(root, 'pane'), telemetry: false, log: () => undefined });
+    expect(status.state).toBe('ready');
+    const profiles = await agentFarmProfiles(shellPath);
+    expect(profiles).not.toHaveProperty('mine/own');
+    expect(Object.keys(profiles).some(name => name.startsWith('greenfield/'))).toBe(true);
   }, 60_000);
 });

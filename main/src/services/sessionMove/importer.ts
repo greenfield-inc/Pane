@@ -203,7 +203,7 @@ export async function cliVersion(executable: string, args: string[] = ['--versio
 async function runAgentFarm(args: string[], options: { cwd?: string; timeout: number; shellPath?: () => string }): Promise<{ stdout: string }> {
   const env = { ...process.env, PATH: (options.shellPath ?? getShellPath)() };
   if (!profilesOn()) return run('agent-farm', args, { cwd: options.cwd, env, timeout: options.timeout });
-  const agentFarm = paneAgentFarmProcess(getAppDirectory(), args, env);
+  const agentFarm = paneAgentFarmProcess(getAppDirectory(), args, { env, profiles: true });
   if (!agentFarm) throw new PaneError('ERR_MOVE_AGENT_FARM_MISSING', `This Pane build on ${thisMachineName()} lacks its bundled Agent Farm.`, `Reinstall Pane from runpane.com on ${thisMachineName()}, then check again.`);
   return run(agentFarm.executable, agentFarm.args, { cwd: options.cwd, env: agentFarm.env, timeout: options.timeout, windowsHide: true });
 }
