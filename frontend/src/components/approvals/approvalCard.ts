@@ -1,4 +1,5 @@
 import type { NotifyChoice, NotifyItem, NotifyLink, NotifySubQuestion, NotifyVersion } from '../../../../shared/types/notify';
+import { newestFirst } from '../../../../shared/approvalOrder';
 import { EMPTY_TODO_SCOPE, inTodoScope, type TodoApprovalScope } from '../todos/sessionTodos';
 import { machineOfItem } from '../../../../shared/todoKey';
 import { todoRefOfItem } from '../../stores/todosStore';
@@ -209,7 +210,7 @@ export function askedBy(item: NotifyItem): string[] {
 }
 
 /**
- * Items open for a Session (its own, its workers', Autopilot's about it; not dismissed), oldest first: from
+ * Items open for a Session (its own, its workers', Autopilot's about it; not dismissed), newest first (T-88): from
  * the machine it is on (`todos.machineId`, T-51), and not from a machine gone offline, whose cards wait in
  * Approvals until it is back.
  */
@@ -217,7 +218,7 @@ export function sessionApprovals(items: readonly NotifyItem[], sessionId: string
   return items
     .filter(item => isOpenForSession(item) && !item.relay && item.staleSince === undefined && !item.unreachable && machineOfItem(item) === todos.machineId
       && (item.source.session?.id === sessionId || (item.connected?.kind === 'session' && item.connected.id === sessionId) || inTodoScope(item, todos)))
-    .sort((a, b) => a.createdAt - b.createdAt);
+    .sort(newestFirst);
 }
 
 /**

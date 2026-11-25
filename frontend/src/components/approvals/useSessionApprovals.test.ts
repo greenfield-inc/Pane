@@ -46,6 +46,14 @@ describe('openNewSessionApprovals', () => {
     expect(opened()).toBe('q7');
   });
 
+  it('T-88: opens the newest of several approvals arriving together', () => {
+    stop = openNewSessionApprovals('s1');
+    const now = Date.now();
+    useNotifyStore.setState({ snapshot: snapshotOf([old, approval('q7', now), approval('q8', now + 5)]) });
+
+    expect(opened()).toBe('q8');
+  });
+
   it('leaves an approval already open in the column alone, so a reply being typed stays', () => {
     stop = openNewSessionApprovals('s1');
     useApprovalColumnStore.getState().openApproval('session:s1', 'old');

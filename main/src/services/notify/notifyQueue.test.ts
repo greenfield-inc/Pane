@@ -93,22 +93,33 @@ describe('NotifyQueue', () => {
     expect(queue.snapshot().hidden).toEqual([]);
   });
 
-  it('shows one question at a time, oldest first, and the next one after an answer', async () => {
+  it('shows one question at a time, newest first, and the next one after an answer (T-88)', async () => {
     const { queue } = makeQueue();
-    const first = ask(queue, sessionStore, claude);
+    ask(queue, sessionStore, claude);
     vi.advanceTimersByTime(1_000);
-    ask(queue, migration, codex);
+    const second = ask(queue, migration, codex);
+    const [newestId, olderId] = queue.snapshot().queue;
+    expect(queue.snapshot().items.find(item => item.id === newestId)?.title).toBe(migration.title);
+    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: newestId });
 
-    const [firstId, secondId] = queue.snapshot().queue;
-    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: firstId });
-
-    queue.run({ type: 'answer', id: firstId, answer: { choice: 'Postgres table' } });
-    expect(queue.snapshot().strip).toEqual({ kind: 'sent', itemId: firstId });
-    expect(queue.snapshot().queue).toEqual([secondId]);
+    queue.run({ type: 'answer', id: newestId, answer: { approved: true } });
+    expect(queue.snapshot().strip).toEqual({ kind: 'sent', itemId: newestId });
+    expect(queue.snapshot().queue).toEqual([olderId]);
 
     await vi.advanceTimersByTimeAsync(3_000);
-    expect(first.result).toEqual({ answer: 'Postgres table' });
-    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: secondId });
+    expect(second.result).toEqual({ approved: true });
+    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: olderId });
+  });
+
+  it('puts a question asked while another shows on top, like a stack (T-88)', () => {
+    const { queue } = makeQueue();
+    ask(queue, sessionStore, claude);
+    const firstId = onlyId(queue);
+    vi.advanceTimersByTime(1_000);
+    ask(queue, migration, codex);
+    const newestId = queue.snapshot().queue.find(id => id !== firstId);
+    expect(queue.snapshot().queue).toEqual([newestId, firstId]);
+    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: newestId });
   });
 
   it('holds an answer 3 seconds, and Undo brings the question back with nothing sent', async () => {
@@ -388,7 +399,8 @@ describe('NotifyQueue', () => {
     expect(titles()).toEqual(['Which region?']);
 
     // A snooze that ends announces the question again.
-    queue.run({ type: 'remind', id: onlyId(queue), after: '10m' });
+    const firstAsked = queue.snapshot().items.find(item => item.title === sessionStore.title)?.id ?? '';
+    queue.run({ type: 'remind', id: firstAsked, after: '10m' });
     vi.advanceTimersByTime(10 * 60_000);
     expect(titles()).toEqual(['Which session store should the refactor use?']);
   });
@@ -462,13 +474,14 @@ describe('NotifyQueue across machines', () => {
     const laptopCall = ask(laptop, migration, codex);
 
     const hostId = onlyId(host);
-    const [hostKey, laptopId] = laptop.snapshot().queue;
+    // The laptop's question is newer, so it leads (T-88).
+    const [laptopId, hostKey] = laptop.snapshot().queue;
     expect(hostKey).toBe(onStudio(hostId));
     expect(laptop.snapshot().items.map(item => [item.title, item.machine])).toEqual([
       ['Apply migration 0042 to staging?', 'parsa-devbox'],
       ['Which session store should the refactor use?', 'mac-studio'],
     ]);
-    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: hostKey });
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: laptopId });
     expect(laptop.remoteTarget(hostKey)).toEqual({ machineId: 'studio', machine: 'mac-studio', online: true, id: hostId, ui: 'options' });
     expect(laptop.remoteTarget(laptopId)).toBeNull();
 
@@ -606,8 +619,9 @@ describe('NotifyQueue across machines', () => {
     const { queue: host } = makeQueue({}, 'mac-studio');
     const { queue: laptop } = makeQueue({}, 'parsa-devbox');
     connect(host, laptop);
-    ask(host, sessionStore, claude);
     ask(host, migration, codex);
+    ask(host, sessionStore, claude);
+    // Newest first (T-88): the session-store question, asked last, leads.
     const [first, second] = host.snapshot().queue;
 
     host.run({ type: 'remind', id: second, after: 'pane' });

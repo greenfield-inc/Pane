@@ -32,6 +32,7 @@ import type { AppConfig } from '../../types/config';
 import { PaneError } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { leadingQn } from '../../../../shared/autopilotDecision';
+import { approvalListedAt, newestFirst } from '../../../../shared/approvalOrder';
 import { connectedOf, originOf, type ApprovalStore } from '../approvals/approvalStore';
 
 /** Pane holds an answer this long so Undo can take it back. */
@@ -382,6 +383,8 @@ export class NotifyQueue extends EventEmitter {
       if (item.dismissedAt !== undefined) this.hidden.add(item.id);
       if (item.quiet) this.armRing(entry);
     }
+    // Newest first, as it was before the restart (T-88).
+    this.queue = this.byNewest(this.queue);
     for (const entry of this.entries.values()) {
       const { item } = entry;
       if (item.state === 'answered' && !item.delivered && !item.undelivered && item.source.panelId && !item.agentPrompt) this.enqueueTabMessage(item, answerLine(item), true);
@@ -464,7 +467,8 @@ export class NotifyQueue extends EventEmitter {
       return Promise.resolve({ delivered });
     }
 
-    this.queue.push(item.id);
+    // Newest on top, like a stack (T-88).
+    this.queue.unshift(item.id);
     // A question never waits behind an update; the update stays under For your information.
     if (this.transient?.view.kind === 'info') this.clearTransient();
     this.chime(item.id);
@@ -594,7 +598,7 @@ export class NotifyQueue extends EventEmitter {
     const entry: Entry = { item, resumeLoop: false };
     this.entries.set(item.id, entry);
     this.save(entry);
-    this.queue.push(item.id);
+    this.queue.unshift(item.id);
     if (item.quiet) this.armRing(entry);
     this.changed();
   }
@@ -1115,6 +1119,8 @@ export class NotifyQueue extends EventEmitter {
     item.staleSince = undefined;
     item.dismissedAt = undefined;
     this.hidden.delete(item.id);
+    // Its new version is the newest card: back on top (T-88).
+    this.queue = [item.id, ...this.queue.filter(other => other !== item.id)];
     this.save(entry);
     // Ready again is quiet: a notice where the person is, and no chime (D-244).
     const current = this.strip();
@@ -2257,7 +2263,7 @@ export class NotifyQueue extends EventEmitter {
     this.transient = null;
   }
 
-  /** What the strip shows: a confirmation, expiry or update first, else the oldest visible question. */
+  /** What the strip shows: a confirmation, expiry or update first, else the newest visible question (T-88). */
   private strip(): NotifyStripView | null {
     if (this.transient) return this.transient.view;
     const hidden = this.allHidden();
@@ -2284,7 +2290,13 @@ export class NotifyQueue extends EventEmitter {
     return undefined;
   }
 
-  /** Every machine's waiting questions, oldest first; each machine keeps its own order (skip moves one back). */
+  /** These ids, newest first by `approvalListedAt` (T-88). */
+  private byNewest(ids: readonly string[]): string[] {
+    const items = ids.flatMap(id => this.find(id) ?? []);
+    return items.sort(newestFirst).map(item => item.id);
+  }
+
+  /** Every machine's waiting questions, newest first (T-88); each machine keeps its own order (skip moves one back). */
   private allQueued(): string[] {
     const queues = [this.localQueue(), ...[...this.remotes.values()].map(remote => remote.queue.filter(id => !this.sendingHere.has(id)))].filter(queue => queue.length > 0);
     if (queues.length <= 1) return [...queues[0] ?? []];
@@ -2292,11 +2304,12 @@ export class NotifyQueue extends EventEmitter {
     const merged: string[] = [];
     for (;;) {
       let pick = -1;
-      let pickAt = Infinity;
+      let pickAt = -Infinity;
       queues.forEach((queue, index) => {
         if (heads[index] >= queue.length) return;
-        const at = this.find(queue[heads[index]])?.createdAt ?? Infinity;
-        if (pick === -1 || at < pickAt) { pick = index; pickAt = at; }
+        const head = this.find(queue[heads[index]]);
+        const at = head ? approvalListedAt(head) : -Infinity;
+        if (pick === -1 || at > pickAt) { pick = index; pickAt = at; }
       });
       if (pick === -1) return merged;
       merged.push(queues[pick][heads[pick]++]);

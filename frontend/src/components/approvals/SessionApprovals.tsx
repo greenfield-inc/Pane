@@ -1,12 +1,13 @@
 import { useEffect } from 'react';
 import { Inbox } from 'lucide-react';
-import { notifyItem, useNotifyStore } from '../../stores/notifyStore';
+import { notifyItem, selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
 import { sessionTodoMachine, useShownHostId } from '../../stores/todosStore';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { ApprovalColumn } from './ApprovalColumn';
 import { ApprovalOrigin } from './ApprovalOrigin';
 import { firstToOpen, readyCount, sessionColumnNext } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
+import { advanceApproval } from './approvalAdvance';
 
 /**
  * The Session header's count (P4): "Approvals 3 · 1 ready". Opens the column on the newest
@@ -64,6 +65,7 @@ export function SessionApprovalColumn({ sessionId, sessionName, inChat, closeLab
   const surface = `session:${sessionId}` as const;
   const open = useApprovalColumnStore((state) => state.open[surface]);
   const close = useApprovalColumnStore((state) => state.close);
+  const showCaughtUp = useApprovalColumnStore((state) => state.showCaughtUp);
   const waiting = useSessionApprovals(sessionId);
   const machine = sessionTodoMachine(undefined, useShownHostId());
   const selected = useNotifyStore((state) => notifyItem(state.snapshot, open?.itemId));
@@ -88,8 +90,20 @@ export function SessionApprovalColumn({ sessionId, sessionName, inChat, closeLab
       inChat={inChat}
       focused={focused}
       renderOrigin={(item) => <ApprovalOrigin item={item} />}
-      // Send closes the column; the chat's status line names who reads the reply (P7).
-      onSent={() => close(surface)}
+      // Send moves on to the Session's next approval, or says all caught up (T-88); the chat's
+      // status line still names who reads the reply (P7).
+      onSent={() => {
+        const fromId = open.itemId;
+        advanceApproval({
+          surface,
+          order: waiting.map((item) => item.id),
+          fromId,
+          items: selectNotifyItems(useNotifyStore.getState()),
+          sent: true,
+          open: (id) => openSessionApproval(sessionId, id),
+          caughtUp: () => showCaughtUp(surface, fromId),
+        });
+      }}
     />
   );
 }

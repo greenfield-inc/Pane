@@ -5,7 +5,7 @@ import { openSessionApproval, useApprovalColumnStore } from '../../stores/approv
 import { bridgedFrom, firstToOpen, sessionApprovals } from './approvalCard';
 import { sessionTodoScope, useSessionTodoScope } from '../../stores/todosStore';
 
-/** A Session's waiting approvals, oldest first, as its pager walks them (J14). */
+/** A Session's waiting approvals, newest first, as its pager walks them (J14, T-88). */
 export function useSessionApprovals(sessionId: string, machineId?: string): NotifyItem[] {
   const items = useNotifyStore(selectNotifyItems);
   // With its to-dos' approvals, their own hidden Sessions' included (T-22).
@@ -16,7 +16,7 @@ export function useSessionApprovals(sessionId: string, machineId?: string): Noti
 /**
  * While a Session is shown, an approval asked for it from now on opens in its column on its own,
  * over whatever the right split shows, with ✕ "Back to <tab>" (D-114). It opens once per approval,
- * only while the column is closed (an open one may hold a reply being typed), and leaves focus where
+ * only while the column is closed or all caught up (an open one may hold a reply being typed), and leaves focus where
  * it is. A worker's question waits while it is quiet (its orchestrator may answer it first) and
  * opens when relayed; the chat's own prompts stay in the chat, which shows them (P5). Returns the
  * unsubscribe.
@@ -37,8 +37,10 @@ export function openNewSessionApprovals(sessionId: string, chatPanelId?: string)
       && (item.createdAt >= since || quiet.has(item.id)));
     notice(items);
     for (const item of fresh) seen.add(item.id);
-    const newest = fresh.at(-1);
-    if (newest && !useApprovalColumnStore.getState().open[`session:${sessionId}`]) openSessionApproval(sessionId, newest.id);
+    const newest = fresh[0];
+    // An "All caught up" column holds nothing being typed: the new approval takes its place (T-88).
+    const column = useApprovalColumnStore.getState().open[`session:${sessionId}`];
+    if (newest && (!column || column.caughtUp)) openSessionApproval(sessionId, newest.id);
   });
 }
 

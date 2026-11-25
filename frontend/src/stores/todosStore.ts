@@ -9,6 +9,7 @@ import { machineOfItem, todoKey, todoRefOn, type TodoKey } from '../../../shared
 import { sessionTodoEntries } from '../components/todos/sessionTodosList';
 import type { TodoEntry } from '../components/todos/todoList';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
+import { newestFirst } from '../../../shared/approvalOrder';
 import { isTodosEnabled, shownHostId, useConfigStore } from './configStore';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { showActionError } from './errorStore';
@@ -758,7 +759,7 @@ export function useSessionTodoApprovals(sessionId: string, machineId?: string): 
   const rows = useTodosStore(state => machineRows(state, machine, shownHost));
   const scope = useSessionTodoScope(sessionId, machineId);
   return useMemo(() => {
-    const waiting = sessionTodoApprovals(items, scope).sort((a, b) => a.createdAt - b.createdAt);
+    const waiting = sessionTodoApprovals(items, scope).sort(newestFirst);
     return { items: waiting, byTodo: approvalsByTodo(waiting, rows ?? [], machine), machineId: machine };
   }, [items, rows, scope, machine]);
 }

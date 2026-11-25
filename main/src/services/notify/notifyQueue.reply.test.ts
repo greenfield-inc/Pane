@@ -201,6 +201,25 @@ describe('NotifyQueue replies (the reply contract)', () => {
     expect(queue.took({}, result.replyId, 'answer')).toMatchObject({ took: 'answer', id: 'q50' });
   });
 
+  it('an updated approval goes back on top of the queue, as the newest (T-88)', () => {
+    const queue = restoredQ20();
+    vi.advanceTimersByTime(1_000);
+    void queue.ask({ question: { ui: 'approve', title: 'Apply migration 0042?' }, source: orchestrator, id: 'newer' });
+    expect(queue.snapshot().queue).toEqual(['newer', 'q20']);
+    vi.advanceTimersByTime(1_000);
+    void queue.update({ panelId: 'orch' }, 'Q-20', { asked: '', whatChanged: 'Two more items' });
+    expect(queue.snapshot().queue).toEqual(['q20', 'newer']);
+  });
+
+  it('keeps the newest approval first after a restart (T-88)', () => {
+    const first = queueWith();
+    void first.ask({ question: q20, source: orchestrator, id: 'q20' });
+    vi.advanceTimersByTime(1_000);
+    void first.ask({ question: { ui: 'approve', title: 'Apply migration 0042?' }, source: orchestrator, id: 'newer' });
+    first.dispose();
+    expect(queueWith().snapshot().queue).toEqual(['newer', 'q20']);
+  });
+
   it('an update answering a typed question must quote it; the asker\'s own update quotes nothing', async () => {
     const queue = restoredQ20();
     // The asker refreshes its own card (a loop's next run, say): no question of the person's to quote.
