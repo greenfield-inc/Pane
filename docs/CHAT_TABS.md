@@ -545,8 +545,12 @@ Telemetry is off unless Settings › AI & Agents › *Save Agent Farm telemetry 
 this computer* (`agentFarmTelemetry`) is on: Pane writes `telemetry.enabled` from
 that switch, and `telemetry.directory` as `<PANE_DIR>/agent-farm/telemetry`, into
 that folder's `settings.json` at start and whenever the switch changes. Each
-computer keeps its own switch. `AGENT_FARM_TELEMETRY=on|off` in the environment
-still overrides it for a launch, as Agent Farm documents. Agent Farm still keeps
+computer keeps its own switch. A repository's `.agent-farm/workspace.yaml`
+outranks `settings.json` in Agent Farm, so while the switch is off every Agent
+Farm Pane runs (chat launches, Session move, the terminal shim) also gets
+`AGENT_FARM_TELEMETRY=off`, the one setting that outranks a workspace. While it is
+on, a repository's settings can still turn telemetry off or name another
+folder. An `AGENT_FARM_TELEMETRY` already in the environment is kept either way. Agent Farm still keeps
 small state of its own (workspace trust, launch records, MCP logins) under
 `~/.local/state/agent-farm` and `~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
 `scripts/after-pack.js`) fails a packaged build unless Agent Farm is inside

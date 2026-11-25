@@ -110,7 +110,21 @@ describe('bundledAgentFarmProcess', () => {
   it('runs the entry with the runtime as Node, against Pane\'s config root, without AGENT_FARM_CONFIG_ROOT', () => {
     const bundle = { root: '/app', entry: '/app/dist/cli.js', version: '0.2.34' };
     const process = bundledAgentFarmProcess(bundle, ['run', 'greenfield/planner'], '/pane/agent-farm', { PATH: '/bin', AGENT_FARM_CONFIG_ROOT: '/elsewhere' }, '/Pane.exe');
-    expect(process).toEqual({ executable: '/Pane.exe', args: ['/app/dist/cli.js', 'run', 'greenfield/planner', '--config-root', '/pane/agent-farm'], env: { PATH: '/bin', ELECTRON_RUN_AS_NODE: '1' } });
+    expect(process).toEqual({ executable: '/Pane.exe', args: ['/app/dist/cli.js', 'run', 'greenfield/planner', '--config-root', '/pane/agent-farm'], env: { PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', AGENT_FARM_TELEMETRY: 'off' } });
+  });
+
+  // A repository's .agent-farm/workspace.yaml outranks settings.json; only AGENT_FARM_TELEMETRY outranks it.
+  it('turns telemetry off for the launch unless Pane\'s switch is on, keeping a value already set', async () => {
+    const paneDir = tempDir();
+    const bundle = { root: '/app', entry: '/app/dist/cli.js', version: '0.2.34' };
+    const env = () => bundledAgentFarmProcess(bundle, ['run', 'p'], agentFarmConfigRoot(paneDir), { PATH: '/bin' }).env.AGENT_FARM_TELEMETRY;
+    expect(env()).toBe('off');
+    await writeAgentFarmTelemetry(paneDir, false);
+    expect(env()).toBe('off');
+    await writeAgentFarmTelemetry(paneDir, true);
+    expect(env()).toBeUndefined();
+    await writeAgentFarmTelemetry(paneDir, false);
+    expect(bundledAgentFarmProcess(bundle, ['run', 'p'], agentFarmConfigRoot(paneDir), { AGENT_FARM_TELEMETRY: 'on' }).env.AGENT_FARM_TELEMETRY).toBe('on');
   });
 });
 
@@ -184,7 +198,7 @@ describe('writeAgentFarmTelemetry', () => {
 describe('paneAgentFarmProcess', () => {
   it('is the bundled copy with Pane\'s config root, or undefined without a bundle', () => {
     const bundle = { root: '/app', entry: '/app/dist/cli.js', version: '0.2.34' };
-    expect(paneAgentFarmProcess('/pane', ['profiles', 'list'], { PATH: '/bin' }, bundle, '/Pane')).toEqual({ executable: '/Pane', args: ['/app/dist/cli.js', 'profiles', 'list', '--config-root', path.join('/pane', 'agent-farm')], env: { PATH: '/bin', ELECTRON_RUN_AS_NODE: '1' } });
+    expect(paneAgentFarmProcess('/pane', ['profiles', 'list'], { PATH: '/bin' }, bundle, '/Pane')).toEqual({ executable: '/Pane', args: ['/app/dist/cli.js', 'profiles', 'list', '--config-root', path.join('/pane', 'agent-farm')], env: { PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', AGENT_FARM_TELEMETRY: 'off' } });
     expect(paneAgentFarmProcess('/pane', ['profiles', 'list'], {}, null)).toBeUndefined();
   });
 });
