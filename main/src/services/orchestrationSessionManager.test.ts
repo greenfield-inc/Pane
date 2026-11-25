@@ -394,6 +394,10 @@ describe('OrchestrationSessionManager', () => {
       const created = await fixture.manager.create({ name: 'Orchestrator', agentProfile: 'greenfield/orchestrator' });
       const updated = await fixture.manager.update({ sessionId: created.session.id }, { launchCommand: 'claude --dangerously-skip-permissions' });
       expect(updated.agentProfile?.ref).toBe('greenfield/orchestrator');
+      // Review F-2: a launch command that runs another agent drops the named profile for that agent's plain one.
+      const other = await fixture.manager.create({ name: 'Becomes Codex', agentProfile: 'greenfield/orchestrator' });
+      const codex = await fixture.manager.update({ sessionId: other.session.id }, { launchCommand: 'codex' });
+      expect(codex).toMatchObject({ agent: 'codex', agentProfile: { ref: 'pane/codex' } });
       const moved = await fixture.manager.update({ sessionId: created.session.id }, { launchCommand: 'agent-farm run greenfield/product-researcher' });
       expect(moved.agentProfile?.ref).toBe('greenfield/product-researcher');
     }));

@@ -570,8 +570,9 @@ export class OrchestrationSessionManager extends EventEmitter {
       // A Session that runs through Agent Farm keeps doing so with its new agent or launch command.
       if (current.agentProfile && (agentChanging || input.launchCommand !== undefined || input.customResume !== undefined)) {
         let agentProfile = await this.implicitAgentProfile(nextRecord);
-        // A named profile stays while the agent does: a new launch command alone doesn't drop it.
-        if (agentProfile && !agentChanging && !plainProfileAgent(current.agentProfile.ref) && plainProfileAgent(agentProfile.ref)) {
+        // A named profile stays while the agent does: a new launch command for the same agent doesn't drop it,
+        // but one that runs another agent does (review F-2), as an explicit agent change already did.
+        if (agentProfile && nextRecord.agent === current.agent && !plainProfileAgent(current.agentProfile.ref) && plainProfileAgent(agentProfile.ref)) {
           const hash = await this.agentFarm().pluginHash(profilePlugin(current.agentProfile.ref));
           agentProfile = hash === undefined ? agentProfile : { ref: current.agentProfile.ref, hash };
         }

@@ -350,6 +350,19 @@ describe('A Session\'s Agent Farm profile in its folder (T-63)', () => {
     expect(agents.match(/<!-- pane-session-context:end -->/g)).toHaveLength(1);
   });
 
+  // Review F-1: an agent can plant PROFILE.md as a link; Pane must never write through it.
+  it.each(['dangling', 'existing'])('refuses a PROFILE.md that is a %s link and writes nothing outside the folder', async kind => {
+    const folder = prepareSessionWorkspace(`link-${kind}`);
+    const target = path.join(root, `outside-${kind}.md`);
+    if (kind === 'existing') await fs.writeFile(target, 'theirs');
+    await fs.symlink(target, path.join(folder, 'PROFILE.md'));
+    expect(() => writeSessionProfile(folder, 'x/y', 'text')).toThrow(expect.objectContaining({ code: 'SESSION_PROFILE_FILE' }));
+    if (kind === 'existing') expect(await fs.readFile(target, 'utf8')).toBe('theirs');
+    else await expect(fs.lstat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await fs.lstat(path.join(folder, 'PROFILE.md'))).isSymbolicLink()).toBe(true);
+    expect((await fs.readdir(folder)).filter(name => name.includes('.tmp'))).toEqual([]);
+  });
+
   it('writes only into a Session folder under Pane\'s sessions folder', async () => {
     const outside = await fs.mkdtemp(path.join(root, 'elsewhere-'));
     expect(() => writeSessionProfile(outside, 'x/y', 'text')).toThrow(expect.objectContaining({ code: 'SESSION_PROFILE_FOLDER' }));
