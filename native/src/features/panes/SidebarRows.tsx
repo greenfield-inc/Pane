@@ -42,7 +42,7 @@ export function SidebarSectionHeader({ item, first, onToggle }: {
  */
 export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinned, onArchive, onTogglePaused, background }: {
   item: Extract<SidebarItem, { type: 'session' }>;
-  /** Approvals from this Session and its panes waiting in their terminal; none at zero. */
+  /** What waits on you in this Session (`sessionWaiting`); none at zero. */
   waiting: number;
   onOpen: () => void;
   onToggleNested: () => void;
@@ -54,7 +54,7 @@ export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinn
 }) {
   const theme = useTheme();
   const [pressed, setPressed] = useState(false);
-  const { session, label, paneCount, nestedKey, nestedExpanded } = item;
+  const { session, label, paneCount, key: nestedKey, nestedExpanded } = item;
   const paused = Boolean(session.paused);
   const actions = { pinned: Boolean(session.isPinned), onTogglePinned, onArchive, pause: { paused, onToggle: onTogglePaused } };
   return (

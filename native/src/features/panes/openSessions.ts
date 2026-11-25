@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 
-import { hostIdHash } from '@/auth/hosts';
-import type { SavedStateFiles } from '@/daemon/savedState';
+import { keepMachineFiles, machineFileName as fileName, type SavedStateFiles } from '@/daemon/savedState';
 
 const NONE: readonly string[] = [];
 
@@ -29,8 +28,7 @@ export function createOpenSessions(files: SavedStateFiles, options: { saves(mach
     return {
       open: {},
       restore: machineIds => {
-        const kept = new Set(machineIds.map(fileName));
-        for (const name of files.list()) if (!kept.has(name)) files.remove(name);
+        keepMachineFiles(files, machineIds);
         set({ open: Object.fromEntries(machineIds.map(id => [id, parseIds(files.read(fileName(id)))])) });
       },
       toggle: (machineId, sessionId) => {
@@ -46,8 +44,6 @@ export function createOpenSessions(files: SavedStateFiles, options: { saves(mach
     };
   });
 }
-
-const fileName = (machineId: string) => `${hostIdHash(machineId)}.json`;
 
 function parseIds(text: string | null): readonly string[] {
   try {

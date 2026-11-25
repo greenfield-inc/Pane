@@ -31,8 +31,8 @@ export function useSessions() {
     // An open Session follows the desktop when its agent changes.
     void queryClient.invalidateQueries({ queryKey: [profile.id, GET] });
   });
-  // A list read since the app opened says which Sessions are gone; one painted from the phone may miss a newer one.
-  const fresh = sessions.isFetchedAfterMount ? sessions.data?.sessions : undefined;
+  // A list read since this screen mounted says which Sessions are gone; one painted from the phone may miss a newer one.
+  const fresh = sessions.isFetchedAfterMount && !sessions.isError ? sessions.data?.sessions : undefined;
   useEffect(() => {
     if (fresh) useOpenSessions.getState().keepSessions(profile.id, fresh.map(session => session.id));
   }, [fresh, profile.id]);

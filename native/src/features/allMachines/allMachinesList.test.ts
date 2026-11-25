@@ -71,7 +71,7 @@ describe('buildAllMachinesList', () => {
   it('describes a Pane with its repository and Session, and marks it blocked while it waits on you', () => {
     const { recent } = buildAllMachinesList([studio, build], '');
     const fromStudio = recent.find(row => row.key === 'profile-studio:pane:pane-1');
-    expect(fromStudio?.type === 'pane' && fromStudio.pane).toMatchObject({ repository: 'acme-web', session: 'Spring sale launch', status: 'blocked' });
+    expect(fromStudio?.type === 'pane' && fromStudio.pane).toMatchObject({ repository: 'acme-web', session: { name: 'Spring sale launch' }, status: 'blocked' });
     const fromBuild = recent.find(row => row.key === 'profile-build:pane:pane-1');
     expect(fromBuild?.type === 'pane' && fromBuild.pane).toMatchObject({ repository: 'infra', status: 'blocked' });
   });
@@ -128,7 +128,6 @@ describe('buildAllMachinesList', () => {
     expect(list.offline).toEqual([{ key: 'profile-build', name: 'build-box', waiting: 2 }]);
     expect(list.waiting.map(row => row.machineKey)).toEqual(['profile-studio']);
     expect(list.staleQuestions).toEqual([]);
-    expect(sessionWaiting(list).has(sessionKey('profile-build', 's-1'))).toBe(false);
   });
 
   it('shows no row for an offline machine with nothing waiting', () => {
@@ -143,7 +142,6 @@ describe('buildAllMachinesList', () => {
     expect(list.staleQuestions.map(row => row.key)).toEqual(['profile-studio:question:s']);
     const pane = list.recent.find(row => row.key === 'profile-studio:pane:pane-1');
     expect(pane?.type === 'pane' && pane.pane.status).not.toBe('blocked');
-    expect(sessionWaiting(list).has(sessionKey('profile-studio', 's-1'))).toBe(false);
   });
 
   it('lists the last 24 hours\' answered and closed items from online machines, newest first', () => {

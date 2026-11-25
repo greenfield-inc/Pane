@@ -49,7 +49,7 @@ export function terminalWaiting(list: Pick<AllMachinesList, 'waiting' | 'recent'
  */
 export function sessionWaiting(list: Pick<AllMachinesList, 'waiting' | 'recent'>, held: AllMachinesList['waiting'] = []): ReadonlyMap<string, number> {
   const counts = new Map(waitingCounts(list.waiting).bySession);
-  const sessionOf = new Map(paneRows(list.recent).map(({ machineKey, pane }) => [`${machineKey}:${pane.id}`, pane.sessionId]));
+  const sessionOf = new Map(paneRows(list.recent).map(({ machineKey, pane }) => [`${machineKey}:${pane.id}`, pane.session?.id]));
   const add = (machineKey: string, paneId: string | undefined) => {
     const sessionId = sessionOf.get(`${machineKey}:${paneId}`);
     if (!sessionId) return;

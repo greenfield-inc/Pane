@@ -102,7 +102,7 @@ export function RecentRowView({ row, waiting, machine, currentKey, actions, onOp
     <AllRow
       testID={`all-pane-row-${row.key}`}
       title={row.pane.name}
-      detail={[row.pane.repository, row.pane.session, time].filter(Boolean).join(' · ')}
+      detail={[row.pane.repository, row.pane.session?.name, time].filter(Boolean).join(' · ')}
       label={paneLabel(row.pane, machine?.name)}
       machine={machine}
       stale={row.stale}
@@ -177,7 +177,7 @@ export function allOffline(feeds: readonly AllMachinesFeed[]): boolean {
 }
 
 function paneLabel(pane: AllPane, machine: string | undefined): string {
-  return [pane.name, pane.repository, pane.session, pane.paused ? 'Paused' : statusPresentation[pane.status].label, machine].filter(Boolean).join(', ');
+  return [pane.name, pane.repository, pane.session?.name, pane.paused ? 'Paused' : statusPresentation[pane.status].label, machine].filter(Boolean).join(', ');
 }
 
 /** "9:14 AM" in the phone's own clock format. */

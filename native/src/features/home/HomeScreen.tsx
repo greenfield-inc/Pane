@@ -371,22 +371,24 @@ export function HomeScreen() {
     </View>
   );
   const place = all ? 'all' : profile.id;
-  const scroll = homeScroll(place);
+  const scroll = searching ? undefined : homeScroll(`${place}:${tile}:${rows.length}`);
   const list = (
     // The skeleton draws the tiles too, so the board doesn't fade them in again.
     <SkeletonSwap loading={loading} skeleton={skeleton} style={styles.fill} fade={false}>
       <LegendList
         // All and each machine keep their own place.
         key={place}
-        // The header's height too, or the offset stops where the rows alone would end.
-        initialScrollOffset={scroll.offset}
-        estimatedHeaderSize={scroll.headerSize}
-        onMetricsChange={({ headerSize }) => { if (!searching) scroll.headerSize = headerSize; }}
-        onScroll={event => { if (!searching) scroll.offset = Math.max(0, event.nativeEvent.contentOffset.y); }}
+        // Back where it was on this list, header height included, or the offset stops where the rows
+        // alone would end. Search results draw no header and always start at the top.
+        initialScrollOffset={scroll?.offset ?? 0}
+        estimatedHeaderSize={scroll?.headerSize}
+        onMetricsChange={({ headerSize }) => { if (scroll) scroll.headerSize = headerSize; }}
+        onScroll={event => { if (scroll) scroll.offset = Math.max(0, event.nativeEvent.contentOffset.y); }}
         testID="panes-list"
         data={rows}
         keyExtractor={row => row.key}
         getItemType={row => row.kind}
+        // All's rows carry a second line and a machine badge.
         estimatedItemSize={tile === 'all' && all ? 60 : 52}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"

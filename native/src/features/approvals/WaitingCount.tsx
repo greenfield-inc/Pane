@@ -4,7 +4,7 @@ import { useTheme } from '@/theme';
 import { Text } from '@/ui';
 
 /**
- * A Session row's amber count of what waits on you in it: approvals (D-38), and Panes waiting in their terminal. The box keeps its size
+ * A Session row's amber count of what waits on you in it (`sessionWaiting`): its approvals (D-38), questions its Panes asked outside any Session, and its Panes waiting in their terminal. The box keeps its size
  * at zero, when nothing shows, so the row doesn't reflow as approvals come and go.
  */
 export function WaitingCount({ count, testID }: { count: number; testID?: string }) {

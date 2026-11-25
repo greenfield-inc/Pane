@@ -53,8 +53,6 @@ export type SidebarItem =
     session: OrchestrationSessionRecord;
     label: string;
     paneCount: number;
-    /** Names this row; a pinned Session has two. */
-    nestedKey: string;
     nestedExpanded: boolean;
   }
   | { type: 'archived'; key: string; kind: 'session' | 'pane'; id: string; label: string; detail?: string }
@@ -133,7 +131,7 @@ export function buildSidebar(input: SidebarInput): SidebarItem[] {
     const nestedKey = `${placement}:${session.id}`;
     const nestedExpanded = input.openSessions.includes(session.id);
     return [
-      { type: 'session', key: nestedKey, session, label: session.name || 'Untitled', paneCount: panes.length, nestedKey, nestedExpanded },
+      { type: 'session', key: nestedKey, session, label: session.name || 'Untitled', paneCount: panes.length, nestedExpanded },
       ...(nestedExpanded ? panes.map(pane => ({ type: 'pane' as const, key: `${nestedKey}:${pane.id}`, pane, label: pane.name, nested: true })) : []),
     ];
   };

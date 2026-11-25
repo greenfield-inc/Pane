@@ -129,6 +129,14 @@ describe('sessionWaiting', () => {
     expect([...sessionWaiting(buildAllMachinesList([{ ...box, snapshot: { ...box.snapshot!, notify: asked } }], ''))]).toEqual([['box:ship', 2]]);
   });
 
+  it('counts a question filed under the Session once, and leaves out one already answered', () => {
+    const asked = notify([
+      { id: 'q', createdAt: 1, source: { name: 'prompt', agent: 'Codex', paneId: 'prompt', session: { id: 'ship', name: 'ship', paneId: 'ship-pane' } } },
+      { id: 'sent', createdAt: 2, state: 'sent', source: { name: 'prompt', agent: 'Codex', paneId: 'prompt' } },
+    ]);
+    expect([...sessionWaiting(buildAllMachinesList([{ ...box, snapshot: { ...box.snapshot!, notify: asked } }], ''))]).toEqual([['box:ship', 2]]);
+  });
+
   it('counts nothing on a machine that went offline', () => {
     expect([...sessionWaiting(buildAllMachinesList([{ ...box, offlineSince: 1 }], ''))]).toEqual([]);
   });

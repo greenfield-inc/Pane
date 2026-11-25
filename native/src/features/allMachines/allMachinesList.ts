@@ -81,8 +81,7 @@ export interface AllPane {
   name: string;
   repository: string;
   /** The Session this Pane works for, when one does. */
-  session?: string;
-  sessionId?: string;
+  session?: { id: string; name: string };
   pinned: boolean;
   status: AgentDisplayStatus;
   agent?: string;
@@ -157,8 +156,7 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
             id: pane.id,
             name: pane.name,
             repository: project.name,
-            session: session?.name,
-            sessionId: session?.id,
+            session,
             pinned: Boolean(pane.isFavorite),
             status: blocked.has(pane.id) ? 'blocked' : snapshot.statuses ? paneDisplayStatus(snapshot.statuses, pane.id) : 'unknown',
             agent: snapshot.statuses ? paneAgent(snapshot.statuses, pane.id) : undefined,
