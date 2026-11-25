@@ -37,12 +37,12 @@ export function SidebarSectionHeader({ item, first, onToggle }: {
 
 /**
  * A Session row: a chevron showing its panes (or a chat icon when it has none),
- * then the name, pane count and the amber count of approvals waiting from it; a paused Session is
+ * then the name, pane count and the amber count of what waits on you in it; a paused Session is
  * grayed out behind a pause glyph. Swipe right pins; swipe left pauses or resumes, and archives.
  */
 export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinned, onArchive, onTogglePaused, background }: {
   item: Extract<SidebarItem, { type: 'session' }>;
-  /** Approvals waiting from this Session; none at zero. */
+  /** Approvals from this Session and its panes waiting in their terminal; none at zero. */
   waiting: number;
   onOpen: () => void;
   onToggleNested: () => void;
@@ -64,6 +64,7 @@ export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinn
           <IconButton
             testID={`session-nested-${nestedKey}`}
             label={`${nestedExpanded ? 'Hide' : 'Show'} panes in ${label}`}
+            expanded={nestedExpanded}
             onPress={onToggleNested}
           >
             <Icon ios={nestedExpanded ? 'chevron.down' : 'chevron.right'} android={nestedExpanded ? 'expand_more' : 'chevron_right'} size={14} />

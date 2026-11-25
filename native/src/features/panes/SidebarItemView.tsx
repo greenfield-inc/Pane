@@ -12,10 +12,11 @@ import type { PaneActions } from './usePaneActions';
 
 export interface SidebarItemContext {
   actions: PaneActions;
-  /** Approvals waiting from a Session on this machine. */
+  /** What waits on the person in a Session on this machine. */
   waitingFor: (sessionId: string) => number;
   onToggleSection: (section: SidebarSection) => void;
-  onToggleNested: (nestedKey: string) => void;
+  /** Shows or hides a Session's panes. */
+  onToggleSession: (sessionId: string) => void;
   retry: (what: 'sessions' | 'archived') => void;
   /** What rows sit on: the page, or a card. */
   background?: string;
@@ -69,7 +70,7 @@ export function SidebarItemView({ item, previous, first, context }: {
           background={background}
           waiting={context.waitingFor(item.session.id)}
           onOpen={() => actions.openSession(item.session.id)}
-          onToggleNested={() => context.onToggleNested(item.nestedKey)}
+          onToggleNested={() => context.onToggleSession(item.session.id)}
           onTogglePinned={() => actions.toggleSessionPinned(item.session.id, !item.session.isPinned)}
           onArchive={() => actions.archiveSession(item.session.id)}
           onTogglePaused={() => actions.setSessionPaused(item.session.id, !item.session.paused)}
@@ -86,14 +87,6 @@ export function SidebarItemView({ item, previous, first, context }: {
         ? <Notice danger message={item.text} action={{ title: 'Try again', onPress: () => context.retry(item.retry ?? 'sessions') }} />
         : <SidebarNote testID={item.key} text={item.text} />;
   }
-}
-
-/** Shows or hides one Session row's nested panes. */
-export function toggleMember(current: ReadonlySet<string>, member: string): ReadonlySet<string> {
-  const next = new Set(current);
-  if (next.has(member)) next.delete(member);
-  else next.add(member);
-  return next;
 }
 
 const styles = StyleSheet.create({

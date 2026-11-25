@@ -53,7 +53,7 @@ export type SidebarItem =
     session: OrchestrationSessionRecord;
     label: string;
     paneCount: number;
-    /** Identifies this row's nested panes; a pinned Session has a second, separate row. */
+    /** Names this row; a pinned Session has two. */
     nestedKey: string;
     nestedExpanded: boolean;
   }
@@ -76,8 +76,8 @@ export interface SidebarInput {
   /** Loaded the first time Archived opens; undefined until then. */
   archivedProjects: ProjectWithPanes[] | undefined;
   expanded: SectionExpansion;
-  /** `nestedKey`s whose panes are hidden. */
-  collapsedSessions: ReadonlySet<string>;
+  /** The Sessions whose panes show; the rest are collapsed. */
+  openSessions: readonly string[];
   query: string;
   lookup: StatusLookup;
 }
@@ -131,7 +131,7 @@ export function buildSidebar(input: SidebarInput): SidebarItem[] {
   const sessionRows = (session: OrchestrationSessionRecord, placement: 'pinned' | 'sessions'): SidebarItem[] => {
     const panes = session.associations.flatMap(association => paneById.get(association.paneId) ?? []);
     const nestedKey = `${placement}:${session.id}`;
-    const nestedExpanded = !input.collapsedSessions.has(nestedKey);
+    const nestedExpanded = input.openSessions.includes(session.id);
     return [
       { type: 'session', key: nestedKey, session, label: session.name || 'Untitled', paneCount: panes.length, nestedKey, nestedExpanded },
       ...(nestedExpanded ? panes.map(pane => ({ type: 'pane' as const, key: `${nestedKey}:${pane.id}`, pane, label: pane.name, nested: true })) : []),

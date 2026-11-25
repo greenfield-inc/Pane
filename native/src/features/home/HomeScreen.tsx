@@ -9,7 +9,7 @@ import { canClose } from '@shared/approvalReceipts';
 import { buildAllMachinesList, feedsAnswered, type RecentRow } from '@/features/allMachines/allMachinesList';
 import { AllMachinesNotes, allOffline, offlineAlert, openRecentRow, openWaitingRow, RecentRowView, waitingRowText } from '@/features/allMachines/AllMachinesRows';
 import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
-import { sessionKey, waitingCounts } from '@/features/approvals/approvals';
+import { sessionKey } from '@/features/approvals/approvals';
 import { ArchiveUndoBar, useArchiveHold } from '@/features/approvals/ArchiveUndo';
 import { approvalRowSpoken, ApprovalRowLines } from '@/features/approvals/ApprovalRowLines';
 import { AutopilotRow } from '@/features/autopilot/AutopilotRow';
@@ -23,8 +23,9 @@ import { useArchivedProjects } from '@/features/panes/hooks';
 import { LoadingRows, Notice } from '@/features/panes/PaneKit';
 import { buildSidebar, type SidebarItem, type SidebarSection } from '@/features/panes/paneList';
 import { PaneRow } from '@/features/panes/PaneRow';
-import { SidebarItemView, toggleMember, type SidebarItemContext } from '@/features/panes/SidebarItemView';
+import { SidebarItemView, type SidebarItemContext } from '@/features/panes/SidebarItemView';
 import { useSidebarSections } from '@/features/panes/sidebarSections';
+import { useOpenSessions } from '@/features/panes/useOpenSessions';
 import { usePaneActions } from '@/features/panes/usePaneActions';
 import { markNextFrame } from '@/features/perf/perfMarks';
 import { useLiveMarks, useValueMark } from '@/features/perf/usePerfMarks';
@@ -35,7 +36,8 @@ import type { IconProps } from '@/ui/Icon';
 import { ActivityRow, ApprovalRow, BoardHeader, BoardSkeleton, Card, CardSkeleton, EmptyCard, GroupRow, HistoryLine, RowDivider } from './BoardRows';
 import { useBoardTile } from './boardTile';
 import { bottomBarHeight, HomeBottomBar } from './HomeBottomBar';
-import { boardCounts, PINNED_PREVIEW, terminalWaiting, tilePanes, type PaneRecentRow } from './statusBoard';
+import { homeScroll, useHomeView } from './homeView';
+import { boardCounts, PINNED_PREVIEW, sessionWaiting, terminalWaiting, tilePanes, type PaneRecentRow } from './statusBoard';
 import { StatusTiles } from './StatusTiles';
 import { useHomeFeeds } from './useHomeData';
 
@@ -69,10 +71,13 @@ export function HomeScreen() {
   const actions = usePaneActions();
   const tile = useBoardTile(state => state.tile);
   const selectTile = useBoardTile(state => state.select);
-  const [query, setQuery] = useState('');
+  const query = useHomeView(state => state.query);
+  const setQuery = useHomeView(state => state.setQuery);
   const [refreshing, setRefreshing] = useState(false);
-  const [collapsedSessions, setCollapsedSessions] = useState<ReadonlySet<string>>(new Set());
-  const [pinnedExpanded, setPinnedExpanded] = useState(false);
+  const openSessions = useOpenSessions(state => state.open[profile.id]) ?? [];
+  const toggleSession = useOpenSessions(state => state.toggle);
+  const pinnedExpanded = useSidebarSections(state => state.allPinned);
+  const togglePinnedExpanded = useSidebarSections(state => state.toggleAllPinned);
   const expanded = useSidebarSections(state => state.expanded);
   const toggleSection = useSidebarSections(state => state.toggle);
   const searching = query.trim().length > 0;
@@ -101,7 +106,7 @@ export function HomeScreen() {
   // On All, rows carry their machine's mark.
   const markOf = (key: string) => (all ? machineOf(key) : undefined);
   const sayOffline = offlineAlert(feeds, chipMachines);
-  const waitingBySession = waitingCounts(board.waiting).bySession;
+  const waitingBySession = sessionWaiting(board, held);
   // The machine the phone is on, as Pinned, Sessions, Repositories and Archived list it.
   const statusOf = new Map(board.recent.flatMap(row => (row.type === 'pane' && row.machineKey === profile.id ? [[row.pane.id, row.pane] as const] : [])));
   const sidebar = (sidebarQuery: string, sections: Record<SidebarSection, boolean>) => buildSidebar({
@@ -111,7 +116,7 @@ export function HomeScreen() {
     archivedProjects: archived.data,
     archivedError: archived.isError ? archived.error.message : undefined,
     expanded: sections,
-    collapsedSessions,
+    openSessions,
     query: sidebarQuery,
     lookup: {
       status: paneId => statusOf.get(paneId)?.status ?? 'unknown',
@@ -123,7 +128,7 @@ export function HomeScreen() {
     background,
     waitingFor: sessionId => waitingBySession.get(sessionKey(profile.id, sessionId)) ?? 0,
     onToggleSection: toggleSection,
-    onToggleNested: nestedKey => setCollapsedSessions(currentSet => toggleMember(currentSet, nestedKey)),
+    onToggleSession: sessionId => toggleSession(profile.id, sessionId),
     retry: what => void (what === 'archived' ? archived.refetch() : here.sessions.refetch()),
   });
 
@@ -186,7 +191,7 @@ export function HomeScreen() {
       case 'recent':
         return (
           <View style={styles.below}>
-            <RecentRowView row={item.row} machine={machineOf(item.row.machineKey)} currentKey={profile.id} actions={actions} onOpen={() => openRecentRow(item.row, profile.id, actions, sayOffline)} />
+            <RecentRowView row={item.row} waiting={item.row.type === 'session' ? waitingBySession.get(sessionKey(item.row.machineKey, item.row.session.id)) ?? 0 : 0} machine={machineOf(item.row.machineKey)} currentKey={profile.id} actions={actions} onOpen={() => openRecentRow(item.row, profile.id, actions, sayOffline)} />
           </View>
         );
       case 'sidebar':
@@ -321,7 +326,7 @@ export function HomeScreen() {
             </View>
           )) : null}
           {expanded.pinned && pinnedCount > PINNED_PREVIEW ? (
-            <Pressable testID="home-pinned-more" accessibilityRole="button" hitSlop={4} onPress={() => setPinnedExpanded(!pinnedExpanded)} style={styles.more}>
+            <Pressable testID="home-pinned-more" accessibilityRole="button" hitSlop={4} onPress={togglePinnedExpanded} style={styles.more}>
               <Text variant="subhead" tone="accent">{pinnedExpanded ? 'Show less' : `Show ${pinnedCount - PINNED_PREVIEW} more`}</Text>
             </Pressable>
           ) : null}
@@ -365,10 +370,15 @@ export function HomeScreen() {
       <View style={styles.below}><BoardSkeleton groups={tile === 'all' && !all} /></View>
     </View>
   );
+  const place = all ? 'all' : profile.id;
   const list = (
     // The skeleton draws the tiles too, so the board doesn't fade them in again.
     <SkeletonSwap loading={loading} skeleton={skeleton} style={styles.fill} fade={false}>
       <LegendList
+        // All and each machine keep their own place.
+        key={place}
+        initialScrollOffset={homeScroll.get(place) ?? 0}
+        onScroll={event => { if (!searching) homeScroll.set(place, Math.max(0, event.nativeEvent.contentOffset.y)); }}
         testID="panes-list"
         data={rows}
         keyExtractor={row => row.key}

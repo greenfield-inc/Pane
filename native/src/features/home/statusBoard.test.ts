@@ -4,7 +4,7 @@ import type { NotifyItem, NotifySharedState } from '@shared/types/notify';
 
 import { buildAllMachinesList, type MachineFeed } from '@/features/allMachines/allMachinesList';
 
-import { boardCounts, terminalWaiting, tilePanes, todayBuckets } from './statusBoard';
+import { boardCounts, sessionWaiting, terminalWaiting, tilePanes, todayBuckets } from './statusBoard';
 
 const notify = (items: Array<Partial<NotifyItem> & Pick<NotifyItem, 'id' | 'createdAt'>>): NotifySharedState => ({
   machine: 'host', epoch: 'e1', revision: 1, enabled: true, queue: [], hidden: [],
@@ -94,6 +94,37 @@ describe('terminalWaiting', () => {
     const list = buildAllMachinesList([{ ...box, offlineSince: 1 }], '');
     expect(terminalWaiting(list)).toEqual([]);
     expect(boardCounts(list).needs).toBe(0);
+  });
+});
+
+describe('sessionWaiting', () => {
+  const session = (id: string, paneIds: string[]) => ({
+    id, name: id, updatedAt: '2026-11-15T09:00:00Z', associations: paneIds.map(paneId => ({ paneId })),
+  }) as never;
+  const blocked = (paneIds: string[]) => ({
+    agentStatus: Object.fromEntries(paneIds.map(id => [`tab-${id}`, 'blocked' as const])),
+    agentStatusSession: Object.fromEntries(paneIds.map(id => [`tab-${id}`, id])),
+    agentType: {},
+    unseen: {},
+  });
+  const box: MachineFeed = {
+    key: 'box',
+    name: 'build-box',
+    snapshot: {
+      projects: [{ id: 1, name: 'infra', sessions: [{ id: 'prompt', name: 'prompt' }, { id: 'asked', name: 'asked' }, { id: 'loose', name: 'loose' }] }],
+      statuses: blocked(['prompt', 'asked', 'loose']),
+      permissions: [{ id: 'perm', sessionId: 'asked', toolName: 'Bash', input: {}, timestamp: 4 }],
+      sessions: [session('ship', ['prompt', 'asked']), session('quiet', [])],
+    },
+  };
+
+  it('counts a Session’s approvals and its Panes stopped in their terminal, each once', () => {
+    // "asked" waits through its permission request, "prompt" in its terminal, "loose" is in no Session.
+    expect([...sessionWaiting(buildAllMachinesList([box], ''))]).toEqual([['box:ship', 2]]);
+  });
+
+  it('counts nothing on a machine that went offline', () => {
+    expect([...sessionWaiting(buildAllMachinesList([{ ...box, offlineSince: 1 }], ''))]).toEqual([]);
   });
 });
 

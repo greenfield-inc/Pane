@@ -1,5 +1,5 @@
 import type { AllMachinesList, RecentRow } from '@/features/allMachines/allMachinesList';
-import { waitingCounts } from '@/features/approvals/approvals';
+import { sessionKey, waitingCounts } from '@/features/approvals/approvals';
 
 /** Home's four tiles: each counts something and, when selected, lists it below. */
 export type BoardTile = 'needs' | 'working' | 'ready' | 'all';
@@ -40,6 +40,20 @@ export function terminalWaiting(list: Pick<AllMachinesList, 'waiting' | 'recent'
     return paneId ? [`${row.machineKey}:${paneId}`] : [];
   }));
   return paneRows(list.recent).filter(row => row.pane.status === 'blocked' && !row.pane.paused && !row.stale && !asked.has(`${row.machineKey}:${row.pane.id}`));
+}
+
+/**
+ * A Session row's amber count, by `sessionKey`: the approvals from it (D-38) and its Panes waiting
+ * in their terminal, so a collapsed Session still says something in it needs you.
+ */
+export function sessionWaiting(list: Pick<AllMachinesList, 'waiting' | 'recent'>, held: AllMachinesList['waiting'] = []): ReadonlyMap<string, number> {
+  const counts = new Map(waitingCounts(list.waiting).bySession);
+  for (const { machineKey, pane } of terminalWaiting(list, held)) {
+    if (!pane.sessionId) continue;
+    const key = sessionKey(machineKey, pane.sessionId);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
 }
 
 function paneRows(recent: readonly RecentRow[]): PaneRecentRow[] {

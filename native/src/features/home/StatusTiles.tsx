@@ -5,12 +5,13 @@ import { Skeleton, Text } from '@/ui';
 
 import type { BoardTile } from './statusBoard';
 
-const TILES: ReadonlyArray<{ id: BoardTile; label: string; color: keyof ThemeColors }> = [
+const ROWS: ReadonlyArray<ReadonlyArray<{ id: BoardTile; label: string; color: keyof ThemeColors }>> = [[
   { id: 'all', label: 'All panes', color: 'allPanes' },
   { id: 'needs', label: 'Needs you', color: 'warning' },
+], [
   { id: 'working', label: 'Working', color: 'accent' },
   { id: 'ready', label: 'Ready', color: 'success' },
-];
+]];
 
 /** Four counts in a 2×2 grid. The selected tile wears its status color and filters the list below. */
 export function StatusTiles({ counts, selected, onSelect }: {
@@ -21,7 +22,7 @@ export function StatusTiles({ counts, selected, onSelect }: {
   const theme = useTheme();
   return (
     <View testID="home-tiles" style={styles.grid} accessibilityRole="tablist">
-      {TILES.map(tile => {
+      {ROWS.map(row => <View key={row[0].id} style={styles.row}>{row.map(tile => {
         const color = theme.colors[tile.color];
         const on = tile.id === selected;
         const count = counts?.[tile.id];
@@ -52,15 +53,16 @@ export function StatusTiles({ counts, selected, onSelect }: {
             </View>
           </Pressable>
         );
-      })}
+      })}</View>)}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 12 },
-  // Two per row: half the width, less half the gap.
-  tile: { flexBasis: '48%', flexGrow: 1, minHeight: 72, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1.5, justifyContent: 'center' },
+  grid: { gap: 8, paddingHorizontal: 12 },
+  // Two rows of two, so the tiles follow the window's width as a foldable opens and closes.
+  row: { flexDirection: 'row', gap: 8 },
+  tile: { flex: 1, minHeight: 72, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1.5, justifyContent: 'center' },
   count: { fontSize: 26, lineHeight: 30, fontWeight: '700', fontVariant: ['tabular-nums'] },
   countBone: { position: 'absolute', left: 0, top: 4 },
   label: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
