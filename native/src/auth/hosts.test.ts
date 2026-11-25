@@ -28,6 +28,8 @@ describe('saved hosts', () => {
     const hosts = { profiles: [full], activeId: full.id };
     expect(addHosts(hosts, [], read).profiles).toEqual([full]);
     expect(addHosts(hosts, [read]).profiles).toEqual([full]);
+    const fresh = { ...read, token: 'fresh' };
+    expect(addHosts({ profiles: [read], activeId: read.id }, [fresh]).profiles).toEqual([fresh]);
     expect(addHosts({ profiles: [read], activeId: read.id }, [], full).profiles).toEqual([full]);
   });
 

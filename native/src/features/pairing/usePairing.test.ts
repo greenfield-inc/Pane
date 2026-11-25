@@ -59,8 +59,8 @@ it('saves nothing when the computer hid that its code is Read only', async () =>
   expect(state.added).toEqual([]);
 });
 
-it('tells a Read only code’s computer only of computers it named itself', async () => {
-  state.profiles = [saved('mine'), saved('tyler2', 'read')];
+it('tells a Read only code’s computer only of full-access computers it named itself', async () => {
+  state.profiles = [saved('mine'), saved('tyler2'), saved('tyler3', 'read')];
   await pair({ code, watchOnly: true });
   expect(state.exchanged.map(request => request.known)).toEqual([['tyler2']]);
 });

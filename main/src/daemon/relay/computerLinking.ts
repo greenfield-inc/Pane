@@ -233,8 +233,9 @@ export class ComputerLinking {
   private async redeemReadOnly(link: RelayPairingLink, self: RelayComputer, group: FetchedPreview['group']): Promise<LinkRedeemResult> {
     const { links } = this.deps;
     const maker = group[0].name;
-    const reached = new Set(links.reachable().map((profile) => profile.relay.computerId));
-    if (links.linked().some((profile) => profile.relay.computerId === link.computerId)) {
+    // Full access stays as it is; a computer already watched gets a fresh token, since its owner may have removed this one.
+    const full = new Set(links.linked().map((profile) => profile.relay.computerId));
+    if (full.has(link.computerId)) {
       throw new PaneError('ERR_LINK_ALREADY_FULL', `This computer already has full access to ${maker}, so the read-only link was not used.`, `To watch ${maker} read-only instead, unlink it in Settings › Remote Access › Computers, then open the link again.`);
     }
     const offered: RelayComputer = { id: self.id, name: self.name, domain: self.domain, address: self.address, local: [], fingerprint: self.fingerprint };
@@ -242,7 +243,7 @@ export class ComputerLinking {
       secret: link.secret,
       label: self.name,
       // Only computers the maker named itself, so this computer's own group stays private.
-      known: group.slice(1).map((member) => member.id).filter((id) => reached.has(id)),
+      known: group.slice(1).map((member) => member.id).filter((id) => full.has(id)),
       computer: { computer: offered },
     };
     let answer: { status: number; json: unknown };
@@ -259,7 +260,7 @@ export class ComputerLinking {
     await links.saveComputer({ computer: result.computer, token: result.token, routes: decodeComputerRoutesReport(result.routes), access: 'read' });
     const saved = [result.computer.name];
     for (const { computer, token } of result.linked) {
-      if (computer.id === self.id || computer.id === result.computer.id || reached.has(computer.id) || !isRelayComputerUnder(computer, link.domain)) continue;
+      if (computer.id === self.id || computer.id === result.computer.id || full.has(computer.id) || !isRelayComputerUnder(computer, link.domain)) continue;
       await links.saveComputer({ computer, token, linkedBy: maker, access: 'read' });
       saved.push(computer.name);
     }

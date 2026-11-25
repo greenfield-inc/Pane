@@ -14,11 +14,14 @@ import { isReadOnlyProfile } from './access';
 /**
  * Trades a scanned code's one-time secret for this phone's token. Returns the computer first,
  * then each computer linked with it that `saved` doesn't already reach, with its own token.
- * A Read only link's computer learns of no saved computer but those its own `preview` named.
+ * A Read only link's computer learns of no saved computer but those its own `preview` named, and of
+ * those only the ones with full access: a watched one gets a fresh token.
  */
 export async function exchangeRelayLink(link: RelayPairingLink, saved: readonly RemotePaneConnectionProfile[], preview: LinkPreviewAnswer): Promise<RelayConnectionProfile[]> {
-  const reached = saved.flatMap(profile => (profile.relay ? [profile.relay.computerId] : []));
-  const known = preview?.access === 'read' ? reached.filter(id => preview.group.some(computer => computer.id === id)) : reached;
+  const idsOf = (profiles: readonly RemotePaneConnectionProfile[]) => profiles.flatMap(profile => (profile.relay ? [profile.relay.computerId] : []));
+  const known = preview?.access === 'read'
+    ? idsOf(saved.filter(profile => !isReadOnlyProfile(profile))).filter(id => preview.group.some(computer => computer.id === id))
+    : idsOf(saved);
   return exchangeRelayPairing(streamingFetch, link, { secret: link.secret, label: DEVICE_LABEL ?? CLIENT_LABEL, phoneId: await getRuntimeId(), known });
 }
 

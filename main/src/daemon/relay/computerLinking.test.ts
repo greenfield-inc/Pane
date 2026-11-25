@@ -479,6 +479,11 @@ describe('a read-only link', () => {
     expect(await net.reaches(parsa, tyler)).toBe(false);
     expect(await net.reaches(parsa, a2)).toBe(false);
     expect([tyler.disconnected, a2.disconnected]).toEqual([[record?.id], [onA2?.id]]);
+
+    // Shared again later, its saved computers work again, the linked one too.
+    await parsa.redeem(await tyler.link('10m', 'read'));
+    expect(await net.reaches(parsa, tyler)).toBe(true);
+    expect(await net.reaches(parsa, a2)).toBe(true);
   });
 
   it('refuses a computer that already has full access, leaving the link for another', async () => {

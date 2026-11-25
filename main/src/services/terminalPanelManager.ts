@@ -2773,6 +2773,9 @@ export class TerminalPanelManager extends EventEmitter {
   async getTerminalState(panelId: string): Promise<TerminalPanelState | null> {
     const terminal = this.terminals.get(panelId);
     if (!terminal) return null;
+    // Output a hidden terminal still holds is in the snapshot too; sent now, a watching client
+    // replaces it with the snapshot instead of drawing it again after.
+    if (!terminal.isVisible) this.flushPendingHiddenOutputToDaemon(terminal);
 
     const restore = await terminal.screenEmulator?.restoreSnapshot();
     if (this.terminals.get(panelId) !== terminal) return null;

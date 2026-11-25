@@ -206,12 +206,15 @@ export function isRelayComputerUnder(computer: RelayComputer, domain: string): b
 /**
  * `saved` plus each of `added` the device has no profile for yet (same id or address). A
  * computer's answer never replaces a saved computer's token or fingerprint; only scanning that
- * computer's own code does.
+ * computer's own code does. A read-only profile is the exception: a fresh read-only token for the
+ * same computer takes its place, since the owner may have removed this device before sharing again.
  */
 export function withNewProfiles<T extends RemotePaneConnectionProfile>(saved: readonly T[], added: readonly T[]): T[] {
   const profiles = [...saved];
   for (const profile of added) {
-    if (!profiles.some(known => known.id === profile.id || known.baseUrl === profile.baseUrl)) profiles.push(profile);
+    const at = profiles.findIndex(known => known.id === profile.id || known.baseUrl === profile.baseUrl);
+    if (at < 0) profiles.push(profile);
+    else if (profile.access === 'read' && profiles[at]?.access === 'read') profiles[at] = profile;
   }
   return profiles;
 }
