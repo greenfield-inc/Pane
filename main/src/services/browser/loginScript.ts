@@ -49,7 +49,7 @@ function loginWorld() {
     if (!(el instanceof HTMLInputElement) || !TYPES.has(el.type)) return 'is not a text or password field';
     if (!el.isConnected) return 'has left the page';
     if (el.matches(':disabled') || el.readOnly || el.getAttribute('aria-disabled') === 'true' || el.closest('[inert]')) return 'is disabled or read-only';
-    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
     let opacity = 1;
     for (let node: Element | null = el; node; node = parentOf(node)) opacity *= Number(getComputedStyle(node).opacity);
     const rect = el.getBoundingClientRect();
@@ -155,7 +155,7 @@ function loginWorld() {
       if (node.nodeType === Node.TEXT_NODE) {
         const text = (node.textContent ?? '').replace(/\s+/g, '');
         // A drawn digit is a piece of the value, just after the fill and while its boxes are still there.
-        const live = armed() && Array.from(hidden).some(el => el instanceof HTMLInputElement && el.isConnected);
+        const live = armed() && holding();
         if (holds(text) || (live && (text.includes(plain) || piece(text)))) conceal(node.parentElement);
       } else if (node instanceof Element) {
         if (node.shadowRoot) watch(node.shadowRoot);
@@ -163,12 +163,23 @@ function loginWorld() {
         if ((node.textContent ?? '').replace(/\s+/g, '') === plain) conceal(node);
       }
     };
+    let ticking = false;
+    const holding = () => Array.from(hidden).some(el => el instanceof HTMLInputElement && el.isConnected);
+    const everyFrame = () => {
+      look();
+      ticking = holding();
+      if (ticking) requestAnimationFrame(everyFrame);
+    };
     const observer = new MutationObserver(records => {
       for (const record of records) {
         if (record.type === 'characterData') inspect(record.target);
         else record.addedNodes.forEach(inspect);
       }
       look();
+      if (!ticking && holding()) {
+        ticking = true;
+        requestAnimationFrame(everyFrame);
+      }
     });
     const watch = (root: Document | ShadowRoot) => {
       if (roots.has(root)) return;
@@ -181,8 +192,9 @@ function loginWorld() {
     };
     if (plain) {
       watch(document);
-      // Setting an input's value changes nothing an observer sees, so every frame looks again.
-      const everyFrame = () => { look(); requestAnimationFrame(everyFrame); };
+      // Setting an input's value changes nothing an observer sees, so every frame looks again while a field
+      // holding the login is on the page; once none is, the observer starts it again when one comes back.
+      ticking = true;
       requestAnimationFrame(everyFrame);
     }
     boxes.forEach(protect);
