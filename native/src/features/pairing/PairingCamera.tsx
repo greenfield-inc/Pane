@@ -71,7 +71,7 @@ export function PairingCamera({ caption, actions, onPaired }: { caption: string;
         onBarcodeScanned={({ data }) => {
           if (pairing.isPending || error || !isPairingCode(data) || data === lastCode.current) return;
           lastCode.current = data;
-          pairing.mutate(data);
+          pairing.mutate({ code: data });
         }}
       />
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">

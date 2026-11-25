@@ -1,4 +1,5 @@
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../validation/boundaryDecoder';
+import { tokenAccess } from './accessLevel';
 import type { PaneRemoteConnectionImportPayload, RemotePaneConnectionProfile, RemoteRelayProfile } from './remoteDaemon';
 
 /**
@@ -86,6 +87,7 @@ const routeSchema: BoundarySchema<ComputerRoute> = boundary.object({
     computerId: boundary.nonEmptyString,
     fingerprint: boundary.nonEmptyString,
     linkedBy: boundary.optional(boundary.nonEmptyString),
+    sharedBy: boundary.optional(boundary.nonEmptyString),
   })),
   ssh: boundary.optional(boundary.object({ host: boundary.nonEmptyString, remotePort: boundary.number })),
 });
@@ -239,6 +241,14 @@ export function routeFromProfile(profile: RemotePaneConnectionProfile, source?: 
   return route;
 }
 
+/**
+ * Whether this computer only watches a saved computer: one of its routes carries a read-only token.
+ * A computer saved both ways counts as watched, so nothing of this computer's own is sent to it.
+ */
+export function isWatchedComputer(computer: Pick<RemoteComputer, 'routes'>): boolean {
+  return computer.routes.some((route) => tokenAccess(route.token) === 'read');
+}
+
 /** One route of a computer in the shape the connection code takes: the profile id is the computer's. */
 export function routeProfile(computer: RemoteComputer, route: ComputerRoute): RemotePaneConnectionProfile {
   const profile: RemotePaneConnectionProfile = {
@@ -253,6 +263,7 @@ export function routeProfile(computer: RemoteComputer, route: ComputerRoute): Re
   if (route.tailnetDomain) profile.tailnetDomain = route.tailnetDomain;
   if (route.relay) {
     profile.relay = { computerId: route.relay.computerId, fingerprint: route.relay.fingerprint };
+    if (route.relay.sharedBy) profile.relay.sharedBy = route.relay.sharedBy;
     if (computer.linkedBy) profile.relay.linkedBy = computer.linkedBy;
   }
   return profile;
@@ -309,7 +320,10 @@ export function withRoutes(routes: readonly ComputerRoute[], added: readonly Com
     if (at >= 0) {
       // A found route never downgrades one that was linked or added by hand.
       const existing = next[at];
-      next[at] = route.source === 'found' && existing.source !== 'found' ? { ...route, source: existing.source } : route;
+      const kept = route.source === 'found' && existing.source !== 'found' ? { ...route, source: existing.source } : route;
+      // Who shared a watched computer is known only from its link; a report about the same token keeps it.
+      const sharedBy = existing.relay?.sharedBy;
+      next[at] = sharedBy && kept.relay && !kept.relay.sharedBy && kept.token === existing.token ? { ...kept, relay: { ...kept.relay, sharedBy } } : kept;
       continue;
     }
     const before = next.findIndex((existing) => rank(existing.kind) > rank(route.kind));

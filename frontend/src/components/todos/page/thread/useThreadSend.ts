@@ -1,3 +1,4 @@
+import { isReadOnlyHost } from '../../../../stores/readOnlyHostStore';
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import type { TodoAction } from '../../../../../../shared/types/todos';
 import { todosApi, useTodosStore } from '../../../../stores/todosStore';
@@ -19,6 +20,7 @@ export async function sendThreadComment(action: TodoAction): Promise<ThreadSendR
   try {
     const api = todosApi();
     if (!api) return { ok: false, error: 'To-dos are not available here. Nothing was sent.' };
+    if (isReadOnlyHost()) return { ok: false, error: 'This computer gives you read-only access. Nothing was sent.' };
     const response = await api.act(action);
     if (!response.success || !response.data) return { ok: false, error: ipcErrorMessage(response.error, 'Pane did not say why. Nothing was sent.') };
     await useTodosStore.getState().refresh();

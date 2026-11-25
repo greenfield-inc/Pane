@@ -75,10 +75,10 @@ export function SectionLabel({ children, action, className }: { children: ReactN
   );
 }
 
-/** "+ Add", "+ Attach": a small link-like action at the right of a section label. */
+/** "+ Add", "+ Attach": a small link-like action at the right of a section label; none on a computer you only watch. */
 export function SectionAction({ label, onClick, testId }: { label: string; onClick: () => void; testId?: string }) {
   return (
-    <button type="button" onClick={onClick} className="shrink-0 text-[12px] font-medium normal-case tracking-normal text-interactive-text hover:underline" data-testid={testId}>
+    <button type="button" onClick={onClick} className="needs-full-access shrink-0 text-[12px] font-medium normal-case tracking-normal text-interactive-text hover:underline" data-testid={testId}>
       + {label}
     </button>
   );

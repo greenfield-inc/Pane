@@ -3,7 +3,7 @@ import {
   RelayPairingError,
   type RelayConnectionProfile,
 } from '../../../../shared/remoteClient/relay';
-import { relayLinkJoin, type RelayLinkJoin } from '../../../../shared/remoteClient/relayLinkPreview';
+import { fullAccessRefusal, readLinkPreview, relayLinkJoin, type RelayLinkJoin } from '../../../../shared/remoteClient/relayLinkPreview';
 import type { RemoteFetch } from '../../../../shared/remoteClient/remoteDaemonClient';
 import type { RemotePaneConnectionProfile } from '../../../../shared/types/remoteDaemon';
 
@@ -23,14 +23,20 @@ export function takePairingSecret({ location, history }: PairingPage): string | 
 
 /**
  * Pairs this browser with the computer that served it: trades the secret at its own
- * `/pair/exchange`. Returns that computer first, then every computer linked with it.
+ * `/pair/exchange`. A link shown as read-only, by the confirm (`watching`) or its preview, pairs only read-only, and one to
+ * a computer in `saved` with full access is refused unspent. Returns that computer first, then every computer linked with it.
  */
 export async function pairThisBrowser(
   page: PairingPage,
   secret: string,
-  request: { fetch: RemoteFetch; label: string; phoneId: string },
+  request: { fetch: RemoteFetch; label: string; phoneId: string; saved?: readonly RemotePaneConnectionProfile[]; watching?: boolean },
 ): Promise<RelayConnectionProfile[]> {
-  return exchangeRelayPairing(request.fetch, servedBy(page), { secret, label: request.label, phoneId: request.phoneId });
+  const { computerId } = servedBy(page);
+  const preview = await readLinkPreview(request.fetch, { ...servedBy(page), secret });
+  const refusal = fullAccessRefusal('browser', [computerId, ...(preview?.group.map(computer => computer.id) ?? [])], preview?.access, request.saved ?? []);
+  if (refusal) throw refusal;
+  const watching = request.watching === true || preview?.access === 'read';
+  return exchangeRelayPairing(request.fetch, servedBy(page), { secret, label: request.label, phoneId: request.phoneId }, { watching });
 }
 
 /**

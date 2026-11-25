@@ -448,7 +448,7 @@ export const MissionControlTile = memo(function MissionControlTile({
             onClick={() => onClose(tile)}
             aria-label={`Close ${tile.sessionName}`}
             title="Close this pane"
-            className="flex-shrink-0 rounded p-0.5 text-text-muted opacity-0 transition-opacity hover:bg-status-error/15 hover:text-status-error focus-visible:opacity-100 group-hover:opacity-100"
+            className="needs-full-access flex-shrink-0 rounded p-0.5 text-text-muted opacity-0 transition-opacity hover:bg-status-error/15 hover:text-status-error focus-visible:opacity-100 group-hover:opacity-100"
           >
             <Trash2 className="h-2.5 w-2.5" aria-hidden="true" />
           </button>
@@ -488,7 +488,7 @@ export const MissionControlTile = memo(function MissionControlTile({
           onClick={() => onFocusAgent(tile)}
           aria-label={`Interact with ${tile.sessionName}`}
           title="Click to answer or type"
-          className="absolute inset-x-0 bottom-5 top-6 z-10 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive"
+          className="needs-full-access absolute inset-x-0 bottom-5 top-6 z-10 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive"
         >
           <span className="sr-only">Interact with {tile.sessionName}</span>
           <span

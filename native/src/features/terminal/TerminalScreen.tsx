@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,7 +12,7 @@ import { pausedMarkOf, type BrowserPanelState, type EditorPanelState, type Termi
 import { offersViewLive, streamChoices, viewLive } from '@shared/utils/streamChoice';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
-import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
+import { useDaemon, useInvokeMutation, useInvokeQuery, useReadOnlyHost } from '@/daemon';
 import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, SkeletonSwap, Text } from '@/ui';
 
@@ -82,6 +82,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { client, profile } = useDaemon();
+  const readOnly = useReadOnlyHost();
   const { presence } = useConnectionPresence();
   const queryClient = useQueryClient();
 
@@ -124,7 +125,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
     return () => markThisPaneSeen();
   }, [paneId]);
 
-  const strip = stripPanels(panelList.data ?? []);
+  const strip = stripPanels(panelList.data ?? [], readOnly);
   const panels = session ? sessionWorkspacePanels(session, strip) : strip;
   const leadingTab = leading?.tabs.find(tab => tab.id === (panelId ?? leading.tabs[0]?.id));
   const panel = leadingTab ? null : pickPanel(panels, panelId ?? null, hostActive.data?.id);
@@ -157,7 +158,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
 
   // With the host's resume-on-open setting, a paused tab the person opens resumes. Only the tab
   // shown when the screen opens, or one they pick, counts; a tab paused while on screen stays paused.
-  const resumeOnOpen = affordances.data?.resumePausedOnOpen === true;
+  const resumeOnOpen = !readOnly && affordances.data?.resumePausedOnOpen === true;
   const openChecked = useRef(false);
   useEffect(() => {
     if (openChecked.current || (!panel && !leadingTab) || affordances.isPending) return;
@@ -195,9 +196,11 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       behavior="padding"
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
+      {/* A watched terminal pans sideways, so swipe-back there starts from the left edge only. */}
+      <Stack.Screen options={{ fullScreenGestureEnabled: !(readOnly && terminalActive) }} />
       {/* Dictation's audio, here so a recording survives switching tabs; mounted on first use. */}
       {voice.audio ? <VoiceAudio {...voice.audio} /> : null}
-      {topBar ?? <TerminalTopBar paneName={title} onClearScrollback={terminalActive ? () => terminalActions.current?.clearScrollback() : undefined} />}
+      {topBar ?? <TerminalTopBar paneName={title} onClearScrollback={terminalActive && !readOnly ? () => terminalActions.current?.clearScrollback() : undefined} />}
       {/* An approval's layout is final once the tabs and the tab body stop moving (perf marks). */}
       <View onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `tabs=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
         {/* Tab lists of recent Panes are kept on the phone, so this skeleton shows only for a Pane never opened here. */}
@@ -209,8 +212,8 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
           leading={leading?.tabs}
           onSelectLeading={id => router.setParams({ panelId: id })}
           onSelect={selectPanel}
-          onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
-          onClose={closePanel}
+          onAdd={readOnly ? undefined : () => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
+          onClose={readOnly ? undefined : closePanel}
         />
         </SkeletonSwap>
       </View>
@@ -221,7 +224,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       {panel && view !== 'terminal' ? (
         <TabBody panel={panel} title={title} panels={panels} />
       ) : panel && paused ? (
-        <PausedTerminal key={panel.id} panelId={panel.id} mark={paused} resuming={resumePanel.isPending} onResume={() => resume(panel)} />
+        <PausedTerminal key={panel.id} panelId={panel.id} mark={paused} resuming={resumePanel.isPending} onResume={readOnly ? undefined : () => resume(panel)} />
       ) : panel ? (
         <TerminalPanel
           key={panel.id}
@@ -245,7 +248,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
             <EmptyState
               testID="terminal-empty"
               title="No tabs"
-              message="This pane has no tabs open. Tap + to start a terminal."
+              message={readOnly ? 'This pane has no terminal or chat tabs open.' : 'This pane has no tabs open. Tap + to start a terminal.'}
             />
           )}
         </View>
@@ -328,6 +331,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   const theme = useTheme();
   useScreenJourney('terminal', panel.id);
   const { profile } = useDaemon();
+  const readOnly = useReadOnlyHost();
   const { live } = useConnectionPresence();
   const terminal = useTerminal(panel.id, panel.sessionId);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -346,7 +350,8 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   const [sendError, setSendError] = useState<string | null>(null);
   // Input waits for a live terminal. While the connection comes back the last screen stays at full
   // strength and keys wait for it (useTerminal); past the grace window it dims.
-  const disabled = terminal.status !== 'ready' || !live;
+  const stopped = terminal.status === 'stopped';
+  const disabled = (terminal.status !== 'ready' && !stopped) || !live;
   const shown = terminal.status === 'ready' || terminal.hasContent;
   // A terminal that has shown a screen covers a reload with its plain background; only a first open draws lines.
   const [drawn, setDrawn] = useState(false);
@@ -417,7 +422,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
       <View style={[styles.fill, { backgroundColor: theme.terminal.background }]} onLayout={event => setTerminalHeight(event.nativeEvent.layout.height)}>
         <Dimmed dimmed={disabled} style={styles.fill}>
           <View style={styles.screen}>
-            <TerminalTouchSurface rows={terminal.rows} onScrollLines={terminal.scrollLines}>
+            <TerminalTouchSurface rows={terminal.rows} onScrollLines={terminal.scrollLines} onPan={readOnly ? terminal.pan : undefined}>
               <TerminalWebView
                 ref={terminal.webView}
                 onMessage={terminal.onMessage}
@@ -426,7 +431,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
               />
             </TerminalTouchSurface>
           </View>
-          {shown && controllerShown ? (
+          {shown && controllerShown && !readOnly ? (
             <FloatingController onKey={sendKey} onScroll={terminal.scrollLines} layout={controllerLayout(terminalHeight, terminal.rows)} />
           ) : null}
           {shown && !terminal.atBottom ? (
@@ -463,10 +468,15 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
           <View style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: theme.terminal.background }]}>
             <ErrorState title="Terminal unavailable" error={terminal.error} onRetry={terminal.retry} testID="terminal-error" />
           </View>
+        ) : stopped ? (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.terminal.background }]}>
+            <EmptyState testID="terminal-not-running" title="Not running" message={`This tab isn’t running on ${profile.label}. Its output shows here once someone starts it there.`} />
+          </View>
         ) : blank && drawn ? (
           <View testID="terminal-refreshing" style={[StyleSheet.absoluteFill, { backgroundColor: theme.terminal.background }]} />
         ) : null}
       </View>
+      {readOnly ? null : <>
       <View style={[styles.inputArea, { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.border }]}>
         {voiceSaved ? (
           <View testID="voice-keys-saved" accessibilityLiveRegion="polite" style={[styles.notice, { borderRadius: theme.radius.lg, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised }]}>
@@ -526,6 +536,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
         }}
       />
       <CopySheet visible={showCopy} onClose={() => setShowCopy(false)} panelId={panel.id} screenText={terminal.screenText} />
+      </>}
     </>
   );
 }

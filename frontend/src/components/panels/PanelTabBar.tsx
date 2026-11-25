@@ -1,3 +1,4 @@
+import { isReadOnlyHost, useReadOnlyHost } from '../../stores/readOnlyHostStore';
 import React, { useCallback, memo, useState, useRef, useEffect, useMemo } from 'react';
 import { Plus, X, Terminal, PanelRight, FolderTree, TerminalSquare, Play, Globe, Pencil, Sprout, Boxes } from 'lucide-react';
 import { createPortal } from 'react-dom';
@@ -112,6 +113,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const [showDropdown, setShowDropdown] = useState(false);
   // Read the catalog again each time the menu opens, so an agent installed meanwhile is offered.
   useEffect(() => { if (showDropdown && chatTabs) void refreshChatAgents(window.electronAPI.chatTab); }, [showDropdown, chatTabs]);
+  const readOnly = useReadOnlyHost();
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const addToolButtonRef = useRef<HTMLButtonElement>(null);
@@ -264,6 +266,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   useEffect(() => {
     const handleOpenRequest = (event: Event) => {
       if (!(event instanceof CustomEvent)) return;
+      if (isReadOnlyHost()) return;
       externalAnchorRef.current = event.detail?.rect ?? null;
       setShowDropdown(true);
     };
@@ -427,8 +430,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
   const rightActions = (
         <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
-          {activePanel && <SwitchToChatPaletteEntry key={`switch-${activePanel.id}`} panel={activePanel} view="pane" />}
-          {activePanel && <PromoteChatButton key={activePanel.id} panel={activePanel} paneName={session?.name} />}
+          {!readOnly && activePanel && <SwitchToChatPaletteEntry key={`switch-${activePanel.id}`} panel={activePanel} view="pane" />}
+          {!readOnly && activePanel && <PromoteChatButton key={activePanel.id} panel={activePanel} paneName={session?.name} />}
           {/* Run Dev Server button */}
           {session && (
             <Tooltip content={
@@ -447,7 +450,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               <button
                 type="button"
                 aria-label={resolvedRunScript ? `Run ${resolvedRunScript.command}` : 'Set up run script'}
-                className="inline-flex items-center justify-center h-[var(--panel-tab-height)] px-2.5 rounded text-text-tertiary hover:text-status-success hover:bg-surface-hover transition-colors flex-shrink-0"
+                className="needs-full-access inline-flex items-center justify-center h-[var(--panel-tab-height)] px-2.5 rounded text-text-tertiary hover:text-status-success hover:bg-surface-hover transition-colors flex-shrink-0"
                 onClick={handleRunDevServer}
               >
                 <Play aria-hidden="true" className="w-4 h-4" />
@@ -563,7 +566,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               ref={addToolButtonRef}
               type="button"
               className={cn(
-                "inline-flex items-center justify-center h-7 w-7 ml-0.5 text-text-tertiary hover:text-text-primary hover:bg-surface-hover rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
+                "needs-full-access inline-flex items-center justify-center h-7 w-7 ml-0.5 text-text-tertiary hover:text-text-primary hover:bg-surface-hover rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
                 tabsInGroups && "hidden",
               )}
               onClick={() => setShowDropdown(!showDropdown)}

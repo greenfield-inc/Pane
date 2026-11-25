@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
+import { useReadOnlyHost } from '@/daemon';
 import { useTheme } from '@/theme';
 import { Icon, SkeletonSwap } from '@/ui';
 
@@ -30,6 +31,7 @@ export function SidebarItemView({ item, previous, first, context }: {
   context: SidebarItemContext;
 }) {
   const theme = useTheme();
+  const readOnly = useReadOnlyHost();
   const { actions, background } = context;
   switch (item.type) {
     case 'section':
@@ -41,7 +43,7 @@ export function SidebarItemView({ item, previous, first, context }: {
           // Flush under the Repositories header or the top of the list, spaced after that.
           first={first || previous?.type === 'section'}
           icon={<Icon ios="folder" android="folder" size={14} />}
-          add={{
+          add={readOnly ? undefined : {
             label: `New pane in ${item.title}`,
             testID: `panes-new-${item.projectId}`,
             onPress: () => router.push({ pathname: '/new', params: { kind: 'pane', projectId: String(item.projectId) } }),
@@ -76,6 +78,7 @@ export function SidebarItemView({ item, previous, first, context }: {
         />
       );
     case 'archived':
+      if (readOnly) return <ArchivedRow item={item} />;
       return item.kind === 'session'
         ? <ArchivedRow item={item} onRestore={() => actions.restoreSession(item.id)} />
         : <ArchivedRow item={item} onRestore={() => actions.restorePane(item.id)} onDelete={() => actions.deletePane(item)} />;

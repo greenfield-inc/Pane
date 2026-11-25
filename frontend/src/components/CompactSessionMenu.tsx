@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { API } from '../utils/api';
 import { Modal, ModalBody, ModalHeader, ModalFooter } from './ui/Modal';
 import { Input } from './ui/Input';
@@ -37,6 +38,7 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
   const orchestrationSessions = useOrchestrationSessionStore(state => state.sessions);
   const refreshOrchestrationSessions = useOrchestrationSessionStore(state => state.refresh);
   const todoSessionIds = useTodoSessionIds();
+  const readOnly = useReadOnlyHost();
   const paneId = menu?.session.id;
   const memberOf: OrchestrationSessionRecord[] = [];
   const addableTo: OrchestrationSessionRecord[] = [];
@@ -73,7 +75,7 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
     <TerminalPopover
       // Remounting on the swap re-measures the menu, so a long Session list repositions to fit the viewport.
       key={picking ? 'picker' : 'actions'}
-      visible={menu !== null}
+      visible={menu !== null && !readOnly}
       x={menu?.x ?? 0}
       y={menu?.y ?? 0}
       onClose={close}

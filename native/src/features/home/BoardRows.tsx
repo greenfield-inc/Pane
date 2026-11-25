@@ -7,7 +7,7 @@ import { sinceLabel } from '@/features/allMachines/allMachinesList';
 import type { Machine } from '@/features/machines/machines';
 import { MachineMark } from '@/features/machines/MachineMark';
 import { PausedBadge, StatusBadge, statusPresentation } from '@/features/panes/StatusBadge';
-import { SwipeRow, swipeRowAccessibility } from '@/features/panes/SwipeRow';
+import { SwipeRow, useSwipeRowAccessibility } from '@/features/panes/SwipeRow';
 import { useTheme } from '@/theme';
 import { Icon, Skeleton, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
@@ -73,13 +73,14 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
 }) {
   const theme = useTheme();
   const time = sinceLabel(at, Date.now());
+  const accessibility = useSwipeRowAccessibility(onArchive ? { onArchive: onArchive.archive } : undefined);
   const content = (
     <Pressable
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={[title, detail, ...spoken, time, machine?.name].filter(Boolean).join(', ')}
       accessibilityHint={stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
-      {...(onArchive ? swipeRowAccessibility({ onArchive: onArchive.archive }) : {})}
+      {...accessibility}
       onPress={onPress}
       style={({ pressed }) => [styles.approval, { opacity: stale ? STALE_OPACITY : 1 }, onArchive && { backgroundColor: background }, pressed && { backgroundColor: theme.colors.surfacePressed }]}
     >
@@ -119,13 +120,14 @@ export function ActivityRow({ row, machine, divided, onPress, swipe, background 
   const agent = AGENT_LAUNCH_PRESETS.find(preset => preset.id === pane.agent)?.title;
   const detail = [agent, pane.activeAt ? sinceLabel(pane.activeAt, Date.now()) : undefined, pane.repository].filter(Boolean).join(' · ');
   const actions = swipe ? { pinned: pane.pinned, onTogglePinned: swipe.onTogglePinned, onArchive: swipe.onArchive, pause: { paused: Boolean(pane.paused), onToggle: swipe.onTogglePaused } } : undefined;
+  const accessibility = useSwipeRowAccessibility(actions);
   const content = (
     <Pressable
       testID={`board-pane-${row.key}`}
       accessibilityRole="button"
       accessibilityLabel={[pane.name, statusPresentation[pane.status].label, detail, pane.session, machine?.name].filter(Boolean).join(', ')}
       accessibilityHint={row.stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
-      {...(actions ? swipeRowAccessibility(actions) : {})}
+      {...accessibility}
       onPress={onPress}
       style={({ pressed }) => [styles.activity, { opacity: row.stale ? STALE_OPACITY : 1, backgroundColor: pressed ? theme.colors.surfacePressed : background ?? theme.colors.surfaceRaised }]}
     >

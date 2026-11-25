@@ -11,6 +11,13 @@ def names(items: List[str]) -> str:
     return "".join(items) if len(items) < 2 else f"{', '.join(items[:-1])} and {items[-1]}"
 
 
+def read_only_meaning(maker: str, computers: List[str]) -> str:
+    return (
+        f"Read only: this computer sees the Sessions, agents, transcripts and terminal output of {names(computers or [maker])}, "
+        "and can't type, run, approve or open files there. They can't reach this computer."
+    )
+
+
 def run_link(parsed: Any, stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> int:
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
@@ -23,9 +30,12 @@ def run_link(parsed: Any, stdin: Optional[TextIO] = None, stdout: Optional[TextI
         )
     preview = invoke_daemon("relay:link-preview", [{"link": link}], pane_dir=parsed.pane_dir)
     maker = str(preview["maker"])
+    read_only = preview.get("access") == "read"
     if preview.get("needsConfirm") and not parsed.yes:
         joins = (
-            f"This link joins your computers ({names(list(preview['here']))}) with {maker}'s "
+            f"{read_only_meaning(maker, list(preview['makerGroup']))} Your own linked computers stay as they are."
+            if read_only
+            else f"This link joins your computers ({names(list(preview['here']))}) with {maker}'s "
             f"({names(list(preview['makerGroup']))}), and each can then run agents on the others."
             if preview["here"]
             else f"This link lets {maker}'s computers ({names(list(preview['makerGroup']))}) run agents on this computer, "
@@ -35,7 +45,7 @@ def run_link(parsed: Any, stdin: Optional[TextIO] = None, stdout: Optional[TextI
             raise RunpaneError(
                 "ERR_LINK_NEEDS_CONFIRM",
                 f"{joins} This shell cannot ask you to confirm, so nothing was linked and the link is still unused.",
-                "Run it again with --yes to join them: runpane link '<link>' --yes",
+                f"Run it again with --yes to {'link read only' if read_only else 'join them'}: runpane link '<link>' --yes",
             )
         stdout.write(f"{joins}\nLink with {maker}? [y/N] ")
         stdout.flush()
@@ -45,9 +55,17 @@ def run_link(parsed: Any, stdin: Optional[TextIO] = None, stdout: Optional[TextI
                 "You did not confirm, so nothing was linked. The link is still unused.",
                 "Run runpane link again to link them, or let another device use the link.",
             )
-    linked = [str(name) for name in invoke_daemon("relay:redeem-link", [{"link": link}], pane_dir=parsed.pane_dir)["linked"]]
+    # The level shown above, so a link that changed it since is refused (ERR_LINK_LEVEL_CHANGED).
+    result = invoke_daemon("relay:redeem-link", [{"link": link, "access": "read" if read_only else "full"}], pane_dir=parsed.pane_dir)
+    linked = [str(name) for name in result["linked"]]
+    access = result.get("access")
     if parsed.json:
-        stdout.write(json.dumps({"ok": True, "maker": maker, "linked": linked}, indent=2) + "\n")
+        body = {"ok": True, "maker": maker, "linked": linked}
+        if access:
+            body["access"] = access
+        stdout.write(json.dumps(body, indent=2) + "\n")
+    elif access:
+        stdout.write(f"{read_only_meaning(maker, linked)} List them with: runpane workspace list\n")
     else:
         stdout.write(f"Linked with {names(linked or [maker])}. List them with: runpane workspace list\n")
     return 0

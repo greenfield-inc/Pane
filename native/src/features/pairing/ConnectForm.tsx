@@ -25,7 +25,7 @@ export function ConnectForm({ initialCode = '', onPaired }: { initialCode?: stri
   const submit = async () => {
     setClipboardError(null);
     if (trimmed) {
-      pairing.mutate(trimmed);
+      pairing.mutate({ code: trimmed });
       return;
     }
     const pasted = (await Clipboard.getStringAsync()).trim();
@@ -34,7 +34,7 @@ export function ConnectForm({ initialCode = '', onPaired }: { initialCode?: stri
       return;
     }
     setCode(pasted);
-    pairing.mutate(pasted);
+    pairing.mutate({ code: pasted });
   };
 
   const error = pairing.error?.message ?? clipboardError;

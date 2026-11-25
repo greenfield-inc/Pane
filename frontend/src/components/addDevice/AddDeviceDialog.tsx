@@ -49,7 +49,10 @@ export function AddDeviceDialog({ isOpen, tab, onTabChange, onClose }: {
   onClose: () => void;
 }) {
   const usesRelay = isOpen && (tab === 'phone' || tab === 'computer');
-  const { view, ready, paired, renewal, retry } = useRelayPairing(usesRelay, tab === 'phone', isOpen);
+  const access = useAddDeviceStore((state) => state.access);
+  // Each opening starts at Full access, whoever owns the open state.
+  useEffect(() => (isOpen ? () => useAddDeviceStore.getState().setAccess('full') : undefined), [isOpen]);
+  const { view, ready, paired, pairedReadOnly, renewal, retry } = useRelayPairing(usesRelay, tab === 'phone', isOpen, access);
   const domain = useRelayDomain(isOpen && tab === 'wearables');
   const limitUntil = view.step === 'limited' ? view.until : null;
   // Tailscale pairs devices without Pane relay's certificates, so it works while the relay is paused.
@@ -90,7 +93,7 @@ export function AddDeviceDialog({ isOpen, tab, onTabChange, onClose }: {
           })}
         </div>
         <div role="tabpanel" id="add-device-panel" aria-labelledby={`add-device-tab-${tab}`}>
-          {tab === 'phone' && <PhoneTab view={view} paired={paired} renewed={renewal !== null} onRetry={retry} onSetUpTailscale={setUpTailscale} />}
+          {tab === 'phone' && <PhoneTab view={view} paired={paired} pairedReadOnly={pairedReadOnly} renewed={renewal !== null} onRetry={retry} onSetUpTailscale={setUpTailscale} />}
           {tab === 'computer' && (
             <ComputerTab
               ready={ready}

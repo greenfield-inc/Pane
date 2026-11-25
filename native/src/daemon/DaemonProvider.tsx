@@ -103,7 +103,6 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
     requestSharedCredentialSync();
   }), [client, profile.id, queryClient]);
 
-
   return <DaemonContext value={{ client, profile, connection }}>{children}</DaemonContext>;
 }
 

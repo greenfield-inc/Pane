@@ -13,7 +13,7 @@ import type { Machine } from '@/features/machines/machines';
 import { Notice } from '@/features/panes/PaneKit';
 import { describePermission } from '@/features/panes/permissions';
 import { PausedBadge, StatusBadge, statusPresentation } from '@/features/panes/StatusBadge';
-import { SwipeRow, swipeRowAccessibility } from '@/features/panes/SwipeRow';
+import { SwipeRow, useSwipeRowAccessibility } from '@/features/panes/SwipeRow';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
@@ -237,13 +237,14 @@ function AllRow({ title, detail, below, spoken = [], label, machine, stale, paus
   testID: string;
 }) {
   const theme = useTheme();
+  const accessibility = useSwipeRowAccessibility(swipe);
   const row = (
     <Pressable
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label ?? [title, paused ? 'Paused' : undefined, detail, ...spoken, machine?.name].filter(Boolean).join(', ')}
       accessibilityHint={stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
-      {...(swipe ? swipeRowAccessibility(swipe) : {})}
+      {...accessibility}
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,

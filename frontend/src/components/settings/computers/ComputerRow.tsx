@@ -3,6 +3,7 @@ import { ChevronDown, GripVertical, Link2, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../../ui/Button';
 import { Input } from '../../ui/Input';
 import { MachineMark } from '../../machines/MachineMark';
+import { ReadOnlyPill } from '../../machines/ReadOnlyPill';
 import { RoutePillView, RoutePills } from './RoutePills';
 import { THIS_COMPUTER, type MachineEntry, type RoutePill } from '../../../utils/machineList';
 import { cn } from '../../../utils/cn';
@@ -49,6 +50,7 @@ export function ComputerRow({ machine, expanded, onToggle, disabled, busy, passw
           <div className="min-w-0">
             <p className={cn('flex items-center gap-2 truncate text-sm font-medium', dimmed ? 'text-text-tertiary' : 'text-text-primary')}>
               <span className="truncate">{machine.name}</span>
+              {machine.readOnly && <ReadOnlyPill />}
               {machine.kind === 'local' && machine.name !== THIS_COMPUTER && (
                 <span className="flex-none rounded bg-surface-secondary px-1.5 py-px text-[11px] font-medium text-text-secondary">This computer</span>
               )}
@@ -86,7 +88,7 @@ export function ComputerRow({ machine, expanded, onToggle, disabled, busy, passw
       {footer}
       {localDetail && expanded && <div id={detailId}>{localDetail}</div>}
       {computer && expanded && (
-        <ComputerDetail id={detailId} computer={computer} routes={machine.routes ?? []} onAddRoute={onAddRoute} onReorder={onReorder} onUnlink={onUnlink} onDetails={onDetails} />
+        <ComputerDetail id={detailId} computer={computer} readOnly={machine.readOnly === true} routes={machine.routes ?? []} onAddRoute={onAddRoute} onReorder={onReorder} onUnlink={onUnlink} onDetails={onDetails} />
       )}
     </div>
   );
@@ -133,6 +135,8 @@ function moved<T>(items: readonly T[], from: number, to: number): T[] {
 
 interface ComputerDetailProps {
   id: string;
+  /** This computer only watches it. */
+  readOnly: boolean;
   computer: RemoteComputer;
   routes: readonly RoutePill[];
   onAddRoute: () => void;
@@ -142,7 +146,7 @@ interface ComputerDetailProps {
 }
 
 /** Routes in order with drag to reorder, Add route, who linked it, and unlink. */
-function ComputerDetail({ id, computer, routes, onAddRoute, onReorder, onUnlink, onDetails }: ComputerDetailProps) {
+function ComputerDetail({ id, computer, readOnly, routes, onAddRoute, onReorder, onUnlink, onDetails }: ComputerDetailProps) {
   // The order shown while a reorder saves; the saved order replaces it once the config reloads.
   const [order, setOrder] = useState<string[] | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -152,7 +156,8 @@ function ComputerDetail({ id, computer, routes, onAddRoute, onReorder, onUnlink,
   const ids = order && order.length === savedIds.length && order.every((routeId) => savedIds.includes(routeId)) ? order : savedIds;
   const pills = new Map(routes.map((pill) => [pill.id, pill]));
   const byId = new Map(computer.routes.map((route) => [route.id, route]));
-  const unlinkable = computer.routes.some((route) => route.relay);
+  // A watched computer isn't linked with this one, so there is nothing to unlink there.
+  const unlinkable = !readOnly && computer.routes.some((route) => route.relay);
 
   const save = async (next: string[]) => {
     if (next.join('\n') === ids.join('\n')) return;
@@ -219,7 +224,7 @@ function ComputerDetail({ id, computer, routes, onAddRoute, onReorder, onUnlink,
         <dd className="text-text-secondary">Pane tries routes top to bottom; drag to reorder</dd>
         <dd><button type="button" className="text-xs font-medium text-interactive-text hover:underline" onClick={onAddRoute}>Add route</button></dd>
         <dt className="text-text-tertiary">Linked</dt>
-        <dd className="col-span-2 text-text-secondary">{linkedSentence(computer)}</dd>
+        <dd className="col-span-2 text-text-secondary">{readOnly ? `Read only: ${computer.label} shared it with this computer` : linkedSentence(computer)}</dd>
       </dl>
       {error && <p className="text-xs text-status-error" role="alert">{error}</p>}
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -228,7 +233,7 @@ function ComputerDetail({ id, computer, routes, onAddRoute, onReorder, onUnlink,
           <div className="flex items-center gap-2">
             <span className="text-xs text-text-secondary">
               {unlinkable ? `${computer.label} stops reaching your other computers, and they stop reaching it.` : `Pane forgets ${computer.label} on this computer.`}
-              {' '}Secret leases pushed to it end now if it is online; otherwise they last until they expire there.
+              {!readOnly && ' Secret leases pushed to it end now if it is online; otherwise they last until they expire there.'}
             </span>
             <Button type="button" variant="danger" size="sm" onClick={() => { setConfirming(false); onUnlink(); }}>{unlinkable ? 'Unlink' : 'Forget'}</Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>

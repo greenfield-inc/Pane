@@ -8,7 +8,7 @@ import { EventEmitter } from 'events';
 import { type LookupFunction } from 'net';
 import { hostname as getOsHostname } from 'os';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
+import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig, type RemotePaneConnectionState } from '../../../../shared/types/remoteDaemon';
 import { primaryProfile } from '../../../../shared/types/remoteComputers';
 import type { PaneEventSink } from '../../core/eventSink';
 import { RemotePaneClient, RemotePaneClientController } from './remotePaneClient';
@@ -751,6 +751,29 @@ describe('RemotePaneClient writes through a drop', () => {
 });
 
 describe('RemotePaneClientController', () => {
+  it('watches a host its token is read-only for, whatever the host says, and asks it none of its own bookkeeping', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    config.client = { mode: 'remote', activeProfileId: 'tyler', profiles: [
+      { id: 'tyler', label: 'Tyler', baseUrl: server.baseUrl, token: 'pane_read_tyler', transport: 'http+sse' },
+    ] };
+    const controller = createController();
+    const seen: Array<'read' | undefined> = [];
+    controller.on('state-changed', (state: RemotePaneConnectionState) => { if (state.mode === 'remote') seen.push(state.access); });
+    controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {} } });
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+
+    await expect(controller.invoke('permission:getPending', [], async () => null)).resolves.toEqual({ success: true, data: [] });
+    expect(server.getInvokes().map((call) => call.channel)).not.toContain('permission:getPending');
+    server.closeEventStream();
+    await waitFor(() => server.getEventRequestCount() === 2 && controller.getConnectionState().status === 'connected');
+    expect(new Set(seen)).toEqual(new Set(['read']));
+
+    await controller.switchToLocalMode();
+    expect(controller.getConnectionState().access).toBeUndefined();
+  });
+
   it('requires every current renderer to acknowledge restoration before green', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);
@@ -1419,7 +1442,7 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
       if (emitReadyEvent) {
         response.write('event: ready\n');
         const ready = { replay: 'none', resync: 'refetch-state-after-reconnect', timestamp: new Date().toISOString() };
-        response.write(`data: ${JSON.stringify(deduplicates ? { ...ready, deduplicatesRequestIds: true } : ready)}\n\n`);
+        response.write(`data: ${JSON.stringify({ ...ready, ...(deduplicates && { deduplicatesRequestIds: true }) })}\n\n`);
       }
       request.on('close', () => {
         if (streamResponse === response) {

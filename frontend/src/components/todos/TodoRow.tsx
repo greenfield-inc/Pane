@@ -18,6 +18,8 @@ interface TodoRowProps {
   now: number;
   /** The viewer's zone: a snoozed row's time reads in it. */
   zone: string;
+  /** Its computer gives read-only access: no snooze or state action. */
+  readOnly?: boolean;
   onSelect: () => void;
   onOpen: () => void;
   onAction: (kind: TodoRowActionKind, anchor: DOMRect) => void;
@@ -62,13 +64,13 @@ function AgentTile({ agentId }: { agentId: string | undefined }) {
  * chips, agent and age. Hovered or selected, the chips give way to Stop, Resume or Start anyway, and
  * Open.
  */
-export function TodoRow({ entry, grouping, selected, flash, now, zone, onSelect, onOpen, onAction, onSnooze }: TodoRowProps) {
+export function TodoRow({ entry, grouping, selected, flash, now, zone, readOnly = false, onSelect, onOpen, onAction, onSnooze }: TodoRowProps) {
   const { row } = entry;
   const { todo, status } = row;
   // Snoozed (round 9): "until Wed 9:00 AM" in the viewer's zone, then the note's first line.
   const snooze = status.status === 'snoozed' ? todo.snooze : undefined;
   const reminder = todo.snooze && (todo.snooze.action === 'remind' || !todo.sessionId);
-  const action = entryAction(entry);
+  const action = readOnly ? null : entryAction(entry);
   const reasonClass = status.alert ? 'text-status-error' : status.status === 'waiting' ? 'text-text-secondary' : 'text-text-tertiary';
   const requester = requesterLabel(row);
   // A saved machine's to-do acts there; its page opens on that machine, not here.

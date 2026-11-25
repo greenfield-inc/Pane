@@ -125,7 +125,7 @@ export function setDeviceMachines(connections: DeviceMachines): void {
 function savedMacs(services: Pick<AppServices, 'configManager'>): DeviceMac[] {
   const computers = services.configManager.getConfig().remoteDaemon?.client.computers ?? [];
   return computers
-    .filter(computer => computer.os === 'macOS')
+    .filter(computer => computer.os === 'macOS' && machines?.machineState(computer.id)?.access !== 'read')
     .map(computer => ({ id: computer.id, name: computer.label, online: machines?.machineState(computer.id)?.status === 'online' }));
 }
 let appServices: AppServices | undefined;

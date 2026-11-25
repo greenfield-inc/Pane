@@ -10,12 +10,12 @@ export function LoopActions({ loop }: { loop: Loop }) {
   const openDrawer = useLoopsStore(state => state.openDrawer);
   return (
     <>
-      <Button size="sm" onClick={() => void runNow(loop.id)}><Play className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Run now</Button>
-      <Button size="sm" variant="secondary" onClick={() => void setEnabled(loop.id, !loop.enabled)}>
+      <Button size="sm" className="needs-full-access" onClick={() => void runNow(loop.id)}><Play className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Run now</Button>
+      <Button size="sm" variant="secondary" className="needs-full-access" onClick={() => void setEnabled(loop.id, !loop.enabled)}>
         {loop.enabled ? <Pause className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> : <Play className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}
         {loop.enabled ? 'Pause' : 'Resume'}
       </Button>
-      <Button size="sm" variant="secondary" onClick={() => openDrawer(loop.id)}><Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Edit</Button>
+      <Button size="sm" variant="secondary" className="needs-full-access" onClick={() => openDrawer(loop.id)}><Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Edit</Button>
     </>
   );
 }

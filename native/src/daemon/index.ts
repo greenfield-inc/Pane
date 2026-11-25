@@ -6,3 +6,4 @@ export { useDaemonEvent, useDaemonQueryKey, useInvokeMutation } from './hooks';
 /** @public API for feature screens. */
 export { invokeChannel } from './invoke';
 export { queryClient } from './queryClient';
+export { useReadOnlyHost } from './useReadOnly';

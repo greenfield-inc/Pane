@@ -1,3 +1,4 @@
+import { isReadOnlyHost } from '../stores/readOnlyHostStore';
 import { createPortal } from 'react-dom';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -428,6 +429,8 @@ export function SessionWorkspacePanels({
 
   async function toggleTool(type: 'terminal' | 'explorer') {
     if (!loaded || creating.current) return;
+    // A read-only computer shows the tools it has and opens none.
+    if (isReadOnlyHost() && !(type === 'terminal' ? terminal : explorer)) return;
     creating.current = true;
     setError(null);
     try {

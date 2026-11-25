@@ -215,7 +215,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
             type="button"
             aria-label="Add tool"
             aria-haspopup="menu"
-            className="inline-flex items-center justify-center h-7 w-7 ml-0.5 flex-shrink-0 text-text-tertiary hover:text-text-primary hover:bg-surface-hover rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+            className="needs-full-access inline-flex items-center justify-center h-7 w-7 ml-0.5 flex-shrink-0 text-text-tertiary hover:text-text-primary hover:bg-surface-hover rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
             onClick={handleAddTool}
           >
             <Plus className="w-4 h-4" />

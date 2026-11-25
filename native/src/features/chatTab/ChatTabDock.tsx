@@ -30,16 +30,16 @@ export function DockButton({ title, onPress, disabled, busy, primary, testID, st
   </Pressable>;
 }
 
-export function ProblemBanner({ problem, agent, busy, onRestart, onSignIn }: { problem: ChatTabProblem; agent: string; busy: boolean; onRestart: () => void; onSignIn: () => void }) {
+export function ProblemBanner({ problem, agent, busy, readOnly, onRestart, onSignIn }: { problem: ChatTabProblem; agent: string; busy: boolean; /** Says what's wrong, with nothing to press. */ readOnly?: boolean; onRestart: () => void; onSignIn: () => void }) {
   const theme = useTheme();
   return <View testID="chat-problem" accessibilityLiveRegion="polite" style={[styles.card, { backgroundColor: theme.chat.dangerSoft, borderColor: theme.chat.border }]}>
     <Text variant="headline" style={{ color: theme.chat.foreground }}>{problem.message}</Text>
     <Text variant="subhead" style={{ color: theme.chat.mutedForeground }}>{problem.next}</Text>
-    <View style={styles.row}>
+    {readOnly ? null : <View style={styles.row}>
       {problem.action === 'sign-in' && <DockButton testID="chat-sign-in" title="Sign in on the computer" primary disabled={busy} onPress={onSignIn} />}
       {problem.action === 'install' && problem.url && <DockButton testID="chat-install" title={`Install ${agent}`} primary onPress={() => void Linking.openURL(problem.url!)} />}
       {problem.code !== 'unsupported-host' && <DockButton testID="chat-restart" title={problem.action === 'restart' ? 'Restart' : 'Retry'} primary={problem.action === 'restart'} disabled={busy} onPress={onRestart} />}
-    </View>
+    </View>}
   </View>;
 }
 

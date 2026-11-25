@@ -8,7 +8,7 @@ import { Icon, Text } from '@/ui';
 import type { SidebarItem } from './paneList';
 import { IconButton } from './PaneKit';
 import { PausedBadge } from './StatusBadge';
-import { SwipeRow, swipeRowAccessibility } from './SwipeRow';
+import { SwipeRow, useSwipeRowAccessibility } from './SwipeRow';
 
 /** The drawer's collapsible section header: chevron, sentence-case label and, for Archived, a count. */
 export function SidebarSectionHeader({ item, first, onToggle }: {
@@ -57,6 +57,7 @@ export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinn
   const { session, label, paneCount, nestedKey, nestedExpanded } = item;
   const paused = Boolean(session.paused);
   const actions = { pinned: Boolean(session.isPinned), onTogglePinned, onArchive, pause: { paused, onToggle: onTogglePaused } };
+  const accessibility = useSwipeRowAccessibility(actions);
   return (
     <SwipeRow testIDPrefix="session" id={nestedKey} {...actions}>
       <View style={[styles.row, { backgroundColor: pressed ? theme.colors.selected : background ?? theme.colors.background }]}>
@@ -77,7 +78,7 @@ export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinn
           testID={`session-row-${nestedKey}`}
           accessibilityRole="button"
           accessibilityLabel={`Open Session ${label}${paused ? ', Paused' : ''}${waiting > 0 ? `, ${waiting} waiting` : ''}`}
-          {...swipeRowAccessibility(actions)}
+          {...accessibility}
           onPress={onOpen}
           onPressIn={() => setPressed(true)}
           onPressOut={() => setPressed(false)}
@@ -93,10 +94,10 @@ export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinn
   );
 }
 
-/** An archived Session or pane with Restore; archived panes can also be deleted for good. */
+/** An archived Session or pane with Restore, when the phone may; archived panes can also be deleted for good. */
 export function ArchivedRow({ item, onRestore, onDelete }: {
   item: Extract<SidebarItem, { type: 'archived' }>;
-  onRestore: () => void;
+  onRestore?: () => void;
   onDelete?: () => void;
 }) {
   return (
@@ -107,13 +108,13 @@ export function ArchivedRow({ item, onRestore, onDelete }: {
         {item.detail ? <Text variant="footnote" tone="muted">{`  ${item.detail}`}</Text> : null}
       </Text>
       <View style={styles.actions}>
-        <IconButton
+        {onRestore ? <IconButton
           testID={`archived-restore-${item.id}`}
           label={item.kind === 'session' ? `Restore Session ${item.label}` : `Restore ${item.label}`}
           onPress={onRestore}
         >
           <Icon ios="arrow.uturn.backward" android="unarchive" size={16} />
-        </IconButton>
+        </IconButton> : null}
         {onDelete ? (
           <IconButton testID={`archived-delete-${item.id}`} label={`Delete ${item.label}`} onPress={onDelete}>
             <Icon ios="trash" android="delete" size={16} />
