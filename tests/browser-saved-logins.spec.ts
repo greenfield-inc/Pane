@@ -407,12 +407,12 @@ test.describe('the page after a fill', () => {
   });
 
   test('hides a short PIN the page quotes in a sentence, and waits still find text beside drawn digits', async ({ page }) => {
-    const t = await tab(page, { [`${SITE}/`]: '<label>PIN <input id="p" style="width:200px"></label><span id="drawn"></span><p id="m"></p>' });
+    const t = await tab(page, { [`${SITE}/`]: '<label>PIN <input id="p" style="width:200px"></label><span id="drawn"></span><p id="m"></p><h2 id="h"></h2>' });
     await page.goto(SITE);
     await fill(t, 'PIN', login(t, { value: '1357' }));
     await page.evaluate('document.querySelector("#drawn").textContent = "1"');
     await page.waitForTimeout(2_100);
-    await page.evaluate('document.querySelector("#m").innerHTML = "The code " + document.querySelector("#p").value + " is not valid. <b>Try</b> again!"');
+    await page.evaluate('document.querySelector("#m").innerHTML = "The code " + document.querySelector("#p").value + " is not valid."; document.querySelector("#h").innerHTML = "<b>Try</b> again!"');
     expect((await t.driver.snapshot()).snapshot).not.toContain('1357');
     await t.driver.wait({ text: 'Try again!' }, 2_000);
   });
