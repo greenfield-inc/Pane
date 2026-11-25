@@ -176,7 +176,7 @@ describe('a device paired Read only', () => {
     registry.register('runpane:panels:list', () => ({ ok: true, panels }));
     registry.register('panels:getActive', () => panels[2]);
     registry.register('orchestration-sessions:overview', () => ({ success: true, data: { session: { name: 'Ship', profile: secret, launchCommand: secret, customResume: { command: secret } }, panes: [{ panels: [...panels, closed] }] } }));
-    registry.register('loops:list', () => ({ success: true, data: [{ id: 'l', name: 'Nightly', prompt: 'report', toolCommand: `${secret} ./report.sh` }] }));
+    registry.register('loops:list', () => ({ success: true, data: [{ id: 'l', name: 'Nightly', prompt: 'report', initialInput: secret, toolCommand: `${secret} ./report.sh` }] }));
     registry.register('chat-tab:get', () => ({ panelId: 'c', permissions: [{ toolCall: 'diff' }], questions: [{}], queue: [{}], messageCount: 2 }));
     const { invoke, stream, server } = await serve(registry);
 
