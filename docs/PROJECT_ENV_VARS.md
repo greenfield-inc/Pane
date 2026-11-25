@@ -49,7 +49,7 @@ other projects' Panes. They are not a sandbox:
 - Every process Pane starts for the project, including the agents, gets the value in
   its environment, and other processes running as your user can read a process's
   environment (for example with `ps eww`).
-- Any agent can use any Pane secret through `runpane secrets exec`
+- Any agent can use any Pane secret that is not a login through `runpane secrets exec`
   ([who can read a secret](PANE_SECRETS.md#who-can-read-a-secret)).
 - On a host set to "Everyone on tailnet", a teammate's commands and terminals run as
   you and can reach every secret. Pane only keeps the secret and keychain variables

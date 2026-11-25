@@ -74,10 +74,11 @@ export async function runVerb(page: PageDriver, contents: BrowserPageContents, r
     case 'type':
       return after(await page.type(request.ref, request.text, request.clear, request.submit));
     case 'fill': {
-      const { site, ...filled } = await page.fill(request.ref, request.login);
+      const { site, sure, ...filled } = await page.fill(request.ref, request.login);
       const outcome = after(filled);
       outcome.filledSite = site;
-      outcome.note = [`Filled ${request.login.key}. Its value shows as dots, and scripts don't run on this page until the tab loads a new one.`, outcome.note].filter(Boolean).join(' ');
+      const what = sure ? `Filled ${request.login.key}.` : `The page changed while Pane filled ${request.login.key}, so it may hold it, part of it or nothing: a page that submits by itself does this. Call browser_snapshot to see where it is.`;
+      outcome.note = [`${what} Its value shows as dots, and scripts don't run on this page until the tab loads a new one.`, outcome.note].filter(Boolean).join(' ');
       return outcome;
     }
     case 'press':

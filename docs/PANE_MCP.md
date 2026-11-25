@@ -67,9 +67,9 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 | `autopilot` | `autopilot_status`, `autopilot_waiting`, `autopilot_stack`, `autopilot_stack_push`, `autopilot_answer`, `autopilot_close`, `autopilot_rewrite`: Autopilot's (experimental) reads, its stack, and its actions on waiting items. `autopilot_stack_push` takes one `tab` per call (the CLI's `--tab` repeats). Only Autopilot's panel may act (`AUTOPILOT_ONLY`), and a permission prompt, or an answer or rewrite of a secret card, is refused with `AUTOPILOT_CANNOT_ANSWER` |
 | `repos` | the repository tools, including `repos_get` and `repos_update` (a repo's Project Settings: build, run and archive scripts, worktree folder) |
 | `devices` | the six device tools plus `device_usage` and `device_free`, which report and free what simulators use on this machine ([Devices](DEVICES.md)) |
-| `browser` | the fifteen `browser_*` tools, which drive this Pane's browser tabs ([Browser tools](BROWSER_AGENTS.md)) |
+| `browser` | the sixteen `browser_*` tools, which drive this Pane's browser tabs ([Browser tools](BROWSER_AGENTS.md)) |
 | `machine` | `machine_health` (disk and memory levels, the Panes using the most memory, leak warnings, and what Pane can free by tier) and `machine_cleanup` (lists one kind of tier 1 or 2 item, and deletes them with `yes: true`; tier 3 is refused with how to free it) |
-| `secrets` | `secrets_list`, `secrets_delete`, `secrets_lease`, `secrets_lease_end`. No tool sets or reads a value: agents use secrets through `runpane secrets exec` ([Pane secrets](PANE_SECRETS.md)) |
+| `secrets` | `secrets_list`, `secrets_delete`, `secrets_lease`, `secrets_lease_end`. No tool sets or reads a value: agents use secrets through `runpane secrets exec`, and logins through `browser_fill` ([Pane secrets](PANE_SECRETS.md)) |
 | `docs`, `links`, `admin` | documentation, deep-link, and diagnostic tools |
 | `plugin` | `core` without the four `workspace` tools: what the [Claude plugin](#claude-plugin) serves |
 | `all` / `read` | every tool / every read-only tool |

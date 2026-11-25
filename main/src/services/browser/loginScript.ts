@@ -11,7 +11,7 @@ export const LOGIN_MARK = 'data-pane-login';
 /** What the check answers: the document's own origin, or why the field can't take a login. */
 interface LoginCheck { origin: string; problem?: string }
 /** What the fill answers: why nothing (or not everything) went in. */
-interface LoginFill { problem?: string }
+interface LoginFill { problem?: string; partly?: boolean }
 
 function loginWorld() {
   const TYPES = new Set(['text', 'password', 'email', 'tel', 'number', 'search', 'url']);
@@ -82,24 +82,37 @@ function loginWorld() {
   /** The split PIN's boxes in page order: the smallest group around `el` with exactly one box per character. */
   function boxesAround(el: HTMLInputElement, length: number): HTMLInputElement[] | null {
     for (let scope = parentOf(el); scope; scope = parentOf(scope)) {
-      const boxes = Array.from(scope.querySelectorAll('input')).filter(input => TYPES.has(input.type) && oneCharacter(input));
+      const inputs = Array.from(scope.querySelectorAll('input')).filter(input => TYPES.has(input.type));
+      const boxes = inputs.filter(oneCharacter);
+      // A first box that takes the whole code, as one that a texted code fills does.
+      const [first] = inputs;
+      if (first?.maxLength === length && boxes.length === length - 1 && boxes.every(box => box.maxLength === 1)) boxes.unshift(first);
       if (boxes.length === length && boxes.includes(el)) return boxes;
       if (boxes.length > length || scope instanceof HTMLFormElement) return null;
     }
     return null;
   }
 
-  /** The field shows dots, can't be copied, and stays so however the page changes it. */
-  function protect(el: HTMLInputElement): void {
-    if (el.type !== 'password') el.type = 'password';
-    new MutationObserver(() => { if (el.type !== 'password') el.type = 'password'; }).observe(el, { attributes: true, attributeFilter: ['type'] });
-  }
-
-  /** Text the page copies from the login (a PIN component's drawn digits, a "show" preview) shows as dots too. */
-  function concealCopies(value: string, boxes: readonly HTMLInputElement[]): void {
+  /**
+   * Keeps the login out of sight for the life of the document: the filled boxes, any other input that
+   * comes to hold it, and text the page draws from it (a PIN component's digits, a "show" preview)
+   * all show as dots. Call what it returns after each change made here.
+   */
+  function hide(value: string, boxes: readonly HTMLInputElement[]): () => void {
+    const plain = value.replace(/\s+/g, '');
     const armedUntil = Date.now() + ARMED_MS;
+    const hidden = new Set<Element>();
+    const roots = new Set<Document | ShadowRoot>();
+    const before = new Map<Element, string>();
+
+    /** The field shows dots, can't be copied, and stays so however the page changes it. */
+    const protect = (el: HTMLInputElement) => {
+      hidden.add(el);
+      if (el.type !== 'password') el.type = 'password';
+    };
     const conceal = (el: Element | null) => {
-      if (!(el instanceof HTMLElement) || boxes.some(box => box === el)) return;
+      if (!(el instanceof HTMLElement) || hidden.has(el)) return;
+      hidden.add(el);
       const dots = () => {
         if (el.style.getPropertyValue('-webkit-text-security') === 'disc') return;
         el.style.setProperty('-webkit-text-security', 'disc', 'important');
@@ -108,15 +121,46 @@ function loginWorld() {
       dots();
       new MutationObserver(dots).observe(el, { attributes: true, attributeFilter: ['style'] });
     };
+
+    /** A value long enough that text containing it was copied from it. */
+    const distinct = plain.length >= 8;
+    const holds = (text: string) => text === plain || (distinct && text.includes(plain));
+    const armed = () => Date.now() < armedUntil;
+    /** A piece of the value, as one box or one drawn digit of it is. */
+    const piece = (text: string) => text !== '' && text.length <= 2 && plain.includes(text);
+
+    /** Hides every input that holds the login, whole or one character in each of several in a row. */
+    const look = () => {
+      let run: HTMLInputElement[] = [];
+      for (const root of roots) {
+        for (const el of Array.from(root.querySelectorAll('input, textarea'))) {
+          if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) continue;
+          if (el instanceof HTMLInputElement && !TYPES.has(el.type)) continue;
+          const text = el.value.replace(/\s+/g, '');
+          // What the page put there since the fill began; a box it fills after the window is caught by the run below.
+          const spread = armed() && piece(text) && before.get(el) !== text;
+          if (el instanceof HTMLTextAreaElement) {
+            if (holds(text)) conceal(el);
+            continue;
+          }
+          if (holds(text) || spread || hidden.has(el)) protect(el);
+          run = [...run, el].slice(-plain.length);
+          const held = run.map(box => box.value);
+          if (plain.length > 1 && held.every(box => box.length === 1) && held.join('') === plain) run.forEach(protect);
+        }
+      }
+    };
+
     const inspect = (node: Node) => {
       if (node.nodeType === Node.TEXT_NODE) {
         const text = (node.textContent ?? '').replace(/\s+/g, '');
-        // A drawn digit is one or two characters of the value, just after the fill; the whole value counts any time.
-        const copied = text.includes(value) || (text !== '' && text.length <= 2 && value.includes(text) && Date.now() < armedUntil);
-        if (copied) conceal(node.parentElement);
+        // A drawn digit is a piece of the value, just after the fill and while its boxes are still there.
+        const live = armed() && Array.from(hidden).some(el => el instanceof HTMLInputElement && el.isConnected);
+        if (holds(text) || (live && (text.includes(plain) || piece(text)))) conceal(node.parentElement);
       } else if (node instanceof Element) {
+        if (node.shadowRoot) watch(node.shadowRoot);
         node.childNodes.forEach(inspect);
-        if ((node.textContent ?? '').replace(/\s+/g, '') === value) conceal(node);
+        if ((node.textContent ?? '').replace(/\s+/g, '') === plain) conceal(node);
       }
     };
     const observer = new MutationObserver(records => {
@@ -124,9 +168,34 @@ function loginWorld() {
         if (record.type === 'characterData') inspect(record.target);
         else record.addedNodes.forEach(inspect);
       }
+      look();
+      soon();
     });
-    const roots = new Set<Node>([document, ...boxes.map(box => box.getRootNode())]);
-    for (const root of roots) observer.observe(root, { subtree: true, childList: true, characterData: true });
+    /** Again before the next frame is drawn: setting an input's value changes nothing an observer sees. */
+    let queued = false;
+    const soon = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; look(); });
+    };
+    const watch = (root: Document | ShadowRoot) => {
+      if (roots.has(root)) return;
+      roots.add(root);
+      observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true });
+      for (const el of Array.from(root.querySelectorAll('*'))) {
+        if (el instanceof HTMLInputElement) before.set(el, el.value.replace(/\s+/g, ''));
+        if (el.shadowRoot) watch(el.shadowRoot);
+      }
+    };
+    if (plain) {
+      watch(document);
+      for (const type of ['input', 'change', 'click', 'keyup', 'focusout']) window.addEventListener(type, soon, true);
+      const everyFrame = () => { look(); if (armed()) requestAnimationFrame(everyFrame); };
+      requestAnimationFrame(everyFrame);
+    }
+    boxes.forEach(protect);
+    look();
+    return look;
   }
 
   /** Puts `text` in the field as typing would: focused, one input event the page's framework sees, then change. */
@@ -145,20 +214,22 @@ function loginWorld() {
     const problem = untypeable(target);
     if (problem) return { problem };
     const characters = Array.from(value);
-    const boxes = oneCharacter(target) && characters.length > 1 ? boxesAround(target, characters.length) : null;
+    const split = characters.length > 1 && (oneCharacter(target) || target.maxLength === characters.length);
+    const boxes = split ? boxesAround(target, characters.length) : null;
     if (!boxes && target.maxLength >= 0 && target.maxLength < value.length) return { problem: 'does not fit this login' };
     const fields = boxes ?? [target];
     if (fields.some(field => untypeable(field) !== null)) return { problem: 'is one of several boxes, and another of them can\'t be typed in' };
-    fields.forEach(protect);
-    concealCopies(value, fields);
+    const look = hide(value, fields);
     if (!boxes) {
       enter(target, value);
+      look();
       return {};
     }
     for (const [index, character] of characters.entries()) {
       // The page may have redrawn the boxes or moved one out of reach after the last character.
-      if (untypeable(boxes[index]) !== null) return { problem: 'is one of several boxes, and the page changed them partway, so only some were filled' };
+      if (untypeable(boxes[index]) !== null) return { problem: 'is one of several boxes, and the page changed them partway, so only some were filled', partly: true };
       enter(boxes[index], character);
+      look();
       // The page's framework applies each box's change before the next, as with a person's keys.
       await new Promise(resolve => setTimeout(resolve, 20));
     }

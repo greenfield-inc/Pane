@@ -60,6 +60,7 @@ const trustedSchema = boundary.object({ clientId: boundary.nonEmptyString });
 const startLeaseSchema = boundary.object({
   project: boundary.string,
   names: boundary.array(boundary.string),
+  references: boundary.record(boundary.string),
   machines: boundary.array(boundary.string),
 });
 
@@ -241,8 +242,8 @@ function registerSettingsChannels(ipcMain: Pick<IpcMain, 'handle'>, secrets: () 
     return true;
   }));
   ipcMain.handle('pane-secrets:start-lease', (_event, request: PaneCommandValue) => respond(async () => {
-    const { project, names, machines } = decode(request, startLeaseSchema);
-    return desktop().start({ project, names, machines: machines.filter(id => id !== LOCAL_MACHINE_ID), requestedBy: 'Settings' });
+    const { project, names, references, machines } = decode(request, startLeaseSchema);
+    return desktop().start({ project, names, approved: references, machines: machines.filter(id => id !== LOCAL_MACHINE_ID), requestedBy: 'Settings' });
   }));
   ipcMain.handle('pane-secrets:end-lease', (_event, leaseId: PaneCommandValue) => respond(async () => {
     const { id } = decode({ id: leaseId }, leaseEndSchema);

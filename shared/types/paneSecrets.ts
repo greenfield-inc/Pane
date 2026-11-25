@@ -124,6 +124,11 @@ export interface PaneSecretReferenceSummary {
   sites?: string[];
 }
 
+/** A lease's secret as the person approves it: where its value comes from and, for a login, its sites. */
+export function leaseReferenceText(reference: string, sites: readonly string[] | null | undefined): string {
+  return sites ? `${reference} (login for ${sites.join(', ')})` : reference;
+}
+
 /** What a lease log line records. */
 export type SecretLeaseEvent = 'granted' | 'renewed' | 'ended' | 'expired' | 'swept';
 
@@ -205,6 +210,8 @@ export interface PaneSecretsOverview {
 export interface SecretLeaseStartRequest {
   project: string;
   names: string[];
+  /** Each name's {@link leaseReferenceText} as the form showed it; the lease is refused when one has changed. */
+  references: Record<string, string>;
   /** Machine ids from {@link SecretLeaseMachine}; `local` is this desktop. */
   machines: string[];
 }

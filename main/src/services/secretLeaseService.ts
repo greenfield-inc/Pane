@@ -1,6 +1,7 @@
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
+  leaseReferenceText,
   paneSecretKey,
   SECRET_LEASE_DEFAULT_MS,
   SECRET_LEASE_MAX_MS,
@@ -124,6 +125,8 @@ export interface SecretLeaseStart {
   requestedBy: string;
   /** Renews this lease: same id, new values and expiry, pushed where it went before. */
   renews?: string;
+  /** Each name's `leaseReferenceText` as the person saw and approved it. The lease is refused when one has changed. */
+  approved?: Record<string, string>;
   /** The length the person saw and approved on the card. Absent: the project's length now. */
   lengthMs?: number;
   /** Started from the Extend card itself: that card ends with its own answer, so it isn't closed here. */
@@ -194,6 +197,16 @@ export class SecretLeaseService {
     const ownRefusal = hostLeaseRefusal(this.deps.config());
     if (ownRefusal) throw leaseRefused('This computer', ownRefusal);
     const references = this.referencesOf(request.project, request.names);
+    // Read before 1Password asks, so what is granted is what was compared with the person's approval.
+    const sites = request.names.map(name => this.deps.secrets().sitesOf(request.project, name));
+    const changed = request.approved && request.names.find((name, index) => request.approved?.[name] !== leaseReferenceText(references[index], sites[index]));
+    if (changed) {
+      throw new PaneError(
+        'SECRET_LEASE_CHANGED',
+        `The 1Password reference or sites of ${paneSecretKey(request.project, changed)} changed after you were shown them. Nothing was read or leased.`,
+        'Check its sites in Settings → Secrets. Then decline the card, if it still shows the old ones, and start a new lease from Settings or ask the agent to run its lease command again.',
+      );
+    }
     const previous = request.renews ? this.deps.store.get(request.renews) : null;
     if (request.renews && !previous) {
       throw new PaneError('SECRET_LEASE_ENDED', 'That lease already ended, so it can\'t be extended. Nothing was read.', 'Start a new lease from Settings → Secrets, or ask the agent to run its lease command again.');
@@ -201,9 +214,9 @@ export class SecretLeaseService {
     const targets = request.renews ? previous?.pushedTo ?? [] : request.machines.filter(id => id !== LOCAL_MACHINE_ID);
     const values = await this.deps.onePassword().read(references);
     const secrets = request.names.map((name, index): SecretLeaseGrant['secrets'][number] => {
-      const sites = this.deps.secrets().sitesOf(request.project, name);
       const secret = { name, reference: references[index], value: values[index] };
-      return sites ? { ...secret, sites } : secret;
+      const chosen = sites[index];
+      return chosen ? { ...secret, sites: chosen } : secret;
     });
     const lengthMs = request.lengthMs ?? this.lengthFor(request.project);
     const lease = await this.deps.store.grant({

@@ -3889,7 +3889,7 @@
       {
         "name": "--only",
         "value": "<name,...>",
-        "description": "Secrets to inject, comma-separated. Defaults to every secret in the project."
+        "description": "Secrets to inject, comma-separated. Defaults to every secret in the project except logins."
       },
       {
         "name": "--reason",
@@ -4625,7 +4625,7 @@
         "  runpane secrets <list|set|delete|exec|request|lease> [options]",
         "",
         "Pane secrets are named values, addressed as <project>/<NAME>, that every machine you saved in Pane keeps a copy of.",
-        "Agents use them only through `runpane secrets exec`, which puts them in a command's environment. No command prints a value.",
+        "Agents use them through `runpane secrets exec`, which puts them in a command's environment, and logins through `runpane browser fill`. No command prints a value.",
         "Ask the person for a new one with `runpane secrets request`; they type it on a masked card.",
         "A login is a secret the person gave sites in Settings > Secrets. Agents fill it on those sites with `runpane browser fill`; `secrets exec`, `set` and `delete` refuse it.",
         "A secret can also come from 1Password: the person adds the reference in Settings > Secrets, and it has a value only during a lease they approve.",
@@ -4684,8 +4684,8 @@
         "Usage:",
         "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>]... [--file <name>]... -- <command>...",
         "",
-        "Runs the command with Pane secrets added to your environment, and exits with its exit code. Each secret is injected under its own name and overrides a variable of that name.",
-        "With no --only, --env or --file, it injects every secret in the project.",
+        "Runs the command with Pane secrets added to your environment, and exits with its exit code. Logins are left out. Each secret is injected under its own name and overrides a variable of that name.",
+        "With no --only, --env or --file, it injects every secret in the project except logins.",
         "",
         "Options:",
         "  --project <project>            Secret project",
@@ -7517,7 +7517,7 @@
         "  python -m runpane secrets <list|set|delete|exec|request|lease> [options]",
         "",
         "Pane secrets are named values, addressed as <project>/<NAME>, that every machine you saved in Pane keeps a copy of.",
-        "Agents use them only through `runpane secrets exec`, which puts them in a command's environment. No command prints a value.",
+        "Agents use them through `runpane secrets exec`, which puts them in a command's environment, and logins through `runpane browser fill`. No command prints a value.",
         "Ask the person for a new one with `runpane secrets request`; they type it on a masked card.",
         "A login is a secret the person gave sites in Settings > Secrets. Agents fill it on those sites with `runpane browser fill`; `secrets exec`, `set` and `delete` refuse it.",
         "A secret can also come from 1Password: the person adds the reference in Settings > Secrets, and it has a value only during a lease they approve.",
@@ -7576,8 +7576,8 @@
         "Usage:",
         "  python -m runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>]... [--file <name>]... -- <command>...",
         "",
-        "Runs the command with Pane secrets added to your environment, and exits with its exit code. Each secret is injected under its own name and overrides a variable of that name.",
-        "With no --only, --env or --file, it injects every secret in the project.",
+        "Runs the command with Pane secrets added to your environment, and exits with its exit code. Logins are left out. Each secret is injected under its own name and overrides a variable of that name.",
+        "With no --only, --env or --file, it injects every secret in the project except logins.",
         "",
         "Options:",
         "  --project <project>            Secret project",
@@ -24550,7 +24550,7 @@
       "secrets exec": {
         "name": "secrets exec",
         "summary": "Run a command with Pane secrets in its environment. Nothing prints a value.",
-        "details": "Reads the secrets from this machine's Pane when it runs, starts the command with your environment plus the secrets, passes stdin, stdout and stderr through, and exits with the command's exit code. By default it injects every secret in the project under its own name. --only limits that to the names given. --env VAR=NAME injects secret NAME as VAR. --file NAME writes secret NAME to a 0600 file in a private temp folder and sets NAME to the file's path; the file is removed when the command exits. Injected names override your environment.",
+        "details": "Reads the secrets from this machine's Pane when it runs, starts the command with your environment plus the secrets, passes stdin, stdout and stderr through, and exits with the command's exit code. By default it injects every secret in the project except logins under its own name. --only limits that to the names given. --env VAR=NAME injects secret NAME as VAR. --file NAME writes secret NAME to a 0600 file in a private temp folder and sets NAME to the file's path; the file is removed when the command exits. Injected names override your environment.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [

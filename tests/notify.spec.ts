@@ -519,7 +519,7 @@ test.describe('Settings → Secrets', () => {
     await sites.fill('bank.example/login https://bank.example:8443');
     await expect(row('bank/PASSWORD')).toContainText('Agents can fill it on https://bank.example, https://bank.example:8443 and nowhere else');
     await save.click();
-    await expect(row('bank/PASSWORD').getByTestId('pane-secret-login')).toContainText('Never filled.');
+    await expect(row('bank/PASSWORD').getByTestId('pane-secret-login')).toContainText('No recent fills.');
 
     await row('bank/PIN').getByRole('button', { name: 'Edit sites' }).click();
     await page.getByLabel('Sign-in sites for bank/PIN').fill('https://login.bank.example');
@@ -591,7 +591,7 @@ test.describe('Settings → Secrets', () => {
     await expect(lease).toHaveCount(0);
     expect(await secretCalls(page)).toEqual([
       { action: 'setReference', project: 'stripe', name: 'STRIPE_SECRET_KEY', reference: 'op://Dev/Stripe/credential' },
-      { action: 'startLease', request: { project: 'stripe', names: ['STRIPE_SECRET_KEY'], machines: ['local', 'devbox'] } },
+      { action: 'startLease', request: { project: 'stripe', names: ['STRIPE_SECRET_KEY'], references: { STRIPE_SECRET_KEY: 'op://Dev/Stripe/credential', DATABASE_URL: 'op://Dev/Neon/url' }, machines: ['local', 'devbox'] } },
       { action: 'endLease', leaseId: 'lease-1' },
     ]);
   });

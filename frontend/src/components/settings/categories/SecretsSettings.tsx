@@ -14,6 +14,7 @@ import { leaseEndLabel } from '../../notify/notifyFormat';
 import { formatDuration } from '../../loops/loopRunView';
 import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
 import {
+  leaseReferenceText,
   loginSiteOrigin,
   loginSitesProblem,
   paneSecretKey,
@@ -114,7 +115,7 @@ function SitesInput({ value, onChange, autoFocus, label }: { value: string; onCh
       value={value}
       onChange={(event) => onChange(event.target.value)}
       error={problem ?? undefined}
-      helperText={sites.length > 0 ? `A login. Agents can fill it on ${sites.join(', ')} and nowhere else, and no command gets it.` : 'Add a site to save a login that agents fill in browser tabs.'}
+      helperText={sites.length > 0 ? `A login. Agents can fill it on ${sites.join(', ')} and nowhere else, and no command gets it.` : 'Add a site to save a password or PIN as a login that agents fill in browser tabs.'}
       className="font-mono text-sm"
       autoFocus={autoFocus}
       fullWidth
@@ -159,7 +160,7 @@ function LoginLine({ sites, uses }: { sites: string[]; uses: PaneLoginUse[] }) {
             {use.agent} in {use.pane} filled it on <span className="font-mono">{use.site}</span>{use.machine ? ` on ${use.machine}` : ''} {formatDistanceToNow(use.at)}
           </p>
         ))
-        : <p>Never filled.</p>}
+        : <p>No recent fills.</p>}
     </div>
   );
 }
@@ -387,7 +388,7 @@ function Check({ label, checked, disabled, onChange, note, address }: {
       <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-border-primary accent-interactive" />
       <span className={cn('min-w-0', disabled && 'text-text-muted')}>
         {label}
-        {address && <span className="block truncate font-mono text-xs text-text-tertiary" title={address}>{address}</span>}
+        {address && <span className="block break-all font-mono text-xs text-text-tertiary">{address}</span>}
         {note && <span className="block text-xs text-text-tertiary">{note}</span>}
       </span>
     </label>
@@ -416,6 +417,7 @@ function StartLeaseForm({ project, references, machines, lengthMs, now, onStart,
   const [names, setNames] = useState(() => new Set(references.map((reference) => reference.name)));
   const [picked, setPicked] = useState(() => new Set(machines.some((machine) => machine.id === LOCAL_MACHINE_ID && !machine.refusal) ? [LOCAL_MACHINE_ID] : []));
   const [busy, setBusy] = useState(false);
+  const shown = new Map(references.map((reference) => [reference.name, leaseReferenceText(reference.reference, reference.sites)]));
   const start = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
@@ -425,6 +427,7 @@ function StartLeaseForm({ project, references, machines, lengthMs, now, onStart,
       ok = await onStart({
         project,
         names: references.flatMap((reference) => (names.has(reference.name) ? [reference.name] : [])),
+        references: Object.fromEntries(shown),
         machines: machines.flatMap((machine) => (picked.has(machine.id) ? [machine.id] : [])),
       });
     } finally {
@@ -437,7 +440,7 @@ function StartLeaseForm({ project, references, machines, lengthMs, now, onStart,
       <fieldset className="space-y-1.5">
         <legend className="mb-1 text-xs font-medium text-text-secondary">Secrets</legend>
         {references.map((reference) => (
-          <Check key={reference.name} label={reference.name} address={reference.reference} checked={names.has(reference.name)} onChange={(on) => setNames(toggled(names, reference.name, on))} />
+          <Check key={reference.name} label={reference.name} address={shown.get(reference.name)} checked={names.has(reference.name)} onChange={(on) => setNames(toggled(names, reference.name, on))} />
         ))}
       </fieldset>
       <fieldset className="space-y-1.5">

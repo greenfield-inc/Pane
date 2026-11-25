@@ -957,7 +957,7 @@ export function LeaseRows({ item, className }: { item: NotifyItem; className?: s
           <li key={name} className="flex min-w-0 items-baseline gap-3" data-testid="notify-lease-row">
             <span className="w-[38%] shrink-0 truncate font-mono text-text-primary" title={name}>{name}</span>
             {reference
-              ? <span className="min-w-0 truncate font-mono text-text-tertiary" title={reference}>{reference}</span>
+              ? <span className="min-w-0 break-all font-mono text-text-tertiary">{reference}</span>
               : <span className="min-w-0 truncate text-status-warning">not a 1Password reference on {host}</span>}
           </li>
         );

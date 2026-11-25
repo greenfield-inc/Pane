@@ -227,6 +227,8 @@ test.describe('only on its own site', () => {
       await fresh.goto(SITE);
       const moved = login(t, { record: async () => { await fresh.goto(destination); } });
       const outcome = await fill(t, 'Password', moved).catch((error: { code: string }) => error);
+      // Pane never claims a fill it can't know of.
+      expect(JSON.stringify(outcome)).not.toContain('Filled bank/PASSWORD.');
       expect(await fresh.evaluate('window.got')).toEqual([]);
       expect(await fresh.locator('#p').inputValue()).toBe('');
       expect(JSON.stringify(outcome)).not.toContain(VALUE);
@@ -317,17 +319,96 @@ all.forEach((box, i) => box.addEventListener('input', () => { const seen = state
     });
   }
 
+  /** Screenshots and frames of two values that differ only in their digits: the same when no digit shows. */
+  async function pictures(page: Page, html: string, act: (fresh: Page, t: Tab) => Promise<void>) {
+    const seen = [];
+    for (const value of ['1111', '8888']) {
+      const fresh = await page.context().newPage();
+      const t = await tab(fresh, { [`${SITE}/`]: `<style>*{caret-color:transparent!important;outline:0!important}</style>${html}` });
+      await fresh.goto(SITE);
+      await fill(t, 'Digit 1', login(t, { value }));
+      await act(fresh, t);
+      await fresh.evaluate('new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))');
+      // The pictures could be of a page that never got it: it did.
+      expect(await fresh.evaluate('[...document.querySelectorAll("input")].map(el => el.value).join("")')).toContain(value);
+      expect((await t.driver.snapshot()).snapshot).not.toContain(value[0].repeat(2));
+      seen.push({ shot: (await t.driver.screenshot(false)).png.toString('base64'), frame: (await t.driver.still(90)).data });
+      await fresh.close();
+    }
+    expect(seen[0]).toEqual(seen[1]);
+  }
+  /** Boxes whose page spreads what one is given over the rest, as a pasted or texted code is. */
+  const spreading = (first: string, rest: string, when: string) => `<div>${[1, 2, 3, 4].map(n => `<input aria-label="Digit ${n}" ${n === 1 ? first : rest}>`).join('')}</div>
+<script>const all = [...document.querySelectorAll('input')]; all[0].addEventListener('input', () => { const code = all[0].value; if (code.length > 1) ${when}(() => all.forEach((box, i) => { box.value = code[i]; })); });</script>`;
+  for (const [name, html] of [
+    ['a first box that takes the whole code', spreading('maxlength="4"', 'maxlength="1"', 'queueMicrotask')],
+    ['wide boxes spread at once', spreading('style="width:200px"', 'style="width:200px"', 'queueMicrotask')],
+    ['wide boxes spread a moment later', spreading('style="width:200px"', 'style="width:200px"', '(f => setTimeout(f, 120))')],
+  ] as const) {
+    test(`shows no digit in a picture of ${name}`, async ({ page }) => {
+      await pictures(page, html, async fresh => { await fresh.waitForTimeout(250); });
+    });
+  }
+
+  test('shows no digit when the page draws the filled field, or its boxes, again', async ({ page }) => {
+    const redraw = '<script>function again() { const old = [...document.querySelectorAll("input")]; const kept = old.map(el => el.value); document.querySelector("#f").textContent = "Signing in"; setTimeout(() => { document.querySelector("#f").innerHTML = kept.map((v, i) => "<input aria-label=\'Digit " + (i + 1) + "\' style=\'width:40px;height:40px\'>").join(""); document.querySelectorAll("input").forEach((el, i) => { el.value = kept[i]; }); }, 2300); }</script>';
+    const field = (count: number) => `<div id="f">${Array.from({ length: count }, (_, i) => `<input aria-label="Digit ${i + 1}" style="width:${count === 1 ? 200 : 40}px;height:40px">`).join('')}</div>${redraw}`;
+    for (const count of [1, 4]) {
+      await pictures(page, field(count), async fresh => {
+        await fresh.evaluate('again()');
+        await fresh.waitForTimeout(2500);
+      });
+    }
+  });
+
   test('says so without the value when the boxes don\'t fit the login, or the page submits itself', async ({ page }) => {
     const t = await tab(page, { [`${SITE}/`]: boxes('maxlength="1"'), [`${SITE}/in`]: '<title>In</title>', [`${SITE}/auto`]: `<form method="post" action="/in"><input aria-label="Digit 1" maxlength=1><input aria-label="Digit 2" maxlength=1 oninput="this.form.submit()"></form>` });
     await page.goto(SITE);
     const refused = await fill(t, 'Digit 1', login(t, { value: '740299' })).catch((error: { code: string; message: string }) => error);
-    expect(refused).toMatchObject({ code: 'ERR_BROWSER_LOGIN_FIELD', message: expect.stringContaining('does not fit this login') });
+    expect(refused).toMatchObject({ code: 'ERR_BROWSER_LOGIN_FIELD', message: expect.stringMatching(/does not fit this login\. Nothing was filled/) });
     expect(await page.evaluate('[...document.querySelectorAll("input")].map(el => el.value).join("")')).toBe('');
     await page.goto(`${SITE}/auto`);
     const outcome = await fill(t, 'Digit 1', login(t, { value: '74' }));
     await expect(page).toHaveTitle('In');
     expect(JSON.stringify(outcome)).not.toContain('"74"');
   });
+});
+
+test.describe('the page after a fill', () => {
+  test('keeps the refs of the snapshot before it, and text waits, working', async ({ page }) => {
+    const t = await tab(page, { [`${SITE}/`]: '<label>Password <input id="p" type="password"></label><button style="text-transform:uppercase" onclick="this.remove(); document.querySelector(\'#out\').innerHTML = \'Welcome, <b>Alice</b>!\'"><svg width="9" height="9"><title>lock</title></svg><span>Sign</span><span> in</span></button><p id="out"></p>' });
+    await page.goto(SITE);
+    const { snapshot } = await t.driver.snapshot();
+    const ref = (role: string) => snapshot.match(new RegExp(`${role}.*ref=(e\\d+)`))?.[1] ?? '';
+    const submit = ref('button');
+    await t.driver.fill(ref('textbox'), login(t));
+    // The ref from before the fill is refused only when the button changed.
+    await t.driver.click({ ref: submit }, 'left', false);
+    await t.driver.wait({ text: 'Welcome, Alice!' }, 2_000);
+  });
+
+  test('hides what the page draws of the login, and nothing that only looks like it', async ({ page }) => {
+    const t = await tab(page, { [`${SITE}/`]: '<div id="app"><label>PIN <input></label></div>' });
+    await page.goto(SITE);
+    await fill(t, 'PIN', login(t, { value: '2026' }));
+    await page.evaluate('document.querySelector("#app").innerHTML = "<p>Unread <b>2</b></p><p>Cards <b>20</b></p><p>Due 4 Mar 2026</p><p>Account 99202611</p>"');
+    const { snapshot } = await t.driver.snapshot();
+    for (const text of ['Unread', '2', '20', 'Due 4 Mar 2026', 'Account 99202611']) expect(snapshot).toContain(text);
+    expect(snapshot).not.toContain('•');
+  });
+
+  for (const value of [VALUE, 'correct horse battery']) {
+    test(`hides a preview of "${value}", with or without words around it`, async ({ page }) => {
+      const t = await tab(page, { [`${SITE}/`]: '<label>Password <input type="password"></label><p id="a"></p><p id="b"></p>' });
+      await page.goto(SITE);
+      await fill(t, 'Password', login(t, { value }));
+      await page.waitForTimeout(2_100);
+      await page.evaluate(text => { const [a, b] = document.querySelectorAll('p'); a.textContent = text; b.textContent = `You typed ${text}.`; }, value);
+      const { snapshot } = await t.driver.snapshot();
+      expect(snapshot).not.toContain(value);
+      expect(await page.evaluate('[...document.querySelectorAll("p")].map(el => getComputedStyle(el).webkitTextSecurity)')).toEqual(['disc', 'disc']);
+    });
+  }
 });
 
 test('every debugger command a fill sends is one the driver allows, and none reaches another page', async ({ page }) => {

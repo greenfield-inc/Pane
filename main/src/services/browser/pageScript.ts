@@ -41,6 +41,11 @@ function pageScript(limit: number) {
     return security !== '' && security !== 'none';
   }
 
+  /** Whether `el` or anything in it shows a copy of a filled login as dots, which `innerText` would read. */
+  function hidesLogin(el: Element): boolean {
+    return filled && (concealed(el) || el.querySelector('[style*="-webkit-text-security"]') !== null);
+  }
+
   function textNode(node: Node): string {
     return concealed(node.parentElement) ? MASK : node.textContent ?? '';
   }
@@ -107,7 +112,7 @@ function pageScript(limit: number) {
   }
 
   function textOf(el: Element): string {
-    if (filled) return flatText(el);
+    if (hidesLogin(el)) return flatText(el);
     return clean(el instanceof HTMLElement ? el.innerText : el.textContent);
   }
 
@@ -430,7 +435,7 @@ function pageScript(limit: number) {
 
   function check(text: string | null, url: string | null, ref: string | null): PageCheck {
     if (url !== null && !location.href.includes(url)) return { met: false };
-    if (text !== null && !(filled ? (document.body ? textOf(document.body) : '') : document.body?.innerText ?? '').includes(text)) return { met: false };
+    if (text !== null && !(document.body && hidesLogin(document.body) ? flatText(document.body) : document.body?.innerText ?? '').includes(text)) return { met: false };
     if (ref !== null) {
       const el = lookup(ref);
       if ('stale' in el) return { met: false, stale: el.stale };

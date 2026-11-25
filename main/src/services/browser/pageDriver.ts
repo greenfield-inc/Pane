@@ -100,7 +100,7 @@ const readingSchema = boundary.object({ snapshot: boundary.string, truncated: bo
 const refusalSchema = boundary.object({ stale: boundary.optional(boundary.string), wait: boundary.optional(boundary.string) });
 const pointSchema = boundary.object({ x: boundary.number, y: boundary.number });
 const loginCheckSchema = boundary.object({ origin: boundary.string, problem: boundary.optional(boundary.string) });
-const loginFillSchema = boundary.object({ problem: boundary.optional(boundary.string) });
+const loginFillSchema = boundary.object({ problem: boundary.optional(boundary.string), partly: boundary.optional(boundary.boolean) });
 const frameTreeSchema = boundary.object({ frameTree: boundary.object({ frame: boundary.object({ id: boundary.string }) }) });
 const worldSchema = boundary.object({ executionContextId: boundary.number });
 const handleSchema = boundary.object({ result: boundary.object({ objectId: boundary.string }) });
@@ -333,7 +333,7 @@ export class PageDriver {
   }
 
   /** Puts a saved login into the field behind `ref`; returns the site it went to. */
-  fill(ref: string, login: LoginToFill): Promise<ActionOutcome & { site: string }> {
+  fill(ref: string, login: LoginToFill): Promise<ActionOutcome & { site: string; sure: boolean }> {
     return this.exclusive(() => this.fillNow(ref, login));
   }
 
@@ -666,7 +666,7 @@ export class PageDriver {
    * fine, and goes only to a handle in that document: if the page navigates first, Chromium drops the
    * handle and the value goes nowhere. The document checks its origin and the field again as it fills.
    */
-  private async fillNow(ref: string, login: LoginToFill): Promise<ActionOutcome & { site: string }> {
+  private async fillNow(ref: string, login: LoginToFill): Promise<ActionOutcome & { site: string; sure: boolean }> {
     this.refuseWhileDialog();
     this.refuseScripted();
     await this.attach();
@@ -692,18 +692,19 @@ export class PageDriver {
     this.guardAddress(value);
     await this.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     let problem: string | undefined;
+    let partly: boolean | undefined;
     let cutOff = false;
     const outcome = await this.input(async () => {
       try {
-        problem = decodeBoundary(await this.callLogin(world, 'fill', [value, [...sites]]), loginFillSchema).problem;
+        ({ problem, partly } = decodeBoundary(await this.callLogin(world, 'fill', [value, [...sites]]), loginFillSchema));
       } catch {
         // The page left partway (a PIN that submits itself), or it stopped answering. The cause is never shown: it can quote the call.
         cutOff = true;
       }
     }, true);
-    if (problem) throw refusedField(ref, problem, 'It may be partly filled.');
-    if (cutOff && !outcome.dialog) this.notice = 'The page changed while Pane filled it, as a page that submits by itself does. Call browser_snapshot to see where it is.';
-    return { ...outcome, site: found.origin };
+    if (problem) throw refusedField(ref, problem, partly ? 'It may be partly filled.' : 'Nothing was filled.');
+    // Pane can't tell a page that left before the value arrived from one that submitted by itself once it had it.
+    return { ...outcome, site: found.origin, sure: !cutOff || outcome.dialog !== undefined };
   }
 
   private refuseScripted(): void {

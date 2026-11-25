@@ -325,7 +325,7 @@ function LeaseLines({ lease, error }: { lease: NotifyLeaseTarget; error?: string
     <>
       <View testID="notify-lease-names" style={[styles.block, styles.leaseRows, { borderRadius: theme.radius.lg, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised }]}>
         {lease.names.map(name => (
-          <Text key={name} testID={`notify-lease-row-${name}`} selectable variant="footnote" numberOfLines={1} style={{ fontFamily: monoFontFamily }}>
+          <Text key={name} testID={`notify-lease-row-${name}`} selectable variant="footnote" style={{ fontFamily: monoFontFamily }}>
             {lease.references?.[name] ? `${name}  ${lease.references[name]}` : name}
           </Text>
         ))}

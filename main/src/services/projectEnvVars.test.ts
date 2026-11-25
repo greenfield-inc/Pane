@@ -132,6 +132,18 @@ describe('project environment variables', () => {
     expect(resolved.warnings[0]).not.toContain('sk-live-123');
   });
 
+  it('skips a variable that points at a login, with a next step that works', async () => {
+    const project = db.createProject('Login', '/tmp/login');
+    await service.save(project.id, [{ key: 'PIN', source: 'secret', project: 'bank', name: 'PIN' }]);
+    await secrets.setLogin('bank', 'PIN', 'canary-pin', ['https://bank.example']);
+
+    const { env, warnings } = await service.resolve(project.id, null);
+    expect(env).toEqual({});
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('Point the variable at another secret in Project Settings');
+    expect(warnings[0]).not.toMatch(/canary-pin|secrets set/);
+  });
+
   it('keeps Pane secrets when their variable or project is removed', async () => {
     const project = db.createProject('cura', '/repos/cura');
     keychain.set('conductor', 'uiverify', 'theirs');

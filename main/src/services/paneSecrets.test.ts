@@ -355,6 +355,47 @@ describe('PaneSecretStore logins', () => {
     leases.dispose();
   });
 
+  it('from 1Password, loses a removed site at once, and is filled no more once removed or replaced, though its lease lives', async () => {
+    const { store, leases } = await loginStore();
+    const reference = 'op://Private/Bank/pin';
+    const other = 'https://card.example';
+    const lease = { project: 'bank', secrets: [{ name: 'PIN', reference, value: VALUE, sites: [SITE, other] }], expiresInMs: 60_000, requestedBy: 'test', grantedOn: 'studio' };
+    // A lease pushed before the reference has synced here answers.
+    await leases.grant(lease);
+    expect(await store.readLogin('bank', 'PIN')).toEqual({ value: VALUE, sites: [SITE, other] });
+
+    await store.setReference('bank', 'PIN', reference, [SITE, other]);
+    await store.setSites('bank', 'PIN', [SITE]);
+    expect((await store.readLogin('bank', 'PIN')).sites).toEqual([SITE]);
+
+    await store.delete('bank', 'PIN');
+    await expect(store.readLogin('bank', 'PIN')).rejects.toMatchObject({ code: 'SECRET_NOT_FOUND' });
+    await store.setLogin('bank', 'PIN', 'typed-since', [other]);
+    expect(await store.readLogin('bank', 'PIN')).toEqual({ value: 'typed-since', sites: [other] });
+    leases.dispose();
+  });
+
+  it('stays a login when its 1Password reference changes, or its value moves to 1Password', async () => {
+    const { store } = await loginStore();
+    await store.setReference('bank', 'PIN', 'op://Private/Bank/pin', [SITE]);
+    await store.setReference('bank', 'PIN', 'op://Private/Bank/new-pin');
+    expect(store.sitesOf('bank', 'PIN')).toEqual([SITE]);
+    await store.setLogin('bank', 'PASSWORD', VALUE, [SITE]);
+    await store.setReference('bank', 'PASSWORD', 'op://Private/Bank/password');
+    expect(store.sitesOf('bank', 'PASSWORD')).toEqual([SITE]);
+  });
+
+  it('keeps the newer login when an older copy arrives by sync', async () => {
+    const one = await loginStore();
+    const two = await loginStore();
+    await one.store.setLogin('bank', 'PIN', 'old', [SITE]);
+    const old = await one.store.exportLoginsForSync();
+    two.clock.now += 60_000;
+    await two.store.setLogin('bank', 'PIN', 'new', [SITE]);
+    expect(await two.store.applyLoginsFromSync(old)).toEqual([]);
+    expect((await two.store.readLogin('bank', 'PIN')).value).toBe('new');
+  });
+
   it('syncs a login reference so an older machine reads no reference in it', async () => {
     const one = await loginStore();
     const two = await loginStore();

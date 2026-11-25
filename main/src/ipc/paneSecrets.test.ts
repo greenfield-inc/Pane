@@ -127,6 +127,17 @@ describe('runpane secrets channels', () => {
     leases.dispose();
   });
 
+  it('stores a pushed login as one, and refuses the whole push when a login in it is malformed', async () => {
+    const { registry, leases } = setup();
+    const login = { name: 'PIN', reference: 'op://Private/Bank/pin', login: JSON.stringify({ sites: ['https://bank.example'], value: CANARY }) };
+    await expect(registry.invokeRemote('secrets:lease:push', [{ ...push(), logins: [{ ...login, login: CANARY }] }, { clientId: 'desktop-1' }])).rejects.toMatchObject({ code: 'SECRET_INVALID', message: expect.not.stringContaining(CANARY) });
+    expect(leases.list()).toEqual([]);
+    await registry.invokeRemote('secrets:lease:push', [{ ...push(), secrets: [], logins: [login] }, { clientId: 'desktop-1' }]);
+    expect(await leases.readLogin('stripe', 'PIN')).toEqual({ value: CANARY, sites: ['https://bank.example'] });
+    await expect(leases.read('stripe', 'PIN')).rejects.toMatchObject({ code: 'SECRET_IS_LOGIN' });
+    leases.dispose();
+  });
+
   it('takes a pushed lease only from a paired device, never from a program on this machine', async () => {
     const { registry, leases } = setup();
     const trusted = { clientId: 'desktop-1' };

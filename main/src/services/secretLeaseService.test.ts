@@ -126,6 +126,27 @@ describe('SecretLeaseService', () => {
     service.dispose();
   });
 
+  it('leases only what the person was shown: not other sites, no sites, or another item', async () => {
+    const clock = { now: Date.parse('2026-11-18T12:00:00Z') };
+    const { service, secrets, store, op, config } = await desktop(clock, [], ITEMS);
+    const reference = 'op://Dev/Stripe/credential';
+    await secrets.setReference('stripe', 'PIN', reference, ['https://bank.example']);
+    const request = { project: 'stripe', names: ['PIN'], machines: [], requestedBy: 'Claude', approved: { PIN: 'op://Dev/Stripe/credential (login for https://bank.example)' } };
+    const { leaseId } = await service.start(request);
+
+    const meta = { updatedAt: '2026-11-18T12:00:00.000Z', source: 'studio', reference };
+    for (const edited of [{ ...meta, sites: ['https://evil.test'] }, meta, { ...meta, reference: 'op://Dev/Neon/url', sites: ['https://bank.example'] }]) {
+      await config.updateConfigWith(() => ({ paneSecretReferences: { 'stripe/PIN': edited } }));
+      // Start lease and Extend alike, before 1Password is asked.
+      for (const renews of [undefined, leaseId]) {
+        await expect(service.start({ ...request, renews })).rejects.toMatchObject({ code: 'SECRET_LEASE_CHANGED' });
+      }
+    }
+    expect(op.calls).toHaveLength(1);
+    expect(await store.readLogin('stripe', 'PIN')).toEqual({ value: 'sk_live_canary_1', sites: ['https://bank.example'] });
+    service.dispose();
+  });
+
   it('refuses a name that is not a 1Password reference here, before reading 1Password', async () => {
     const clock = { now: Date.parse('2026-11-18T12:00:00Z') };
     const { service, secrets, op } = await desktop(clock, [], ITEMS);

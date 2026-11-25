@@ -381,6 +381,46 @@ describe('SharedCredentialSync and the Approvals switch', () => {
     expect(writes).not.toHaveBeenCalled();
   }, 30_000);
 
+  it('gives a login, its sites and its removal to the other machine, in both directions', async () => {
+    const hostFor = async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-login-sync-'));
+      dirs.push(dir);
+      vi.stubEnv('PANE_DIR', dir);
+      const configManager = new ConfigManager();
+      await configManager.initialize();
+      const secrets = new PaneSecretStore(configManager, keychainSecretBackend(new FakeKeychain(), 'Pane (test)'), () => 'this-mac');
+      const registry = new PaneCommandRegistry();
+      // SAFETY: These handlers read only configManager from the services bag.
+      registerSharedCredentialHandlers({ configManager } as AppServices, registry, secrets);
+      return { configManager, secrets, registry };
+    };
+    const here = await hostFor();
+    const there = await hostFor();
+    const sync = new TrackedSync(here.configManager, {
+      subscribe: () => () => undefined,
+      remotes: () => [{
+        id: 'other',
+        invoke: async (channel: string, args: unknown[]) => {
+          const input: PaneCommandValue = JSON.parse(JSON.stringify(args[0] ?? null));
+          return overTheWire(await there.registry.invokeRemote(channel, [input, { clientId: 'paired' }]));
+        },
+      }],
+    }, () => here.secrets);
+    running.push(sync);
+    sync.start();
+    await here.secrets.setLogin('bank', 'PIN', '7402', ['https://bank.example']);
+    await there.secrets.setLogin('card', 'PIN', '9155', ['https://card.example']);
+    await settled();
+    expect(await there.secrets.readLogin('bank', 'PIN')).toEqual({ value: '7402', sites: ['https://bank.example'] });
+    expect(await here.secrets.readLogin('card', 'PIN')).toEqual({ value: '9155', sites: ['https://card.example'] });
+    // Never as a plain secret, on either.
+    expect(await there.secrets.exportForSync()).toEqual({});
+
+    await here.secrets.delete('bank', 'PIN');
+    await settled();
+    await expect(there.secrets.readLogin('bank', 'PIN')).rejects.toMatchObject({ code: 'SECRET_NOT_FOUND' });
+  });
+
   it('sends a local turn-off to a machine that is behind, carrying this machine\'s time', async () => {
     const peer = machine('build-box', { enabled: true, changedAt: 0 });
     const { configManager } = await start([peer]);

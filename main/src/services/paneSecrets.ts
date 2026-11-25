@@ -519,7 +519,10 @@ export class PaneSecretStore {
     const listed = this.sitesOf(project, name);
     const leases = this.leases();
     await leases?.ready();
-    if (leases?.has(project, name) || this.referenceOf(project, name)) {
+    const key = paneSecretKey(project, name);
+    // A lease can arrive before its reference has synced, but never outlives one the person removed or replaced.
+    const replaced = !this.referenceOf(project, name) && (this.referenceIndex()[key]?.deleted === true || this.typedLoginSites(key) !== null);
+    if (!replaced && (leases?.has(project, name) || this.referenceOf(project, name))) {
       this.refuseSharedLease(project, name);
       if (!listed && this.referenceOf(project, name)) throw secretNotLogin(project, name);
       const leased = leases ? await leases.readLogin(project, name) : null;

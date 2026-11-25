@@ -109,8 +109,8 @@ runpane browser fill --ref e7 --project bank --name PIN
   [lease](PANE_SECRETS.md#leases).
 - **The value stays out of reach.** It goes from Pane's main process to the page, and is in no tool
   input or output, log, command, environment or screen. The filled field becomes a password field
-  and stays one, so a screenshot, the stream and your own window show dots; digits the page draws
-  from it show as dots too. While the page holds it, snapshots withhold every field's value.
+  and stays one, and so does any other field the page puts it in, so a screenshot, the stream and
+  your own window show dots; digits the page draws from it show as dots too. While the page holds it, snapshots withhold every field's value.
 - **No scripts beside it.** `browser_evaluate` is refused on the filled page until the tab loads a
   new one (`ERR_BROWSER_LOGIN_ON_PAGE`). A tab where it already ran takes no login
   (`ERR_BROWSER_LOGIN_SCRIPTED`): open the page in a new tab, and fill before any script.
@@ -125,6 +125,13 @@ What this can't do:
 - The site's own scripts read what is typed into it, as with any password. A site that then shows or
   sends the value somewhere Pane can't recognize (a picture, a changed copy, its own later pages, the
   page title, an address it rewrites without loading) is not stopped.
+- The stop on addresses covers a page's own navigation in the tab. A `GET` form that opens a new
+  tab, and a `POST` whose answer redirects to an address holding the value, are not stopped.
+- Boxes are recognized by their shape: when a page has exactly as many narrow, unlimited boxes
+  around the field as the login has characters (a date beside a short PIN field), each gets one.
+  The next snapshot shows which fields hold something.
+- Digits drawn as a picture, with CSS or in a canvas, and text in a page's own dialog or
+  accessibility label, are not hidden.
 - The dots show how long the value is.
 - An agent that ran a script on the site in another tab could have left something the site itself
   keeps and runs, such as a stored script on a site with such a flaw.
@@ -179,7 +186,7 @@ The stream stays while the agent drives and while you use it (after **Take over*
 and scrolls keep it). Thirty seconds after the last input by anyone, the screen goes back to its own
 copy at the page's current URL; **Back to my copy** goes back sooner, and the agent's next action
 streams again. Anything on the page that its URL doesn't hold (a half-filled form, the scroll
-position) stays on the host, so a page the agent typed into (`browser_type`, `browser_select`,
+position) stays on the host, so a page the agent typed into (`browser_type`, `browser_fill`, `browser_select`,
 `browser_upload` or `browser_press`) keeps streaming until you press **Back to my copy**, the page
 loads a new document or the tab goes to sleep; a screen that opens the tab later streams it too. **View live** shows the
 host's page on any tab an agent has used, until **Back to my copy**: it sits next to the address bar
