@@ -23,6 +23,8 @@ import { PHOTO_SAMPLES, readFileAsDataUrl, squarePhoto } from './profilePhotos';
 import { leaveProfiles } from './profilesNavigation';
 
 const MOD = isMac() ? '⌘' : 'Ctrl+';
+/** How often the open tab looks for changes made outside it. */
+const PROFILES_REFRESH_MS = 3000;
 const SYNC_LATER = 'Sync to your other computers arrives in the next update';
 
 /** How many Sessions on this computer use each profile (`plugin/profile`, variant left out). */
@@ -78,6 +80,19 @@ export function ProfilesView() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Changes made outside the tab (an agent, `runpane profiles`, sync from another computer) show
+  // within a few seconds: while the tab is visible it reads the list and the open file again, and at
+  // once when the window regains focus. Both are local file reads, with no Agent Farm process.
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') void useProfilesStore.getState().refresh(); };
+    const timer = window.setInterval(refresh, PROFILES_REFRESH_MS);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+    };
+  }, []);
 
   const plugin = place.level === 'profile' ? overview?.plugins.find(entry => entry.name === place.plugin) : undefined;
   const profile = place.level === 'profile' ? plugin?.profiles.find(entry => entry.name === place.profile) : undefined;
@@ -351,12 +366,15 @@ function FileEditor({ plugin, profile, file, notify }: { plugin: ProfilePlugin; 
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const onDisk = useProfilesStore(state => state.onDisk[key]);
+  const resolveDiskChange = useProfilesStore(state => state.resolveDiskChange);
+
+  // Opening a file always reads it again, so a change made outside the tab shows (profileDiskSync.ts).
   useEffect(() => {
     setReadError(null);
     setSaveError(null);
-    if (saved !== undefined) return;
     readFile(plugin.name, file).catch(error => setReadError(error instanceof Error ? error.message : String(error)));
-  }, [file, plugin.name, readFile, saved]);
+  }, [file, plugin.name, readFile]);
 
   const dirty = draft !== undefined;
   const value = draft ?? saved ?? '';
@@ -392,7 +410,20 @@ function FileEditor({ plugin, profile, file, notify }: { plugin: ProfilePlugin; 
           <Save className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{saving ? 'Saving…' : 'Save'}
         </Button>
       </div>
-      {readError
+      {onDisk !== undefined && (
+        <div role="status" data-testid="profiles-disk-changed" className="flex shrink-0 items-center gap-3 border-b border-status-warning/30 bg-status-warning/10 px-4 py-2 text-[13px] text-text-primary">
+          <span className="min-w-0 flex-1">
+            {onDisk === null
+              ? 'This file was removed outside Pane. Your unsaved edits are still here; Save puts the file back.'
+              : 'This file changed outside Pane while you were editing. Reload it, or keep your edits (Save then replaces the other version).'}
+          </span>
+          <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-disk-reload" onClick={() => resolveDiskChange(plugin.name, file, 'disk')}>
+            {onDisk === null ? 'Discard my edits' : 'Reload from disk'}
+          </button>
+          <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-disk-keep" onClick={() => resolveDiskChange(plugin.name, file, 'mine')}>Keep mine</button>
+        </div>
+      )}
+      {readError && saved === undefined
         ? <p role="alert" className="p-4 text-[13px] text-status-error">{readError}</p>
         : (
           <textarea

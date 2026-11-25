@@ -1475,6 +1475,22 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return result(plugin, entry.profiles[0]?.entry ?? 'plugin.yaml');
         },
         photos: () => ok(photos),
+        /** Not part of Pane's API: a spec changes a file "on disk", as an agent or sync would. Null removes it. */
+        writeOnDisk: (plugin: string, path: string, content: string | null) => {
+          const entry = pluginOf(plugin);
+          if (content === null) {
+            delete state.files[`${plugin}/${path}`];
+            if (entry) entry.files = entry.files.filter(file => file !== path);
+            return;
+          }
+          state.files[`${plugin}/${path}`] = content;
+          if (entry && !entry.files.includes(path)) entry.files = [...entry.files, path].sort();
+          // A new profiles/<name>.yaml is a new profile, as Agent Farm reads it.
+          const profile = /^profiles\/([a-z][a-z0-9_-]*)\.yaml$/.exec(path)?.[1];
+          if (entry && profile && !entry.profiles.some(item => item.name === profile)) {
+            entry.profiles = [...entry.profiles, { name: profile, ref: `${plugin}/${profile}`, entry: `agents/${profile}.md`, harness: 'claude', uses: [path] }];
+          }
+        },
         setPhoto: (ref: string, base64: string) => { photos.profiles[ref] = `data:image/png;base64,${base64}`; return ok(null); },
         removePhoto: (ref: string) => { delete photos.profiles[ref]; return ok(null); },
       };
@@ -2442,6 +2458,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getInvokeCalls(channel: string) {
           return clone(invokeCalls.get(channel) ?? []);
+        },
+        writeProfileFile(plugin: string, path: string, content: string | null) {
+          profilesApi?.writeOnDisk(plugin, path, content);
         },
         setTodoReplyRefusal(on: boolean) {
           todoRepliesRefused = on;
