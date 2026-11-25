@@ -308,6 +308,9 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
           </button>
         )}
         <span className={cn('pointer-events-none min-w-0 flex-1 truncate text-[13px]', dimmed ? 'text-text-muted' : 'font-semibold text-text-primary')}>{session.name}</span>
+        {session.isPinned && <PinnedMark />}
+        {/* The right side reads spinner, then the approvals badge (or Pane count), then the machine mark (T-63). */}
+        {!dimmed && row.activity === 'working' && <SessionActivityIcon state="working" neutral className="pointer-events-none" />}
         {moveLabel ? (
           <span data-testid="session-move-label" className="pointer-events-none max-w-[55%] flex-shrink-0 truncate text-[11px] text-text-tertiary">{moveLabel}</span>
         ) : (
@@ -319,9 +322,6 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
               : row.panes.length > 0 && <span className="text-[12px] tabular-nums text-text-tertiary">{row.panes.length}</span>}
           />
         )}
-        {session.isPinned && <PinnedMark />}
-        {/* While the Session works, a spinner sits just left of its machine mark (T-63). */}
-        {!dimmed && row.activity === 'working' && <SessionActivityIcon state="working" neutral className="pointer-events-none" />}
         <MarkSlot machine={machine} label={session.name} onMenu={openMenu} />
       </div>
       {expanded && row.panes.map(renderPane)}

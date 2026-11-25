@@ -18,7 +18,8 @@ export function SessionApprovalsCount({ sessionId, machineId, otherwise, opensAp
   const waiting = useSessionApprovals(sessionId, machineId);
   const ready = readyCount(waiting);
   return (
-    <span className="pointer-events-none ml-auto inline-flex h-[18px] shrink-0 items-center justify-end gap-1.5">
+    // Hidden when empty, so it takes no flex gap and a working spinner reaches the row's end.
+    <span className="pointer-events-none ml-auto inline-flex h-[18px] shrink-0 items-center justify-end gap-1.5 empty:hidden" data-testid="session-approvals-slot">
       {count > 0 && ready > 0 && (
         <span className="flex h-2 w-2 items-center justify-center" aria-label={`${ready} ready again`} data-testid="session-approvals-ready-dot">
           <span className="h-1.5 w-1.5 rounded-full bg-status-info" />

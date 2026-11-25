@@ -382,9 +382,9 @@ focus. The avatar is a profile's initials on a tinted
 circle (the `--color-avatar-1` to `--color-avatar-8` theme tokens), or Claude's
 or Codex's logo for the agent on its own and for a Session from before profiles,
 or another agent's initial. Profile photos arrive with the Profiles tab. A grey
-spinner shows at the row's right end only while the Session really works (in
-**All machines**, just left of the machine mark), and nothing shows while it is
-idle. The phone and web app keep the spinner and the empty ring in place of the
+spinner shows on the row's right only while the Session really works, and nothing
+shows while it is idle. The right side reads, in order: the spinner, the amber
+approvals count (or the Pane count), then in **All machines** the machine mark. The phone and web app keep the spinner and the empty ring in place of the
 avatar. Neither is ever red (the amber approvals count and the expanded Pane
 rows show what needs you). The spinner shows once the orchestrator's agent tab, or
 an agent tab in one of the Session's Panes (not archived), has been mid-turn

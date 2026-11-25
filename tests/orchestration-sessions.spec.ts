@@ -312,7 +312,12 @@ test('a Session row shows its profile\'s avatar where the activity icon was, and
     { ...sessionFixture('profiled', 'Profiled', '', '', '2026-09-16T12:00:00.000Z'), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' } },
     { ...sessionFixture('plain', 'Plain', '', '', '2026-09-16T12:01:00.000Z'), agent: 'codex', agentProfile: { ref: 'pane/codex', hash: 'h' } },
     sessionFixture('older', 'Older', '', '', '2026-09-16T12:02:00.000Z'),
-  ], [], { sessionActivity: [{ sessionId: 'profiled', state: 'working', workingPanes: 0 }] });
+  ], [], {
+    sessionActivity: [{ sessionId: 'profiled', state: 'working', workingPanes: 0 }, { sessionId: 'older', state: 'working', workingPanes: 0 }],
+    notifySnapshot: { settings: { ...DEFAULT_NOTIFY_SETTINGS }, history: [], items: [
+      { id: 'q-row', ui: 'approve', title: 'Apply migration?', source: { name: 'checkout', agent: 'Claude', session: { id: 'older', name: 'Older' } }, state: 'waiting', createdAt: Date.now() },
+    ] },
+  });
   await gotoApp(page);
   await dismissStartupDialogs(page);
   const row = (id: string) => page.getByTestId(`orchestration-session-${id}`);
@@ -332,10 +337,13 @@ test('a Session row shows its profile\'s avatar where the activity icon was, and
   }
   await expect(row('profiled').getByTestId('session-activity-icon')).toHaveAttribute('data-state', 'working');
   await expect(row('plain').getByTestId('session-activity-icon')).toHaveCount(0);
-  // The spinner is the row's last mark, at its right edge.
-  const spinner = await layoutBox(row('profiled').getByTestId('session-activity-icon'));
-  const button = await layoutBox(row('profiled'));
-  expect(button.x + button.width - (spinner.x + spinner.width)).toBeLessThanOrEqual(8);
+  // The right side reads spinner, then the approvals badge.
+  await expect(row('older').getByTestId('session-approvals-count')).toHaveText('1');
+  const spinner = await layoutBox(row('older').getByTestId('session-activity-icon'));
+  const badge = await layoutBox(row('older').getByTestId('session-approvals-count'));
+  expect(spinner.x + spinner.width).toBeLessThanOrEqual(badge.x);
+  const button = await layoutBox(row('older'));
+  expect(button.x + button.width - (badge.x + badge.width)).toBeLessThanOrEqual(8);
   await page.screenshot({ path: testInfo.outputPath('j18-session-rows.png') });
 });
 
