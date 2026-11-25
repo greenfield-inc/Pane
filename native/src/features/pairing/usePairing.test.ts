@@ -67,10 +67,17 @@ it('saves nothing when the computer hid that its code is Read only', async () =>
   expect(state.added).toEqual([]);
 });
 
-it('tells a Read only code’s computer only of full-access computers it named itself', async () => {
-  state.profiles = [saved('mine'), saved('tyler2'), saved('tyler3', 'read')];
+it('tells a Read only code’s computer of none of this phone’s others', async () => {
+  state.profiles = [saved('mine'), saved('tyler2', 'read')];
   await pair({ code, preview: state.preview });
-  expect(state.exchanged.map(request => request.known)).toEqual([['tyler2']]);
+  expect(state.exchanged.map(request => request.known)).toEqual([[]]);
+});
+
+it('refuses a Read only code while it still has full access to a computer the code shares, without spending it', async () => {
+  // Full access removed everywhere, then shared read-only: that computer's full token is dead, and it would hand out no read-only one.
+  state.profiles = [saved('tyler2')];
+  await expect(pair({ code, preview: state.preview })).rejects.toThrow('This phone already has full access to tyler2');
+  expect(state.exchanged).toEqual([]);
 });
 
 it('asks before spending a scanned Read only code, and once only', async () => {

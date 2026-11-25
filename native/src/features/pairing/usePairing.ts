@@ -33,7 +33,7 @@ export function usePairing(onPaired?: () => void) {
       }
       const before = useHostsStore.getState().profiles;
       const preview = agreed === undefined ? await previewLink(link) : agreed;
-      const refusal = fullAccessRefusal('phone', link.computerId, preview?.access, before);
+      const refusal = fullAccessRefusal('phone', [link.computerId, ...(preview?.group.map(computer => computer.id) ?? [])], preview?.access, before);
       if (refusal) throw refusal;
       if (agreed === undefined && preview?.access === 'read' && !(await confirmWatch(preview.group[0]?.name ?? link.name))) {
         throw new RelayPairingError('Not paired', 'The code was not used.', 'cancelled', false);
@@ -41,7 +41,7 @@ export function usePairing(onPaired?: () => void) {
       const [computer, ...linked] = await exchangeRelayLink(link, before, preview);
       if (!computer) throw new Error('The computer sent no pairing.');
       // The preview said full, or couldn't be read.
-      const late = fullAccessRefusal('phone', link.computerId, tokenAccess(computer.token), before);
+      const late = fullAccessRefusal('phone', [link.computerId, ...(preview?.group.map(member => member.id) ?? [])], tokenAccess(computer.token), before);
       if (late) throw late;
       onPaired?.();
       await addHosts(linked, computer);

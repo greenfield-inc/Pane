@@ -175,7 +175,7 @@ describe('a device paired Read only', () => {
     registry.register('panels:list', () => ({ success: true, data: panels }));
     registry.register('runpane:panels:list', () => ({ ok: true, panels }));
     registry.register('panels:getActive', () => panels[2]);
-    registry.register('orchestration-sessions:overview', () => ({ success: true, data: { session: { name: 'Ship', profile: secret, launchCommand: secret, customResume: { command: secret } }, panes: [{ panels: [...panels, closed] }] } }));
+    registry.register('orchestration-sessions:overview', () => ({ success: true, data: { session: { name: 'Ship', profile: secret, openingPrompt: secret, launchCommand: secret, customResume: { command: secret } }, panes: [{ panels: [...panels, closed] }] } }));
     registry.register('loops:list', () => ({ success: true, data: [{ id: 'l', name: 'Nightly', prompt: 'report', initialInput: secret, toolCommand: `${secret} ./report.sh` }] }));
     registry.register('chat-tab:get', () => ({ panelId: 'c', permissions: [{ toolCall: 'diff' }], questions: [{}], queue: [{}], messageCount: 2 }));
     const { invoke, stream, server } = await serve(registry);
@@ -251,7 +251,7 @@ describe('a device paired Read only', () => {
     config.host.clients[0].grantedBy = 'tyler';
     config.host.clients[0].linkedBy = 'Tyler';
     const { invoke, stream } = await serve(registry, config);
-    expect(await invoke('todos:snapshot')).toMatchObject({ status: 503, body: { error: { code: 'ERR_READ_ONLY_UNCONFIRMED', message: expect.stringContaining('Tyler') } } });
+    expect(await invoke('todos:snapshot')).toMatchObject({ status: 409, body: { error: { code: 'ERR_READ_ONLY_UNCONFIRMED', message: expect.stringContaining('Tyler') } } });
     expect((await invoke('todos:snapshot', 'owner-token')).status).toBe(200);
 
     confirmedSharers.confirm('tyler');
@@ -260,6 +260,6 @@ describe('a device paired Read only', () => {
     // Asleep and awake again: closed until Tyler says so.
     confirmedSharers.clear();
     await reader.ended;
-    expect((await invoke('todos:snapshot')).status).toBe(503);
+    expect((await invoke('todos:snapshot')).status).toBe(409);
   });
 });

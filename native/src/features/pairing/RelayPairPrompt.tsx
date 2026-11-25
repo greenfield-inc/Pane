@@ -112,7 +112,7 @@ async function checkLink(link: RelayPairingLink): Promise<Checked> {
   if (join) return { join, preview };
   // A link that would pair without asking still asks when it only watches.
   const maker = preview?.group[0]?.name;
-  if (!maker || preview.access !== 'read' || fullAccessRefusal('phone', link.computerId, preview.access, saved)) return { join: null, preview };
+  if (!maker || preview.access !== 'read' || fullAccessRefusal('phone', [link.computerId, ...preview.group.map(computer => computer.id)], preview.access, saved)) return { join: null, preview };
   return { join: { maker, makerGroup: preview.group.map(computer => computer.name), here: [], access: 'read' }, preview };
 }
 

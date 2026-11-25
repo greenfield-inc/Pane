@@ -27,15 +27,19 @@ const previewSchema = boundary.object({
 
 export type LinkPreviewAnswer = Awaited<ReturnType<typeof readLinkPreview>>;
 
-/** Why a read-only link is refused where the device already has full access to its computer; null when it isn't. */
+/**
+ * Why a read-only link is refused where the device already has full access to its computer, or to
+ * any computer the preview names with it (they would keep the full tokens their owner revokes, and
+ * hand out no read-only ones); null when it isn't.
+ */
 export function fullAccessRefusal(
   device: 'phone' | 'browser',
-  computerId: string,
+  computerIds: readonly string[],
   access: ReadOnlyMark | undefined,
   saved: readonly RemotePaneConnectionProfile[],
 ): RelayPairingError | null {
   if (access !== 'read') return null;
-  const full = saved.find(profile => profile.relay?.computerId === computerId && tokenAccess(profile.token) !== 'read');
+  const full = saved.find(profile => profile.relay !== undefined && computerIds.includes(profile.relay.computerId) && tokenAccess(profile.token) !== 'read');
   return full ? new RelayPairingError(`This ${device} already has full access to ${full.label}`, `Remove it first to watch it read-only.`, 'ERR_PAIRING_FULL_ACCESS', false) : null;
 }
 

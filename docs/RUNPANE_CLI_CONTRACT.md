@@ -310,7 +310,7 @@ Commands with a contract `daemonAction` (the `panes` git, script, restore, and m
 
 `runpane ask --agent <agent> --prompt "<question>"` asks one agent one read-only question and prints its answer, with no tab left behind: the agent's own headless mode runs once, on this machine or another one (`--machine`), in a saved repository (`--repo`, a WSL repository runs in WSL) or a Pane's worktree (`--pane`), with any model it accepts (`--model`). It can read files but not edit them or run shell commands; an agent with no such mode is refused (`ERR_ASK_UNSUPPORTED`). A missing agent, a sign-in error, an unknown model and a timeout each fail with the agent's own words and the next step. Use it for a second opinion or a question to another model; work that edits files goes to a tab.
 
-`runpane models` lists the models each installed agent offers, read from the agent's own list on every call, with its sign-in as the agent reports it. `--all` covers this machine, every saved machine and their WSL; `--agent` and `--search` narrow the rows. A machine that does not answer is one `unreachable` row; a list that can't be read is `list unavailable`.
+`runpane models` lists the models each installed agent offers, read from the agent's own list on every call, with its sign-in as the agent reports it. `--all` covers this machine, every saved machine and their WSL; `--agent` and `--search` narrow the rows. A machine that does not answer is one `unreachable` row, one this computer only watches is one `read only` row, and a list that can't be read is `list unavailable`.
 
 `runpane pr watch`: Register durable GitHub PR monitoring for a Pane.
 
@@ -335,7 +335,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `agent-context`: Print token-efficient Pane command context for coding agents.
 - `mcp`: Run the Pane MCP server over stdio so coding agents can call runpane commands as tools.
 - `relay`: Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags; init prints and checks the DNS records it needs.
-- `link`: Link this computer with the one that made a one-time link, so each can reach the other.
+- `link`: Redeem a one-time link: full access links both computers both ways; read only lets this one watch.
 - `repos list`: List repositories saved in the running Pane app.
 - `repos add`: Register an existing git repository with the running Pane app.
 - `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.

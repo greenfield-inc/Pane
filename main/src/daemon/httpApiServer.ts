@@ -1613,11 +1613,13 @@ export class PaneRemoteHttpApiServer {
     const auth = this.identify(request, token);
     const sharer = auth.ok && auth.client?.access === 'read' ? auth.client.grantedBy : undefined;
     if (sharer === undefined || confirmedSharers.has(sharer)) return auth;
+    const name = (auth.ok ? auth.client?.linkedBy : undefined) ?? 'The computer that shared this one';
+    // 409, not 503: a client retries a 503 as an outage and never shows why.
     return {
       ok: false,
-      statusCode: 503,
+      statusCode: 409,
       error: {
-        message: `${auth.ok ? auth.client?.linkedBy ?? 'The computer that shared this one' : ''} hasn't confirmed since this computer woke that it still shares with this device, so nothing was read. It does once it is online.`,
+        message: `${name} hasn't said, since this computer started or woke, that it still shares with this device, so nothing was read. Next: wait until ${name} is online, then reconnect.`,
         code: 'ERR_READ_ONLY_UNCONFIRMED',
       },
     };

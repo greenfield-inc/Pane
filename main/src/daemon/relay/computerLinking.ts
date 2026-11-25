@@ -248,8 +248,11 @@ export class ComputerLinking {
     // Full access stays as it is; a computer already watched gets a fresh token, since its owner may have removed this one.
     const reachable = new Map(links.reachable().map((profile) => [profile.relay.computerId, profile]));
     const full = new Set(links.linked().map((profile) => profile.relay.computerId));
-    if (full.has(link.computerId)) {
-      throw new PaneError('ERR_LINK_ALREADY_FULL', `This computer already has full access to ${maker}, so the read-only link was not used.`, `To watch ${maker} read-only instead, unlink it in Settings › Remote Access › Computers, then open the link again.`);
+    // Any computer the link shares that this one reaches with full access would keep its full token,
+    // even one its owner revoked, and hand out no read-only one.
+    const already = group.find((member) => full.has(member.id));
+    if (already) {
+      throw new PaneError('ERR_LINK_ALREADY_FULL', `This computer already has full access to ${already.name}, which this link shares, so the read-only link was not used.`, `To watch ${maker} read-only instead, unlink ${already.name} in Settings › Remote Access › Computers, then open the link again.`);
     }
     const offered: RelayComputer = { id: self.id, name: self.name, domain: self.domain, address: self.address, local: [], fingerprint: self.fingerprint };
     const request: RelayExchangeRequest = {

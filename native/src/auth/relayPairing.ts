@@ -15,12 +15,12 @@ import { isReadOnlyProfile } from './access';
  * Trades a scanned code's one-time secret for this phone's token. Returns the computer first,
  * then each computer linked with it that `saved` doesn't already reach with full access, with its
  * own token: a watched one gets a fresh token. A Read only link's computer learns of no saved
- * computer but those `preview`, the answer the person agreed to, named; and it must answer Read only.
+ * computer (the phone has full access to none it names: `fullAccessRefusal`), and it must answer Read only.
  */
 export async function exchangeRelayLink(link: RelayPairingLink, saved: readonly RemotePaneConnectionProfile[], preview: LinkPreviewAnswer): Promise<RelayConnectionProfile[]> {
   const watching = preview?.access === 'read';
   const full = saved.flatMap(profile => (profile.relay && !isReadOnlyProfile(profile) ? [profile.relay.computerId] : []));
-  const known = watching ? full.filter(id => preview.group.some(computer => computer.id === id)) : full;
+  const known = watching ? [] : full;
   return exchangeRelayPairing(streamingFetch, link, { secret: link.secret, label: DEVICE_LABEL ?? CLIENT_LABEL, phoneId: await getRuntimeId(), known }, { watching });
 }
 

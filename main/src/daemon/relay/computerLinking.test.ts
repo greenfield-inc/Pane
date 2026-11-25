@@ -515,6 +515,10 @@ describe('a read-only link', () => {
     const { net, tyler, a2, b2 } = await shared();
     const link = await tyler.link('10m', 'read');
     await expect(a2.redeem(link)).rejects.toMatchObject({ code: 'ERR_LINK_ALREADY_FULL' });
+    // Or full access to a computer the link shares with it, whose token its owner may have revoked.
+    const other = net.add('Other', 'otherotherother0');
+    await other.redeem(await a2.link());
+    await expect(other.redeem(link)).rejects.toMatchObject({ code: 'ERR_LINK_ALREADY_FULL' });
     expect(await net.reaches(tyler, a2)).toBe(true);
     expect(await b2.redeem(link)).toMatchObject({ access: 'read' });
   });

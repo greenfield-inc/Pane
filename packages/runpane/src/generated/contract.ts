@@ -671,7 +671,7 @@ const CONTRACT_SECTION_11 = [
   },
   {
     "name": "link",
-    "summary": "Link this computer with the one that made a one-time link, so each can reach the other.",
+    "summary": "Redeem a one-time link: full access links both computers both ways; read only lets this one watch.",
     "usage": [
       "runpane link <link> [--yes] [--json] [--pane-dir <path>]"
     ],
@@ -5173,12 +5173,12 @@ const CONTRACT_SECTION_13 = {
       "Usage:",
       "  runpane link <link> [--yes] [--json] [--pane-dir <path>]",
       "",
-      "Link this computer with the one that made a one-time link, so each can reach the other.",
+      "Redeem a one-time link: full access links both computers both ways; read only lets this one watch.",
       "Copy the link in Pane on the other computer: Add a device › Computer.",
-      "A computer that already has linked computers asks before the two groups join.",
+      "It asks first when groups would join, and always for a read-only link.",
       "",
       "Options:",
-      "  --yes                           Join without asking; required in non-interactive shells.",
+      "  --yes                           Link without asking; required in non-interactive shells.",
       "  --json                          Print machine-readable output.",
       "  --pane-dir <path>               Connect to a specific Pane data directory."
     ],
@@ -8022,12 +8022,12 @@ const CONTRACT_SECTION_13 = {
       "Usage:",
       "  runpane link <link> [--yes] [--json] [--pane-dir <path>]",
       "",
-      "Link this computer with the one that made a one-time link, so each can reach the other.",
+      "Redeem a one-time link: full access links both computers both ways; read only lets this one watch.",
       "Copy the link in Pane on the other computer: Add a device › Computer.",
-      "A computer that already has linked computers asks before the two groups join.",
+      "It asks first when groups would join, and always for a read-only link.",
       "",
       "Options:",
-      "  --yes                           Join without asking; required in non-interactive shells.",
+      "  --yes                           Link without asking; required in non-interactive shells.",
       "  --json                          Print machine-readable output.",
       "  --pane-dir <path>               Connect to a specific Pane data directory."
     ],
@@ -10049,7 +10049,7 @@ const CONTRACT_SECTION_14 = {
     "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.",
     "`runpane handoff` hands a task to another agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. When the sender is a Pane tab running a Claude, Codex, Cursor or OpenCode session and the receiver is the same agent, the handoff carries that session: on another machine its files are copied into that machine's agent store and the receiver resumes the same id; on this machine the receiver resumes a fork, because two agents never resume one session on one machine. The receiver starts with no prompt, and the CLI runs the continuity check and reports JSON `continuity.result` `continued`, `inconclusive` (exit 0; `next` gives a probe question) or `not-continued` (exit 1; the receiver is kept and `next` gives the `--note-only` command). `--note-only`, a different agent, or a tab with no carried session starts a fresh agent with the note (`fresh-agent`). JSON `continuity` is `{ carried, result, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched?, originalAppended? }, reason, next }`: `sessionId` is the sender's session, `resumedId` the id the receiver resumes (the fork's on this machine), `checks` are the continuity checks (`historyLoaded` is null when there was nothing to compare; `originalUntouched` is set for forks), and a dry run sets `carried`, `sessionId`, `fork`, `files` and `bytes` with no `result`. After `continued` or `inconclusive` the sending agent ends its turn and makes no more changes on the branch. An OpenCode session travels as its export: `opencode export` on this machine, then `opencode import` inside the receiving repository there, and an OpenCode receiver is accepted only to continue an OpenCode session. A Cursor session is carried only to another machine, best effort since Cursor's store is undocumented: Cursor has no fork, and a copied chat still writes to the original, so on this machine the result is `not-continued` and nothing is started. A destination's agent store is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`); a copy already there is replaced only when the sender's holds all of it and no agent there runs it, otherwise nothing is copied and the result is `not-continued`. A destination Pane too old to resume a carried session is refused before anything is sent (`ERR_HANDOFF_RESUME_UNSUPPORTED`). From a Session's terminal it skips git and creates a Session with the same name, goal and agent on the other machine instead; a same-agent Session starts on the sender's conversation. The receiver reports back to the sender's panel.",
     "`runpane ask --agent <agent> --prompt \"<question>\"` asks one agent one read-only question and prints its answer, with no tab left behind: the agent's own headless mode runs once, on this machine or another one (`--machine`), in a saved repository (`--repo`, a WSL repository runs in WSL) or a Pane's worktree (`--pane`), with any model it accepts (`--model`). It can read files but not edit them or run shell commands; an agent with no such mode is refused (`ERR_ASK_UNSUPPORTED`). A missing agent, a sign-in error, an unknown model and a timeout each fail with the agent's own words and the next step. Use it for a second opinion or a question to another model; work that edits files goes to a tab.",
-    "`runpane models` lists the models each installed agent offers, read from the agent's own list on every call, with its sign-in as the agent reports it. `--all` covers this machine, every saved machine and their WSL; `--agent` and `--search` narrow the rows. A machine that does not answer is one `unreachable` row; a list that can't be read is `list unavailable`.",
+    "`runpane models` lists the models each installed agent offers, read from the agent's own list on every call, with its sign-in as the agent reports it. `--all` covers this machine, every saved machine and their WSL; `--agent` and `--search` narrow the rows. A machine that does not answer is one `unreachable` row, one this computer only watches is one `read only` row, and a list that can't be read is `list unavailable`.",
     "`runpane pr watch`: Register durable GitHub PR monitoring for a Pane.",
     "`runpane pr unwatch`: Remove a Pane’s explicit PR registration.",
     "`runpane pr list`: List PR registrations and stopped watches.",
@@ -21442,7 +21442,8 @@ const CONTRACT_SECTION_16 = {
             "note": {
               "enum": [
                 "unreachable",
-                "list unavailable"
+                "list unavailable",
+                "read only"
               ]
             }
           },
@@ -24087,8 +24088,8 @@ const CONTRACT_SECTION_17 = {
     },
     "link": {
       "name": "link",
-      "summary": "Link this computer with the one that made a one-time link, so each can reach the other.",
-      "details": "Redeems a link copied from Pane on another computer (Add a device › Computer) through this computer's running Pane, the way opening the link does. The computer that made the link, and every computer already linked with it, become reachable from this one with runpane workspace, and this one from them. For a computer with no screen. A read-only link runs one way: this computer sees the Sessions, agents, transcripts and terminal output of the computers it shares, they get no way to reach this one, and no groups join.",
+      "summary": "Redeem a one-time link: full access links both computers both ways; read only lets this one watch.",
+      "details": "Redeems a link copied from Pane on another computer (Add a device › Computer) through this computer's running Pane, the way opening the link does. With a full-access link, the computer that made it and every computer already linked with it become reachable from this one with runpane workspace, and this one from them. For a computer with no screen. A read-only link runs one way: this computer sees the Sessions, agents, transcripts and terminal output of the computers it shares, they get no way to reach this one, and no groups join.",
       "requiresPaneDaemon": true,
       "mutates": true,
       "arguments": [
@@ -28661,7 +28662,7 @@ const CONTRACT_SECTION_17 = {
       ],
       "notes": [
         "signIn is the agent's own report, not a check: an ask's own error is the proof.",
-        "note is unreachable (the machine did not answer) or list unavailable (the list could not be read)."
+        "note is unreachable (the machine did not answer), list unavailable (the list could not be read) or read only (this computer only watches that machine, which lists no models to it)."
       ]
     },
     "sessions unpin": {

@@ -294,6 +294,16 @@ any computer it already paired.
   retrying while it is open, at least every 5 seconds (once a minute after an
   hour without reaching it); nothing to do. On the same Wi-Fi it connects
   directly even when the internet is down.
+- **"&lt;computer&gt; hasn't said, since this computer started or woke, that it still shares with this device":**
+  a read-only device reached a computer that was handed its token by another,
+  which hasn't confirmed it since that computer started or woke. Wait until the
+  computer that shared it is online, then reconnect.
+- **"This … already has full access to &lt;computer&gt;":** a read-only link
+  shares a computer this device reaches with full access. Remove that computer
+  from the device first, then open the link again.
+- **Removing a read-only device fails with "… which didn't answer":** it was
+  handed its token by another computer, which is off. Wake that computer and
+  remove it again, or remove it there.
 - **"Asleep since 9:40":** the computer is asleep. Wake it, or turn on Keep
   Awake.
 - **A browser on a Wi-Fi with no internet** can't reach the computer: a

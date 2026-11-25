@@ -180,7 +180,7 @@ export function readOnlyRefusal(what: string) {
  */
 const HIDDEN_FIELDS: ReadonlySet<string> = new Set([
   'system_prompt', 'run_script', 'build_script', 'archive_script', 'open_ide_command',
-  'launchCommand', 'toolCommand', 'launch', 'initialInput', 'customResume', 'profile', 'orchestrationProfile',
+  'launchCommand', 'toolCommand', 'launch', 'initialInput', 'openingPrompt', 'customResume', 'profile', 'orchestrationProfile',
 ]);
 
 /** What a tab's own state shows a viewer. Everything else in it, and whatever is added to it later, stays with the owner. */

@@ -33,7 +33,7 @@ export async function pairThisBrowser(
 ): Promise<RelayConnectionProfile[]> {
   const { computerId } = servedBy(page);
   const preview = await readLinkPreview(request.fetch, { ...servedBy(page), secret });
-  const refusal = fullAccessRefusal('browser', computerId, preview?.access, request.saved ?? []);
+  const refusal = fullAccessRefusal('browser', [computerId, ...(preview?.group.map(computer => computer.id) ?? [])], preview?.access, request.saved ?? []);
   if (refusal) throw refusal;
   const watching = request.watching === true || preview?.access === 'read';
   return exchangeRelayPairing(request.fetch, servedBy(page), { secret, label: request.label, phoneId: request.phoneId }, { watching });
