@@ -7566,7 +7566,7 @@ const CONTRACT_SECTION_13 = {
       "Usage:",
       "  python -m runpane secrets list [--project <project>] [--json] [--pane-dir <path>]",
       "",
-      "Lists the Pane secrets on this machine: project, name, when each was last set, and on which machine. A secret from 1Password shows its reference and when its lease ends. A login shows the sites `runpane browser fill` may fill it on. It never shows a value.",
+      "Lists the Pane secrets on this machine: project, name, when each was last set, and on which machine. A secret from 1Password shows its reference and when its lease ends. With --json, a login has the sites `runpane browser fill` may fill it on. It never shows a value.",
       "",
       "Options:",
       "  --project <project>            Only this project's secrets",

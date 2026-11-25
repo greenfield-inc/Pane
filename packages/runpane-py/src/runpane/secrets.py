@@ -59,11 +59,6 @@ def print_json(value: Any) -> None:
     print(json.dumps(value, indent=2))
 
 
-def login_text(secret: Any) -> str:
-    sites = secret.get("sites")
-    return f"  login for {', '.join(sites)}" if sites else ""
-
-
 def run_secrets_list(parsed: Any) -> int:
     refuse_teammate("list them")
     request = {} if parsed.project is None else {"project": parsed.project}
@@ -77,7 +72,7 @@ def run_secrets_list(parsed: Any) -> int:
         scope = "" if parsed.project is None else f" in project {parsed.project}"
         print(f"No Pane secrets{scope} on this machine yet.")
     for secret in result["secrets"]:
-        print(f"{secret['project']}/{secret['name']}  set {secret['updatedAt']} on {secret['machine']}{login_text(secret)}")
+        print(f"{secret['project']}/{secret['name']}  set {secret['updatedAt']} on {secret['machine']}")
     for reference in references:
         ends = sorted(
             lease["expiresAt"]
@@ -85,7 +80,7 @@ def run_secrets_list(parsed: Any) -> int:
             if lease["project"] == reference["project"] and reference["name"] in lease["names"]
         )
         until = f"leased until {ends[-1]}" if ends else "no lease"
-        print(f"{reference['project']}/{reference['name']}  from 1Password ({reference['reference']})  {until}{login_text(reference)}")
+        print(f"{reference['project']}/{reference['name']}  from 1Password ({reference['reference']})  {until}")
     storage = result.get("storage") or {}
     if storage.get("kind") == "file" and not storage.get("encrypted"):
         print("This machine has no OS keyring, so its secret values are stored unencrypted in a file only you can read.")
