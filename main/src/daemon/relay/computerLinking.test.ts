@@ -8,6 +8,8 @@ import type { RelayComputer, RelayLinkLifetime, RelayPairedEvent } from '../../.
 import { boundary, decodeBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import type { AppConfig } from '../../types/config';
 import { PaneCommandRegistry, type PaneCommandValue } from '../commandRegistry';
+import { isWatchedComputer } from '../../../../shared/types/remoteComputers';
+import { exchangeRelayPairing, fetchNewRelayProfiles, relayProfile, withNewProfiles, type RelayCommandClient, type RelayConnectionProfile } from '../../../../shared/remoteClient/relay';
 import { mayInvoke } from '../accessLevel';
 import { authenticateRemoteDaemonBearerToken } from '../auth';
 import type { PairingRoute } from '../httpApiServer';
@@ -26,6 +28,8 @@ interface Computer {
   registry: PaneCommandRegistry;
   /** A Pane from before access levels. */
   older: boolean;
+  asleep: boolean;
+  links: RelayLinks;
   route: PairingRoute;
   paired: RelayPairedEvent[];
   config(): RemoteDaemonConfig;
@@ -38,7 +42,7 @@ interface Computer {
   /** A phone redeems a code of this computer's, at its pairing route. */
   pairPhone(link: string, phoneId: string): ReturnType<PairingRoute['exchange']>;
   preview(link: string): Promise<PaneCommandValue>;
-  redeem(link: string): Promise<PaneCommandValue>;
+  redeem(link: string, access?: 'read' | 'full'): Promise<PaneCommandValue>;
 }
 
 /**
@@ -85,12 +89,13 @@ function network() {
 
   const call: CallComputer = async (profile, channel, args) => {
     const callee = at(profile.baseUrl);
+    if (callee.asleep) throw new Error(`${profile.label} did not answer within 15 seconds.`);
     if (profile.relay?.fingerprint !== callee.info.fingerprint) throw new Error(`${profile.label} showed a different key.`);
     const auth = authenticateRemoteDaemonBearerToken(`Bearer ${profile.token}`, callee.config().host.clients);
     if (!auth.ok) throw new RemoteRequestError('Unauthorized', 403, 'ERR_REMOTE_DAEMON_UNAUTHORIZED');
     const { client } = auth;
     if (!mayInvoke(client.access === 'read' ? 'read' : 'full', channel)) throw new RemoteRequestError('Read only', 409, 'ERR_READ_ONLY_ACCESS');
-    if (callee.older && (channel === 'relay:client:grant-read' || channel === 'relay:client:remove-read')) throw new RemoteRequestError('Unknown command', 400, 'ERR_UNKNOWN_CHANNEL');
+    if (callee.older && (channel === 'relay:client:grant-read' || channel.startsWith('relay:client:read-devices'))) throw new RemoteRequestError('Unknown command', 400, 'ERR_UNKNOWN_CHANNEL');
     try {
       // SAFETY: link commands take JSON arguments.
       const first = (args[0] ?? null) as PaneCommandValue;
@@ -152,6 +157,8 @@ function network() {
       info,
       registry,
       older,
+      asleep: false,
+      links,
       disconnected,
       route,
       paired,
@@ -161,7 +168,7 @@ function network() {
       link: async (lifetime = '10m', access = 'full') => decodeBoundary(await registry.invoke('relay:pairing-code', [{ expiresIn: lifetime, access }]), boundary.object({ url: boundary.string })).url,
       pairPhone: (link, phoneId) => route.exchange({ secret: new URLSearchParams(new URL(link).hash.slice(1)).get('s') ?? '', label: 'Phone', phoneId, source: '192.168.1.30' }),
       preview: (link) => registry.invoke('relay:link-preview', [{ link }]),
-      redeem: (link) => registry.invoke('relay:redeem-link', [{ link }]),
+      redeem: async (link, access) => registry.invoke('relay:redeem-link', [{ link, access: access ?? (decodeBoundary(await registry.invoke('relay:link-preview', [{ link }]), boundary.object({ access: boundary.optional(boundary.enumeration('read', 'full')) })).access ?? 'full') }]),
     };
     computers.set(id, computer);
     return computer;
@@ -189,7 +196,15 @@ function network() {
     return await call({ id: saved.id, label: saved.label, baseUrl: route.baseUrl, token: route.token, transport: 'http+sse', relay: route.relay }, channel, [request]) as PaneCommandValue;
   }
 
-  return { add, reaches, callAs, advance: (ms: number) => { now += ms; } };
+  /** A paired phone: its requests carry its token, as its app's do. */
+  function phone(): (profile: RelayConnectionProfile) => RelayCommandClient {
+    return (profile) => ({
+      // SAFETY: link commands answer JSON, which the caller decodes.
+      invoke: async <T>(channel: string, args: unknown[] = []) => await call({ ...profile, relay: profile.relay }, channel, args) as T,
+    });
+  }
+
+  return { add, reaches, callAs, phone, advance: (ms: number) => { now += ms; } };
 }
 
 describe('linking computers with a one-time link', () => {
@@ -443,7 +458,7 @@ describe('a read-only link', () => {
     expect(parsa.listed()).toEqual(['A2', 'B2', 'Tyler']);
     expect(await net.reaches(parsa, tyler)).toBe(true);
     expect(await net.reaches(parsa, a2)).toBe(true);
-    expect(parsa.config().client.computers.filter((computer) => computer.label !== 'B2').flatMap((computer) => computer.routes.map((route) => route.access))).toEqual(['read', 'read']);
+    expect(parsa.config().client.computers.filter(isWatchedComputer).map((computer) => computer.label).sort()).toEqual(['A2', 'Tyler']);
 
     // The sharer's side gained no route and no token to the reader's computers, and the older A3 handed out nothing.
     expect([tyler.listed(), a2.listed(), a3.listed(), b2.listed()]).toEqual([['A2', 'A3'], before.a2, before.a3, before.b2]);
@@ -457,7 +472,7 @@ describe('a read-only link', () => {
   it('can mint, save or grant nothing on the computers it watches', async () => {
     const { net, tyler, parsa, b2 } = await shared();
     await parsa.redeem(await tyler.link('10m', 'read'));
-    for (const channel of ['relay:client:mint-link', 'relay:client:save-link', 'relay:client:grant-phone', 'relay:client:grant-computer', 'relay:client:grant-read', 'relay:client:remove-read', 'relay:client:forget-computer', 'relay:client:preview-address']) {
+    for (const channel of ['relay:client:mint-link', 'relay:client:save-link', 'relay:client:grant-phone', 'relay:client:grant-computer', 'relay:client:grant-read', 'relay:client:read-devices', 'relay:client:read-devices-changed', 'relay:client:forget-computer', 'relay:client:preview-address']) {
       await expect(net.callAs(parsa, tyler, channel, { peer: { ...b2.info }, token: 'x', label: 'Phone', computerId: b2.info.id }), channel).rejects.toMatchObject({ code: 'ERR_READ_ONLY_ACCESS' });
     }
     // A later full link with someone else doesn't bring the shared computer along.
@@ -498,7 +513,7 @@ describe('a read-only link', () => {
     const { net, tyler, a2 } = await shared();
     const own = await tyler.pairPhone(await tyler.link(), 'owner-phone');
     const claimed = await tyler.pairPhone(await tyler.link('10m', 'read'), 'owner-phone');
-    expect([own, claimed]).toEqual([expect.objectContaining({ ok: true }), expect.objectContaining({ ok: true, access: 'read' })]);
+    expect([own, claimed]).toEqual([expect.objectContaining({ ok: true }), expect.objectContaining({ ok: true, token: expect.stringMatching(/^pane_read_/u) })]);
     const phones = () => tyler.config().host.clients.filter((client) => client.phoneId === 'owner-phone').map((client) => client.access ?? 'full');
     expect(phones()).toEqual(['full', 'read']);
 
@@ -512,7 +527,7 @@ describe('a read-only link', () => {
   it('gives a read-only phone read-only tokens, also when it refreshes its computers', async () => {
     const { tyler, a2, a3 } = await shared();
     const paired = await tyler.pairPhone(await tyler.link('10m', 'read'), 'reader-phone');
-    expect(paired).toMatchObject({ ok: true, access: 'read' });
+    expect(paired).toMatchObject({ ok: true, token: expect.stringMatching(/^pane_read_/u) });
     const phones = (computer: Computer) => computer.config().host.clients.filter((client) => client.phoneId === 'reader-phone').map((client) => client.access);
     expect([phones(tyler), phones(a2), phones(a3)]).toEqual([['read'], ['read'], []]);
 
@@ -530,8 +545,108 @@ describe('a read-only link', () => {
       label: 'Parsa', source: '192.168.1.20', known: [],
       computer: { computer: { ...parsa.info }, token: 'a token for Tyler to call Parsa' },
     });
-    expect(result).toMatchObject({ ok: true, access: 'read' });
+    expect(result).toMatchObject({ ok: true, token: expect.stringMatching(/^pane_read_/u) });
     expect(tyler.listed()).toEqual(['A2', 'A3']);
     expect(tyler.config().host.clients.filter((client) => client.label === 'Parsa')).toEqual([expect.objectContaining({ access: 'read' })]);
+  });
+
+  /** Parsa's phone, paired Read only with Tyler, holding what the app saves. */
+  async function sharedPhone() {
+    const net = await shared();
+    const paired = await net.tyler.pairPhone(await net.tyler.link('10m', 'read'), 'reader-phone');
+    if (!paired.ok) throw new Error(paired.message);
+    const tyler = relayProfile({ computer: { ...net.tyler.info }, token: paired.token });
+    const saved = [tyler, ...(paired.linked ?? []).map((grant) => relayProfile(grant, 'Tyler'))];
+    const client = net.net.phone();
+    const works = async (profile: RelayConnectionProfile) => client(profile).invoke('relay:client:computer').then(() => true, () => false);
+    return { ...net, saved, client, works, onTyler: saved[0], onA2: saved[1] };
+  }
+
+  it('keeps every computer working when a phone opens any of them, in any order, and after one is renamed', async () => {
+    const { saved, client, works, onTyler, onA2, tyler, a2 } = await sharedPhone();
+    let profiles = saved;
+    for (const opened of [onA2, onTyler, onA2, { ...onTyler, label: 'Tyler, renamed' }]) {
+      profiles = withNewProfiles(profiles, await fetchNewRelayProfiles(client(opened), opened, profiles));
+      for (const profile of profiles) expect(await works(profile), `${profile.label} after opening ${opened.label}`).toBe(true);
+    }
+    for (const computer of [tyler, a2]) expect(computer.config().host.clients.filter((record) => record.phoneId === 'reader-phone')).toHaveLength(1);
+  });
+
+  it('stays removed: a linked computer that slept through it drops the token when it wakes, and can win none back meanwhile', async () => {
+    const { tyler, a2, client, works, onTyler, onA2 } = await sharedPhone();
+    a2.asleep = true;
+    const record = tyler.config().host.clients.find((saved) => saved.access === 'read');
+    // However it is removed: the row's own Remove, or the plain one, which only drops the record here.
+    expect(await tyler.registry.invoke('relay:remove-phone-everywhere', [{ clientId: record?.id }])).toEqual({ removed: ['Tyler'], notReached: ['A2'] });
+
+    a2.asleep = false;
+    expect(await fetchNewRelayProfiles(client(onA2), onA2, [])).toEqual([]);
+    expect(await works(onTyler)).toBe(false);
+    expect(tyler.config().host.clients.some((saved) => saved.access === 'read')).toBe(false);
+    await a2.links.followReadDevices();
+    expect(await works(onA2)).toBe(false);
+  });
+
+  it('drops a linked computer\'s tokens for a device however it was removed, and keeps those it shares itself', async () => {
+    const { tyler, a2, works, onA2 } = await sharedPhone();
+    const own = await a2.pairPhone(await a2.link('10m', 'read'), 'other-phone');
+    await tyler.links.dropClient(tyler.config().host.clients.find((saved) => saved.access === 'read')?.id ?? '');
+    await tyler.links.tellReadDevices();
+    expect(await works(onA2)).toBe(false);
+    expect(own.ok && a2.config().host.clients.some((saved) => saved.id === own.client.id)).toBe(true);
+  });
+
+  it('refuses a link whose computer changes its level after the person agreed, and gives nothing', async () => {
+    const { tyler, parsa, before } = await shared();
+    const link = await tyler.link('10m', 'full');
+    const preview = tyler.route.preview;
+    // A changed Pane: Read only on the screen, full when it counts.
+    let asked = 0;
+    tyler.route.preview = async (request) => {
+      const answer = await preview(request);
+      asked += 1;
+      return answer.ok && asked === 1 ? { ...answer, access: 'read' } : answer;
+    };
+    expect(await parsa.preview(link)).toMatchObject({ access: 'read' });
+    await expect(parsa.redeem(link, 'read')).rejects.toMatchObject({ code: 'ERR_LINK_LEVEL_CHANGED' });
+    expect([parsa.listed(), parsa.config().host.clients]).toEqual([['B2'], before.bClients]);
+
+    // Or Read only to every preview, and a full token at the end.
+    tyler.route.preview = async (request) => {
+      const answer = await preview(request);
+      return answer.ok ? { ...answer, access: 'read' } : answer;
+    };
+    const exchange = tyler.route.exchange;
+    tyler.route.exchange = async (request) => exchange({ ...request, computer: { computer: { ...parsa.info }, token: 'parsa-gives-none' } });
+    await expect(parsa.redeem(link, 'read')).rejects.toMatchObject({ code: 'ERR_LINK_LEVEL_CHANGED' });
+    expect([parsa.listed(), parsa.config().host.clients]).toEqual([['B2'], before.bClients]);
+  });
+
+  it('passes on no token of another level from a changed linked computer', async () => {
+    const { tyler, a2 } = await shared();
+    const grantRead = a2.links.grantRead.bind(a2.links);
+    a2.links.grantRead = async (device, caller) => ({ token: (await grantRead(device, caller)).token.replace('pane_read_', '') });
+    const paired = await tyler.pairPhone(await tyler.link('10m', 'read'), 'reader-phone');
+    expect(paired).toMatchObject({ ok: true, linked: [] });
+  });
+
+  it('lets a phone and browser keep nothing from an exchange that is not the Read only they agreed to', async () => {
+    const { tyler } = await shared();
+    const answer = (token: string) => async () => new Response(JSON.stringify({ ok: true, token, clientId: 'c', computer: tyler.info, linked: [] }));
+    const scanned = { computerId: tyler.info.id, domain: DOMAIN, name: 'Tyler' };
+    const request = { secret: 's', label: 'Phone' };
+    await expect(exchangeRelayPairing(answer('full-token'), scanned, request, { watching: true })).rejects.toMatchObject({ code: 'ERR_PAIRING_LEVEL_CHANGED' });
+    expect(await exchangeRelayPairing(answer('pane_read_x'), scanned, request, { watching: true })).toEqual([expect.objectContaining({ token: 'pane_read_x' })]);
+  });
+
+  it('forgets a watched computer whole: its Tailscale route never stays as full access', async () => {
+    const { parsa, tyler } = await shared();
+    await parsa.redeem(await tyler.link('10m', 'read'));
+    parsa.seed(parsa.config().client.computers.map((computer) => (computer.label !== 'Tyler' ? computer : {
+      ...computer,
+      routes: [...computer.routes, { id: 'tailscale:https://tyler.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://tyler.ts.net:8443', token: computer.routes[0].token, tailnetMachine: 'tyler', tailnetDomain: 'ts.net' }],
+    })));
+    await parsa.registry.invoke('relay:unlink-computer-everywhere', [{ computerId: tyler.info.id }]);
+    expect(parsa.listed()).not.toContain('Tyler');
   });
 });

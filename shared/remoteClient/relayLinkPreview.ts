@@ -1,4 +1,4 @@
-import { readOnlyMarkSchema, type ReadOnlyMark } from '../types/accessLevel';
+import { readOnlyMarkSchema, tokenAccess, type ReadOnlyMark } from '../types/accessLevel';
 import type { RemotePaneConnectionProfile } from '../types/remoteDaemon';
 import { boundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
 import { fetchWithin, isRelayProfile, relayComputerAddress, RelayPairingError, type RelayPairingLink } from './relay';
@@ -35,7 +35,7 @@ export function fullAccessRefusal(
   saved: readonly RemotePaneConnectionProfile[],
 ): RelayPairingError | null {
   if (access !== 'read') return null;
-  const full = saved.find(profile => profile.relay?.computerId === computerId && profile.access !== 'read');
+  const full = saved.find(profile => profile.relay?.computerId === computerId && tokenAccess(profile.token) !== 'read');
   return full ? new RelayPairingError(`This ${device} already has full access to ${full.label}`, `Remove it first to watch it read-only.`, 'ERR_PAIRING_FULL_ACCESS', false) : null;
 }
 
@@ -53,7 +53,7 @@ export async function relayLinkJoin(
   saved: readonly RemotePaneConnectionProfile[],
 ): Promise<RelayLinkJoin | null> {
   // A computer this device only watches joins nothing, so it counts on neither side.
-  const mine = saved.filter(isRelayProfile).filter(profile => profile.access !== 'read');
+  const mine = saved.filter(isRelayProfile).filter(profile => tokenAccess(profile.token) !== 'read');
   if (mine.length === 0 || mine.some(profile => profile.relay.computerId === link.computerId)) return null;
   const here = mine.map(profile => profile.label);
   const preview = await readLinkPreview(fetch, link);

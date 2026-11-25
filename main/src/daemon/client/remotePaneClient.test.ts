@@ -751,30 +751,24 @@ describe('RemotePaneClient writes through a drop', () => {
 });
 
 describe('RemotePaneClientController', () => {
-  it('learns on every connect whether the host is read-only, keeps it through a drop, and asks such a host none of its own bookkeeping', async () => {
+  it('watches a host its token is read-only for, whatever the host says, and asks it none of its own bookkeeping', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);
-    server.setAccess('read');
     const config = createDefaultRemoteDaemonConfig();
     config.client = { mode: 'remote', activeProfileId: 'tyler', profiles: [
-      { id: 'tyler', label: 'Tyler', baseUrl: server.baseUrl, token: 'test-token', transport: 'http+sse' },
+      { id: 'tyler', label: 'Tyler', baseUrl: server.baseUrl, token: 'pane_read_tyler', transport: 'http+sse' },
     ] };
     const controller = createController();
     const seen: Array<'read' | undefined> = [];
-    controller.on('state-changed', (state: RemotePaneConnectionState) => { if (state.status === 'reconnecting') seen.push(state.access); });
+    controller.on('state-changed', (state: RemotePaneConnectionState) => { if (state.mode === 'remote') seen.push(state.access); });
     controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {} } });
     await waitFor(() => controller.getConnectionState().status === 'connected');
-    expect(controller.getConnectionState().access).toBe('read');
 
     await expect(controller.invoke('permission:getPending', [], async () => null)).resolves.toEqual({ success: true, data: [] });
     expect(server.getInvokes().map((call) => call.channel)).not.toContain('permission:getPending');
-
-    server.setAccess(undefined);
     server.closeEventStream();
-    await waitFor(() => seen.length > 0);
-    await waitFor(() => controller.getConnectionState().status === 'connected');
-    expect(seen[0]).toBe('read');
-    expect(controller.getConnectionState().access).toBeUndefined();
+    await waitFor(() => server.getEventRequestCount() === 2 && controller.getConnectionState().status === 'connected');
+    expect(new Set(seen)).toEqual(new Set(['read']));
 
     await controller.switchToLocalMode();
     expect(controller.getConnectionState().access).toBeUndefined();
@@ -1372,7 +1366,6 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
   let invokeDelayMs = 0;
   let invokeCount = 0;
   let deduplicates = false;
-  let access: 'read' | undefined;
   const invokes: Array<{ channel: string; args: JsonValue[]; requestId?: string }> = [];
   const applied: Array<{ channel: string; args: JsonValue[] }> = [];
   const seenRequestIds = new Set<string>();
@@ -1449,7 +1442,7 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
       if (emitReadyEvent) {
         response.write('event: ready\n');
         const ready = { replay: 'none', resync: 'refetch-state-after-reconnect', timestamp: new Date().toISOString() };
-        response.write(`data: ${JSON.stringify({ ...ready, ...(deduplicates && { deduplicatesRequestIds: true }), ...(access && { access }) })}\n\n`);
+        response.write(`data: ${JSON.stringify({ ...ready, ...(deduplicates && { deduplicatesRequestIds: true }) })}\n\n`);
       }
       request.on('close', () => {
         if (streamResponse === response) {
@@ -1479,7 +1472,6 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
     proxyMissInvoke(count) { proxyMisses = count; },
     delayInvoke(ms: number) { invokeDelayMs = ms; },
     deduplicateRequestIds() { deduplicates = true; },
-    setAccess(next: 'read' | undefined) { access = next; },
     getInvokes() { return invokes; },
     getApplied() { return applied; },
     setHeartbeatInterval(ms: number) {

@@ -1,4 +1,4 @@
-import { readOnlyMarkSchema, type ReadOnlyMark } from '../../../../shared/types/accessLevel';
+import { tokenAccess } from '../../../../shared/types/accessLevel';
 import { READ_ONLY_HOST_ANSWERS } from '../../../../shared/remoteClient/readOnlyHost';
 import { decodeUpdateIntent } from '../../../../shared/remoteClient/updateIntent';
 import { pinnedServerIdentity } from '../relay/keyPinning';
@@ -72,8 +72,6 @@ interface RemoteConnectionStateMetadata {
   hostMachineId?: string;
   /** Whether the host sends `workspace:entry` events; false from hosts before remote Session members. */
   hostWorkspaceEntries?: boolean;
-  /** "read" when the host gives this computer read-only access; known once the ready event arrived. */
-  hostAccess?: ReadOnlyMark;
   /** What the host reported about itself on its ready event: its install id and routes. Older hosts omit it. */
   hostRoutes?: ComputerRoutesReport;
   /** The route the connection is on (`ComputerRoute.id`); absent for a connection with one route. */
@@ -170,8 +168,6 @@ interface RemoteReadyEventPayload {
   /** `ComputerRoutesReport`, decoded where it is used. */
   computer?: JsonValue;
   workspaceEntries?: boolean;
-  /** Full access when absent. */
-  access?: ReadOnlyMark;
 }
 
 const remoteInvokeResponseSchema: BoundarySchema<RemoteInvokeResponsePayload> = boundary.union(
@@ -200,7 +196,6 @@ const remoteReadyEventSchema: BoundarySchema<RemoteReadyEventPayload> = boundary
   machineId: boundary.optional(boundary.string),
   computer: boundary.optional(boundary.json),
   workspaceEntries: boundary.optional(boundary.boolean),
-  access: boundary.optional(readOnlyMarkSchema),
 });
 const remoteHeartbeatSchema: BoundarySchema<RemoteDaemonHeartbeatPayload> = boundary.object({
   timestamp: boundary.nonEmptyString,
@@ -1018,14 +1013,13 @@ export class RemotePaneClient {
               this.markRemoteSeen();
               armTimeout(this.restoreTimeoutMs, `Workspace restoration timed out after ${this.restoreTimeoutMs}ms`);
               if (resolveOnReady && !settled) { settled = true; resolve(); }
-              const host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId' | 'hostRoutes' | 'hostWorkspaceEntries' | 'hostAccess'> = {
+              const host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId' | 'hostRoutes' | 'hostWorkspaceEntries'> = {
                 hostVersion: readyPayload.paneVersion,
                 hostMachineId: readyPayload.machineId,
                 hostWorkspaceEntries: readyPayload.workspaceEntries === true,
               };
               const hostRoutes = decodeComputerRoutesReport(readyPayload.computer);
               if (hostRoutes) host.hostRoutes = hostRoutes;
-              if (readyPayload.access) host.hostAccess = readyPayload.access;
               this.reportStatus('restoring', 'host ready', null, host);
               void Promise.resolve().then(() => this.onResyncRequired?.()).then(() => {
                 if (!isStale()) {
@@ -1229,7 +1223,7 @@ export class RemotePaneClient {
     status: RemotePaneConnectionStatus,
     reason: string,
     errorMessage: string | null = null,
-    host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId' | 'hostRoutes' | 'hostWorkspaceEntries' | 'hostAccess'> = {},
+    host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId' | 'hostRoutes' | 'hostWorkspaceEntries'> = {},
   ): void {
     const route = this.routes[this.routeIndex];
     console.info(`[Pane remote daemon] ${this.profile.label}: ${status}${this.routes.length > 1 ? ` on ${route.kind}` : ''} (${reason})`);
@@ -1812,9 +1806,8 @@ export class RemotePaneClientController extends EventEmitter {
     });
 
     let hostChanged = options.resolveOnReady === true;
-    // The saved route's level until the host answers; then each ready event ("restoring") says it anew,
-    // and a reconnect keeps the last answer, so it never flashes the controls back.
-    let access = savedProfile.access;
+    // The credential's own level: nothing the host says changes it.
+    const access = [savedProfile, ...routes.map((route) => route.profile)].some((route) => tokenAccess(route.token) === 'read') ? 'read' as const : undefined;
     const client = new RemotePaneClient(profile, {
       dnsLookup: this.dnsLookup,
       routes: routes.length === 1 ? [{ ...routes[0], profile }] : routes,
@@ -1841,7 +1834,6 @@ export class RemotePaneClientController extends EventEmitter {
       },
       onConnectionStateChange: (status, errorMessage, metadata) => {
         if (this.activeClient !== client) return;
-        if (status === 'restoring') access = metadata?.hostAccess;
         this.advanceCheck(savedProfile, status, errorMessage, metadata?.hostVersion);
         if (status === 'error' || status === 'reconnecting') {
           this.pendingRestore?.reject(new Error('Connection interrupted'));

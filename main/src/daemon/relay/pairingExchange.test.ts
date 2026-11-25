@@ -148,12 +148,13 @@ describe('QR pairing exchange', () => {
 
     const result = await new PairingExchange(deps).exchange({ secret, label: 'Parsa', source: PHONE });
 
-    expect(result).toMatchObject({ ok: true, access: 'read' });
+    expect(result).toMatchObject({ ok: true });
     if (!result.ok) return;
     expect(saved).toEqual([expect.objectContaining({ access: 'read' })]);
-    expect(saved[0].tokenHash).not.toBe(plain(result.token));
+    for (const sent of [result.token, `read:${result.token}`, createHash('sha256').update(result.token).digest('latin1'), result.token.replace('pane_read_', '')]) expect(saved[0].tokenHash).not.toBe(plain(sent));
     expect(authenticateRemoteDaemonBearerToken(`Bearer ${result.token}`, saved)).toMatchObject({ ok: true, client: { access: 'read' } });
     const { access: _dropped, ...stripped } = saved[0];
     expect(authenticateRemoteDaemonBearerToken(`Bearer ${result.token}`, [stripped])).toMatchObject({ ok: false });
+    expect(authenticateRemoteDaemonBearerToken(`Bearer ${result.token.replace('pane_read_', '')}`, saved)).toMatchObject({ ok: false });
   });
 });

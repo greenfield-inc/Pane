@@ -1558,7 +1558,8 @@ export class OrchestrationSessionManager extends EventEmitter {
       panel,
       agent: record.agent,
       cwd: sessionRuntimePath(sessionWorkspacePath(record.id), record),
-      guidePath: sessionRuntimePath(await this.ensureGuidePath(), record),
+      // Making sure the guide is there writes it; a read-only device runs no agent that reads it.
+      guidePath: readOnlyPaneCaller() ? '' : sessionRuntimePath(await this.ensureGuidePath(), record),
       started: this.agentStarted(panel.id),
     };
   }

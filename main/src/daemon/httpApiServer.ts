@@ -159,8 +159,6 @@ interface RemoteReadyEventPayload {
   machineId?: string;
   /** This host's routes (D-51), saved by the client as found automatically. Hosts before it omit it. */
   computer?: ComputerRoutesReport;
-  /** Set when this device is paired Read only, so its client shows no controls. Full access, and hosts before it, omit it. */
-  access?: ReadOnlyMark;
   /** This host sends `workspace:entry` events, so a Session on another computer hears its members. Hosts before it omit it. */
   workspaceEntries: true;
 }
@@ -299,7 +297,7 @@ type PairingRefusal = { ok: false; status: number; code: string; message: string
 
 /** The new token, what the caller stores about this computer, and the computers it may now reach. */
 type PairingRouteResult =
-  | { ok: true; token: string; client: { id: string }; access?: ReadOnlyMark; computer?: RelayComputer; linked?: RelayComputerGrant[]; routes?: ComputerRoutesReport }
+  | { ok: true; token: string; client: { id: string }; computer?: RelayComputer; linked?: RelayComputerGrant[]; routes?: ComputerRoutesReport }
   | PairingRefusal;
 
 /** Whose code it is, without spending it: this computer, then every computer linked with it. */
@@ -1242,7 +1240,6 @@ export class PaneRemoteHttpApiServer {
       workspaceEntries: true,
     };
     const access: CallerAccess = glassesClient ? 'glasses' : accessOf(auth);
-    if (access === 'read') ready.access = 'read';
     if (this.paneVersion) ready.paneVersion = this.paneVersion;
     const hostMachineId = this.configManager.getConfig().machineId;
     if (hostMachineId) ready.machineId = hostMachineId;

@@ -11,7 +11,7 @@ import {
   type RelayExchangeRequest,
   type RelayPairedEvent,
 } from '../../../../shared/types/relay';
-import { readOnlyMarkSchema } from '../../../../shared/types/accessLevel';
+import { readOnlyMarkSchema, tokenAccess, type DeviceAccess } from '../../../../shared/types/accessLevel';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PairingRoute } from '../httpApiServer';
 import type { PairingCheck, PairingExchangeRequest, PairingExchangeResult } from './pairingExchange';
@@ -37,7 +37,6 @@ const previewSchema = boundary.object({ ok: boundary.literal(true), group: group
 const exchangeSchema = boundary.object({
   ok: boundary.literal(true),
   token: boundary.nonEmptyString,
-  access: boundary.optional(readOnlyMarkSchema),
   computer: relayComputerSchema,
   linked: boundary.array(boundary.object({ computer: relayComputerSchema, token: boundary.nonEmptyString })),
   routes: boundary.optional(boundary.json),
@@ -74,7 +73,7 @@ export function createPairingRoute(deps: {
       if (request.computer === undefined) {
         const result = await host.exchangeSecret(request);
         if (!result.ok) return result;
-        const { access } = result;
+        const { access } = result.client;
         deps.onPaired(access ? { kind: 'phone', label: result.client.label, access } : { kind: 'phone', label: result.client.label });
         return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId, access }, request.known ?? []) };
       }
@@ -94,7 +93,7 @@ export function createPairingRoute(deps: {
       }
       const result = await host.exchangeSecret({ ...request, label: offer.computer.name, computerId: offer.computer.id });
       if (!result.ok) return result;
-      if (result.access === 'read' || token === undefined) {
+      if (result.client.access === 'read' || token === undefined) {
         deps.onPaired({ kind: 'computer', label: offer.computer.name, access: 'read' });
         const [linked, routes] = await Promise.all([links.computerGrantsFor(offer.computer, request.known ?? [], 'read'), deps.routesReport()]);
         return routes ? { ...result, linked, routes } : { ...result, linked };
@@ -140,6 +139,10 @@ function refusal(code: string, maker: string): PaneError {
   }
 }
 
+function levelChanged(maker: string): PaneError {
+  return new PaneError('ERR_LINK_LEVEL_CHANGED', `${maker} answered with another access level than the link showed, so nothing was linked.`, `Ask for a new link from Add a device › Computer on ${maker}, and check what it says before you link.`);
+}
+
 /**
  * The redeemer's side: this computer opens another computer's one-time link. It previews the link
  * without spending it, trades it as a computer, saves the maker and every computer linked with it,
@@ -167,7 +170,8 @@ export class ComputerLinking {
     };
   }
 
-  async redeem(text: string): Promise<LinkRedeemResult> {
+  /** `confirmed`: the level the person agreed to. The link's computer writes every preview, so one that says otherwise now is refused. */
+  async redeem(text: string, confirmed: DeviceAccess): Promise<LinkRedeemResult> {
     const { links } = this.deps;
     const link = this.parse(text);
     const self = this.deps.self();
@@ -181,7 +185,10 @@ export class ComputerLinking {
     if (link.computerId === self.id) throw new PaneError('ERR_RELAY_LINK_SELF', 'This is this computer\'s own link, so nothing was linked.', 'Open the link on another computer.');
     const { group, access } = await this.fetchPreview(link);
     const maker = group[0].name;
-    if (access === 'read') return this.redeemReadOnly(link, self, group);
+    if (confirmed === 'read' || access === 'read') {
+      if (confirmed === 'read' && access !== 'read') throw levelChanged(maker);
+      return this.redeemReadOnly(link, self, group);
+    }
     const before = links.linked();
     const minted = await links.mintFor({ id: link.computerId, name: maker });
     let answer: { status: number; json: unknown };
@@ -201,13 +208,18 @@ export class ComputerLinking {
       throw result ? new PaneError('ERR_PAIRING_WRONG_COMPUTER', `A different computer answered for ${maker}, so nothing was linked.`, `Copy a new link from Add a device › Computer on ${maker}.`)
         : refusal(decodeOptionalBoundary(answer.json, failureSchema)?.error.code ?? `HTTP_${answer.status}`, maker);
     }
+    if (tokenAccess(result.token) === 'read') {
+      // It shared read-only after all: it gets nothing back.
+      await links.dropClient(minted.clientId);
+      throw levelChanged(maker);
+    }
     await links.saveComputer({ computer: result.computer, token: result.token, routes: decodeComputerRoutesReport(result.routes) });
 
     // The maker's linked computers handed out tokens; each gets one to call this computer.
     const theirs: RelayComputer[] = [result.computer];
     for (const grant of result.linked) {
       const peer = grant.computer;
-      if (peer.id === self.id || peer.id === result.computer.id || !isRelayComputerUnder(peer, link.domain)) continue;
+      if (peer.id === self.id || peer.id === result.computer.id || tokenAccess(grant.token) === 'read' || !isRelayComputerUnder(peer, link.domain)) continue;
       await links.saveComputer({ computer: peer, token: grant.token, linkedBy: maker });
       const back = await links.mintFor(peer);
       try {
@@ -257,11 +269,12 @@ export class ComputerLinking {
       throw result ? new PaneError('ERR_PAIRING_WRONG_COMPUTER', `A different computer answered for ${maker}, so nothing was linked.`, `Copy a new link from Add a device › Computer on ${maker}.`)
         : refusal(decodeOptionalBoundary(answer.json, failureSchema)?.error.code ?? `HTTP_${answer.status}`, maker);
     }
-    await links.saveComputer({ computer: result.computer, token: result.token, routes: decodeComputerRoutesReport(result.routes), access: 'read' });
+    if (tokenAccess(result.token) !== 'read') throw levelChanged(maker);
+    await links.saveComputer({ computer: result.computer, token: result.token, routes: decodeComputerRoutesReport(result.routes) });
     const saved = [result.computer.name];
     for (const { computer, token } of result.linked) {
-      if (computer.id === self.id || computer.id === result.computer.id || full.has(computer.id) || !isRelayComputerUnder(computer, link.domain)) continue;
-      await links.saveComputer({ computer, token, linkedBy: maker, access: 'read' });
+      if (computer.id === self.id || computer.id === result.computer.id || full.has(computer.id) || tokenAccess(token) !== 'read' || !isRelayComputerUnder(computer, link.domain)) continue;
+      await links.saveComputer({ computer, token, linkedBy: maker });
       saved.push(computer.name);
     }
     return { linked: saved, access: 'read' };

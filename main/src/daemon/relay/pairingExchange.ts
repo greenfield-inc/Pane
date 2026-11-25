@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID, timingSafeEqual } from 'crypto';
-import { hashDeviceToken } from '../auth';
+import { hashDeviceToken, newDeviceToken } from '../auth';
 import { readOnlyMarkSchema, type ReadOnlyMark } from '../../../../shared/types/accessLevel';
 import type { RemoteDaemonClientRecord } from '../../../../shared/types/remoteDaemon';
 import type { RelayLinkLifetime } from '../../../../shared/types/relay';
@@ -23,7 +23,7 @@ const MAX_LABEL_LENGTH = 60;
 export type PairingRefusal = { ok: false; status: number; code: string; message: string };
 
 export type PairingExchangeResult =
-  | { ok: true; token: string; client: RemoteDaemonClientRecord; access?: ReadOnlyMark }
+  | { ok: true; token: string; client: RemoteDaemonClientRecord }
   | PairingRefusal;
 
 /** Whether a secret would trade, and the access it gives. */
@@ -45,7 +45,7 @@ interface SourceFailures {
 }
 
 interface Pending {
-  /** Of the secret, tagged for a read-only link as its token is (`hashDeviceToken`), so an older Pane refuses it. */
+  /** Of the secret, as a token of its level is kept (`hashDeviceToken`), so an older Pane refuses a read-only link. */
   hash: Buffer;
   lifetime: RelayLinkLifetime;
   expiresAt: number;
@@ -152,7 +152,7 @@ export class PairingExchange {
     if (!found.ok) return found;
     found.entry.spentAt = now;
     this.save();
-    const token = randomBytes(32).toString('base64url');
+    const token = newDeviceToken(found.entry.access);
     const client: RemoteDaemonClientRecord = {
       id: randomUUID(),
       label: cleanLabel(label, computerId ? 'Computer' : 'Phone'),
@@ -167,7 +167,7 @@ export class PairingExchange {
       client.phoneId = phoneId.slice(0, 100);
     }
     await this.deps.addClient(client);
-    return found.entry.access ? { ok: true, token, client, access: found.entry.access } : { ok: true, token, client };
+    return { ok: true, token, client };
   }
 
   private find(secret: string, source: string, now: number): { ok: true; entry: Pending } | PairingRefusal {

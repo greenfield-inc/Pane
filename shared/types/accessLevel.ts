@@ -3,8 +3,23 @@ import { boundary, type BoundarySchema } from '../validation/boundaryDecoder';
 /** What a paired device may do: watch, or everything. Records and answers hold only `read`; absent means full access. */
 export type DeviceAccess = 'read' | 'full';
 
-/** `access` on records, routes and answers: `read`, or absent for full access. */
+/** `access` on a host's records and links: `read`, or absent for full access. */
 export type ReadOnlyMark = 'read';
+
+/** A read-only device's token starts with this; no other token does. */
+const READ_TOKEN_PREFIX = 'pane_read_';
+
+export function readOnlyToken(random: string): string {
+  return `${READ_TOKEN_PREFIX}${random}`;
+}
+
+/**
+ * The level of the pairing a token is for, from the token alone. A device's level is fixed when it
+ * pairs, so nothing the computer says later, and no field an older Pane drops, changes it.
+ */
+export function tokenAccess(token: string): ReadOnlyMark | undefined {
+  return token.startsWith(READ_TOKEN_PREFIX) ? 'read' : undefined;
+}
 
 export const readOnlyMarkSchema: BoundarySchema<ReadOnlyMark> = boundary.literal('read');
 

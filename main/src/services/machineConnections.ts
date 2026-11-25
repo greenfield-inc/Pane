@@ -2,7 +2,7 @@ import type { WebSocket } from 'ws';
 import { MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_APP_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL } from '../../../shared/types/machineHealth';
 import os from 'os';
 import { RemotePaneClient, type RemoteRouteCandidate } from '../daemon/client/remotePaneClient';
-import { primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
+import { isWatchedComputer, primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
 import type { ConfigManager } from './configManager';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { READ_ONLY_ACCESS_CODE } from '../../../shared/types/accessLevel';
@@ -301,7 +301,7 @@ export class MachineConnections {
       key: connectionKey(computer),
       profile,
       retryTimer: null,
-      state: { id, label: profile.label, kind: 'remote', status: 'connecting', offlineSince: null, ...(profile.access && { access: profile.access }) },
+      state: { id, label: profile.label, kind: 'remote', status: 'connecting', offlineSince: null, ...(isWatchedComputer(computer) && { access: 'read' as const }) },
       client: this.createClient(profile, {
         machineId: this.deps.configManager.getConfig().machineId,
         routes,
@@ -311,12 +311,6 @@ export class MachineConnections {
           if (!isCurrent()) return;
           if (metadata?.hostRoutes) void this.deps.routes?.saveReport(id, metadata.routeId, metadata.hostRoutes);
           if (metadata?.routeId && machine.state.routeId !== metadata.routeId) { machine.state.routeId = metadata.routeId; this.emitMachines(); }
-          // Each ready event ("restoring") says this computer's access anew; no mark means full.
-          if (status === 'restoring' && machine.state.access !== metadata?.hostAccess) {
-            if (metadata?.hostAccess) machine.state.access = metadata.hostAccess;
-            else delete machine.state.access;
-            this.emitMachines();
-          }
           this.updateStatus(machine, status, metadata?.hostMachineId, metadata?.hostWorkspaceEntries);
           if (status === 'connected') clearRetry(machine);
           if (status === 'error' && !machine.retryTimer) {

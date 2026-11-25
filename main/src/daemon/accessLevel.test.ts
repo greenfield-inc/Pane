@@ -6,6 +6,8 @@ import WebSocket from 'ws';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { hashDeviceToken } from './auth';
+import type { ChatPanelState } from '../../../shared/types/chatTab';
+import type { TerminalPanelState } from '../../../shared/types/panels';
 import { isDaemonOwnedChannel } from './daemonChannels';
 import { PaneCommandRegistry, readOnlyPaneCaller } from './commandRegistry';
 import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
@@ -64,7 +66,7 @@ function readerConfig(): RemoteDaemonConfig {
   config.host.config = { ...config.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0, pairingRequired: true };
   const createdAt = '2026-11-25T00:00:00.000Z';
   config.host.clients = [
-    { id: 'reader', label: 'Parsa', createdAt, kind: 'computer', computerId: 'parsa', access: 'read', tokenHash: hashDeviceToken('reader-token', 'read') },
+    { id: 'reader', label: 'Parsa', createdAt, kind: 'computer', computerId: 'parsa', access: 'read', tokenHash: hashDeviceToken('pane_read_token', 'read') },
     { id: 'owner', label: 'Own Mac', createdAt, kind: 'computer', computerId: 'mac', tokenHash: hashDeviceToken('owner-token') },
   ];
   return config;
@@ -96,9 +98,9 @@ async function serve(registry: PaneCommandRegistry, config = readerConfig(), wor
   return {
     server,
     request,
-    invoke: (channel: string, token = 'reader-token', args: JsonValue[] = [], headers?: http.OutgoingHttpHeaders) => request('POST', '/invoke', token, { channel, args }, headers),
+    invoke: (channel: string, token = 'pane_read_token', args: JsonValue[] = [], headers?: http.OutgoingHttpHeaders) => request('POST', '/invoke', token, { channel, args }, headers),
     /** Opens an event stream and collects what it receives. */
-    stream: (token = 'reader-token', headers: http.OutgoingHttpHeaders = {}) => new Promise<{ text: () => string; ended: Promise<void>; close: () => void }>((resolve, reject) => {
+    stream: (token = 'pane_read_token', headers: http.OutgoingHttpHeaders = {}) => new Promise<{ text: () => string; ended: Promise<void>; close: () => void }>((resolve, reject) => {
       const sent = http.request({ host: '127.0.0.1', port, path: `${prefix}/events`, headers: { authorization: `Bearer ${token}`, ...headers } }, (response) => {
         let text = '';
         response.on('data', (chunk) => { text += String(chunk); });
@@ -107,7 +109,7 @@ async function serve(registry: PaneCommandRegistry, config = readerConfig(), wor
       sent.on('error', reject);
       sent.end();
     }),
-    upgrade: (url: string, token = 'reader-token') => new Promise<number>((resolve, reject) => {
+    upgrade: (url: string, token = 'pane_read_token') => new Promise<number>((resolve, reject) => {
       const socket = new WebSocket(`ws://127.0.0.1:${port}${prefix}${url}`, { headers: { authorization: `Bearer ${token}` } });
       socket.on('unexpected-response', (_request, response) => { resolve(response.statusCode ?? 0); response.resume(); });
       socket.on('open', () => { resolve(101); socket.terminate(); });
@@ -142,7 +144,7 @@ describe('a device paired Read only', () => {
 
   it('reaches no media, port, voice or preview route', async () => {
     const { request, upgrade } = await serve(new PaneCommandRegistry());
-    expect(await request('GET', '/media?sessionId=s&filePath=a.png', 'reader-token')).toMatchObject({ status: 403, body: { error: { code: 'ERR_READ_ONLY_ACCESS' } } });
+    expect(await request('GET', '/media?sessionId=s&filePath=a.png', 'pane_read_token')).toMatchObject({ status: 403, body: { error: { code: 'ERR_READ_ONLY_ACCESS' } } });
     expect(await upgrade('/ports/3000')).toBe(403);
     expect(await upgrade('/voice/deepgram-stream')).toBe(403);
   });
@@ -150,20 +152,38 @@ describe('a device paired Read only', () => {
   it('leaves out settings, launch commands, what waits on the owner, and file, diff and browser tabs', async () => {
     const registry = new PaneCommandRegistry();
     const project = { id: 1, name: 'app', path: '/app', system_prompt: 'private', run_script: 'KEY=abc npm start', sessions: [{ id: 'pane' }] };
-    const panels = [{ id: 't', type: 'terminal', state: { customState: { agentType: 'claude', initialCommand: 'API_KEY=hidden claude' } } }, { id: 'c', type: 'chat' }, { id: 'e', type: 'explorer', state: { customState: { content: 'file text' } } }, { id: 'b', type: 'browser' }];
+    const secret = 'API_KEY=hidden';
+    // Records as Pane saves them.
+    const terminal: TerminalPanelState = {
+      isInitialized: true, cwd: '/app', agentType: 'claude', isCliPanel: true, initialCommand: `${secret} claude`, launchCommand: `${secret} claude`, initialInput: secret,
+      initialInputFile: `/tmp/${secret}`, environmentVars: { KEY: secret }, orchestrationProfile: secret, selectionText: secret,
+    };
+    const chat: ChatPanelState = { agent: 'claude', cwd: '/app', status: 'idle', launch: { kind: 'profile', profile: secret }, initialInput: secret, settings: { mode: secret }, queue: [{ operationId: 'o', text: secret, queuedAt: '2026-11-25' }] };
+    const panels = [
+      { id: 't', type: 'terminal', state: { customState: terminal } },
+      { id: 'c', type: 'chat', state: { customState: chat } },
+      { id: 'e', type: 'explorer', state: { customState: { content: 'file text' } } },
+      { id: 'b', type: 'browser' },
+    ];
+    const shown = [
+      { id: 't', type: 'terminal', state: { customState: { isInitialized: true, cwd: '/app', agentType: 'claude', isCliPanel: true } } },
+      { id: 'c', type: 'chat', state: { customState: { agent: 'claude', cwd: '/app', status: 'idle' } } },
+    ];
+    const closed = { panelId: 'gone' };
     registry.register('sessions:get-all-with-projects', () => ({ success: true, data: [project] }));
     registry.register('panels:list', () => ({ success: true, data: panels }));
-    registry.register('panels:getActive', () => panels[2]);
     registry.register('runpane:panels:list', () => ({ ok: true, panels }));
-    registry.register('orchestration-sessions:overview', () => ({ success: true, data: { panes: [{ panels }] } }));
+    registry.register('panels:getActive', () => panels[2]);
+    registry.register('orchestration-sessions:overview', () => ({ success: true, data: { session: { name: 'Ship', profile: secret, launchCommand: secret, customResume: { command: secret } }, panes: [{ panels: [...panels, closed] }] } }));
+    registry.register('loops:list', () => ({ success: true, data: [{ id: 'l', name: 'Nightly', prompt: 'report', toolCommand: `${secret} ./report.sh` }] }));
     registry.register('chat-tab:get', () => ({ panelId: 'c', permissions: [{ toolCall: 'diff' }], questions: [{}], queue: [{}], messageCount: 2 }));
-    const shown = [{ id: 't', type: 'terminal', state: { customState: { agentType: 'claude' } } }, { id: 'c', type: 'chat' }];
     const { invoke, stream, server } = await serve(registry);
 
     expect((await invoke('sessions:get-all-with-projects')).body).toEqual({ ok: true, result: { success: true, data: [{ id: 1, name: 'app', path: '/app', sessions: [{ id: 'pane' }] }] } });
     expect((await invoke('panels:list')).body).toEqual({ ok: true, result: { success: true, data: shown } });
     expect((await invoke('runpane:panels:list')).body).toEqual({ ok: true, result: { ok: true, panels: shown } });
-    expect((await invoke('orchestration-sessions:overview')).body).toEqual({ ok: true, result: { success: true, data: { panes: [{ panels: shown }] } } });
+    expect((await invoke('orchestration-sessions:overview')).body).toEqual({ ok: true, result: { success: true, data: { session: { name: 'Ship' }, panes: [{ panels: [...shown, closed] }] } } });
+    expect((await invoke('loops:list')).body).toEqual({ ok: true, result: { success: true, data: [{ id: 'l', name: 'Nightly', prompt: 'report' }] } });
     expect((await invoke('chat-tab:get')).body).toEqual({ ok: true, result: { panelId: 'c', permissions: [], questions: [], queue: [], messageCount: 2 } });
     expect((await invoke('panels:getActive')).body).toEqual({ ok: true, result: null });
     expect((await invoke('sessions:get-all-with-projects', 'owner-token')).body).toEqual({ ok: true, result: { success: true, data: [project] } });
@@ -171,6 +191,7 @@ describe('a device paired Read only', () => {
     const reader = await stream();
     server.getEventSink().send('project:updated', project);
     server.getEventSink().send('panel:updated', panels[2]);
+    server.getEventSink().send('panel:updated', panels[1]);
     server.getEventSink().send('panel:updated', panels[0]);
     await vi.waitFor(() => expect(reader.text()).toContain('"id":"t"'));
     expect(reader.text()).not.toMatch(/private|npm start|file text|hidden/u);
@@ -189,8 +210,6 @@ describe('a device paired Read only', () => {
 
     expect(received(reader.text())).toEqual([...READABLE_EVENTS].sort());
     expect(received(owner.text())).toEqual([...new Set(events)].sort());
-    expect(reader.text()).toContain('"access":"read"');
-    expect(owner.text()).not.toContain('"access"');
     expect(server.hasEventSubscriber('permission:request')).toBe(true);
     owner.close();
     await vi.waitFor(() => expect(server.hasEventSubscriber('permission:request')).toBe(false));
@@ -214,11 +233,11 @@ describe('a device paired Read only', () => {
     const access = (): WorkspaceAccessPolicy => ({ ownerLogin: 'tyler@example.com', visibility: 'owner', tailnetLogins: new Set(), verifySecret: null });
     const { invoke, stream } = await serve(registry, config, { access });
     const owner = { 'tailscale-user-login': 'tyler@example.com' };
-    expect((await invoke('terminal:input', 'reader-token', [], owner)).status).toBe(409);
-    expect((await invoke('terminal:input', 'reader-token', [], { 'tailscale-user-login': 'parsa@example.com' })).status).toBe(409);
+    expect((await invoke('terminal:input', 'pane_read_token', [], owner)).status).toBe(409);
+    expect((await invoke('terminal:input', 'pane_read_token', [], { 'tailscale-user-login': 'parsa@example.com' })).status).toBe(409);
     expect((await invoke('terminal:input', 'owner-token', [], owner)).status).toBe(200);
 
-    const reader = await stream('reader-token', { 'tailscale-user-login': 'parsa@example.com' });
+    const reader = await stream('pane_read_token', { 'tailscale-user-login': 'parsa@example.com' });
     await vi.waitFor(() => expect(reader.text().match(/heartbeat/gu)?.length).toBeGreaterThan(2));
     config.host.clients = config.host.clients.filter((client) => client.id !== 'reader');
     await reader.ended;

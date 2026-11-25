@@ -174,30 +174,45 @@ export function readOnlyRefusal(what: string) {
 }
 
 /**
- * Settings inside a readable record: a repository's scripts and prompts, and how a tab, Session or
- * loop launches. They are configuration and can hold a key the screen never shows. Dropped wherever
+ * Settings inside a readable record: a repository's scripts and prompts, and how a Session or loop
+ * launches and behaves. They are configuration and can hold a key the screen never shows. Dropped wherever
  * they appear in a read-only device's answers and events.
  */
 const HIDDEN_FIELDS: ReadonlySet<string> = new Set([
   'system_prompt', 'run_script', 'build_script', 'archive_script', 'open_ide_command',
-  'launchCommand', 'initialCommand', 'initialInput', 'initialInputFile', 'environmentVars', 'customResume',
+  'launchCommand', 'toolCommand', 'launch', 'customResume', 'profile', 'orchestrationProfile',
+]);
+
+/** What a tab's own state shows a viewer. Everything else in it, and whatever is added to it later, stays with the owner. */
+const TAB_STATE_FIELDS: ReadonlySet<string> = new Set([
+  'isInitialized', 'cwd', 'shellType', 'isAlternateScreen', 'dimensions', 'lastActivityTime', 'wasInterrupted', 'paused',
+  'agentType', 'agentDetection', 'agentReport', 'isCliPanel', 'isCliReady', 'orchestrationSessionId', 'sshHost',
+  // Chat tabs.
+  'agent', 'status', 'problem', 'notice', 'clearedAt',
 ]);
 
 /** The kinds of tab a read-only device sees; a file, diff, browser or log tab carries contents it may not open. */
 const READABLE_TAB_TYPES: ReadonlySet<string> = new Set(['terminal', 'chat']);
 
 const tabSchema = boundary.object({ type: boundary.string });
-const tabsSchema = boundary.array(tabSchema);
 
 function isReadableTab(tab: JsonValue | undefined): boolean {
   return READABLE_TAB_TYPES.has(decodeOptionalBoundary(tab, tabSchema)?.type ?? '');
 }
 
-/** A value without hidden fields, and with other kinds of tab left out of every `panels` list. */
+/** A tab list's entry stays unless it is another kind of tab; a closed one, listed by id alone, has no kind. */
+function staysInTabList(entry: JsonValue): boolean {
+  return decodeOptionalBoundary(entry, tabSchema) === undefined || isReadableTab(entry);
+}
+
+/** A value without hidden fields, with each tab's state cut to what it shows, and other kinds of tab left out of every `panels` list. */
 function readable(value: JsonValue): JsonValue {
   return decodeBoundary(JSON.parse(JSON.stringify(value, (key, field: JsonValue) => {
     if (HIDDEN_FIELDS.has(key)) return undefined;
-    return key === 'panels' && Array.isArray(field) && decodeOptionalBoundary(field, tabsSchema) ? field.filter(isReadableTab) : field;
+    if (key === 'panels' && Array.isArray(field)) return field.filter(staysInTabList);
+    if (key !== 'customState') return field;
+    const state = decodeOptionalBoundary(field, boundary.jsonObject);
+    return state && Object.fromEntries(Object.entries(state).filter(([name]) => TAB_STATE_FIELDS.has(name)));
   })), boundary.json);
 }
 

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
-import type { ReadOnlyMark } from '../../../shared/types/accessLevel';
+import { readOnlyToken, tokenAccess, type ReadOnlyMark } from '../../../shared/types/accessLevel';
 import type { RemoteDaemonClientRecord } from '../../../shared/types/remoteDaemon';
 
 interface RemoteDaemonAuthSuccess {
@@ -27,11 +27,20 @@ export function hashRemoteDaemonToken(token: string): string {
 }
 
 /**
- * The hash a device's record keeps. A read-only device's is over a tagged token, so a Pane from
- * before access levels, which ignores `access`, refuses the token instead of taking it as full access.
+ * The hash a device's record keeps. A read-only device's is half of a SHA-512, as long as a SHA-256.
+ * A Pane from before access levels ignores `access` and compares a SHA-256 of what it is sent, and
+ * nothing anyone can send has that SHA-256, so it refuses the device.
  */
 export function hashDeviceToken(token: string, access?: ReadOnlyMark): string {
-  return hashRemoteDaemonToken(access === 'read' ? `read:${token}` : token);
+  return access === 'read'
+    ? createHash('sha512').update(token).digest().subarray(0, 32).toString('hex')
+    : hashRemoteDaemonToken(token);
+}
+
+/** A new token for a device paired at this level. */
+export function newDeviceToken(access?: ReadOnlyMark): string {
+  const random = randomBytes(32).toString('base64url');
+  return access === 'read' ? readOnlyToken(random) : random;
 }
 
 export function authenticateRemoteDaemonBearerToken(
@@ -50,9 +59,10 @@ export function authenticateRemoteDaemonBearerToken(
     };
   }
 
-  const fullHash = hashDeviceToken(token);
-  const readHash = hashDeviceToken(token, 'read');
-  const client = clients.find((candidate) => safeTokenHashEquals(candidate.tokenHash, candidate.access === 'read' ? readHash : fullHash));
+  // The token and its record must agree on the level; a record whose level went missing matches no token.
+  const access = tokenAccess(token);
+  const tokenHash = hashDeviceToken(token, access);
+  const client = clients.find((candidate) => candidate.access === access && safeTokenHashEquals(candidate.tokenHash, tokenHash));
   if (!client) {
     return {
       ok: false,

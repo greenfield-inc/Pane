@@ -118,8 +118,6 @@ export interface RemotePaneConnectionProfile {
   tailnetDomain?: string;
   /** A computer reached through a relay (QR pairing): its id and key fingerprint. */
   relay?: RemoteRelayProfile;
-  /** "read" when the token is a read-only device's; absent for full access. */
-  access?: ReadOnlyMark;
 }
 
 export interface RemoteRelayProfile {
@@ -640,7 +638,6 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
     fingerprint: boundary.nonEmptyString,
     linkedBy: boundary.optional(boundary.nonEmptyString),
   })),
-  access: boundary.optional(readOnlyMarkSchema),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {

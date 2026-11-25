@@ -31,7 +31,7 @@ export interface MachineState {
   routeId?: string;
   /** Whether the machine's Pane sends its Session members' reports; absent until it first answers. */
   workspaceEntries?: boolean;
-  /** "read" when the machine gives this computer read-only access: its saved route's level until it answers, then what it says; absent for full access. */
+  /** "read" when this computer only watches the machine (its saved token says so); absent for full access. */
   access?: ReadOnlyMark;
 }
 

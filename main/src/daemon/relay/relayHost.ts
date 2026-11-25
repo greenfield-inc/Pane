@@ -120,6 +120,22 @@ export async function createRelayHost(deps: {
   proxy = await servePreviews(previews.route, deps.files);
   registerRelayCommands(deps.commandRegistry, relay, previews, links, linking, configManager);
   relay.onStatus((status) => getPaneEventSink().send('relay:status-changed', status));
+  // Linked computers keep read-only tokens only for devices still paired here. They hear of every
+  // change, whichever way a device was removed, and both sides compare whenever one comes back.
+  let shared = JSON.stringify(links.readDevices());
+  const tellIfChanged = () => {
+    const now = JSON.stringify(links.readDevices());
+    if (now === shared) return;
+    shared = now;
+    void links.tellReadDevices();
+  };
+  configManager.on('config-updated', tellIfChanged);
+  let ready = false;
+  relay.onStatus((status) => {
+    const back = status.phase === 'ready' && !ready;
+    ready = status.phase === 'ready';
+    if (back) void Promise.all([links.tellReadDevices(), links.followReadDevices()]);
+  });
   relay.start();
   // A computer without the Pane app's push keys sends its phones' alerts through its relay.
   setRelayPushChannel({
@@ -143,6 +159,7 @@ export async function createRelayHost(deps: {
     resume: () => relay.resume(),
     stop: async () => {
       setRelayPushChannel(null);
+      configManager.off('config-updated', tellIfChanged);
       await relay.stop();
       await proxy?.close();
     },

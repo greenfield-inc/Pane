@@ -366,7 +366,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
       if (studioForLaptop.json.ok) await invoke(b.host, String(b.paired.json.token), 'relay:client:save-link', [{ peer: studioInfo, token: decodeBoundary(studioForLaptop.json.result, tokenSchema).token }]);
       const link = studio.service.createPairingCode('1h', 'read').url;
 
-      expect(await reader.registry.invoke('relay:redeem-link', [{ link }])).toEqual({ linked: ['Studio Mac', 'Travel Laptop'], access: 'read' });
+      expect(await reader.registry.invoke('relay:redeem-link', [{ link, access: 'read' }])).toEqual({ linked: ['Studio Mac', 'Travel Laptop'], access: 'read' });
 
       const call = createComputerCaller({ dial, extraCa });
       for (const profile of reader.links.reachable()) {

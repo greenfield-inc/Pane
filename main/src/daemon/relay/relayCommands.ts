@@ -1,12 +1,13 @@
 import { isRemotePaneCommand, type PaneCommandRegistry, type PaneCommandValue } from '../commandRegistry';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { tokenAccess } from '../../../../shared/types/accessLevel';
 import { PaneError } from '../../../../shared/paneError';
 import { normalizeRemoteDaemonConfig, type RemoteRelaySettings } from '../../../../shared/types/remoteDaemon';
 import type { ConfigManager } from '../../services/configManager';
 import type { RelayService } from './relayService';
 import type { ComputerLinking } from './computerLinking';
 import type { RelayPreviews } from './relayPreviews';
-import { RELAY_COMPUTER_COMMANDS, relayComputerSchema, type RelayLinks } from './relayLinks';
+import { readDeviceSchema, RELAY_COMPUTER_COMMANDS, relayComputerSchema, type RelayLinks } from './relayLinks';
 import { RELAY_CLIENT_COMMANDS, RELAY_DEVICE_COMMANDS } from '../../../../shared/types/relay';
 
 const RELAY_COMMANDS = {
@@ -30,8 +31,9 @@ const previewTargetSchema = boundary.union(
 
 const peerRequestSchema = boundary.object({ peer: relayComputerSchema });
 const readGrantSchema = boundary.union(peerRequestSchema, boundary.object({ label: boundary.string, phoneId: boundary.nonEmptyString }));
-const readDeviceSchema = boundary.union(boundary.object({ computerId: boundary.nonEmptyString }), boundary.object({ phoneId: boundary.nonEmptyString }));
 const linkRequestSchema = boundary.object({ link: boundary.nonEmptyString });
+/** `access`: the level the person agreed to on the preview. A runpane from before levels sends none, after showing a full link. */
+const redeemRequestSchema = boundary.object({ link: boundary.nonEmptyString, access: boundary.optional(boundary.enumeration('read', 'full')) });
 const unlinkRequestSchema = boundary.object({ computerId: boundary.nonEmptyString });
 const forgetRequestSchema = boundary.object({ computerId: boundary.nonEmptyString, keep: boundary.optional(boundary.array(boundary.string)) });
 const pairingCodeSchema = boundary.optional(boundary.object({ expiresIn: boundary.optional(boundary.enumeration('10m', '1h', '24h')), access: boundary.optional(boundary.enumeration('read', 'full')) }));
@@ -130,9 +132,9 @@ export function registerRelayCommands(
   });
   registry.register(RELAY_COMMANDS.redeemLink, async (request: PaneCommandValue) => {
     onThisComputerOnly();
-    const { link } = decodeBoundary(request, linkRequestSchema);
+    const { link, access } = decodeBoundary(request, redeemRequestSchema);
     await relayReady();
-    return linking.redeem(link);
+    return linking.redeem(link, access ?? 'full');
   });
 
   // Called by paired phones and linked computers; the HTTP server supplies the caller.
@@ -163,8 +165,9 @@ export function registerRelayCommands(
   registry.register(RELAY_COMPUTER_COMMANDS.grantRead, (request: PaneCommandValue, from: PaneCommandValue) => (
     links.grantRead(decodeBoundary(request, readGrantSchema), caller(from))
   ));
-  registry.register(RELAY_COMPUTER_COMMANDS.removeRead, async (request: PaneCommandValue, from: PaneCommandValue) => {
-    await links.removeRead(decodeBoundary(request, readDeviceSchema), caller(from));
+  registry.register(RELAY_COMPUTER_COMMANDS.readDevices, (_request: PaneCommandValue, from: PaneCommandValue) => links.readDevicesFor(caller(from)));
+  registry.register(RELAY_COMPUTER_COMMANDS.readDevicesChanged, async (request: PaneCommandValue, from: PaneCommandValue) => {
+    await links.readDevicesChanged(decodeBoundary(request, boundary.object({ devices: boundary.array(readDeviceSchema) })).devices, caller(from));
     return null;
   });
   registry.register(RELAY_COMPUTER_COMMANDS.removePhone, async (request: PaneCommandValue, from: PaneCommandValue) => {
@@ -187,7 +190,8 @@ export function registerRelayCommands(
         token: profile.token,
         fingerprint: profile.relay.fingerprint,
       };
-      return profile.access ? { ...computer, access: profile.access } : computer;
+      const access = tokenAccess(profile.token);
+      return access ? { ...computer, access } : computer;
     });
   });
 

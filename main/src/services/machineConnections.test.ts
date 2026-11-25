@@ -15,7 +15,7 @@ interface FakeClient extends MachineClient {
 }
 
 function profile(id: string): RemotePaneConnectionProfile {
-  return { id, label: id, baseUrl: `http://${id}.tail1234.ts.net:4800/`, token: `token-${id}`, transport: 'http+sse' };
+  return { id, label: id, baseUrl: `http://${id}.tail1234.ts.net:4800/`, token: id === 'tyler' ? 'pane_read_tyler' : `token-${id}`, transport: 'http+sse' };
 }
 
 const started: MachineConnections[] = [];
@@ -206,7 +206,7 @@ describe('MachineConnections', () => {
 
   it('offers nothing to share with a machine it only watches, and sends it no actions', async () => {
     const { machines, client, connect } = setup(['tyler', 'build-box']);
-    client('tyler').options.onConnectionStateChange?.('restoring', null, { hostAccess: 'read' });
+    client('tyler').options.onConnectionStateChange?.('restoring', null, { hostMachineId: 'tyler-install' });
     connect('tyler');
     connect('build-box');
 
@@ -214,11 +214,6 @@ describe('MachineConnections', () => {
     expect(machines.remotes().map(machine => machine.id)).toEqual(['build-box']);
     await expect(machines.run('tyler', { type: 'pin', target: { kind: 'pane', id: 'pane-1' }, pinned: true })).rejects.toMatchObject({ code: 'ERR_READ_ONLY_ACCESS' });
     expect(client('tyler').invoke).not.toHaveBeenCalled();
-
-    // Paired again with full access.
-    client('tyler').options.onConnectionStateChange?.('restoring', null, {});
-    expect(machines.machineState('tyler')?.access).toBeUndefined();
-    expect(machines.remotes().map(machine => machine.id)).toEqual(['tyler', 'build-box']);
   });
 
   it('retries its offline machines at once when another Pane starts reading this computer, as a computer back from sleep does', () => {
@@ -302,7 +297,7 @@ describe('SharedCredentialSync over MachineConnections', () => {
 
   it('leaves out a machine this computer only watches: no keys, no Approvals switch', async () => {
     const { configManager, machines, client } = setup(['tyler', 'build-box']);
-    client('tyler').options.onConnectionStateChange?.('restoring', null, { hostAccess: 'read' });
+    client('tyler').options.onConnectionStateChange?.('restoring', null, { hostMachineId: 'tyler-install' });
     const sync = new SharedCredentialSync(configManager, machines);
     sync.start();
     await vi.advanceTimersByTimeAsync(1_000);

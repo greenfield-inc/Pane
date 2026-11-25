@@ -91,8 +91,6 @@ export interface RelayExchangeResult {
   ok: true;
   token: string;
   clientId: string;
-  /** "read" when the code pairs Read only: the caller and `linked` hold read-only tokens, and no groups join. */
-  access?: ReadOnlyMark;
   computer: RelayComputer;
   linked: RelayComputerGrant[];
   /** To a computer only: the maker's own routes, so the redeemer saves every way to reach it. */
