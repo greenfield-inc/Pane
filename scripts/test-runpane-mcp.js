@@ -1526,6 +1526,13 @@ test("Pane's HTTP endpoint serves the same instructions, tools and docs as stdio
   const handler = createPaneMcpHttpHandler({
     runCli: (argv, signal, env, auth) => {
       calls.push({ argv, client: auth?.clientId });
+      if (argv[0] === 'workspace') {
+        return Promise.resolve({ code: 1, stderr: '', stdout: JSON.stringify({ ok: false, error: {
+          code: 'ERR_READ_ONLY_ACCESS',
+          message: 'Use `runpane workspace tylers-mac panels screen --panel p1`, not `runpane workspace tylers-mac panels submit --panel p1`.',
+          next: 'Ask the owner.',
+        } }) });
+      }
       return runCliProcess(process.execPath, [dist('cli.js'), ...argv], { env: { ...process.env, ...env }, signal });
     },
   });
@@ -1552,6 +1559,10 @@ test("Pane's HTTP endpoint serves the same instructions, tools and docs as stdio
     const result = await overHttp.callTool({ name: 'docs_search', arguments: { query: 'notify' } });
     assert.equal(result.isError, undefined);
     assert.deepEqual(calls, [{ argv: ['docs', 'search', '--query=notify', '--json'], client: 'tab-1' }]);
+    const refused = await overHttp.callTool({ name: 'agents_status', arguments: { machine: 'tylers-mac', panel: 'p1' } });
+    assert.equal(refused.isError, true);
+    assert.match(refused.content[0].text, /^Use `panels_screen` with machine: tylers-mac, panel: p1/);
+    assert.match(refused.content[0].text, /not `runpane workspace tylers-mac panels submit --panel p1`\.\nNext: Ask the owner\.\nCode: ERR_READ_ONLY_ACCESS$/);
   } finally {
     await overHttp.close();
     server.close();

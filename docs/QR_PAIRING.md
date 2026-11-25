@@ -42,7 +42,9 @@ The app still accepts `pane-remote://` connection codes.
 ## Full access or Read only
 
 The **Phone** and **Computer** tabs ask what the code or link gives whoever
-uses it. The choice is saved with the code, so its holder can't raise it.
+uses it. The choice is saved with the code and is part of the sign-in token
+the device gets, so it is fixed when the device pairs and travels with it on
+every route.
 
 | Access | What the device can do |
 |---|---|
@@ -51,6 +53,14 @@ uses it. The choice is saved with the code, so its holder can't raise it.
 
 A read-only device sees everything your agents and terminals print, including
 any key or password that appears on screen. Pane shows that text as it is.
+These stay with you:
+
+- launch commands, and the settings of repositories, Sessions and loops (scripts,
+  prompts, profiles);
+- in a chat, approvals and questions waiting on you, and prompts not sent yet;
+- in a tab's state, everything except its kind, title, agent, status, report,
+  folder and size;
+- file, diff, browser and log tabs.
 
 The computer checks each request, on every route. It answers the reads above
 and refuses the rest with `ERR_READ_ONLY_ACCESS`: commands, files and media,
@@ -66,6 +76,10 @@ forwarded ports, dev server previews and dictation.
   the device again after the update to add it.
 - A computer that already has full access here refuses the read-only link and
   leaves it unused. To watch instead, unlink it first.
+
+Whoever opens the link is asked at the level it shows, and pairs at that level.
+If the sharing computer then answers with another one, nothing is linked
+(`ERR_LINK_LEVEL_CHANGED`).
 
 To change a device's access, remove it, then pair it again.
 
@@ -243,10 +257,13 @@ any computer it already paired.
   connections close within seconds. The Pane app shows **Pair again**; a
   browser says the computer removed it and to scan a new code on that
   computer.
-- **Remove**, on a computer's row under **Watching this computer**, takes its
-  read-only access back here and on every computer linked with this one. A
-  read-only phone has the same two choices as any phone. A linked computer
-  that can't be reached is named; remove the device there too.
+- **Remove**, on a read-only phone's row or a computer's row under **Watching
+  this computer**, takes its read-only access back here and on every computer
+  linked with this one. A linked computer that is asleep or offline is named.
+  After it starts or wakes, it accepts the read-only tokens it handed out only
+  once this computer confirms which devices it still shares with, so the
+  removed device reaches nothing there even if it asks first. Pairing that
+  device again needs a new code or link.
 - Removing a phone also undoes the links it made: computers that phone linked
   stop reaching each other, along with the phones they shared it with. That
   keeps a lost or stolen phone from leaving a way back in. To link them again,

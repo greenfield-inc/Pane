@@ -73,7 +73,8 @@ export async function runLink(parsed: ParsedArgs, terminal: Terminal = { input: 
       );
     }
   }
-  const { linked, access } = await invokeDaemon('relay:redeem-link', [{ link }], linkRedeemSchema, options);
+  // The level shown above, so a link that changed it since is refused (ERR_LINK_LEVEL_CHANGED).
+  const { linked, access } = await invokeDaemon('relay:redeem-link', [{ link, access: preview.access ?? 'full' }], linkRedeemSchema, options);
   if (parsed.json) {
     terminal.output.write(`${JSON.stringify({ ok: true, maker: preview.maker, linked, access }, null, 2)}\n`);
   } else if (access) {

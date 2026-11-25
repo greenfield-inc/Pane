@@ -570,7 +570,8 @@ Alerts interrupt you on the device you're using (D-144):
   answer-all shortcut. A computer the picked one can't read (it's off, asleep
   or disconnected, or it hasn't saved this computer) rings as if nothing were
   picked, and its Settings row says why. "Reading" means the picked computer
-  holds a live connection to this one, as its owner or a paired device, naming
+  holds a live connection to this one, as its owner or a device with full
+  access, naming
   itself by its install id (`machineId` in `config.json`; a `config.json`
   copied to another computer carries the same id, so delete the key there).
   A computer that has saved the picked one also checks its own connection:

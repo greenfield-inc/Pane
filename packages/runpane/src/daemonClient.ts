@@ -285,16 +285,50 @@ const remoteInvokeResponseSchema = boundary.union(
 
 let routedTarget: RemoteDaemonTarget | null = null;
 let routedToSelf = false;
+let routedName: string | undefined;
 
-/** Sends every later daemon call in this process to another machine (`runpane workspace <machine> <command>`). */
-export function routeDaemonCallsTo(target: RemoteDaemonTarget | null, self = false): void {
+/**
+ * Sends every later daemon call in this process to another machine (`runpane workspace <machine> <command>`).
+ * `name` is how the caller named it, for the follow-up commands it answers with.
+ */
+export function routeDaemonCallsTo(target: RemoteDaemonTarget | null, self = false, name = target?.machine): void {
   routedTarget = target;
+  routedName = name;
   routedToSelf = self;
 }
 
 /** The other machine daemon calls go to, or null when they stay on this one (this machine named by its own name included). */
 export function routedOtherMachine(): string | null {
   return routedTarget && !routedToSelf ? routedTarget.machine : null;
+}
+
+/** A command that stays on the machine runpane runs on. */
+const HERE = '(?!(?:workspace (?!state\\b)|doctor\\b|update\\b|link\\b))';
+const SPOKEN_COMMAND = new RegExp(`\`runpane ${HERE}`, 'g');
+const BARE_COMMAND = new RegExp(`\\brunpane ${HERE}`, 'g');
+
+/** Text another machine answered with, its `runpane` commands naming that machine. */
+export function withRoutedMachine(text: string): string {
+  return routedOtherMachine() ? text.replace(SPOKEN_COMMAND, `\`runpane workspace ${routedName} `) : text;
+}
+
+const textSchema = boundary.string;
+
+/** Another machine's follow-ups (`nextCommand`, `next`, the result's own `message`) name that machine; what its agents wrote stays as written. */
+function withRoutedMachineHints(result: JsonValue | undefined): JsonValue | undefined {
+  if (result === undefined || !routedOtherMachine()) return result;
+  const root = decodeBoundary(result, boundary.json);
+  const text = JSON.stringify(root, function hint(this: JsonValue, key: string, value: JsonValue) {
+    if (key !== 'nextCommand' && key !== 'next' && !(key === 'message' && this === root)) return value;
+    let said: string;
+    try {
+      said = decodeBoundary(value, textSchema);
+    } catch {
+      return value;
+    }
+    return key === 'nextCommand' ? said.replace(BARE_COMMAND, `runpane workspace ${routedName} `) : withRoutedMachine(said);
+  });
+  return decodeBoundary(JSON.parse(text), boundary.json);
 }
 
 /** The route that last answered for each target, tried first on its next call. */
@@ -430,7 +464,8 @@ export async function invokeDaemon<T>(
   options: InvokeOptions = {},
 ): Promise<T> {
   if (routedTarget && !options.thisMachine) {
-    return invokeRemoteDaemon(routedTarget, channel, args, resultSchema, options.timeoutMs);
+    const result = await invokeRemoteDaemon(routedTarget, channel, args, boundary.optional(boundary.json), options.timeoutMs);
+    return decodeResult(channel, withRoutedMachineHints(result), resultSchema);
   }
   const appDirectory = resolvePaneDirectory(options.paneDir);
   const endpoint = getPaneDaemonEndpoint(appDirectory);

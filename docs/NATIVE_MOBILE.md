@@ -92,7 +92,7 @@ For your own Firebase project, create a sender service account with `roles/fireb
 
 Do not commit any provider credential. CI gets the Firebase app config from the `PANE_ANDROID_GOOGLE_SERVICES_JSON` secret (see `native/README.md`); that file identifies the app and is not a sending credential.
 
-The app registers with every computer it has saved, whether it paired by QR code, connected with a code or from Your Computers over Tailscale, and asks notification permission once, when the first computer reports that it can deliver. Notification setup runs independently of the terminal connection, so permission or provider errors leave remote terminal use available. Registration renewals preserve the installation's alert preferences and deduplication history. OS token registration and each provider network request time out after 15 seconds.
+The app registers with every computer it has saved with full access (a read-only computer sends it no alerts), whether it paired by QR code, connected with a code or from Your Computers over Tailscale, and asks notification permission once, when the first computer reports that it can deliver. Notification setup runs independently of the terminal connection, so permission or provider errors leave remote terminal use available. Registration renewals preserve the installation's alert preferences and deduplication history. OS token registration and each provider network request time out after 15 seconds.
 
 Push-state writes merge with the latest host configuration inside the serialized config-write queue, so they cannot restore a concurrently revoked pairing. Hosts without registered mobile clients do not persist push state on every agent transition.
 

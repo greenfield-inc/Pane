@@ -42,7 +42,7 @@ Settings → Machine health's Cards and notifications switch (`machineHealth.not
 
 ## Who can read the keys
 
-Only your own devices, with full access. Over Tailscale, a host answers a request for its keys only from its owner's Tailscale login, even when its workspace lets other people on the tailnet in, so a teammate's computer neither receives nor replaces your keys. With a connection code, the caller must present the pairing token of a device with full access, and the host refuses the request when it does not require pairing. Either device can already open terminals on that host, so sharing keys with it exposes nothing new.
+Only your own devices, with full access. Over Tailscale, a host answers a request for its keys only from its owner's Tailscale login, even when its workspace lets other people on the tailnet in, so a teammate's computer neither receives nor replaces your keys. With a connection code, the caller must present the pairing token of a device with full access (a read-only device's token says so itself, and is refused), and the host refuses the request when it does not require pairing. Either device can already open terminals on that host, so sharing keys with it exposes nothing new.
 
 Keys are never written to logs or events. They are stored in each host's `config.json` in the Pane data directory, as before.
 

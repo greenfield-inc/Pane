@@ -290,7 +290,6 @@ const savedComputerSchema = boundary.object({
     token: boundary.string,
     relay: boundary.optional(boundary.object({ computerId: boundary.nonEmptyString, fingerprint: boundary.nonEmptyString })),
     tailnetMachine: boundary.optional(boundary.nonEmptyString),
-    access: boundary.optional(boundary.literal('read')),
   })),
 });
 type SavedComputer = ReturnType<typeof savedComputerSchema.decode>;
@@ -302,7 +301,6 @@ const linkedComputersSchema = boundary.array(boundary.object({
   address: boundary.string,
   token: boundary.string,
   fingerprint: boundary.nonEmptyString,
-  access: boundary.optional(boundary.literal('read')),
 }));
 
 /** "lowercase-with-dashes" for a computer name, so it reads like a Tailscale machine name. */
@@ -335,7 +333,7 @@ async function readSavedComputers(paneDir?: string): Promise<SavedComputer[]> {
         os: undefined,
         routes: [{
           kind: 'relay', baseUrl: computer.address, token: computer.token,
-          relay: { computerId: computer.id, fingerprint: computer.fingerprint }, tailnetMachine: undefined, access: computer.access,
+          relay: { computerId: computer.id, fingerprint: computer.fingerprint }, tailnetMachine: undefined,
         }],
       }));
     } catch {
@@ -395,6 +393,11 @@ function onThisNetwork(baseUrl: string): boolean {
   });
 }
 
+/** The CLI's copy of `tokenAccess` in shared/types/accessLevel.ts: a read-only device's token says so. */
+function isReadOnlyToken(token: string): boolean {
+  return token.startsWith('pane_read_');
+}
+
 /** One saved computer as one machine, merged with its tailnet entry when it is on the tailnet. */
 function computerMachine(computer: SavedComputer, peer: TailnetMachine | undefined): TailnetMachine {
   // Same network routes on another network (or WSL, Docker and VM adapters) would only cost timeouts.
@@ -403,7 +406,7 @@ function computerMachine(computer: SavedComputer, peer: TailnetMachine | undefin
     const remote: RemoteRoute = { kind: route.kind, baseUrl: route.baseUrl };
     if (route.token) remote.token = route.token;
     if (route.relay) remote.fingerprint = route.relay.fingerprint;
-    if (route.access) remote.access = route.access;
+    if (isReadOnlyToken(route.token)) remote.access = 'read';
     return remote;
   });
   // On the tailnet without a saved Tailscale route: reach it there too, before the routes that are farther.
@@ -431,7 +434,7 @@ function computerMachine(computer: SavedComputer, peer: TailnetMachine | undefin
     routes,
     aliases: [...new Set(aliases)],
   };
-  if (computer.routes.every((route) => route.access === 'read')) machine.access = 'read';
+  if (computer.routes.every((route) => isReadOnlyToken(route.token))) machine.access = 'read';
   return machine;
 }
 

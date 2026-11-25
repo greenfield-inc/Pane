@@ -24,7 +24,7 @@ Agents can call them as MCP tools too: `workspace_list`, `workspace_read`, `work
 
 ## Link a computer from the command line
 
-`runpane link '<link>'` links this computer with the one that made a [one-time link](QR_PAIRING.md#link-another-computer), for a computer with no screen. Copy the link on the other computer (**Add a device › Computer**). Pane must be running here with phone access on. It asks first, naming the computers on both sides. For a [read-only link](QR_PAIRING.md#full-access-or-read-only) it says **Read only** and what that means, before and after linking; in a script or with `--json`, pass `--yes`, or it exits with `ERR_LINK_NEEDS_CONFIRM` and leaves the link unused. Then `runpane workspace list` shows the new computer.
+`runpane link '<link>'` links this computer with the one that made a [one-time link](QR_PAIRING.md#link-another-computer), for a computer with no screen. Copy the link on the other computer (**Add a device › Computer**). Pane must be running here with phone access on. It asks first, naming the computers on both sides. For a [read-only link](QR_PAIRING.md#full-access-or-read-only) it says **Read only** and what that means, before and after linking. It links at the level it showed, or fails with `ERR_LINK_LEVEL_CHANGED` and links nothing. In a script or with `--json`, pass `--yes`, or it exits with `ERR_LINK_NEEDS_CONFIRM` and leaves the link unused. Then `runpane workspace list` shows the new computer.
 
 These commands ship in the npm CLI (`npm i -g runpane`, or `npx --yes runpane@latest workspace list`). The Python package prints the workspaces status block but does not run them.
 
@@ -34,7 +34,7 @@ The MCP tools that look (`workspace_state`, `sessions_list`, `sessions_get`, `se
 
 ## A read-only computer
 
-`runpane workspace list` marks a computer that shared itself [Read only](QR_PAIRING.md#full-access-or-read-only): `tylers-mac-mini (macOS, online, read only) [Pane relay]: joined through Pane relay`. In `--json`, its `access` is `"read"`, and so is each read-only route's. A computer is read only when every route saved for it is. A route your Tailscale login signs in to (see [Who is trusted](#who-is-trusted)) has full access: runpane tries full-access routes first, and the mark goes away when one answers.
+`runpane workspace list` marks a computer that shared itself [Read only](QR_PAIRING.md#full-access-or-read-only): `tylers-mac-mini (macOS, online, read only) [Pane relay]: joined through Pane relay`. In `--json`, its `access` is `"read"`, and so is each read-only route's. The level is part of the token each route holds. A computer is read only when every route saved for it is. A route your Tailscale login signs in to (see [Who is trusted](#who-is-trusted)) has full access: runpane tries full-access routes first, and the mark goes away when one answers.
 
 | It answers | Commands |
 |---|---|
@@ -42,7 +42,9 @@ The MCP tools that look (`workspace_state`, `sessions_list`, `sessions_get`, `se
 | Panes, tabs and what they print | `repos list`, `panes list`, `panels list`, `panels screen`, `panels output`, `panels last-message` |
 | Work lists | `todos list`, `todos show`, `loops list` |
 
-Every other command, such as `exec`, `read`, `write`, `panes create`, `panels submit`, `watch` and `ask --machine`, exits 1 with `ERR_READ_ONLY_ACCESS`, says nothing was run or changed, and gives the next step: ask its owner for full access. Their Pane refuses it, so the MCP tools get the same error.
+Every other command, such as `exec`, `read`, `write`, `panes create`, `panels submit` and `ask --machine`, exits 1 with `ERR_READ_ONLY_ACCESS`, says nothing was run or changed, and gives the next step: ask its owner for full access. Their Pane refuses it, so the MCP tools get the same error. `watch` prints it as a `WATCH ERROR` line, with no next step, and exits 2: to follow a read-only computer, poll `workspace state` or `agents status`.
+
+Answers leave out launch commands and the settings of repositories, Sessions and loops; see [Full access or Read only](QR_PAIRING.md#full-access-or-read-only). Follow-up commands in an answer (`nextCommand`, `next`) name the computer you asked.
 
 ## Turning it on
 

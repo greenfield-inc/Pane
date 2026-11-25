@@ -55,7 +55,8 @@ def run_link(parsed: Any, stdin: Optional[TextIO] = None, stdout: Optional[TextI
                 "You did not confirm, so nothing was linked. The link is still unused.",
                 "Run runpane link again to link them, or let another device use the link.",
             )
-    result = invoke_daemon("relay:redeem-link", [{"link": link}], pane_dir=parsed.pane_dir)
+    # The level shown above, so a link that changed it since is refused (ERR_LINK_LEVEL_CHANGED).
+    result = invoke_daemon("relay:redeem-link", [{"link": link, "access": "read" if read_only else "full"}], pane_dir=parsed.pane_dir)
     linked = [str(name) for name in result["linked"]]
     access = result.get("access")
     if parsed.json:

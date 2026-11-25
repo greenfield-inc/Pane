@@ -262,7 +262,8 @@ const UNKNOWN_CHANNEL = { error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'No Pan
 const READ_ONLY_RESULTS = {
   'remote:pwa-affordances': { os: 'macOS' },
   'runpane:sessions:list': { ok: true, sessions: [] },
-  'runpane:panels:screen': { ok: true, panelId: 'panel-1', paneId: 'pane-1', source: 'scrollback', limit: 40, returnedLineCount: 1, hasMore: false, text: 'Compiling', state: { running: true, initialized: true }, composer: { isPresent: true, hasUndeliveredText: false } },
+  'runpane:panels:screen': { ok: true, panelId: 'panel-1', paneId: 'pane-1', source: 'scrollback', limit: 40, returnedLineCount: 1, hasMore: false, text: 'Compiling', nextCommand: 'runpane panels output --panel panel-1 --json', state: { running: true, initialized: true }, composer: { isPresent: true, hasUndeliveredText: false } },
+  'runpane:panels:last-message': { ok: false, panelId: 'panel-1', paneId: 'pane-1', reason: 'transcript-unavailable', message: 'No reply yet. Use `runpane panels screen --panel panel-1`.' },
   'runpane:panels:list': { ok: true, paneId: 'pane-1', panels: [] },
   'runpane:workspace:state': { ok: true, epoch: 'e1', generation: 4, entries: [{ gen: 4, at: '2026-11-25T10:00:00.000Z', kind: 'agent.busy', paneId: 'pane-1', paneName: 'fix-auth', panelId: 'panel-1', source: 'agent', baseline: true }] },
 };
@@ -300,7 +301,7 @@ async function withComputer({ computers, tailnet = null, relay = null }, check) 
     request.on('end', () => {
       requests.push({ authorization: request.headers.authorization, channel: JSON.parse(body).channel });
       const reply = (status, payload) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(payload)); };
-      if (request.headers.authorization === 'Bearer read-token') {
+      if (request.headers.authorization === 'Bearer pane_read_token') {
         const { channel } = JSON.parse(body);
         const result = READ_ONLY_RESULTS[channel];
         return result ? reply(200, { ok: true, result }) : reply(409, { ok: false, error: {
@@ -512,7 +513,7 @@ test('workspace list shows a saved computer without its route tokens', posixOnly
 
 // ---------------------------------------------------------------- a read-only computer
 
-const readRoute = (baseUrl, fingerprint) => ({ ...relayRoute(baseUrl, fingerprint), token: 'read-token', access: 'read' });
+const readRoute = (baseUrl, fingerprint) => ({ ...relayRoute(baseUrl, fingerprint), token: 'pane_read_token' });
 
 test('list marks a computer whose every saved route is read-only, and learns its OS', posixOnly, async () => {
   await withComputer({ computers: ({ laptop, keys }) => ({ computers: [{ ...travelLaptop([readRoute(laptop, keys.laptop)]), os: undefined }] }) }, async (run) => {
@@ -527,7 +528,7 @@ test('list marks a computer whose every saved route is read-only, and learns its
   });
   // As `relay:linked-computers` lists it.
   const linkedComputers = ({ laptop, keys }) => ({
-    linkedComputers: [{ id: 'k3x9linked0000aa', name: 'Travel Laptop', address: laptop, token: 'read-token', fingerprint: keys.laptop, access: 'read' }],
+    linkedComputers: [{ id: 'k3x9linked0000aa', name: 'Travel Laptop', address: laptop, token: 'pane_read_token', fingerprint: keys.laptop, access: 'read' }],
   });
   await withComputer({ computers: linkedComputers }, async (run) => {
     assert.match((await run('workspace', 'list')).output, /^travel-laptop \(macOS, online, read only\)/m);
@@ -559,6 +560,17 @@ test('a read-only computer answers looking, agents status included', posixOnly, 
   });
 });
 
+test('follow-ups from another computer name it as it was named', posixOnly, async () => {
+  await withComputer({ computers: ({ laptop, keys }) => ({ computers: [travelLaptop([readRoute(laptop, keys.laptop)])] }) }, async (run) => {
+    const screen = JSON.parse((await run('workspace', 'k3x9linked0000aa', 'panels', 'screen', '--panel', 'panel-1', '--json')).output);
+    assert.equal(screen.nextCommand, 'runpane workspace k3x9linked0000aa panels output --panel panel-1 --json');
+    const message = JSON.parse((await run('workspace', 'travel-laptop', 'panels', 'last-message', '--panel', 'panel-1', '--json')).output);
+    assert.equal(message.message, 'No reply yet. Use `runpane workspace travel-laptop panels screen --panel panel-1`.');
+    const none = await run('workspace', 'travel-laptop', 'agents', 'status', '--pane', 'pane-1');
+    assert.match(none.output, /Start an agent in it with `runpane workspace travel-laptop agents start --pane pane-1/);
+  });
+});
+
 test('a read-only computer\'s refusal keeps its code and next step, and no other route is tried', posixOnly, async () => {
   const computers = ({ laptop, keys }) => ({ computers: [travelLaptop([readRoute(laptop, keys.laptop), { ...readRoute(laptop, keys.laptop), id: 'second' }])] });
   await withComputer({ computers }, async (run, requests) => {
@@ -586,11 +598,11 @@ test('a read-only computer\'s refusal keeps its code and next step, and no other
 const LINK = 'https://runpane.net/pair#s=secret&c=k7xq2m4n8p3r5t6v&n=parsa-devbox';
 
 /** This computer's Pane answering a link's preview and redemption. */
-async function withLinkPane(preview, check) {
+async function withLinkPane(preview, check, redeem) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-link-'));
   const pane = await fakeLocalPane(home, (channel) => (channel === 'relay:link-preview'
     ? { expiresAt: '2026-11-15T10:00:00.000Z', ...preview }
-    : preview.access ? { linked: ['parsa-devbox', 'build-box'], access: preview.access } : { linked: ['parsa-devbox', 'build-box'] }));
+    : redeem ?? (preview.access ? { linked: ['parsa-devbox', 'build-box'], access: preview.access } : { linked: ['parsa-devbox', 'build-box'] })));
   const run = (...args) => new Promise((resolve) => {
     const child = spawn(process.execPath, [cli, 'link', ...args, '--pane-dir', home], { env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' } });
     let stdout = '';
@@ -619,7 +631,7 @@ test('runpane link on a computer with nothing linked asks too, naming who could 
     assert.equal(linked.status, 0, linked.stderr);
     assert.equal(linked.stdout, 'Linked with parsa-devbox and build-box. List them with: runpane workspace list\n');
     assert.deepEqual(requests.map(({ channel }) => channel), ['relay:link-preview', 'relay:redeem-link']);
-    assert.deepEqual(requests[1].args, [{ link: LINK }]);
+    assert.deepEqual(requests[1].args, [{ link: LINK, access: 'full' }]);
   });
 });
 
@@ -669,12 +681,13 @@ const readOnlyLink = { maker: 'parsa-devbox', makerGroup: ['parsa-devbox', 'buil
 
 test('runpane link says Read only and what it means, before and after a read-only link', posixOnly, async () => {
   const meaning = /Read only: this computer sees the Sessions, agents, transcripts and terminal output of parsa-devbox and build-box, .* They can't reach this computer\./;
-  await withLinkPane(readOnlyLink, async (run) => {
+  await withLinkPane(readOnlyLink, async (run, requests) => {
     const { error } = JSON.parse((await run(LINK, '--json')).stdout);
     assert.equal(error.code, 'ERR_LINK_NEEDS_CONFIRM');
     assert.match(error.message, meaning);
     assert.doesNotMatch(error.message, /run agents on this computer/);
     assert.match((await run(LINK, '--yes')).stdout, meaning);
+    assert.deepEqual(requests[requests.length - 1].args, [{ link: LINK, access: 'read' }]);
     assert.deepEqual(JSON.parse((await run(LINK, '--yes', '--json')).stdout), { ok: true, maker: 'parsa-devbox', linked: ['parsa-devbox', 'build-box'], access: 'read' });
   });
 });
@@ -689,10 +702,13 @@ test('the Python runpane link refuses and links the same way', posixOnly, async 
     child.stdin.end();
     child.on('close', (status) => resolve({ status, stdout }));
   });
-  for (const preview of [joinsGroups, readOnlyLink]) await withLinkPane(preview, async (run, requests, home) => {
+  const changed = { error: { code: 'ERR_LINK_LEVEL_CHANGED', message: 'parsa-devbox answered with another access level than the link showed, so nothing was linked.', next: 'Ask for a new link.' } };
+  for (const [preview, redeem] of [[joinsGroups], [readOnlyLink], [joinsGroups, changed]]) await withLinkPane(preview, async (run, requests, home) => {
     for (const args of [['--json'], ['--yes', '--json']]) {
       const [npm, python] = [await run(LINK, ...args), await runPython(home, ...args)];
       assert.deepEqual({ status: python.status, output: JSON.parse(python.stdout) }, { status: npm.status, output: JSON.parse(npm.stdout) }, args.join(' '));
+      if (redeem && args.includes('--yes')) assert.deepEqual(JSON.parse(npm.stdout).error, changed.error);
     }
-  });
+    assert.equal(requests.at(-1).args[0].access, preview.access ?? 'full');
+  }, redeem);
 });

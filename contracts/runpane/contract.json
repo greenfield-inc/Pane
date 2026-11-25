@@ -24064,7 +24064,7 @@
           {
             "name": "--yes",
             "required": false,
-            "description": "Join two groups of computers without asking; required in non-interactive shells when this computer already has linked computers."
+            "description": "Link without asking; required in non-interactive shells when the link asks first."
           },
           {
             "name": "--json",
@@ -24086,9 +24086,9 @@
           "linkRedeemResult"
         ],
         "notes": [
-          "A computer with nothing linked links without asking. One that already reaches computers asks first, naming both sides, because the two groups become one.",
+          "A full-access link asks first, unless this computer already reaches the one that made it: linking lets that computer run agents here. When both sides have linked computers, it names both groups, because they become one.",
           "Each link works once. A used link fails with \"This code was already used\", an old one with \"This code expired\".",
-          "A read-only link always asks first, and says Read only before and after it links. In JSON, `access` is \"read\"."
+          "A read-only link always asks first, and says Read only before and after it links. In JSON, `access` is \"read\". Pane links at the level shown: a link that answers with another one fails with ERR_LINK_LEVEL_CHANGED, and nothing is linked."
         ]
       },
       "repos list": {

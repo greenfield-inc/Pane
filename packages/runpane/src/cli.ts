@@ -23,7 +23,7 @@ import { runThemeRead, runThemeReset, runThemeSet } from './theme';
 import { runMachineCleanup, runMachineHealth } from './machine';
 import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
-import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo, routedOtherMachine } from './daemonClient';
+import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo, routedOtherMachine, withRoutedMachine } from './daemonClient';
 import { paneIntro, renderPaneIntro } from './paneIntro';
 import { describeFailure, printFailure, RunpaneError } from './errors';
 import { boundary, decodeBoundary } from './boundaryDecoder';
@@ -189,9 +189,13 @@ async function runOnMachine(machineQuery: string, command: string[]): Promise<nu
   }
   const tailnet = await requireTailnet(parsed.paneDir);
   const machine = resolveMachine(machineQuery, [tailnet.self, ...tailnet.machines]);
-  routeDaemonCallsTo(workspaceTarget(machine), machine.self);
+  routeDaemonCallsTo(workspaceTarget(machine), machine.self, machineQuery);
   try {
     return await main(command);
+  } catch (error) {
+    if (!(error instanceof Error) || machine.self) throw error;
+    const failure = describeFailure(error);
+    throw new RunpaneError(failure.code, withRoutedMachine(failure.message), failure.next && withRoutedMachine(failure.next));
   } finally {
     routeDaemonCallsTo(null);
   }
