@@ -61,6 +61,41 @@ a saved one is ignored and dropped when the Session's agent or launch command
 changes, and `chat-tab:profiles` returns an empty list. Turning Profiles on or off
 applies to the next start of a Session's agent.
 
+### Create New and Session rows (Profiles on)
+
+With Profiles on, **New**, the `+` beside Sessions and Search's **New Session**
+open **Create New** instead of the dialogs below. It asks, in order:
+
+1. **To** (required): one type-ahead of Claude and Codex on their own, this
+   machine's listed Agent Farm profiles, then Other agents (Cursor, OpenCode, Pi,
+   which start directly). Type to filter, **↑**/**↓** to move, **Return** picks
+   and moves on. A profile Agent Farm marks unlisted (such as a subagent's own)
+   isn't offered; an Agent Farm too old to say lists every profile. It starts on
+   the last choice made here.
+2. **Name** (optional): left empty, the Session is named from its first message.
+3. **Message** (optional): the agent's first message, sent once as a one-time
+   opening prompt. PNG, JPEG, WebP and GIF images can be attached (the button,
+   paste or drop) when the Session runs on this computer with Chat tabs on; they
+   go to its chat with the message. **Return** creates; **Shift+Return** adds a
+   line.
+4. **Run on**: the machine you last created on, else this one. Another machine
+   lists its own profiles, creates there, and Pane switches to it.
+
+**Create session** has a menu that switches it to **Create pane** (the project,
+base branch and Pane name), and Create New opens in that mode next time.
+**More options** holds every setting the old dialogs had: for a Session, what
+it's for, Start pinned, Run agent in (WSL), and the launch command and behavior;
+for a Pane, Start pinned, Use worktree and the number of Panes. **Back** returns.
+A project's `+` still opens New Pane for that project.
+
+Session rows show the profile's avatar at the row's left padding (a profile's
+initials on a tint, `--color-avatar-1` to `--color-avatar-8`; Claude's or Codex's
+logo for the agent on its own and for older Sessions; another agent's initial).
+A Session with Panes shows its expand chevron in the avatar's place on hover or
+keyboard focus. While it works, a grey spinner sits on the right, before the
+approvals count and, in All machines, the machine mark; an idle row shows none.
+With Profiles off, New, the `+` and the rows are as described below.
+
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,
 a **Machine** picker sits between them. It starts on the machine you last
