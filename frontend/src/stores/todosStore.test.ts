@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { TodoDetail, TodoRecord } from '../../../shared/types/todos';
 import { installTodosApi, useTodosStore, type TodosApi, type TodosAnswer } from './todosStore';
+import { todoKey } from '../../../shared/todoKey';
 
 /** A detail answer the test settles by hand, so two reads can finish out of order. */
 function deferred() {
@@ -45,6 +46,6 @@ describe('loadDetail', () => {
     await newer;
     reads[0].settle({ success: true, data: detail('before the drop') });
     await older;
-    expect(useTodosStore.getState().details.get(12)?.todo.title).toBe('with the dropped file');
+    expect(useTodosStore.getState().details.get(todoKey('local', 12))?.todo.title).toBe('with the dropped file');
   });
 });

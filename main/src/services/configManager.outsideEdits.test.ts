@@ -56,6 +56,16 @@ describe('ConfigManager keeps outside edits to config.json', () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
+  it('loads the settings of the removed Profiles engine and keeps them through a save', async () => {
+    const retired = { profilesEnabled: true, profiles: { enabled: ['greenfield', 'mine'] } };
+    await atomicHandEdit(configPath, (c) => { Object.assign(c, retired); });
+    const reloaded = new ConfigManager();
+    await reloaded.initialize();
+    await reloaded.updateConfig({ notesEnabled: true });
+    expect(await onDisk(configPath)).toMatchObject({ ...retired, notesEnabled: true });
+    reloaded.stopWatching();
+  });
+
   const writers: Array<[string, (m: ConfigManager) => Promise<AppConfig | void>]> = [
     ['a no-op updateConfigWith (shared-credential / notify-switch apply)', m => m.updateConfigWith(() => ({}))],
     ['a remoteDaemon mode switch', m => m.updateConfig({ remoteDaemon: { ...m.getConfig().remoteDaemon!, client: { ...m.getConfig().remoteDaemon!.client, mode: 'local', activeProfileId: null } } })],

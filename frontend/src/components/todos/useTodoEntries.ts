@@ -1,11 +1,14 @@
 import { useMemo } from 'react';
 import { useNavigationStore } from '../../stores/navigationStore';
-import { useTodosStore } from '../../stores/todosStore';
+import { shownSnapshot, useShownHostId, useTodosStore } from '../../stores/todosStore';
 import { mergeTodoEntries, navSummary, type TodoEntry, type TodosNavSummary } from './todoList';
 
 /** Every top-level to-do on this machine and each saved one, newest change first. */
 export function useTodoEntries(): TodoEntry[] {
-  const snapshot = useTodosStore(state => state.snapshot);
+  // The shown computer's own list only once it is read from that computer (T-51 F-1): just after a switch the
+  // store can still hold the old one's, whose rows would read and open as this one's.
+  const shownHost = useShownHostId();
+  const snapshot = useTodosStore(state => shownSnapshot(state, shownHost));
   const remote = useTodosStore(state => state.remote);
   return useMemo(() => mergeTodoEntries(snapshot, Object.values(remote)), [snapshot, remote]);
 }

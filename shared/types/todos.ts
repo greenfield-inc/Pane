@@ -244,6 +244,8 @@ export interface TodosSnapshot {
   rows: TodoListRow[];
   gate: LoadGateSnapshot;
   machine: string;
+  /** T-51: this machine's install id (`AppConfig.machineId`), so a viewer can tell whose to-dos these are. Absent from older machines. */
+  installId?: string;
   /** Sessions that belong to a top-level to-do: kept out of the sidebar, All machines and Mod+1–9. */
   ownSessionIds: string[];
 }

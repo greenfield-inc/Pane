@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, FileText, MoreHorizontal } from 'lucide-react';
 import type { TodoAction, TodoDetail } from '../../../../../shared/types/todos';
-import { todosApi, useTodoDetail, useTodosStore } from '../../../stores/todosStore';
+import { snoozeRequestedFor, todosApi, useTodoDetail, useTodosStore } from '../../../stores/todosStore';
 import { Dropdown, type DropdownItem } from '../../ui/Dropdown';
 import { SkeletonSwap } from '../../ui/Skeleton';
 import { PhoneTodoPageSkeleton } from '../TodoSkeletons';
@@ -41,7 +41,7 @@ export function PhoneTodoPage(props: PhoneTodoPageProps) {
   const request = useTodosStore((state) => state.snoozeRequest);
   const act = useTodosStore((state) => state.act);
   useEffect(() => {
-    if (request !== props.number || !detail) return;
+    if (!snoozeRequestedFor(request, props.number) || !detail) return;
     useTodosStore.getState().requestSnooze(null);
     if (canSnoozeTodo(detail.todo)) setSnoozing(true);
   }, [request, props.number, detail]);

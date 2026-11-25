@@ -55,7 +55,7 @@ import { remoteDeviceClient } from './components/remoteDeviceClient';
 import { RemoteTodos } from './components/RemoteTodos';
 import { startRemoteTodos } from './runtime/remoteTodosHost';
 import { isOverlayRoute, parseRouteView, routeParent, routeView, stepTodosStack, type PhoneTodosRoute } from '../components/todos/phone/phoneRoute';
-import { useSessionTodosWaiting, useTodosStore } from '../stores/todosStore';
+import { todoDetailNow, useSessionTodosWaiting, useTodosStore } from '../stores/todosStore';
 import type { PhoneTodosSession } from '../components/todos/phone/PhoneSessionTodos';
 import { LoadingStatus } from '../components/ui/Skeleton';
 import { LinkPopoverHost, type LinkActions } from '../components/links/LinkPopover';
@@ -526,7 +526,7 @@ export function RemotePwaApp() {
       setTodosRoute(routeParent(route));
       return;
     }
-    const parentNumber = route.screen === 'todo' ? useTodosStore.getState().details.get(route.number)?.todo.parentNumber ?? null : null;
+    const parentNumber = route.screen === 'todo' ? todoDetailNow(route.number)?.todo.parentNumber ?? null : null;
     const parent = routeParent(route, parentNumber);
     const stack = todosStackRef.current;
     const under = stack[stack.length - 1];

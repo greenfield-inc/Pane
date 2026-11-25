@@ -45,6 +45,7 @@ const agentReportSchema = boundary.object({
   question: boundary.optional(boundary.string),
   ...agentReportOptionFields,
   todo: boundary.optional(boundary.string),
+  installId: boundary.optional(boundary.string),
   reportedAt: boundary.nonEmptyString,
 });
 

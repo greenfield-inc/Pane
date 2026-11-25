@@ -1,8 +1,9 @@
 import type { NotifyChoice, NotifyItem, NotifyLink, NotifySubQuestion, NotifyVersion } from '../../../../shared/types/notify';
 import { EMPTY_TODO_SCOPE, inTodoScope, type TodoApprovalScope } from '../todos/sessionTodos';
+import { machineOfItem } from '../../../../shared/todoKey';
+import { todoRefOfItem } from '../../stores/todosStore';
 import { isOpenForSession } from '../../../../shared/approvalOpen';
 import { approvalStatus, replyReader, sentenceStart } from '../../../../shared/approvalStatus';
-import { todoRef } from '../../../../shared/types/todos';
 
 /**
  * The approval column's logic (P3 of the approval card), kept apart from its rendering: the
@@ -188,8 +189,9 @@ function originPanel(item: NotifyItem): string | undefined {
  * Where a to-do's approval is from, by the to-do (D-408): "T-14 · Build the sheet and approval keys".
  * Its Session is the to-do's own, hidden from the sidebar, so the to-do names it instead.
  */
-export function todoPlace(item: Pick<NotifyItem, 'todo'>): string | undefined {
-  return item.todo ? `${todoRef(item.todo.number)} · ${item.todo.title}` : undefined;
+export function todoPlace(item: Pick<NotifyItem, 'todo' | 'machineId' | 'machine'>): string | undefined {
+  // Another machine's to-do names its machine (T-51): "T-28 · tylers-macbook-pro · Phone-number sign-up".
+  return item.todo ? `${todoRefOfItem(item)} · ${item.todo.title}` : undefined;
 }
 
 /** "doozy-overhaul asks · relayed · Doozy · tylers-mac-mini": who asked, from where. */
@@ -206,12 +208,27 @@ export function askedBy(item: NotifyItem): string[] {
   return parts;
 }
 
-/** Items open for a Session (its own, its workers', Autopilot's about it; not dismissed), oldest first. */
+/**
+ * Items open for a Session (its own, its workers', Autopilot's about it; not dismissed), oldest first: from
+ * the machine it is on (`todos.machineId`, T-51), and not from a machine gone offline, whose cards wait in
+ * Approvals until it is back.
+ */
 export function sessionApprovals(items: readonly NotifyItem[], sessionId: string, todos: TodoApprovalScope = EMPTY_TODO_SCOPE): NotifyItem[] {
   return items
-    .filter(item => isOpenForSession(item) && !item.relay && item.staleSince === undefined
+    .filter(item => isOpenForSession(item) && !item.relay && item.staleSince === undefined && !item.unreachable && machineOfItem(item) === todos.machineId
       && (item.source.session?.id === sessionId || (item.connected?.kind === 'session' && item.connected.id === sessionId) || inTodoScope(item, todos)))
     .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/**
+ * What a Session's open column does with its card (T-51): keeps it, unless the card is from another machine
+ * than the Session's or its machine went offline, when the next of the Session's cards takes its place, or the
+ * column closes. An answered card stays (its receipt shows); only the card's machine or reach moves it on.
+ */
+export function sessionColumnNext(selected: NotifyItem | undefined, waiting: readonly NotifyItem[], machineId: string): { keep: true } | { open: string } | { close: true } {
+  if (!selected || (!selected.unreachable && machineOfItem(selected) === machineId)) return { keep: true };
+  const next = firstToOpen(waiting.filter(item => item.id !== selected.id));
+  return next ? { open: next.id } : { close: true };
 }
 
 /** "1 ready": how many of these came back updated and wait again. */

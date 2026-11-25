@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from 'react';
 import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ListTodo, Plus } from 'lucide-react';
 import { todoRef } from '../../../../shared/types/todos';
-import { useSessionTodoApprovals, useSessionTodoEntries } from '../../stores/todosStore';
+import { sessionTodoMachine, useSessionTodoApprovals, useSessionTodoEntries, useShownHostId, type CreatedTodo } from '../../stores/todosStore';
+import { todoKey, todoKeyOfItem, todoKeyOfRow } from '../../../../shared/todoKey';
+import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
+import { openOnMachine } from '../../utils/machineRowActions';
 import { useNotifyStore } from '../../stores/notifyStore';
 import { useApprovalColumnStore, type ApprovalSurface } from '../../stores/approvalColumnStore';
 import { cn } from '../../utils/cn';
@@ -14,7 +17,7 @@ import { TodoPage } from './page/TodoPage';
 import { TodoStatusIcon } from './TodoStatusIcon';
 import { firstLine, snoozeWhen, viewerZone, wakesIn, wakesInShort } from './snoozeTime';
 import { SESSION_DONE_GROUP, SESSION_SNOOZED_GROUP, sessionGroupFolded, sessionOpenCount, sessionTodoGroups, stepTodo, withSessionFold } from './sessionTodosList';
-import { FRESH, useTabMemory, type TabMemory } from './sessionTodosTabMemory';
+import { FRESH, tabMemoryKey, useTabMemory, type TabMemory } from './sessionTodosTabMemory';
 import { headerKey, listStops, moveSelection, nextWake, resolveStop, type TodoEntry, type TodoGroup } from './todoList';
 import { isTypingTarget, openTodo, openTodosByRequester, overlayOpen } from './todosNavigation';
 import { TODOS_BUTTON } from './todoStyles';
@@ -51,7 +54,11 @@ interface SessionTodosTabProps {
 
 export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTabProps) {
   const entries = useSessionTodoEntries(sessionId, machineId);
-  const memory = useTabMemory(state => state.tabs[sessionId] ?? FRESH);
+  const shownHost = useShownHostId();
+  const todosMachine = sessionTodoMachine(machineId, shownHost);
+  // Per Session on its machine (T-51 F-4): another machine's Session with the same id has its own view.
+  const tabKey = tabMemoryKey(todosMachine, sessionId);
+  const memory = useTabMemory(state => state.tabs[tabKey] ?? FRESH);
   const update = useTabMemory(state => state.update);
   const now = useNow();
   const groups = useMemo(() => sessionTodoGroups(entries ?? [], now), [entries, now]);
@@ -63,11 +70,22 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
   const rootRef = useRef<HTMLDivElement>(null);
   const narrow = useNarrow(rootRef);
 
-  const select = useCallback((key: string | null) => update(sessionId, { selected: key }), [sessionId, update]);
-  const keyOf = useCallback((number: number) => `${entries?.[0]?.machineId ?? machineId ?? 'local'}:${number}`, [entries, machineId]);
-  const showList = useCallback((selected?: string) => update(sessionId, selected === undefined ? { view: { kind: 'list' } } : { view: { kind: 'list' }, selected }), [sessionId, update]);
-  const openNumber = useCallback((number: number) => update(sessionId, { view: { kind: 'todo', number }, selected: keyOf(number) }), [keyOf, sessionId, update]);
-  const openApproval = useCallback((id: string, key: string) => update(sessionId, { view: { kind: 'approval', id }, selected: key }), [sessionId, update]);
+  const select = useCallback((key: string | null) => update(tabKey, { selected: key }), [tabKey, update]);
+  const keyOf = useCallback((number: number): string => todoKey(todosMachine, number), [todosMachine]);
+  const showList = useCallback((selected?: string) => update(tabKey, selected === undefined ? { view: { kind: 'list' } } : { view: { kind: 'list' }, selected }), [tabKey, update]);
+  const openNumber = useCallback((number: number) => {
+    // A to-do page reads only the computer the window shows (T-51 F-4): another machine's to-do opens there.
+    if (todosMachine !== shownHost) void openOnMachine(todosMachine, { kind: 'todo', id: number, name: todoRef(number) });
+    else update(tabKey, { view: { kind: 'todo', machineId: todosMachine, number }, selected: keyOf(number) });
+  }, [keyOf, tabKey, todosMachine, shownHost, update]);
+  const openApproval = useCallback((id: string, key: string) => update(tabKey, { view: { kind: 'approval', id }, selected: key }), [tabKey, update]);
+
+  const openCreated = (created: CreatedTodo) => {
+    // Made on another machine (T-51): it opens there, as the To-dos list opens one, never as this machine's to-do with that number.
+    // `local` is the list's own host: the computer this window shows.
+    if ((created.machineId === LOCAL_MACHINE_ID ? shownHost : created.machineId) === todosMachine) openNumber(created.number);
+    else void openOnMachine(created.machineId, { kind: 'todo', id: created.number, name: todoRef(created.number) });
+  };
 
   const { view } = memory;
   // An approval answered elsewhere (Approvals, the chat card, another machine) leaves the Decide view for the list (T-23 QA F4).
@@ -79,10 +97,11 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
   let body;
   if (entries === null) {
     body = null;
-  } else if (view.kind === 'todo') {
+  } else if (view.kind === 'todo' && view.machineId === todosMachine && view.machineId === shownHost) {
     body = (
       <OpenTodo
         number={view.number}
+        machineId={view.machineId}
         onBack={() => showList(keyOf(view.number))}
         onOpen={openNumber}
         onStep={(step) => {
@@ -99,7 +118,7 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
         itemId={view.id}
         order={approvals.map(item => item.id)}
         inChat={inChat}
-        onSelect={(id) => update(sessionId, { view: { kind: 'approval', id } })}
+        onSelect={(id) => update(tabKey, { view: { kind: 'approval', id } })}
         onBack={() => showList()}
       />
     );
@@ -117,11 +136,11 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
           const patch: Partial<TabMemory> = { folds: withSessionFold(memory.folds, group.key, fold) };
           if (fold) patch.selected = headerKey(group.key);
           else if (group.entries[0]) patch.selected = group.entries[0].key;
-          update(sessionId, patch);
+          update(tabKey, patch);
         }}
         onOpen={(entry) => openNumber(entry.row.todo.number)}
         onAnswer={(entry) => {
-          const id = entry.row.status.waitingApprovalId ?? approvals.find(item => item.todo?.number === entry.row.todo.number)?.id;
+          const id = entry.row.status.waitingApprovalId ?? approvals.find(item => todoKeyOfItem(item) === todoKeyOfRow(todosMachine, entry.row))?.id;
           if (id) openApproval(id, entry.key);
           else openNumber(entry.row.todo.number);
         }}
@@ -134,7 +153,7 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
     <div ref={rootRef} className="flex h-full min-h-0 min-w-0 flex-col bg-bg-primary text-[14px] text-text-primary" data-testid="session-todos-tab" data-view={view.kind} data-narrow={narrow || undefined}>
       {body}
       {/* A to-do made here is yours (the dialog says so), so the list may not hold it: it opens here all the same (T-23 QA F1). */}
-      {creating && <NewTodoDialog onClose={() => setCreating(false)} onCreated={(created) => { setCreating(false); openNumber(created.number); }} />}
+      {creating && <NewTodoDialog onClose={() => setCreating(false)} onCreated={(created) => { setCreating(false); openCreated(created); }} />}
     </div>
   );
 }
@@ -371,7 +390,7 @@ function EmptyState({ onNew }: { onNew: () => void }) {
 
 // ── An open to-do ───────────────────────────────────────────────────────────
 
-function OpenTodo({ number, onBack, onOpen, onStep }: { number: number; onBack: () => void; onOpen: (number: number) => void; onStep: (step: 1 | -1) => void }) {
+function OpenTodo({ number, machineId, onBack, onOpen, onStep }: { number: number; machineId: string; onBack: () => void; onOpen: (number: number) => void; onStep: (step: 1 | -1) => void }) {
   // ↑ ↓ (J K) step through the list without going back; a field, a menu or a page's own keys keep theirs.
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
@@ -390,7 +409,7 @@ function OpenTodo({ number, onBack, onOpen, onStep }: { number: number; onBack: 
   );
   return (
     <div className="flex min-h-0 flex-1 flex-col" onKeyDown={onKeyDown} data-testid="session-todo-open">
-      <TodoPage number={number} onBack={onBack} onOpenTodo={onOpen} embedded={{ trailing }} />
+      <TodoPage number={number} machineId={machineId} onBack={onBack} onOpenTodo={onOpen} embedded={{ trailing }} />
     </div>
   );
 }

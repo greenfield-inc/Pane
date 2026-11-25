@@ -22,7 +22,7 @@ import {
 } from './commands';
 import type { BoundarySchema, JsonObject, JsonValue } from './boundaryDecoder';
 import { parseSessionCreatePayload, parseSessionUpdatePayload } from './sessionPayload';
-import { describeReport, effectiveWatchHeartbeatMs, sanitizeName, formatNonEntry, formatWaitResult, type WatchFormat } from './watchLines';
+import { describeReport, effectiveWatchHeartbeatMs, formatNonEntry, formatWaitResult, type WatchFormat } from './watchLines';
 
 interface OrchestrationLink {
   label: string;
@@ -757,6 +757,10 @@ export interface AgentReport {
   choices?: NotifyChoice[];
   /** A blocked report's several questions (`--questions`). */
   questions?: NotifySubQuestion[];
+  /** To-dos: the `--todo` reference ("T-28"). The Session's machine reads it as its own to-do. */
+  todo?: string;
+  /** The install id of the machine the report was made on, sent with `todo`. */
+  installId?: string;
   reportedAt: string;
 }
 
@@ -769,7 +773,7 @@ interface ReportResult {
   sessionIds: string[];
   /** Watches waiting when the report was journaled; absent from older daemons. */
   liveWatchers?: number;
-  /** A blocked report's card check: what its card misses; it was recorded anyway. */
+  /** Recorded anyway: a blocked report's card check, and a --todo left to the Session's machine. */
   warnings?: string[];
 }
 
@@ -1386,6 +1390,8 @@ const agentReportFields = {
     choices: boundary.array(reportChoiceSchema),
     why: boundary.optional(boundary.string),
   }))),
+  todo: boundary.optional(boundary.string),
+  installId: boundary.optional(boundary.string),
   reportedAt: boundary.string,
 };
 const agentReportSchema: BoundarySchema<AgentReport> = boundary.object(agentReportFields);
@@ -4014,7 +4020,6 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
     summary: summaryText?.slice(0, MAX_SENT_SUMMARY_LENGTH),
     summaryPath,
     question: parsed.question,
-    outcome: parsed.reportOutcome,
     ...options,
     todo: parsed.todo,
   }], reportResultSchema, {
@@ -4024,7 +4029,7 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
   if (parsed.json) {
     printJson(result);
   } else {
-    for (const line of describeReportDelivery(result, parsed.reportOutcome)) console.log(line);
+    for (const line of describeReportDelivery(result)) console.log(line);
   }
   return 0;
 }
@@ -4033,13 +4038,11 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
  * What `runpane report` prints: the report, who recorded it, and how many watches were waiting.
  * Zero waiting watchers means nobody is waiting right now, not that the report is lost.
  */
-function describeReportDelivery(result: ReportResult, outcome?: string): string[] {
+function describeReportDelivery(result: ReportResult): string[] {
   const sessions = result.sessionIds.length > 0 ? ` Recorded on Session ${result.sessionIds.join(', ')}.` : '';
   const watchers = result.liveWatchers ?? 0;
   const delivered = watchers > 0 ? ` Delivered to ${watchers} waiting watcher${watchers === 1 ? '' : 's'}.` : '';
-  // A profile step's outcome is what moved its run, so the line names it.
-  const reported = outcome ? `outcome "${sanitizeName(outcome)}" (${describeReport(result.report)})` : describeReport(result.report);
-  const lines = [`Reported ${reported} for panel ${result.panelId}.${sessions}${delivered}`];
+  const lines = [`Reported ${describeReport(result.report)} for panel ${result.panelId}.${sessions}${delivered}`];
   // The blocked question's card check: posted anyway, but worth fixing next time.
   const warnings = (result.warnings ?? []).map(warning => `Warning: ${warning}`);
   if (result.sessionIds.length > 0 || watchers > 0) return [...lines, ...warnings];

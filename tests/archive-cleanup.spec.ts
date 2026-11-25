@@ -97,3 +97,17 @@ test('a failure seen first after a reconnect opens the panel, one from another h
   await resync(snapshot(task('other-host', 'failed', 'Old failure'), task('b', 'failed', 'Failed while offline')), false);
   await expect(header).toHaveAttribute('aria-expanded', 'true');
 });
+
+test('a running row keeps its height as its job moves from phase to phase', async ({ page }) => {
+  await installElectronApiMock(page, { initialArchiveProgress: snapshot(task('a', 'running-archive-script')) });
+  await gotoApp(page);
+  await page.getByRole('button', { name: /Archive Tasks/ }).click();
+  const row = page.getByText('Pane a', { exact: true }).locator('xpath=ancestor::div[contains(@class, "space-y-1")][1]');
+  const heights: number[] = [];
+  for (const status of ['running-archive-script', 'removing-worktree', 'cleaning-artifacts', 'completed'] as const) {
+    await page.evaluate(value => window.__paneTestElectronMock.emitArchiveProgress(value), snapshot(task('a', status)));
+    await expect(row).toContainText(status === 'completed' ? 'Completed' : '...');
+    heights.push((await row.boundingBox())!.height);
+  }
+  expect(new Set(heights).size).toBe(1);
+});

@@ -1,4 +1,6 @@
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../../../shared/validation/boundaryDecoder';
+import { todoKeyOfRow } from '../../../../../shared/todoKey';
+import type { TodoListRow } from '../../../../../shared/types/todos';
 
 /**
  * Which to-dos have their split hidden (D-420), and which of their split's tabs are closed (T-25): a
@@ -20,8 +22,23 @@ interface ClosedTabs {
 const hiddenSchema = boundary.record(boundary.number);
 const closedSchema = boundary.record(boundary.object({ at: boundary.number, keys: boundary.array(boundary.string) }));
 
-export function todoSplitKey(machineId: string, number: number): string {
-  return `${machineId}:${number}`;
+/**
+ * On a to-do page of machine `pageMachine`: forgets that machine's closed or gone to-dos, from a list read from it
+ * (T-51 F-3). A list from another machine (one still shown just after a computer switch) says nothing about this
+ * machine's to-dos, so nothing is forgotten until the page's machine's own list is read.
+ */
+export function pruneForPage(storage: Storage, pageMachine: string, list: { machineId: string; rows: readonly TodoListRow[] } | null): void {
+  if (!list || list.machineId !== pageMachine) return;
+  pruneClosedTodos(storage, list.machineId, list.rows);
+}
+
+/**
+ * Forgets the to-dos of machine `machineId` that are closed or gone, as its `rows` say; other machines' to-dos
+ * stay (T-51): their T-5 is another to-do than this one's.
+ */
+export function pruneClosedTodos(storage: Storage, machineId: string, rows: readonly TodoListRow[]): void {
+  const open = new Set<string>(rows.filter((row) => row.status.status !== 'done' && row.status.status !== 'dropped').map((row) => todoKeyOfRow(machineId, row)));
+  pruneSplitMemory(storage, (stored) => !stored.startsWith(`${machineId}:`) || open.has(stored));
 }
 
 function read<Value>(storage: Storage, storageKey: string, schema: BoundarySchema<Record<string, Value>>): Record<string, Value> {

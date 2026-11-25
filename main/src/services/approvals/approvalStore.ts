@@ -50,15 +50,19 @@ export class ApprovalStore {
   private readonly saveReportStatement: Database.Statement;
   private readonly ackStatement: Database.Statement;
 
-  constructor(private readonly db: Database.Database, private readonly machine: string) {
+  /**
+   * `machine` is this machine's name on its rows (`thisMachineName`), which drifts; `installId` is its install id
+   * (`AppConfig.machineId`), stored beside it so a row names its machine by something stable (T-51).
+   */
+  constructor(private readonly db: Database.Database, private readonly machine: string, private readonly installId?: string) {
     ensureApprovalsSchema(db);
     this.saveItemStatement = db.prepare(`
       INSERT INTO approvals (id, machine, connected_kind, connected_id, connected_name, origin_kind, session_id, pane_id, panel_id, addressee, qn, state, item_json,
-        answered_by, closed_by, closed_reason, stale_since, rewritten_from, rewritten_as, delivered_via, delivered_at, decision, created_at, ended_at, todo_id)
+        answered_by, closed_by, closed_reason, stale_since, rewritten_from, rewritten_as, delivered_via, delivered_at, decision, created_at, ended_at, todo_id, install_id)
       VALUES (@id, @machine, @connected_kind, @connected_id, @connected_name, @origin_kind, @session_id, @pane_id, @panel_id, 'person', @qn, @state, @item_json,
-        @answered_by, @closed_by, @closed_reason, @stale_since, @rewritten_from, @rewritten_as, @delivered_via, @delivered_at, @decision, @created_at, @ended_at, @todo_id)
+        @answered_by, @closed_by, @closed_reason, @stale_since, @rewritten_from, @rewritten_as, @delivered_via, @delivered_at, @decision, @created_at, @ended_at, @todo_id, @install_id)
       ON CONFLICT(id) DO UPDATE SET
-        machine = excluded.machine, connected_kind = excluded.connected_kind, connected_id = excluded.connected_id, connected_name = excluded.connected_name,
+        machine = excluded.machine, install_id = COALESCE(excluded.install_id, approvals.install_id), connected_kind = excluded.connected_kind, connected_id = excluded.connected_id, connected_name = excluded.connected_name,
         origin_kind = excluded.origin_kind, session_id = excluded.session_id, pane_id = excluded.pane_id, panel_id = excluded.panel_id,
         addressee = 'person', qn = excluded.qn, state = excluded.state, item_json = excluded.item_json,
         answered_by = excluded.answered_by, closed_by = excluded.closed_by, closed_reason = excluded.closed_reason, stale_since = excluded.stale_since,
@@ -67,9 +71,10 @@ export class ApprovalStore {
     this.claimStatement = db.prepare(`UPDATE approvals SET state = @state, item_json = @item_json, answered_by = @answered_by, closed_by = @closed_by, closed_reason = @closed_reason,
       delivered_via = @delivered_via, delivered_at = @delivered_at, rewritten_as = @rewritten_as, ended_at = @ended_at WHERE id = @id AND state = '${CLAIMABLE}'`);
     this.saveReportStatement = db.prepare(`
-      INSERT INTO approvals (id, machine, connected_kind, connected_id, connected_name, origin_kind, session_id, pane_id, panel_id, addressee, state, report_json, inbox_session_id, created_at, ended_at)
-      VALUES (@id, @machine, 'session', @session_id, @session_name, 'worker', @session_id, @pane_id, @panel_id, 'orchestrator', 'report', @report_json, @session_id, @created_at, NULL)
-      ON CONFLICT(id) DO UPDATE SET report_json = excluded.report_json, inbox_session_id = excluded.inbox_session_id, connected_name = excluded.connected_name`);
+      INSERT INTO approvals (id, machine, install_id, connected_kind, connected_id, connected_name, origin_kind, session_id, pane_id, panel_id, addressee, state, report_json, inbox_session_id, created_at, ended_at)
+      VALUES (@id, @machine, @install_id, 'session', @session_id, @session_name, 'worker', @session_id, @pane_id, @panel_id, 'orchestrator', 'report', @report_json, @session_id, @created_at, NULL)
+      ON CONFLICT(id) DO UPDATE SET report_json = excluded.report_json, inbox_session_id = excluded.inbox_session_id, connected_name = excluded.connected_name,
+        install_id = COALESCE(excluded.install_id, approvals.install_id)`);
     this.ackStatement = db.prepare(`UPDATE approvals SET acked_at = @at, ended_at = CASE WHEN item_json IS NULL THEN @at ELSE ended_at END, decision = COALESCE(@decision, decision) WHERE id = @id`);
   }
 
@@ -115,7 +120,7 @@ export class ApprovalStore {
 
   saveInboxItem(item: RunpaneInboxItem, sessionName: string): void {
     this.saveReportStatement.run({
-      id: item.id, machine: this.machine, session_id: item.sessionId, session_name: sessionName, pane_id: item.paneId, panel_id: item.panelId,
+      id: item.id, machine: this.machine, install_id: this.installId ?? null, session_id: item.sessionId, session_name: sessionName, pane_id: item.paneId, panel_id: item.panelId,
       report_json: JSON.stringify(item), created_at: timeOf(item.at),
     });
   }
@@ -191,6 +196,7 @@ export class ApprovalStore {
     return {
       id: item.id,
       machine: this.machine,
+      install_id: this.installId ?? null,
       connected_kind: connected.kind,
       connected_id: connected.id,
       connected_name: connected.name,

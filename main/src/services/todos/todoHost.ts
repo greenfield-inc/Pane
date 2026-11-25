@@ -67,6 +67,7 @@ export function createTodoHost(services: AppServices, commandRegistry: PaneComma
 
   return {
     machineName: () => thisMachineName(),
+    installId: () => services.configManager.getConfig().machineId,
 
     async createSession(input): Promise<CreatedTodoSession> {
       const manager = sessions();
@@ -162,6 +163,8 @@ export function createTodoHost(services: AppServices, commandRegistry: PaneComma
         ? { ui: 'options', title: card.title, context: card.context, choices: card.choices.map((label, index) => ({ label, recommended: index === 0 })), links: card.links }
         : { ui: 'ask', title: card.title, context: card.context, links: card.links };
       question.todo = { number: card.todo.number, title: card.todo.title, kind: card.kind };
+      const installId = services.configManager.getConfig().machineId;
+      if (installId) question.todo.installId = installId;
       return queue.ask({ id: card.id, question, source });
     },
 

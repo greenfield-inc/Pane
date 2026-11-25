@@ -16,7 +16,7 @@ process prints its own report.
 (`correctness`, `suspicious`, `perf`, `pedantic`, `restriction`, `style`) for
 the `eslint`, `typescript`, `unicorn`, `oxc`, `react`, `jsx-a11y`, `promise`,
 `node`, `vitest` and `react-perf` plugins, plus the 15 anti-slop
-rules ([anti-slop.md](anti-slop.md)). Every rule is an error except the two
+rules ([anti-slop.md](anti-slop.md)) and Pane's own rules (below). Every rule is an error except the two
 renderer warnings below.
 
 A rule is `off` in the `rules` block only when the code does not pass it yet.
@@ -40,6 +40,31 @@ Legacy octal literals (ESLint's `no-octal`) and `\8`/`\9` escapes are parse
 errors in TypeScript and ES modules, so Oxlint reports them without a rule.
 Plain CommonJS scripts are not checked for them. `eslint/no-irregular-whitespace`
 does not look inside comments or regular expression literals.
+
+## Pane's own rules
+
+`tools/oxlint/pane` is a JS plugin, like anti-slop, for rules specific to this
+codebase. `scripts/todo-key-lint.test.mjs` tests it on fixtures.
+
+`pane/no-bare-todo-number` (T-51): every machine numbers its own to-dos T-1,
+T-2 and so on, so two machines each have a T-28. The rule fails when a bare
+to-do number (`x.todo.number`, `x["todo"]["number"]`, `x.todoNumber`,
+`x.todo_id`, or `todo.number` for a `todo` destructured from a row, as in
+`({ todo }) => todo.number`) is compared with `===`, `!==`, `==` or `!=`,
+looked up with `includes` or `indexOf`, or used as a Map, Set or record key.
+Compare and key by a `TodoKey` from `shared/todoKey.ts` instead, the one file
+the rule skips. Showing a number (`` `T-${n}` ``, `todoRef(n)`), passing it
+on, and checking it against `null` or `undefined` are allowed. The rule reads
+names, not types: a plain `todo` variable (main's own to-do records) is not
+checked.
+
+The rule is on everywhere, tests included, and no override turns it off
+(`scripts/todo-key-lint.test.mjs` checks the repository config). Where a
+comparison is on one machine's to-dos by construction, the line carries
+`// oxlint-disable-next-line pane/no-bare-todo-number -- <reason>`. Today
+those are in main's to-do service (`main/src/services/todos`,
+`main/src/ipc/todos.ts`), which reads only this machine's database, in its unit
+tests, and in Playwright mocks and specs that serve or run one machine.
 
 ## Why a rule is off
 

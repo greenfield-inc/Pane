@@ -95,8 +95,9 @@ test.describe('Machine health cards', () => {
 
   test('a popup that arrives after the stack closed under the pointer still hides on its own', async ({ page }) => {
     await open(page, 'popup=critical');
-    const critical = page.getByRole('alert', { name: 'Disk is almost full' });
-    await critical.hover();
+    // Rest the pointer near the top of the upper card: the single popup that arrives later shows
+    // at the bottom and never under it, since a popup under a resting pointer is held, as it should be.
+    await page.getByRole('status', { name: 'Memory is tight' }).hover({ position: { x: 40, y: 8 } });
     // Both cards end while the pointer rests on the stack, so it unmounts without a pointer leave.
     await page.evaluate(() => { window.qaResolve('m1'); window.qaResolve('d1'); });
     await expect(page.getByTestId('health-popups')).toHaveCount(0);

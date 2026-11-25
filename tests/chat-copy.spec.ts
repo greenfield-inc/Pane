@@ -15,6 +15,9 @@ async function open(page: Page) {
 
 const clipboard = (page: Page) => page.evaluate(() => navigator.clipboard.readText());
 
+// Chat writes LF. On Windows, Chromium converts each line break to CRLF in the clipboard.
+const onClipboard = (text: string) => process.platform === 'win32' ? text.replaceAll('\n', '\r\n') : text;
+
 test('message text can be selected by dragging across several messages', async ({ page }) => {
   await open(page);
   const from = await page.getByText('Why does pnpm test fail?').boundingBox();
@@ -43,7 +46,7 @@ test('each message copies as Markdown, and its icon confirms', async ({ page }) 
   await response.click();
   await expect(response).toHaveAttribute('data-state', 'copied');
   // D-182: the agent's text only, without its activity lines.
-  expect(await clipboard(page)).toBe('The `a.test.ts` suite imports a file that moved. Change the import:\n\n```ts\nimport { a } from "./lib/a";\n```');
+  expect(await clipboard(page)).toBe(onClipboard('The `a.test.ts` suite imports a file that moved. Change the import:\n\n```ts\nimport { a } from "./lib/a";\n```'));
 });
 
 test('the whole conversation copies with speaker labels', async ({ page }) => {
@@ -53,10 +56,10 @@ test('the whole conversation copies with speaker labels', async ({ page }) => {
   // The conversation loads before it is written, so wait for the button to confirm.
   await expect(copy).toHaveAttribute('data-state', 'copied');
   const conversation = await clipboard(page);
-  expect(conversation.startsWith('**You:**\n\nWhy does pnpm test fail?\n\n**Claude:**\n\n')).toBe(true);
+  expect(conversation.startsWith(onClipboard('**You:**\n\nWhy does pnpm test fail?\n\n**Claude:**\n\n'))).toBe(true);
   expect(conversation).toContain('- Ran `pnpm test` (failed)');
   expect(conversation).not.toContain('FAIL src/a.test.ts');
-  expect(conversation).toContain('**You:**\n\nThanks, fix it please.\n\n**Claude:**\n\nDone: the import now points at `./lib/a`, and the suite passes.');
+  expect(conversation).toContain(onClipboard('**You:**\n\nThanks, fix it please.\n\n**Claude:**\n\nDone: the import now points at `./lib/a`, and the suite passes.'));
 });
 
 test('a code block keeps its own copy button, for the code alone', async ({ page }) => {

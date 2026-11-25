@@ -142,3 +142,26 @@ describe('MoveCoordinator.resume (T-44)', () => {
     expect(fs.existsSync(done)).toBe(false);
   });
 });
+
+describe('MoveCoordinator: a to-do\'s own Session (T-51, W11)', () => {
+  const record = { id: 'todo-sess', name: 'T-28 work', internalSessionId: '__todo__', associations: [], archived: false, todoNumber: 28 };
+  const coordinatorFor = (session: Partial<OrchestrationSessionRecord>) => {
+    const servicesFixture = {
+      // No saved machine: the check must refuse before it looks for the target.
+      configManager: { getConfig: () => ({}) },
+      orchestrationSessionManager: { get: async () => session },
+    };
+    // SAFETY: the fixture supplies the exact AppServices members check and start read before they refuse.
+    return new MoveCoordinator(servicesFixture as AppServices, new PaneCommandRegistry());
+  };
+
+  it('the preflight blocks it, naming the to-do, and asks nothing of the target', async () => {
+    const preflight = await coordinatorFor(record).check({ sessionId: 'todo-sess', target: 'macbook' });
+    expect(preflight.ready).toBe(false);
+    expect(preflight.checks).toEqual([expect.objectContaining({ id: 'todo', level: 'block', title: "T-28's Session stays on this machine" })]);
+  });
+
+  it('a start is refused with ERR_MOVE_TODO_SESSION and moves nothing', async () => {
+    await expect(coordinatorFor(record).start({ sessionId: 'todo-sess', target: 'macbook' })).rejects.toMatchObject({ code: 'ERR_MOVE_TODO_SESSION' });
+  });
+});

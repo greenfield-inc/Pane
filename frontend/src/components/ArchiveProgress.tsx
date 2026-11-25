@@ -25,7 +25,7 @@ function getStatusText(status: ArchiveProgressTask['status']) {
     case 'running-archive-script':
       return 'Running archive script...';
     case 'removing-worktree':
-      return 'Removing worktree (this may take a while)...';
+      return 'Removing worktree (can take several minutes)...';
     case 'cleaning-artifacts':
       return 'Cleaning artifacts...';
     case 'completed':
@@ -37,12 +37,21 @@ function getStatusText(status: ArchiveProgressTask['status']) {
   }
 }
 
+function formatElapsedTime(startTime: string, endTime: string | undefined, now: number) {
+  const start = new Date(startTime).getTime();
+  const end = endTime ? new Date(endTime).getTime() : now;
+  const elapsed = Math.max(0, Math.floor((end - start) / 1000));
+  if (elapsed < 60) return `${elapsed}s`;
+  return `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
+}
+
 export function ArchiveProgress() {
   const taskListId = useId();
   const [progress, setProgress] = useState<ArchiveProgressSnapshot | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const failedIds = useRef<Set<string> | null>(null);
   const hasActiveTasks = (progress?.activeCount ?? 0) > 0;
 
@@ -95,10 +104,18 @@ export function ArchiveProgress() {
     };
   }, [applyProgress, loadProgress]);
 
-  // Refresh elapsed times while a job runs.
+  // Elapsed times tick here, once a second, rather than jumping when a snapshot arrives.
   useEffect(() => {
     if (!hasActiveTasks) return;
-    const interval = setInterval(() => void loadProgress(), 2000);
+    setNow(Date.now());
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [hasActiveTasks]);
+
+  // Pushes carry every change; a slow poll covers a push missed while a job runs.
+  useEffect(() => {
+    if (!hasActiveTasks) return;
+    const interval = setInterval(() => void loadProgress(), 10000);
     return () => clearInterval(interval);
   }, [hasActiveTasks, loadProgress]);
 
@@ -116,19 +133,6 @@ export function ArchiveProgress() {
     return <LiveRegion>{archiveAnnouncement}</LiveRegion>;
   }
 
-  const formatElapsedTime = (startTime: string, endTime?: string) => {
-    const start = new Date(startTime).getTime();
-    const end = endTime ? new Date(endTime).getTime() : Date.now();
-    const elapsed = Math.floor((end - start) / 1000);
-    
-    if (elapsed < 60) {
-      return `${elapsed}s`;
-    }
-    const minutes = Math.floor(elapsed / 60);
-    const seconds = elapsed % 60;
-    return `${minutes}m ${seconds}s`;
-  };
-
   return (
     <div className="border-t border-border-primary flex-shrink-0">
       <LiveRegion>{archiveAnnouncement}</LiveRegion>
@@ -142,17 +146,17 @@ export function ArchiveProgress() {
         className="w-full px-4 py-2 flex items-center justify-between hover:bg-surface-hover transition-colors"
       >
         <div className="flex items-center gap-2">
-          <Archive className={`w-3.5 h-3.5 ${hasActiveTasks ? 'text-status-info animate-pulse' : 'text-text-tertiary'}`} />
+          <Archive className={`w-3.5 h-3.5 ${hasActiveTasks ? 'text-status-info' : 'text-text-tertiary'}`} />
           <span className="text-xs text-text-tertiary">
             Archive Tasks
           </span>
           {progress.activeCount > 0 && (
-            <span className="px-1.5 py-0.5 bg-status-info/20 text-status-info-on-tint text-xs rounded-full animate-pulse">
+            <span className="px-1.5 py-0.5 bg-status-info/20 text-status-info-on-tint text-xs rounded-full tabular-nums">
               {progress.activeCount} active
             </span>
           )}
           {progress.tasks.filter(t => t.status === 'queued').length > 0 && (
-            <span className="px-1.5 py-0.5 bg-status-neutral/20 text-status-neutral text-xs rounded-full">
+            <span className="px-1.5 py-0.5 bg-status-neutral/20 text-status-neutral text-xs rounded-full tabular-nums">
               {progress.tasks.filter(t => t.status === 'queued').length} queued
             </span>
           )}
@@ -196,11 +200,12 @@ export function ArchiveProgress() {
                         </div>
                       </div>
                     </div>
-                    <span className="text-xs text-text-tertiary whitespace-nowrap">
-                      {formatElapsedTime(task.startTime, task.endTime)}
+                    <span className="text-xs text-text-tertiary whitespace-nowrap tabular-nums">
+                      {formatElapsedTime(task.startTime, task.endTime, now)}
                     </span>
                   </div>
-                  <div className="text-xs text-text-tertiary pl-5">
+                  {/* One line for every running state, so a row keeps its height as its job moves on. */}
+                  <div className="text-xs text-text-tertiary pl-5 truncate" title={getStatusText(task.status)}>
                     {getStatusText(task.status)}
                   </div>
                   {task.error && (
@@ -210,7 +215,7 @@ export function ArchiveProgress() {
                   )}
                   {task.cleanupId && (
                     <div className="text-xs text-text-tertiary pl-5 space-y-1">
-                      {task.status !== 'completed' && <div>Archived; cleanup {task.status === 'failed' ? 'needs attention' : 'pending'}</div>}
+                      {task.status === 'failed' && <div>Archived; cleanup needs attention</div>}
                       {task.remainingPath && task.status === 'failed' && <div className="break-all select-text">{task.remainingPath}</div>}
                       {(task.attempts ?? 0) > 0 && <div>Failed attempts: {task.attempts}</div>}
                       {task.nextAttempt && task.status === 'queued' && <div>Retry scheduled for {new Date(task.nextAttempt).toLocaleTimeString()}</div>}
@@ -221,11 +226,6 @@ export function ArchiveProgress() {
                           {task.interruptedScript ? 'Retry cleanup (skip interrupted script)' : 'Retry cleanup'}
                         </button>
                       )}
-                    </div>
-                  )}
-                  {task.status === 'removing-worktree' && (
-                    <div className="text-xs text-status-warning pl-5 mt-1 italic">
-                      ⚠️ Worktree removal can take several minutes for large repositories
                     </div>
                   )}
                 </div>

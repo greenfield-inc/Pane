@@ -69,7 +69,7 @@ export function toggleTodos(): void {
     return;
   }
   // On a to-do's page the entry goes back to the list first, as the breadcrumb does.
-  if (navigation.selectedTodoNumber !== null) {
+  if (navigation.selectedTodo !== null) {
     navigation.selectTodo(null);
     return;
   }

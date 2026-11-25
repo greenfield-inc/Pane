@@ -107,7 +107,7 @@ describe('restoreHostNavigation', () => {
     useConfigStore.setState(state => ({ config: state.config && { ...state.config, todosEnabled: true } }));
     await restoreHostNavigation();
     expect(useNavigationStore.getState().activeView).toBe('todos');
-    expect(useNavigationStore.getState().selectedTodoNumber).toBe(12);
+    expect(useNavigationStore.getState().selectedTodo?.number).toBe(12);
   });
 
   it('keeps To-dos closed while it is turned off (T-39)', async () => {
@@ -115,7 +115,7 @@ describe('restoreHostNavigation', () => {
     const { restoreHostNavigation, useNavigationStore } = await loadHostNavigationMemory();
     await restoreHostNavigation();
     expect(useNavigationStore.getState().activeView).not.toBe('todos');
-    expect(useNavigationStore.getState().selectedTodoNumber).toBeNull();
+    expect(useNavigationStore.getState().selectedTodo).toBeNull();
   });
 
   it('reopens the Pane the host was left on', async () => {

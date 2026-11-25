@@ -264,6 +264,7 @@ export function registerTodoHandlers(ipcMain: IpcMainHandleLike, services: TodoH
     const listed = request.all || closed ? snapshot.rows : snapshot.rows.filter(row => row.status.status !== 'done' && row.status.status !== 'dropped');
     // --status snoozed: soonest first, as the snapshot orders that group.
     const rows = request.status ? listed.filter(row => row.status.status === request.status) : listed;
+    // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
     return { ok: true, todos: rows.map(row => runpaneTodoOf(row, counts.get(row.todo.number) ?? 0)) };
   });
 

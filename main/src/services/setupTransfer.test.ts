@@ -206,6 +206,15 @@ describe('readSetupFile', () => {
 
     expect(file.sections).toEqual({ agentPresets: { defaultModel: 'opus' }, preferences: { notesEnabled: true } });
   });
+
+  it('still imports a file from a Pane that had the Profiles workflow engine, ignoring its settings', () => {
+    const file = readSetupFile(JSON.stringify({
+      ...setupFile({}),
+      sections: { preferences: { notesEnabled: true, profilesEnabled: true, profiles: { enabled: ['greenfield'] } } },
+    }), 'pane-setup.json');
+
+    expect(file.sections).toEqual({ preferences: { notesEnabled: true } });
+  });
 });
 
 describe('previewSetupImport', () => {
