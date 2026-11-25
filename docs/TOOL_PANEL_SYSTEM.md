@@ -41,7 +41,7 @@ The tool panel system consists of several key components:
 - Each shell gets `PANE_PANEL_KIND`, set when it starts so shell startup files can branch on it: `dock` (the first
   plain shell, pinned to the bottom terminal dock), `shell` (another plain shell tab), `agent` (an agent CLI such as
   Claude Code or Codex) or `command` (any other launch command)
-- Cmd-click on macOS or Ctrl-click on Windows/Linux opens `pane://open?pane=<pane-id>&panel=<panel-id>` links in terminal output inside Pane. The panel parameter is optional.
+- Cmd-click on macOS or Ctrl-click on Windows/Linux opens `pane://open?pane=<pane-id>&panel=<panel-id>` links in terminal output inside Pane. The panel parameter is optional. A `pane://new?…` start link in terminal output shows the same confirmation as one opened from outside Pane.
 
 ## Database Schema
 

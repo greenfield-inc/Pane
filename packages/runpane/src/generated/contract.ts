@@ -5633,7 +5633,7 @@ const CONTRACT_SECTION_13 = {
       "Open a pane:// link in the running Pane app.",
       "",
       "Options:",
-      "  --url <pane-url>                A pane://open link from links create.",
+      "  --url <pane-url>                A pane://open or pane://new link from links create.",
       "  --yes                           Confirm this change; required in non-interactive shells.",
       "  --json                          Print machine-readable output.",
       "  --pane-dir <path>               Connect to a specific Pane data directory."
@@ -8481,7 +8481,7 @@ const CONTRACT_SECTION_13 = {
       "Open a pane:// link in the running Pane app.",
       "",
       "Options:",
-      "  --url <pane-url>                A pane://open link from links create.",
+      "  --url <pane-url>                A pane://open or pane://new link from links create.",
       "  --yes                           Confirm this change; required in non-interactive shells.",
       "  --json                          Print machine-readable output.",
       "  --pane-dir <path>               Connect to a specific Pane data directory."
@@ -27452,7 +27452,7 @@ const CONTRACT_SECTION_17 = {
     "links open": {
       "name": "links open",
       "summary": "Open a pane:// link in the running Pane app.",
-      "details": "Use this to navigate the app to a Pane, panel, repository, or Session. It raises the Pane window, so run it only when the user asked.",
+      "details": "Use this to navigate the app to a Pane, panel, repository, or Session, or to ask the person about a start link. It raises the Pane window, so run it only when the user asked.",
       "requiresPaneDaemon": true,
       "mutates": true,
       "arguments": [
@@ -27460,7 +27460,7 @@ const CONTRACT_SECTION_17 = {
           "name": "--url",
           "value": "<pane-url>",
           "required": true,
-          "description": "A pane://open link from links create."
+          "description": "A pane://open or pane://new link from links create."
         },
         {
           "name": "--yes",
@@ -27486,7 +27486,7 @@ const CONTRACT_SECTION_17 = {
         "daemonActionResult"
       ],
       "notes": [
-        "Opening a link never changes Pane state; it selects what the link names."
+        "An open link never changes Pane state; it selects what the link names. A start link (pane://new) only asks: Pane creates a Pane when the person presses Start."
       ]
     },
     "docs search": {
