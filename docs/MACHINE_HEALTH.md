@@ -118,9 +118,9 @@ A card shows once and again only after 6 hours or when it gets worse; Not now
 holds it for 24 hours. A disk card that turns critical replaces its
 warning card. A critical card whose level returns to normal leaves Approvals,
 closed with the reason, and the next time the level turns critical raises a
-new card. A warning card keeps waiting after the level recovers. When disk turns critical, a desktop
-notification also fires, following your notification settings; clicking it
-opens Resources. Ask an agent, on a card or on Resources, hands the items to the agent of
+new card. A warning card keeps waiting after the level recovers. When disk turns critical, a silent desktop
+notification also fires, following your notification settings, unless the
+card already floats over other apps; clicking it opens Resources. Ask an agent, on a card or on Resources, hands the items to the agent of
 a Session named "Clean up <machine>", starting that Session when none is open,
 and shows it. The agent runs on the machine the window is on when the items are
 about that machine, and on this computer otherwise (the window switches back to

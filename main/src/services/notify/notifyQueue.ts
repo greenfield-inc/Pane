@@ -2333,6 +2333,11 @@ export class NotifyQueue extends EventEmitter {
     return this.paneFocused || (settings.showOutsidePane && this.env.showOutsideSupported);
   }
 
+  /** A card would float over other apps here now, so a system notification would repeat it. */
+  floatsOutsidePane(): boolean {
+    return !this.paneFocused && this.canShowStrip();
+  }
+
   private stripSurface(strip: NotifyStripView | null): NotifySnapshot['stripSurface'] {
     if (!strip || !this.canShowStrip()) return null;
     return this.paneFocused ? 'pane' : 'window';
