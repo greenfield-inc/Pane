@@ -14,7 +14,7 @@ Paste one line where the button goes. Your page styles the link. The link goes t
 <a href="https://runpane.com/open?agent=codex&amp;prompt=Clone+github.com%2Facme%2Fapp+and+run+its+tests">Open in Pane with Codex</a>
 ```
 
-A link without `agent` starts the person's default agent:
+A link without `agent` starts the person's default agent when it is installed, otherwise an agent that is:
 
 ```html
 <a href="https://runpane.com/open?prompt=Clone+github.com%2Facme%2Fapp+and+run+its+tests">Open in Pane</a>
@@ -36,8 +36,8 @@ In Pane: open the Command Palette and choose **Create Open in Pane link…**. Ty
 
 | Parameter | Required | What it does | Limits |
 | --- | --- | --- | --- |
-| `prompt` | Yes | The text the agent receives. | At most 4000 characters. Tab and newline are allowed; control, text-direction and invisible characters are refused. It must not start with `-`. Pane trims trailing spaces and shortens runs of blank lines to one. |
-| `agent` | No | The agent to start: `claude`, `codex`, `cursor`, `opencode` or `pi`. | Leave it out for the person's default agent. |
+| `prompt` | Yes | The text the agent receives. | At most 4000 characters. Tab and newline are allowed; control, text-direction and invisible characters (zero-width and tag characters, fillers, variation selectors other than an emoji's own) are refused. It must not start with `-`. Pane trims trailing spaces and shortens runs of blank lines to one. |
+| `agent` | No | The agent to start: `claude`, `codex`, `cursor`, `opencode` or `pi`. | Leave it out for the person's default agent, or an installed agent when the default isn't installed. |
 | `repo` | No | Starts the agent in a new Pane in that saved repository. | A repository id, its saved name, or `owner/repo`, matched against each saved repository's origin remote. |
 | `session` | No | Sends the prompt to that existing Session's agent. `agent` does not apply. | The Session's id or name: one line, at most 100 characters. |
 
@@ -49,10 +49,11 @@ Keep a web link at most 2,048 characters long, the most Chrome and Edge pass fro
 
 Pane comes to the front and shows a dialog:
 
-- The title, such as "Start Claude on this prompt?", and where it runs ("in a new Session", "in a new Pane in acme/app", or the Session's name).
+- The title, such as "Start Claude on this prompt?", and where it runs: "Runs in a new Session.", "Runs in a new Pane in acme-app (acme/app)." (the saved name, then the `owner/repo` when they differ), or "Runs in Session Build fixes.".
 - The prompt. A long one shows its first lines, with **Show all**.
 - "Claude runs with full access: it can edit files and run commands without asking." Agents started from a link run with full access.
 - When the link names an agent that isn't installed, a line says so, and an installed agent runs instead.
+- When no agent Pane can start is installed, a line says which to install, and **Start** stays off. A link to an existing Session runs that Session's agent instead.
 - **Options**, collapsed: change the agent (agents that aren't installed show "Not installed") or where it runs.
 - **Cancel** and **Start**. Cancel has focus, and Enter and Escape cancel. Start turns on after a moment, so a stray click can't press it.
 
@@ -64,7 +65,7 @@ Nothing runs until the person presses **Start**. Pane then opens the new tab wit
 
 ## Error messages
 
-When Pane can't open a link, it says why in a dialog titled "Pane could not open this link". `runpane links open` prints the same message.
+When Pane can't open a link, it says why in a dialog titled "Pane could not open this link". `runpane links open` prints the same message for problems found before the dialog asks (the first group below). It returns as soon as the dialog appears, so problems after **Start** (the last group) show only in Pane.
 
 | Message | Cause |
 | --- | --- |
@@ -86,7 +87,15 @@ When Pane can't open a link, it says why in a dialog titled "Pane could not open
 | Several saved repositories match "&lt;repo&gt;" (&lt;names&gt;). Use the numeric id from `runpane repos list` in the link. | `repo` matches more than one saved repository. |
 | No Session matches "&lt;session&gt;". Use a Session's name or id from `runpane sessions list`, or leave session out to start a new Session. | No Session has that id or name. |
 | Session "&lt;name&gt;" is archived. Restore it in Pane, then open the link again. | The Session is archived. |
+| Several Sessions are named "&lt;session&gt;". Use the Session's id from `runpane sessions list` in the link. | More than one Session has that name. |
 | Session "&lt;name&gt;" has no &lt;agent&gt; tab to send the prompt to. | The Session's agent tab is gone. |
 | Pane is already asking about another start link. Answer that one, then open this link again. | A start dialog is already open. |
+
+After **Start**, in Pane only:
+
+| Message | Cause |
+| --- | --- |
+| &lt;Agent&gt; is not running in &lt;where&gt;'s tab, so the link's prompt was not sent. Start &lt;agent&gt; in that tab (or install it), then open the link again. | The Session's tab has a shell or another program, not its agent. Pane never types a link's prompt into a shell. |
+| &lt;where&gt;'s &lt;agent&gt; is stopped at a prompt in its tab, so the link's prompt was not sent. Answer it there, then open the link again. | The agent is waiting on a question, such as trusting a folder. |
 | Pane could not start the linked task in &lt;where&gt;: &lt;reason&gt; | Creating the Pane or Session failed after Start. |
 | Pane could not confirm that &lt;where&gt; got the prompt. Open the Session to check whether it arrived. | The prompt went to an existing Session, and Pane could not confirm it arrived. |
