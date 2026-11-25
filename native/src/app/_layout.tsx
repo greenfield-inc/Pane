@@ -9,6 +9,7 @@ import { useActiveHost, useHostsStore } from '@/auth/hostsStore';
 import { DaemonProvider, queryClient } from '@/daemon';
 import { ReopenLastScreen } from '@/features/app/ReopenLastScreen';
 import { WideFrame } from '@/features/layout/WideFrame';
+import { useShowsBack } from '@/features/layout/wideLayout';
 import { RelayComputerSync } from '@/features/hosts/RelayComputerSync';
 import { SharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
 import { NotificationTapRouter, NotifyAlertCleanup } from '@/features/notifications/NotificationRouting';
@@ -76,11 +77,13 @@ export default function RootLayout() {
 
 function RootStack({ signedIn }: { signedIn: boolean }) {
   const theme = useTheme();
+  // Beside the docked Home, a screen opened over "Nothing open" has nothing to go back to.
+  const headerBackVisible = useShowsBack() || !signedIn;
   // Settings screens sit on the grouped page color, header included.
   const grouped = { headerStyle: { backgroundColor: theme.colors.grouped }, headerShadowVisible: false, contentStyle: { backgroundColor: theme.colors.grouped } };
   return (
     // Swipe back from anywhere on the screen, not only the left edge.
-    <Stack screenOptions={{ fullScreenGestureEnabled: true, headerBackButtonDisplayMode: 'minimal' }}>
+    <Stack screenOptions={{ fullScreenGestureEnabled: true, headerBackButtonDisplayMode: 'minimal', headerBackVisible }}>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="connect" options={{ headerShown: false }} />
       </Stack.Protected>

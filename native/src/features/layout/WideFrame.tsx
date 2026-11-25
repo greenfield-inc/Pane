@@ -1,9 +1,9 @@
 import { useNavigationContainerRef } from 'expo-router';
 import { useEffect, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ScreenFocus } from '@/daemon';
-import { topScreen } from '@/features/app/reopenScreen';
 import { ArchiveHoldProvider } from '@/features/approvals/ArchiveUndo';
 import { HomeScreen } from '@/features/home/HomeScreen';
 import { useTheme } from '@/theme';
@@ -18,22 +18,24 @@ import { columnWidth, RAIL_WIDTH } from './windowRule';
  */
 export function WideFrame({ children }: { children: ReactNode }) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const wide = useWideLayout(state => state.wide);
   const width = useWideLayout(state => state.window.width);
   const rail = useRail();
   const setWindow = useWideLayout(state => state.setWindow);
-  const setOpen = useWideLayout(state => state.setOpen);
+  const setStack = useWideLayout(state => state.setStack);
   const navigation = useNavigationContainerRef();
   useEffect(() => {
-    const note = () => setOpen(topScreen(navigation.getRootState()));
+    const note = () => setStack(navigation.getRootState());
     note();
     return navigation.addListener('state', note);
-  }, [navigation, setOpen]);
+  }, [navigation, setStack]);
 
   return (
     <ArchiveHoldProvider>
       {/* What is really laid out, not the reported window: React Native can report a stale size on a fold. */}
-      <View style={styles.row} onLayout={({ nativeEvent: { layout } }) => setWindow({ width: layout.width, height: layout.height })}>
+      {/* Side by side, the column and the open screen keep clear of a cutout on either side. */}
+      <View style={[styles.row, wide && { paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: theme.colors.background }]} onLayout={({ nativeEvent: { layout } }) => setWindow({ width: layout.width, height: layout.height })}>
         {wide ? (
           <View key="home" testID="home-column" style={[styles.column, { width: rail ? RAIL_WIDTH : columnWidth(width), backgroundColor: theme.colors.background, borderRightColor: theme.colors.border }]}>
             <InColumn value>

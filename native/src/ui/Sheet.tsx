@@ -6,6 +6,9 @@ import { useTheme } from '@/theme';
 
 import { Text } from './Text';
 
+/** A sheet's content stops this wide, so a tablet or an unfolded phone keeps a readable line. */
+export const SHEET_MAX_WIDTH = 640;
+
 export interface SheetProps {
   title?: string;
   children: ReactNode;
@@ -42,6 +45,6 @@ export function Sheet({ title, children, footer, testID }: SheetProps) {
 }
 
 const styles = StyleSheet.create({
-  content: { flexGrow: 1, padding: 20, paddingTop: 28, gap: 16 },
+  content: { flexGrow: 1, padding: 20, paddingTop: 28, gap: 16, width: '100%', maxWidth: SHEET_MAX_WIDTH, alignSelf: 'center' },
   footer: { marginTop: Platform.OS === 'ios' ? 'auto' : 8, gap: 8 },
 });

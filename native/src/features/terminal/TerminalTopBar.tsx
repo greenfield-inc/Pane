@@ -9,6 +9,7 @@ import { Icon, ListRow, Text } from '@/ui';
 
 import { ComposerSheet, useAfterSheetCloses } from '../composer/ComposerSheet';
 import { ReadOnlyChip } from '../hosts/ReadOnlyChip';
+import { useShowsBack } from '../layout/wideLayout';
 import { ConnectionBar, presenceLabel } from '../hosts/ConnectionStatus';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { MachineMark } from '../machines/MachineMark';
@@ -28,6 +29,7 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
   const { presence, notice, retry } = useConnectionPresence();
   const current = useMachines().find(machine => machine.current);
   const [menuOpen, setMenuOpen] = useState(false);
+  const showsBack = useShowsBack();
   const { afterClose, onDismiss } = useAfterSheetCloses();
   const choose = (action: () => void) => {
     afterClose(action);
@@ -39,6 +41,7 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
       <View style={{ paddingTop: insets.top, backgroundColor: colors.surface, borderBottomColor: colors.border, borderBottomWidth: 1 }}>
         <View style={styles.row}>
           <View style={styles.leading}>
+            {showsBack ? (
             <Pressable
               testID="terminal-back"
               accessibilityRole="button"
@@ -52,6 +55,7 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
             >
               <Icon ios="chevron.left" android="arrow_back" size={20} color={colors.textSecondary} />
             </Pressable>
+            ) : null}
             {/* The machine's own mark, as on home and in Settings: it pulses and dims with the connection. */}
             <View style={styles.mark}>{current ? <MachineMark os={current.os} slot={current.slot} state={current.state} /> : null}</View>
             <View style={styles.text}>

@@ -18,7 +18,7 @@ import { useMachines } from '@/features/machines/useMachines';
 import { useNotifyShared } from '@/features/notify/hooks';
 import { useTheme, withAlpha } from '@/theme';
 import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
-import { useAvoidsKeyboard } from '@/features/layout/wideLayout';
+import { useAvoidsKeyboard, useShowsBack } from '@/features/layout/wideLayout';
 
 import { composerPlaceholder, startBlocked, walkBar, autopilotItems } from './autopilot';
 import { DecisionCard, DecisionCardSkeleton, useDecisionAnswer } from './DecisionCard';
@@ -96,15 +96,18 @@ function Header({ snapshot }: { snapshot: AutopilotSnapshot | undefined }) {
   const insets = useSafeAreaInsets();
   const { notice, retry } = useConnectionPresence();
   const current = useMachines().find(machine => machine.current);
+  const showsBack = useShowsBack();
   return (
     <>
       <View style={{ paddingTop: insets.top, backgroundColor: colors.surface, borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }}>
         <View style={styles.bar}>
+          {showsBack ? (
           <Pressable testID="autopilot-back" accessibilityRole="button" accessibilityLabel="Back" hitSlop={4}
             onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
             style={({ pressed }) => [styles.square, { borderRadius: theme.radius.md, backgroundColor: pressed ? colors.surfacePressed : 'transparent' }]}>
             <Icon ios="chevron.left" android="arrow_back" size={20} color={colors.text} />
           </Pressable>
+          ) : null}
           <AutopilotMark size={30} />
           <Text variant="title" accessibilityRole="header" numberOfLines={1} style={styles.fill}>Autopilot</Text>
           {current ? <MachineBadge machine={current} full /> : null}

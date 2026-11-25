@@ -23,6 +23,11 @@ const PANE_PATH = '/pane/[paneId]';
 
 let remembered: { hostId: string; screen: ScreenToReopen; paneId?: string } | null = null;
 
+/** How many screens the stack holds, its root included and sheets left out. */
+export function screenCount(root: NavigationState | undefined): number {
+  return stackRoutes(root).filter(route => !SHEETS.has(route.name)).length;
+}
+
 /** The screen on top of the stack, under any sheet, unless that is Home. */
 export function topScreen(root: NavigationState | undefined): ScreenToReopen | null {
   const top = stackRoutes(root).findLast(route => !SHEETS.has(route.name));

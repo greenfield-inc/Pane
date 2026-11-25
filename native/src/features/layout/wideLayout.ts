@@ -4,7 +4,7 @@ import { Dimensions } from 'react-native';
 import { create } from 'zustand';
 
 import { secureStore } from '@/auth/secureStore';
-import type { ScreenToReopen } from '@/features/app/reopenScreen';
+import { screenCount, topScreen, type NavigationState, type ScreenToReopen } from '@/features/app/reopenScreen';
 
 import { isWide, type WindowSize } from './windowRule';
 
@@ -15,6 +15,8 @@ interface WideLayoutState {
   wide: boolean;
   /** The screen on top of the stack (under any sheet), or null on its root. */
   open: ScreenToReopen | null;
+  /** Screens in the stack, its root included and sheets left out. */
+  depth: number;
   /** The column's search has the keyboard: the screen beside it stays put. */
   searching: boolean;
   /** The person collapsed Home to its rail. Remembered on the phone. */
@@ -22,7 +24,7 @@ interface WideLayoutState {
   /** The search box should take the keyboard once Home expands from the rail. */
   searchRequested: boolean;
   setWindow(window: WindowSize): void;
-  setOpen(open: ScreenToReopen | null): void;
+  setStack(root: NavigationState | undefined): void;
   setSearching(searching: boolean): void;
   setCollapsed(collapsed: boolean, options?: { search?: boolean }): void;
   takeSearchRequest(): boolean;
@@ -35,11 +37,16 @@ export const useWideLayout = create<WideLayoutState>((set, get) => ({
   window: { width: initial.width, height: initial.height },
   wide: isWide(initial),
   open: null,
+  depth: 1,
   searching: false,
   collapsed: false,
   searchRequested: false,
   setWindow: window => set({ window, wide: isWide(window) }),
-  setOpen: open => set(state => (sameScreen(state.open, open) ? state : { open })),
+  setStack: root => {
+    const open = topScreen(root);
+    const depth = screenCount(root);
+    set(state => (sameScreen(state.open, open) && state.depth === depth ? state : { open, depth }));
+  },
   setSearching: searching => set({ searching }),
   setCollapsed: (collapsed, options) => {
     set({ collapsed, searchRequested: Boolean(options?.search) });
@@ -65,6 +72,14 @@ export function useRail(): boolean {
 /** Whether the screen beside the column should rise with the keyboard: not for the column's own. */
 export function useAvoidsKeyboard(): boolean {
   return !useWideLayout(state => state.wide && state.searching);
+}
+
+/**
+ * Whether the open screen shows a back arrow. Beside the docked Home, only when there is a screen to
+ * go back to on the right; the system Back still leaves the first one for "Nothing open".
+ */
+export function useShowsBack(): boolean {
+  return useWideLayout(state => !state.wide || state.depth > 2);
 }
 
 /** Rendered around Home when it is the docked column. */

@@ -27,7 +27,7 @@ import { perfMark } from '@/features/perf/perfMarks';
 import { useJourneyMark, useScreenJourney } from '@/features/perf/usePerfMarks';
 import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
-import { useAvoidsKeyboard } from '@/features/layout/wideLayout';
+import { useAvoidsKeyboard, useShowsBack } from '@/features/layout/wideLayout';
 
 import { ApprovalActions, ConnectedRow, QuestionActions } from './ApprovalActions';
 import { useApprovalSort } from './approvalSortPreference';
@@ -236,10 +236,12 @@ function ApprovalTopBar({ position, onNext }: { position: string | null; onNext?
   const insets = useSafeAreaInsets();
   const { notice, retry } = useConnectionPresence();
   const current = useMachines().find(machine => machine.current);
+  const showsBack = useShowsBack();
   return (
     <>
       <View style={{ paddingTop: insets.top, backgroundColor: colors.surface, borderBottomColor: colors.border, borderBottomWidth: 1 }}>
         <View style={styles.bar}>
+          {showsBack ? (
           <Pressable
             testID="approval-back"
             accessibilityRole="button"
@@ -250,6 +252,7 @@ function ApprovalTopBar({ position, onNext }: { position: string | null; onNext?
           >
             <Icon ios="chevron.left" android="arrow_back" size={20} color={colors.textSecondary} />
           </Pressable>
+          ) : null}
           <View style={styles.barTitle} accessible accessibilityRole="header" accessibilityLabel={position ? `Approvals, ${position}` : 'Approvals'}>
             <Text variant="headline" numberOfLines={1}>Approvals</Text>
             {position ? <Text testID="approval-position" variant="subhead" tone="muted" numberOfLines={1}>{position}</Text> : null}
