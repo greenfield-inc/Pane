@@ -1,3 +1,4 @@
+import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
@@ -34,6 +35,20 @@ function setup() {
 }
 
 describe('runpane on a chat tab', () => {
+  it('shows a resting chat to a read-only device without starting its agent', async () => {
+    const { manager, panel } = setup();
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:panels:screen', () => chatTabScreen(manager, panel, 80));
+
+    await registry.invokeRemote('runpane:panels:screen', [], { readOnly: true });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(manager.isRunning(panel.id)).toBe(false);
+    expect(manager.view(panel.id, 0, false).status).toBe('starting');
+
+    await registry.invokeRemote('runpane:panels:screen', []);
+    await vi.waitFor(() => expect(manager.isRunning(panel.id)).toBe(true), { timeout: 10_000 });
+  });
+
   it('submits with an ACP receipt, waits for the turn to end and reads the reply', async () => {
     const { manager, panel } = setup();
     await manager.ensure(panel.id);

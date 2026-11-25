@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { setFlagsFromString } from 'node:v8';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
 import { loadDocs } from './docs';
+import { splitWorkspacePassThrough } from './commands';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, mcpContractWithoutTodos, type McpTool } from './mcpTools';
 import { isTodoCommand, todosDisabledError, todosOn } from './todosFeature';
@@ -288,12 +289,16 @@ function rewriteCliHints(text: string, allTools: readonly McpTool[], served: Rea
   const byLongestCommand = [...allTools].sort((a, b) => b.command.length - a.command.length);
   return text.replace(/`runpane ([^`]+)`/g, (whole, written: string) => {
     // `notify --took <id> answer` puts its second value after the id; the tool takes it as tookAs.
-    const spoken = written.replace(/--took (\S+) (answer|question)\b/, '--took $1 --took-as $2');
+    const took = written.replace(/--took (\S+) (answer|question)\b/, '--took $1 --took-as $2');
+    const routed = splitWorkspacePassThrough(took.split(' '));
+    const spoken = routed ? routed.command.join(' ') : took;
     const tool = byLongestCommand.find((candidate) => spoken === candidate.command || spoken.startsWith(`${candidate.command} `));
-    if (!tool) return whole;
+    // A tool that takes no machine can't run there; the CLI command can.
+    if (!tool || (routed && !tool.otherMachines)) return whole;
     const inputs = [...spoken.slice(tool.command.length).matchAll(/--([a-z][a-z0-9-]*)(?:[ =]("[^"]*"|<[^>]+>|[^\s-]\S*))?/g)]
       .filter(([, flag]) => flag !== 'json')
       .map(([, flag, value]) => `${flag.replace(/-([a-z0-9])/g, (_c, letter: string) => letter.toUpperCase())}: ${value ?? 'true'}`);
+    if (routed) inputs.unshift(`machine: ${routed.machine}`);
     const where = served.has(tool.name) ? '' : ` (in the "${tool.toolsets[0] ?? 'all'}" toolset)`;
     return `\`${tool.name}\`${inputs.length > 0 ? ` with ${inputs.join(', ')}` : ''}${where}`;
   });

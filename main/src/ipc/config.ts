@@ -2,7 +2,7 @@ import { IpcMain } from 'electron';
 import { execFile } from 'child_process';
 import type { AppServices } from './types';
 import type { AppConfig, UpdateConfigRequest } from '../types/config';
-import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import { readOnlyPaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { RemotePwaAffordances, RemotePwaSessionAgents, RemoteSettingsPatch } from '../../../shared/types/remoteDaemon';
 import { SHORTCUT_LETTER, sharedShortcutLetter } from '../../../shared/utils/terminalShortcuts';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
@@ -44,6 +44,19 @@ export function registerConfigHandlers(
   if (commandRegistry) {
     const buildAffordances = (): RemotePwaAffordances => {
       const config = configManager.getConfig();
+      // A read-only device can use none of these, and a shortcut or command can hold anything the owner typed.
+      if (readOnlyPaneCaller()) {
+        const configured = { cleanup: false, recorded: false, streaming: false, fal: false, deepgram: false, openRouter: false };
+        return {
+          terminalShortcuts: [],
+          customCommands: [],
+          voiceTranscription: { ...buildRemotePwaVoiceAffordance(config), availableModes: [], configured },
+          sessionAgents: buildRemotePwaSessionAgents(undefined),
+          chatTabsEnabled: config.chatTabsEnabled === true,
+          os: machineOs(process.platform),
+          resumePausedOnOpen: false,
+        };
+      }
       return {
         terminalShortcuts: (config.terminalShortcuts ?? []).map(shortcut => ({
           id: shortcut.id,

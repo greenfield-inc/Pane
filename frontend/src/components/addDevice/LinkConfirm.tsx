@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
-import { AlertCircle, CheckCircle2, Link2, Loader2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Eye, Link2, Loader2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { MachineMark } from '../machines/MachineMark';
 import { assignMachineLetters } from '../../../../shared/utils/machineMarks';
 import { preferredMachineColorSlot } from '../../../../shared/utils/machineColor';
+import { ReadOnlyPill } from '../machines/ReadOnlyPill';
 import { useAddDeviceStore, type LinkFlow } from './addDeviceStore';
 import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from '../ui/Skeleton';
 
@@ -19,37 +20,44 @@ function ConfirmLink({ flow }: { flow: Extract<LinkFlow, { step: 'confirm' }> })
   const { confirmLink, cancelLink } = useAddDeviceStore();
   const makerGroup = [preview.maker, ...preview.makerGroup.filter((name) => name !== preview.maker)];
   const marks = useMarks([here, ...makerGroup, ...preview.here]);
+  const readOnly = preview.access === 'read';
   const mark = (name: string) => (
     <MachineMark letters={marks.get(name) ?? '?'} slot={preferredMachineColorSlot(name)} size="md" />
   );
   const rows: Array<{ name: string; tag?: string }> = [
     ...makerGroup.map((name) => ({ name, tag: name === preview.maker ? 'made this link' : undefined })),
-    ...preview.here.map((name) => ({ name, tag: `linked with ${here}` })),
+    // A read-only link joins nothing, so the computers on this side stay out of it.
+    ...(readOnly ? [] : preview.here).map((name) => ({ name, tag: `linked with ${here}` })),
   ];
 
   return (
     <div className="flex flex-col items-center gap-5 text-center">
       <div className="flex items-center gap-3" aria-hidden="true">
         {mark(here)}
-        <Link2 className="h-5 w-5 text-text-tertiary" />
+        {readOnly ? <Eye className="h-5 w-5 text-text-tertiary" /> : <Link2 className="h-5 w-5 text-text-tertiary" />}
         {mark(preview.maker)}
       </div>
       <div className="space-y-1">
-        <h2 className="text-heading-1 text-text-primary">Link this computer with {preview.maker}</h2>
-        <p className="text-sm text-text-secondary">Linking lets {preview.maker} run agents on {here}. Once linked, {here} and each computer below can run agents on each other.</p>
+        <h2 className="text-heading-1 text-text-primary">{readOnly ? `Watch ${preview.maker} from this computer` : `Link this computer with ${preview.maker}`}</h2>
+        {readOnly ? (
+          <p className="text-sm text-text-secondary">
+            Read only. {here} sees the Sessions, agents, transcripts and terminal output on each computer below, and can&apos;t change anything there. They can&apos;t reach {here}, and your linked computers stay as they are.
+          </p>
+        ) : <p className="text-sm text-text-secondary">Linking lets {preview.maker} run agents on {here}. Once linked, {here} and each computer below can run agents on each other.</p>}
       </div>
-      <ul className="w-full max-w-md divide-y divide-border-primary overflow-hidden rounded-lg border border-border-primary text-left" aria-label="Computers on both sides">
+      <ul className="w-full max-w-md divide-y divide-border-primary overflow-hidden rounded-lg border border-border-primary text-left" aria-label={readOnly ? 'Computers to watch' : 'Computers on both sides'}>
         {rows.map(({ name, tag }) => (
           <li key={name} className="flex items-center gap-3 px-3 py-2.5">
             {mark(name)}
             <span className="truncate text-sm text-text-primary">{name}</span>
+            {readOnly && <ReadOnlyPill />}
             {tag && <span className="flex-none rounded bg-surface-secondary px-1.5 py-0.5 text-xs text-text-secondary">{tag}</span>}
           </li>
         ))}
       </ul>
       <div className="flex gap-3">
         <Button type="button" variant="secondary" onClick={cancelLink}>Not mine, cancel</Button>
-        <Button type="button" onClick={() => void confirmLink()}>Link {here}</Button>
+        <Button type="button" onClick={() => void confirmLink()}>{readOnly ? `Watch ${preview.maker}` : `Link ${here}`}</Button>
       </div>
     </div>
   );
@@ -112,9 +120,9 @@ export function LinkFlowView({ flow, onDone }: { flow: Exclude<LinkFlow, { step:
         <div role="status" className="flex items-start gap-3 rounded-lg border border-status-success/30 bg-status-success/10 p-3 text-left">
           <CheckCircle2 className="mt-0.5 h-5 w-5 flex-none text-status-success" aria-hidden="true" />
           <div className="min-w-0">
-            <p className="text-sm font-medium text-text-primary">Linked with {flow.maker}</p>
+            <p className="text-sm font-medium text-text-primary">{flow.access === 'read' ? `Paired Read only with ${flow.maker}` : `Linked with ${flow.maker}`}</p>
             <p className="text-xs text-text-secondary">
-              This computer now reaches {flow.maker}{others > 0 ? ` and ${others} other ${others === 1 ? 'computer' : 'computers'}` : ''}.
+              This computer now {flow.access === 'read' ? 'watches' : 'reaches'} {flow.maker}{others > 0 ? ` and ${others} other ${others === 1 ? 'computer' : 'computers'}` : ''}.
             </p>
           </div>
         </div>

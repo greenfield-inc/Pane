@@ -1,3 +1,4 @@
+import { isReadOnlyHost } from './readOnlyHostStore';
 import { useEffect, useMemo } from 'react';
 import { create } from 'zustand';
 import type { TodoAction, TodoActionResult, TodoCreateInput, TodoDetail, TodoListRow, TodoRecord, TodosSnapshot } from '../../../shared/types/todos';
@@ -74,7 +75,8 @@ function electronTodosApi(): TodosApi | null {
     onChanged: (listener) => api.events.onTodosChanged(listener),
     readDoc: (path) => api.autopilot.readDoc(path),
     openUrl: (url) => { void api.openExternal(url); },
-    files: {
+    // A read-only computer takes no files, so nothing picks, pastes or drops one.
+    files: isReadOnlyHost() ? undefined : {
       pick: async () => {
         const response = await api.dialog.openFile().catch(() => null);
         return response?.success ? response.data ?? null : null;
@@ -126,6 +128,13 @@ interface RemoteTodoAnswer {
 
 interface RemoteAnswerData {
   number?: number;
+}
+
+/** `act` and `create` run on the computer this window shows; one it only watches takes neither (a key can still ask). */
+function refusedReadOnly(): boolean {
+  if (!isReadOnlyHost()) return false;
+  showActionError('Read only', 'This computer gives you read-only access, so its to-dos can’t be changed from here. Nothing was changed.');
+  return true;
 }
 
 /** What another machine's `todos:act` or `todos:create` answered, as far as the screen needs it. */
@@ -318,6 +327,7 @@ export const useTodosStore = create<TodosState>((set, get) => ({
   },
 
   create: async (input) => {
+    if (refusedReadOnly()) return null;
     try {
       const api = todosApi();
       if (!api) throw new Error('To-dos are not available here.');
@@ -335,6 +345,7 @@ export const useTodosStore = create<TodosState>((set, get) => ({
   },
 
   act: async (action) => {
+    if (refusedReadOnly()) return null;
     try {
       const api = todosApi();
       if (!api) throw new Error('To-dos are not available here.');

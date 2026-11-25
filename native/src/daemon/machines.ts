@@ -9,6 +9,7 @@ import { sendDirect } from '@/features/notify/notifyActions';
 import { CLIENT_LABEL, createDaemonClient, DEVICE_LABEL, getRuntimeId, streamingFetch } from './createClient';
 import { useDaemon } from './DaemonProvider';
 import { invokeChannel, readChannel, unwrap } from './invoke';
+import { readUnlessRefused } from './readOnlyReads';
 
 /**
  * Runs `use` with a client for a saved machine that never connects: no event stream, so no
@@ -42,10 +43,10 @@ export function useMachineQuery<T>(
     enabled: machine !== null && (options?.enabled ?? true),
     // A timed read already failed for a reason; the person retries by picking the machine again.
     retry: live ? options?.retry : false,
-    queryFn: () => {
+    queryFn: () => readUnlessRefused<T>(machine ?? current, channel, () => {
       if (live || !machine) return invokeChannel<T>(client, channel, args);
       return withMachineClient(machine, other => readChannel<T>(other, channel, args));
-    },
+    }),
   });
 }
 

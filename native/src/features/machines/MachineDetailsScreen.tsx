@@ -3,11 +3,13 @@ import { Alert, StyleSheet, View } from 'react-native';
 
 import type { RemoteWakeTiming } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
+import { DEVICE_ACCESS_LABELS } from '@shared/types/accessLevel';
 import { MACHINE_COLOR_NAMES } from '@shared/utils/machineColor';
 
 import { useHostsStore } from '@/auth/hostsStore';
 import { useDaemon } from '@/daemon';
 import { isDemoProfile } from '@/features/demo/demoHost';
+import { ReadOnlyChip } from '@/features/hosts/ReadOnlyChip';
 import type { PushSetupResult } from '@/features/notifications/registration';
 import { signOutPush, usePushStore } from '@/features/notifications/usePushSetup';
 import { useTheme } from '@/theme';
@@ -72,21 +74,23 @@ function Details({ machine }: { machine: Machine }) {
           <MachineMark os={machine.os} slot={machine.slot} state={machine.state} variant="tile" size={72} />
           <Text variant="largeTitle" numberOfLines={1} style={styles.center}>{machine.name}</Text>
           <Text variant="subhead" tone="muted" style={styles.center}>{`${machine.os ?? 'Computer'} · ${machine.status}${how}`}</Text>
+          {machine.readOnly ? <ReadOnlyChip /> : null}
         </View>
 
         <ListSection title="Connection" footer={machine.current ? connection.lastError ?? undefined : undefined}>
           <ListRow testID="machine-address" title="Address" subtitle={address} />
           <ListRow testID="machine-status" title="Status" subtitle={machine.status} />
+          {machine.readOnly ? <ListRow testID="machine-access" title={DEVICE_ACCESS_LABELS.read} subtitle="This phone watches this machine and can’t change anything there." /> : null}
           {machine.current && connection.lastWake ? (
             <ListRow testID="machine-last-wake" title="Last return to Pane" subtitle={describeWake(connection.lastWake)} />
           ) : null}
         </ListSection>
 
-        <ListSection title="On this phone" footer="Every saved machine can alert this phone. The color marks this machine everywhere in Pane.">
+        <ListSection title="On this phone" footer={`${machine.readOnly ? 'A machine this phone only watches sends it no alerts.' : 'Every saved machine can alert this phone.'} The color marks this machine everywhere in Pane.`}>
           <ListRow
             testID="machine-notifications"
             title="Notifications"
-            value={demo ? 'Not in the demo' : profile ? alertText(alerts) : 'After you connect'}
+            value={demo ? 'Not in the demo' : machine.readOnly ? DEVICE_ACCESS_LABELS.read : profile ? alertText(alerts) : 'After you connect'}
             trailing={profile && !demo ? 'chevron' : undefined}
             onPress={profile && !demo ? () => router.push('/settings/notifications') : undefined}
           />

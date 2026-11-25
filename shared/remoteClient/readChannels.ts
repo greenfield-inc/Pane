@@ -69,6 +69,8 @@ export const REMOTE_READ_CHANNELS = new Set([
   'panels:list',
   'panels:getActive',
   'panels:agent-statuses',
+  // Every agent's screen as text; a read-only viewer reads a terminal's size from it.
+  'mission-control:snapshots',
   'orchestration-sessions:activity-list',
   'panels:checkInitialized',
   'panels:get-output',

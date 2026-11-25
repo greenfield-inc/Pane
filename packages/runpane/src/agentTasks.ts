@@ -1,6 +1,6 @@
 import type { ParsedArgs } from './commands';
 import { confirmMutation } from './daemonActions';
-import { invokeDaemon } from './daemonClient';
+import { invokeDaemon, routedOtherMachine } from './daemonClient';
 import { RunpaneError } from './errors';
 import { buildPaneLink } from './links';
 import { describeReport } from './watchLines';
@@ -30,7 +30,7 @@ interface AgentStatusResult {
   status: AgentStatus;
   screen: string;
   hasUndeliveredText: boolean;
-  link: string;
+  link?: string;
   report?: AgentReport;
 }
 
@@ -166,8 +166,9 @@ export async function runAgentsStatus(parsed: ParsedArgs): Promise<number> {
     status: (entry && STATUS_BY_KIND.get(entry.kind)) ?? 'unknown',
     screen: screen.text,
     hasUndeliveredText: screen.composer.hasUndeliveredText,
-    link: buildPaneLink({ kind: 'pane', id: paneId, panelId }),
   };
+  // A pane:// link opens on this machine.
+  if (!routedOtherMachine()) result.link = buildPaneLink({ kind: 'pane', id: paneId, panelId });
   if (report) result.report = report;
   const reportLine = report ? `\nReport: ${describeReport(report)} (${report.reportedAt})` : '';
   print(parsed, result, `${result.status}${reportLine}\n${markSuggestionLine(result.screen, screen.composer.ghostText)}`);

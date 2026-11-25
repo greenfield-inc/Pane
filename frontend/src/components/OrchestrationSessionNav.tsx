@@ -1,3 +1,4 @@
+import { isReadOnlyHost, useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
@@ -292,6 +293,7 @@ export function OrchestrationSessionNav({
   const handleSessionKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>, session: OrchestrationSessionRecord, list: SessionOrderList) => {
     if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
       event.preventDefault();
+      if (isReadOnlyHost()) return;
       const order = stepOrder(listSessions(list).map(item => item.id), session.id, event.key === 'ArrowUp' ? -1 : 1);
       if (!order) return;
       focusAfterMove.current = sessionTestId(session, list);
@@ -541,7 +543,7 @@ export function OrchestrationSessionNav({
                 const bounds = event.currentTarget.getBoundingClientRect();
                 openSessionMenu(session, bounds.left, bounds.bottom, event.currentTarget);
               }}
-              className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
+              className="needs-full-access inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
             >
               <MoreHorizontal className="h-3.5 w-3.5" />
             </button>
@@ -568,7 +570,7 @@ export function OrchestrationSessionNav({
               data-compact-rail-item
               aria-label="New Session"
               onClick={() => setShowCreate(true)}
-              className="flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
+              className="needs-full-access flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
             >
               <Plus className="h-4 w-4" />
             </button>
@@ -706,7 +708,7 @@ export function OrchestrationSessionNav({
               event.stopPropagation();
               setShowCreate(true);
             }}
-            className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
+            className="needs-full-access inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -759,6 +761,7 @@ interface SessionContextMenuProps {
 }
 
 function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: SessionContextMenuProps) {
+  const readOnly = useReadOnlyHost();
   const moveBlockedReason = useMoveToHostBlockedReason();
   const [renaming, setRenaming] = useState<SessionContextMenuState | null>(null);
   const [name, setName] = useState('');
@@ -795,7 +798,7 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
 
   return (<>
     <TerminalPopover
-      visible={menu !== null}
+      visible={menu !== null && !readOnly}
       x={menu?.x ?? 0}
       y={menu?.y ?? 0}
       onClose={onClose}

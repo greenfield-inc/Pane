@@ -15,6 +15,8 @@ export interface MachineRef {
   os: MachineOs | null;
   slot: number;
   letters: string;
+  /** This computer only watches it, so its rows have no actions. */
+  readOnly?: boolean;
 }
 
 /** One machine's lists, as its `machines:read` answers gave them. */

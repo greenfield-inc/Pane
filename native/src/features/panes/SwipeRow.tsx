@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View, type AccessibilityActionEvent } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
+import { useReadOnlyHost } from '@/daemon';
 import { useTheme, type ThemeColors } from '@/theme';
 import { Text } from '@/ui';
 
@@ -16,7 +17,7 @@ interface SwipeRowActions {
 }
 
 /**
- * A home-list row that swipes right to pin or unpin, and left to pause or resume and archive. Pin and
+ * A home-list row of the machine the phone is on (it stays put when the phone only watches it) that swipes right to pin or unpin, and left to pause or resume and archive. Pin and
  * pause are optional.
  * The swipe actions' testIDs are `<testIDPrefix>-swipe-pin-<id>`, `<testIDPrefix>-swipe-pause-<id>`
  * and `<testIDPrefix>-swipe-archive-<id>`.
@@ -27,9 +28,11 @@ export function SwipeRow({ testIDPrefix, id, pinned, onTogglePinned, onArchive, 
   children: ReactNode;
 }) {
   const theme = useTheme();
+  const readOnly = useReadOnlyHost();
   return (
     <View style={[styles.outer, { borderRadius: theme.radius.md }]}>
       <ReanimatedSwipeable
+        enabled={!readOnly}
         friction={2}
         // The screen's left edge belongs to swipe-back on pushed screens.
         hitSlop={{ left: -24 }}
@@ -72,8 +75,11 @@ export function SwipeRow({ testIDPrefix, id, pinned, onTogglePinned, onArchive, 
   );
 }
 
-/** Pin/Unpin and Pause/Resume when the row has them, and Archive, as screen reader actions, for the row's focusable Pressable. */
-export function swipeRowAccessibility({ pinned, onTogglePinned, onArchive, pause }: SwipeRowActions) {
+/** Pin/Unpin and Pause/Resume when the row has them, and Archive, as screen reader actions, for the row's focusable Pressable; none for a row that doesn't swipe. */
+export function useSwipeRowAccessibility(actions: SwipeRowActions | undefined) {
+  const readOnly = useReadOnlyHost();
+  if (!actions || readOnly) return {};
+  const { pinned, onTogglePinned, onArchive, pause } = actions;
   return {
     accessibilityActions: [
       ...(onTogglePinned ? [{ name: 'pin', label: pinned ? 'Unpin' : 'Pin' }] : []),

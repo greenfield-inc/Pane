@@ -2,6 +2,9 @@ import { LegendList } from '@legendapp/list/react-native';
 import { router } from 'expo-router';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
+import { DEVICE_ACCESS_LABELS } from '@shared/types/accessLevel';
+
+import { ReadOnlyChip } from '@/features/hosts/ReadOnlyChip';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
@@ -113,7 +116,7 @@ function MachineChip({ machine, selected, connecting, onPress }: { machine: Mach
     <Pressable
       testID={`machine-chip-${machine.name}`}
       accessibilityRole="button"
-      accessibilityLabel={`${machine.name}, ${machine.status}`}
+      accessibilityLabel={[machine.name, machine.status, machine.readOnly ? DEVICE_ACCESS_LABELS.read : undefined].filter(Boolean).join(', ')}
       accessibilityHint={selected ? 'Opens machine details' : machine.current ? 'Lists this machine only' : machine.profile ? 'Switches to this machine' : 'Connects to this machine'}
       accessibilityState={{ selected, disabled: inactive, busy: connecting }}
       onPress={onPress}
@@ -135,6 +138,7 @@ function MachineChip({ machine, selected, connecting, onPress }: { machine: Mach
       >
         {machine.name}
       </Text>
+      {machine.readOnly ? <ReadOnlyChip color={selected ? theme.colors.background : undefined} /> : null}
     </Pressable>
   );
 }

@@ -99,7 +99,7 @@ export function PhoneTodoList({ onOpen, onNew, lead }: PhoneTodoListProps) {
       <PhoneHeader
         title="To-dos"
         lead={lead}
-        right={<button type="button" onClick={onNew} aria-label="New to-do" className={PHONE_ICON_BUTTON} data-testid="phone-todos-new"><Plus className="h-5 w-5" aria-hidden="true" /></button>}
+        right={<button type="button" onClick={onNew} aria-label="New to-do" className={`needs-full-access ${PHONE_ICON_BUTTON}`} data-testid="phone-todos-new"><Plus className="h-5 w-5" aria-hidden="true" /></button>}
       />
       <div role="tablist" aria-label="Which to-dos" className="scrollbar-none flex shrink-0 gap-1.5 overflow-x-auto border-b border-border-secondary py-2.5 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))]" data-testid="phone-todos-pills">
         {PILLS.map((pill) => (

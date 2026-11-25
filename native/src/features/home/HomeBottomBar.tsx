@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { AppState, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { AppState, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
@@ -18,12 +18,14 @@ export function bottomBarHeight(insetBottom: number): number {
 }
 
 /**
- * Home's bottom bar, in thumb reach: Search panes, and + for a new Session or Pane. It rides up with
+ * Home's bottom bar, in thumb reach: Search panes, and + for a new Session or Pane
+ * (none when no machine takes one, `canCreate`). It rides up with
  * the keyboard, and fades the list out under it.
  */
-export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (query: string) => void }) {
+export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; onQuery: (query: string) => void; canCreate: boolean }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const keyboard = useAnimatedKeyboard();
   const returns = useReturnsToForeground();
   // The keyboard closes while the app is in the background, and that last update never reaches
@@ -32,7 +34,8 @@ export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (que
   const lift = useAnimatedStyle(() => ({ transform: [{ translateY: -Math.max(0, keyboard.height.value - insets.bottom) }] }), [returns, insets.bottom]);
   return (
     <Animated.View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 12) }, lift]}>
-      <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+      {/* Keyed by its size: an Svg keeps drawing at its first one when a foldable opens or closes. */}
+      <Svg key={`${width}:${insets.bottom}`} style={StyleSheet.absoluteFill} pointerEvents="none">
         <Defs>
           <LinearGradient id="home-bar-fade" x1="0" y1="0" x2="0" y2="1">
             <Stop offset="0" stopColor={theme.colors.background} stopOpacity={0} />
@@ -62,7 +65,7 @@ export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (que
           </IconButton>
         ) : null}
       </View>
-      <Pressable
+      {canCreate ? <Pressable
         testID="home-new"
         accessibilityRole="button"
         accessibilityLabel="New"
@@ -71,7 +74,7 @@ export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (que
         style={({ pressed }) => [styles.new, { backgroundColor: theme.colors.accent, opacity: pressed ? 0.85 : 1 }]}
       >
         <Icon ios="plus" android="add" size={22} color={theme.colors.onAccent} />
-      </Pressable>
+      </Pressable> : null}
     </Animated.View>
   );
 }

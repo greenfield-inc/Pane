@@ -1,3 +1,5 @@
+import { isReadOnlyHost, useReadOnlyHost } from '../../stores/readOnlyHostStore';
+import { adoptOwnerGrid, OWNER_GRID_CHECK_MS, ownerGridChanged } from '../../utils/ownerTerminalGrid';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -57,7 +59,10 @@ export function useRemoteTerminal({
     terminalRef.current?.focus();
   };
 
+  const readOnly = useReadOnlyHost();
+  const notRunningRef = useRef(false);
   const sendInput = useCallback(async (data: string) => {
+    if (isReadOnlyHost()) return;
     try {
       await adapter.sendTerminalInput(panel.id, data);
     } catch (error) {
@@ -69,7 +74,7 @@ export function useRemoteTerminal({
   const resetTerminal = () => {
     terminalRef.current?.clear();
     terminalRef.current?.focus();
-    void adapter.clearTerminalScrollback(panel.id).catch(error => {
+    if (!isReadOnlyHost()) void adapter.clearTerminalScrollback(panel.id).catch(error => {
       setStatus({ kind: 'problem', message: error instanceof Error ? error.message : 'Failed to reset terminal' });
     });
   };
@@ -84,7 +89,10 @@ export function useRemoteTerminal({
 
   const hydrateTerminal = useCallback(async (terminal: Terminal, owns: () => boolean) => {
     // Every attach, a reconnect included, starts a shell nobody has started since the computer restarted.
-    if (!await adapter.checkPanelInitialized(panel.id)) {
+    // A read-only viewer starts nothing, and draws at the owner's size.
+    const watching = isReadOnlyHost();
+    if (watching) await adoptOwnerGrid(panel.id, terminal, adapter.terminalSnapshots);
+    else if (!await adapter.checkPanelInitialized(panel.id)) {
       await adapter.initializePanel(panel.id, { sessionId, cols: terminal.cols, rows: terminal.rows });
     }
     if (!owns()) return false;
@@ -92,10 +100,12 @@ export function useRemoteTerminal({
     const hydrated = await hydrateRemoteTerminalSnapshot(terminal, async () => {
       const state = await adapter.getTerminalState(panel.id);
       fullScreen = state?.isAlternateScreen === true;
-      return terminalSnapshotText(state);
+      // Its first output, when someone starts it, replaces this line.
+      notRunningRef.current = watching && !state;
+      return watching && !state ? '\x1b[90mThis tab is not running.\x1b[0m' : terminalSnapshotText(state);
     }, () => terminalRef.current === terminal && owns());
     // A full-screen app's frame was drawn for the host's size; a forced resize makes the app repaint at this one.
-    if (hydrated && fullScreen) await adapter.resizeTerminal(panel.id, terminal.cols, terminal.rows, { force: true });
+    if (hydrated && fullScreen && !watching) await adapter.resizeTerminal(panel.id, terminal.cols, terminal.rows, { force: true });
     return hydrated;
   }, [adapter, panel.id, sessionId]);
 
@@ -104,6 +114,15 @@ export function useRemoteTerminal({
     if (terminal) terminal.options.cursorBlink = !caretResting;
   }, [caretResting]);
 
+  // Keys and query answers stop here while the host takes none, and no cursor invites them.
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.disableStdin = readOnly;
+    terminal.options.cursorInactiveStyle = readOnly ? 'none' : 'outline';
+    terminal.options.theme = terminalTheme(readOnly);
+  }, [readOnly]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -111,6 +130,7 @@ export function useRemoteTerminal({
     const terminal = new Terminal({
       allowProposedApi: true,
       convertEol: true,
+      disableStdin: isReadOnlyHost(),
       cursorBlink: !caretRestingRef.current,
       fontFamily: 'Menlo, Monaco, Consolas, "Liberation Mono", monospace',
       fontSize: 13,
@@ -118,12 +138,8 @@ export function useRemoteTerminal({
       // Static AA floor: the remote PWA is browser-served with no AppConfig transport,
       // so the desktop high-contrast setting cannot be plumbed here.
       minimumContrastRatio: 4.5,
-      theme: {
-        background: '#010409',
-        foreground: '#e6edf3',
-        cursor: '#58a6ff',
-        selectionBackground: '#264f78',
-      },
+      cursorInactiveStyle: isReadOnlyHost() ? 'none' : 'outline',
+      theme: terminalTheme(isReadOnlyHost()),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -138,6 +154,7 @@ export function useRemoteTerminal({
       if (!container.isConnected || container.clientWidth <= 0 || container.clientHeight <= 0) {
         return;
       }
+      if (isReadOnlyHost()) return;
       fitAddon.fit();
       void adapter.resizeTerminal(panel.id, terminal.cols, terminal.rows).catch(() => {});
     };
@@ -169,6 +186,10 @@ export function useRemoteTerminal({
         terminalOutputPayloadSchema,
       );
       if (!payload || payload.panelId !== panel.id) return;
+      if (notRunningRef.current) {
+        notRunningRef.current = false;
+        terminal.reset();
+      }
       terminal.write(payload.output, () => {
         if (disposed) return;
         void adapter.ackTerminalOutput(
@@ -222,6 +243,22 @@ export function useRemoteTerminal({
     };
   }, [adapter, panel.id, sessionId, sendInput, hydrateTerminal]);
 
+  const loading = status.kind === 'loading';
+  // The owner's window decides a watched terminal's size, and says nothing when it changes.
+  useEffect(() => {
+    if (!readOnly || loading) return;
+    const timer = window.setInterval(() => {
+      const terminal = terminalRef.current;
+      if (!terminal) return;
+      void ownerGridChanged(panel.id, terminal, adapter.terminalSnapshots).then((changed) => {
+        if (!changed || terminalRef.current !== terminal) return;
+        const generation = ++snapshotGenerationRef.current;
+        return hydrateTerminal(terminal, () => terminalRef.current === terminal && snapshotGenerationRef.current === generation);
+      }).catch(() => undefined);
+    }, OWNER_GRID_CHECK_MS);
+    return () => window.clearInterval(timer);
+  }, [adapter, hydrateTerminal, loading, panel.id, readOnly]);
+
   useEffect(() => adapter.onRestore(async signal => {
     const terminal = terminalRef.current;
     if (!terminal || signal.aborted) return;
@@ -244,10 +281,17 @@ export function useRemoteTerminal({
 
   return {
     containerRef,
-    loading: status.kind === 'loading',
+    loading,
     problem: status.kind === 'problem' ? status.message : null,
     focusTerminal, sendInput, resetTerminal, scrollLines, scrollToBottom,
   };
+}
+
+/** While watching, the cursor takes the background's colour, since xterm can't turn a focused one off. */
+function terminalTheme(readOnly: boolean) {
+  const background = '#010409';
+  const foreground = '#e6edf3';
+  return { background, foreground, cursor: readOnly ? background : '#58a6ff', cursorAccent: readOnly ? foreground : background, selectionBackground: '#264f78' };
 }
 
 function getTerminalViewerId(): string {

@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import type { NotifyItem, NotifySharedState } from '@shared/types/notify';
 import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSession';
 
+import { sessionKey } from '@/features/approvals/approvals';
+import { sessionWaiting } from '@/features/home/statusBoard';
+
 import { buildAllMachinesList, feedsAnswered, sinceLabel, type MachineFeed } from './allMachinesList';
 
 const notify = (items: Array<Pick<NotifyItem, 'id' | 'createdAt' | 'title'> & { paneId?: string }>): NotifySharedState => ({
@@ -68,7 +71,7 @@ describe('buildAllMachinesList', () => {
   it('describes a Pane with its repository and Session, and marks it blocked while it waits on you', () => {
     const { recent } = buildAllMachinesList([studio, build], '');
     const fromStudio = recent.find(row => row.key === 'profile-studio:pane:pane-1');
-    expect(fromStudio?.type === 'pane' && fromStudio.pane).toMatchObject({ repository: 'acme-web', session: 'Spring sale launch', status: 'blocked' });
+    expect(fromStudio?.type === 'pane' && fromStudio.pane).toMatchObject({ repository: 'acme-web', session: { name: 'Spring sale launch' }, status: 'blocked' });
     const fromBuild = recent.find(row => row.key === 'profile-build:pane:pane-1');
     expect(fromBuild?.type === 'pane' && fromBuild.pane).toMatchObject({ repository: 'infra', status: 'blocked' });
   });
@@ -98,13 +101,12 @@ describe('buildAllMachinesList', () => {
       inSession('held', 30, { state: 'sent' }),
     ] };
     const buildNotify: NotifySharedState = { ...studio.snapshot!.notify!, items: [inSession('b', 40)] };
-    const { recent } = buildAllMachinesList([
+    const counts = sessionWaiting(buildAllMachinesList([
       { ...studio, snapshot: { ...studio.snapshot!, notify: studioNotify } },
       { ...build, snapshot: { ...build.snapshot!, notify: buildNotify, sessions: [session('s-1', 'Spring sale launch', [], '2026-10-30T09:10:00Z')] } },
-    ], '');
-    const waitingOf = (key: string) => recent.flatMap(row => (row.key === key && row.type === 'session' ? [row.waiting] : []));
-    expect(waitingOf('profile-studio:session:s-1')).toEqual([2]);
-    expect(waitingOf('profile-build:session:s-1')).toEqual([1]);
+    ], ''));
+    expect(counts.get(sessionKey('profile-studio', 's-1'))).toBe(2);
+    expect(counts.get(sessionKey('profile-build', 's-1'))).toBe(1);
   });
 
   it('lists a machine that has not answered yet as nothing', () => {
@@ -126,8 +128,6 @@ describe('buildAllMachinesList', () => {
     expect(list.offline).toEqual([{ key: 'profile-build', name: 'build-box', waiting: 2 }]);
     expect(list.waiting.map(row => row.machineKey)).toEqual(['profile-studio']);
     expect(list.staleQuestions).toEqual([]);
-    const row = list.recent.find(candidate => candidate.key === 'profile-build:session:s-1');
-    expect(row?.type === 'session' && row.waiting).toBe(0);
   });
 
   it('shows no row for an offline machine with nothing waiting', () => {
@@ -142,8 +142,6 @@ describe('buildAllMachinesList', () => {
     expect(list.staleQuestions.map(row => row.key)).toEqual(['profile-studio:question:s']);
     const pane = list.recent.find(row => row.key === 'profile-studio:pane:pane-1');
     expect(pane?.type === 'pane' && pane.pane.status).not.toBe('blocked');
-    const sessionRow = list.recent.find(row => row.key === 'profile-studio:session:s-1');
-    expect(sessionRow?.type === 'session' && sessionRow.waiting).toBe(0);
   });
 
   it('lists the last 24 hours\' answered and closed items from online machines, newest first', () => {

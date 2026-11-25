@@ -7,6 +7,7 @@ import type { AgentChatMessage, AgentChatReceipt } from '../../../../shared/type
 import type { TerminalPausedMark, ToolPanel } from '../../../../shared/types/panels';
 import { CHAT_CONVERSATION_LIMIT, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabConversation, type ChatTabSwitchBanner, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabTranscript, type ChatTabView, type ChatTurnTime } from '../../../../shared/types/chatTab';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
+import { readOnlyPaneCaller } from '../../daemon/commandRegistry';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { AgentCommand } from './agentProcess';
 import { ChatTabRuntime, chatFailure, isAuthRequired, type RuntimeExit } from './runtime';
@@ -152,7 +153,7 @@ export class ChatTabManager {
   view(panelId: string, limit = DEFAULT_VIEW_LIMIT, start = true): ChatTabView {
     const state = this.required(panelId);
     const tab = this.tab(panelId);
-    if (start && !tab.runtime && !tab.starting && state.status !== 'stopped') void this.ensure(panelId).catch(() => undefined);
+    if (start && !readOnlyPaneCaller() && !tab.runtime && !tab.starting && state.status !== 'stopped') void this.ensure(panelId).catch(() => undefined);
     return this.snapshot(panelId, state, tab, limit);
   }
 

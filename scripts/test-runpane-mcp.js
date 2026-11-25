@@ -526,6 +526,17 @@ test('workspace tools place the machine and path in the command line and the com
   assert.deepEqual(buildToolArgv(tool('workspace_read'), { path: '~/notes.md' }), ['workspace', 'read', '~/notes.md', '--json']);
 });
 
+test('a look tool with a machine asks that machine, and only a machine name fits there', () => {
+  const { buildMcpTools, buildToolArgv } = require(dist('mcpTools.js'));
+  const tool = (name) => buildMcpTools().find((item) => item.name === name);
+  assert.deepEqual(buildToolArgv(tool('agents_status'), { machine: 'tylers-mac', panel: 'p1' }), ['workspace', 'tylers-mac', 'agents', 'status', '--panel=p1', '--json']);
+  assert.deepEqual(buildToolArgv(tool('sessions_overview'), { session: 's1' }), ['sessions', 'overview', '--session=s1', '--json']);
+  for (const machine of ['write', 'list', '--help', '']) {
+    assert.throws(() => buildToolArgv(tool('sessions_list'), { machine }), /machine must be a computer's name/);
+  }
+  assert.equal(tool('panels_submit').inputSchema.properties.machine, undefined);
+});
+
 test('workspace write needs yes from the server, then writes the content it was given', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   const target = path.join(paneDir, 'prompt.md');
@@ -1515,6 +1526,13 @@ test("Pane's HTTP endpoint serves the same instructions, tools and docs as stdio
   const handler = createPaneMcpHttpHandler({
     runCli: (argv, signal, env, auth) => {
       calls.push({ argv, client: auth?.clientId });
+      if (argv[0] === 'workspace') {
+        return Promise.resolve({ code: 1, stderr: '', stdout: JSON.stringify({ ok: false, error: {
+          code: 'ERR_READ_ONLY_ACCESS',
+          message: 'Use `runpane workspace tylers-mac panels screen --panel p1`, not `runpane workspace tylers-mac panels submit --panel p1`.',
+          next: 'Ask the owner.',
+        } }) });
+      }
       return runCliProcess(process.execPath, [dist('cli.js'), ...argv], { env: { ...process.env, ...env }, signal });
     },
   });
@@ -1541,6 +1559,10 @@ test("Pane's HTTP endpoint serves the same instructions, tools and docs as stdio
     const result = await overHttp.callTool({ name: 'docs_search', arguments: { query: 'notify' } });
     assert.equal(result.isError, undefined);
     assert.deepEqual(calls, [{ argv: ['docs', 'search', '--query=notify', '--json'], client: 'tab-1' }]);
+    const refused = await overHttp.callTool({ name: 'agents_status', arguments: { machine: 'tylers-mac', panel: 'p1' } });
+    assert.equal(refused.isError, true);
+    assert.match(refused.content[0].text, /^Use `panels_screen` with machine: tylers-mac, panel: p1/);
+    assert.match(refused.content[0].text, /not `runpane workspace tylers-mac panels submit --panel p1`\.\nNext: Ask the owner\.\nCode: ERR_READ_ONLY_ACCESS$/);
   } finally {
     await overHttp.close();
     server.close();

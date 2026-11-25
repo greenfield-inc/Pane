@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../stores/readOnlyHostStore';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { API } from '../utils/api';
@@ -433,6 +434,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     return unsubscribe;
   }, [mainRepoSessionId]);
 
+  const readOnly = useReadOnlyHost();
   const mainRepoGit = useMainRepoGitActions(mainRepoSessionId, mainRepoSession);
 
   // Listen for panel updates from the backend
@@ -581,7 +583,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
 
       {!activeMainRepoSession && !isLoadingSession && (
         <div className="flex-1 flex items-center justify-center text-text-secondary">
-          No session selected
+          {readOnly ? 'A read-only computer does not show its main workspaces. Open a Pane to watch it.' : 'No session selected'}
         </div>
       )}
 

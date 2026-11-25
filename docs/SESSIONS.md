@@ -293,8 +293,9 @@ adding Panes, or `runpane` focusing one of its Panes leaves it collapsed. Each
 device remembers the Sessions you opened, separately for each host: the
 desktop in its own settings, the remote web app (PWA) in browser storage
 (`pane.remotePwa.expandedSessions@<host id>`). Opening a Session under Pinned
-opens it under Sessions too. The native iOS and Android app does not follow
-this yet: its Sessions start expanded and it forgets on restart.
+opens it under Sessions too. The native iOS and Android app keeps them in one
+file per host in its cache folder (`open-sessions/`), and Home and its Sessions
+screen share them.
 Child Pane rows are indented beyond the Session chat icon and keep the ordinary
 Pane actions. Create Pane, opened while a Session is showing, has an
 **Add to <Session>** checkbox, on by default, that files the new Pane under that

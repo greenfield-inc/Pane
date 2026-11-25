@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import { boundary, decodeOptionalBoundary } from '@shared/validation/boundaryDecoder';
 
+import { isReadOnlyProfile } from '@/auth/access';
 import { useHostsStore } from '@/auth/hostsStore';
 import { secureStore } from '@/auth/secureStore';
 import { invokeChannel } from '@/daemon';
@@ -86,7 +87,8 @@ async function run(): Promise<void> {
   running = true;
   try {
     await preferencesLoaded;
-    const profiles = useHostsStore.getState().profiles.filter(profile => !isDemoProfile(profile));
+    // A computer this phone is paired Read only with sends it no alerts.
+    const profiles = useHostsStore.getState().profiles.filter(profile => !isDemoProfile(profile) && !isReadOnlyProfile(profile));
     const saved = new Set(profiles.map(profile => profile.id));
     usePushStore.setState(state => ({
       results: Object.fromEntries(Object.entries(state.results).filter(([id]) => saved.has(id))),

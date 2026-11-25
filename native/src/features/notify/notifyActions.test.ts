@@ -100,6 +100,12 @@ describe('sendNotifyCommand', () => {
       .resolves.toEqual({ status: 'refused', message: 'Already answered on Parsa’s MacBook. Nothing was sent.' });
   });
 
+  it('passes on what to do next when the host refuses a read-only phone', async () => {
+    const fetch = reply(409, { ok: false, error: { code: 'ERR_READ_ONLY_ACCESS', message: 'This device is paired Read only. Nothing was changed.', next: 'Ask the owner for full access.' } });
+    await expect(sendNotifyCommand(sender(fetch), work, { type: 'answer', id: 'q1', answer: { approved: true } }))
+      .resolves.toEqual({ status: 'refused', message: 'This device is paired Read only. Nothing was changed. Next: Ask the owner for full access.' });
+  });
+
   it('says the host is unreachable when the request fails', async () => {
     const fetch: RemoteFetch = vi.fn(async () => { throw new TypeError('Network request failed'); });
     await expect(sendNotifyCommand(sender(fetch), work, { type: 'answer', id: 'q1', answer: { approved: true } }))

@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
+import { useReadOnlyHost } from '@/daemon';
 import { useTheme } from '@/theme';
 import { Icon, SkeletonSwap } from '@/ui';
 
@@ -12,10 +13,11 @@ import type { PaneActions } from './usePaneActions';
 
 export interface SidebarItemContext {
   actions: PaneActions;
-  /** Approvals waiting from a Session on this machine. */
+  /** What waits on the person in a Session on this machine. */
   waitingFor: (sessionId: string) => number;
   onToggleSection: (section: SidebarSection) => void;
-  onToggleNested: (nestedKey: string) => void;
+  /** Shows or hides a Session's panes. */
+  onToggleSession: (sessionId: string) => void;
   retry: (what: 'sessions' | 'archived') => void;
   /** What rows sit on: the page, or a card. */
   background?: string;
@@ -30,6 +32,7 @@ export function SidebarItemView({ item, previous, first, context }: {
   context: SidebarItemContext;
 }) {
   const theme = useTheme();
+  const readOnly = useReadOnlyHost();
   const { actions, background } = context;
   switch (item.type) {
     case 'section':
@@ -41,7 +44,7 @@ export function SidebarItemView({ item, previous, first, context }: {
           // Flush under the Repositories header or the top of the list, spaced after that.
           first={first || previous?.type === 'section'}
           icon={<Icon ios="folder" android="folder" size={14} />}
-          add={{
+          add={readOnly ? undefined : {
             label: `New pane in ${item.title}`,
             testID: `panes-new-${item.projectId}`,
             onPress: () => router.push({ pathname: '/new', params: { kind: 'pane', projectId: String(item.projectId) } }),
@@ -69,13 +72,14 @@ export function SidebarItemView({ item, previous, first, context }: {
           background={background}
           waiting={context.waitingFor(item.session.id)}
           onOpen={() => actions.openSession(item.session.id)}
-          onToggleNested={() => context.onToggleNested(item.nestedKey)}
+          onToggleNested={() => context.onToggleSession(item.session.id)}
           onTogglePinned={() => actions.toggleSessionPinned(item.session.id, !item.session.isPinned)}
           onArchive={() => actions.archiveSession(item.session.id)}
           onTogglePaused={() => actions.setSessionPaused(item.session.id, !item.session.paused)}
         />
       );
     case 'archived':
+      if (readOnly) return <ArchivedRow item={item} />;
       return item.kind === 'session'
         ? <ArchivedRow item={item} onRestore={() => actions.restoreSession(item.id)} />
         : <ArchivedRow item={item} onRestore={() => actions.restorePane(item.id)} onDelete={() => actions.deletePane(item)} />;
@@ -86,14 +90,6 @@ export function SidebarItemView({ item, previous, first, context }: {
         ? <Notice danger message={item.text} action={{ title: 'Try again', onPress: () => context.retry(item.retry ?? 'sessions') }} />
         : <SidebarNote testID={item.key} text={item.text} />;
   }
-}
-
-/** Shows or hides one Session row's nested panes. */
-export function toggleMember(current: ReadonlySet<string>, member: string): ReadonlySet<string> {
-  const next = new Set(current);
-  if (next.has(member)) next.delete(member);
-  else next.add(member);
-  return next;
 }
 
 const styles = StyleSheet.create({

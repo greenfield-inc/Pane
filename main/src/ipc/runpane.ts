@@ -4,7 +4,8 @@ import { computerTailnetName } from '../../../shared/types/remoteComputers';
 import { decodeChatPanelState } from '../services/chatTabs/state';
 import { createChatTab } from './chatTabs';
 import { chatTabLastMessage, chatTabNoTerminal, chatTabOutput, chatTabScreen, submitChatTab, waitForChatTab } from './runpaneChatTabs';
-import { paneCommandCaller, paneCommandSignal } from '../daemon/commandRegistry';
+import { paneCommandCaller, paneCommandSignal, readOnlyPaneCaller } from '../daemon/commandRegistry';
+import { READ_ONLY_ACCESS_CODE } from '../../../shared/types/accessLevel';
 import { MAX_WORKSPACE_WAIT_TIMEOUT_MS, WorkspaceWatchCancelledError, WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
 import { failureDetails, FailureLimiter } from '../utils/failureTelemetry';
 import { ownsRemovableWorktree } from '../utils/owns-removable-worktree';
@@ -1506,6 +1507,9 @@ export function registerRunpaneHandlers(
       const panel = resolvePanel(normalized.panelId);
       const limit = normalized.limit ?? DEFAULT_PANEL_OUTPUT_LIMIT;
       if (panel.type === 'chat') return chatTabOutput(getChatTabManager(), panel, limit);
+      if (panel.type !== 'terminal' && readOnlyPaneCaller()) {
+        throw new PaneError(READ_ONLY_ACCESS_CODE, `A device paired Read only reads terminal and chat tabs; tab ${panel.id} is a ${panel.type} tab, so nothing was read.`, 'Ask the computer\'s owner what that tab shows.');
+      }
       const scrollbackResult = panel.type === 'terminal' ? await panelScrollbackOutput(panel, limit) : null;
 
       if (scrollbackResult) {
