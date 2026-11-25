@@ -152,7 +152,14 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
     },
     restore: async (plugin) => {
       const result = applied(await answer(api().restore(plugin), profileSaveResultSchema));
-      set(state => ({ saved: withoutPlugin(state.saved, plugin), drafts: withoutPlugin(state.drafts, plugin) }));
+      set(state => {
+        // A file you added (New subagent, New skill) is gone after a restore: open the profile's identity instead.
+        const current = state.place;
+        const place = current.level === 'profile' && current.plugin === plugin && !result.plugin.files.includes(current.file)
+          ? { ...current, file: result.plugin.profiles.find(item => item.name === current.profile)?.entry ?? result.path }
+          : current;
+        return { place, saved: withoutPlugin(state.saved, plugin), drafts: withoutPlugin(state.drafts, plugin) };
+      });
       return result;
     },
     setPhoto: async (ref, base64) => {

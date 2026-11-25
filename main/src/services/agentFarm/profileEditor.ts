@@ -93,6 +93,20 @@ function titleCase(name: string): string {
   return name.split(/[-_]/).filter(Boolean).map(word => word[0].toUpperCase() + word.slice(1)).join(' ');
 }
 
+/**
+ * Why an Agent Farm command failed, in one line: its `error:` line (a YAML error prints a code
+ * snippet after it, ending in a caret line), else its last line, else `fallback`. Each of `folders` is shown as `shownAs`.
+ */
+function agentFarmReason(failure: { stderr: string; fallback: string }, folders: string[] = [], shownAs = ''): string {
+  const lines = failure.stderr.split('\n').map(line => line.trim()).filter(Boolean);
+  const line = lines.find(entry => /^error:/i.test(entry)) ?? lines.at(-1) ?? failure.fallback;
+  let reason = line.replace(/^(error:\s*)+/i, '').replace(/[:.]+$/, '');
+  for (const folder of folders) reason = reason.split(folder).join(shownAs);
+  return reason;
+}
+
+const stderrSchema = boundary.object({ stderr: boundary.string });
+
 function nameError(name: string, what: string): PaneError {
   return new PaneError('PROFILE_NAME_INVALID', `"${name}" isn't a ${what} name Pane can use.`, 'Use lowercase letters, digits, - and _, starting with a letter.');
 }
@@ -323,8 +337,8 @@ export class ProfileEditor {
       await this.agentFarm(['plugin', 'validate', folder]);
     } catch (error) {
       if (error instanceof PaneError) throw error;
-      const stderr = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr ?? '';
-      const reason = (stderr.trim().split('\n').filter(line => line.trim()).at(-1) ?? reasonOf(error)).replace(/^(Error:\s*)+/, '').split(folder).join(plugin);
+      // Agent Farm prints the staged folder's real path (/private/var/… on macOS).
+      const reason = agentFarmReason({ stderr: decodeOptionalBoundary(error, stderrSchema)?.stderr ?? '', fallback: reasonOf(error) }, [await fs.realpath(folder).catch(() => folder), folder], plugin);
       throw new PaneError('PROFILE_INVALID', `${plugin} wasn't saved: Agent Farm says ${reason}.`, 'Fix the file, then save again. Nothing was changed.');
     }
   }
@@ -348,7 +362,7 @@ export class ProfileEditor {
       try { await this.agentFarm(['plugin', 'install', staging]); }
       catch (error) {
         if (error instanceof PaneError) throw error;
-        const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);
+        const reason = agentFarmReason({ stderr: decodeOptionalBoundary(error, stderrSchema)?.stderr ?? '', fallback: reasonOf(error) });
         throw new PaneError('PROFILE_CREATE_FAILED', `Pane couldn't create ${name}: ${reason}.`, 'Try again; if it keeps failing, restart Pane.');
       }
     } finally {
@@ -406,7 +420,7 @@ export class ProfileEditor {
       await reinstallBundledPlugin(this.options.paneDir, plugin, this.bundle(), this.options.run);
     } catch (error) {
       if (error instanceof PaneError) throw error;
-      const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);
+      const reason = agentFarmReason({ stderr: decodeOptionalBoundary(error, stderrSchema)?.stderr ?? '', fallback: reasonOf(error) });
       throw new PaneError('PROFILE_RESTORE_FAILED', `Pane couldn't restore its version of ${plugin}: ${reason}.`, 'Restart Pane, which reinstalls it, then try again.');
     }
     this.options.onChanged?.(plugin);

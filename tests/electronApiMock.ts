@@ -1424,6 +1424,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       const state = clone(mockOptions.profileEditor);
       const photos: { profiles: Record<string, string>; plugins: Record<string, string> } = state.photos ?? { profiles: {}, plugins: {} };
       const pristine = clone(state.files);
+      const pristinePlugins = clone(state.overview.plugins);
       const ok = <T,>(data: T) => Promise.resolve({ success: true, data: clone(data) });
       const pluginOf = (name: string) => state.overview.plugins.find(plugin => plugin.name === name);
       const result = (name: string, path: string) => ok({ plugin: pluginOf(name), path });
@@ -1468,6 +1469,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           if (!entry?.bundled) return Promise.resolve({ success: false, error: `${plugin} doesn't ship with Pane, so there's no Pane version to restore.` });
           for (const key of Object.keys(state.files)) if (key.startsWith(`${plugin}/`)) delete state.files[key];
           for (const [key, value] of Object.entries(pristine)) if (key.startsWith(`${plugin}/`)) state.files[key] = value;
+          const shipped = pristinePlugins.find(item => item.name === plugin);
+          if (shipped) Object.assign(entry, clone(shipped));
           entry.edited = false;
           return result(plugin, entry.profiles[0]?.entry ?? 'plugin.yaml');
         },

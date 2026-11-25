@@ -163,6 +163,8 @@ function ProfileList({ plugins }: { plugins: ProfilePlugin[] }) {
               <button
                 type="button"
                 data-profiles-item
+                // Keyboard focus arriving from the sidebar (Enter on Profiles) lands on the first profile.
+                data-focus-entry={plugin === plugins[0] && profile === plugin.profiles[0] ? '' : undefined}
                 data-testid={`profile-row-${plugin.name}-${profile.name}`}
                 onClick={() => open(plugin.name, profile.name)}
                 className="flex w-full items-center gap-3 rounded-lg px-2 py-[7px] text-left hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
@@ -280,7 +282,11 @@ function FileTree({ plugin, profile, file }: { plugin: ProfilePlugin; profile: P
   const uses = useMemo(() => new Set(profile.uses), [profile.uses]);
   const treeRef = useRef<HTMLDivElement>(null);
   // Opening a profile puts the keys in its files, on the open one.
-  useEffect(() => { treeRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus({ preventScroll: true }); }, [profile.ref]);
+  useEffect(() => {
+    const open = treeRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    open?.focus({ preventScroll: true });
+    open?.scrollIntoView({ block: 'nearest' });
+  }, [profile.ref]);
   return (
     <div className="flex w-[280px] shrink-0 flex-col overflow-y-auto border-r border-border-primary py-2" data-testid="profiles-tree">
       <div ref={treeRef} role="tree" aria-label={`${plugin.name} files`} onKeyDown={arrowKeys}>
@@ -305,6 +311,7 @@ function FileTree({ plugin, profile, file }: { plugin: ProfilePlugin; profile: P
               role="treeitem"
               aria-selected={selected}
               data-profiles-item
+              data-focus-entry={selected ? '' : undefined}
               data-testid={`profiles-file-${row.path}`}
               title={row.path}
               onClick={() => {
