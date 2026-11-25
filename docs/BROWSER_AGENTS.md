@@ -125,6 +125,7 @@ What this can't do:
 - The site's own scripts read what is typed into it, as with any password. A site that then shows or
   sends the value somewhere Pane can't recognize (a picture, a changed copy, its own later pages, the
   page title, an address it rewrites without loading) is not stopped.
+- The dots show how long the value is.
 - An agent that ran a script on the site in another tab could have left something the site itself
   keeps and runs, such as a stored script on a site with such a flaw.
 - A login for `http://localhost` goes to whatever serves that port, which an agent may control.
