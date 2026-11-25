@@ -12,7 +12,8 @@ const sessionStore: NotifyQuestion = {
 const migration: NotifyQuestion = { ui: 'approve', title: 'Apply migration 0042 to staging?', detail: 'ALTER TABLE …' };
 
 function makeQueue(overrides: Partial<NotifySettings> = {}, machine?: string) {
-  let settings: NotifySettings = { ...DEFAULT_NOTIFY_SETTINGS, ...overrides };
+  // The floating strip is off by default; these tests are about it.
+  let settings: NotifySettings = { ...DEFAULT_NOTIFY_SETTINGS, showOutsidePane: true, ...overrides };
   const queue = new NotifyQueue({ settings: () => settings, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [], machine });
   return {
     queue,
@@ -362,6 +363,43 @@ describe('NotifyQueue', () => {
 
     queue.setRoundOpen(true);
     expect(queue.snapshot().stripSurface).toBeNull();
+  });
+
+  it('off by default, hands each question over once for a system notification while Pane is in the background', () => {
+    const { queue } = makeQueue({ showOutsidePane: DEFAULT_NOTIFY_SETTINGS.showOutsidePane });
+    const titles = () => queue.takeUnannounced().map(item => item.title);
+    ask(queue, sessionStore);
+    expect(queue.snapshot().stripSurface).toBeNull();
+    expect(titles()).toEqual(['Which session store should the refactor use?']);
+    expect(titles()).toEqual([]);
+
+    // Seen in Pane: no notification, then or after leaving it.
+    queue.setPaneFocused(true);
+    ask(queue, migration);
+    expect(titles()).toEqual([]);
+    queue.setPaneFocused(false);
+    expect(titles()).toEqual([]);
+
+    // Paused: it waits for the pause to end.
+    queue.run({ type: 'pause', minutes: 60 });
+    ask(queue, { ui: 'ask', title: 'Which region?' });
+    expect(titles()).toEqual([]);
+    vi.advanceTimersByTime(60 * 60_000);
+    expect(titles()).toEqual(['Which region?']);
+
+    // A snooze that ends announces the question again.
+    queue.run({ type: 'remind', id: onlyId(queue), after: '10m' });
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(titles()).toEqual(['Which session store should the refactor use?']);
+  });
+
+  it('hands over no notification for a floating card, or a health card', () => {
+    const { queue, setSettings } = makeQueue();
+    ask(queue, sessionStore);
+    expect(queue.takeUnannounced()).toEqual([]);
+    setSettings({ showOutsidePane: false });
+    ask(queue, { ...migration, machineHealth: { kind: 'disk', level: 'critical', hostname: 'mac', rows: [], agentPrompt: '' } });
+    expect(queue.takeUnannounced()).toEqual([]);
   });
 
   it('returns an overlapping resume call instead of leaving it waiting forever', async () => {

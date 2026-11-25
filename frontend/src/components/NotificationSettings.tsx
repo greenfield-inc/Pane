@@ -100,7 +100,7 @@ export function NotificationSettings({ persistence }: { persistence: SettingsPer
         <SettingRow
           settingId="desktop-notifications"
           label="Desktop notifications"
-          description="Notify when a pane finishes while Pane is in the background. When Dictate is running, alerts show in its pill."
+          description="Notify when a pane finishes or an approval waits while Pane is in the background, and when disk is nearly full. When Dictate is running, finished and needs-input alerts show in its pill."
           saveState={persistence.saveStates['desktop-notifications']}
         >
           <ImmediateToggle

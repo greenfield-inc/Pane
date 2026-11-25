@@ -42,6 +42,8 @@ export function HealthCardBody({ item, onAnswer, onAskAgent, onReview, machineNa
   const card = item.machineHealth;
   const choices = (item.choices ?? []).map(choice => choice.label);
   const primary = choices.find(label => label !== NOT_NOW && label !== PAUSE_IDLE);
+  // A disk card only warns; an older linked Pane's still brings a cleanup to ask an agent about.
+  const canAsk = card.kind !== 'disk' || card.rows.length > 0;
   const Icon = KIND_ICON[card.kind];
   const largest = Math.max(1, ...card.rows.map(row => row.bytes));
   const rowsTitle = card.kind === 'memory' ? `Using the most memory${machineName ? ` on ${machineName}` : ''}`
@@ -97,19 +99,19 @@ export function HealthCardBody({ item, onAnswer, onAskAgent, onReview, machineNa
         </div>
       )}
 
-      <div className={cn('grid gap-3', onReview ? 'grid-cols-2' : 'grid-cols-1')}>
+      <div className={cn('grid gap-3', onReview && canAsk ? 'grid-cols-2' : 'grid-cols-1')}>
         {onReview && (
           <button type="button" onClick={onReview}
             className="flex flex-col items-start gap-1 rounded-lg bg-interactive px-4 py-3 text-left text-text-on-interactive hover:bg-interactive-hover">
-            <span className="flex items-center gap-2 font-medium"><HardDrive className="h-4 w-4" aria-hidden="true" />{machineName ? `Review on ${machineName}` : 'Review in Resources'}</span>
-            <span className="text-sm opacity-90">{machineName ? `Opens Resources with ${machineName} selected.` : 'Opens Resources so you pick what to clean.'}</span>
+            <span className="flex items-center gap-2 font-medium"><HardDrive className="h-4 w-4" aria-hidden="true" />{machineName ? `Review on ${machineName}` : canAsk ? 'Review in Resources' : 'Open Resources'}</span>
+            <span className="text-sm opacity-90">{machineName ? `Opens Resources with ${machineName} selected.` : canAsk ? 'Opens Resources so you pick what to clean.' : 'Shows what uses the disk.'}</span>
           </button>
         )}
-        <button type="button" onClick={onAskAgent}
+        {canAsk && <button type="button" onClick={onAskAgent}
           className="flex flex-col items-start gap-1 rounded-lg border border-border-primary px-4 py-3 text-left hover:bg-surface-hover">
           <span className="flex items-center gap-2 font-medium text-text-primary"><Sparkles className="h-4 w-4" aria-hidden="true" />Ask an agent</span>
           <span className="text-sm text-text-secondary">{machineName ? `Opens a Session with this list; the agent works on ${machineName}.` : 'Opens a Session with this list; the agent asks you before it changes anything.'}</span>
-        </button>
+        </button>}
       </div>
 
       {card.pauseOffer && card.pauseOffer.paneCount > 0 && choices.includes(PAUSE_IDLE) && (
