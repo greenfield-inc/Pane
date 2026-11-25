@@ -376,7 +376,7 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
           position="bottom-right"
           width="md"
         />
-        <button type="button" className={cn(TODOS_HEADER_BUTTON, 'shrink-0')} onClick={() => setCreating(true)} data-testid="todos-new" aria-label="New to-do" title="New to-do">
+        <button type="button" className={cn('needs-full-access', TODOS_HEADER_BUTTON, 'shrink-0')} onClick={() => setCreating(true)} data-testid="todos-new" aria-label="New to-do" title="New to-do">
           <Plus className="h-3.5 w-3.5" aria-hidden="true" />{narrow ? null : 'New to-do'}
         </button>
       </div>

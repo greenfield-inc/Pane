@@ -56,6 +56,8 @@ export interface MachineEntry {
   /** A mark saved on this computer changed its letters or colour. */
   customMark: boolean;
   active: boolean;
+  /** This computer only watches it: it gave read-only access. */
+  readOnly?: boolean;
   presence: MachinePresence;
   /** "Online", "Agents run here", "Reconnecting…": the state part of the subtitle. */
   stateText: string;
@@ -204,7 +206,7 @@ function listMachines({ connectionState, computers, tailnet, localName, localOs,
     const tailscaleOnly = computer.routes.every((route) => route.kind === 'tailscale');
     const inUse = computer.routes.find((route) => route.id === routeInUse) ?? computer.routes[0];
     const os = computer.os ?? machine?.os ?? null;
-    const base = { id: computer.id, name: computer.label, os, kind: 'computer' as const, slot: slotFor(computer.label), routes, needsLink, computer, profile: routeProfile(computer, inUse), tailnet: machine };
+    const base = { id: computer.id, name: computer.label, os, kind: 'computer' as const, slot: slotFor(computer.label), routes, needsLink, computer, profile: routeProfile(computer, inUse), tailnet: machine, readOnly: (active ? connectionState.access : state ? state.access : inUse?.access) === 'read' };
 
     const idle = idleState({ machine, state, needsLink, tailscaleOnly, tailnetListed: tailnet?.ok === true });
     // An active computer that now wants a password asks for it instead of retrying the stored one.

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { installElectronApiMock, gotoApp } from './electronApiMock';
+import type { RemotePaneConnectionState } from '../shared/types/remoteDaemon';
 
 declare global {
   interface Window {
@@ -49,3 +50,57 @@ for (const channel of ['connection', 'host'] as const) {
     await page.screenshot({ path: testInfo.outputPath(`${channel}-still-current.png`) });
   });
 }
+
+const at = new Date(0).toISOString();
+const project = { id: 915, name: 'Watched', path: '/tmp/watched', active: true, created_at: at, updated_at: at };
+const pane = {
+  id: 'watched-pane', name: 'Fix checkout', projectId: project.id,
+  worktreePath: `${project.path}/pane`, isMainRepo: false, prompt: '', status: 'stopped',
+  createdAt: at, lastActivity: at, output: [], jsonMessages: [], isRunning: false,
+  permissionMode: 'ignore', toolType: 'none', archived: false, displayOrder: 0,
+};
+
+type HostTestWindow = Window & {
+  __paneTestElectronMock: {
+    setConnectionState(updates: Partial<RemotePaneConnectionState>): void;
+    getInvokeCalls(channel: string): Array<{ args: unknown[] }>;
+  };
+};
+
+test('a read-only computer is watched: no create, close, git or typing, until it gives full access', async ({ page }) => {
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialSessions: [pane], activeProjectId: project.id,
+    initialPanels: [{
+      id: 'agent', sessionId: pane.id, type: 'terminal', title: 'Codex',
+      state: { isActive: true, customState: { initialCommand: 'codex' } }, metadata: { createdAt: at, lastActiveAt: at, position: 0 },
+    }],
+  });
+  await gotoApp(page);
+  // SAFETY: installElectronApiMock installs __paneTestElectronMock before navigation.
+  const connect = (access: 'read' | undefined) => page.evaluate((level) => (window as HostTestWindow).__paneTestElectronMock.setConnectionState({
+    mode: 'remote', status: 'connected', activeProfileId: 'tyler', activeProfileLabel: 'Tyler', access: level,
+  }), access);
+  // SAFETY: same mock as above.
+  const typed = () => page.evaluate(() => (window as HostTestWindow).__paneTestElectronMock.getInvokeCalls('terminal:input').length);
+  await connect('read');
+  const expand = page.getByRole('button', { name: `Expand project ${project.name}`, exact: true });
+  await expect(page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true })).toBeVisible();
+  if (await expand.isVisible()) await expand.click();
+  await page.getByRole('button', { name: pane.name, exact: true }).click();
+
+  await expect(page.getByRole('tab', { name: 'Codex', exact: true })).toBeVisible();
+  for (const name of ['New project', `New pane in ${project.name}`, 'Add tool', `Archive ${pane.name}`]) {
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
+  }
+  await expect(page.getByTestId('terminal-activation-mask')).toHaveCount(0);
+  await page.locator('.xterm').first().click();
+  await page.keyboard.type('rm -rf');
+  expect(await typed()).toBe(0);
+  if (process.env.PANE_QR_SHOTS) await page.screenshot({ path: `${process.env.PANE_QR_SHOTS}/desktop-read-only.png` });
+
+  await connect(undefined);
+  await expect(page.getByRole('button', { name: 'Add tool', exact: true })).toBeVisible();
+  await page.locator('.xterm').first().click();
+  await page.keyboard.type('ls');
+  await expect.poll(typed).toBeGreaterThan(0);
+});

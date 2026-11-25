@@ -204,6 +204,23 @@ describe('MachineConnections', () => {
     expect(machines.list().find(machine => machine.id === 'build-box')).toMatchObject({ installId: 'c3d4-book', status: 'online', onlineSince: '2026-11-12T20:00:00.000Z' });
   });
 
+  it('offers nothing to share with a machine it only watches, and sends it no actions', async () => {
+    const { machines, client, connect } = setup(['tyler', 'build-box']);
+    client('tyler').options.onConnectionStateChange?.('restoring', null, { hostAccess: 'read' });
+    connect('tyler');
+    connect('build-box');
+
+    expect(machines.machineState('tyler')?.access).toBe('read');
+    expect(machines.remotes().map(machine => machine.id)).toEqual(['build-box']);
+    await expect(machines.run('tyler', { type: 'pin', target: { kind: 'pane', id: 'pane-1' }, pinned: true })).rejects.toMatchObject({ code: 'ERR_READ_ONLY_ACCESS' });
+    expect(client('tyler').invoke).not.toHaveBeenCalled();
+
+    // Paired again with full access.
+    client('tyler').options.onConnectionStateChange?.('restoring', null, {});
+    expect(machines.machineState('tyler')?.access).toBeUndefined();
+    expect(machines.remotes().map(machine => machine.id)).toEqual(['tyler', 'build-box']);
+  });
+
   it('retries its offline machines at once when another Pane starts reading this computer, as a computer back from sleep does', () => {
     const { client, connect } = setup(['devbox', 'mini']);
     connect('mini');
@@ -280,6 +297,18 @@ describe('SharedCredentialSync over MachineConnections', () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(client('build-box').invoke).toHaveBeenCalledWith('credentials:shared:get', []);
+    await sync.stop();
+  });
+
+  it('leaves out a machine this computer only watches: no keys, no Approvals switch', async () => {
+    const { configManager, machines, client } = setup(['tyler', 'build-box']);
+    client('tyler').options.onConnectionStateChange?.('restoring', null, { hostAccess: 'read' });
+    const sync = new SharedCredentialSync(configManager, machines);
+    sync.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(client('build-box').invoke).toHaveBeenCalledWith('credentials:shared:get', []);
+    expect(client('tyler').invoke).not.toHaveBeenCalled();
     await sync.stop();
   });
 });

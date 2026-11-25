@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { linkWithSavedRelayComputers, relayProfile } from '../../../../shared/remoteClient/relay';
+import { relayLinkJoin } from '../../../../shared/remoteClient/relayLinkPreview';
 import { pairingErrorText, pairThisBrowser, takePairingSecret, type PairingPage } from './relayBrowserPairing';
 
 function page(hash: string): PairingPage & { replaced: string[] } {
@@ -65,6 +67,34 @@ describe('pairing the browser app from "Continue in browser"', () => {
         relay: { computerId: 'kqyutsssbsalgvyf', fingerprint: 'VDFJylIMgLNXBfifCTjEhM6xs4EiuRSX7-xqISiCiWk', domain: 'runpane.net', local: ['https://192-168-1-5.local.runpane.net'], linkedBy: 'Studio Mac' },
       },
     ]);
+  });
+
+  it('marks every computer of a read-only code read-only, and links none of them with the saved ones', async () => {
+    const fetch = async () => ({
+      ok: true,
+      status: 200,
+      body: null,
+      json: async () => ({
+        ok: true, token: 'tok', clientId: 'c', access: 'read', computer: computer('6cphy4hwgmwpp4nl', 'Tyler'),
+        linked: [{ computer: computer('kqyutsssbsalgvyf', 'Tyler 2'), token: 'tok-2' }],
+      }),
+    });
+    const [tyler, tyler2] = await pairThisBrowser(page(''), 's3cret', { fetch, label: 'x', phoneId: 'y' });
+    expect([tyler.access, tyler2.access]).toEqual(['read', 'read']);
+
+    const mine = relayProfile({ computer: computer('jkbgxxed5x35pv6o', 'Studio Mac'), token: 'tok-mine' });
+    const asked: string[] = [];
+    const clientFor = () => ({ invoke: async (channel: string): Promise<never> => { asked.push(channel); throw new Error('refused'); } });
+    await linkWithSavedRelayComputers(tyler, [tyler2], [mine], clientFor);
+    await linkWithSavedRelayComputers(mine, [], [tyler, tyler2], clientFor);
+    expect(asked).toEqual([]);
+  });
+
+  it('says a read-only link joins nothing, and still asks first', async () => {
+    const mine = relayProfile({ computer: computer('jkbgxxed5x35pv6o', 'Studio Mac'), token: 'tok-mine' });
+    const fetch = async () => ({ ok: true, status: 200, body: null, json: async () => ({ ok: true, access: 'read', group: [{ id: '6cphy4hwgmwpp4nl', name: 'Tyler' }], expiresAt: 'x' }) });
+    expect(await relayLinkJoin(fetch, { secret: 's', computerId: '6cphy4hwgmwpp4nl', domain: 'runpane.net', name: 'Tyler' }, [mine]))
+      .toEqual({ maker: 'Tyler', makerGroup: ['Tyler'], here: ['Studio Mac'], access: 'read' });
   });
 
   it('refuses an answer from a computer other than the one that served the page', async () => {

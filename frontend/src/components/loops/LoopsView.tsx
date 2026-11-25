@@ -188,7 +188,7 @@ export function LoopsView() {
       <aside className="flex w-72 flex-shrink-0 flex-col border-r border-border-primary">
         <div className="flex h-14 flex-shrink-0 items-center justify-between px-4">
           <h1 className="text-lg font-semibold text-text-primary">Loops</h1>
-          <Button size="sm" aria-label="New loop" onClick={() => openDrawer(null)}><Plus className="mr-1 h-3.5 w-3.5" aria-hidden="true" />New</Button>
+          <Button size="sm" className="needs-full-access" aria-label="New loop" onClick={() => openDrawer(null)}><Plus className="mr-1 h-3.5 w-3.5" aria-hidden="true" />New</Button>
         </div>
         <nav aria-label="Loops" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2">
           {loops.map(loop => (
@@ -212,7 +212,7 @@ export function LoopsView() {
             <p className="text-xs text-text-secondary">
               A loop runs an agent on a schedule, in a new Pane or in a Session, for large recurring jobs such as a nightly bug sweep. Loops run at most once an hour.
             </p>
-            <Button size="sm" onClick={() => openDrawer(null)}><Plus className="mr-1 h-3.5 w-3.5" aria-hidden="true" />New loop</Button>
+            <Button size="sm" className="needs-full-access" onClick={() => openDrawer(null)}><Plus className="mr-1 h-3.5 w-3.5" aria-hidden="true" />New loop</Button>
           </div>
         )}
       </main>

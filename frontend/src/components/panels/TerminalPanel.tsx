@@ -28,6 +28,8 @@ import {
 import { isMac } from '../../utils/platformUtils';
 import { copyTerminalText, decodeOsc52Write, isTerminalCopyShortcut } from '../../utils/terminalClipboard';
 import { sendTerminalInput } from '../../utils/terminalInput';
+import { isReadOnlyHost, useReadOnlyHost } from '../../stores/readOnlyHostStore';
+import { adoptOwnerGrid, OWNER_GRID_CHECK_MS, ownerGridChanged } from '../../utils/ownerTerminalGrid';
 import { registerRemoteTerminalRestore } from '../../utils/remoteRestoration';
 import { terminalTiming } from '../../utils/terminalTiming';
 import { acknowledgeTerminalOutput } from '../../utils/terminalAck';
@@ -330,6 +332,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const isCliPanel = !!terminalState?.isCliPanel;
   const [isCliReady, setIsCliReady] = useState(!!terminalState?.isCliReady);
   const isRemoteMode = useConfigStore((state) => state.config?.remoteDaemon?.client.mode === 'remote');
+  const readOnly = useReadOnlyHost();
   const isCliPanelRef = useRef(isCliPanel);
 
   // ptyId for the current PTY behind this panel, delivered via
@@ -357,6 +360,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     if (!terminal) return;
     terminal.options.vtExtensions = { ...terminal.options.vtExtensions, kittyKeyboard: kittyKeyboardEnabled };
   }, [kittyKeyboardEnabled]);
+
+  // A read-only host takes no input, so keys, pastes and query answers stop here.
+  useEffect(() => {
+    if (xtermRef.current) xtermRef.current.options.disableStdin = readOnly;
+  }, [readOnly]);
 
   const terminalScrollSurfaceRef = useScrollSurface<HTMLDivElement>({
     id: `terminal:${panel.id}`,
@@ -390,7 +398,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   // Loading-mask visibility: show immediately when any loading state is
   // active, hide only after a short linger so the terminal underneath has
   // finished painting before the mask lifts.
-  const overlayActive = !isInitialized || isRefreshing || (isCliPanel && !isCliReady);
+  const overlayActive = !isInitialized || isRefreshing || (isCliPanel && !isCliReady && !readOnly);
   useEffect(() => {
     if (!overlayActive) {
       setInitError(null);
@@ -585,7 +593,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   useEffect(() => {
     const wasActive = wasActiveRef.current;
     wasActiveRef.current = panelVisible;
-    if (wasActive && !panelVisible && serializeAddonRef.current) {
+    if (wasActive && !panelVisible && serializeAddonRef.current && !isReadOnlyHost()) {
       if (Date.now() - lastSnapshotAtRef.current < SNAPSHOT_MIN_INTERVAL_MS) return;
       try {
         const serialized = serializeAddonRef.current.serialize();
@@ -771,6 +779,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     const terminal = xtermRef.current;
     const prevCols = terminal?.cols;
     const prevRows = terminal?.rows;
+    if (isReadOnlyHost()) {
+      if (terminal && await adoptOwnerGrid(panel.id, terminal) && terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
+      return;
+    }
     fitAddonRef.current.fit();
     const dimensions = fitAddonRef.current.proposeDimensions();
     if (
@@ -875,9 +887,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       if (xtermRef.current !== terminal) return;
       const state = await window.electronAPI.invoke('terminal:getState', panel.id);
       if (xtermRef.current !== terminal) return;
-      if (isRemoteMode && !state) throw new Error('The host did not return this terminal snapshot.');
+      const watching = isReadOnlyHost();
+      if (isRemoteMode && !state && !watching) throw new Error('The host did not return this terminal snapshot.');
       setRefreshError(null);
-      if (state?.isAlternateScreen) {
+      // A read-only viewer can't ask the app to redraw, so its screen is replayed like a normal buffer's.
+      if (state?.isAlternateScreen && !watching) {
         // Renderer refresh alone cannot repair an application frame that was
         // restored before the visible grid settled. Ask main for a forced resize
         // (single PTY row nudge) so the foreground app receives a real resize
@@ -899,7 +913,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
       };
 
-      if (state?.scrollbackBuffer) {
+      if (watching) {
+        const content = state ? selectTerminalRestoreContent(state)?.content : '\x1b[90mThis tab is not running.\x1b[0m';
+        if (content) await new Promise<void>((resolve) => { pendingReplayWritesRef.current += 1; terminal.write(content, () => { pendingReplayWritesRef.current -= 1; resolve(); }); });
+      } else if (state?.scrollbackBuffer) {
         const content = Array.isArray(state.scrollbackBuffer)
           ? state.scrollbackBuffer.join('\n')
           : state.scrollbackBuffer;
@@ -951,6 +968,16 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     if (!activationVisible) return;
     await handleManualRefresh();
   }), [panel.id, isRemoteMode, activationVisible, handleManualRefresh]);
+
+  // The owner's window decides a watched terminal's size, and says nothing when it changes: check while shown.
+  useEffect(() => {
+    if (!readOnly || !activationVisible || !isInitialized) return;
+    const timer = setInterval(() => {
+      const terminal = xtermRef.current;
+      if (terminal) void ownerGridChanged(panel.id, terminal).then((changed) => { if (changed && xtermRef.current === terminal) return handleManualRefresh(); });
+    }, OWNER_GRID_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [readOnly, activationVisible, isInitialized, panel.id, handleManualRefresh]);
 
   // Light repaint for pure-refocus activations (buffer is live, only pixels are
   // stale). Pattern: the theme effect's guarded refresh minus its unconditional
@@ -1093,7 +1120,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         // Store terminal state for THIS panel only (not in global variable)
         let terminalStateForThisPanel: TerminalRestoreState | null = null;
 
-        if (!initialized) {
+        if (!initialized && !isReadOnlyHost()) {
           // Initialize backend PTY process
           devLog.debug('[TerminalPanel] Initializing backend PTY process...');
           // Use workingDirectory and sessionId if available, but don't require them
@@ -1108,7 +1135,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             rows: estimatedRows && estimatedRows >= 5 ? estimatedRows : undefined,
           });
           devLog.debug('[TerminalPanel] Backend PTY process initialized');
-        } else {
+        } else if (initialized) {
           // Terminal is already initialized, get its state to restore scrollback
           devLog.debug('[TerminalPanel] Restoring terminal state from backend...');
           const terminalState = await window.electronAPI.invoke('terminal:getState', panel.id);
@@ -1152,6 +1179,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           cursorWidth: 1,
           cursorInactiveStyle: 'outline',
           allowTransparency: false,
+          disableStdin: isReadOnlyHost(),
           ...terminalCapabilityOptions(kittyKeyboardEnabledRef.current),
           scrollOnUserInput: true,
           scrollSensitivity: 1,
@@ -1248,7 +1276,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             if (e.type === 'keydown') {
               const clear = () => {
                 xtermRef.current?.clear();
-                window.electronAPI
+                if (!isReadOnlyHost()) window.electronAPI
                   .invoke('terminal:clearScrollback', panel.id)
                   .catch((error) => {
                     console.warn('[TerminalPanel] Failed to persist scrollback clear:', error);
@@ -1334,7 +1362,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // PTY output then parses into a garbage-width buffer that reflow can't fix.
           // Keeping xterm's default grid matches the PTY's default cols; the one-time
           // full activation refresh rebuilds anything that still parsed mismatched.
-          if ((terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
+          if (isReadOnlyHost()) {
+            await adoptOwnerGrid(panel.id, terminal);
+            if (disposed) return;
+          } else if ((terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
             fitAddon.fit();
             devLog.debug('[TerminalPanel] FitAddon fitted');
           } else {
@@ -1471,7 +1502,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             // a resize event (minimize/fullscreen) forces invalidation.
             // Same hidden-container guard as the mount fit: a 0-width fit would
             // mangle the grid.
-            if ((terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
+            if (!isReadOnlyHost() && (terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
               fitAddon.fit();
             }
           }
@@ -1512,6 +1543,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           };
 
           const handlePaste = (e: ClipboardEvent) => {
+            if (isReadOnlyHost()) {
+              e.stopPropagation();
+              e.preventDefault();
+              return;
+            }
             // Step 1: Check for images in browser clipboard (works on native Windows/macOS)
             const items = e.clipboardData?.items;
             const textVal = e.clipboardData?.getData('text') ?? '';
@@ -1585,14 +1621,14 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           const handleDragOver = (e: DragEvent) => {
             if (!e.dataTransfer) return;
             e.preventDefault();
-            e.dataTransfer.dropEffect = 'copy';
+            e.dataTransfer.dropEffect = isReadOnlyHost() ? 'none' : 'copy';
           };
           // Save files on the terminal's host and paste each resolved path. Shared by
           // drag-and-drop, image paste and the upload button's file picker. The copies run
           // in resumable chunks with progress over the terminal, and keep going while
           // another Pane is shown: what lands meanwhile is pasted when this terminal is back.
           const pasteFiles = (files: File[]) => {
-            if (!files.length || disposed || !terminal) return;
+            if (!files.length || disposed || !terminal || isReadOnlyHost()) return;
             void uploadToTerminal(panel.id, files, {
               invoke: (channel, args) => window.electronAPI.invoke(channel, ...args),
               sessionId: terminalRuntimeRef.current.sessionId || terminalRuntimeRef.current.panelSessionId,
@@ -1712,7 +1748,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
                 setTerminalFontObservation(newFontFamily);
                 terminal.options.fontSize = newFontSize;
                 // Hidden-container guard (see mount fit): defer to the activation fit
-                if (fitAddon && (terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
+                if (fitAddon && !isReadOnlyHost() && (terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
                   fitAddon.fit();
                 }
               });
@@ -1909,7 +1945,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       }
 
       // Save serialized terminal snapshot before disposing
-      if (serializeAddonRef.current && xtermRef.current) {
+      if (serializeAddonRef.current && xtermRef.current && !isReadOnlyHost()) {
         try {
           const serialized = serializeAddonRef.current.serialize();
           window.electronAPI.invoke('terminal:saveSnapshot', panel.id, serialized);
@@ -2142,7 +2178,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       {/* ph-no-capture keeps xterm out of session recordings: its WebGL canvas
           never replays, and replaying scrollback rewrites the scrollbar
           slider's style thousands of times, which the recorder would serialize. */}
-      <div ref={terminalRef} className="ph-no-capture h-full w-full" data-terminal-font={terminalFontObservation} data-window-focused={windowFocused ? "true" : "false"} />
+      <div ref={terminalRef} className={`ph-no-capture h-full w-full${readOnly ? ' overflow-auto' : ''}`} data-terminal-font={terminalFontObservation} data-window-focused={windowFocused ? "true" : "false"} />
       {refreshError && <div role="status" className="absolute bottom-0 inset-x-0 z-30 bg-surface-secondary px-3 py-2 text-xs text-text-secondary">
         Terminal restoration needs attention: {refreshError}
         <button type="button" className="ml-3 text-text-primary" onClick={() => void handleManualRefresh()}>Retry snapshot</button>
@@ -2168,7 +2204,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           <button
             type="button"
             onClick={() => uploadInputRef.current?.click()}
-            className={TERMINAL_TOOLBAR_BUTTON}
+            className={`needs-full-access ${TERMINAL_TOOLBAR_BUTTON}`}
             title="Upload files"
           >
             <span className={TERMINAL_TOOLBAR_CHIP}><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">

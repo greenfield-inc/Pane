@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { LinkPreview, LinkRedeemResult, RelayLinkOpenedEvent, RelayPairedEvent } from '../../../../shared/types/relay';
+import type { LinkPreview, LinkRedeemResult, RelayLinkOpenedEvent, RelayPairedEvent, RelayPairingInfo } from '../../../../shared/types/relay';
 import { startAddDeviceListeners, useAddDeviceStore } from './addDeviceStore';
 import { ComputerTab, MakerResultView } from './ComputerTab';
 import { LinkFlowView } from './LinkConfirm';
@@ -87,8 +87,33 @@ describe('Add a device › Computer: copying a link', () => {
     useAddDeviceStore.getState().setExpiresIn('24h');
     await useAddDeviceStore.getState().copyLink();
 
-    expect(callsTo('relay:pairing-code')).toEqual([[{ expiresIn: '1h' }], [{ expiresIn: '10m' }], [{ expiresIn: '24h' }]]);
+    expect(callsTo('relay:pairing-code')).toEqual([[{ expiresIn: '1h', access: 'full' }], [{ expiresIn: '10m', access: 'full' }], [{ expiresIn: '24h', access: 'full' }]]);
     expect(writeText).toHaveBeenLastCalledWith(LINK);
+  });
+
+  it('makes a Read only link, and never copies one asked for at another level', async () => {
+    let answer: (info: RelayPairingInfo) => void = () => undefined;
+    invoke.mockImplementationOnce(() => new Promise<RelayPairingInfo>((resolve) => { answer = resolve; }));
+    const fullLink = useAddDeviceStore.getState().copyLink();
+    useAddDeviceStore.getState().setAccess('read');
+    answer({ url: 'https://runpane.net/pair#s=full', expiresAt: '2026-11-15T10:00:00Z' });
+    await fullLink;
+
+    expect(writeText).not.toHaveBeenCalled();
+    expect(useAddDeviceStore.getState().copied).toBeNull();
+
+    await useAddDeviceStore.getState().copyLink();
+    expect(callsTo('relay:pairing-code').at(-1)).toEqual([{ expiresIn: '1h', access: 'read' }]);
+    expect(useAddDeviceStore.getState().copied).toMatchObject({ url: LINK, access: 'read' });
+  });
+
+  it('starts at Full access again each time the dialog opens', () => {
+    useAddDeviceStore.getState().open('computer');
+    useAddDeviceStore.getState().setAccess('read');
+    useAddDeviceStore.getState().close();
+    useAddDeviceStore.getState().open('phone');
+
+    expect(useAddDeviceStore.getState().access).toBe('full');
   });
 });
 
@@ -112,6 +137,22 @@ describe('Add a device › Computer: pasting a link', () => {
     expect(callsTo('relay:redeem-link')).toEqual([[{ link: LINK }]]);
     expect(useAddDeviceStore.getState().flow).toMatchObject({ step: 'linked', maker: 'Studio Mac' });
     expect(text(renderFlow())).toContain('This computer now reaches Studio Mac and 3 other computers.');
+  });
+
+  it('says a read-only link only lets this computer watch, and names none of its own computers', async () => {
+    preview = { ...JOINING_TWO_GROUPS, needsConfirm: false, access: 'read' };
+    redeem = async () => ({ linked: ['Studio Mac'], access: 'read' });
+    await useAddDeviceStore.getState().startLink(LINK, 'paste');
+
+    const markup = renderFlow();
+    expect(text(markup)).toContain('Watch Studio Mac from this computer');
+    expect(text(markup)).toContain('Read only.');
+    expect(text(markup)).not.toContain('Lab PC');
+    expect(text(markup)).not.toContain('run agents on');
+    expect(callsTo('relay:redeem-link')).toEqual([]);
+
+    await useAddDeviceStore.getState().confirmLink();
+    expect(text(renderFlow())).toContain('Paired Read only with Studio Mac');
   });
 
   it('"Not mine, cancel" redeems nothing, so the link stays usable', async () => {
@@ -199,6 +240,18 @@ describe('The computer that made the link', () => {
 
     expect(callsTo('relay:undo-join')).toEqual([[{ computerId: 'build-box' }]]);
     expect(text(renderMaker())).toContain('Unlinked Build Box, NAS from your computers.');
+  });
+});
+
+describe('The computer that shared itself read-only', () => {
+  it('says the other computer watches, with no unlink of a link there is not', async () => {
+    useAddDeviceStore.getState().setAccess('read');
+    await useAddDeviceStore.getState().copyLink();
+    emitPaired({ kind: 'computer', label: 'Build Box', access: 'read' });
+
+    const markup = renderMaker();
+    expect(text(markup)).toContain('Paired Read only with Build Box');
+    expect(buttons(markup)).toEqual(['Remove it in Settings › Remote Access', 'Done']);
   });
 });
 

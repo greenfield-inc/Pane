@@ -6,6 +6,7 @@ import { cn } from '../../utils/cn';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { Tooltip } from '../ui/Tooltip';
 import { QR_PAPER, QrCode, TestFlightLine } from './QrCode';
+import { AccessPicker } from './AccessPicker';
 import { RelayLimitNotice, RelayLimitTip } from './RelayLimitNotice';
 import { relayLimitSentence, relayLimitTime } from './relayLimit';
 
@@ -77,9 +78,11 @@ function caption(view: PairingView, renewed: boolean): string {
 }
 
 /** Add a device › Phone: a one-time code, good for 10 minutes, that a phone scans to reach this computer from any network. */
-export function PhoneTab({ view, paired, renewed, onRetry, onSetUpTailscale }: {
+export function PhoneTab({ view, paired, pairedReadOnly = false, renewed, onRetry, onSetUpTailscale }: {
   view: PairingView;
   paired: string | null;
+  /** That phone paired Read only. */
+  pairedReadOnly?: boolean;
   renewed: boolean;
   onRetry: () => void;
   /** Opens Remote Access › Tailscale, the way to pair while Pane relay is paused. */
@@ -116,8 +119,8 @@ export function PhoneTab({ view, paired, renewed, onRetry, onSetUpTailscale }: {
         <div className="flex items-start gap-3 rounded-lg border border-status-success/30 bg-status-success/10 p-3" role="status">
           <CheckCircle2 className="mt-0.5 h-5 w-5 flex-none text-status-success" aria-hidden="true" />
           <div className="min-w-0">
-            <p className="text-sm font-medium text-text-primary">Paired with {paired}</p>
-            <p className="text-xs text-text-secondary">It can reach this computer from any network. To pair another phone, scan the new code.</p>
+            <p className="text-sm font-medium text-text-primary">{pairedReadOnly ? `Paired Read only with ${paired}` : `Paired with ${paired}`}</p>
+            <p className="text-xs text-text-secondary">It can {pairedReadOnly ? 'watch' : 'reach'} this computer from any network. To pair another phone, scan the new code.</p>
           </div>
         </div>
       )}
@@ -130,6 +133,7 @@ export function PhoneTab({ view, paired, renewed, onRetry, onSetUpTailscale }: {
         </div>
         <div className="min-w-0 flex-1 space-y-5 pt-2">
           {side}
+          {view.step !== 'limited' && <AccessPicker />}
           <TestFlightLine />
         </div>
       </div>

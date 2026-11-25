@@ -1,3 +1,5 @@
+import { ReadOnlyPill } from './machines/ReadOnlyPill';
+import { isReadOnlyHost, useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { NewDialog } from './NewDialog';
 import { onOpenNewDialogRequest } from '../utils/openNewDialog';
@@ -297,6 +299,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   const switcherVisible = machines.length > 1 || remoteConnectionState.mode === 'remote';
   const paneSort = usePaneSort({ id: machineId, local: machineLocal });
   const allMachines = useAllMachinesStore(isAllMachinesOn);
+  const readOnly = useReadOnlyHost();
   const setAllMachines = useAllMachinesStore((state) => state.setEnabled);
   // Saved machines and this computer: the ones All machines lists.
   const savedMachines = useMemo(() => machines.filter((machine) => machine.kind === 'local' || machine.profile), [machines]);
@@ -423,7 +426,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   }, [loadOrchestrationSessions]);
 
   // Home's Get Started "New" opens this same dialog.
-  useEffect(() => onOpenNewDialogRequest(() => setShowNewDialog(true)), []);
+  useEffect(() => onOpenNewDialogRequest(() => { if (!isReadOnlyHost()) setShowNewDialog(true); }), []);
 
   const handleRefreshGitStatus = async () => {
     try {
@@ -629,6 +632,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
             ? <MachineMarkStack machines={savedMachines} />
             : <MachineMark letters={activeMachine.letters} slot={activeMachine.slot} presence={activeMachine.presence} size="sm" className="rounded-full" />}
           {showHostPillLabel && <span className="min-w-0 truncate">{allMachines ? 'All machines' : activeMachine.name}</span>}
+          {showHostPillLabel && readOnly && !allMachines && <ReadOnlyPill className="bg-surface-tertiary" />}
           <ChevronDown className="h-3 w-3 shrink-0 text-text-tertiary" />
         </button>,
         'bottom-left',
@@ -665,7 +669,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
               <button type="button" data-compact-rail-item aria-label="Search" onClick={openSearch} className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}><Search className="h-4 w-4" /></button>
             </Tooltip>
             <Tooltip content="New" side="right">
-              <button type="button" data-compact-rail-item aria-label="New" onClick={() => setShowNewDialog(true)} className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}><Plus className="h-4 w-4" /></button>
+              <button type="button" data-compact-rail-item aria-label="New" onClick={() => setShowNewDialog(true)} className={`${allMachines ? '' : 'needs-full-access '}${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}><Plus className="h-4 w-4" /></button>
             </Tooltip>
             {showRemoteDesktopLink && (
               <Tooltip content={REMOTE_DESKTOP_TOOLTIP} side="right">
@@ -1029,7 +1033,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
           data-sidebar-item
           data-sidebar-key="new"
           onClick={() => setShowNewDialog(true)}
-          className="mx-2 mt-1 flex h-7 flex-shrink-0 items-center gap-2 rounded-md bg-surface-hover px-2 text-[13px] font-medium text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+          className={`${allMachines ? '' : 'needs-full-access '}mx-2 mt-1 flex h-7 flex-shrink-0 items-center gap-2 rounded-md bg-surface-hover px-2 text-[13px] font-medium text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive`}
         >
           <Plus className="h-3.5 w-3.5 flex-shrink-0" />
           <span>New</span>

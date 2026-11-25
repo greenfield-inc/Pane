@@ -10,6 +10,7 @@ import { useConnectionPresence } from './hooks/useConnectionPresence';
 import { RemoteWorkspace } from './components/RemoteWorkspace';
 import { TailnetHttpsBanner } from './components/TailnetHttpsBanner';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { followHostAccess } from './stores/readOnlyHostStore';
 import { useIPCEvents } from './hooks/useIPCEvents';
 import { useNotifications } from './hooks/useNotifications';
 import { useResizable } from './hooks/useResizable';
@@ -195,6 +196,7 @@ function App() {
 
 
   useIPCEvents();
+  useEffect(() => followHostAccess(), []);
   useLoopsRefresh();
   const { showNotification } = useNotifications();
 

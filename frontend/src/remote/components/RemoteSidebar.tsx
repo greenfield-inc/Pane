@@ -211,7 +211,7 @@ export function RemoteSidebar({
               type="button"
               disabled={actionId === session.id}
               onClick={() => actions.toggleSessionPinned(session)}
-              className={`${ROW_ACTION} ${session.isPinned ? 'text-interactive hover:text-interactive-hover' : 'text-text-muted hover:text-text-primary'}`}
+              className={`needs-full-access ${ROW_ACTION} ${session.isPinned ? 'text-interactive hover:text-interactive-hover' : 'text-text-muted hover:text-text-primary'}`}
               title={session.isPinned ? 'Unpin' : 'Pin'}
               aria-label={`Pin Session ${name}`}
               aria-pressed={session.isPinned === true}
@@ -240,7 +240,7 @@ export function RemoteSidebar({
                 <button
                   type="button"
                   disabled={actionId === session.id}
-                  className={`${ROW_ACTION} text-text-muted hover:text-text-primary`}
+                  className={`needs-full-access ${ROW_ACTION} text-text-muted hover:text-text-primary`}
                   title="More actions"
                   aria-label={`More actions for ${name}`}
                 >
@@ -307,7 +307,7 @@ export function RemoteSidebar({
             expanded={expanded.sessions}
             onToggle={toggleSection}
             action={(
-              <button type="button" onClick={actions.createSession} className={SECTION_ACTION} title="New Session" aria-label="New Session">
+              <button type="button" onClick={actions.createSession} className={`needs-full-access ${SECTION_ACTION}`} title="New Session" aria-label="New Session">
                 <Plus className="h-3.5 w-3.5" />
               </button>
             )}
@@ -335,7 +335,7 @@ export function RemoteSidebar({
               type="button"
               onClick={() => actions.createPane()}
               disabled={projects.length === 0}
-              className={SECTION_ACTION}
+              className={`needs-full-access ${SECTION_ACTION}`}
               title="New Pane"
               aria-label="New Pane"
             >
@@ -356,7 +356,7 @@ export function RemoteSidebar({
                 <button
                   type="button"
                   onClick={() => actions.createPane(project)}
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary md:h-auto md:w-auto md:p-1"
+                  className="needs-full-access inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary md:h-auto md:w-auto md:p-1"
                   title={`New pane in ${project.name}`}
                   aria-label={`New pane in ${project.name}`}
                 >
@@ -478,7 +478,7 @@ function ArchivedRow({ label, detail, restoreLabel, icon, busy, onRestore }: Arc
         type="button"
         disabled={busy}
         onClick={onRestore}
-        className={`${ROW_ACTION} text-text-muted hover:text-status-success`}
+        className={`needs-full-access ${ROW_ACTION} text-text-muted hover:text-status-success`}
         title="Restore"
         aria-label={restoreLabel}
       >
@@ -541,7 +541,7 @@ function RemotePaneRow({
           type="button"
           disabled={busy}
           onClick={onTogglePinned}
-          className={`${ROW_ACTION} ${pane.isFavorite ? 'text-interactive hover:text-interactive-hover' : 'text-text-muted hover:text-text-primary'}`}
+          className={`needs-full-access ${ROW_ACTION} ${pane.isFavorite ? 'text-interactive hover:text-interactive-hover' : 'text-text-muted hover:text-text-primary'}`}
           title={pane.isFavorite ? 'Unpin' : 'Pin'}
           aria-label="Pin pane"
           aria-pressed={Boolean(pane.isFavorite)}
@@ -552,7 +552,7 @@ function RemotePaneRow({
           type="button"
           disabled={busy}
           onClick={onTogglePaused}
-          className={`${ROW_ACTION} text-text-muted hover:text-text-primary`}
+          className={`needs-full-access ${ROW_ACTION} text-text-muted hover:text-text-primary`}
           title={paused ? 'Resume' : 'Pause'}
           aria-label={paused ? 'Resume pane' : 'Pause pane'}
         >
@@ -562,7 +562,7 @@ function RemotePaneRow({
           type="button"
           disabled={busy}
           onClick={onArchive}
-          className={`${ROW_ACTION} text-text-muted hover:text-status-error`}
+          className={`needs-full-access ${ROW_ACTION} text-text-muted hover:text-status-error`}
           title="Archive"
           aria-label="Archive pane"
         >

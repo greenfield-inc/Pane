@@ -58,7 +58,7 @@ export function RemotePausedTerminal({ adapter, panelId, mark }: {
           type="button"
           onClick={resume}
           disabled={resuming}
-          className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-md bg-interactive px-3 text-xs font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-60 md:h-7"
+          className="needs-full-access inline-flex h-11 shrink-0 items-center gap-1.5 rounded-md bg-interactive px-3 text-xs font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-60 md:h-7"
         >
           <Play className="h-3 w-3 fill-current" aria-hidden="true" />
           Resume

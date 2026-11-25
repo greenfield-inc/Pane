@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
 import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server, Repeat, Inbox } from 'lucide-react';
@@ -177,6 +178,7 @@ export function ProjectSessionList({
   const reorderPanes = useSessionStore(s => s.reorderPanes);
   const [paneOrderAnnouncement, setPaneOrderAnnouncement] = useState('');
   const reorderPane = useRowReorder(setPaneOrderAnnouncement);
+  const readOnly = useReadOnlyHost();
   /** A project's Panes as one list; a move is saved on the host they run on. */
   const paneList = (projectId: number, panes: Session[]): ReorderList => ({
     id: `project:${projectId}`,
@@ -550,7 +552,7 @@ export function ProjectSessionList({
             aria-label="New project"
             title="New project"
             onClick={() => setShowAddProjectDialog(true)}
-            className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
+            className="needs-full-access inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -598,7 +600,8 @@ export function ProjectSessionList({
               icon: GitBranch,
               onClick: () => navigateToProject(project.id),
             },
-            {
+            // Its settings are configuration, which a read-only computer shows to nobody.
+            ...(readOnly ? [] : [{
               id: 'project-settings',
               label: 'Project settings',
               icon: Settings,
@@ -608,13 +611,13 @@ export function ProjectSessionList({
               id: 'delete',
               label: 'Delete project',
               icon: Trash2,
-              variant: 'danger',
+              variant: 'danger' as const,
               onClick: () => {
                 if (confirm(`Delete project "${project.name}"? Panes will be archived.`)) {
                   handleDeleteProject(project.id);
                 }
               },
-            },
+            }]),
           ];
 
           return (
@@ -626,7 +629,7 @@ export function ProjectSessionList({
                   dragOverProjectId === project.id && dragProjectId !== project.id && "bg-interactive/20",
                   dragProjectId === project.id && "opacity-50"
                 )}
-                draggable
+                draggable={!readOnly}
                 onDragStart={(e) => handleProjectDragStart(e, project.id)}
                 onDragOver={(e) => handleProjectDragOver(e, project.id)}
                 onDrop={(e) => handleProjectDrop(e, project.id)}
@@ -677,7 +680,7 @@ export function ProjectSessionList({
                     e.stopPropagation();
                     handleNewSession(project);
                   }}
-                  className="relative z-10 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:text-text-primary hover:bg-surface-hover transition-colors"
+                  className="needs-full-access relative z-10 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:text-text-primary hover:bg-surface-hover transition-colors"
                   aria-label={`New pane in ${project.name}`}
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -688,7 +691,7 @@ export function ProjectSessionList({
                 <div id={`project-sessions-${project.id}`}>
                   {projectSessions.map((session) => (
                     <SessionRow
-                      reorder={reorderPane(paneList(project.id, projectSessions), session.id, session.name || 'Untitled')}
+                      reorder={readOnly ? undefined : reorderPane(paneList(project.id, projectSessions), session.id, session.name || 'Untitled')}
                       key={session.id}
                       session={session}
                       isActive={activeView === 'sessions' && sidebarNavigationScope === 'repositories' && session.id === activeSessionId}
@@ -1218,7 +1221,7 @@ function SessionRow({
             </button>
           </div>
         )}
-        <div className={cn(actionSurfaceClassName, 'pr-0.5 opacity-0')}>
+        <div className={cn('needs-full-access', actionSurfaceClassName, 'pr-0.5 opacity-0')}>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); archive(); }}
@@ -1229,7 +1232,7 @@ function SessionRow({
             <Archive className="h-3.5 w-3.5" />
           </button>
         </div>
-        {loopName === undefined && <div className={cn(actionSurfaceClassName, session.isFavorite ? 'opacity-100' : 'opacity-0')}>
+        {loopName === undefined && <div className={cn('needs-full-access', actionSurfaceClassName, session.isFavorite ? 'opacity-100' : 'opacity-0')}>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
@@ -1434,7 +1437,7 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
           <button
             type="button"
             onClick={handlePermanentDeleteAllArchived}
-            className="flex-shrink-0 p-1 rounded text-text-muted hover:text-status-error hover:bg-surface-hover transition-all opacity-0 group-hover/archived-header:opacity-100 group-focus-within/archived-header:opacity-100"
+            className="needs-full-access flex-shrink-0 p-1 rounded text-text-muted hover:text-status-error hover:bg-surface-hover transition-all opacity-0 group-hover/archived-header:opacity-100 group-focus-within/archived-header:opacity-100"
             title="Permanently delete all archived panes"
             aria-label="Permanently delete all archived panes"
           >
@@ -1496,7 +1499,7 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
                     <button
                       type="button"
                       onClick={() => void handleRestoreOrchestrationSession(session.id)}
-                      className="relative z-10 flex-shrink-0 rounded p-1 text-text-muted hover:bg-surface-hover hover:text-status-success transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
+                      className="needs-full-access relative z-10 flex-shrink-0 rounded p-1 text-text-muted hover:bg-surface-hover hover:text-status-success transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
                       title={`Restore Session ${session.name || 'Untitled'}`}
                       aria-label={`Restore Session ${session.name || 'Untitled'}`}
                     >
@@ -1548,7 +1551,7 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); handleRestoreSession(session.id); }}
-                          className="relative z-10 flex-shrink-0 p-1 rounded text-text-muted hover:text-status-success hover:bg-surface-hover transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
+                          className="needs-full-access relative z-10 flex-shrink-0 p-1 rounded text-text-muted hover:text-status-success hover:bg-surface-hover transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
                           title={`Restore ${session.name || 'Untitled'}`}
                           aria-label={`Restore ${session.name || 'Untitled'}`}
                         >
@@ -1557,7 +1560,7 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); handlePermanentDeleteSession(session); }}
-                          className="relative z-10 flex-shrink-0 p-1 rounded text-text-muted hover:text-status-error hover:bg-surface-hover transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
+                          className="needs-full-access relative z-10 flex-shrink-0 p-1 rounded text-text-muted hover:text-status-error hover:bg-surface-hover transition-all opacity-0 group-hover/archived:opacity-100 group-focus-within/archived:opacity-100"
                           title={`Permanently delete ${session.name || 'Untitled'}`}
                           aria-label={`Permanently delete ${session.name || 'Untitled'}`}
                         >

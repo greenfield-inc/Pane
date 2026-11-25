@@ -9,6 +9,8 @@ import {
   type RemoteRequestContext,
 } from '../../../../shared/remoteClient/remoteDaemonClient';
 import { readEventStreamResponse } from '../../../../shared/remoteClient/fetchEventStreamTransport';
+import { readOnlyMarkSchema, type ReadOnlyMark } from '../../../../shared/types/accessLevel';
+import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { RemotePaneConnectionProfile } from '../../../../shared/types/remoteDaemon';
 
 export type RemoteBrowserConnectionState = RemoteDaemonConnectionState;
@@ -47,9 +49,34 @@ const browserTransport: RemoteDaemonTransport = {
   },
 };
 
+const readySchema = boundary.object({ access: boundary.optional(readOnlyMarkSchema) });
+
+/** A host that sends no level (full access, or an older Pane) gives full access. */
+function accessInReady(data: string): ReadOnlyMark | undefined {
+  try {
+    return decodeOptionalBoundary(JSON.parse(data), readySchema)?.access;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The transport, telling `onAccess` the level in each ready event before the client restores from it. */
+function notingAccess(onAccess: (access: ReadOnlyMark | undefined) => void): RemoteDaemonTransport {
+  return {
+    ...browserTransport,
+    openEventStream: (context) => browserTransport.openEventStream({
+      ...context,
+      onEvent: (event) => {
+        if (event.event === 'ready') onAccess(accessInReady(event.data));
+        context.onEvent(event);
+      },
+    }),
+  };
+}
+
 export class RemoteDaemonBrowserClient extends RemoteDaemonClient {
-  constructor(profile: RemotePaneConnectionProfile) {
-    super({ profile, transport: browserTransport, runtimeId: getRuntimeId, clientLabel: getClientLabel() });
+  constructor(profile: RemotePaneConnectionProfile, onAccess: (access: ReadOnlyMark | undefined) => void = () => undefined) {
+    super({ profile, transport: notingAccess(onAccess), runtimeId: getRuntimeId, clientLabel: getClientLabel() });
   }
 
   override async connect(): Promise<void> {

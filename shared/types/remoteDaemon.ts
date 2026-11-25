@@ -390,6 +390,8 @@ export interface RemotePaneConnectionState {
   activeBaseUrl: string | null;
   /** The route the active computer is on (`ComputerRoute.id`): the dot on its pill. */
   activeRouteId?: string | null;
+  /** "read" while the active computer gives this one read-only access; absent for full access. */
+  access?: ReadOnlyMark;
   lastError: string | null;
   lastSeenAt: string | null;
   /** The latest connection checklist, while a connect the user started runs, failed or warns. */

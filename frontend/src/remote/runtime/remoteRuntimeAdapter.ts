@@ -1,3 +1,6 @@
+import type { MissionControlSnapshotRequest, MissionControlSnapshotResult } from '../../../../shared/types/missionControl';
+import { READ_ONLY_HOST_ANSWERS } from '../../../../shared/remoteClient/readOnlyHost';
+import type { ReadOnlyMark } from '../../../../shared/types/accessLevel';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { ChatTabClient, ChatTabCreate, ChatTabView } from '../../../../shared/types/chatTab';
 import { decodeChatAgents, decodeChatConversations, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
@@ -70,8 +73,16 @@ export class RemoteRuntimeAdapter {
   private readonly client: RemoteDaemonBrowserClient;
 
   constructor(readonly profile: RemotePaneConnectionProfile) {
-    this.client = new RemoteDaemonBrowserClient(profile);
+    this.access = profile.access;
+    this.client = new RemoteDaemonBrowserClient(profile, (access) => {
+      this.access = access;
+      this.onAccess?.(access);
+    });
   }
+
+  /** The computer's level for this browser: its pairing's until it answers, then what each ready event says. */
+  access: ReadOnlyMark | undefined;
+  onAccess?: (access: ReadOnlyMark | undefined) => void;
 
   connect(): Promise<void> {
     return this.client.connect();
@@ -119,7 +130,9 @@ export class RemoteRuntimeAdapter {
   }
 
   async invoke<T>(channel: string, args: unknown[] = []): Promise<T> {
-    const response = await this.client.invoke<IpcLikeResponse<T> | T>(channel, args);
+    // SAFETY: each answer holds what its channel's readers use when there is nothing to show.
+    const answer = this.access === 'read' ? READ_ONLY_HOST_ANSWERS.get(channel) as IpcLikeResponse<T> | T | undefined : undefined;
+    const response = answer !== undefined ? answer : await this.client.invoke<IpcLikeResponse<T> | T>(channel, args);
     if (isIpcResponse<T>(response)) {
       if (response.success === false) {
         throw new Error(response.error ?? `${channel} failed`);
@@ -130,6 +143,9 @@ export class RemoteRuntimeAdapter {
     // SAFETY: The adapter method selects T from the invoked channel contract.
     return response as T;
   }
+
+  /** Terminals' sizes on the host, for a read-only viewer to draw at. */
+  readonly terminalSnapshots = (request: MissionControlSnapshotRequest): Promise<MissionControlSnapshotResult> => this.invoke('mission-control:snapshots', [request]);
 
   /** Chat tabs on the connected host: the agent runs there, under that machine's own sign-in. */
   readonly chatTab: ChatTabClient & { create(request: ChatTabCreate): Promise<{ panelId: string }> } = {

@@ -7,6 +7,7 @@ import { settingDomId } from '../catalog';
 import { RemoteGroup } from '../RemoteGroup';
 import { CARD_ROW, CodelessAccessRows } from '../CodelessRemoteSettings';
 import { GlassesRows } from '../GlassesSettings';
+import { ReadOnlyPill } from '../../machines/ReadOnlyPill';
 import { ComputerRow } from '../computers/ComputerRow';
 import { PublicUrlField } from '../computers/PublicUrlField';
 import { useAddDeviceStore } from '../../addDevice/addDeviceStore';
@@ -22,7 +23,7 @@ import { Bone, Skeleton, LoadingStatus, useSkeletonHold } from '../../ui/Skeleto
 import { computerRelayId } from '../../../../../shared/types/remoteComputers';
 import { relayCarrier } from '../../../utils/relayCarrier';
 import type { RemoteDaemonClientRecord } from '../../../../../shared/types/remoteDaemon';
-import type { RelayStatus } from '../../../../../shared/types/relay';
+import { RELAY_DEVICE_COMMANDS, type RelayStatus } from '../../../../../shared/types/relay';
 import type { RemoteAccessSubviewId, SettingSaveState, SettingsSettingId } from '../../../types/settings';
 import type { RemoteAccessController } from '../useRemoteAccessSettings';
 
@@ -97,7 +98,9 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
     return relayId ? [relayId] : [];
   }));
   // Computers linked with this one that this one does not list (it reaches them no other way).
-  const linkedOnly = controller.config.host.clients.filter((client) => client.kind === 'computer' && !(client.computerId && listedRelayIds.has(client.computerId)));
+  const linkedOnly = controller.config.host.clients.filter((client) => client.kind === 'computer' && client.access !== 'read' && !(client.computerId && listedRelayIds.has(client.computerId)));
+  // Read-only computers only watch this one. They aren't linked, and their ids are their own claim, so each has its own row.
+  const watching = controller.config.host.clients.filter((client) => client.kind === 'computer' && client.access === 'read');
   const devices = controller.config.host.clients.filter((client) => client.kind !== 'computer').length;
   const tailnetName = tailnet?.ok ? tailnet.tailnet : null;
   const tailscaleSignedOut = tailnet?.ok === false;
@@ -145,7 +148,8 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
     if (!computer) return;
     const relayId = computerRelayId(computer);
     setUnlinkOutcome(null);
-    if (!relayId) {
+    // A computer this one only watches isn't linked with it: forgetting it here is all there is.
+    if (!relayId || machine.readOnly) {
       // Main switches to this computer first when it is the active one.
       void controller.forgetComputer(computer.id).then(() => fetchConfig());
       return;
@@ -267,6 +271,19 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
                 <div id={settingDomId('remote-linked-computers')} data-setting-id="remote-linked-computers" tabIndex={-1} className="divide-y divide-border-secondary outline-none">
                   {linkedOnly.map((computer) => (
                     <LinkedComputerRow key={computer.id} computer={computer} controller={controller} onOutcome={setUnlinkOutcome} />
+                  ))}
+                </div>
+              </RemoteGroup>
+            )}
+
+            {watching.length > 0 && (
+              <RemoteGroup
+                title="Watching this computer"
+                footnote="These computers see this one's Sessions, agents, transcripts and terminal output, and can't change anything on it."
+              >
+                <div id={linkedOnly.length === 0 ? settingDomId('remote-linked-computers') : undefined} data-setting-id={linkedOnly.length === 0 ? 'remote-linked-computers' : undefined} tabIndex={-1} className="divide-y divide-border-secondary outline-none">
+                  {watching.map((computer) => (
+                    <WatchingComputerRow key={computer.id} computer={computer} controller={controller} onOutcome={setUnlinkOutcome} />
                   ))}
                 </div>
               </RemoteGroup>
@@ -481,7 +498,7 @@ function PhoneRows({ controller, here }: { controller: RemoteAccessController; h
         const connected = live.some((entry) => entry.clientId === client.id);
         const detail = [connected ? 'Connected now' : lastUsed(client.lastUsedAt), client.linkedBy && `Added by ${client.linkedBy}`].filter(Boolean).join(' · ');
         return (
-          <PhoneRow key={client.id} title={client.label} detail={detail} className={rowClass}>
+          <PhoneRow key={client.id} title={client.label} readOnly={client.access === 'read'} detail={detail} className={rowClass}>
             {connected && <Button type="button" variant="ghost" size="sm" disabled={controller.busy} onClick={() => controller.disconnectClients([client.id])}>Disconnect</Button>}
             <Dropdown
               menuLabel={`Remove ${client.label}`}
@@ -548,7 +565,7 @@ function PhoneRowSkeleton() {
   );
 }
 
-function PhoneRow({ title, detail, className, children }: { title: string; detail: string; className?: string; children: ReactNode }) {
+function PhoneRow({ title, detail, readOnly = false, className, children }: { title: string; detail: string; readOnly?: boolean; className?: string; children: ReactNode }) {
   return (
     <div className={cn('flex items-center justify-between gap-3', CARD_ROW, className)}>
       <div className="flex min-w-0 items-center gap-3">
@@ -556,7 +573,10 @@ function PhoneRow({ title, detail, className, children }: { title: string; detai
           <Smartphone className="h-4 w-4" />
         </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-text-primary">{title}</p>
+          <p className="flex items-center gap-2 text-sm font-medium text-text-primary">
+            <span className="truncate">{title}</span>
+            {readOnly && <ReadOnlyPill />}
+          </p>
           <p className="truncate text-xs text-text-tertiary">{detail}</p>
         </div>
       </div>
@@ -612,6 +632,46 @@ function LinkedComputerRow({ computer, controller, onOutcome }: { computer: Remo
           />
         )}
       </div>
+    </div>
+  );
+}
+
+/** A computer that only watches this one. Removing it takes back every token it got from this computer's link. */
+function WatchingComputerRow({ computer, controller, onOutcome }: { computer: RemoteDaemonClientRecord; controller: RemoteAccessController; onOutcome: (line: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  const connected = controller.hostState.connectedClients.some((entry) => entry.clientId === computer.id);
+  const detail = [connected ? 'Connected now' : computer.lastUsedAt ? `Last used ${new Date(computer.lastUsedAt).toLocaleString()}` : 'Never used', computer.linkedBy && `Added by ${computer.linkedBy}`].filter(Boolean).join(' · ');
+  return (
+    <div className={cn('flex items-center justify-between gap-3', CARD_ROW)} data-testid={`watching-${computer.label}`}>
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-surface-secondary text-text-secondary" aria-hidden="true">
+          <Monitor className="h-4 w-4" />
+        </span>
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 text-sm font-medium text-text-primary">
+            <span className="truncate">{computer.label}</span>
+            <ReadOnlyPill />
+          </p>
+          <p className="truncate text-xs text-text-tertiary">{detail}</p>
+        </div>
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label={`Remove ${computer.label}`}
+        loading={busy}
+        onClick={() => {
+          setBusy(true);
+          onOutcome(null);
+          void runEverywhere(controller, RELAY_DEVICE_COMMANDS.removePhoneEverywhere, { clientId: computer.id }, `Removed ${computer.label}`).then((line) => {
+            setBusy(false);
+            onOutcome(line);
+          });
+        }}
+      >
+        Remove
+      </Button>
     </div>
   );
 }

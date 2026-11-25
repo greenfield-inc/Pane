@@ -1,3 +1,4 @@
+import { readOnlyMarkSchema, type ReadOnlyMark } from '../types/accessLevel';
 import {
   RELAY_CLIENT_COMMANDS,
   type RelayComputer,
@@ -56,12 +57,14 @@ export function isRelayProfile(profile: RemotePaneConnectionProfile): profile is
   return profile.relay !== undefined;
 }
 
-/** A saved profile for a computer reached through a relay. Its id follows the computer, so pairing again replaces it. */
-export function relayProfile(grant: RelayComputerGrant, linkedBy?: string): RelayConnectionProfile {
+/** A saved profile for a computer reached through a relay. Its id follows the computer, so pairing again replaces it. `access` is the token's level. */
+export function relayProfile(grant: RelayComputerGrant, linkedBy?: string, access?: ReadOnlyMark): RelayConnectionProfile {
   const { computer, token } = grant;
   const relay: StoredRelayProfile = { computerId: computer.id, fingerprint: computer.fingerprint, domain: computer.domain, local: computer.local };
   if (linkedBy) relay.linkedBy = linkedBy;
-  return { id: `relay:${computer.id}`, label: computer.name, baseUrl: computer.address.replace(/\/+$/u, ''), token, transport: 'http+sse', relay };
+  const profile: RelayConnectionProfile = { id: `relay:${computer.id}`, label: computer.name, baseUrl: computer.address.replace(/\/+$/u, ''), token, transport: 'http+sse', relay };
+  if (access) profile.access = access;
+  return profile;
 }
 
 /** Why a pairing failed, in the words the phone and the browser show. */
@@ -94,6 +97,7 @@ const exchangeSchema = boundary.object({
   ok: boundary.literal(true),
   token: boundary.nonEmptyString,
   clientId: boundary.nonEmptyString,
+  access: boundary.optional(readOnlyMarkSchema),
   computer: computerSchema,
   linked: boundary.array(grantSchema),
 });
@@ -134,7 +138,7 @@ export async function fetchWithin(fetch: RemoteFetch, url: string, init: Paramet
 /**
  * Trades a pairing secret for this device's token at `POST https://<id>.<domain>/pair/exchange`
  * (the browser app's own origin) and returns the scanned computer's profile first, then a profile
- * for each computer linked with it. Throws `RelayPairingError`, also when a different computer
+ * for each computer linked with it; a read-only code makes them all read-only. Throws `RelayPairingError`, also when a different computer
  * answers. Linked computers outside `<id>.<domain>` are dropped.
  */
 export async function exchangeRelayPairing(
@@ -164,7 +168,7 @@ export async function exchangeRelayPairing(
     throw new RelayPairingError('This code didn’t work', `A different computer answered. Scan the code Pane on ${name} is showing now.`, 'ERR_PAIRING_WRONG_COMPUTER', true);
   }
   const linked = result.linked.filter(grant => grant.computer.id !== scanned.computerId && isRelayComputerUnder(grant.computer, scanned.domain));
-  return [relayProfile({ computer: result.computer, token: result.token }), ...linked.map(grant => relayProfile(grant, result.computer.name))];
+  return [relayProfile({ computer: result.computer, token: result.token }, undefined, result.access), ...linked.map(grant => relayProfile(grant, result.computer.name, result.access))];
 }
 
 const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
@@ -245,7 +249,8 @@ export async function linkRelayComputers(added: RelayLinkPeer, others: readonly 
 
 /**
  * Links a newly paired computer with the device's other saved relay computers, skipping the
- * ones the pairing already linked it with. Returns the ids it could not link yet.
+ * ones the pairing already linked it with. Returns the ids it could not link yet. A computer this
+ * device only watches joins nothing: it is never linked, whether it is the new one or a saved one.
  */
 export function linkWithSavedRelayComputers(
   added: RelayConnectionProfile,
@@ -253,8 +258,9 @@ export function linkWithSavedRelayComputers(
   saved: readonly RemotePaneConnectionProfile[],
   clientFor: (profile: RelayConnectionProfile) => RelayCommandClient,
 ): Promise<string[]> {
+  if (added.access === 'read') return Promise.resolve([]);
   const skip = new Set([added.relay.computerId, ...alreadyLinked.map(profile => profile.relay.computerId)]);
-  const others = saved.filter(isRelayProfile).filter(profile => !skip.has(profile.relay.computerId));
+  const others = saved.filter(isRelayProfile).filter(profile => profile.access !== 'read' && !skip.has(profile.relay.computerId));
   const peer = (profile: RelayConnectionProfile): RelayLinkPeer => ({ computer: relayComputerOf(profile), client: clientFor(profile) });
   return others.length ? linkRelayComputers(peer(added), others.map(peer)) : Promise.resolve([]);
 }
@@ -267,7 +273,8 @@ export function relayComputerOf(profile: RelayConnectionProfile): RelayComputer 
 
 /**
  * "Your computers": asks one relay computer for the computers linked with it and returns profiles
- * for the ones this device has not saved yet, on that computer's domain.
+ * for the ones this device has not saved yet, on that computer's domain. A computer this device only
+ * watches hands out read-only tokens.
  */
 export async function fetchNewRelayProfiles(
   client: RelayCommandClient,
@@ -278,7 +285,7 @@ export async function fetchNewRelayProfiles(
   const grants = decodeBoundary(await client.invoke(RELAY_CLIENT_COMMANDS.computers, [{ known }]), boundary.array(grantSchema));
   return grants
     .filter(grant => !known.includes(grant.computer.id) && isRelayComputerUnder(grant.computer, from.relay.domain))
-    .map(grant => relayProfile(grant, from.label));
+    .map(grant => relayProfile(grant, from.label, from.access));
 }
 
 const statusSchema = boundary.object({

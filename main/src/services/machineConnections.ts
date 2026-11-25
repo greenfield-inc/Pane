@@ -5,6 +5,8 @@ import { RemotePaneClient, type RemoteRouteCandidate } from '../daemon/client/re
 import { primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
 import type { ConfigManager } from './configManager';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
+import { READ_ONLY_ACCESS_CODE } from '../../../shared/types/accessLevel';
+import { READ_ONLY_HOST_ANSWERS } from '../../../shared/remoteClient/readOnlyHost';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '../../../shared/types/remoteDaemon';
@@ -155,9 +157,12 @@ export class MachineConnections {
     return () => { this.listeners.delete(listener); };
   }
 
-  /** Each saved machine's connection, for main-process callers such as key sharing. Never reaches the renderer. */
+  /**
+   * The connection to each saved machine this computer has full access to, for main-process callers
+   * that share this computer's data (key sharing, secret leases). Never reaches the renderer.
+   */
   remotes(): Array<{ id: string; invoke: MachineClient['invoke'] }> {
-    return [...this.machines.values()].map(machine => ({ id: machine.profile.id, invoke: (channel, args) => machine.client.invoke(channel, args) }));
+    return [...this.machines.values()].filter(machine => machine.state.access !== 'read').map(machine => ({ id: machine.profile.id, invoke: (channel, args) => machine.client.invoke(channel, args) }));
   }
 
   /** Runs any host channel on a saved machine, for main-process callers (Session members). Never reaches the renderer. */
@@ -220,7 +225,8 @@ export class MachineConnections {
         `Pane can't read "${channel}" from another machine: only its lists can be read this way. Nothing was read.`,
         `Use one of ${MACHINE_READ_CHANNELS.join(', ')}.`);
     }
-    return { machineId, data: await this.invoke(machineId, { channel, args }) };
+    const answer = this.machines.get(machineId)?.state.access === 'read' ? READ_ONLY_HOST_ANSWERS.get(channel) : undefined;
+    return { machineId, data: answer !== undefined ? answer : await this.invoke(machineId, { channel, args }) };
   }
 
   /** Runs one allowed command on the named machine. Anything outside the list is refused before it is sent. */
@@ -250,6 +256,11 @@ export class MachineConnections {
     const machine = this.machines.get(machineId);
     if (!machine) throw unknownMachine(machineId);
     // Reads work over a stream that is still connecting; a write waits for the machine to answer.
+    if (options.write && machine.state.access === 'read') {
+      throw new PaneError(READ_ONLY_ACCESS_CODE,
+        `This computer is paired Read only with ${machine.profile.label}, so the action was not sent. Nothing was changed.`,
+        `Ask ${machine.profile.label}'s owner for full access.`);
+    }
     if (options.write && machine.state.status !== 'online') {
       throw new PaneError('ERR_MACHINE_OFFLINE',
         `${machine.profile.label} is not connected, so the action was not sent. Nothing was changed.`,
@@ -291,7 +302,7 @@ export class MachineConnections {
       key: connectionKey(computer),
       profile,
       retryTimer: null,
-      state: { id, label: profile.label, kind: 'remote', status: 'connecting', offlineSince: null },
+      state: { id, label: profile.label, kind: 'remote', status: 'connecting', offlineSince: null, ...(profile.access && { access: profile.access }) },
       client: this.createClient(profile, {
         machineId: this.deps.configManager.getConfig().machineId,
         routes,
@@ -301,6 +312,12 @@ export class MachineConnections {
           if (!isCurrent()) return;
           if (metadata?.hostRoutes) void this.deps.routes?.saveReport(id, metadata.routeId, metadata.hostRoutes);
           if (metadata?.routeId && machine.state.routeId !== metadata.routeId) { machine.state.routeId = metadata.routeId; this.emitMachines(); }
+          // Each ready event ("restoring") says this computer's access anew; no mark means full.
+          if (status === 'restoring' && machine.state.access !== metadata?.hostAccess) {
+            if (metadata?.hostAccess) machine.state.access = metadata.hostAccess;
+            else delete machine.state.access;
+            this.emitMachines();
+          }
           this.updateStatus(machine, status, metadata?.hostMachineId, metadata?.hostWorkspaceEntries);
           if (status === 'connected') clearRetry(machine);
           if (status === 'error' && !machine.retryTimer) {
@@ -448,6 +465,7 @@ function unknownMachine(machineId: string): PaneError {
     'Read the machine list again with machines:list and use one of its ids.');
 }
 
+/** A route's level is in its token, so a new level arrives as a new token. */
 function connectionKey(computer: RemoteComputer): string {
   return computer.routes.map((route) => `${route.id}\n${route.baseUrl}\n${route.token}`).join('\n');
 }

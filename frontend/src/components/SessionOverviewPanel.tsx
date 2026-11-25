@@ -246,7 +246,7 @@ export function SessionOverviewPanel({ record, folderSessionId, overview, error,
         </div>
         <div className="flex flex-shrink-0 items-center gap-1">
           <button type="button" aria-label="Refresh Session overview" title="Refresh" onClick={() => void onRefresh()} className={OVERVIEW_ACTION}><RefreshCw className="h-3.5 w-3.5" /></button>
-          <button type="button" aria-label={editing ? 'Cancel renaming Session' : 'Rename Session'} title={editing ? 'Cancel renaming' : 'Rename Session'} onClick={() => setEditing(value => !value)} className={OVERVIEW_ACTION}>{editing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}</button>
+          <button type="button" aria-label={editing ? 'Cancel renaming Session' : 'Rename Session'} title={editing ? 'Cancel renaming' : 'Rename Session'} onClick={() => setEditing(value => !value)} className={OVERVIEW_ACTION}>{editing ? <X className="needs-full-access h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}</button>
           {statusPage && <>
             <button type="button" aria-label="Open as a browser tab" title="Open as a browser tab" className={OVERVIEW_ACTION}
               onClick={() => void openBesideChat(folderSessionId, statusPage).catch((cause: unknown) => console.error('[SessionOverview] Did not open the status page beside chat:', cause))}>

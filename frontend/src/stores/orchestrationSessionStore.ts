@@ -1,3 +1,4 @@
+import { isReadOnlyHost } from './readOnlyHostStore';
 import { create } from 'zustand';
 import { API } from '../utils/api';
 import type {
@@ -227,7 +228,8 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
         selectionVisits: { ...state.selectionVisits, [intended.id]: (state.selectionVisits[intended.id] ?? 0) + 1 } }));
     }
     try {
-      const data = ensureSuccess(await API.orchestrationSessions.select(selector), 'Failed to select Session');
+      // A read-only host keeps its own last-used Session; this window only shows another one.
+      const data = ensureSuccess(await (isReadOnlyHost() ? API.orchestrationSessions.list() : API.orchestrationSessions.select(selector)), 'Failed to select Session');
       if (generation === operationGeneration) {
         refreshSequence += 1;
         applyList(data, intended?.id);

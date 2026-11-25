@@ -1,3 +1,4 @@
+import { setHostAccess, useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import type { OrchestrationSessionRecord, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
@@ -127,6 +128,7 @@ function connectionReducer(state: ConnectionState, update: Partial<ConnectionSta
 export function RemotePwaApp() {
   const [savedProfiles, setSavedProfiles] = useState<RemotePaneConnectionProfile[]>([]);
   const [profilesLoading, setProfilesLoading] = useState(true);
+  const readOnly = useReadOnlyHost();
   const [pendingPushRoute, setPendingPushRoute] = useState<NativePushRoute | null>(null);
   const [pushStatus, setPushStatus] = useState<{ registration: 'registered' | 'not-registered' | 'revoked'; provider: string; message: string; needsInputEnabled?: boolean; completedEnabled?: boolean } | null>(null);
   const [pushControls, setPushControls] = useState(DEFAULT_PUSH_CONTROLS);
@@ -614,6 +616,8 @@ export function RemotePwaApp() {
     const runtime = new RemoteRuntimeAdapter(profile);
     activeRuntimeRef.current?.disconnect();
     activeRuntimeRef.current = runtime;
+    setHostAccess(runtime.access);
+    runtime.onAccess = access => { if (runtime === activeRuntimeRef.current) setHostAccess(access); };
     updateConnection({ ...INITIAL_CONNECTION, connectionStatus: 'connecting' });
     resetHostState(profile.id);
     updateConnection({ adapter: runtime, activeProfile: profile });
@@ -706,11 +710,13 @@ export function RemotePwaApp() {
       // Computers the Pane app already linked with this one come along. The browser links none itself:
       // each computer's browser app has its own storage, so it never sees the others.
       setSavedProfiles(previous => withNewProfiles(previous, linked));
-      await connectProfile(computer);
+      // A read-only link never takes the place of full access this browser already has.
+      const saved = computer.access === 'read' ? savedProfiles.find(profile => profile.id === computer.id && profile.access !== 'read') : undefined;
+      await connectProfile(saved ?? computer);
     } catch (error) {
       setLastError(error instanceof Error ? pairingErrorText(error) : 'Pairing failed.');
     }
-  }, [connectProfile, setLastError]);
+  }, [connectProfile, savedProfiles, setLastError]);
 
   // Reconnects to the last used host once on open; a notification tap picks its own host instead.
   useEffect(() => {
@@ -752,6 +758,7 @@ export function RemotePwaApp() {
   const disconnect = useCallback(() => {
     activeRuntimeRef.current?.disconnect();
     activeRuntimeRef.current = null;
+    setHostAccess(undefined);
     setAutoConnectPaused(true);
     updateConnection(INITIAL_CONNECTION);
     resetHostState();
@@ -761,6 +768,7 @@ export function RemotePwaApp() {
   const cancelReconnect = useCallback(() => {
     activeRuntimeRef.current?.disconnect();
     activeRuntimeRef.current = null;
+    setHostAccess(undefined);
     setReconnectingProfile(null);
     updateConnection(INITIAL_CONNECTION);
   }, []);
@@ -1072,7 +1080,8 @@ export function RemotePwaApp() {
   }, [adapter]);
 
   useEffect(() => {
-    if (!adapter || !activeProfile || !isNativeMobile()) return;
+    // A computer this device only watches sends it no alerts.
+    if (!adapter || !activeProfile || !isNativeMobile() || readOnly) return;
     let cancelled = false;
     void (async () => {
       const pushError = await setupNativePush(activeProfile, adapter);
@@ -1085,7 +1094,7 @@ export function RemotePwaApp() {
       if (!cancelled) setLastError(error instanceof Error ? error.message : 'Could not set up notifications.');
     });
     return () => { cancelled = true; };
-  }, [adapter, activeProfile, setLastError]);
+  }, [adapter, activeProfile, readOnly, setLastError]);
 
   const changePushControl = useCallback((key: 'needsInputEnabled' | 'completedEnabled', value: boolean) => {
     if (!adapter) return;
@@ -1315,7 +1324,7 @@ export function RemotePwaApp() {
           />
           {connectionBar}
 
-          {isNativeMobile() && (
+          {isNativeMobile() && !readOnly && (
             <details className="border-b border-border-primary bg-surface-secondary px-3 py-2 text-sm">
               <summary className="cursor-pointer font-medium text-text-secondary">Notifications {pushStatus?.registration === 'registered' ? 'enabled' : 'setup'}</summary>
               <p className="mt-2 text-text-tertiary">{pushStatus?.message ?? 'Allow notifications to receive host attention alerts.'}</p>

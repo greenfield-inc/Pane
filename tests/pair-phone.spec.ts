@@ -67,6 +67,39 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
+for (const theme of ['light', 'dark'] as const) {
+  test(`Read only says what it gives and shows only read-only codes (${theme})`, async ({ page }) => {
+    await openHome(page, { relay: { codeDelayMs: 400 } }, theme);
+    const dialog = await openPairDialog(page);
+    await expect(qr(page)).toHaveAttribute('data-url', /#s=secret-1&/);
+    await shot(page, `add-phone-full-${theme}`);
+    await dialog.getByRole('radio', { name: 'Read only' }).click();
+    // The full code is gone before the read-only one is made.
+    await expect(qr(page)).toHaveCount(0);
+    await expect(dialog).toContainText("Can’t type, run, approve, open files or see your keys.");
+    await expect(dialog).toContainText('any key or password that appears on screen');
+    await expect(qr(page)).toHaveAttribute('data-url', /#s=read-secret-2&/);
+    await shot(page, `add-phone-read-${theme}`);
+
+    // Back and forth while a code is being made: the code shown is the level chosen last.
+    await dialog.getByRole('radio', { name: 'Full access' }).click();
+    await dialog.getByRole('radio', { name: 'Read only' }).click();
+    await expect(qr(page)).toHaveAttribute('data-url', /#s=read-secret-/);
+    await page.waitForTimeout(600);
+    await expect(qr(page)).toHaveAttribute('data-url', /#s=read-secret-/);
+
+    await dialog.getByRole('tab', { name: 'Computer' }).click();
+    await expect(dialog.getByRole('radio', { name: 'Read only' })).toBeChecked();
+    await shot(page, `add-computer-read-${theme}`);
+    await dialog.getByRole('button', { name: 'Close modal' }).click();
+    await openPairDialog(page);
+    await expect(dialog.getByRole('radio', { name: 'Full access' })).toBeChecked();
+    await expect(qr(page)).toHaveAttribute('data-url', /#s=secret-/);
+    await dialog.getByRole('tab', { name: 'Computer' }).click();
+    await shot(page, `add-computer-full-${theme}`);
+  });
+}
+
 test('a used code shows who paired and a new code', async ({ page }) => {
   await openHome(page);
   const dialog = await openPairDialog(page);
@@ -267,3 +300,20 @@ test('first run ends on "Take your agents with you", whose Pair a phone opens Ad
   await step.getByRole('button', { name: 'Pair a phone' }).click();
   await expect(qr(page)).toBeVisible();
 });
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`read-only devices say so, and a read-only computer is removed, not unlinked (${theme})`, async ({ page }) => {
+    const readPhone: RemoteDaemonClientRecord = { ...PHONE, id: 'phone-2', label: "Alex's iPhone", phoneId: 'install-2', access: 'read' };
+    const readComputer: RemoteDaemonClientRecord = { ...LAPTOP, id: 'computer-2', label: "Alex's Mac", computerId: 'z9z9z9', access: 'read', linkedBy: undefined };
+    await openRemoteAccess(page, { hostClients: [PHONE, LAPTOP, readPhone, readComputer] }, theme);
+    const row = page.getByTestId("watching-Alex's Mac");
+    await expect(row).toContainText('Read only');
+    await shot(page, `settings-computers-${theme}`);
+    await row.getByRole('button', { name: "Remove Alex's Mac" }).click();
+    await expect.poll(() => calls(page, 'relay:remove-phone-everywhere')).toEqual([[{ clientId: 'computer-2' }]]);
+    expect(await calls(page, 'relay:unlink-computer-everywhere')).toEqual([]);
+    await openPhonesTab(page);
+    await expect(page.getByText('Read only', { exact: true })).toHaveCount(1);
+    await shot(page, `settings-phones-${theme}`);
+  });
+}

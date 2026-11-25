@@ -1,3 +1,4 @@
+import type { ReadOnlyMark } from './accessLevel';
 import type { JsonObject } from '../validation/boundaryDecoder';
 import type { TodoAction, TodoCreateInput } from './todos';
 import type { NotifyRemoteCommand } from './notify';
@@ -30,6 +31,8 @@ export interface MachineState {
   routeId?: string;
   /** Whether the machine's Pane sends its Session members' reports; absent until it first answers. */
   workspaceEntries?: boolean;
+  /** "read" when the machine gives this computer read-only access: its saved route's level until it answers, then what it says; absent for full access. */
+  access?: ReadOnlyMark;
 }
 
 /** A saved machine's round trip: `ms` null when it did not answer; `routeId` the route it was measured over (`ComputerRoute.id`). */

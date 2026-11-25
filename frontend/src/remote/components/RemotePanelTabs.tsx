@@ -172,7 +172,7 @@ export function RemotePanelTabs({
           type="button"
           onClick={() => setShowAddMenu(value => !value)}
           disabled={creating}
-          className="mb-1.5 flex h-8 shrink-0 items-center gap-1 rounded-md border border-border-secondary bg-surface-primary px-2 text-sm font-medium text-text-secondary shadow-sm hover:bg-surface-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
+          className="needs-full-access mb-1.5 flex h-8 shrink-0 items-center gap-1 rounded-md border border-border-secondary bg-surface-primary px-2 text-sm font-medium text-text-secondary shadow-sm hover:bg-surface-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
           aria-haspopup="menu"
           aria-expanded={showAddMenu}
           aria-controls={showAddMenu ? addMenuId : undefined}

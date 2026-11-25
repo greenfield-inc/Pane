@@ -128,7 +128,7 @@ export function ChatStatusBar({ context, tasks = [], queued, pr, agents = [], on
               {tasks.map(task => <li key={task.id}>
                 <span className="chat-status-task-name" title={task.title ?? task.kind}>{task.title ?? task.kind}</span>
                 <span className="chat-status-panel-muted">{taskAge(task.startedAt, now)}</span>
-                {task.canStop !== false && <button type="button" className="chat-status-button" onClick={() => onStopTask(task.id)}>Stop</button>}
+                {task.canStop !== false && <button type="button" className="needs-full-access chat-status-button" onClick={() => onStopTask(task.id)}>Stop</button>}
               </li>)}
             </ul>
           </div>} />;

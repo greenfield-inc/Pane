@@ -39,6 +39,7 @@ import {
   type KeyboardEventLike,
 } from '../../../shared/utils/keyboardChords';
 import { isMac } from '../utils/platformUtils';
+import { isReadOnlyHost } from './readOnlyHostStore';
 import { areKeyboardShortcutsEnabled, isCommandPaletteShortcutEnabled, useConfigStore } from './configStore';
 
 export interface HotkeyDefinition {
@@ -165,6 +166,16 @@ function isGloballyAllowed(id: HotkeyId): boolean {
   const config = useConfigStore.getState().config;
   return areKeyboardShortcutsEnabled(config)
     || (id === 'open-command-palette' && isCommandPaletteShortcutEnabled(config));
+}
+
+/** Commands that change the shown computer: off while it gives read-only access. */
+const CHANGES_HOST = new Set<string>([
+  'new-session', 'new-orchestration-session', 'new-project', 'open-add-tool', 'close-active-tab',
+  'archive-active-session', 'run-dev-server', 'send-approval',
+  'git-commit', 'git-push', 'git-pull', 'git-soft-reset', 'git-rebase-from-main', 'git-merge-to-main',
+]);
+function changesHost(id: string): boolean {
+  return CHANGES_HOST.has(id) || id.startsWith('switch-to-chat-') || (id.startsWith('add-tool-') && id !== 'add-tool-explorer');
 }
 
 function isDefinitionEnabled(definition: EffectiveHotkeyDefinition): boolean {
@@ -416,6 +427,7 @@ export const useHotkeyStore = create<HotkeyStore>((set, get) => ({
       const registered = new Map(state.hotkeys);
       registered.set(definition.id, {
         ...definition,
+        ...(changesHost(definition.id) && { enabled: () => !isReadOnlyHost() && (definition.enabled?.() ?? true) }),
         keys: '',
         registeredKeys: definition.keys,
       });
