@@ -10,6 +10,8 @@ import {
   bundledAgentFarm,
   bundledAgentFarmProcess,
   installBundledAgentFarm,
+  paneAgentFarmProcess,
+  writeAgentFarmTelemetry,
   type AgentFarmProcess,
   type BundledAgentFarm,
 } from './bundledAgentFarm';
@@ -224,8 +226,67 @@ describe('installBundledAgentFarm with the pinned package', () => {
     expect(status.error).toBeUndefined();
     expect(status.state).toBe('ready');
     expect(Object.keys(status.plugins)).toEqual([...BUNDLED_AGENT_FARM_PLUGINS]);
-    expect(JSON.parse(readFileSync(path.join(configRoot, 'settings.json'), 'utf8'))).toEqual({ telemetry: { directory: path.join(configRoot, 'telemetry') } });
+    expect(JSON.parse(readFileSync(path.join(configRoot, 'settings.json'), 'utf8'))).toEqual({ telemetry: { enabled: false, directory: path.join(configRoot, 'telemetry') } });
   }, 120_000);
+
+  it('keeps a bundled plugin you edited when a Pane update brings a new bundle, and updates the others', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    const first = await installBundledAgentFarm({ paneDir, log: () => undefined });
+    expect(first).toMatchObject({ state: 'ready', edited: [] });
+    const readme = path.join(configRoot, 'plugins', 'greenfield', 'agents', 'mine.md');
+    writeFileSync(readme, '# my own subagent\n');
+    const bundle = bundledAgentFarm();
+    if (!bundle) throw new Error('Expected the pinned package');
+    const logs: string[] = [];
+    // A Pane release: same package files, a new version, so the manifest hash changes.
+    const status = await installBundledAgentFarm({ paneDir, bundle: { ...bundle, version: '9.9.9' }, log: (line) => logs.push(line) });
+    expect(status.error).toBeUndefined();
+    expect(status).toMatchObject({ state: 'ready', edited: ['greenfield'] });
+    expect(status.plugins.greenfield).toBe(first.plugins.greenfield);
+    expect(readFileSync(readme, 'utf8')).toBe('# my own subagent\n');
+    expect(logs.join('\n')).toContain('kept greenfield because it was changed here');
+    // The next start with the same bundle still reports it.
+    const again = await installBundledAgentFarm({ paneDir, bundle: { ...bundle, version: '9.9.9' }, log: () => undefined });
+    expect(again.edited).toEqual(['greenfield']);
+  }, 180_000);
+
+  it('treats a changed installed file as an edit too', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    await installBundledAgentFarm({ paneDir, log: () => undefined });
+    const bundle = bundledAgentFarm()!;
+    writeFileSync(path.join(configRoot, 'plugins', 'dcouple', 'agents', 'astra-audits.md'), '---\nname: astra-audits\n---\nMine now.\n', { flag: 'a' });
+    const status = await installBundledAgentFarm({ paneDir, bundle: { ...bundle, version: '9.9.8' }, log: () => undefined });
+    expect(status.error).toBeUndefined();
+    expect(status).toMatchObject({ state: 'ready', edited: ['dcouple'] });
+  }, 180_000);
+});
+
+describe('writeAgentFarmTelemetry', () => {
+  it('turns telemetry off by default at install, and on only when asked, keeping other settings', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    mkdirSync(configRoot, { recursive: true });
+    writeFileSync(path.join(configRoot, 'settings.json'), JSON.stringify({ provider: 'x', telemetry: { capture_content: false } }));
+    await installBundledAgentFarm({ paneDir, bundle: fakeBundle(), run: recordingRunner([]), log: () => undefined });
+    const settings = () => JSON.parse(readFileSync(path.join(configRoot, 'settings.json'), 'utf8'));
+    expect(settings()).toEqual({ provider: 'x', telemetry: { capture_content: false, enabled: false, directory: path.join(configRoot, 'telemetry') } });
+    await writeAgentFarmTelemetry(paneDir, true);
+    expect(settings().telemetry).toEqual({ capture_content: false, enabled: true, directory: path.join(configRoot, 'telemetry') });
+    await installBundledAgentFarm({ paneDir, bundle: fakeBundle(), run: recordingRunner([]), telemetry: true, log: () => undefined });
+    expect(settings().telemetry.enabled).toBe(true);
+    await writeAgentFarmTelemetry(paneDir, false);
+    expect(settings().telemetry.enabled).toBe(false);
+  });
+});
+
+describe('paneAgentFarmProcess', () => {
+  it('is the bundled copy with Pane\'s config root, or undefined without a bundle', () => {
+    const bundle = { root: '/app', entry: '/app/dist/cli.js', version: '0.2.34' };
+    expect(paneAgentFarmProcess('/pane', ['profiles', 'list'], { PATH: '/bin' }, bundle, '/Pane')).toEqual({ executable: '/Pane', args: ['/app/dist/cli.js', 'profiles', 'list', '--config-root', path.join('/pane', 'agent-farm')], env: { PATH: '/bin', ELECTRON_RUN_AS_NODE: '1' } });
+    expect(paneAgentFarmProcess('/pane', ['profiles', 'list'], {}, null)).toBeUndefined();
+  });
 });
 
 describe('the pinned package', () => {

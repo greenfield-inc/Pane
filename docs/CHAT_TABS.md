@@ -551,12 +551,19 @@ The profile's model, effort, instructions with LAUNCH CONTEXT, skills,
 subagents, MCP servers and telemetry come with it. The contract is Agent Farm's
 CONFIGURATION.md, *ACP sessions*.
 
-Which `agent-farm` runs: the person's own when one is on PATH, with their own
-config root, exactly as before. Without one, Pane runs the Agent Farm it ships
-(`@greenfieldco/agent-farm`, pinned in `package.json` and `main/package.json`)
-with its Electron as Node and `--config-root <PANE_DIR>/agent-farm`, so a
-profile works on a fresh install. At each start
-(`main/src/services/agentFarm/bundledAgentFarm.ts`, called from
+Which `agent-farm` runs: always the one Pane ships (`@greenfieldco/agent-farm`,
+pinned in `package.json` and `main/package.json`), with its Electron as Node and
+`--config-root <PANE_DIR>/agent-farm`. An agent-farm the person installed
+themselves is not used, and Pane never reads or writes their
+`~/.config/agent-farm`. Chat launches and Session move's checks run it directly
+(`paneAgentFarmProcess` in `main/src/services/agentFarm/bundledAgentFarm.ts`).
+Pane's terminals get it as `agent-farm` from `<PANE_DIR>/bin` (see
+[RUNPANE_BUNDLED_CLI.md](RUNPANE_BUNDLED_CLI.md)), which adds the config root
+before any `--` unless the command names its own. The bare `agent-farm` menu,
+`init` and `doctor` only ever use `~/.config/agent-farm`, so the shim refuses them
+and says why.
+
+At each start (`installBundledAgentFarm`, called from
 `main/src/daemon/bootstrap.ts` without waiting) Pane installs one plugin from
 that package, greenfield, into that folder, when the package's version or plugin
 files differ from what `<PANE_DIR>/agent-farm/pane-manifest.json` records; an
@@ -568,15 +575,25 @@ tried again on the next start. A retired plugin's receipt that isn't valid JSON
 would make every Agent Farm install there fail, so Pane renames it to
 `<name>.json.unreadable-<time>` (keeping its bytes and the plugin's files) and
 logs where it went. When an unchanged bundle's manifest still lists a retired
-plugin, Pane rewrites only the manifest and leaves greenfield's files alone. An install that never finished (its lock or
-half-copied plugin files) is cleared before the next one, and a failed install
-is logged and never blocks startup. Pane never writes to the person's
-`~/.config/agent-farm`. With the bundled copy, `run` writes its launch bundle to
+plugin, Pane rewrites only the manifest and leaves greenfield's files alone. A
+bundled plugin whose files no longer match Agent Farm's install receipt
+(`.plugins/<name>.json`), because someone edited, added or removed a file, is
+kept as it is: Pane updates no longer replace it, the log names it, and the
+manifest lists it under `edited`. An install that never finished (its lock, a
+plugin Pane was installing then, recorded in `pane-installing.json`, or one with
+no receipt) is cleared before the next one, and a failed install is logged and
+never blocks startup. `run` writes its launch bundle to
 `<worktree>/.agent-farm/generated`, which Pane hides from git through
-`info/exclude` as it does `.pane/`, and launch telemetry goes to
-`<PANE_DIR>/agent-farm/telemetry` (set in that folder's `settings.json`). Agent
-Farm still keeps small state of its own (workspace trust, launch records, MCP
-logins) under `~/.local/state/agent-farm` and `~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
+`info/exclude` as it does `.pane/`.
+
+Telemetry is off unless Settings › AI & Agents › *Save Agent Farm telemetry on
+this computer* (`agentFarmTelemetry`) is on: Pane writes `telemetry.enabled` from
+that switch, and `telemetry.directory` as `<PANE_DIR>/agent-farm/telemetry`, into
+that folder's `settings.json` at start and whenever the switch changes. Each
+computer keeps its own switch. `AGENT_FARM_TELEMETRY=on|off` in the environment
+still overrides it for a launch, as Agent Farm documents. Agent Farm still keeps
+small state of its own (workspace trust, launch records, MCP logins) under
+`~/.local/state/agent-farm` and `~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
 `scripts/after-pack.js`) fails a packaged build unless Agent Farm is inside
 `app.asar`, carries no native binaries, and answers `--version` under Electron
 as Node.

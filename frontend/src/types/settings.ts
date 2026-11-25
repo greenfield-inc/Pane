@@ -75,6 +75,7 @@ export type SettingsSettingId =
   | 'mcp-registration'
   | 'mcp-toolsets'
   | 'answer-prompts-from-pane'
+  | 'agent-farm-telemetry'
   | 'agent-skill'
   | 'agent-context'
   | 'session-defaults'
