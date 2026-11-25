@@ -15,6 +15,7 @@ import type { SaveChatFile } from './chatAttachments';
 import { uploadFileToHost } from '../../utils/hostUpload';
 import type { ChatTurnActions } from './ChatTurns';
 import { SessionApprovalCards } from '../approvals/SessionApprovalCards';
+import { referencedFile } from './chatReferences';
 import ChatTabPanel from './ChatTabPanel';
 import type { ChatRendering } from './chatRendering';
 
@@ -45,10 +46,17 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   const cwd = state?.cwd;
   // The Pane's device tabs, so device cards follow their device's state; other tabs' changes keep `actions` as it is.
   const deviceTabs = usePanelStore(useShallow(store => (store.panels[panel.sessionId] ?? []).filter(tab => tab.type === 'device')));
+  const root = useSessionStore(store => store.sessions.find(session => session.id === panel.sessionId)?.worktreePath);
   const actions = useMemo<ChatTurnActions>(() => ({
     onOpenWorker: (paneId: string, panelId?: string) => { void openWorkerTab(paneId, panelId); },
     onViewDiff: file => void openFileInEditor({ sessionId: panel.sessionId, filePath: worktreeRelative(file, cwd), pin: true, diff: { kind: 'scope', scope: { kind: 'session' } } })
       .catch(error => showActionError('Could not open the diff', error)),
+    onOpenFile: async file => {
+      const filePath = referencedFile(file, cwd, root);
+      if (!filePath || await window.electronAPI.invoke('file:exists', { sessionId: panel.sessionId, filePath }) !== true) return false;
+      await openFileInEditor({ sessionId: panel.sessionId, filePath, pin: true });
+      return true;
+    },
     device: {
       openedHere: devicesOpenedBy(deviceTabs, panel.id),
       phase: panelId => devicePhaseOf(deviceTabs, panelId),
@@ -58,7 +66,7 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
       },
       open: panelId => { void openPaneTarget({ paneId: panel.sessionId, panelId }); },
     },
-  }), [cwd, panel.id, panel.sessionId, deviceTabs]);
+  }), [cwd, root, panel.id, panel.sessionId, deviceTabs]);
   // Links in the chat open beside it, in this Pane (Settings > Links).
   const rendering = useMemo<ChatRendering>(() => ({ paneId: panel.sessionId }), [panel.sessionId]);
   return <ChatTabPanel
@@ -68,7 +76,7 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     panelId={panel.id}
     client={window.electronAPI.chatTab}
     machine={machine}
-    placeholder={state?.orchestrationSessionId ? 'Ask the Session anything' : undefined}
+    session={!!state?.orchestrationSessionId}
     actions={actions}
     // A Session's orchestrator chat shows its approvals as light cards above the composer (P5).
     dock={state?.orchestrationSessionId ? <SessionApprovalCards sessionId={state.orchestrationSessionId} chatPanelId={panel.id} /> : undefined}
