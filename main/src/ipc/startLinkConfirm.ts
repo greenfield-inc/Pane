@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
-import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 import { configuredAgentSchema } from '../../../shared/agents';
 import { START_LINK_ANSWER_CHANNEL, START_LINK_REQUEST_CHANNEL, type StartLinkAnswer, type StartLinkRequest } from '../../../shared/types/startLinks';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 type Answer = Omit<StartLinkAnswer, 'requestId'>;
 
@@ -15,15 +15,26 @@ const answerSchema = boundary.object({
 
 const CANCEL: Answer = { start: false };
 
+/** The parts of Pane's main window the question uses. */
+interface ConfirmWindow {
+  once(event: 'closed', listener: () => void): void;
+  removeListener(event: 'closed', listener: () => void): void;
+  webContents: {
+    send(channel: string, request: StartLinkRequest): void;
+    once(event: 'render-process-gone' | 'did-start-loading', listener: () => void): void;
+    removeListener(event: 'render-process-gone' | 'did-start-loading', listener: () => void): void;
+  };
+}
+
 /**
  * Asks the person about a `pane://new` link in Pane's own window and waits for their answer. Only
  * the main window may answer, and only the request it was shown; a reload, a crash or a closed
  * window counts as Cancel, so nothing else can press Start.
  */
-export function registerStartLinkConfirm(ipcMain: Pick<IpcMain, 'handle'>, raiseMainWindow: () => BrowserWindow | undefined) {
-  let pending: { requestId: string; window: BrowserWindow; settle: (answer: Answer) => void } | null = null;
+export function registerStartLinkConfirm(ipcMain: Pick<IpcMain, 'handle'>, raiseMainWindow: () => ConfirmWindow | undefined) {
+  let pending: { requestId: string; window: ConfirmWindow; settle: (answer: Answer) => void } | null = null;
 
-  ipcMain.handle(START_LINK_ANSWER_CHANNEL, (event: IpcMainInvokeEvent, value: unknown) => {
+  ipcMain.handle(START_LINK_ANSWER_CHANNEL, (event: IpcMainInvokeEvent, value: JsonValue) => {
     if (!pending || event.sender !== pending.window.webContents) return;
     let answer: StartLinkAnswer;
     try {

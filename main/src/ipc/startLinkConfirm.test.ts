@@ -1,7 +1,8 @@
 import { EventEmitter } from 'events';
-import type { BrowserWindow, IpcMainInvokeEvent } from 'electron';
+import type { IpcMainInvokeEvent, WebContents } from 'electron';
 import { describe, expect, it } from 'vitest';
 import { START_LINK_ANSWER_CHANNEL, START_LINK_REQUEST_CHANNEL, type StartLinkRequest } from '../../../shared/types/startLinks';
+import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { registerStartLinkConfirm } from './startLinkConfirm';
 
 const REQUEST: Omit<StartLinkRequest, 'requestId'> = {
@@ -13,7 +14,7 @@ const REQUEST: Omit<StartLinkRequest, 'requestId'> = {
 };
 
 function setup() {
-  let handler: (event: IpcMainInvokeEvent, value: unknown) => unknown = () => undefined;
+  let handler: (event: IpcMainInvokeEvent, value: JsonValue) => void = () => undefined;
   const sent: Array<{ channel: string; request: StartLinkRequest }> = [];
   const contents = Object.assign(new EventEmitter(), {
     send: (channel: string, request: StartLinkRequest) => sent.push({ channel, request }),
@@ -21,10 +22,13 @@ function setup() {
   const window = Object.assign(new EventEmitter(), { webContents: contents });
   const confirm = registerStartLinkConfirm(
     { handle: (channel: string, listener: typeof handler) => { if (channel === START_LINK_ANSWER_CHANNEL) handler = listener; } },
-    // SAFETY: the confirmer uses only the window's events and its webContents' events and send.
-    () => window as unknown as BrowserWindow,
+    () => window,
   );
-  const answer = (from: unknown, value: unknown) => handler({ sender: from } as IpcMainInvokeEvent, value);
+  const answer = (from: EventEmitter, value: JsonValue) => {
+    // SAFETY: the confirmer reads only the event's sender, which it compares by identity.
+    const event = { sender: from as WebContents } as IpcMainInvokeEvent;
+    handler(event, value);
+  };
   return { confirm, sent, contents, window, answer };
 }
 

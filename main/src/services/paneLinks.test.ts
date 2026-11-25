@@ -6,6 +6,7 @@ import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandReg
 import { PaneDaemonServer } from '../daemon/server';
 import type { PaneLinkNavigation } from '../../../shared/types/paneLinks';
 import type { ConfiguredAgentId } from '../../../shared/agents';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { MAX_LINK_PROMPT_LENGTH } from '../../../shared/startLinks';
 import type { StartLinkAnswer, StartLinkRequest } from '../../../shared/types/startLinks';
 import { DEFAULT_NOTIFY_SETTINGS } from '../../../shared/types/notify';
@@ -48,7 +49,7 @@ function setup(options: {
     return options.createResult ?? { ok: true, items: [{ ok: true, index: 0, sessionId: 'pane-new', panelId: 'panel-new' }] };
   });
   registry.register('runpane:sessions:get', (selector: PaneCommandValue) => {
-    const wanted = selector as { sessionId?: string; name?: string };
+    const wanted = decodeBoundary(selector, boundary.object({ sessionId: boundary.optional(boundary.string), name: boundary.optional(boundary.string) }));
     const session = SESSIONS.find((candidate) => candidate.id === wanted.sessionId || candidate.name === wanted.name);
     if (!session) throw new Error('No Session matches');
     return { ok: true, session };
@@ -323,6 +324,7 @@ describe('pane:// links', () => {
 
   it.each([
     ['an agent that is not installed and was not preselected', { start: true, agent: 'cursor', target: 0 }],
+    // SAFETY: deliberately not an agent id, as a tampered answer would send.
     ['an agent the dialog did not offer', { start: true, agent: 'sh' as ConfiguredAgentId, target: 0 }],
     ['a target the dialog did not offer', { start: true, agent: 'claude', target: 5 }],
     ['no target', { start: true, agent: 'claude' }],
