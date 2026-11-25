@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import type { AgentFarmProfileList } from '../shared/types/agentFarmProfiles';
+import type { ProfilePhotos, ProfilesOverview } from '../shared/types/profileEditor';
 import type { ArchiveProgressSnapshot } from '../shared/types/archiveProgress';
 import type { PaneChatAgent } from '../shared/types/paneChat';
 import type { PanePermissionRequest, PanePermissionResponse } from '../shared/types/permissions';
@@ -194,6 +195,12 @@ export type ElectronApiMockOptions = {
   setupImportError?: string;
   /** chat-tab:profiles, this computer's Agent Farm profiles (T-63). Absent: none, and no chatTab API without a chat panel. */
   agentFarmProfiles?: AgentFarmProfileList;
+  /**
+   * window.electronAPI.profiles, the Profiles tab (T-63 PR 5): the plugins, each file's content by
+   * `plugin/path`, and photos. `saveError` makes every save fail with that PaneError text, as a
+   * plugin Agent Farm rejects does. Absent: no Profiles API, so no Profiles row.
+   */
+  profileEditor?: { overview: ProfilesOverview; files: Record<string, string>; photos?: ProfilePhotos; saveError?: string };
   /** Each chat tab's conversation, by panel id (plain text turns). Absent: no messages. */
   chatMessages?: Record<string, Array<{ id: string; role: 'user' | 'assistant'; text: string }>>;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
@@ -1386,7 +1393,66 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     // New Session reads this computer's Agent Farm profiles through chatTab.profiles (T-63).
     const profilesList = mockOptions.agentFarmProfiles;
     const chatTabWithProfiles = profilesList ? { ...chatTabApi, profiles: () => Promise.resolve(clone(profilesList)) } : chatTabApi;
+    // The Profiles tab (T-63 PR 5): an in-memory copy of the plugins it edits. Saves mark Pane's own plugins Edited.
+    const profilesApi = mockOptions.profileEditor ? (() => {
+      const state = clone(mockOptions.profileEditor);
+      const photos: { profiles: Record<string, string>; plugins: Record<string, string> } = state.photos ?? { profiles: {}, plugins: {} };
+      const pristine = clone(state.files);
+      const ok = <T,>(data: T) => Promise.resolve({ success: true, data: clone(data) });
+      const pluginOf = (name: string) => state.overview.plugins.find(plugin => plugin.name === name);
+      const result = (name: string, path: string) => ok({ plugin: pluginOf(name), path });
+      return {
+        list: () => ok(state.overview),
+        read: (plugin: string, file: string) => {
+          const content = state.files[`${plugin}/${file}`];
+          return content === undefined ? Promise.resolve({ success: false, error: `${plugin}/${file} doesn't exist. Open the profile again to see its files.` }) : ok(content);
+        },
+        save: (plugin: string, changes: Array<{ path: string; content: string }>) => {
+          if (state.saveError) return Promise.resolve({ success: false, error: state.saveError });
+          const entry = pluginOf(plugin);
+          for (const change of changes) {
+            state.files[`${plugin}/${change.path}`] = change.content;
+            if (entry && !entry.files.includes(change.path)) entry.files = [...entry.files, change.path].sort();
+          }
+          if (entry?.bundled) entry.edited = true;
+          return result(plugin, changes[0]?.path ?? '');
+        },
+        newProfile: (name: string, agent: string) => {
+          const entry = `agents/${name}.md`;
+          state.files[`${name}/plugin.yaml`] = `name: ${name}\nversion: 0.1.0\ncli_major: 0\n`;
+          state.files[`${name}/profiles/${name}.yaml`] = `agent: ${name}\n`;
+          state.files[`${name}/${entry}`] = `---\nharness: ${agent}\n---\n\n# ${name}\n\nWho you are and what you do.\n`;
+          const files = [entry, 'plugin.yaml', `profiles/${name}.yaml`];
+          state.overview.plugins.push({ name, version: '0.1.0', bundled: false, edited: false, files, profiles: [{ name, ref: `${name}/${name}`, entry, harness: agent, uses: files }] });
+          return result(name, entry);
+        },
+        newFile: (plugin: string, profile: string, kind: string, name: string) => {
+          const entry = pluginOf(plugin);
+          const summary = entry?.profiles.find(item => item.name === profile);
+          if (!entry || !summary) return Promise.resolve({ success: false, error: `${plugin} has no profile named ${profile}.` });
+          const path = kind === 'skill' ? `skills/${name}/SKILL.md` : kind === 'subagent' ? `agents/${name}.md` : `references/${profile}/${name}.md`;
+          state.files[`${plugin}/${path}`] = `# ${name}\n`;
+          entry.files = [...entry.files, path].sort();
+          summary.uses = [...summary.uses, path].sort();
+          if (entry.bundled) entry.edited = true;
+          return result(plugin, path);
+        },
+        restore: (plugin: string) => {
+          const entry = pluginOf(plugin);
+          if (!entry?.bundled) return Promise.resolve({ success: false, error: `${plugin} doesn't ship with Pane, so there's no Pane version to restore.` });
+          for (const key of Object.keys(state.files)) if (key.startsWith(`${plugin}/`)) delete state.files[key];
+          for (const [key, value] of Object.entries(pristine)) if (key.startsWith(`${plugin}/`)) state.files[key] = value;
+          entry.edited = false;
+          return result(plugin, entry.profiles[0]?.entry ?? 'plugin.yaml');
+        },
+        photos: () => ok(photos),
+        setPhoto: (ref: string, base64: string) => { photos.profiles[ref] = `data:image/png;base64,${base64}`; return ok(null); },
+        removePhoto: (ref: string) => { delete photos.profiles[ref]; return ok(null); },
+      };
+    })() : undefined;
     const electronAPI = {
+      // Absent without the option, so the Profiles row stays hidden in other specs.
+      profiles: profilesApi,
       autopilot: autopilotApi,
       todos: todosApi,
       chatTab: chatTabWithProfiles,

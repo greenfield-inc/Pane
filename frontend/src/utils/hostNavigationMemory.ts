@@ -322,6 +322,13 @@ export async function restoreHostNavigation(
     return;
   }
 
+  if (memory.view === 'profiles') {
+    await setActiveSession(null);
+    if (!ownsRuntime()) return;
+    navigation.navigateToProfiles();
+    return;
+  }
+
   if (memory.view === 'ssh') {
     await setActiveSession(null);
     if (!ownsRuntime()) return;

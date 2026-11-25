@@ -93,6 +93,7 @@ export type SessionFixtureOptions = {
   sessionActivity?: Array<{ sessionId: string; state: 'working' | 'idle'; workingPanes: number }>;
   /** This computer's Agent Farm profiles, for the New Session palette (T-63). */
   agentFarmProfiles?: ElectronApiMockOptions['agentFarmProfiles'];
+  profileEditor?: ElectronApiMockOptions['profileEditor'];
 };
 
 export function sessionFixture(
@@ -191,6 +192,7 @@ export async function installSessionsFixture(
     machineConnections: fixtureOptions.machineConnections,
     computers: fixtureOptions.computers,
     agentFarmProfiles: fixtureOptions.agentFarmProfiles,
+    profileEditor: fixtureOptions.profileEditor,
     ...fixtureOptions.machines,
   });
   await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes, distributions, sessionActivity }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]>; distributions: string[]; sessionActivity: Array<{ sessionId: string; state: 'working' | 'idle'; workingPanes: number }> | null }) => {

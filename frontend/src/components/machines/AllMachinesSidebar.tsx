@@ -27,6 +27,7 @@ import {
   SessionRowContent,
 } from '../ProjectSessionList';
 import { TodosNavRow } from '../todos/TodosNavRow';
+import { ProfilesNavRow } from '../profiles/ProfilesNavRow';
 import { paneIconColor } from '../../utils/paneIconColor';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
 import { useAllMachinesTree } from '../../hooks/useAllMachinesTree';
@@ -451,6 +452,7 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
       <AutopilotNavRow />
       <ApprovalsNavRow />
       <TodosNavRow />
+      <ProfilesNavRow />
 
       {offline.map(({ machine }) => (
         <MachineOfflineBanner

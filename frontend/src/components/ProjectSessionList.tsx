@@ -41,6 +41,7 @@ import { useAnyLoopRunning } from './loops/loopRunView';
 import { useApprovalsNav } from './approvals/useApprovalsNav';
 import { toggleApprovals } from './approvals/approvalsNavigation';
 import { TodosNavRow } from './todos/TodosNavRow';
+import { ProfilesNavRow } from './profiles/ProfilesNavRow';
 import { SSH_HOSTS_SESSION_ID } from '../../../shared/types/sshHosts';
 import { DropLine, useRowReorder, type ReorderList, type RowReorder } from '../hooks/useRowReorder';
 import { useErrorStore } from '../stores/errorStore';
@@ -467,6 +468,7 @@ export function ProjectSessionList({
         <AutopilotNavRow />
         <ApprovalsNavRow />
         <TodosNavRow />
+        <ProfilesNavRow />
 
         {missionControlEnabled && (
           <button

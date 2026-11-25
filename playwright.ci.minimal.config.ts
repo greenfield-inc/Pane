@@ -62,6 +62,7 @@ const BROWSER_SPECS = [
   'pair-phone.spec.ts',
   'pane-order.spec.ts',
   'pause.spec.ts',
+  'profiles.spec.ts',
   'project-dashboard-refresh.spec.ts',
   'remote-host-switcher.spec.ts',
   'remote-network-rejection.spec.ts',
