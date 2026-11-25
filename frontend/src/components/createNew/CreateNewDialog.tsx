@@ -358,7 +358,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
         disabled={busy}
         onChange={event => { setPickedId(event.target.value); setError(null); }}
         onKeyDown={event => { if (event.key === 'Enter' && mode === 'session') { event.preventDefault(); void createSession(); } }}
-        className="h-8 min-w-0 max-w-[14rem] rounded-md border border-border-primary bg-bg-primary px-2 text-sm text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+        className="h-8 min-w-0 max-w-[20rem] rounded-md border border-border-primary bg-bg-primary pl-2 pr-7 text-sm text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
       >
         {orderedMachines.map(candidate => {
           const note = candidate.current ? ' (this computer)' : candidate.status === 'offline' ? ' (offline)' : candidate.status === 'connecting' ? ' (connecting)' : '';
@@ -466,6 +466,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
             onChange={event => { void addImages([...(event.target.files ?? [])]); event.target.value = ''; messageRef.current?.focus(); }} />
         </div>
       </div>
+      {settings.startPinned && <p className="text-xs text-text-tertiary">Starts pinned. Change it in More options.</p>}
       {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
     </ModalBody>
   );
@@ -479,10 +480,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
           <div className="text-sm font-medium text-text-primary">Start pinned</div>
           <div className="mt-0.5 text-xs text-text-secondary">Show this Session in the pinned section immediately.</div>
         </div>
-        <Toggle checked={settings.startPinned} aria-label="Start pinned" size="sm" onChange={checked => {
-          setSettings(current => ({ ...current, startPinned: checked }));
-          void updateConfig({ defaultSessionPinned: checked }).catch(() => undefined);
-        }} />
+        <Toggle checked={settings.startPinned} aria-label="Start pinned" size="sm" onChange={checked => setSettings(current => ({ ...current, startPinned: checked }))} />
       </div>
       {distributions.length > 0 && !onOtherMachine && (
         <div className="space-y-2">

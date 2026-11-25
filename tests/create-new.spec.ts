@@ -112,6 +112,24 @@ test('Create New skips the optional name and message: the Session is named from 
   await expect(dialog(page)).toHaveCount(0);
 });
 
+test('a remembered profile in To stays selected when the profiles arrive, so typing replaces it (QA)', async ({ page }) => {
+  await openApp(page);
+  await page.addInitScript(() => {
+    // The profiles answer late, as a real Agent Farm listing does.
+    const list = window.electronAPI.chatTab.profiles;
+    window.electronAPI.chatTab.profiles = () => new Promise(resolve => { setTimeout(() => resolve(list()), 400); });
+    localStorage.setItem('pane.new.to', 'profile:greenfield/orchestrator');
+  });
+  await page.reload();
+  await dismissStartupDialogs(page);
+  await page.getByTestId('new-orchestration-session').click();
+  await expect(to(page)).toBeFocused();
+  await expect(to(page)).toHaveValue('Greenfield orchestrator');
+  await page.keyboard.type('codex');
+  await expect(to(page)).toHaveValue('codex');
+  await expect(dialog(page).getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option')).toHaveText([/^Codex/]);
+});
+
 test('Run on has a default, lists the other machines, and Create names no machine; another machine creates there', async ({ page }) => {
   await openApp(page, {
     machineConnections: {
@@ -167,6 +185,8 @@ test('More options holds the old Create Session settings, Back returns, and they
   await dialog(page).getByLabel('Run agent in').selectOption('Ubuntu-24.04');
   await dialog(page).getByRole('button', { name: 'Back', exact: true }).click();
   await expect(dialog(page).getByRole('heading', { name: 'New Session', exact: true })).toBeVisible();
+  // Start pinned applies to this Session only, and the main screen says so (QA).
+  await expect(dialog(page)).toContainText('Starts pinned. Change it in More options.');
   // In WSL, profiles can't start and images can't be attached.
   await to(page).focus();
   await page.keyboard.type('orch');
@@ -175,6 +195,12 @@ test('More options holds the old Create Session settings, Back returns, and they
   await dialog(page).getByTestId('create-new-submit').click();
   await expect(dialog(page)).toHaveCount(0);
   expect((await createInputs(page))[0]).toMatchObject({ goal: 'Close the refund backlog.', isPinned: true, runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' });
+  const configUpdates = await page.evaluate(() => {
+    // SAFETY: installElectronApiMock installs this controller before the app loads.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { getConfigUpdates: () => JsonObject[] } };
+    return mockWindow.__paneTestElectronMock.getConfigUpdates();
+  });
+  expect(configUpdates.some(update => 'defaultSessionPinned' in update)).toBe(false);
 });
 
 test('Create\'s menu switches to a Pane and is remembered; a Pane\'s More options holds its advanced options', async ({ page }) => {
