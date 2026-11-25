@@ -8,7 +8,7 @@ import type { HealthNotifyItem } from '../../frontend/src/components/machineHeal
 import type { MachineHealthCard } from '../../shared/types/machineHealth';
 import '../../frontend/src/index.css';
 
-// One machine health card body: ?kind=memory|disk|leak|finished|leftovers, ?theme=dark, ?remote=1 (raised by a
+// One machine health card body: ?kind=memory|disk|leak|finished|leftovers (memory comes only from an older linked Pane), ?theme=dark, ?remote=1 (raised by a
 // linked machine). Answers land in window.qaAnswers and Ask an agent in window.qaAsked.
 // ?popup=warning|critical: the in-window popups over a sample window, with Notify commands in window.qaCommands,
 // window.qaResolve(id) ending a card, and window.qaView() naming the view Open Resources went to.
@@ -46,19 +46,13 @@ const cards = {
     },
   },
   disk: {
-    title: 'Disk almost full',
-    context: '13 GB free. Pane can free about 25 GB of its own leftovers and finished work.',
-    choices: ['Clean up', 'Not now'],
+    title: 'Disk space is low',
+    context: '13 GB free. Open Resources to see what uses the disk.',
+    choices: ['Not now'],
     card: {
-      kind: 'disk', level: 'warning', hostname: host, freeBytes: 13 * GB, totalBytes: 926 * GB, freesBytes: 25 * GB,
-      rows: [
-        { label: 'u-2.4.212', detail: 'The rollback copy of an update a newer update replaced.', bytes: 9.3 * GB, note: 'Tier 1' },
-        { label: 'sessions.db.pre-panel-buffers.bak', detail: 'A database backup from a migration more than 30 days ago.', bytes: 1.8 * GB, note: 'Tier 1' },
-        { label: 'qa1344.noindex', detail: 'Agent temp files nobody touched for 2 days.', bytes: 11.8 * GB, note: 'Tier 2' },
-        { label: 'qa1351.noindex', detail: 'Agent temp files nobody touched for 2 days.', bytes: 1.4 * GB, note: 'Tier 2' },
-        { label: 'u-2.4.208', detail: 'The rollback copy of an update a newer update replaced.', bytes: 900 * MB, note: 'Tier 1' },
-      ],
-      agentPrompt: 'This Mac has 13 GB of disk free.',
+      kind: 'disk', level: 'warning', hostname: host, freeBytes: 13 * GB, totalBytes: 926 * GB,
+      rows: [],
+      agentPrompt: 'This Mac is low on disk.',
     },
   },
   leak: {
@@ -122,10 +116,10 @@ if (popup) {
     id, ui: 'options', title: fixture.title, context: fixture.context, choices: fixture.choices.map(label => ({ label })),
     source: { name: 'Pane', agent: 'Pane' }, state: 'waiting', createdAt, machineHealth: { ...fixture.card, level },
   });
-  const criticalDisk: FixtureCard = { ...cards.disk, title: 'Disk is almost full', context: '3.1 GB free. Pane can free about 25 GB of its own leftovers and finished work. Open Resources to see what uses the disk and clean up.' };
+  const criticalDisk: FixtureCard = { ...cards.disk, title: 'Disk is almost full', context: '3.1 GB free. Open Resources to see what uses the disk.' };
   const items = popup === 'critical'
-    ? [toItem('m1', cards.memory, 1), toItem('d1', criticalDisk, 2, 'critical')]
-    : [toItem('d1', cards.disk, 1), toItem('m1', cards.memory, 2)];
+    ? [toItem('f1', cards.finished, 1), toItem('d1', criticalDisk, 2, 'critical')]
+    : [toItem('d1', cards.disk, 1), toItem('f1', cards.finished, 2)];
   window.qaCommands = [];
   Object.assign(window, { electronAPI: { notify: { run: async (command: NotifyCommand) => { window.qaCommands.push(command); } } } });
   // A short hide time keeps the test quick; the app uses Notify's setting the same way.

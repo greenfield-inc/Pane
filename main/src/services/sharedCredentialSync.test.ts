@@ -359,6 +359,9 @@ describe('SharedCredentialSync and the Approvals switch', () => {
     expect(a.configManager.getConfig().notify?.cardsOn).toBeNull();
     await settled();
 
+    await a.configManager.updateConfig({ machineHealth: { notifications: true } });
+    await settled();
+    expect(b.configManager.getConfig().machineHealth?.notifications).toBe(true);
     await a.configManager.updateConfig({ machineHealth: { notifications: false } });
     await settled();
     expect(b.configManager.getConfig().machineHealth?.notifications).toBe(false);

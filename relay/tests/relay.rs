@@ -541,9 +541,10 @@ async fn the_phone_app_opens_pair_and_glasses_links() {
         let (code, body) = env.http("GET", path, "", "").await;
         assert_eq!(code, 200, "{path}");
         assert!(
-            body.contains("https://testflight.apple.com/join/eKJmnzXF"),
+            body.contains("https://apps.apple.com/app/id6808839038"),
             "{path}"
         );
+        assert!(!body.contains("{{"), "{path} has an unfilled placeholder");
     }
 }
 

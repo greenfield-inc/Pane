@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { NOTIFY_SUMMARY_CSP, type NotifyItem } from '../../../../shared/types/notify';
+import { NOTIFY_PAGE_LIMIT_BYTES, NOTIFY_SUMMARY_CSP, type NotifyItem } from '../../../../shared/types/notify';
 import { summaryPage } from './summaryPage';
 import { withSummaryPolicy } from '../../../../shared/utils/summaryPolicy';
 import { summaryFiles } from './notifyService';
@@ -78,6 +78,26 @@ describe("an approval's Summary page", () => {
     const page = summaryPage({ ...q80, summaryPage: path.join(dir, 'removed.html') });
     expect(page.kind).toBe('template');
     expect(page.kind === 'template' && page.html).toContain('wasn’t found at');
+  });
+
+  // T-76: a worker's Summary is often its review page, screenshots inlined (2.4 to 6.6 MB on the person's Mac mini).
+  it("shows an asker's Summary page of several MiB, with its screenshots inlined", () => {
+    const file = path.join(dir, 'review-summary.html');
+    const html = `<!doctype html><html><head></head><body><h1>PR 4</h1>${`<img src="data:image/png;base64,${'A'.repeat(1024 * 1024)}">`.repeat(6)}</body></html>`;
+    fs.writeFileSync(file, html);
+    const page = summaryPage({ ...q80, summaryPage: file });
+    expect(page).toMatchObject({ kind: 'page', path: file });
+    expect(page.kind === 'page' && page.html).toBe(withSummaryPolicy(html));
+  });
+
+  it("says a Summary page past the limit is too large, not that it wasn't found", () => {
+    const file = path.join(dir, 'huge-summary.html');
+    fs.writeFileSync(file, Buffer.alloc(NOTIFY_PAGE_LIMIT_BYTES + 1, 'a'));
+    const page = summaryPage({ ...q80, summaryPage: file });
+    expect(page.kind).toBe('template');
+    const html = page.kind === 'template' ? page.html : '';
+    expect(html).toContain('the Summary page it sent, huge-summary.html, is larger than 16 MiB, too large to show here');
+    expect(html).not.toContain('wasn’t found');
   });
 
   it("takes a worker's .html --summary-file as its page, and any other file as its status file", () => {

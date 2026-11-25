@@ -8,6 +8,7 @@ import { pathToFileURL } from 'url';
 import type { ConfigManager } from '../configManager';
 import type { AppConfig } from '../../types/config';
 import {
+  countsAsWaiting,
   DEFAULT_NOTIFY_SETTINGS,
   type NotifyCaller,
   type NotifyAgentAction,
@@ -33,7 +34,7 @@ import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed, type M
 import { PaneError, paneErrorText, reasonOf } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
-import { NotifyTray } from './notifyTray';
+import { NotifyTray, taskbarDot } from './notifyTray';
 import { syncNotifyInstructions, syncWslNotifyInstructions } from './notifyInstructions';
 import { isPaneHomeSkillEnabled } from '../paneHomeSkill';
 import type { RunpaneInboxItem } from '../../../../shared/types/runpaneOrchestration';
@@ -131,6 +132,15 @@ export interface NotifyServiceDependencies {
   typeIntoTab?: NotifyQueueEnvironment['typeIntoTab'];
   /** Seconds since the person last used this computer; Infinity while its screen is locked. Absent: in use. */
   idleSeconds?: () => number;
+  /**
+   * Whether Dictate shows this computer's blocked tabs right now; a prompt asked in one of them
+   * (`isTabPrompt`) then has its notice there.
+   */
+  dictateShowsTabs?: () => boolean;
+  /** A chat tab on this computer: its questions block the tab, as a Claude prompt does. */
+  isChatTab?: (panelId: string) => boolean;
+  /** Shows a system notification under the person's desktop notification rules. */
+  alert?: (title: string, body: string, onClick: () => void) => void;
   /** Where "Show cards on" leaves this machine (`cardsOnStatus`). Absent: whichever computer is in use. */
   cardsOn?: NotifyQueueEnvironment['cardsOn'];
   /** Whether a tab still exists. */
@@ -532,6 +542,7 @@ export class NotifyService {
       case 'show-details': await this.updateSettings({ showDetails: command.shown }); return;
       case 'open-in-pane': await this.openInPane(command.id); return;
       case 'ask-agent': this.askAgentInMainWindow(command.id); return;
+      case 'open-resources': this.openResourcesFor(command.id); return;
       case 'open-link': await this.openLink(command.id, command.index, command.paneId); return;
       case 'open-url': await this.openUrl(command.id, command.url); return;
       default: {
@@ -601,7 +612,7 @@ export class NotifyService {
    * A command for a saved machine's question: it goes to that machine only, under the id the
    * machine knows the question by. What stays on this screen runs here.
    */
-  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' | 'open-url' | 'ask-agent' }>): Promise<void> {
+  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' | 'open-url' | 'ask-agent' | 'open-resources' }>): Promise<void> {
     const target = this.queue.remoteTarget(command.id);
     if (!target) return;
     if (command.type === 'close' || command.type === 'reopen' || command.type === 'override') {
@@ -701,6 +712,7 @@ export class NotifyService {
     for (const timer of this.pushTimers.values()) clearTimeout(timer);
     this.queue.dispose();
     if (this.shortcut) globalShortcut.unregister(this.shortcut);
+    if (!this.deps.headless) this.showBadge(0);
     this.tray.destroy();
     this.windows.destroy();
   }
@@ -784,6 +796,14 @@ export class NotifyService {
     if (!this.queue.snapshot().items.some(candidate => candidate.id === itemId && candidate.machineHealth)) return;
     this.windows.closeRound();
     this.navigate({ askAgent: itemId });
+  }
+
+  /** A health card's Open Resources clicked in a floating window, about the machine that raised it. */
+  private openResourcesFor(itemId: string): void {
+    const item = this.queue.find(itemId);
+    if (!item?.machineHealth) return;
+    this.windows.closeRound();
+    this.navigate({ resources: item.machineId ?? 'local' });
   }
 
   private navigate(target: NotifyNavigateTarget): void {
@@ -877,6 +897,7 @@ export class NotifyService {
 
   private broadcast(): void {
     this.publishShared();
+    const unannounced = this.queue.takeUnannounced();
     if (this.deps.headless) return;
     const snapshot = this.queue.snapshot();
     if (snapshot.stripSurface === 'window') {
@@ -893,8 +914,42 @@ export class NotifyService {
       paused: snapshot.pausedUntil !== null,
       showOutsideSupported: snapshot.showOutsideSupported,
     });
+    this.showBadge(snapshot.settings.enabled ? snapshot.items.filter(item => countsAsWaiting(item) && !item.quiet).length : 0);
+    this.announce(unannounced);
     this.sendToMainWindow('notify:snapshot', snapshot);
     for (const contents of this.windows.webContents()) contents.send('notify:snapshot', snapshot);
+  }
+
+  /** The count on Pane's Dock icon or launcher; on Windows, which has no count, a dot on the taskbar button. */
+  private showBadge(count: number): void {
+    if (process.platform === 'win32') {
+      const window = this.deps.getMainWindow();
+      if (window && !window.isDestroyed()) window.setOverlayIcon(count > 0 ? taskbarDot() : null, count > 0 ? `${count} waiting in Approvals` : '');
+    } else {
+      app.setBadgeCount(count);
+    }
+  }
+
+  /** One system notification for what started waiting while Pane is in the background. */
+  private announce(announced: NotifyItem[]): void {
+    const items = this.deps.dictateShowsTabs?.() ? announced.filter(item => !this.isTabPrompt(item)) : announced;
+    const [first] = items;
+    if (!first) return;
+    const open = () => { void this.openInPane(first.id); };
+    if (items.length === 1 && first.machineHealth) this.deps.alert?.(`${first.machine}: ${first.title}`, first.context ?? '', open);
+    else if (items.length === 1) this.deps.alert?.(`${first.source.name} ${first.readyAgain ? 'updated its question' : 'needs your answer'}`, first.title, open);
+    else this.deps.alert?.(`${items.length} approvals are waiting`, first.title, () => this.navigate('inbox'));
+  }
+
+  /** A prompt asked in one of this computer's tabs, which reads blocked while it waits. */
+  private isTabPrompt(item: NotifyItem): boolean {
+    if ((item.machineId ?? 'local') !== 'local') return false;
+    return item.originKind === 'claude-prompt' || (item.source.panelId !== undefined && this.deps.isChatTab?.(item.source.panelId) === true);
+  }
+
+  /** The disk alert's click: Pane comes to the front on this computer's Resources. */
+  openResources(): void {
+    this.navigate({ resources: 'local' });
   }
 
   /** Connected screens and phones get the shared state when it changes, not on this screen's own moves. */

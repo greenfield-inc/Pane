@@ -84,6 +84,11 @@ export class NotifyTray {
   }
 }
 
+/** The dot Windows draws over Pane's taskbar button. */
+export function taskbarDot(): Electron.NativeImage {
+  return nativeImage.createFromPath(path.join(TRAY_ASSETS, 'taskbar-dot.png'));
+}
+
 function image(dotted: boolean): Electron.NativeImage {
   // tray@2x.png sits beside tray.png, so Electron picks the sharp one on high-DPI screens.
   return nativeImage.createFromPath(path.join(TRAY_ASSETS, dotted ? 'tray-dot.png' : 'tray.png'));

@@ -56,18 +56,18 @@ export function MachineHealthSettings({ persistence }: { persistence: SettingsPe
   return (
     <SettingsPage title="Machine health" description="Pane watches free disk, memory pressure and every process it started. It removes its own leftovers by itself and asks before anything else; each kind below can be switched to automatic.">
       <SettingsSection title="Notifications">
-        <SettingRow settingId="machine-health-notifications" label="Cards and notifications" description={`About low disk, tight memory, finished Panes, processes left behind and leaks, on all your computers. When off, Pane still notifies when free disk drops below ${health.diskCriticalGB ?? 5} GB or memory runs critically low. Resources always shows everything.`} saveState={persistence.saveStates['machine-health-notifications']}>
-          <ImmediateToggle label="Cards and notifications" value={health.notifications !== false} onSave={value => save('machine-health-notifications', { notifications: value })} />
+        <SettingRow settingId="machine-health-notifications" label="Cards and notifications" description={`About low disk, finished Panes, processes left behind and leaks, on all your computers. When off, Pane still warns you when free disk drops below ${health.diskCriticalGB ?? 5} GB. Resources always shows everything, memory included.`} saveState={persistence.saveStates['machine-health-notifications']}>
+          <ImmediateToggle label="Cards and notifications" value={health.notifications === true} onSave={value => save('machine-health-notifications', { notifications: value })} />
         </SettingRow>
       </SettingsSection>
       <SettingsSection title="Thresholds">
-        <SettingRow settingId="machine-health-disk" label="Disk warning" description="Pane warns below the first figure and alerts below the second, on any volume holding its data, your worktrees or the temp folder. Files sent to this computer (from the phone, a terminal or a chat) must leave the second figure free." saveState={persistence.saveStates['machine-health-disk']}>
+        <SettingRow settingId="machine-health-disk" label="Disk warning" description="Pane shows a warning in Resources below the first figure, and as a card too with Cards and notifications on. Below the second it always alerts you. It checks any volume holding its data, your worktrees or the temp folder. Files sent to this computer (from the phone, a terminal or a chat) must leave the second figure free." saveState={persistence.saveStates['machine-health-disk']}>
           <div className="flex items-center gap-4">
             <NumberField label="Warn below" unit="GB free" saved={health.diskWarningGB ?? 20} min={1} max={10_000} onSave={value => { void save('machine-health-disk', { diskWarningGB: value }); }} />
             <NumberField label="Alert below" unit="GB free" saved={health.diskCriticalGB ?? 5} min={1} max={10_000} onSave={value => { void save('machine-health-disk', { diskCriticalGB: value }); }} />
           </div>
         </SettingRow>
-        <SettingRow settingId="machine-health-memory" label="Pause idle Panes under pressure after" description="When memory is tight, Pane offers to pause Panes idle this long." saveState={persistence.saveStates['machine-health-memory']}>
+        <SettingRow settingId="machine-health-memory" label="Pause idle Panes under pressure after" description="When memory is tight, Resources offers to pause Panes idle this long." saveState={persistence.saveStates['machine-health-memory']}>
           <NumberField label="Idle hours" unit="hours" saved={health.pauseIdleHours ?? 2} min={1} max={720} onSave={value => { void save('machine-health-memory', { pauseIdleHours: value }); }} />
         </SettingRow>
         <SettingRow settingId="machine-health-finished" label="A Pane is finished after" description="Days with no activity before Pane offers to archive a Pane whose PR is still open or has none." saveState={persistence.saveStates['machine-health-finished']}>
