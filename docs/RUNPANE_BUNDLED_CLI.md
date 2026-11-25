@@ -40,7 +40,9 @@ same command to the end of your own `PATH`, so it works in any terminal.
   binary even after a CLI-only update. In WSL it starts the Windows binary
   through interop, as `pane-node` does. Pane leaves an `agent-farm` file it did
   not write in place. Turning Profiles off removes Pane's copy at once, so
-  `agent-farm` in Pane's terminals is the one on your `PATH` again.
+  `agent-farm` in Pane's terminals is the one on your `PATH` again, even in
+  an open terminal: zsh looks again by itself, and Pane's bash startup files
+  turn on `checkhash` so bash does too.
 - The shim checks only that the binary exists and is executable. If the
   binary exists but crashes on launch, `runpane` fails with it; run
   `npx --yes runpane@latest update` to reinstall Pane.

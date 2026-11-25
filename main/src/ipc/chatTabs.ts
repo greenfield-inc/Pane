@@ -61,7 +61,8 @@ const agentFarmProfiles = new AgentFarmProfiles({
     if (!bundledAgentFarm()) return undefined;
     // `run` writes its launch bundle to <worktree>/.agent-farm/generated; hide that from git like .pane/ (workspace.yaml beside it is meant to be committed).
     await worktreePaneFolder(cwd, '.agent-farm/generated', candidate => new PaneError('CHAT_PROFILE_FOLDER_LINK', `${candidate} is a symbolic link, so Pane won't let Agent Farm write through it. Nothing was started.`, 'Remove the link, then start the profile again.'));
-    return paneAgentFarmProcess(getAppDirectory(), args, env);
+    // The live Profiles state, so a config.json that can't be read keeps telemetry held off (review F-7).
+    return paneAgentFarmProcess(getAppDirectory(), args, { env, profiles: profilesOn() });
   },
   adapter: async agent => {
     const packageName = agentConfig(agent)?.chat?.adapter?.package;

@@ -537,12 +537,20 @@ function bashPathLines(dir: string): string[] {
 }
 
 /** bash --rcfile replaces ~/.bashrc for an interactive non-login shell. */
+/**
+ * Bash remembers where it found each command and, by default, fails when that file is gone. Pane
+ * removes its agent-farm shim when Profiles is turned off (T-63, review F-8), so bash looks the
+ * command up on PATH again instead, as zsh already does.
+ */
+const BASH_CHECKHASH_LINES = ['shopt -s checkhash 2>/dev/null'];
+
 function bashRcFile(binDir: string): string {
   return [
     `# ${MANAGED_SHELL_MARKER}: Pane rewrites this file at startup; edits are lost.`,
     '# Same files an interactive non-login bash reads, then keep runpane first on PATH.',
     '[ -f /etc/bash.bashrc ] && . /etc/bash.bashrc',
     '[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"',
+    ...BASH_CHECKHASH_LINES,
     ...bashPathLines(shellQuote(binDir)),
     '',
   ].join('\n');
@@ -560,6 +568,7 @@ function wslBashRcFile(binDir: string): string {
     'if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile"',
     'elif [ -f "$HOME/.bash_login" ]; then . "$HOME/.bash_login"',
     'elif [ -f "$HOME/.profile" ]; then . "$HOME/.profile"; fi',
+    ...BASH_CHECKHASH_LINES,
     `_pane_runpane_dir=$(${WSLPATH} -u ${shellQuote(binDir)} 2>/dev/null)`,
     '# An empty dir would put the current folder on PATH.',
     'if [ -n "$_pane_runpane_dir" ]; then',

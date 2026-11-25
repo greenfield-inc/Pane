@@ -56,34 +56,48 @@ export interface AgentFarmProcess {
   env: NodeJS.ProcessEnv;
 }
 
+type JsonFile = { state: 'read'; value: JsonObject } | { state: 'missing' } | { state: 'unreadable' };
+
+/** A JSON object file: missing when there is no file, unreadable when it can't be read or parsed. */
+function readJsonFile(file: string): JsonFile {
+  let text: string;
+  try { text = readFileSync(file, 'utf8'); }
+  catch (error) { return { state: decodeOptionalBoundary(error, boundary.object({ code: boundary.string }))?.code === 'ENOENT' ? 'missing' : 'unreadable' }; }
+  let value: JsonObject | undefined;
+  try { value = decodeOptionalBoundary(JSON.parse(text), boundary.jsonObject); }
+  catch { return { state: 'unreadable' }; }
+  return value ? { state: 'read', value } : { state: 'unreadable' };
+}
+
 /**
- * Whether Pane holds launches' telemetry off. Only while Profiles is on (`sessionProfilesEnabled`
- * in <PANE_DIR>/config.json, beside the config root): with it off, Agent Farm's own default
- * decides, as before T-63. With it on, Pane's saved switch (`agentFarmTelemetry`) and Agent Farm's
- * settings.json must both say on. The saved switch is what Settings shows, so turning it off wins
- * even when the settings.json write failed (review F-2). Anything missing or unreadable counts as
- * off. The shim launcher in runpaneShim.ts decides the same way.
+ * Whether Pane holds launches' telemetry off. Only while Profiles is on: `profiles` is the
+ * caller's live Profiles state, else `sessionProfilesEnabled` in <PANE_DIR>/config.json (beside
+ * the config root). With Profiles off, Agent Farm's own default decides, as before T-63. With it
+ * on, Pane's saved switch (`agentFarmTelemetry`) and Agent Farm's settings.json must both say on.
+ * The saved switch is what Settings shows, so turning it off wins even when the settings.json
+ * write failed (review F-2). A config.json that can't be read fails safe: telemetry off, whether
+ * the caller says Profiles is on (Pane kept its last good config, review F-7) or nobody says. The
+ * shim launcher in runpaneShim.ts decides the same way.
  */
-function telemetryHeldOff(configRoot: string): boolean {
-  const read = (file: string) => {
-    try { return decodeOptionalBoundary(JSON.parse(readFileSync(file, 'utf8')), boundary.jsonObject); }
-    catch { return undefined; }
-  };
-  const saved = read(path.join(path.dirname(configRoot), 'config.json'));
-  if (saved?.sessionProfilesEnabled !== true) return false;
-  const settings = read(path.join(configRoot, 'settings.json'));
-  return !(saved.agentFarmTelemetry === true && decodeOptionalBoundary(settings?.telemetry, boundary.jsonObject)?.enabled === true);
+function telemetryHeldOff(configRoot: string, profiles: boolean | undefined): boolean {
+  const saved = readJsonFile(path.join(path.dirname(configRoot), 'config.json'));
+  const on = profiles ?? (saved.state === 'unreadable' || (saved.state === 'read' && saved.value.sessionProfilesEnabled === true));
+  if (!on) return false;
+  if (saved.state !== 'read' || saved.value.agentFarmTelemetry !== true) return true;
+  const settings = readJsonFile(path.join(configRoot, 'settings.json'));
+  return !(settings.state === 'read' && decodeOptionalBoundary(settings.value.telemetry, boundary.jsonObject)?.enabled === true);
 }
 
 /**
  * `agent-farm <args> --config-root <root>` with the bundled copy. While Pane holds telemetry off
  * it sets AGENT_FARM_TELEMETRY=off, the one setting that outranks a repository's
- * .agent-farm/workspace.yaml, unless the environment already chose a value.
+ * .agent-farm/workspace.yaml, unless the environment already chose a value. `profiles` is the
+ * caller's live Profiles state; without it, config.json on disk says.
  */
-export function bundledAgentFarmProcess(bundle: BundledAgentFarm, args: string[], configRoot: string, env: NodeJS.ProcessEnv = process.env, runtime: string = process.execPath): AgentFarmProcess {
+export function bundledAgentFarmProcess(bundle: BundledAgentFarm, args: string[], configRoot: string, env: NodeJS.ProcessEnv = process.env, runtime: string = process.execPath, profiles?: boolean): AgentFarmProcess {
   const rest = { ...env };
   delete rest.AGENT_FARM_CONFIG_ROOT;
-  if (!rest.AGENT_FARM_TELEMETRY && telemetryHeldOff(configRoot)) rest.AGENT_FARM_TELEMETRY = 'off';
+  if (!rest.AGENT_FARM_TELEMETRY && telemetryHeldOff(configRoot, profiles)) rest.AGENT_FARM_TELEMETRY = 'off';
   return { executable: runtime, args: [bundle.entry, ...args, '--config-root', configRoot], env: { ...rest, ELECTRON_RUN_AS_NODE: '1' } };
 }
 
@@ -92,8 +106,9 @@ export function bundledAgentFarmProcess(bundle: BundledAgentFarm, args: string[]
  * shim in Pane's terminals): the bundled copy, against `<PANE_DIR>/agent-farm`. Undefined when
  * this build lacks the package. The person's own agent-farm on PATH is never used (T-63, Q3).
  */
-export function paneAgentFarmProcess(paneDir: string, args: string[], env: NodeJS.ProcessEnv = process.env, bundle: BundledAgentFarm | null | undefined = bundledAgentFarm(), runtime?: string): AgentFarmProcess | undefined {
-  return bundle ? bundledAgentFarmProcess(bundle, args, agentFarmConfigRoot(paneDir), env, runtime) : undefined;
+export function paneAgentFarmProcess(paneDir: string, args: string[], options: { profiles?: boolean; env?: NodeJS.ProcessEnv; bundle?: BundledAgentFarm | null; runtime?: string }): AgentFarmProcess | undefined {
+  const bundle = options.bundle === undefined ? bundledAgentFarm() : options.bundle;
+  return bundle ? bundledAgentFarmProcess(bundle, args, agentFarmConfigRoot(paneDir), options.env ?? process.env, options.runtime, options.profiles) : undefined;
 }
 
 /** The bundled Agent Farm's state after a start's install. */
@@ -157,16 +172,68 @@ export async function writeAgentFarmTelemetry(paneDir: string, enabled: boolean 
   const text = await fs.readFile(file, 'utf8').catch(() => undefined);
   const settings = (text === undefined ? undefined : decodeOptionalBoundary(JSON.parse(text), boundary.jsonObject)) ?? {};
   const telemetry = decodeOptionalBoundary(settings.telemetry, boundary.jsonObject) ?? {};
-  const marker = await fs.readFile(markerFile, 'utf8').then(value => decodeOptionalBoundary(JSON.parse(value), boundary.object({ enabled: boundary.boolean })), () => undefined);
+  const marker = await fs.readFile(markerFile, 'utf8').then(value => decodeOptionalBoundary(JSON.parse(value), telemetryMarkerSchema), () => undefined);
   const next: JsonObject = { ...telemetry, directory };
-  if (enabled !== undefined) next.enabled = enabled;
-  else if (marker && telemetry.enabled === marker.enabled) delete next.enabled;
-  const unchanged = telemetry.directory === directory && telemetry.enabled === next.enabled && (enabled === undefined ? !marker : marker?.enabled === enabled);
-  if (unchanged) return;
+  let nextMarker: TelemetryMarker | undefined;
+  if (enabled !== undefined) {
+    next.enabled = enabled;
+    // What was there before Pane first wrote (review F-5), kept through every later write.
+    const before = decodeOptionalBoundary(telemetry.enabled, boundary.boolean);
+    nextMarker = { enabled, original: marker ? marker.original : before === undefined ? {} : { enabled: before } };
+  } else if (marker && telemetry.enabled === marker.enabled) {
+    // Still Pane's value: give back what was there before, or nothing.
+    if (marker.original.enabled === undefined) delete next.enabled;
+    else next.enabled = marker.original.enabled;
+  }
+  const settingsText = `${JSON.stringify({ ...settings, telemetry: next }, null, 2)}\n`;
+  const markerText = nextMarker ? `${JSON.stringify(nextMarker)}\n` : undefined;
+  const currentMarker = await fs.readFile(markerFile, 'utf8').catch(() => undefined);
+  if (text === settingsText && currentMarker === markerText) return;
   await fs.mkdir(configRoot, { recursive: true });
-  await fs.writeFile(file, `${JSON.stringify({ ...settings, telemetry: next }, null, 2)}\n`);
-  if (enabled === undefined) await fs.rm(markerFile, { force: true });
-  else await fs.writeFile(markerFile, `${JSON.stringify({ enabled })}\n`);
+  // The record goes first and comes off last, so a write cut short never leaves Pane's value without it.
+  if (markerText !== undefined) await fs.writeFile(markerFile, markerText);
+  if (text !== settingsText) await fs.writeFile(file, settingsText);
+  if (markerText === undefined) await fs.rm(markerFile, { force: true });
+}
+
+const telemetryMarkerSchema = boundary.object({
+  enabled: boundary.boolean,
+  original: boundary.object({ enabled: boundary.optional(boundary.boolean) }),
+});
+type TelemetryMarker = { enabled: boolean; original: { enabled?: boolean } };
+
+export interface AgentFarmTelemetrySyncOptions {
+  write?: (paneDir: string, enabled: boolean | undefined) => Promise<void>;
+  onError: (error: Error, wanted: boolean | undefined) => void;
+}
+
+export interface AgentFarmTelemetrySync {
+  /** Writes what Pane wants now, after any write already queued. */
+  sync(): Promise<void>;
+}
+
+/**
+ * Keeps settings.json's telemetry in step with what Pane wants (`wanted()`: the switch while
+ * Profiles is on, undefined while it is off), one write at a time (review F-6). A sync asked for
+ * while a write runs waits for it and then reads `wanted()`, so the last toggle wins. A failed write is reported and retried at the next sync.
+ */
+export function agentFarmTelemetrySync(paneDir: string, wanted: () => boolean | undefined, options: AgentFarmTelemetrySyncOptions): AgentFarmTelemetrySync {
+  const write = options.write ?? writeAgentFarmTelemetry;
+  let written: { value: boolean | undefined } | undefined;
+  let queue: Promise<void> = Promise.resolve();
+  // Each sync reads wanted() only when its turn comes, so the last one queued writes the latest value.
+  const run = async (): Promise<void> => {
+    const value = wanted();
+    if (written && written.value === value) return;
+    try {
+      await write(paneDir, value);
+      written = { value };
+    } catch (error) {
+      written = undefined;
+      options.onError(error instanceof Error ? error : new Error(String(error)), value);
+    }
+  };
+  return { sync: () => (queue = queue.then(run)) };
 }
 
 /** Every file a receipt covers in an installed plugin, relative with `/`, and its SHA-256 (Agent Farm's hash). */
@@ -230,6 +297,8 @@ export interface InstallBundledAgentFarmOptions {
    * undefined while Profiles is off, when Agent Farm's own default decides (as before T-63).
    */
   telemetry?: boolean;
+  /** Writes the telemetry setting through Pane's one queue (agentFarmTelemetrySync) instead of `telemetry`. */
+  syncTelemetry?: () => Promise<void>;
   bundle?: BundledAgentFarm;
   run?: AgentFarmRunner;
   log?: (message: string) => void;
@@ -254,7 +323,7 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
     return status;
   }
   try {
-    await writeAgentFarmTelemetry(options.paneDir, options.telemetry);
+    await (options.syncTelemetry ? options.syncTelemetry() : writeAgentFarmTelemetry(options.paneDir, options.telemetry));
   } catch (error) {
     log(`[AgentFarm] Pane couldn't write Agent Farm's telemetry setting in ${configRoot}: ${reasonOf(error)}.`);
   }

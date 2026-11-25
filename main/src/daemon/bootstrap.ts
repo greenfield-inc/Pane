@@ -31,7 +31,7 @@ import { WorktreeNameGenerator } from '../services/worktreeNameGenerator';
 import { RunCommandManager } from '../services/runCommandManager';
 import { VersionChecker } from '../services/versionChecker';
 import { SkillCacheManager } from '../services/skillCacheManager';
-import { agentFarmConfigRoot, bundledAgentFarm, installBundledAgentFarm, writeAgentFarmTelemetry } from '../services/agentFarm/bundledAgentFarm';
+import { agentFarmConfigRoot, agentFarmTelemetrySync, bundledAgentFarm, installBundledAgentFarm } from '../services/agentFarm/bundledAgentFarm';
 import { profilesEnabled, readProfilesSwitchFrom } from '../services/agentFarm/profilesFeature';
 import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import type { AppConfig } from '../types/config';
@@ -372,20 +372,21 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   // config root, without delaying startup. It never touches the person's own Agent Farm.
   // While Profiles is on, Agent Farm telemetry stays off unless Settings › AI & Agents turns it on for
   // this computer; while it is off (undefined), Agent Farm's own default decides, as before T-63.
-  const telemetryWanted = (config: AppConfig) => profilesEnabled(config) ? config.agentFarmTelemetry === true : undefined;
-  let agentFarmTelemetry = telemetryWanted(configManager.getConfig());
-  void installBundledAgentFarm({ paneDir: getAppDirectory(), telemetry: agentFarmTelemetry, log: message => logger.info(message) });
-  // Launches decide from the saved switches too, so an off that settings.json missed still holds;
-  // a failed write is retried at the next config change and the next start.
-  configManager.on('config-updated', (config: AppConfig) => {
-    const wanted = telemetryWanted(config);
-    if (wanted === agentFarmTelemetry) return;
-    void writeAgentFarmTelemetry(getAppDirectory(), wanted).then(() => { agentFarmTelemetry = wanted; }, error => {
-      const what = wanted === undefined ? 'hand Agent Farm telemetry back to Agent Farm\'s own default' : `turn Agent Farm telemetry ${wanted ? 'on' : 'off'}`;
-      const launches = wanted === true ? 'Launches stay unrecorded' : wanted === false ? 'Launches still stay unrecorded, since they follow the saved switch' : 'Launches follow Agent Farm\'s default anyway';
+  // Startup and every settings change write through one queue that ends on the latest config
+  // (review F-6). Launches decide from the saved switches too, so an off that settings.json missed
+  // still holds; a failed write is retried at the next config change and the next start.
+  const telemetrySync = agentFarmTelemetrySync(getAppDirectory(), () => {
+    const config = configManager.getConfig();
+    return profilesEnabled(config) ? config.agentFarmTelemetry === true : undefined;
+  }, {
+    onError: (error, wanted) => {
+      const what = wanted === undefined ? 'hand Agent Farm telemetry back to what it was before Profiles' : `turn Agent Farm telemetry ${wanted ? 'on' : 'off'}`;
+      const launches = wanted === true ? 'Launches stay unrecorded' : wanted === false ? 'Launches still stay unrecorded, since they follow the saved switch' : 'Launches follow Agent Farm\'s own setting';
       logger.warn(`[AgentFarm] Could not ${what} in its settings.json. ${launches}; Pane tries again at the next settings change and the next start.`, error instanceof Error ? error : undefined);
-    });
+    },
   });
+  void installBundledAgentFarm({ paneDir: getAppDirectory(), syncTelemetry: () => telemetrySync.sync(), log: message => logger.info(message) });
+  configManager.on('config-updated', () => { void telemetrySync.sync(); });
   if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {
     // Retry until all saved repositories are available, without delaying startup.
     const migrationConfig = configManager.getConfig();
