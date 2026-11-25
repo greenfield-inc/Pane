@@ -1,6 +1,6 @@
-import { router } from 'expo-router';
 import { Alert } from 'react-native';
 
+import { useOpenFromHome } from '@/features/layout/wideLayout';
 import { useSetSessionPaused, useUpdateSession } from '@/features/sessions/hooks';
 
 import { useArchivePane, useDeleteArchivedPane, useMarkPaneSeen, useRestorePane, useSetPanePaused, useToggleFavorite } from './hooks';
@@ -11,6 +11,7 @@ import { useArchivePane, useDeleteArchivedPane, useMarkPaneSeen, useRestorePane,
  */
 export function usePaneActions() {
   const markSeen = useMarkPaneSeen();
+  const open = useOpenFromHome();
   const toggleFavorite = useToggleFavorite();
   const archive = useArchivePane();
   const restorePane = useRestorePane();
@@ -24,10 +25,10 @@ export function usePaneActions() {
   return {
     openPane(paneId: string) {
       markSeen(paneId);
-      router.push({ pathname: '/pane/[paneId]', params: { paneId } });
+      open({ pathname: '/pane/[paneId]', params: { paneId } });
     },
     openSession(sessionId: string) {
-      router.push({ pathname: '/session/[sessionId]', params: { sessionId } });
+      open({ pathname: '/session/[sessionId]', params: { sessionId } });
     },
     togglePanePinned(paneId: string) {
       toggleFavorite(paneId).catch(fail('Couldn’t update pinned panes'));

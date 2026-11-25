@@ -4,7 +4,7 @@
  * navigator starts again on Home. Kept in memory only: a new process starts on Home.
  */
 
-interface NavigationState {
+export interface NavigationState {
   index?: number;
   routes: { name: string; params?: object; state?: NavigationState }[];
 }
@@ -19,24 +19,21 @@ const SHEETS = new Set([
   'connect', 'open', 'scan', 'pair', 'new', 'sort-approvals', 'machine/connect', 'settings/shortcut', 'hosts/add',
   'notify/[notifyId]', 'pane/[paneId]/permission', 'pane/[paneId]/notify', 'pane/[paneId]/new-panel',
 ]);
-const PANE_ROUTE = 'pane/[paneId]/index';
+const PANE_PATH = '/pane/[paneId]';
 
 let remembered: { hostId: string; screen: ScreenToReopen; paneId?: string } | null = null;
 
+/** The screen on top of the stack, under any sheet, unless that is Home. */
+export function topScreen(root: NavigationState | undefined): ScreenToReopen | null {
+  const top = stackRoutes(root).findLast(route => !SHEETS.has(route.name));
+  if (!top || top.name === 'index') return null;
+  return { pathname: `/${top.name.replace(/\/index$/, '')}`, params: stringParams(top.params) };
+}
+
 /** Notes the screen on top for the computer the app is on. Call it on every navigation change. */
 export function rememberScreen(hostId: string, root: NavigationState | undefined): void {
-  const routes = stackRoutes(root);
-  const top = routes.findLast(route => !SHEETS.has(route.name));
-  if (!top || top.name === 'index') {
-    remembered = null;
-    return;
-  }
-  const params = stringParams(top.params);
-  remembered = {
-    hostId,
-    screen: { pathname: `/${top.name.replace(/\/index$/, '')}`, params },
-    ...(top.name === PANE_ROUTE ? { paneId: params.paneId } : {}),
-  };
+  const screen = topScreen(root);
+  remembered = screen ? { hostId, screen, ...(screen.pathname === PANE_PATH ? { paneId: screen.params.paneId } : {}) } : null;
 }
 
 /** The person is leaving the app: its next start opens on Home. */

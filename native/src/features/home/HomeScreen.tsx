@@ -1,10 +1,12 @@
 import { LegendList } from '@legendapp/list/react-native';
-import { router, useIsFocused } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import { use, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { canClose } from '@shared/approvalReceipts';
+
+import { ScreenFocus } from '@/daemon';
 
 import { buildAllMachinesList, feedsAnswered, type RecentRow } from '@/features/allMachines/allMachinesList';
 import { AllMachinesNotes, allOffline, offlineAlert, openRecentRow, openWaitingRow, RecentRowView, waitingRowText } from '@/features/allMachines/AllMachinesRows';
@@ -27,6 +29,7 @@ import { PaneRow } from '@/features/panes/PaneRow';
 import { SidebarItemView, type SidebarItemContext } from '@/features/panes/SidebarItemView';
 import { useSidebarSections } from '@/features/panes/sidebarSections';
 import { useOpenSessions } from '@/features/panes/useOpenSessions';
+import { useOpenFromHome } from '@/features/layout/wideLayout';
 import { usePaneActions } from '@/features/panes/usePaneActions';
 import { markNextFrame } from '@/features/perf/perfMarks';
 import { useLiveMarks, useValueMark } from '@/features/perf/usePerfMarks';
@@ -64,12 +67,14 @@ const SECTION_ROWS: ReadonlyArray<{ section: Exclude<SidebarSection, 'pinned'>; 
 export function HomeScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const focused = useIsFocused();
+  // In view: the phone's Home while nothing covers it, and the docked column always.
+  const focused = use(ScreenFocus);
   const home = useHomeFeeds({ active: focused });
   const { here, all, feeds, chipMachines, current, presence, live, notice, retry } = home;
   const profile = here.profile;
   const autopilot = useAutopilot();
   const actions = usePaneActions();
+  const open = useOpenFromHome();
   const tile = useBoardTile(state => state.tile);
   const selectTile = useBoardTile(state => state.select);
   const query = useHomeView(state => state.query);
@@ -254,7 +259,7 @@ export function HomeScreen() {
                     stale={row.stale}
                     done={list === 'agent' || !row.waiting}
                     divided={divided}
-                    onPress={() => openWaitingRow(row, list, profile.id)}
+                    onPress={() => openWaitingRow(row, list, profile.id, open)}
                     // The card's Close with no reason, for this machine's questions it can close.
                     onArchive={row.type === 'question' && list === 'waiting' && row.machineKey === profile.id && !row.stale && canClose(row.item) ? {
                       swipeId: row.item.id,

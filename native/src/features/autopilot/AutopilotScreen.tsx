@@ -18,6 +18,7 @@ import { useMachines } from '@/features/machines/useMachines';
 import { useNotifyShared } from '@/features/notify/hooks';
 import { useTheme, withAlpha } from '@/theme';
 import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
+import { useAvoidsKeyboard } from '@/features/layout/wideLayout';
 
 import { composerPlaceholder, startBlocked, walkBar, autopilotItems } from './autopilot';
 import { DecisionCard, DecisionCardSkeleton, useDecisionAnswer } from './DecisionCard';
@@ -35,6 +36,7 @@ function openAutopilotItem(notifyId: string) {
  * decision cards you answer in place; their footer opens the approval full screen. No tabs.
  */
 export function AutopilotScreen() {
+  const avoidsKeyboard = useAvoidsKeyboard();
   const theme = useTheme();
   const { colors } = theme;
   const autopilot = useAutopilot();
@@ -77,7 +79,7 @@ export function AutopilotScreen() {
   }
 
   return (
-    <KeyboardAvoidingView testID="autopilot-screen" behavior="padding" style={[styles.fill, { backgroundColor: colors.surface }]}>
+    <KeyboardAvoidingView testID="autopilot-screen" behavior="padding" enabled={avoidsKeyboard} style={[styles.fill, { backgroundColor: colors.surface }]}>
       <Header snapshot={snapshot} />
       {snapshot?.enabled && snapshot.state !== 'stopped' ? <WalkBar snapshot={snapshot} /> : null}
       <View style={styles.fill}>

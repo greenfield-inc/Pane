@@ -27,6 +27,7 @@ import { perfMark } from '@/features/perf/perfMarks';
 import { useJourneyMark, useScreenJourney } from '@/features/perf/usePerfMarks';
 import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
+import { useAvoidsKeyboard } from '@/features/layout/wideLayout';
 
 import { ApprovalActions, ConnectedRow, QuestionActions } from './ApprovalActions';
 import { useApprovalSort } from './approvalSortPreference';
@@ -39,7 +40,7 @@ const SUMMARY_TAB = 'summary';
 const linkTab = (index: number) => `link:${index}`;
 
 /** Opens an item's approval screen on the machine the phone is on, stepping through the list it's in. */
-export function openApproval(notifyId: string, list: ApprovalList = 'waiting') {
+function openApproval(notifyId: string, list: ApprovalList = 'waiting') {
   router.push({ pathname: '/approval/[notifyId]', params: list === 'waiting' ? { notifyId } : { notifyId, list } });
 }
 
@@ -214,11 +215,12 @@ function SessionWorkspace({ sessionId, paneId, topBar, leading }: { sessionId: s
 
 /** The approval's own tabs with no Pane's after them: asked from outside Pane, or finished. */
 function Bare({ topBar, leading }: { topBar: ReactNode; leading: LeadingTabs }) {
+  const avoidsKeyboard = useAvoidsKeyboard();
   const theme = useTheme();
   const { panelId } = useLocalSearchParams<{ panelId?: string }>();
   const tab = leading.tabs.find(candidate => candidate.id === panelId) ?? leading.tabs[0];
   return (
-    <KeyboardAvoidingView testID="approval-bare" behavior="padding" style={[styles.fill, { backgroundColor: theme.colors.surface }]}>
+    <KeyboardAvoidingView testID="approval-bare" behavior="padding" enabled={avoidsKeyboard} style={[styles.fill, { backgroundColor: theme.colors.surface }]}>
       {topBar}
       <PanelTabs panels={[]} selectedId={tab?.id ?? null} leading={leading.tabs} onSelectLeading={id => router.setParams({ panelId: id })} />
       <LeadingBodies leading={leading} selectedId={tab?.id ?? null} />
