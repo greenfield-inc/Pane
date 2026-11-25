@@ -107,7 +107,7 @@ test('Cancel has focus and Enter answers Cancel; Start waits before it can be pr
   await boot(page, { activePaneId: '' });
   const dialog = await emitRequest(page, request());
   await expect(dialog.getByRole('heading', { name: 'Start Claude on this prompt?' })).toBeVisible();
-  await expect(dialog.getByText('Runs in a new Pane in acme-app.')).toBeVisible();
+  await expect(dialog.getByText('Runs in a new Pane in acme-app (acme/app).')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
   const start = dialog.getByRole('button', { name: 'Start' });
   await expect(start).toBeDisabled();

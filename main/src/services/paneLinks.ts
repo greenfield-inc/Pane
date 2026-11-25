@@ -261,7 +261,8 @@ export function registerPaneLinkHandler(commandRegistry: PaneCommandRegistry, op
           kind: 'new',
           target: linked.kind,
           ...(linked.kind === 'repo' ? { repoId: linked.repoId } : linked.kind === 'session' ? { sessionId: linked.sessionId } : {}),
-          agent: request.agent,
+          // A Session's own agent gets the prompt, whatever the link named.
+          agent: linked.kind === 'session' ? linked.agent : request.agent,
           confirming: true,
         } } };
       }
@@ -322,26 +323,35 @@ async function startFromLink(commandRegistry: PaneCommandRegistry, opener: PaneL
     } else if (target.kind === 'session') {
       where = `Session "${target.sessionName}"`;
       const session = await findLinkedSession(commandRegistry, target.sessionId);
-      opener.navigate({ kind: 'session', sessionId: session.id, panelId: session.panelId });
-      await commandRegistry.invoke('runpane:panels:resume', [{ panelId: session.panelId, waitReady: true }]);
-      const submitted = decodeBoundary(await commandRegistry.invoke('runpane:panels:submit', [{ panelId: session.panelId, input: request.prompt, source: 'user', expectReport: false }]), boundary.object({ ok: boundary.boolean }));
-      if (!submitted.ok) opener.showError(`Pane could not confirm that ${where} got the prompt. Open the Session to check whether it arrived.`);
+      await sendToSession(commandRegistry, opener, { sessionId: session.id, panelId: session.panelId }, request.prompt, where);
     } else {
-      const created = await createLinkedSession(commandRegistry, startLinkSessionName(request.prompt), agent, request.prompt);
-      opener.navigate({ kind: 'session', sessionId: created.sessionId, panelId: created.panelId });
+      const created = await createLinkedSession(commandRegistry, startLinkSessionName(request.prompt), agent);
+      where = 'the new Session';
+      await sendToSession(commandRegistry, opener, created, request.prompt, where);
     }
   } catch (error) {
     opener.showError(`Pane could not start the linked task in ${where}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-/** A new Session whose agent starts on the prompt; a taken name gets a number, as loops do. */
-async function createLinkedSession(commandRegistry: PaneCommandRegistry, name: string, agent: ConfiguredAgentId, prompt: string): Promise<{ sessionId: string; panelId: string }> {
+/** Opens the Session on its agent tab, waits for the agent, and submits the prompt there. */
+async function sendToSession(commandRegistry: PaneCommandRegistry, opener: PaneLinkOpener, session: { sessionId: string; panelId: string }, prompt: string, where: string): Promise<void> {
+  opener.navigate({ kind: 'session', sessionId: session.sessionId, panelId: session.panelId });
+  await commandRegistry.invoke('runpane:panels:resume', [{ panelId: session.panelId, waitReady: true }]);
+  const submitted = decodeBoundary(
+    await commandRegistry.invoke('runpane:panels:submit', [{ panelId: session.panelId, input: prompt, source: 'user', expectReport: false }]),
+    boundary.object({ ok: boundary.boolean }),
+  );
+  if (!submitted.ok) opener.showError(`Pane could not confirm that ${where} got the prompt. Open the Session to check whether it arrived.`);
+}
+
+/** A new Session with the agent; a taken name gets a number, as loops do. The prompt is submitted once its agent is ready. */
+async function createLinkedSession(commandRegistry: PaneCommandRegistry, name: string, agent: ConfiguredAgentId): Promise<{ sessionId: string; panelId: string }> {
   for (let attempt = 1; ; attempt += 1) {
     const candidate = attempt === 1 ? name : `${name} ${attempt}`;
     try {
       const created = decodeBoundary(
-        await commandRegistry.invoke('runpane:sessions:create', [{ name: candidate, agent, launchCommand: '', openingPrompt: prompt }]),
+        await commandRegistry.invoke('runpane:sessions:create', [{ name: candidate, agent, launchCommand: '' }]),
         boundary.object({ session: boundary.object({ id: boundary.string }), panelId: boundary.string }),
       );
       return { sessionId: created.session.id, panelId: created.panelId };

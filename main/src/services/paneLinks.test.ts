@@ -285,15 +285,16 @@ describe('pane:// links', () => {
   });
 
   it('starts a new Session with the agent and the prompt when the link names no repo or Session', async () => {
-    const { open, sessionsCreated, navigated, confirmed, created } = setup();
+    const { open, sessionsCreated, submitted, navigated, confirmed, created } = setup();
     const prompt = 'Explain how this project builds';
 
     const result = await open(`pane://new?agent=codex&prompt=${encodeURIComponent(prompt)}`);
 
     expect(result).toMatchObject({ success: true, data: { opened: { kind: 'new', target: 'new-session', agent: 'codex' } } });
-    await vi.waitFor(() => expect(navigated).toHaveLength(1));
+    await vi.waitFor(() => expect(submitted).toHaveLength(1));
     expect(confirmed[0].targets).toEqual([{ kind: 'new-session' }]);
-    expect(sessionsCreated[0]).toEqual({ name: 'Explain how this project builds', agent: 'codex', launchCommand: '', openingPrompt: prompt });
+    expect(sessionsCreated[0]).toEqual({ name: 'Explain how this project builds', agent: 'codex', launchCommand: '' });
+    expect(submitted[0]).toMatchObject({ panelId: 'session-agent-tab', input: prompt, source: 'user' });
     expect(navigated).toEqual([{ kind: 'session', sessionId: '__orchestration_session_new__', panelId: 'session-agent-tab' }]);
     expect(created).toEqual([]);
   });
@@ -301,8 +302,9 @@ describe('pane:// links', () => {
   it("sends the prompt to a named Session's own agent, whatever agent the link names", async () => {
     const { open, submitted, navigated, confirmed, sessionsCreated } = setup();
 
-    await open('pane://new?session=Build+fixes&agent=claude&prompt=Rerun+the+flaky+test');
+    const result = await open('pane://new?session=Build+fixes&agent=claude&prompt=Rerun+the+flaky+test');
 
+    expect(result).toMatchObject({ success: true, data: { opened: { target: 'session', sessionId: '__orchestration_session_1__', agent: 'codex' } } });
     await vi.waitFor(() => expect(submitted).toHaveLength(1));
     expect(confirmed[0].targets[0]).toEqual({ kind: 'session', sessionId: '__orchestration_session_1__', sessionName: 'Build fixes', agent: 'codex' });
     expect(submitted[0]).toMatchObject({ panelId: 'codex-tab', input: 'Rerun the flaky test', source: 'user' });

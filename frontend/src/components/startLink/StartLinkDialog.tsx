@@ -29,7 +29,8 @@ function ownerRepo(identity: string): string {
 
 function wherePhrase(target: StartLinkTarget): string {
   if (target.kind === 'new-session') return 'in a new Session';
-  if (target.kind === 'repo') return `in a new Pane in ${target.repoName}`;
+  // The origin's owner/repo is what the link named; the saved name can differ.
+  if (target.kind === 'repo') return `in a new Pane in ${target.repoName}${target.identity && ownerRepo(target.identity) !== target.repoName ? ` (${ownerRepo(target.identity)})` : ''}`;
   return `in Session ${target.sessionName}`;
 }
 
@@ -41,7 +42,7 @@ function targetLabel(target: StartLinkTarget): string {
 
 const OPTION_ROW = 'flex items-center justify-between gap-3 rounded border px-3 py-1.5 text-sm transition-colors focus-within:ring-2 focus-within:ring-interactive';
 
-export function StartLinkDialog({ request, onAnswer }: { request: StartLinkRequest; onAnswer: (choice: StartLinkChoice) => void }) {
+function StartLinkDialog({ request, onAnswer }: { request: StartLinkRequest; onAnswer: (choice: StartLinkChoice) => void }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const optionsId = useId();
   const [agent, setAgent] = useState<ConfiguredAgentId>(request.agent);
