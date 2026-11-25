@@ -1,6 +1,7 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { VersionUpdateInfo } from '../frontend/src/types/session';
+import { notifyFixture } from './fixtures/notifySnapshot';
 import type { PanelAgentStatusEvent } from '../shared/types/agentStatus';
 
 declare global {
@@ -32,12 +33,7 @@ const panels = ['Bottom Terminal', 'Input Terminal'].map((title, index) => ({
   },
 }));
 
-test('different panels keep separate notifications while newer status replaces the same panel', async ({ page }, testInfo) => {
-  await installElectronApiMock(page, {
-    initialProjects: [project], initialSessions: [session], initialPanels: panels,
-    activeProjectId: project.id, initialWindowFocused: false,
-    initialConfig: { notifications: { enabled: true, playSound: false } },
-  });
+async function recordNotifications(page: Page) {
   await page.addInitScript(() => {
     window.__desktopNotifications = [];
     window.__visibleNotifications = {};
@@ -64,6 +60,15 @@ test('different panels keep separate notifications while newer status replaces t
       },
     });
   });
+}
+
+test('different panels keep separate notifications while newer status replaces the same panel', async ({ page }, testInfo) => {
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialSessions: [session], initialPanels: panels,
+    activeProjectId: project.id, initialWindowFocused: false,
+    initialConfig: { notifications: { enabled: true, playSound: false } },
+  });
+  await recordNotifications(page);
   await gotoApp(page);
   await page.getByRole('button', { name: 'Expand project Terminal input fixture', exact: true }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
@@ -96,4 +101,32 @@ test('different panels keep separate notifications while newer status replaces t
     body: JSON.stringify(await page.evaluate(() => window.__desktopNotifications), null, 2),
     contentType: 'application/json',
   });
+});
+
+test('a tab blocked on a prompt that has an approval leaves the notification to the approval', async ({ page }) => {
+  const fixture = notifyFixture();
+  const [item] = fixture.items;
+  const prompt = { ...item, id: 'prompt', state: 'waiting' as const, originKind: 'claude-prompt' as const, source: { name: session.name, agent: 'Claude', paneId: session.id, panelId: 'input-terminal-0' } };
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialSessions: [session], initialPanels: panels,
+    activeProjectId: project.id, initialWindowFocused: false,
+    initialConfig: { notifications: { enabled: true, playSound: false } },
+    notifySnapshot: { ...fixture, items: [], queue: [], strip: null, stripSurface: null },
+  });
+  await recordNotifications(page);
+  await gotoApp(page);
+  await page.getByRole('button', { name: 'Expand project Terminal input fixture', exact: true }).click();
+  await page.getByRole('button', { name: session.name, exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Input Terminal', exact: true })).toBeVisible();
+  // The tab reads blocked first; its approval arrives a moment later. The other tab has none.
+  await page.evaluate(() => {
+    window.__emitNotificationStatus({ panelId: 'input-terminal-0', sessionId: 'terminal-input-session', state: 'blocked', reason: null });
+    window.__emitNotificationStatus({ panelId: 'input-terminal-1', sessionId: 'terminal-input-session', state: 'blocked', reason: null });
+  });
+  // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
+  await page.evaluate((snapshot) => (window as typeof window & { __paneTestElectronMock: { emitNotifySnapshot: (value: unknown) => void } }).__paneTestElectronMock.emitNotifySnapshot(snapshot),
+    { ...fixture, items: [prompt], queue: ['prompt'], strip: null, stripSurface: null });
+  await expect.poll(() => page.evaluate(() => Object.values(window.__visibleNotifications))).toEqual(['Input Terminal needs your input']);
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => Object.values(window.__visibleNotifications))).toEqual(['Input Terminal needs your input']);
 });

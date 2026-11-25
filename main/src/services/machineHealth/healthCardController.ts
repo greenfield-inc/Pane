@@ -5,6 +5,8 @@ import type { FinishedPane } from './finishedPanes';
 import { CardGate, diskCard, finishedCard, IGNORE_PROCESS, KEEP_IT, KEEP_THEM, leakCard, leftoversCard, NOT_NOW, RANK, RESTART_IT, STOP_IT, STOP_THEM, type CardQuestion, type Leftover } from './healthCards';
 
 const DISK = 'disk';
+/** Free space must rise this far above the alert's before a nearly full disk counts as a new episode. */
+const EPISODE_MARGIN_BYTES = 2 * 1024 ** 3;
 const LEFTOVERS_OPEN = 'leftovers';
 
 export interface HealthCardDeps {
@@ -36,6 +38,7 @@ export interface HealthCardDeps {
 }
 
 const identity = (proc: HealthProcess) => `${proc.pid}:${proc.started}`;
+const lowestFree = (snapshot: MachineHealthSnapshot) => Math.min(...snapshot.disk.volumes.map(volume => volume.freeBytes));
 const RECOVERED = 'free disk is back above the warning line';
 
 /**
@@ -47,8 +50,8 @@ const RECOVERED = 'free disk is back above the warning line';
  */
 export class HealthCardController {
   private readonly gate: CardGate;
-  /** The current critical disk episode's desktop alert went out. */
-  private alerted = false;
+  /** Lowest free space when the current episode's desktop alert went out; null when none has. */
+  private alertedFree: number | null = null;
   /** The current critical disk episode's card was raised. */
   private urgentCard = false;
   /** Leftover processes the person chose to keep, by pid and start time. */
@@ -144,15 +147,19 @@ export class HealthCardController {
 
   /** One desktop alert when the disk turns critical, whatever card is already waiting. */
   private alertOnCritical(snapshot: MachineHealthSnapshot): void {
+    const free = lowestFree(snapshot);
     if (snapshot.disk.level !== 'critical') {
-      this.alerted = false;
-      this.urgentCard = false;
+      // Hovering at the line stays one episode.
+      if (snapshot.disk.level === 'ok' || this.alertedFree === null || free > this.alertedFree + EPISODE_MARGIN_BYTES) {
+        this.alertedFree = null;
+        this.urgentCard = false;
+      }
       return;
     }
-    if (this.alerted) return;
+    if (this.alertedFree !== null) return;
     const { title, context } = diskCard(snapshot);
     // Counted only once it went out (or the rules say it should not); otherwise the next sample tries again.
-    this.alerted = this.deps.alert(title, context);
+    if (this.deps.alert(title, context)) this.alertedFree = free;
   }
 
   private raise(key: string, level: HealthLevel, question: CardQuestion, act: (answer: string) => Promise<void>, openKey = key): void {

@@ -42,9 +42,9 @@ describe('CardGate', () => {
 
 describe('HealthCardController', () => {
   const GB = 1024 ** 3;
-  const snapshot = (disk: 'ok' | 'warning' | 'critical', panes: PaneUsage[] = [], memory: 'ok' | 'warning' | 'critical' = 'ok'): MachineHealthSnapshot => ({
+  const snapshot = (disk: 'ok' | 'warning' | 'critical', panes: PaneUsage[] = [], memory: 'ok' | 'warning' | 'critical' = 'ok', freeGB = 13): MachineHealthSnapshot => ({
     sampledAt: 0, platform: 'darwin', hostname: 'mac', cpuPercent: 0, app: { rssMB: 100, cpuPercent: 0 }, panes, leaks: [],
-    disk: { level: disk, volumes: [{ path: '/', roles: ['pane-data'], totalBytes: 500 * GB, freeBytes: 13 * GB, level: disk }] },
+    disk: { level: disk, volumes: [{ path: '/', roles: ['pane-data'], totalBytes: 500 * GB, freeBytes: freeGB * GB, level: disk }] },
     memory: { level: memory, source: 'macos-pressure', detail: '', totalBytes: 32 * GB, freeBytes: 2 * GB, swapUsedBytes: null },
   });
   const escaped = (pid: number, sessionId = 'p1'): HealthProcess => ({ pid, started: `start-${pid}`, name: 'tmux', sessionId, panelId: null, rssMB: 50, cpuPercent: 0, escaped: true });
@@ -116,8 +116,20 @@ describe('HealthCardController', () => {
     expect(asked.map(question => question.title)).toEqual(['Disk space is low', 'Disk is almost full']);
     expect(withdrawn).toEqual([{ title: 'Disk space is low', reason: 'it turned critical, and a new card replaces it' }]);
     expect(alerts).toEqual(['Disk is almost full']);
-    c.onSnapshot(snapshot('warning'));
+    c.onSnapshot(snapshot('ok'));
     c.onSnapshot(snapshot('critical'));
+    expect(alerts).toHaveLength(2);
+  });
+
+  it.each([true, false])('alerts once while free space hovers at the line, and again after it recovers by 2 GB (switch on: %s)', async notifications => {
+    const { c, alerts } = controller(null, { notifications });
+    for (let sample = 0; sample < 5; sample += 1) {
+      c.onSnapshot(snapshot('critical', [], 'ok', 4.9));
+      c.onSnapshot(snapshot('warning', [], 'ok', 5.1));
+    }
+    expect(alerts).toHaveLength(1);
+    c.onSnapshot(snapshot('warning', [], 'ok', 7));
+    c.onSnapshot(snapshot('critical', [], 'ok', 4.9));
     expect(alerts).toHaveLength(2);
   });
 

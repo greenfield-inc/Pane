@@ -661,6 +661,8 @@ export type NotifyCommand =
   | { type: 'open-in-pane'; id: string }
   /** A machine health card's Ask an agent from a floating window: the main window runs it. */
   | { type: 'ask-agent'; id: string }
+  /** A machine health card's Open Resources from a floating window: the main window opens it. */
+  | { type: 'open-resources'; id: string }
   /** Approvals: open the item's link `index` as a tab of `paneId` (the Pane shown beside it), else of the asking Pane. */
   | { type: 'open-link'; id: string; index: number; paneId?: string }
   /** A link in a card's text: opens where Settings > Links says, beside the asking Pane by default. */
@@ -691,10 +693,18 @@ export interface NotifyFixCommand {
 
 /** Where main sends the main window: Approvals (optionally on one item) or its settings. */
 /**
+ * An item the person can answer now: what every count counts. A stale item waits in its own group,
+ * an offline machine's collapses to one row, and a mirror from an older machine takes no answer.
+ */
+export function countsAsWaiting(item: NotifyItem): boolean {
+  return item.state === 'waiting' && !item.unreachable && item.staleSince === undefined && !item.relay;
+}
+
+/**
  * Where main asks the window to go. `toggle-inbox` is the Notify shortcut
  * pressed while Pane is in front: Approvals, or back to where you were (D-251).
  */
-export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | 'resources' | { approval: string } | { askAgent: string } | { link: string; paneId: string };
+export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | { approval: string } | { askAgent: string } | { resources: string } | { link: string; paneId: string };
 
 /** The floating windows report their card's size so main can fit and place them. */
 export interface NotifyWindowSize {

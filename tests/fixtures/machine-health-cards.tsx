@@ -118,8 +118,8 @@ if (popup) {
   });
   const criticalDisk: FixtureCard = { ...cards.disk, title: 'Disk is almost full', context: '3.1 GB free. Open Resources to see what uses the disk.' };
   const items = popup === 'critical'
-    ? [toItem('m1', cards.memory, 0), toItem('f1', cards.finished, 1), toItem('d1', criticalDisk, 2, 'critical')]
-    : [toItem('d1', cards.disk, 1), toItem('f1', cards.finished, 2), toItem('m1', cards.memory, 3)];
+    ? [toItem('f1', cards.finished, 1), toItem('d1', criticalDisk, 2, 'critical')]
+    : [toItem('d1', cards.disk, 1), toItem('f1', cards.finished, 2)];
   window.qaCommands = [];
   Object.assign(window, { electronAPI: { notify: { run: async (command: NotifyCommand) => { window.qaCommands.push(command); } } } });
   // A short hide time keeps the test quick; the app uses Notify's setting the same way.

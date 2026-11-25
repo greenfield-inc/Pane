@@ -64,9 +64,7 @@ test.describe('Machine health cards', () => {
     await open(page, 'popup=warning');
     await page.getByLabel('Composer').focus();
     const popups = page.getByTestId('health-popup');
-    // An older linked Pane's memory card never pops up.
     await expect(popups).toHaveCount(2);
-    await expect(page.getByText('Memory is tight')).toHaveCount(0);
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByRole('status', { name: 'Disk space is low' })).toHaveAttribute('data-level', 'warning');
     const box = await page.getByTestId('health-popups').boundingBox();

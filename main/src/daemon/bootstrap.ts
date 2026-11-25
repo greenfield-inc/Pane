@@ -1035,7 +1035,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     restartProcess: async leak => { await commandRegistry.invoke(MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, [{ pid: leak.pid, started: leak.started }]); },
     ignoreLeak: leak => machineHealth.ignoreLeak(leak.pid, leak.started),
     archive: async paneIds => { await finishedPanes.archive(paneIds, 'card'); },
-    alert: (title, body) => showDesktopAlert(services, services.notifyService?.queue.alertsHere() ?? true, title, body, () => services.notifyService?.openResources()),
+    alert: (title, body) => showDesktopAlert(services, services.notifyService?.queue.alertsHere() ?? true, title, body, { onClick: () => services.notifyService?.openResources() }),
     log: message => logger.warn(message),
   });
   if (duties.housekeeping) {

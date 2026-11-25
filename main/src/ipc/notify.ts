@@ -134,6 +134,7 @@ const notifyCommandSchema = boundary.union(
   idCommand('skip'),
   idCommand('open-in-pane'),
   idCommand('ask-agent'),
+  idCommand('open-resources'),
   boundary.object({ type: boundary.literal('open-link'), id: boundary.nonEmptyString, index: boundary.number, paneId: boundary.optional(boundary.nonEmptyString) }),
   boundary.object({ type: boundary.literal('open-url'), id: boundary.nonEmptyString, url: boundary.nonEmptyString }),
   boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('3m', '5m', '15m', '10m', '1h', 'pane') }),
@@ -494,8 +495,9 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       }
       return { id: started.leaseId, expiresAt: started.expiresAt, machines: started.machines, refused };
     },
-    // The queue already held it until this computer is where alerts go.
-    alert: (title, body, onClick) => { showDesktopAlert(services, true, title, body, onClick); },
+    // The queue already held it until this computer is where alerts go. Approvals' own Sound setting
+    // chimes, and Dictate is not known to show approvals, so it takes none of them over.
+    alert: (title, body, onClick) => { showDesktopAlert(services, true, title, body, { onClick, silent: true, keepFromDictate: true }); },
     publish: (state) => getPaneEventSink().send('notify:shared-changed', state),
     sendToMachine: async (machineId, command) => {
       if (!saved) throw new PaneError('ERR_MACHINE_UNKNOWN', 'Pane is still starting its machine connections. Nothing was sent.', 'Answer again in a moment.');

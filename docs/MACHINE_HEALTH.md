@@ -133,7 +133,9 @@ off by default, and once you set it, it is shared with your other computers the
 way the Approvals switch is ([Shared integration keys](SHARED_CREDENTIALS.md#the-approvals-switch)).
 A value you saved before the default changed stays. Off, Pane still raises the
 disk card and the desktop notification once per episode when free disk drops
-below the alert figure (5 GB by default). A card you answered Not now stays held
+below the alert figure (5 GB by default). The episode ends when
+free space is back above the warning figure, or 2 GB above where it alerted. A
+linked computer's nearly full disk notifies here too. A card you answered Not now stays held
 for its 24 hours. Resources keeps showing everything, and the switches under Do
 it automatically keep working.
 

@@ -245,8 +245,8 @@ function App() {
       openApprovals();
       return;
     }
-    if (target === 'resources') {
-      useNavigationStore.getState().navigateToResources('local');
+    if ('resources' in target) {
+      useNavigationStore.getState().navigateToResources(target.resources);
       return;
     }
     if ('link' in target) {

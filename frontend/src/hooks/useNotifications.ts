@@ -6,7 +6,11 @@ import { useConfigStore } from '../stores/configStore';
 import { ToolPanel } from '../../../shared/types/panels';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { isDesktopAlertHandedOff } from './desktopAlertHandoff';
+import { countsAsWaiting, useNotifyStore } from '../stores/notifyStore';
 import { openPanelOnClick } from './notificationClick';
+
+/** How long a blocked tab waits for its approval before notifying by itself. */
+const PROMPT_APPROVAL_WAIT_MS = 2000;
 
 // Extend window interface for webkit audio context compatibility
 declare global {
@@ -227,9 +231,22 @@ export function useNotifications() {
     });
   }
 
-  // Fires as soon as an agent flips to blocked: it is waiting on the human, so
-  // there is nothing to debounce — the sooner the user knows, the better.
+  // An approval for the same prompt sends the one notification, from main. It can arrive just after
+  // the tab reads blocked, so wait for it before deciding nobody else tells the person.
   function maybeNotifyPanelBlocked(panelId: string) {
+    window.setTimeout(() => {
+      if (usePanelStore.getState().agentStatus[panelId] === 'blocked' && !hasPromptApproval(panelId)) notifyPanelBlocked(panelId);
+    }, PROMPT_APPROVAL_WAIT_MS);
+  }
+
+  /** A waiting approval asks what this tab is blocked on: its Claude prompt, or any question of a chat tab. */
+  function hasPromptApproval(panelId: string): boolean {
+    const isChat = Object.values(usePanelStore.getState().panels).some((panels) => panels.some((panel) => panel.id === panelId && panel.type === 'chat'));
+    return useNotifyStore.getState().snapshot?.items.some((item) => countsAsWaiting(item) && item.source.panelId === panelId
+      && (isChat || item.originKind === 'claude-prompt')) ?? false;
+  }
+
+  function notifyPanelBlocked(panelId: string) {
     const currentSettings = settingsRef.current;
     if (!currentSettings.enabled) return;
     if (windowFocusedRef.current) return;
@@ -244,8 +261,8 @@ export function useNotifications() {
   }
 
   // Subscribe to panelStore.agentStatus (the unified per-panel agent state) and
-  // notify on its transitions: -> blocked fires immediately ("needs your
-  // input"); working -> idle fires after the daemon's authoritative settle.
+  // notify on its transitions: -> blocked fires ("needs your
+  // input") unless an approval announces it; working -> idle fires after the daemon's authoritative settle.
   // Uses the unary subscribe form since panelStore does
   // not use the subscribeWithSelector middleware.
   useEffect(() => {

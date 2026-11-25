@@ -1,8 +1,9 @@
 # Approvals (Pane Notify)
 
 Agents ask you questions through Pane instead of waiting in their terminal.
-An agent calls the `notify` MCP tool (or `runpane notify`), Pane shows the
-question wherever you are, even over your browser, and the agent gets your
+An agent calls the `notify` MCP tool (or `runpane notify`), Pane tells
+you (inside Pane, by a system notification, or on a card over other apps if you turn
+that on), and the agent gets your
 answer as the tool's result. Inside Pane, everything that waits on you is in
 **Approvals**, filed under the Session it belongs to. `notify` is the agents'
 side of it, and keeps its name in the CLI, the MCP server and the code.
@@ -548,30 +549,32 @@ Autopilot.
 
 Alerts interrupt you on the device you're using (D-144):
 
-- **A computer rings** (the strip and the chime) only if it was used in the last
+- **A computer rings** (the strip or system notification, and the chime) only if it was used in the last
   2 minutes with its screen unlocked, for its own items and other machines'. If
   two computers are both in use, both ring. In-Pane cards still show while Pane
   is in front.
 - **With Show outside Pane off** (the default), an approval that starts ringing
   while Pane is in the background sends one system notification, titled
-  "<Pane> needs your answer". Clicking it opens that approval. Several that came
+  "<Pane> needs your answer" and silent (the chime follows Sound). Clicking it opens that approval. Several that came
   in while you were away or paused make one notification. It follows Settings ›
-  Notifications, and the same in-use and Show cards on rules. A Claude
-  permission prompt sends its tab's "needs your input" notification instead.
-- **The app badge** counts what waits, on the Dock (macOS) or the launcher
+  Notifications, and the same in-use and Show cards on rules. A snooze
+  that ends sends one again. A Claude prompt or chat-tab question sends this one,
+  never its tab's "needs your input" too. It shows even while Dictate runs.
+- **The app badge** counts what you can answer now, as Approvals does, on the Dock (macOS) or the launcher
   (Linux desktops that support it). On Windows it is a dot on the taskbar button.
 - **The phone** gets a push about 90 seconds after an approval arrives, only if
   it is still waiting. Answering it, closing it or turning Approvals off cancels
   the push.
 - A worker's question rings once its orchestrator relays it or after 10 minutes.
 - **An updated approval is quiet** (D-244): "Updated · ready again" shows as a
-  notice on the computer in use, with no chime, plus its badges and counts. The
+  notice on the computer in use (a silent system notification while Pane is in the
+  background and Show outside Pane is off), with no chime, plus its badges and counts. The
   phone gets a push only when no computer is in use. You started the follow-up,
   so it doesn't ring like a new approval.
 - A computer can ring only for machines it has saved. Autopilot's "Can't see"
   shows that gap, and the phone push still arrives.
 - **Show cards on** (Settings → Approvals) moves the strip, its window over
-  other apps and the chime to one computer, for every machine it has saved.
+  other apps, the system notification and the chime to one computer, for every machine it has saved.
   That computer still rings only while it's in use; when it's idle or locked
   the phone push is the backstop. Every other computer stays quiet while the
   picked one reads it, and keeps its Approvals list, counts, tray dot and
@@ -601,7 +604,7 @@ the agent:
 
 - **A Pane desktop with saved machines** (Remote Access pairing or
   Workspaces) shows every saved machine's questions beside its own, whichever
-  machine it is on: the strip over other apps, the round, the tray dot, the
+  machine it is on: the system notification or the strip over other apps, the round, the tray dot, the
   chime, Approvals, its sidebar count and the Waiting dots, within the
   [Alerts](#alerts) rules. Each card names its machine, and Approvals shows the
   machine's mark in its Session's group; beside it are that machine's Session
@@ -665,7 +668,7 @@ cards on is shared the same way.
 
 Only the Approvals switch and Show cards on are shared; the other settings here stay on each machine.
 
-Pause for 1 hour (tray menu) hides strips and mutes sound while questions keep
+Pause for 1 hour (tray menu) hides strips, holds system notifications and mutes sound while questions keep
 queueing. Strips show over full-screen apps, during screen sharing, and with
 Focus or Do Not Disturb on; Pause is the way to quiet them.
 
@@ -749,8 +752,8 @@ Pane still works: its card shows the folder name and hides Open in Pane.
 macOS, Windows and Linux on X11 show the strip over other apps. In a Wayland
 session Pane runs as a native Wayland app and can't place a window over other
 apps, so Show outside Pane is unavailable there (in Settings and the tray menu).
-Questions show in Approvals inside Pane, with its sidebar count, Waiting dots and
-the chime. The tray icon and its dot work; GNOME needs the AppIndicator
+Questions show in Approvals inside Pane, with its sidebar count, Waiting dots,
+the chime and, in the background, the system notification. The tray icon and its dot work; GNOME needs the AppIndicator
 extension, which Ubuntu turns on by default. On GNOME 46 (Ubuntu 24.04), which
 has no global-shortcut portal, ⌃⇧Space doesn't reach Pane from other apps;
 inside Pane it opens Approvals.

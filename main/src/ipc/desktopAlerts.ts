@@ -32,6 +32,14 @@ export function isDesktopAlertHandedOff(leases: WorkspaceWatchLeases | undefined
 let pendingTest: Notification | null = null;
 const pendingAlerts = new Set<Notification>();
 
+interface DesktopAlertOptions {
+  onClick?: () => void;
+  /** No OS sound. */
+  silent?: boolean;
+  /** Shows even while Dictate shows Pane's other alerts. */
+  keepFromDictate?: boolean;
+}
+
 /**
  * A desktop alert raised by main, under the same rules as the renderer's: only with
  * notifications on, while Pane is not focused, and not while Dictate shows them.
@@ -42,16 +50,16 @@ const pendingAlerts = new Set<Notification>();
  * where alerts go right now (the person is away from it), so the caller can try again later; true when the
  * alert was shown or the rules say it should not be (notifications off, Pane in front, handed off).
  */
-export function showDesktopAlert(services: Pick<AppServices, 'configManager' | 'getMainWindow' | 'workspaceWatchLeases'>, alertsHere: boolean, title: string, body: string, onClick?: () => void): boolean {
+export function showDesktopAlert(services: Pick<AppServices, 'configManager' | 'getMainWindow' | 'workspaceWatchLeases'>, alertsHere: boolean, title: string, body: string, options: DesktopAlertOptions = {}): boolean {
   if (services.configManager.getConfig().notifications?.enabled === false) return true;
   if (!alertsHere) return false;
-  if (services.getMainWindow()?.isFocused() || isDesktopAlertHandedOff(services.workspaceWatchLeases) || !Notification.isSupported()) return true;
-  const notification = new Notification({ title, body });
+  if (services.getMainWindow()?.isFocused() || (!options.keepFromDictate && isDesktopAlertHandedOff(services.workspaceWatchLeases)) || !Notification.isSupported()) return true;
+  const notification = new Notification({ title, body, silent: options.silent });
   pendingAlerts.add(notification);
   const release = () => pendingAlerts.delete(notification);
   notification.once('close', release);
   notification.once('failed', release);
-  notification.once('click', () => { release(); onClick?.(); });
+  notification.once('click', () => { release(); options.onClick?.(); });
   notification.show();
   return true;
 }

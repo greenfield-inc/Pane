@@ -8,6 +8,7 @@ import { pathToFileURL } from 'url';
 import type { ConfigManager } from '../configManager';
 import type { AppConfig } from '../../types/config';
 import {
+  countsAsWaiting,
   DEFAULT_NOTIFY_SETTINGS,
   type NotifyCaller,
   type NotifyAgentAction,
@@ -534,6 +535,7 @@ export class NotifyService {
       case 'show-details': await this.updateSettings({ showDetails: command.shown }); return;
       case 'open-in-pane': await this.openInPane(command.id); return;
       case 'ask-agent': this.askAgentInMainWindow(command.id); return;
+      case 'open-resources': this.openResourcesFor(command.id); return;
       case 'open-link': await this.openLink(command.id, command.index, command.paneId); return;
       case 'open-url': await this.openUrl(command.id, command.url); return;
       default: {
@@ -603,7 +605,7 @@ export class NotifyService {
    * A command for a saved machine's question: it goes to that machine only, under the id the
    * machine knows the question by. What stays on this screen runs here.
    */
-  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' | 'open-url' | 'ask-agent' }>): Promise<void> {
+  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' | 'open-url' | 'ask-agent' | 'open-resources' }>): Promise<void> {
     const target = this.queue.remoteTarget(command.id);
     if (!target) return;
     if (command.type === 'close' || command.type === 'reopen' || command.type === 'override') {
@@ -789,6 +791,14 @@ export class NotifyService {
     this.navigate({ askAgent: itemId });
   }
 
+  /** A health card's Open Resources clicked in a floating window, about the machine that raised it. */
+  private openResourcesFor(itemId: string): void {
+    const item = this.queue.find(itemId);
+    if (!item?.machineHealth) return;
+    this.windows.closeRound();
+    this.navigate({ resources: item.machineId ?? 'local' });
+  }
+
   private navigate(target: NotifyNavigateTarget): void {
     const window = this.deps.getMainWindow();
     if (!window || window.isDestroyed()) return;
@@ -891,14 +901,13 @@ export class NotifyService {
       if (snapshot.stripSurface === 'pane') this.queue.noteStripShown();
     }
     if (!this.windows.isRoundOpen()) this.queue.setRoundOpen(false);
-    const waiting = this.queue.waitingItems().filter(item => item.staleSince === undefined && !item.quiet);
     this.tray.update({
       settings: snapshot.settings,
-      waiting,
+      waiting: this.queue.waitingItems().filter(item => item.staleSince === undefined && !item.quiet),
       paused: snapshot.pausedUntil !== null,
       showOutsideSupported: snapshot.showOutsideSupported,
     });
-    this.showBadge(snapshot.settings.enabled ? waiting.length : 0);
+    this.showBadge(snapshot.settings.enabled ? snapshot.items.filter(item => countsAsWaiting(item) && !item.quiet).length : 0);
     this.announce(unannounced);
     this.sendToMainWindow('notify:snapshot', snapshot);
     for (const contents of this.windows.webContents()) contents.send('notify:snapshot', snapshot);
@@ -918,13 +927,15 @@ export class NotifyService {
   private announce(items: NotifyItem[]): void {
     const [first] = items;
     if (!first) return;
-    if (items.length === 1) this.deps.alert?.(`${first.source.name} needs your answer`, first.title, () => { void this.openInPane(first.id); });
+    const open = () => { void this.openInPane(first.id); };
+    if (items.length === 1 && first.machineHealth) this.deps.alert?.(`${first.machine}: ${first.title}`, first.context ?? '', open);
+    else if (items.length === 1) this.deps.alert?.(`${first.source.name} ${first.readyAgain ? 'updated its question' : 'needs your answer'}`, first.title, open);
     else this.deps.alert?.(`${items.length} approvals are waiting`, first.title, () => this.navigate('inbox'));
   }
 
   /** The disk alert's click: Pane comes to the front on this computer's Resources. */
   openResources(): void {
-    this.navigate('resources');
+    this.navigate({ resources: 'local' });
   }
 
   /** Connected screens and phones get the shared state when it changes, not on this screen's own moves. */
