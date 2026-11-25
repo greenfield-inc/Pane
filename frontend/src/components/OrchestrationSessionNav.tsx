@@ -486,8 +486,9 @@ export function OrchestrationSessionNav({
             {leading(loopName !== undefined ? <LoopMark loopName={loopName} /> : <ProfileAvatar profileRef={session.agentProfile?.ref} agent={session.agent} size={16} />)}
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
             {loopName !== undefined && <LoopLabel loopName={loopName} />}
-            <SessionApprovalsCount sessionId={session.id} opensApprovals otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
+            {/* The right side reads spinner, then the approvals badge (or Pane count) (T-63). */}
             <SessionWorkingSpinner session={session} />
+            <SessionApprovalsCount sessionId={session.id} opensApprovals otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
           </>
         )}
       </button>

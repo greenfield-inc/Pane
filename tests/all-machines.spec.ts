@@ -200,7 +200,7 @@ test('All machines shows each machine\'s own Session activity, and an offline ma
   await page.screenshot({ path: testInfo.outputPath('j13-all-machines-offline.png') });
 });
 
-test('a Session row shows its avatar where the activity icon was, and a spinner just left of its machine mark while it works (T-63, J18)', async ({ page }, testInfo) => {
+test('a Session row shows its avatar at the row\'s padding, and while it works a spinner before its count and machine mark (T-63, J18)', async ({ page }, testInfo) => {
   const withProfile = { ...reads, build: { ...reads.build, 'orchestration-sessions:list': { success: true, data: { sessions: [
     { ...session('s1', 'Backup rotation', ['b2']), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' } },
   ] } } } };
@@ -229,11 +229,31 @@ test('a Session row shows its avatar where the activity icon was, and a spinner 
   ), { 'orchestration-sessions:activity-list': { success: true, data: [{ sessionId: 's1', state: 'working', workingPanes: 0 }] } });
   const spinner = row.getByTestId('session-activity-icon');
   await expect(spinner).toHaveAttribute('data-state', 'working');
+  // The right side reads spinner, then the Pane count (or approvals badge), then the machine mark.
   const spinnerBox = await layoutBox(spinner);
+  const countBox = await layoutBox(row.getByTestId('session-approvals-slot'));
   const markBox = await layoutBox(row.getByTestId('all-machines-mark-slot'));
-  expect(markBox.x - (spinnerBox.x + spinnerBox.width)).toBeLessThanOrEqual(6);
+  await expect(row.getByTestId('session-approvals-slot')).toHaveText('1');
+  expect(spinnerBox.x + spinnerBox.width).toBeLessThanOrEqual(countBox.x);
+  expect(countBox.x + countBox.width).toBeLessThanOrEqual(markBox.x);
   expect(await offsets(row)).toEqual({ avatar: 8, name: 8 + 16 + 6 });
   await page.screenshot({ path: testInfo.outputPath('j18-all-machines-rows.png') });
+});
+
+test('a working Session with approvals waiting reads spinner, badge, machine mark (T-63)', async ({ page }) => {
+  const working = { ...reads, local: { ...reads.local, 'orchestration-sessions:activity-list': { success: true, data: [{ sessionId: 's1', state: 'working', workingPanes: 0 }] } } };
+  const notifySnapshot = { settings: notifyFixture().settings, history: [], items: [
+    { id: 'q-row', ui: 'approve' as const, title: 'Apply migration?', source: { name: 'checkout', agent: 'Claude', session: { id: 's1', name: 'Spring sale launch' } }, state: 'waiting' as const, createdAt: Date.now() },
+  ] };
+  await openAllMachines(page, 'light', { extra: { machineConnections: { machines, reads: working }, notifySnapshot } });
+  const row = sessionRows(page).filter({ hasText: 'Spring sale launch' });
+  const badge = row.getByTestId('session-approvals-count');
+  await expect(badge).toHaveText('1');
+  const spinnerBox = await layoutBox(row.getByTestId('session-activity-icon'));
+  const badgeBox = await layoutBox(badge);
+  const markBox = await layoutBox(row.getByTestId('all-machines-mark-slot'));
+  expect(spinnerBox.x + spinnerBox.width).toBeLessThanOrEqual(badgeBox.x);
+  expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(markBox.x);
 });
 
 test('switching to All machines opens no project, and what you open is remembered across a relaunch', async ({ page, browser }) => {
