@@ -252,7 +252,7 @@ When running from WSL while Pane is installed on Windows, a Linux-installed runp
 
 A watch releases its pending slot when its client socket or named pipe disconnects. Re-arming the same named cursor takes over the previous request; the superseded watcher exits with a WATCH ERROR instead of competing for the cursor. Anonymous concurrent watchers retain the eight-wait limit. Each request also has a 125-second lease (slightly longer than the maximum 120-second long poll), so an abandoned request is reclaimed even if no disconnect arrives.
 
-The desktop app treats one consumer name specially: while a `runpane watch --as dictate` request is in flight, and for 30 seconds after the last one ends, Pane skips its own "needs your input" and "finished" desktop notifications, because [Dictate](https://github.com/parsakhaz/open-dictate) shows those events on its pill. When that watcher stops, Pane's notifications come back. The CLI's flags and output are unchanged.
+The desktop app treats one consumer name specially: while a `runpane watch --as dictate` request is in flight, and for 30 seconds after the last one ends, Pane skips its own "needs your input" and "finished" desktop notifications, because [Dictate](https://github.com/parsakhaz/open-dictate) shows those events on its pill. A Claude prompt or chat-tab question in one of this computer's tabs shows there as that tab needing input, so Pane sends no approval notification for it; every other approval still notifies from Pane. When that watcher stops, Pane's notifications come back. The CLI's flags and output are unchanged.
 
 `sessions list` list durable named orchestration Sessions.
 
