@@ -111,6 +111,20 @@ async function uninstallRetiredPlugins(bundle: BundledAgentFarm, configRoot: str
   // A lock left by a killed install would refuse the uninstall; the config root is Pane's alone.
   await fs.rm(path.join(configRoot, '.plugins', 'install.lock'), { recursive: true, force: true }).catch(() => undefined);
   for (const name of present) {
+    const receipt = path.join(configRoot, '.plugins', `${name}.json`);
+    // Agent Farm reads every receipt when it installs, so one it can't parse would fail greenfield's
+    // install on every start too. Keep its bytes under a name Agent Farm doesn't read, and its files.
+    const text = await fs.readFile(receipt, 'utf8').catch(() => undefined);
+    let malformed = false;
+    try { if (text !== undefined) JSON.parse(text); } catch { malformed = true; }
+    if (malformed) {
+      const aside = `${receipt}.unreadable-${Date.now()}`;
+      await fs.rename(receipt, aside).then(
+        () => log(`[AgentFarm] The receipt for the retired Agent Farm plugin ${name} isn't valid JSON, so Agent Farm can't uninstall it; Pane moved it aside to ${aside} and left the plugin's files in ${path.join(configRoot, 'plugins', name)}. Delete both if you don't need them.`),
+        (error: NodeJS.ErrnoException) => log(`[AgentFarm] The receipt for the retired Agent Farm plugin ${name} isn't valid JSON, and Pane couldn't move it aside (${error.message}). Agent Farm's installs in ${configRoot} fail until ${receipt} is moved or deleted.`),
+      );
+      continue;
+    }
     try {
       const stdout = await run(bundledAgentFarmProcess(bundle, ['plugin', 'uninstall', name], configRoot));
       const start = stdout.indexOf('{');
@@ -195,9 +209,21 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
   await uninstallRetiredPlugins(bundle, configRoot, run, log);
   const previous = await fs.readFile(manifestPath, 'utf8').then((text) => decodeOptionalBoundary(JSON.parse(text), manifestSchema)).catch(() => undefined);
   const installed = previous && BUNDLED_AGENT_FARM_PLUGINS.every((name) => existsSync(path.join(configRoot, 'plugins', name)));
-  const sameList = previous && Object.keys(previous.plugins).sort().join() === [...BUNDLED_AGENT_FARM_PLUGINS].sort().join();
-  if (previous && installed && sameList && previous.hash === hash) {
-    status = { state: 'ready', configRoot, version: bundle.version, plugins: previous.plugins };
+  if (previous && installed && previous.hash === hash && BUNDLED_AGENT_FARM_PLUGINS.every((name) => name in previous.plugins)) {
+    const bundled: readonly string[] = BUNDLED_AGENT_FARM_PLUGINS;
+    const dropped = Object.keys(previous.plugins).filter((name) => !bundled.includes(name));
+    const plugins = Object.fromEntries(Object.entries(previous.plugins).filter(([name]) => !dropped.includes(name)));
+    if (dropped.length) {
+      // An older Pane bundled more plugins; drop them from the manifest and leave greenfield's files alone.
+      try {
+        await fs.writeFile(`${manifestPath}.tmp`, `${JSON.stringify({ ...previous, plugins }, null, 2)}\n`);
+        await fs.rename(`${manifestPath}.tmp`, manifestPath);
+        log(`[AgentFarm] Bundle unchanged; dropped ${dropped.join(', ')} from the manifest in ${configRoot}.`);
+      } catch (error) {
+        log(`[AgentFarm] Pane couldn't drop ${dropped.join(', ')} from ${manifestPath}: ${reasonOf(error)}. It tries again on the next start.`);
+      }
+    }
+    status = { state: 'ready', configRoot, version: bundle.version, plugins };
     log(`[AgentFarm] Bundled Agent Farm ${bundle.version} is already set up in ${configRoot} (manifest hash unchanged); nothing reinstalled.`);
     return status;
   }

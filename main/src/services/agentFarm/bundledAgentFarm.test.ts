@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -94,10 +94,10 @@ describe('installBundledAgentFarm', () => {
     const calls: AgentFarmProcess[] = [];
     const logs: string[] = [];
     const status = await installBundledAgentFarm({ paneDir, bundle, run: recordingRunner(calls), log: (line) => logs.push(line) });
+    // The bundle is unchanged, so greenfield is left as it is; only the manifest is rewritten.
     expect(calls.map((call) => call.args.slice(1, 4))).toEqual([
       ['plugin', 'uninstall', 'dcouple'],
       ['plugin', 'uninstall', 'bigbrain'],
-      ['plugin', 'install', '--config-root'],
     ]);
     expect(status).toMatchObject({ state: 'ready', plugins: { greenfield: '1.2.3' } });
     expect(Object.keys(status.plugins)).toEqual(['greenfield']);
@@ -108,6 +108,45 @@ describe('installBundledAgentFarm', () => {
     const again: AgentFarmProcess[] = [];
     await installBundledAgentFarm({ paneDir, bundle, run: recordingRunner(again), log: () => undefined });
     expect(again).toEqual([]);
+  });
+
+  it('keeps greenfield\'s local files when an unchanged bundle only drops a retired plugin from the manifest', async () => {
+    const paneDir = tempDir();
+    const bundle = fakeBundle();
+    await installBundledAgentFarm({ paneDir, bundle, run: recordingRunner([]), log: () => undefined });
+    const configRoot = agentFarmConfigRoot(paneDir);
+    const local = path.join(configRoot, 'plugins', 'greenfield', 'profiles', 'mine.yaml');
+    mkdirSync(path.dirname(local), { recursive: true });
+    writeFileSync(local, 'name: mine\n');
+    const manifestPath = path.join(configRoot, 'pane-manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    writeFileSync(manifestPath, JSON.stringify({ ...manifest, plugins: { ...manifest.plugins, dcouple: '0.1.29' } }));
+    const calls: AgentFarmProcess[] = [];
+    const logs: string[] = [];
+    const status = await installBundledAgentFarm({ paneDir, bundle, run: recordingRunner(calls), log: (line) => logs.push(line) });
+    expect(calls).toEqual([]);
+    expect(readFileSync(local, 'utf8')).toBe('name: mine\n');
+    expect(status).toMatchObject({ state: 'ready', plugins: { greenfield: '1.2.3' } });
+    expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toEqual({ ...manifest, plugins: { greenfield: '1.2.3' } });
+    expect(logs).toContainEqual(expect.stringContaining('dropped dcouple from the manifest'));
+  });
+
+  it('moves an unreadable retired receipt aside, keeping its bytes and files, and still installs greenfield', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    installRetired(paneDir, 'dcouple');
+    writeFileSync(path.join(configRoot, '.plugins', 'dcouple.json'), '{"layout":2,');
+    const calls: AgentFarmProcess[] = [];
+    const logs: string[] = [];
+    const status = await installBundledAgentFarm({ paneDir, bundle: fakeBundle(), run: recordingRunner(calls), log: (line) => logs.push(line) });
+    expect(status).toMatchObject({ state: 'ready', plugins: { greenfield: '1.2.3' } });
+    expect(calls.map((call) => call.args.slice(1, 3))).toEqual([['plugin', 'install']]);
+    const aside = readdirSync(path.join(configRoot, '.plugins')).filter((file) => file.startsWith('dcouple'));
+    expect(aside).toHaveLength(1);
+    expect(aside[0].endsWith('.json')).toBe(false);
+    expect(readFileSync(path.join(configRoot, '.plugins', aside[0]), 'utf8')).toBe('{"layout":2,');
+    expect(existsSync(path.join(configRoot, 'plugins', 'dcouple'))).toBe(true);
+    expect(logs).toContainEqual(expect.stringContaining(`moved it aside to ${path.join(configRoot, '.plugins', aside[0])}`));
   });
 
   it('logs a failed uninstall and still installs greenfield', async () => {
