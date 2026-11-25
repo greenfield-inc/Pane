@@ -62,6 +62,9 @@ These stay with you:
   folder and size;
 - file, diff, browser and log tabs.
 
+An agent's question that waits on you still shows in its to-do and in its report, as
+the agent wrote it; you answer it on your own devices.
+
 The computer checks each request, on every route. It answers the reads above
 and refuses the rest with `ERR_READ_ONLY_ACCESS`: commands, files and media,
 forwarded ports, dev server previews and dictation.
