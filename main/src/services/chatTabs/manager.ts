@@ -911,7 +911,7 @@ export class ChatTabManager {
         transcript = tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages });
         tab.held = undefined;
         const at = new Date().toISOString();
-        const text = `Couldn't continue the conversation (${reason}) · new conversation, given the transcript`;
+        const text = 'Couldn\'t continue the conversation · new conversation, given the transcript';
         this.update(panelId, current => ({ ...current, acpSessionId: undefined, turnTimes: undefined, dividers: [...current.dividers ?? [], { leading: true as const, text, at }].slice(-DIVIDERS_LIMIT) }));
         transcript.divider({ text, at });
         await create();

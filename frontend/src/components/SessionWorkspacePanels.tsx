@@ -363,7 +363,11 @@ export function SessionWorkspacePanels({
       // its remembered layout keep their place.
       const splitIds = new Set<string>();
       for (const panel of stage) if (panel.metadata?.openPlacement === 'split') splitIds.add(panel.id);
-      applyLayout(reconcile(withOverview, [agentPanelId, overviewId, ...(todosId ? [todosId] : []), ...stage.map(panel => panel.id)], splitIds).layout);
+      const reconciled = reconcile(withOverview, [agentPanelId, overviewId, ...(todosId ? [todosId] : []), ...stage.map(panel => panel.id)], splitIds).layout;
+      // A Session whose agent changed (Switch profile to the other agent, T-63) opens on its new agent's tab,
+      // not on whatever took the old agent's place.
+      const agentNew = stored?.version === 1 && !layoutPanelIds(base).has(agentPanelId);
+      applyLayout(agentNew ? activatePanelInLayout(reconciled, agentPanelId) : reconciled);
       setLoaded(true);
     }).catch(error => {
       if (!cancelled) setError(error instanceof Error ? error.message : 'Could not load Session tools');

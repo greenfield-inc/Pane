@@ -81,7 +81,7 @@ export function SessionProfileMenuItems({ session, onSwitch, onReload, onClose }
       onClick={() => { if (session?.agentProfile) { onReload(session); onClose(); } }}
     >
       <span className={cn('flex items-center gap-2', !session?.agentProfile && 'opacity-50')}>
-        <RotateCw className="h-4 w-4" aria-hidden="true" />
+        <RotateCw className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span className="flex-1">Reload profile</span>
         {session?.agentProfileChanged
           ? <span className="flex h-3 w-3 items-center justify-center" title="The profile changed since this Session took it"><span className="h-1.5 w-1.5 rounded-full bg-status-warning" /><span className="sr-only">changed</span></span>
