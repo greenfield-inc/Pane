@@ -31,7 +31,7 @@ import { WorktreeNameGenerator } from '../services/worktreeNameGenerator';
 import { RunCommandManager } from '../services/runCommandManager';
 import { VersionChecker } from '../services/versionChecker';
 import { SkillCacheManager } from '../services/skillCacheManager';
-import { installBundledAgentFarm } from '../services/agentFarm/bundledAgentFarm';
+import { agentFarmConfigRoot, bundledAgentFarm, installBundledAgentFarm, writeAgentFarmTelemetry } from '../services/agentFarm/bundledAgentFarm';
 import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import type { AppConfig } from '../types/config';
 import { PaneChatManager } from '../services/paneChatManager';
@@ -308,7 +308,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   // Terminals launched below find this build's runpane first on PATH.
   // Their BROWSER follows Settings > Links (pane-browser).
   const openLinksIn = () => ({ ...DEFAULT_BROWSER_SETTINGS, ...configManager.getConfig().browser }).openLinksIn;
-  installRunpaneShimBestEffort(getAppDirectory(), openLinksIn());
+  // Their `agent-farm` is the Agent Farm bundled with this build, on Pane's own config root (T-63).
+  const agentFarmBundle = bundledAgentFarm();
+  installRunpaneShimBestEffort(getAppDirectory(), openLinksIn(), agentFarmBundle ? { entry: agentFarmBundle.entry, configRoot: agentFarmConfigRoot(getAppDirectory()) } : undefined);
   configManager.on('config-updated', () => {
     // A shim Pane can't write keeps the last choice; the setting still saves and other listeners still run.
     try {
@@ -354,7 +356,16 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   });
   // Bundled Agent Farm: set up greenfield and the other bundled plugins in Pane's own Agent Farm
   // config root, without delaying startup. It never touches the person's own Agent Farm.
-  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) });
+  // Agent Farm telemetry stays off unless Settings › AI & Agents turns it on for this computer.
+  let agentFarmTelemetry = configManager.getConfig().agentFarmTelemetry === true;
+  void installBundledAgentFarm({ paneDir: getAppDirectory(), telemetry: agentFarmTelemetry, log: message => logger.info(message) });
+  configManager.on('config-updated', (config: AppConfig) => {
+    if ((config.agentFarmTelemetry === true) === agentFarmTelemetry) return;
+    agentFarmTelemetry = config.agentFarmTelemetry === true;
+    void writeAgentFarmTelemetry(getAppDirectory(), agentFarmTelemetry).catch(error => {
+      logger.warn(`[AgentFarm] Could not turn Agent Farm telemetry ${agentFarmTelemetry ? 'on' : 'off'} in its settings.json; the switch saved, and Pane writes it again at its next start`, error instanceof Error ? error : undefined);
+    });
+  });
   if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {
     // Retry until all saved repositories are available, without delaying startup.
     const migrationConfig = configManager.getConfig();

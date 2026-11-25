@@ -6,7 +6,6 @@ import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { ChatAgentEnv, ChatProfileResolver } from './launch';
 import type { ResolvedLaunch } from './manager';
-import { hostCommand, type HostCommand } from '../agentChat/hostCommand';
 import { agentConfig } from '../../../../shared/agents';
 import type { AgentFarmProcess } from '../agentFarm/bundledAgentFarm';
 
@@ -31,13 +30,11 @@ const printedLaunch = boundary.object({
 export interface PrintedAcpLaunch { harness: ChatAgent; launch: ResolvedLaunch }
 
 export interface AgentFarmOptions {
-  /** The person's own agent-farm CLI; undefined when none is on PATH. */
-  executable: () => string | undefined;
   /**
-   * Without one: the Agent Farm bundled in Pane, run against Pane's own config root, as a process
-   * for `args` in `cwd`; undefined when this build lacks it.
+   * The Agent Farm bundled in Pane, run against Pane's own config root, as a process for `args`
+   * in `cwd`; undefined when this build lacks it. The person's own agent-farm is never used (T-63, Q3).
    */
-  bundled?: (args: string[], cwd: string, env: ChatAgentEnv) => Promise<AgentFarmProcess | undefined>;
+  bundled: (args: string[], cwd: string, env: ChatAgentEnv) => Promise<AgentFarmProcess | undefined>;
   /** The bundled adapter's entry for a harness. */
   adapter: (agent: ChatAgent) => Promise<string>;
   /** Checks the CLI a printed launch will run, in that launch's folder and environment (#1236). */
@@ -77,14 +74,11 @@ export class AgentFarmProfiles implements ChatProfileResolver {
   async print(profile: string, args: Record<string, string>, agent: ChatAgent, cwd: string, env: ChatAgentEnv): Promise<PrintedAcpLaunch> {
     const adapter = await this.options.adapter(agent);
     const argv = ['run', profile, '--print-acp', '--acp-adapter', adapter, ...Object.entries(args).flatMap(([key, value]) => ['--arg', `${key}=${value}`])];
-    // The person's own agent-farm when one is on PATH; otherwise the copy bundled in Pane.
-    const cli = this.options.executable();
-    const bundled = cli ? undefined : await this.options.bundled?.(argv, cwd, env);
-    if (!cli && !bundled) throw new PaneError('CHAT_AGENT_NOT_INSTALLED', 'Agent Farm is not installed on this machine, and this Pane build lacks its bundled copy, so the profile cannot start.', 'Install the agent-farm CLI, or reinstall Pane from runpane.com, then press Retry.');
+    const bundled = await this.options.bundled(argv, cwd, env);
+    if (!bundled) throw new PaneError('CHAT_AGENT_NOT_INSTALLED', 'This Pane build lacks its bundled Agent Farm, so the profile cannot start.', 'Reinstall Pane from runpane.com, then press Retry.');
     let stdout: string;
     try {
-      const command = cli ? agentFarmCommand(cli, argv) : { executable: bundled?.executable ?? '', args: bundled?.args ?? [] };
-      ({ stdout } = await execFileAsync(command.executable, command.args, { cwd, env: bundled?.env ?? env, timeout: 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true, windowsVerbatimArguments: command.windowsVerbatimArguments }));
+      ({ stdout } = await execFileAsync(bundled.executable, bundled.args, { cwd, env: bundled.env, timeout: 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true }));
     } catch (error) {
       if (error instanceof PaneError) throw error;
       const stderr = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1);
@@ -101,7 +95,7 @@ export class AgentFarmProfiles implements ChatProfileResolver {
     const launchEnv: ChatAgentEnv = { ...env, ...decoded.env };
     // The bundled copy runs on Pane's Electron as Node and prints that runtime as the adapter's
     // Node; without ELECTRON_RUN_AS_NODE it would start another Pane instead of the adapter.
-    if (bundled && executable === bundled.executable) launchEnv.ELECTRON_RUN_AS_NODE = '1';
+    if (executable === bundled.executable) launchEnv.ELECTRON_RUN_AS_NODE = '1';
     // Only now is it known which harness and CLI this launch runs, and where.
     await this.options.checkCli(decoded.harness, { cwd: decoded.cwd, env: launchEnv });
     const launch: ResolvedLaunch = { command: { executable, args: rest, cwd: decoded.cwd, env: launchEnv } };
@@ -109,9 +103,4 @@ export class AgentFarmProfiles implements ChatProfileResolver {
     if (decoded.mode) launch.mode = decoded.mode;
     return { harness: decoded.harness, launch };
   }
-}
-
-/** The agent-farm CLI as a process to start; npm installs it on Windows as a .cmd shim, which runs through cmd. */
-export function agentFarmCommand(cli: string, args: string[], platform: NodeJS.Platform = process.platform): HostCommand {
-  return hostCommand(cli, args, platform);
 }

@@ -224,6 +224,24 @@ interactive `mcp-publisher login github` cannot publish to an organization
 namespace. Check the listing with
 `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=runpane"`.
 
+## Bumping the bundled Agent Farm
+
+Pane ships `@greenfieldco/agent-farm` and runs it for every chat launch, Session
+move check and `agent-farm` in its terminals
+([docs/CHAT_TABS.md](docs/CHAT_TABS.md#agent-farm-profiles)). To ship a new one:
+
+1. Set the same exact version in `package.json` and `main/package.json`, then run
+   `pnpm install` and `pnpm run generate-notices`, and commit `NOTICES`.
+2. Update the pinned version in `main/src/services/agentFarm/bundledAgentFarm.test.ts`
+   and run `pnpm --filter main exec vitest run src/services/agentFarm src/services/runpaneShim.test.ts src/services/chatTabs`
+   with `PANE_DIR` set to a scratch folder.
+3. Check that the bundled greenfield plugin is at least as new as the one the last
+   release shipped (`agent-farm plugin list` in a Pane terminal of a dev build).
+
+On each computer's next start, Pane reinstalls the bundled plugins in
+`<PANE_DIR>/agent-farm`, except any plugin someone edited there: those are kept
+and logged as `kept <plugin> because it was changed here`.
+
 ## CI
 
 `CI result` is the check branch protection requires. It runs even when the

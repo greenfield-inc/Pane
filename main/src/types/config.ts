@@ -207,6 +207,8 @@ export interface AppConfig {
   todosEnabled?: boolean;
   // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
   answerPromptsFromPane?: boolean;
+  // Settings › AI & Agents: Pane's Agent Farm saves launch telemetry under <PANE_DIR>/agent-farm/telemetry on this computer (off when absent).
+  agentFarmTelemetry?: boolean;
   // Set once Notify has shown the one-time note about Claude prompts.
   claudePromptsNoteShown?: boolean;
   // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source
@@ -343,6 +345,8 @@ export interface UpdateConfigRequest {
   todosEnabled?: boolean;
   // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
   answerPromptsFromPane?: boolean;
+  // Settings › AI & Agents: Pane's Agent Farm saves launch telemetry under <PANE_DIR>/agent-farm/telemetry on this computer (off when absent).
+  agentFarmTelemetry?: boolean;
   // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source
   htmlFileOpenMode?: HtmlFileOpenMode;
   // PostHog analytics settings

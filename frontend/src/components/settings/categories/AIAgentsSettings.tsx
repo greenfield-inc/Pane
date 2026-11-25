@@ -133,6 +133,18 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
           />
         </SettingRow>
         <SettingRow
+          settingId="agent-farm-telemetry"
+          label="Save Agent Farm telemetry on this computer"
+          description="Agent Farm, which runs agent profiles for Pane, can record each agent it starts: the agent's own traces, logs and metrics, with its profile, model, folder, branch, username and hostname. They stay as files in Pane's agent-farm/telemetry folder and are never sent anywhere. Conversation text is recorded only if Agent Farm's own capture_content setting is on. Off by default; each computer keeps its own setting, and agents started after a change follow it."
+          saveState={persistence.saveStates['agent-farm-telemetry']}
+        >
+          <ImmediateToggle
+            label="Save Agent Farm telemetry on this computer"
+            value={config.agentFarmTelemetry === true}
+            onSave={(value) => persistence.saveConfig('agent-farm-telemetry', { agentFarmTelemetry: value })}
+          />
+        </SettingRow>
+        <SettingRow
           settingId="agent-skill"
           label="Install Pane skill for agents"
           description="Adds a Pane-managed skill to your home skill folders (~/.claude/skills and ~/.agents/skills) so agents in Pane terminals know how to use RunPane. Pane never touches skills it did not create; turning this off removes its skill."

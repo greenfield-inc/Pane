@@ -1,11 +1,11 @@
-import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, realpathSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { ChatPanelState, ChatTabView } from '../../../../shared/types/chatTab';
 import { PaneError } from '../../../../shared/paneError';
-import { AgentFarmProfiles, agentFarmCommand, printedCli } from './agentFarm';
+import { AgentFarmProfiles, printedCli } from './agentFarm';
 import { ChatTabManager, type ChatTabStore } from './manager';
 
 const FAKE = path.join(__dirname, 'testing', 'fakeAgentFarm.mjs');
@@ -19,33 +19,13 @@ function scratch(): string {
 }
 const inherited = (): Record<string, string> => Object.fromEntries(Object.entries(process.env).flatMap(([key, value]) => value === undefined ? [] : [[key, value]]));
 
-/** The CLI as npm installs it: a shell script, or on Windows a .cmd shim, which Node cannot exec directly. */
-function fakeCli(directory: string): string {
-  if (process.platform === 'win32') {
-    const shim = path.join(directory, 'agent-farm.cmd');
-    writeFileSync(shim, `@ECHO off\r\n"${process.execPath}" "${FAKE}" %*\r\n`);
-    return shim;
-  }
-  const shim = path.join(directory, 'agent-farm');
-  writeFileSync(shim, `#!/bin/sh\nexec "${process.execPath}" "${FAKE}" "$@"\n`);
-  chmodSync(shim, 0o755);
-  return shim;
-}
-
-describe('the agent-farm command', () => {
-  it('runs a Windows npm shim through cmd with its arguments passed literally', () => {
-    expect(agentFarmCommand('C:\\npm\\agent-farm.cmd', ['run', 'greenfield/implementer', '--arg', 'docs=grain'], 'win32')).toEqual({
-      executable: 'cmd.exe', args: ['/d', '/s', '/c', '""C:\\npm\\agent-farm.cmd" "run" "greenfield/implementer" "--arg" "docs=grain""'], windowsVerbatimArguments: true,
-    });
-    expect(agentFarmCommand('/usr/local/bin/agent-farm', ['run', 'p'], 'darwin')).toEqual({ executable: '/usr/local/bin/agent-farm', args: ['run', 'p'] });
-  });
-});
+/** Pane's bundled Agent Farm, played by the fake CLI on this Node. */
+const bundled = async (args: string[], _cwd: string, env: Record<string, string>) => ({ executable: process.execPath, args: [FAKE, ...args], env });
 
 describe('Agent Farm profiles in chat tabs', () => {
   it('starts a profile with its printed settings, selects its mode and keeps env out of saved state', async () => {
     const directory = scratch();
-    const cli = fakeCli(directory);
-    const profiles = new AgentFarmProfiles({ executable: () => cli, adapter: async () => '/adapters/claude/dist/index.js', checkCli: async () => undefined });
+    const profiles = new AgentFarmProfiles({ bundled, adapter: async () => '/adapters/claude/dist/index.js', checkCli: async () => undefined });
     const saved = new Map<string, string>();
     const panel: ToolPanel = { id: 'p1', sessionId: 'pane', type: 'chat', title: 'implementer', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
     const store: ChatTabStore = {
@@ -80,7 +60,7 @@ describe('Agent Farm profiles in chat tabs', () => {
   it('checks the CLI of the harness Agent Farm printed, in the printed folder and environment', async () => {
     const directory = realpathSync(scratch());
     const checks: Array<{ agent: string; cwd?: string; profile?: string; path?: string }> = [];
-    const profiles = new AgentFarmProfiles({ executable: () => fakeCli(directory), adapter: async () => '/adapter.js', checkCli: async (agent, context) => { checks.push({ agent, cwd: context.cwd, profile: context.env?.AGENT_FARM_PROFILE, path: context.env?.PATH }); } });
+    const profiles = new AgentFarmProfiles({ bundled, adapter: async () => '/adapter.js', checkCli: async (agent, context) => { checks.push({ agent, cwd: context.cwd, profile: context.env?.AGENT_FARM_PROFILE, path: context.env?.PATH }); } });
     // The caller guessed claude; Agent Farm says this profile runs Codex, so Codex is what gets checked.
     const printed = await profiles.print('team/codex', {}, 'claude', directory, { PATH: process.env.PATH ?? '', FAKE_AGENT_FARM_HARNESS: 'codex' });
     expect(printed.harness).toBe('codex');
@@ -89,7 +69,7 @@ describe('Agent Farm profiles in chat tabs', () => {
 
   it('stops a profile whose CLI is too old, with that error', async () => {
     const directory = scratch();
-    const profiles = new AgentFarmProfiles({ executable: () => fakeCli(directory), adapter: async () => '/adapter.js', checkCli: async () => { throw new PaneError('CHAT_AGENT_OUTDATED', 'Claude Code 2.0.1 is older than 2.1.316.', 'Update it.'); } });
+    const profiles = new AgentFarmProfiles({ bundled, adapter: async () => '/adapter.js', checkCli: async () => { throw new PaneError('CHAT_AGENT_OUTDATED', 'Claude Code 2.0.1 is older than 2.1.316.', 'Update it.'); } });
     await expect(profiles.print('team/claude', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_AGENT_OUTDATED' });
   });
 
@@ -103,33 +83,24 @@ describe('Agent Farm profiles in chat tabs', () => {
 
   it('names the profile and the next step when Agent Farm refuses it', async () => {
     const directory = scratch();
-    const profiles = new AgentFarmProfiles({ executable: () => fakeCli(directory), adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    const profiles = new AgentFarmProfiles({ bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     await expect(profiles.print('missing/profile', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_PROFILE_FAILED', message: expect.stringContaining('Unknown profile: missing/profile') });
     await expect(profiles.print('old/agent-farm', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_PROFILE_FAILED', next: expect.stringContaining('Update Agent Farm') });
-    const absent = new AgentFarmProfiles({ executable: () => undefined, adapter: async () => '/adapter.js', checkCli: async () => undefined });
-    await expect(absent.print('x', {}, 'claude', directory, {})).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED' });
-    const unbundled = new AgentFarmProfiles({ executable: () => undefined, bundled: async () => undefined, adapter: async () => '/adapter.js', checkCli: async () => undefined });
-    await expect(unbundled.print('x', {}, 'claude', directory, {})).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED', next: expect.stringContaining('reinstall Pane') });
+    const unbundled = new AgentFarmProfiles({ bundled: async () => undefined, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    await expect(unbundled.print('x', {}, 'claude', directory, {})).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED', next: expect.stringContaining('Reinstall Pane') });
   });
 
-  it('runs the bundled Agent Farm when none is on PATH, and the person\'s own when one is', async () => {
+  it('runs Pane\'s bundled Agent Farm, and starts the printed adapter on its runtime as Node', async () => {
     const directory = scratch();
-    const bundledCalls: string[][] = [];
-    const bundled = async (args: string[], _cwd: string, env: Record<string, string>) => {
-      bundledCalls.push(args);
-      return { executable: process.execPath, args: [FAKE, ...args], env };
-    };
-    const withoutOwn = new AgentFarmProfiles({ executable: () => undefined, bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    const calls: string[][] = [];
+    const recording = async (args: string[], cwd: string, env: Record<string, string>) => { calls.push(args); return bundled(args, cwd, env); };
+    const profiles = new AgentFarmProfiles({ bundled: recording, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     const { ELECTRON_RUN_AS_NODE: _unset, ...env } = inherited();
-    const printed = await withoutOwn.print('greenfield/implementer:opus', {}, 'claude', directory, env);
+    const printed = await profiles.print('greenfield/implementer:opus', {}, 'claude', directory, env);
     expect(printed.harness).toBe('claude');
     // It printed the runtime it ran on as the adapter's Node: in a packaged Pane that is Electron,
     // which runs the adapter only as Node.
     expect(printed.launch.command).toMatchObject({ executable: process.execPath, env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: '1' }) });
-    expect(bundledCalls).toEqual([['run', 'greenfield/implementer:opus', '--print-acp', '--acp-adapter', '/adapter.js']]);
-    const withOwn = new AgentFarmProfiles({ executable: () => fakeCli(directory), bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
-    const own = await withOwn.print('greenfield/implementer:opus', {}, 'claude', directory, env);
-    expect(bundledCalls).toHaveLength(1);
-    expect(own.launch.command.env?.ELECTRON_RUN_AS_NODE).toBeUndefined();
+    expect(calls).toEqual([['run', 'greenfield/implementer:opus', '--print-acp', '--acp-adapter', '/adapter.js']]);
   });
 });

@@ -19,6 +19,11 @@
  * Beside it, a `pane-node` shim runs any script with the same binary as Node,
  * so bundled skill scripts work on a machine without Node.
  *
+ * An `agent-farm` shim (and `agent-farm.cmd`) runs the Agent Farm bundled with this build,
+ * with the same binary as Node and `--config-root <PANE_DIR>/agent-farm`, so every
+ * `agent-farm` in Pane's terminals is Pane's own copy (T-63). Its launcher, `agent-farm.cjs`,
+ * adds the config root before any `--` passthrough.
+ *
  * A `pane-browser` command is BROWSER in Pane's terminals: it opens a link a command-line tool
  * opens (gh pr view --web, Python's webbrowser) in a Pane browser tab beside the terminal, or in
  * the system browser when Settings > Links says so or Pane can't open the tab. Pane rewrites it
@@ -52,6 +57,8 @@ const MISSING_RUNTIME_MESSAGE = 'runpane: Pane is missing and Node.js is not on 
 const WSL_MISSING_MESSAGE = 'runpane: Pane is missing, so WSL has no Windows CLI to run. Nothing was run. Reinstall Pane from https://runpane.com.';
 const NODE_MISSING_MESSAGE = 'pane-node: Pane is missing and Node.js is not on PATH. Reinstall Pane from https://runpane.com, or install Node.js.';
 const WSL_NODE_MISSING_MESSAGE = 'pane-node: Pane is missing, so WSL has no Windows runtime to run. Nothing was run. Reinstall Pane from https://runpane.com.';
+// The bundled Agent Farm lives inside Pane (app.asar), which plain Node cannot read: no node fallback.
+const AGENT_FARM_MISSING_MESSAGE = 'agent-farm: Pane is missing, so its bundled Agent Farm cannot run. Nothing was run. Reinstall Pane from https://runpane.com.';
 
 export interface RunpaneShimState {
   binDir: string;
@@ -76,6 +83,14 @@ export interface InstallRunpaneShimOptions {
   platform?: NodeJS.Platform;
   /** Settings > Links: where pane-browser opens links. */
   openLinksIn?: LinksOpenIn;
+  /** The bundled Agent Farm the agent-farm shim runs; no shim without one. */
+  agentFarm?: AgentFarmShimTarget;
+}
+
+/** What the agent-farm shim runs: the bundled CLI entry (inside app.asar when packaged), against Pane's config root. */
+export interface AgentFarmShimTarget {
+  entry: string;
+  configRoot: string;
 }
 
 let currentState: RunpaneShimState | null = null;
@@ -179,10 +194,10 @@ function wslShimLines(execPath: string, cliPath: string): string[] {
   ];
 }
 
-/** pane-node in WSL: the Windows binary reads Windows paths, so absolute and relative path arguments are converted. */
-function wslNodeShimLines(execPath: string): string[] {
+/** pane-node (and agent-farm) in WSL: the Windows binary reads Windows paths, so absolute and relative path arguments are converted. */
+function wslNodeShimLines(execPath: string, name = 'pane-node', script?: string, missing = WSL_NODE_MISSING_MESSAGE): string[] {
   return [
-    ...wslInteropLines('pane-node'),
+    ...wslInteropLines(name),
     '  pane_count=$#',
     '  while [ "$pane_count" -gt 0 ]; do',
     '    pane_arg=$1; shift; pane_count=$((pane_count - 1))',
@@ -190,9 +205,9 @@ function wslNodeShimLines(execPath: string): string[] {
     '    set -- "$@" "$pane_arg"',
     '  done',
     `  pane_exe=$(${WSLPATH} -u ${shellQuote(execPath)} 2>/dev/null)`,
-    `  if [ ! -x "$pane_exe" ]; then echo ${shellQuote(WSL_NODE_MISSING_MESSAGE)} >&2; exit 127; fi`,
+    `  if [ ! -x "$pane_exe" ]; then echo ${shellQuote(missing)} >&2; exit 127; fi`,
     '  WSLENV="${WSLENV:+$WSLENV:}ELECTRON_RUN_AS_NODE"; export WSLENV',
-    '  ELECTRON_RUN_AS_NODE=1 exec "$pane_exe" "$@"',
+    `  ELECTRON_RUN_AS_NODE=1 exec "$pane_exe"${script ? ` ${shellQuote(script)}` : ''} "$@"`,
     'fi',
   ];
 }
@@ -231,6 +246,83 @@ function windowsNodeShim(execPath: string): string {
     'exit /b 1',
     '',
   ].join('\r\n');
+}
+
+/**
+ * agent-farm.cjs: runs the bundled Agent Farm CLI in this process with `--config-root` added
+ * before any `--`. A command that names its own config root, or needs none (version, help), runs
+ * as typed. The bare menu, init and doctor only ever use ~/.config/agent-farm, which Pane leaves
+ * alone, so they are refused.
+ */
+function agentFarmLauncher(target: AgentFarmShimTarget): string {
+  return [
+    `// ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup; edits are lost.`,
+    "// Runs the Agent Farm bundled with this Pane build against Pane's own config root.",
+    "'use strict';",
+    `const entry = ${JSON.stringify(target.entry)};`,
+    `const configRoot = ${JSON.stringify(target.configRoot)};`,
+    'const args = process.argv.slice(2);',
+    "const end = args.includes('--') ? args.indexOf('--') : args.length;",
+    'const options = args.slice(0, end);',
+    'const first = args[0];',
+    "if (args.length === 0 || first === 'init' || (first === 'doctor' && args.length === 1)) {",
+    "  const command = first ? `agent-farm ${first}` : 'agent-farm with no command';",
+    "  process.stderr.write(`agent-farm: ${command} only works on ~/.config/agent-farm, and Pane's Agent Farm keeps its profiles in ${configRoot}. Nothing was run. Run agent-farm help to see the commands, which use Pane's folder.\\n`);",
+    '  process.exitCode = 2;',
+    '} else {',
+    "  const asTyped = (args.length === 1 && ['version', '--version', '-v'].includes(first)) || first === 'help'",
+    "    || options.some(arg => arg === '--help' || arg === '-h' || arg === '--config-root' || arg.startsWith('--config-root='));",
+    "  process.argv = [process.argv[0], entry, ...(asTyped ? args : [...options, '--config-root', configRoot, ...args.slice(end)])];",
+    "  import(require('url').pathToFileURL(entry).href).catch(error => {",
+    "    process.stderr.write(`agent-farm: Pane couldn't start its bundled Agent Farm (${error && error.message ? error.message : error}). Nothing was run. Restart Pane, or reinstall it from https://runpane.com.\\n`);",
+    '    process.exitCode = 1;',
+    '  });',
+    '}',
+    '',
+  ].join('\n');
+}
+
+/** `agent-farm [args]` on macOS, Linux, Git Bash, and WSL through interop. */
+function posixAgentFarmShim(execPath: string, launcher: string, platform: NodeJS.Platform): string {
+  return [
+    '#!/bin/sh',
+    `# ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup; edits are lost.`,
+    "# Runs the Agent Farm bundled with this Pane build, with Pane's config root, using its Electron binary as Node.",
+    ...(platform === 'win32' ? wslNodeShimLines(execPath, 'agent-farm', launcher, AGENT_FARM_MISSING_MESSAGE) : []),
+    `if [ -x ${shellQuote(execPath)} ]; then ELECTRON_RUN_AS_NODE=1 exec ${shellQuote(execPath)} ${shellQuote(launcher)} "$@"; fi`,
+    `echo ${shellQuote(AGENT_FARM_MISSING_MESSAGE)} >&2`,
+    'exit 127',
+    '',
+  ].join('\n');
+}
+
+function windowsAgentFarmShim(execPath: string, launcher: string): string {
+  const [exe, script] = [execPath, launcher].map(value => value.replace(/%/g, '%%'));
+  return [
+    '@echo off',
+    `rem ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup; edits are lost.`,
+    'setlocal',
+    `if not exist "${exe}" goto missing`,
+    'set ELECTRON_RUN_AS_NODE=1',
+    `"${exe}" "${script}" %*`,
+    'exit /b %ERRORLEVEL%',
+    ':missing',
+    `echo ${AGENT_FARM_MISSING_MESSAGE} 1>&2`,
+    'exit /b 1',
+    '',
+  ].join('\r\n');
+}
+
+/**
+ * Writes agent-farm, agent-farm.cmd (Windows) and their launcher. A user's own file of that
+ * name stays, and runpane still works. The binary is Pane's own Electron even after a CLI-only
+ * update, whose Node runtime can't read app.asar.
+ */
+function writeAgentFarmShim(binDir: string, execPath: string, target: AgentFarmShimTarget, platform: NodeJS.Platform): void {
+  const launcher = path.join(binDir, 'agent-farm.cjs');
+  if (!writeManagedFile(launcher, agentFarmLauncher(target), PANE_MANAGED_SHIM_MARKER, 0o644)) return;
+  writeManagedFile(path.join(binDir, 'agent-farm'), posixAgentFarmShim(execPath, launcher, platform), PANE_MANAGED_SHIM_MARKER, 0o755);
+  if (platform === 'win32') writeManagedFile(path.join(binDir, 'agent-farm.cmd'), windowsAgentFarmShim(execPath, launcher), PANE_MANAGED_SHIM_MARKER, 0o755);
 }
 
 /** The OS command that opens a URL in the system browser. */
@@ -503,6 +595,7 @@ export function installRunpaneShim(options: InstallRunpaneShimOptions): RunpaneS
   // pane-node is a convenience: a user's own file of that name stays, and runpane still works.
   writeManagedFile(path.join(binDir, 'pane-node'), posixNodeShim(execPath, platform), PANE_MANAGED_SHIM_MARKER, 0o755);
   if (platform === 'win32') writeManagedFile(path.join(binDir, 'pane-node.cmd'), windowsNodeShim(execPath), PANE_MANAGED_SHIM_MARKER, 0o755);
+  if (options.agentFarm) writeAgentFarmShim(binDir, options.execPath, options.agentFarm, platform);
 
   const zshDotDir = path.join(options.appDirectory, 'shell', 'zsh');
   const bashDir = path.join(options.appDirectory, 'shell', 'bash');
@@ -528,10 +621,10 @@ export function getRunpaneShimState(): RunpaneShimState | null {
   return currentState;
 }
 
-export function installRunpaneShimBestEffort(appDirectory: string, openLinksIn: LinksOpenIn): RunpaneShimState | null {
+export function installRunpaneShimBestEffort(appDirectory: string, openLinksIn: LinksOpenIn, agentFarm?: AgentFarmShimTarget): RunpaneShimState | null {
   try {
     // An AppImage's execPath is a per-launch mount; APPIMAGE is the stable file.
-    const state = installRunpaneShim({ appDirectory, bundledCliPath: defaultBundledRunpaneCliPath(), execPath: process.env.APPIMAGE || process.execPath, openLinksIn });
+    const state = installRunpaneShim({ appDirectory, bundledCliPath: defaultBundledRunpaneCliPath(), execPath: process.env.APPIMAGE || process.execPath, openLinksIn, agentFarm });
     if (!state) console.warn('[runpane] Bundled CLI unavailable; terminals will use runpane from PATH if installed');
     return state;
   } catch (error) {

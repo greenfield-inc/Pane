@@ -13,6 +13,7 @@ import { teammatePaneCaller, type PaneCommandRegistry } from '../../daemon/comma
 import type { AppServices } from '../../ipc/types';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { getShellPath } from '../../utils/shellPath';
+import { paneAgentFarmProcess } from '../agentFarm/bundledAgentFarm';
 import { panelManager } from '../panelManager';
 import { terminalPanelManager } from '../terminalPanelManager';
 import { getChatTabManager } from '../chatTabs';
@@ -194,10 +195,17 @@ export async function cliVersion(executable: string, args: string[] = ['--versio
   }
 }
 
+/** Runs Pane's own Agent Farm (the bundled copy, Pane's config root), as chat launches and Pane's terminals do. */
+async function runAgentFarm(args: string[], options: { cwd?: string; timeout: number }): Promise<{ stdout: string }> {
+  const agentFarm = paneAgentFarmProcess(getAppDirectory(), args, { ...process.env, PATH: getShellPath() });
+  if (!agentFarm) throw new PaneError('ERR_MOVE_AGENT_FARM_MISSING', `This Pane build on ${thisMachineName()} lacks its bundled Agent Farm.`, `Reinstall Pane from runpane.com on ${thisMachineName()}, then check again.`);
+  return run(agentFarm.executable, agentFarm.args, { cwd: options.cwd, env: agentFarm.env, timeout: options.timeout, windowsHide: true });
+}
+
 /** Agent Farm profile versions from `agent-farm profiles list`, by qualified name. */
 export async function agentFarmProfiles(): Promise<Record<string, string>> {
   try {
-    const { stdout } = await run('agent-farm', ['profiles', 'list'], { env: { ...process.env, PATH: getShellPath() }, timeout: 20_000 });
+    const { stdout } = await runAgentFarm(['profiles', 'list'], { timeout: 20_000 });
     const profiles: Record<string, string> = {};
     for (const line of stdout.split('\n')) {
       const match = /^(\S+)\s.*\|\s*plugin\s+\S+\s+(\d[\w.-]*)/.exec(line.trim());
@@ -421,7 +429,7 @@ export class MoveImporter {
 
   private async agentFarmTrust(repoPath: string): Promise<'trusted' | 'untrusted' | 'unknown'> {
     try {
-      const { stdout } = await run('agent-farm', ['workspace', 'show'], { cwd: repoPath, env: { ...process.env, PATH: getShellPath() }, timeout: 20_000 });
+      const { stdout } = await runAgentFarm(['workspace', 'show'], { cwd: repoPath, timeout: 20_000 });
       const trust = /"trust":\s*"([a-z-]+)"/.exec(stdout)?.[1];
       return trust === 'trusted' ? 'trusted' : trust ? 'untrusted' : 'unknown';
     } catch {
@@ -433,7 +441,7 @@ export class MoveImporter {
     this.refuseTeammate();
     if (fix.kind === 'trust') {
       try {
-        await run('agent-farm', ['workspace', 'trust'], { cwd: fix.path, env: { ...process.env, PATH: getShellPath() }, timeout: 60_000 });
+        await runAgentFarm(['workspace', 'trust'], { cwd: fix.path, timeout: 60_000 });
       } catch (error) {
         throw new PaneError('ERR_MOVE_TRUST_FAILED', `agent-farm workspace trust didn't finish in ${fix.path}: ${reasonOf(error)}`, `Run agent-farm workspace trust in ${fix.path} on ${thisMachineName()}, then check again.`);
       }
