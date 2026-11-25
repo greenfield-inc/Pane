@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { CONFIGURED_AGENT_IDS, agentConfig, configuredAgent, type ConfiguredAgentId } from '../../../../shared/agents';
+import { configuredAgent } from '../../../../shared/agents';
+import { PANE_PROFILE_PLUGIN, plainProfileAgents } from '../../../../shared/agentProfiles';
 import type { AgentFarmProfileEntry, AgentFarmProfileVariant } from '../../../../shared/types/agentFarmProfiles';
 import { hashDirectory } from '../skillCacheManager';
 
@@ -10,26 +11,7 @@ import { hashDirectory } from '../skillCacheManager';
  * adds nothing of Agent Farm's (no identity, skills or subagents). Pane writes it from its agents
  * contract (`chat.profileModel`) and owns it: an edit there is replaced at the next start.
  */
-export const PANE_PROFILE_PLUGIN = 'pane';
 const PANE_PROFILE_PLUGIN_VERSION = '1.0.0';
-
-/** The agents with a plain profile: those whose config names an Agent Farm model. */
-export function plainProfileAgents(): ConfiguredAgentId[] {
-  return CONFIGURED_AGENT_IDS.filter(id => !!configuredAgent(id).chat?.profileModel);
-}
-
-/** `pane/<agent>`, the plain profile of an agent, or undefined when Agent Farm doesn't run it. */
-export function plainProfileRef(agent: string): string | undefined {
-  return agentConfig(agent)?.chat?.profileModel ? `${PANE_PROFILE_PLUGIN}/${agent}` : undefined;
-}
-
-/** The agent of a plain profile ref (`pane/claude` → claude), or undefined for any other profile. */
-export function plainProfileAgent(ref: string): ConfiguredAgentId | undefined {
-  const [plugin, rest] = ref.split('/');
-  if (plugin !== PANE_PROFILE_PLUGIN || !rest) return undefined;
-  const agent = rest.split(':')[0];
-  return plainProfileAgents().find(id => id === agent);
-}
 
 /** Pane's plugin's source files, relative path (with `/`) → content, as `agent-farm plugin install` takes them. */
 export function panePluginFiles(): Map<string, string> {

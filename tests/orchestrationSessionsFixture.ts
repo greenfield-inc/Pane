@@ -39,6 +39,8 @@ export type UiSessionFixture = {
   id: string;
   name: string;
   agent: 'claude' | 'codex' | 'cursor';
+  /** The Agent Farm profile the Session runs (T-63); the row shows its avatar. */
+  agentProfile?: { ref: string; hash: string };
   launchCommand?: string;
   customResume?: CustomCommandResume | null;
   profile?: string;
@@ -81,11 +83,15 @@ export type SessionFixtureOptions = {
   initialPanels?: JsonObject[];
   initialLayout?: JsonObject;
   /** Machines for All machines (T-45): the other machines, their reads, and this computer's name. */
-  machines?: Pick<NonNullable<Parameters<typeof installElectronApiMock>[1]>, 'initialPreferences' | 'machineConnections' | 'workspaceAccess' | 'platform'>;
+  machines?: Pick<NonNullable<Parameters<typeof installElectronApiMock>[1]>, 'initialPreferences' | 'machineConnections' | 'workspaceAccess' | 'platform' | 'machineRunAnswers'>;
   /** To-dos and saved machines, for a Session whose to-dos meet another machine's (T-51). */
   todos?: ElectronApiMockOptions['todos'];
   machineConnections?: ElectronApiMockOptions['machineConnections'];
   computers?: ElectronApiMockOptions['computers'];
+  /** The host's Session activity baseline (orchestration-sessions:activity-list); absent, the host has none. */
+  sessionActivity?: Array<{ sessionId: string; state: 'working' | 'idle'; workingPanes: number }>;
+  /** This computer's Agent Farm profiles, for the New Session palette (T-63). */
+  agentFarmProfiles?: ElectronApiMockOptions['agentFarmProfiles'];
 };
 
 export function sessionFixture(
@@ -183,9 +189,10 @@ export async function installSessionsFixture(
     todos: fixtureOptions.todos,
     machineConnections: fixtureOptions.machineConnections,
     computers: fixtureOptions.computers,
+    agentFarmProfiles: fixtureOptions.agentFarmProfiles,
     ...fixtureOptions.machines,
   });
-  await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes, distributions }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]>; distributions: string[] }) => {
+  await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes, distributions, sessionActivity }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]>; distributions: string[]; sessionActivity: Array<{ sessionId: string; state: 'working' | 'idle'; workingPanes: number }> | null }) => {
     type SessionRecord = UiSessionFixture;
     type Selector = { sessionId?: string; name?: string };
     type Update = Partial<Pick<SessionRecord, 'name' | 'goal' | 'context' | 'decisions' | 'blockers' | 'nextAction' | 'archived' | 'isPinned' | 'launchCommand' | 'profile' | 'customResume'>> & { expectedRevision?: number };
@@ -225,6 +232,7 @@ export async function installSessionsFixture(
     let releaseHeldLists = () => {};
     let selectCalls = 0;
     const selectedIds: string[] = [];
+    const createInputs: JsonObject[] = [];
     let overviewCalls = 0;
     let nextOrchestrationUpdateError: string | null = null;
     type ArchiveSelection = { archivePaneIds: string[]; forcePaneIds: string[] };
@@ -300,6 +308,7 @@ export async function installSessionsFixture(
 
     const api = {
       runtimes: async () => success({ distributions }),
+      activityList: sessionActivity ? async () => success(clone(sessionActivity)) : undefined,
       list: async () => {
         const selected = selectedSessionId && sessions.find(session => session.id === selectedSessionId && !session.archived)
           ? selectedSessionId
@@ -319,7 +328,13 @@ export async function installSessionsFixture(
         changed('selected');
         return success({ sessions: clone(sessions), selectedSessionId });
       },
-      create: async (input: { name: string; goal?: string; context?: string; agent?: SessionRecord['agent']; launchCommand?: string; profile?: string; customResume?: CustomCommandResume | null; runtime?: 'windows' | 'wsl'; wslDistribution?: string; isPinned?: boolean }) => {
+      create: async (input: { name: string; goal?: string; context?: string; agent?: SessionRecord['agent']; agentProfile?: string; launchCommand?: string; profile?: string; customResume?: CustomCommandResume | null; runtime?: 'windows' | 'wsl'; wslDistribution?: string; isPinned?: boolean }) => {
+        createInputs.push(clone(input));
+        // As main does: a field the caller leaves out takes the app's Session default.
+        const config = (await window.electronAPI.config.get()).data;
+        const launchCommand = input.launchCommand ?? config?.defaultSessionCommand;
+        const profile = input.profile ?? config?.defaultSessionProfile;
+        const customResume = input.customResume !== undefined ? input.customResume : config?.defaultSessionResume ?? undefined;
         const id = `created-session-${nextId++}`;
         const record: SessionRecord = {
           id,
@@ -327,9 +342,9 @@ export async function installSessionsFixture(
           runtime: input.runtime,
           wslDistribution: input.wslDistribution,
           agent: input.agent ?? 'claude',
-          launchCommand: input.launchCommand,
-          customResume: input.customResume,
-          profile: input.profile,
+          launchCommand,
+          customResume,
+          profile,
           internalSessionId: `__orchestration_session_${id}terminal__`,
           panelIds: {
             claude: `__orchestration_panel_${id}_claude`,
@@ -351,6 +366,9 @@ export async function installSessionsFixture(
           archived: false,
           isPinned: input.isPinned ?? false,
         };
+        // As main does (T-63): a named profile, else Claude or Codex on its own; other agents start directly.
+        if (input.agentProfile) record.agentProfile = { ref: input.agentProfile, hash: 'fixture' };
+        else if (record.agent === 'claude' || record.agent === 'codex') record.agentProfile = { ref: `pane/${record.agent}`, hash: 'fixture' };
         sessions = [...sessions, record];
         selectedSessionId = id;
         persistState();
@@ -486,6 +504,7 @@ export async function installSessionsFixture(
       releaseOrchestrationLists: () => { heldLists = null; releaseHeldLists(); },
       getOrchestrationSelectCalls: () => selectCalls,
       getOrchestrationSelectedIds: () => [...selectedIds],
+      getOrchestrationCreateInputs: () => clone(createInputs),
       getOrchestrationViewRequests: () => clone(viewRequests),
       getOrchestrationOverviewCalls: () => overviewCalls,
       setOrchestrationOverviewPanes: (sessionId: string, panes: UiPaneOverviewFixture[]) => {
@@ -516,7 +535,7 @@ export async function installSessionsFixture(
         selectedSessionId = sessions.find(session => !session.archived)?.id;
       },
     });
-  }, { seed: initialSessions, listDelayMs: fixtureOptions.listDelayMs ?? 0, getDelayMs: fixtureOptions.getDelayMs ?? 0, overviewPanes: fixtureOptions.overviewPanes ?? {}, distributions: fixtureOptions.distributions ?? [] });
+  }, { seed: initialSessions, listDelayMs: fixtureOptions.listDelayMs ?? 0, getDelayMs: fixtureOptions.getDelayMs ?? 0, overviewPanes: fixtureOptions.overviewPanes ?? {}, distributions: fixtureOptions.distributions ?? [], sessionActivity: fixtureOptions.sessionActivity ?? null });
 }
 
 export async function dismissStartupDialogs(page: Page): Promise<void> {

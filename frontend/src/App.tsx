@@ -1,4 +1,5 @@
 import { HealthCardPopups } from './components/machineHealth/HealthCardPopups';
+import { requestOpenNewSessionPalette } from './utils/openNewSessionPalette';
 import { BrowserLayer } from './components/panels/browser/BrowserLayer';
 import { askAgentAbout, isHealthCard } from './components/machineHealth/healthCardActions';
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
@@ -375,12 +376,12 @@ function App() {
   });
 
   // mod+shift+n is New Project, so New Session is palette-only.
-  // OrchestrationSessionNav owns the Create Session dialog and opens it on this event.
+  // The Sidebar owns the New Session palette and opens it on this request.
   useHotkey({
     id: 'new-orchestration-session',
     label: 'New Session',
     category: 'navigation',
-    action: () => window.dispatchEvent(new Event('open-create-orchestration-session')),
+    action: () => requestOpenNewSessionPalette(),
   });
 
   useHotkey({

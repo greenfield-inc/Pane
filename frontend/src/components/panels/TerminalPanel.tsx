@@ -2077,6 +2077,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       // The sidebar cursor is DOM focus. A replay may finish after the user has
       // moved that cursor, and focusing xterm would send their next key there.
       if (document.activeElement?.matches('[data-sidebar-item]:focus-visible')) return;
+      // Nor while a dialog has focus (New Session, Search): the person is typing there.
+      if (document.activeElement?.closest('[aria-modal="true"]')) return;
       xtermRef.current?.focus();
     };
 

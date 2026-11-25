@@ -78,6 +78,7 @@ export type SettingsSettingId =
   | 'agent-farm-telemetry'
   | 'agent-skill'
   | 'agent-context'
+  | 'session-start-pinned'
   | 'session-defaults'
   | 'claude-executable'
   | 'session-import'

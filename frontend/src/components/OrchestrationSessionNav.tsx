@@ -1,5 +1,4 @@
 import { isReadOnlyHost, useReadOnlyHost } from '../stores/readOnlyHostStore';
-import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { SessionApprovalsCount } from './approvals/ApprovalsCount';
@@ -18,7 +17,9 @@ import {
 } from '../stores/orchestrationSessionStore';
 import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import type { OrchestrationSessionArchivedPanes, OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
-import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
+import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestrationSession';
+import { requestOpenNewSessionPalette } from '../utils/openNewSessionPalette';
+import { ProfileAvatar } from './profiles/ProfileAvatar';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -27,7 +28,7 @@ import { Tooltip } from './ui/Tooltip';
 import { UndoToast } from './ui/UndoToast';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 import { cn } from '../utils/cn';
-import { SessionActivityDot, SessionActivitySummary } from './SessionActivity';
+import { SessionActivitySummary, SessionWorkingSpinner } from './SessionActivity';
 import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../utils/sessionDrag';
 import { dropOrder, stepOrder, type SessionDropTarget } from '../utils/sessionReorder';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
@@ -150,13 +151,11 @@ export function OrchestrationSessionNav({
   const load = useOrchestrationSessionStore(state => state.load);
   const refresh = useOrchestrationSessionStore(state => state.refresh);
   const select = useOrchestrationSessionStore(state => state.select);
-  const create = useOrchestrationSessionStore(state => state.create);
   const update = useOrchestrationSessionStore(state => state.update);
   const reorder = useOrchestrationSessionStore(state => state.reorder);
   const navigateToPaneChat = useNavigationStore(state => state.navigateToPaneChat);
   const activeView = useNavigationStore(state => state.activeView);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
-  const [showCreate, setShowCreate] = useState(false);
   const expandedSessions = useNavigationStore(state => state.expandedSessions);
   const toggleStoredSessionExpanded = useNavigationStore(state => state.toggleSessionExpanded);
   const [localSectionExpanded, setLocalSectionExpanded] = useState(true);
@@ -182,25 +181,9 @@ export function OrchestrationSessionNav({
   const sectionExpanded = sessionsSectionExpanded ?? localSectionExpanded;
   const setSectionExpanded = onSessionsSectionExpandedChange ?? setLocalSectionExpanded;
 
-  const createSession = useCallback(async ({ name: requestedName, ...input }: SessionCreateRequest) => {
-    await load();
-    const name = requestedName || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
-    await create({ ...input, name, nameFromFirstMessage: !requestedName });
-    setShowCreate(false);
-    setActiveSession(null);
-    navigateToPaneChat();
-  }, [create, load, navigateToPaneChat, setActiveSession]);
-
   useEffect(() => {
     void load();
   }, [load]);
-
-  // Search's New Session command. Sidebar mounts exactly one nav (rail or tree), so one dialog opens.
-  useEffect(() => {
-    const openCreate = () => setShowCreate(true);
-    window.addEventListener('open-create-orchestration-session', openCreate);
-    return () => window.removeEventListener('open-create-orchestration-session', openCreate);
-  }, []);
 
   useEffect(() => {
     const handleSessionsChanged = (event: Event) => {
@@ -494,10 +477,12 @@ export function OrchestrationSessionNav({
           </>
         ) : (
           <>
-            {loopName !== undefined ? <LoopMark loopName={loopName} /> : <SessionActivityDot session={session} paneIds={visiblePaneIds} />}
+            {/* The avatar takes the 12px activity icon's place: 16px wide with -2px each side, so names start where they did. */}
+            {loopName !== undefined ? <LoopMark loopName={loopName} /> : <ProfileAvatar profileRef={session.agentProfile?.ref} agent={session.agent} size={16} className="-mx-0.5" />}
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
             {loopName !== undefined && <LoopLabel loopName={loopName} />}
             <SessionApprovalsCount sessionId={session.id} opensApprovals otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
+            <SessionWorkingSpinner session={session} />
           </>
         )}
       </button>
@@ -569,7 +554,7 @@ export function OrchestrationSessionNav({
               data-testid="compact-new-orchestration-session"
               data-compact-rail-item
               aria-label="New Session"
-              onClick={() => setShowCreate(true)}
+              onClick={requestOpenNewSessionPalette}
               className="needs-full-access flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
             >
               <Plus className="h-4 w-4" />
@@ -639,7 +624,6 @@ export function OrchestrationSessionNav({
           onMoveToHost={() => { setMovingSessionId(sessionMenu?.sessionId ?? null); setSessionMenu(null); }}
         />
         {moveDialogElement}
-        <CreateOrchestrationSessionDialog isOpen={showCreate} onClose={() => setShowCreate(false)} onCreate={createSession} />
         {archivedToastElement}
         {orderAnnouncer}
       </div>
@@ -706,7 +690,7 @@ export function OrchestrationSessionNav({
             title="New Session"
             onClick={event => {
               event.stopPropagation();
-              setShowCreate(true);
+              requestOpenNewSessionPalette();
             }}
             className="needs-full-access inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
           >
@@ -742,7 +726,6 @@ export function OrchestrationSessionNav({
         onMoveToHost={() => { setMovingSessionId(sessionMenu?.sessionId ?? null); setSessionMenu(null); }}
       />
       {moveDialogElement}
-      <CreateOrchestrationSessionDialog isOpen={showCreate} onClose={() => setShowCreate(false)} onCreate={createSession} />
       {archivedToastElement}
       {orderAnnouncer}
     </>

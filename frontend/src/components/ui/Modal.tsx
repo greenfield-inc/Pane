@@ -26,8 +26,10 @@ export interface ModalProps {
    * this reason.
    */
   instant?: boolean;
-  /** `right` docks the dialog to the window's right edge at full height, as a side drawer. */
-  placement?: 'center' | 'right';
+  /** `right` docks the dialog to the window's right edge at full height, as a side drawer; `top` sits it high, like Spotlight. */
+  placement?: 'center' | 'right' | 'top';
+  /** Classes for the backdrop, such as a lighter scrim for a palette. */
+  overlayClassName?: string;
 }
 
 function canReceiveFocus(element: HTMLElement | null): element is HTMLElement {
@@ -50,6 +52,7 @@ export const Modal: React.FC<ModalProps> = ({
   restoreFocusOnClose = true,
   instant = false,
   placement = 'center',
+  overlayClassName,
 }) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
@@ -94,6 +97,7 @@ export const Modal: React.FC<ModalProps> = ({
           className={cn(
             'fixed inset-0 z-modal-backdrop bg-modal-overlay backdrop-blur-sm',
             !instant && 'animate-modal-overlay-enter',
+            overlayClassName,
           )}
         />
         <Dialog.Content
@@ -105,7 +109,9 @@ export const Modal: React.FC<ModalProps> = ({
             'fixed z-modal outline-none',
             placement === 'right'
               ? 'inset-y-3 right-3 w-[min(28rem,calc(100%-1.5rem))]'
-              : cn('inset-0 m-auto h-fit w-[calc(100%-2rem)] max-h-[calc(100vh-2rem)]', sizeClasses[size]),
+              : placement === 'top'
+                ? cn('inset-x-0 top-[16vh] mx-auto h-fit w-[calc(100%-2rem)] max-h-[calc(84vh-1rem)]', sizeClasses[size])
+                : cn('inset-0 m-auto h-fit w-[calc(100%-2rem)] max-h-[calc(100vh-2rem)]', sizeClasses[size]),
           )}
           onOpenAutoFocus={(event) => {
             const target = initialFocusRef?.current ?? null;
@@ -131,7 +137,7 @@ export const Modal: React.FC<ModalProps> = ({
               className={cn(
                 'relative bg-surface-primary border border-border-primary rounded-modal shadow-modal w-full overflow-hidden flex flex-col',
                 // mx-auto keeps a panel that a caller narrows with className centered in the positioned box.
-                placement === 'right' ? 'h-full' : 'mx-auto max-h-[calc(100vh-2rem)]',
+                placement === 'right' ? 'h-full' : placement === 'top' ? 'mx-auto max-h-[calc(84vh-1rem)]' : 'mx-auto max-h-[calc(100vh-2rem)]',
                 !instant && 'animate-modal-enter',
                 className,
               )}

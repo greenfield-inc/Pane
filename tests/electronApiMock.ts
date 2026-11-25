@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import type { AgentFarmProfileList } from '../shared/types/agentFarmProfiles';
 import type { ArchiveProgressSnapshot } from '../shared/types/archiveProgress';
 import type { PaneChatAgent } from '../shared/types/paneChat';
 import type { PanePermissionRequest, PanePermissionResponse } from '../shared/types/permissions';
@@ -191,6 +192,8 @@ export type ElectronApiMockOptions = {
   hostConnectedClients?: RemoteDaemonConnectedClient[];
   /** setup:choose-import fails with this PaneError text instead of previewing. */
   setupImportError?: string;
+  /** chat-tab:profiles, this computer's Agent Farm profiles (T-63). Absent: none, and no chatTab API without a chat panel. */
+  agentFarmProfiles?: AgentFarmProfileList;
   /** Each chat tab's conversation, by panel id (plain text turns). Absent: no messages. */
   chatMessages?: Record<string, Array<{ id: string; role: 'user' | 'assistant'; text: string }>>;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
@@ -1406,10 +1409,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         onState: () => () => undefined,
       };
     })() : undefined;
+    // New Session reads this computer's Agent Farm profiles through chatTab.profiles (T-63).
+    const profilesList = mockOptions.agentFarmProfiles;
+    const chatTabWithProfiles = profilesList ? { ...chatTabApi, profiles: () => Promise.resolve(clone(profilesList)) } : chatTabApi;
     const electronAPI = {
       autopilot: autopilotApi,
       todos: todosApi,
-      chatTab: chatTabApi,
+      chatTab: chatTabWithProfiles,
       notify: notifyApi,
       paneSecrets: paneSecretsApi,
       machines: machinesApi,
