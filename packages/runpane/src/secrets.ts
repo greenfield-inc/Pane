@@ -17,6 +17,8 @@ interface SecretSummary {
   name: string;
   updatedAt: string;
   machine: string;
+  /** Present on a login: where `browser fill` may fill it. */
+  sites?: string[];
 }
 
 const secretSummarySchema: BoundarySchema<SecretSummary> = boundary.object({
@@ -24,6 +26,7 @@ const secretSummarySchema: BoundarySchema<SecretSummary> = boundary.object({
   name: boundary.string,
   updatedAt: boundary.string,
   machine: boundary.string,
+  sites: boundary.optional(boundary.array(boundary.string)),
 });
 const referenceSummarySchema = boundary.object({
   project: boundary.string,
@@ -31,6 +34,7 @@ const referenceSummarySchema = boundary.object({
   reference: boundary.string,
   updatedAt: boundary.string,
   machine: boundary.string,
+  sites: boundary.optional(boundary.array(boundary.string)),
 });
 const leaseSummarySchema = boundary.object({
   id: boundary.string,
@@ -87,6 +91,10 @@ function requireFlag(parsed: ParsedArgs, value: string | undefined, flag: string
   throw invalid(`runpane ${parsed.command} requires ${flag}. ${outcome}`, `See the options with \`runpane help ${parsed.command}\`.`);
 }
 
+function loginText(sites: readonly string[] | undefined): string {
+  return sites ? `  login for ${sites.join(', ')}` : '';
+}
+
 export async function runSecretsList(parsed: ParsedArgs): Promise<number> {
   refuseTeammate('list them');
   const request = parsed.project === undefined ? {} : { project: parsed.project };
@@ -100,7 +108,7 @@ export async function runSecretsList(parsed: ParsedArgs): Promise<number> {
     console.log(`No Pane secrets${parsed.project === undefined ? '' : ` in project ${parsed.project}`} on this machine yet.`);
   }
   for (const secret of result.secrets) {
-    console.log(`${secret.project}/${secret.name}  set ${secret.updatedAt} on ${secret.machine}`);
+    console.log(`${secret.project}/${secret.name}  set ${secret.updatedAt} on ${secret.machine}${loginText(secret.sites)}`);
   }
   for (const reference of references) {
     const until = (result.leases ?? [])
@@ -108,7 +116,7 @@ export async function runSecretsList(parsed: ParsedArgs): Promise<number> {
       .map((lease) => lease.expiresAt)
       .sort()
       .at(-1);
-    console.log(`${reference.project}/${reference.name}  from 1Password (${reference.reference})  ${until ? `leased until ${until}` : 'no lease'}`);
+    console.log(`${reference.project}/${reference.name}  from 1Password (${reference.reference})  ${until ? `leased until ${until}` : 'no lease'}${loginText(reference.sites)}`);
   }
   if (result.storage.kind === 'file' && !result.storage.encrypted) {
     console.log('This machine has no OS keyring, so its secret values are stored unencrypted in a file only you can read.');

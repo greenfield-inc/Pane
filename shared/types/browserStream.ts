@@ -1,3 +1,4 @@
+import type { BrowserLoginUse } from './browser';
 import type { DeviceDriver } from './devices';
 import type { BrowserPageSize } from './panels';
 
@@ -69,6 +70,8 @@ export interface BrowserTabView {
   fileChooser?: { multiple: boolean };
   /** Recent downloads that saved on the host, newest last. */
   downloads: Array<{ name: string; at: number; agent?: string }>;
+  /** Saved logins agents filled in the last minute, newest last, for each screen's notice. Absent on a host from before logins. */
+  logins?: Array<BrowserLoginUse & { at: number }>;
   /** The live page's id on the host, unique across restarts: a new one means the page reloaded there (it slept, or Pane restarted). */
   page?: string;
   /** The host's name, for "on studio-mac". */

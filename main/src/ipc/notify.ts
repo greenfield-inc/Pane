@@ -453,7 +453,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     machine: thisMachineName(),
     secrets: {
       exists: (project, name) => paneSecretStore().has(project, name),
-      save: async (project, name, value) => { await paneSecretStore().set(project, name, value); },
+      save: async (project, name, value) => { await paneSecretStore().replaceValue(project, name, value); },
     },
     leases: {
       describe: (project, names) => {
@@ -461,7 +461,10 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
         const references: Record<string, string> = {};
         for (const name of names) {
           const reference = store.referenceOf(project, name);
-          if (reference) references[name] = reference;
+          if (!reference) continue;
+          // The person approves the sites with the lease.
+          const sites = store.sitesOf(project, name);
+          references[name] = sites ? `${reference} (login for ${sites.join(', ')})` : reference;
         }
         // Only a desktop knows the length it will grant; a headless host's card shows none until a desktop shows it.
         const lengthMs = secretLeaseService()?.lengthFor(project) ?? null;

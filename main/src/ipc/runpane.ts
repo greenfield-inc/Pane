@@ -362,6 +362,7 @@ const RUNPANE_CHANNELS = [
   'runpane:browser:screenshot',
   'runpane:browser:click',
   'runpane:browser:type',
+  'runpane:browser:fill',
   'runpane:browser:press',
   'runpane:browser:select',
   'runpane:browser:scroll',

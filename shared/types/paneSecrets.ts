@@ -14,6 +14,8 @@ export interface PaneSecretSummary {
   updatedAt: string;
   /** Name of the host where it was last set. */
   machine: string;
+  /** Present on a login: the exact origins it may be filled on. A login is never in a command's environment. */
+  sites?: string[];
 }
 
 /** Where this host keeps secret values. */
@@ -50,6 +52,54 @@ export function parsePaneSecretKey(key: string): { project: string; name: string
   return paneSecretProjectProblem(project) || paneSecretNameProblem(name) ? null : { project, name };
 }
 
+/** A login's sites, at most. */
+const MAX_LOGIN_SITES = 10;
+
+/** This computer's own names, where a page may be plain http: nothing on a network can stand in for it. */
+function isLoopbackHost(host: string): boolean {
+  return host === 'localhost' || host.endsWith('.localhost') || /^127(\.\d{1,3}){3}$/.test(host) || host === '[::1]';
+}
+
+/**
+ * The exact origin a typed site means (`bank.example/login` is `https://bank.example`), or null when it
+ * names none a login may use: not https (or http on this computer), a pattern, or a URL with a user in it.
+ */
+export function loginSiteOrigin(typed: string): string | null {
+  const text = typed.trim();
+  if (!text || /[\s*]/.test(text)) return null;
+  let url: URL;
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`);
+  } catch {
+    return null;
+  }
+  if (!url.hostname || url.username || url.password) return null;
+  return url.protocol === 'https:' || (url.protocol === 'http:' && isLoopbackHost(url.hostname)) ? url.origin : null;
+}
+
+/** Why `sites` can't be a login's sites, or null when they can. Each entry must already be an exact origin. */
+export function loginSitesProblem(sites: readonly string[]): string | null {
+  if (sites.length === 0) return 'A login needs at least one site.';
+  if (sites.length > MAX_LOGIN_SITES) return `A login has at most ${MAX_LOGIN_SITES} sites.`;
+  const bad = sites.find(site => loginSiteOrigin(site) !== site);
+  return bad === undefined ? null : `"${bad}" is not a site a login can be filled on: use an https address, such as https://bank.example, or http on this computer (http://localhost:3000).`;
+}
+
+/** One time Pane filled a saved login for an agent. Never a value. */
+export interface PaneLoginUse {
+  project: string;
+  name: string;
+  /** The origin it was filled on. */
+  site: string;
+  /** The agent, as its tab names it, and the Pane it runs in. */
+  agent: string;
+  pane: string;
+  /** ISO time. */
+  at: string;
+  /** The machine it happened on, when Settings lists more than this one. */
+  machine?: string;
+}
+
 /** Pane secrets are the owner's: a teammate a workspace lets in can use the computer, but not them. */
 export function teammateSecretRefusal(teammate: string, action: string): PaneError {
   return new PaneError(
@@ -70,6 +120,8 @@ export interface PaneSecretReferenceSummary {
   reference: string;
   updatedAt: string;
   machine: string;
+  /** Present on a login, as on a typed one. */
+  sites?: string[];
 }
 
 /** What a lease log line records. */
@@ -145,6 +197,8 @@ export interface PaneSecretsOverview {
   leaseLengths: Record<string, number>;
   /** The vault "Move to 1Password" writes into, or null until the person picks one. */
   moveVault: string | null;
+  /** The newest uses of saved logins on this desktop and each machine that answered, newest first. */
+  loginUses: PaneLoginUse[];
 }
 
 /** Settings → Secrets "Start lease". */

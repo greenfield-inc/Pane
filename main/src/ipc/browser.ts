@@ -6,12 +6,14 @@ import path from 'path';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import type { BrowserPageSize, BrowserPanelState, ToolPanel } from '../../../shared/types/panels';
 import type { DeviceDriver } from '../../../shared/types/devices';
-import { DEFAULT_BROWSER_SETTINGS, type BrowserSettings } from '../../../shared/types/browser';
+import { DEFAULT_BROWSER_SETTINGS, type BrowserLoginUse, type BrowserSettings } from '../../../shared/types/browser';
 import { agentLabel } from '../../../shared/agents';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { isRemotePaneCommand, paneCommandCaller, paneCommandSignal, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { DeviceDriverGate } from '../services/devices/deviceDriverGate';
-import { PageDriver, WAIT_DEFAULT_MS, WAIT_MAX_MS, type BrowserPageContents, type FileChooser, type PendingDialog, type ScreencastSettings } from '../services/browser/pageDriver';
+import { teammateSecretRefusal, paneSecretKey, type PaneLoginUse } from '../../../shared/types/paneSecrets';
+import { loginUseLog, paneSecretStore } from '../services/paneSecrets';
+import { PageDriver, WAIT_DEFAULT_MS, WAIT_MAX_MS, type BrowserPageContents, type FileChooser, type LoginToFill, type PendingDialog, type ScreencastSettings } from '../services/browser/pageDriver';
 import type { BrowserFrame, BrowserFrameAnswer, BrowserInput, BrowserTabView } from '../../../shared/types/browserStream';
 import { READ_VERBS, runVerb, type VerbOutcome, type VerbRequest } from '../services/browser/pageVerbs';
 import { BrowserHolds, type ViewerKind, type WatchLimits } from '../services/browser/browserHolds';
@@ -62,7 +64,25 @@ export interface BrowserHost {
   onSignInRefused(listener: (panelId: string, signIn: { site: string; url: string }) => void): void;
   /** Shows the download's notice in the tab ("Downloaded <name> · Show in folder"); `agent` names the agent whose call caused it. */
   showDownload(panelId: string, file: string, agent?: string): void;
+  /** Shows "Claude filled bank/PIN on https://bank.example" in the tab. */
+  showLogin(panelId: string, login: BrowserLoginUse): void;
+  /** The tab whose page opened this one as a sign-in popup, still linked to it. */
+  openerTab(panelId: string): string | undefined;
 }
+
+/** Saved logins, as browser_fill reads and records them. Main's default is this computer's Pane secrets. */
+export interface BrowserLogins {
+  /** The sites the person chose, or null when it is not a login. */
+  sites(project: string, name: string): string[] | null;
+  read(project: string, name: string): Promise<{ value: string; sites: string[] }>;
+  record(use: PaneLoginUse): Promise<void>;
+}
+
+const savedLogins: BrowserLogins = {
+  sites: (project, name) => paneSecretStore().sitesOf(project, name),
+  read: (project, name) => paneSecretStore().readLogin(project, name),
+  record: use => loginUseLog().record(use),
+};
 
 /** A download a page started (Electron's will-download on the browser tabs' store). */
 export interface TabDownload {
@@ -109,6 +129,7 @@ const schemas = {
   screenshot: boundary.object({ tab: tabField, fullPage: boundary.optional(boundary.boolean) }),
   click: boundary.object({ tab: tabField, ref: refField, x: boundary.optional(boundary.number), y: boundary.optional(boundary.number), button: boundary.optional(boundary.enumeration('left', 'right', 'middle')), double: boundary.optional(boundary.boolean) }),
   type: boundary.object({ tab: tabField, ref: boundary.string, text: boundary.string, clear: boundary.optional(boundary.boolean), submit: boundary.optional(boundary.boolean) }),
+  fill: boundary.object({ tab: tabField, ref: boundary.string, project: boundary.string, name: boundary.string }),
   press: boundary.object({ tab: tabField, key: boundary.string, ref: refField }),
   select: boundary.object({ tab: tabField, ref: boundary.string, values: boundary.array(boundary.string) }),
   scroll: boundary.object({ tab: tabField, ref: refField, dx: boundary.optional(boundary.number), dy: boundary.optional(boundary.number) }),
@@ -158,7 +179,7 @@ const inputSchema: BoundarySchema<BrowserInput[]> = boundary.array(boundary.unio
   boundary.object({ kind: boundary.literal('files-cancel') }),
 ));
 /** Agent calls that put input into a page, which its URL doesn't hold (BrowserPanelState.agentUse). */
-const TYPING_VERBS: ReadonlySet<VerbRequest['verb']> = new Set(['type', 'select', 'upload', 'press']);
+const TYPING_VERBS: ReadonlySet<VerbRequest['verb']> = new Set(['type', 'fill', 'select', 'upload', 'press']);
 /** How long a frame read waits on the host for a newer frame before answering "unchanged". */
 const FRAME_WAIT_MS = 1_000;
 /** The screencast stops this long after the last frame read. */
@@ -171,6 +192,8 @@ const FRAME_QUALITY = 70;
 const HOST_RUN = randomUUID();
 /** How long a batch of a screen's input may take before the host answers that it didn't land. */
 const INPUT_MS = 15_000;
+/** How long other screens show that a saved login was filled. Settings > Secrets keeps the record. */
+const LOGIN_SHOWN_MS = 60_000;
 /** How long a state read waits for a change before answering with the same state. */
 const VIEW_WAIT_MS = 10_000;
 /** Files a person sends one page's picker in one batch, at most (base64 grows it by a third). */
@@ -241,7 +264,7 @@ const DEFAULT_HOLDS: BrowserHoldSettings = { limit: 4, idleMs: 15 * 60_000, swee
  * stops the holds' sweep.
  */
 
-export function registerBrowserHandlers(services: BrowserServices, commandRegistry: PaneCommandRegistry, host: BrowserHost, settingsOverride: Partial<BrowserHoldSettings> = {}): () => void {
+export function registerBrowserHandlers(services: BrowserServices, commandRegistry: PaneCommandRegistry, host: BrowserHost, settingsOverride: Partial<BrowserHoldSettings> = {}, logins: BrowserLogins = savedLogins): () => void {
   const holdSettings = { ...DEFAULT_HOLDS, ...settingsOverride };
   const pages = new Map<number, PageDriver>();
   /** How many documents each page has loaded since Pane began driving it, so a typing call knows it left the page. */
@@ -652,6 +675,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const documentBefore = documents.get(contents.id);
     let outcome: VerbOutcome;
     try {
+      if (request.verb === 'evaluate') await noteLinkedScripts(tab.id);
       // A hidden page starts painting again for the call; give it a frame before capturing it.
       if (request.verb === 'screenshot') await new Promise(resolve => setTimeout(resolve, 150));
       outcome = await withinDeadline(tab, request, runVerb(driverFor(tab.id, contents), contents, request));
@@ -668,6 +692,14 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       changedView(tab.id);
     }
     return outcome;
+  }
+
+  /** A script in a sign-in popup's tab reaches the page that opened it, so no login goes into that page either. */
+  async function noteLinkedScripts(tabId: string): Promise<void> {
+    for (let opener = host.openerTab(tabId); opener; opener = host.openerTab(opener)) {
+      const page = host.page(opener);
+      if (page) await driverFor(opener, page).noteScript();
+    }
   }
 
   /**
@@ -694,7 +726,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
 
   /** A verb's outcome as the tool returns it; a screenshot is saved on the agent's computer. */
   async function toolResult(tab: ToolPanel, outcome: VerbOutcome): Promise<ToolResult> {
-    const { image, cursor: _cursor, ...rest } = outcome;
+    const { image, cursor: _cursor, filledSite: _site, ...rest } = outcome;
     const result: ToolResult = { ok: true, tab: tab.id, ...rest };
     if (image) {
       // A screenshot's result is the file; its schema has no url or title.
@@ -787,6 +819,26 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   tool('type', (raw) => {
     const { tab, ref, text, clear, submit } = decode('type', raw, schemas.type);
     return { tab, request: { verb: 'type', ref, text, clear: clear === true, submit: submit === true } };
+  });
+
+  tool('fill', (raw, caller) => {
+    const { tab, ref, project, name } = decode('fill', raw, schemas.fill);
+    const teammate = teammatePaneCaller();
+    if (teammate) throw teammateSecretRefusal(teammate, 'fill a saved login');
+    const picked = pickTab(caller, tab, true);
+    // A popup shares scripts with the page that opened it, which an agent may have scripted.
+    if (tabState(picked).signInPopup) throw new PaneError('ERR_BROWSER_LOGIN_POPUP', 'This tab is a sign-in popup linked to the page that opened it, and saved logins don\'t go into linked pages. Nothing was filled.', 'Ask the person to sign in here.');
+    const login: LoginToFill = {
+      key: paneSecretKey(project, name),
+      sites: logins.sites(project, name) ?? [],
+      read: () => logins.read(project, name),
+      record: async (site) => {
+        const use: PaneLoginUse = { project, name, site, agent: agentName(caller.panelId), pane: services.sessionManager.getSession(caller.paneId)?.name ?? caller.paneId, at: new Date().toISOString() };
+        await logins.record(use);
+        showLogin(picked.id, { login: paneSecretKey(project, name), site, agent: use.agent });
+      },
+    };
+    return { tab: picked.id, request: { verb: 'fill', ref, login } };
   });
 
   tool('press', (raw) => {
@@ -1074,6 +1126,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   const pointers = new Map<string, string>();
   /** Downloads that saved on this computer, by tab, for other screens' notices. */
   const tabDownloads = new Map<string, Array<{ name: string; at: number; agent?: string }>>();
+  /** Saved logins agents filled, by tab, for other screens' notices. */
+  const tabLogins = new Map<string, Array<BrowserLoginUse & { at: number }>>();
   /** The sign-in each tab stopped, until its page navigates, for other screens' line. */
   const signIns = new Map<string, { site: string; url: string }>();
   host.onSignInRefused((tabId, signIn) => {
@@ -1106,6 +1160,12 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (agent) saved.agent = agent;
     const shown = [...(tabDownloads.get(tabId) ?? []), saved].slice(-3);
     tabDownloads.set(tabId, shown);
+    changedView(tabId);
+  }
+
+  function showLogin(tabId: string, login: BrowserLoginUse): void {
+    host.showLogin(tabId, login);
+    tabLogins.set(tabId, [...(tabLogins.get(tabId) ?? []), { ...login, at: Date.now() }].slice(-3));
     changedView(tabId);
   }
 
@@ -1160,6 +1220,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (driver?.pendingChooser) view.fileChooser = driver.pendingChooser;
     const signIn = signIns.get(tabId);
     if (signIn) view.signIn = signIn;
+    const used = tabLogins.get(tabId)?.filter(login => Date.now() - login.at < LOGIN_SHOWN_MS);
+    if (used?.length) view.logins = used;
     if (live) view.page = `${HOST_RUN}-${live.id}`;
     if (!live) view.stopped = holds.isAsleep(tabId) ? 'asleep' : 'gone';
     return view;

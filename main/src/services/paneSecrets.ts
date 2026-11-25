@@ -6,6 +6,7 @@ import path from 'path';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
+  loginSitesProblem,
   paneSecretKey,
   paneSecretNameProblem,
   paneSecretProjectProblem,
@@ -22,6 +23,7 @@ import type { AppConfig } from '../types/config';
 import type { ConfigManager } from './configManager';
 import { getPaneEventSink, getRuntimeConfigManager } from '../core/runtime';
 import { getAppDirectory } from '../utils/appDirectory';
+import { decodeLogin, encodeLogin, LoginUseLog, secretIsLogin, type StoredLogin } from './paneLogins';
 import { KeychainItemMissing, paneKeychainService, systemKeychain, type Keychain } from './keychain';
 
 /** Index record for one secret, kept in config.json. Never holds the value. */
@@ -37,6 +39,13 @@ export interface PaneSecretMeta {
 export interface PaneSecretReferenceMeta extends PaneSecretMeta {
   /** `op://<vault>/<item>/<field>`; absent once removed. */
   reference?: string;
+  /** Present on a login: the origins it may be filled on. */
+  sites?: string[];
+}
+
+/** Index record for a typed login, kept in config.json under `paneLogins`. */
+export interface PaneLoginMeta extends PaneSecretMeta {
+  sites?: string[];
 }
 
 /** Where values live: the macOS keychain, or one 0600 file elsewhere. Addressed by `<project>/<NAME>`. */
@@ -260,6 +269,41 @@ function usableReference(reference: string | undefined): reference is string {
   return reference !== undefined && paneSecretReferenceProblem(reference) === null;
 }
 
+/** Where a typed login's value is kept. No project has a colon, so it never meets a plain secret's. */
+const loginValueKey = (key: string) => `login:${key}`;
+
+/** Sites read back from config.json or a sync, when they are ones a login can have. */
+function usableSites(sites: readonly string[] | undefined): string[] | null {
+  return sites && loginSitesProblem(sites) === null ? [...sites] : null;
+}
+
+/** How a login reference syncs: its address, then one site a line. A host from before logins reads no reference in it. */
+function encodeReference(reference: string, sites: readonly string[] | undefined): string {
+  return [reference, ...(sites ?? [])].join('\n');
+}
+
+function decodeReference(text: string): { reference: string; sites?: string[] } | null {
+  const [reference, ...sites] = text.split('\n');
+  if (paneSecretReferenceProblem(reference)) return null;
+  if (sites.length === 0) return { reference };
+  return loginSitesProblem(sites) ? null : { reference, sites };
+}
+
+function checkedSites(sites: readonly string[]): string[] {
+  const unique = [...new Set(sites)];
+  const problem = loginSitesProblem(unique);
+  if (problem) throw invalidSecret(problem);
+  return unique;
+}
+
+function secretNotLogin(project: string, name: string): PaneError {
+  return new PaneError(
+    'SECRET_NOT_LOGIN',
+    `${paneSecretKey(project, name)} is not a login: the person has not chosen a site for it, so it can't be filled in a page. Nothing was filled.`,
+    'Ask the person to open Settings → Secrets and choose Use as a login on it. Agents can\'t do that.',
+  );
+}
+
 export function secretNotFound(project: string, name: string): PaneError {
   return new PaneError(
     'SECRET_NOT_FOUND',
@@ -270,6 +314,19 @@ export function secretNotFound(project: string, name: string): PaneError {
 
 function invalidSecret(message: string): PaneError {
   return new PaneError('SECRET_INVALID', `${message} Nothing was changed.`, 'See `runpane secrets --help` for the naming rules.');
+}
+
+function checkValue(value: string): void {
+  if (!value) throw invalidSecret('A secret value cannot be empty.');
+  if (Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) throw invalidSecret('A secret value can be at most 64 KiB.');
+}
+
+function secretIsReference(project: string, name: string): PaneError {
+  return new PaneError(
+    'SECRET_IS_REFERENCE',
+    `${paneSecretKey(project, name)} comes from 1Password, so Pane does not store a value for it. Nothing was changed.`,
+    `Run \`${secretLeaseRenewCommand(project, [name])}\` to use it, or remove the reference in Settings → Secrets first.`,
+  );
 }
 
 export function validatePaneSecretAddress(project: string, name: string): void {
@@ -328,7 +385,9 @@ export class PaneSecretStore {
     return Object.entries(this.referenceIndex()).flatMap(([key, meta]) => {
       const address = parsePaneSecretKey(key);
       if (!address || meta.deleted || !usableReference(meta.reference) || (project !== undefined && address.project !== project)) return [];
-      return [{ ...address, reference: meta.reference, updatedAt: meta.updatedAt, machine: meta.source }];
+      const sites = usableSites(meta.sites);
+      const summary: PaneSecretReferenceSummary = { ...address, reference: meta.reference, updatedAt: meta.updatedAt, machine: meta.source };
+      return [sites ? { ...summary, sites } : summary];
     }).sort((a, b) => a.project.localeCompare(b.project) || a.name.localeCompare(b.name));
   }
 
@@ -336,15 +395,18 @@ export class PaneSecretStore {
    * Points `project/name` at a 1Password item. Only the person does this, from Settings. A typed
    * secret of the same name is deleted here and, through sync, on every host: that is "Move to 1Password".
    */
-  async setReference(project: string, name: string, reference: string): Promise<{ replacedTyped: boolean }> {
+  async setReference(project: string, name: string, reference: string, sites?: readonly string[]): Promise<{ replacedTyped: boolean }> {
     validatePaneSecretAddress(project, name);
     const problem = paneSecretReferenceProblem(reference);
     if (problem) throw invalidSecret(problem);
+    // A login stays one when its value moves to 1Password or its reference changes.
+    const chosen = sites ? checkedSites(sites) : this.sitesOf(project, name);
     const replacedTyped = this.has(project, name) && !this.referenceOf(project, name);
     if (replacedTyped) await this.delete(project, name);
     return this.serial(async () => {
       const key = paneSecretKey(project, name);
       const meta: PaneSecretReferenceMeta = { updatedAt: this.now().toISOString(), source: this.hostLabel(), reference };
+      if (chosen) meta.sites = chosen;
       await this.config.updateConfigWith(config => ({ paneSecretReferences: { ...config.paneSecretReferences, [key]: meta } }));
       this.onLocalChange();
       return { replacedTyped };
@@ -360,52 +422,180 @@ export class PaneSecretStore {
     });
   }
 
+  private loginIndex(): Record<string, PaneLoginMeta> {
+    return this.config.getConfig().paneLogins ?? {};
+  }
+
+  /** A typed login's sites as the person last set them, or null when it is not a typed login. */
+  private typedLoginSites(key: string): string[] | null {
+    const meta = this.loginIndex()[key];
+    return meta && !meta.deleted ? usableSites(meta.sites) : null;
+  }
+
+  /** The sites of a login, typed or from 1Password; null when `project/name` is not a login here. */
+  sitesOf(project: string, name: string): string[] | null {
+    const key = paneSecretKey(project, name);
+    const reference = this.referenceIndex()[key];
+    if (reference && !reference.deleted && usableReference(reference.reference)) return usableSites(reference.sites);
+    return this.typedLoginSites(key);
+  }
+
+  /**
+   * Makes `project/name` a login for exactly `sites`, or changes a login's sites. Only the person does
+   * this, from Settings. A plain secret moves: its copies are deleted here and, through sync, on every
+   * host, so no command gets it any more. A reference takes the sites with its next lease.
+   */
+  async setSites(project: string, name: string, sites: readonly string[]): Promise<void> {
+    validatePaneSecretAddress(project, name);
+    const reference = this.referenceOf(project, name);
+    if (reference) {
+      await this.setReference(project, name, reference, sites);
+      return;
+    }
+    const key = paneSecretKey(project, name);
+    const typed = this.typedLoginSites(key) !== null;
+    const value = typed ? (await this.readTypedLogin(project, name)).value : await this.read(project, name);
+    await this.setLogin(project, name, value, sites);
+  }
+
+  /** Saves a typed login, replacing any plain secret of that name. Only the person does this. */
+  async setLogin(project: string, name: string, value: string, sites: readonly string[]): Promise<void> {
+    const chosen = this.checkedLogin(project, name, value, sites);
+    await this.writeLogin(project, name, value, chosen);
+    if (this.hasPlain(paneSecretKey(project, name))) await this.deletePlain(project, name);
+  }
+
+  private checkedLogin(project: string, name: string, value: string, sites: readonly string[]): string[] {
+    validatePaneSecretAddress(project, name);
+    if (this.referenceOf(project, name)) throw secretIsReference(project, name);
+    checkValue(value);
+    return checkedSites(sites);
+  }
+
+  private writeLogin(project: string, name: string, value: string, sites: string[]): Promise<void> {
+    return this.serial(async () => {
+      const key = paneSecretKey(project, name);
+      try {
+        await this.values.write(loginValueKey(key), encodeLogin({ sites, value }));
+      } catch (error) {
+        throw this.writeFailed(key, error);
+      }
+      const meta: PaneLoginMeta = { updatedAt: this.now().toISOString(), source: this.hostLabel(), sites };
+      await this.config.updateConfigWith(config => ({ paneLogins: { ...config.paneLogins, [key]: meta } }));
+      this.onLocalChange();
+    });
+  }
+
+  private writeFailed(key: string, error: unknown): PaneError {
+    return new PaneError(
+      'SECRET_WRITE_FAILED',
+      `Pane could not store ${key}: ${reasonOf(error)}. Nothing was changed.`,
+      this.values.storage().kind === 'keychain'
+        ? 'Unlock the login keychain in Keychain Access, then try again.'
+        : 'Check that Pane can write to its data directory, then try again.',
+    );
+  }
+
+  private async readTypedLogin(project: string, name: string): Promise<StoredLogin> {
+    const key = paneSecretKey(project, name);
+    const login = decodeLogin(await this.values.read(loginValueKey(key)).catch(error => {
+      throw new PaneError(
+        'SECRET_UNREADABLE',
+        `Pane could not read ${key} on this machine: ${reasonOf(error)}. Nothing was filled.`,
+        this.values.storage().kind === 'keychain' ? 'Unlock the login keychain in Keychain Access, then try again.' : 'Ask the person to save the login again in Settings → Secrets.',
+      );
+    }));
+    if (!login) throw new PaneError('SECRET_UNREADABLE', `Pane could not read ${key} on this machine: its stored login is malformed. Nothing was filled.`, 'Ask the person to save the login again in Settings → Secrets.');
+    return login;
+  }
+
+  /**
+   * A login's value and the sites it may be filled on: those its stored value carries and the person's
+   * list both name. The stored value decides, so editing config.json or a lease record widens nothing.
+   * A login from 1Password needs a live lease, exactly as `read` does.
+   */
+  async readLogin(project: string, name: string): Promise<StoredLogin> {
+    validatePaneSecretAddress(project, name);
+    const listed = this.sitesOf(project, name);
+    const leases = this.leases();
+    await leases?.ready();
+    if (leases?.has(project, name) || this.referenceOf(project, name)) {
+      this.refuseSharedLease(project, name);
+      if (!listed && this.referenceOf(project, name)) throw secretNotLogin(project, name);
+      const leased = leases ? await leases.readLogin(project, name) : null;
+      if (!leased) throw listed ? this.staleLease(project, name) : secretNotLogin(project, name);
+      const sites = listed ? leased.sites.filter(site => listed.includes(site)) : leased.sites;
+      return { value: leased.value, sites };
+    }
+    if (!listed) throw this.has(project, name) ? secretNotLogin(project, name) : secretNotFound(project, name);
+    const login = await this.readTypedLogin(project, name);
+    return { value: login.value, sites: login.sites.filter(site => listed.includes(site)) };
+  }
+
+  /** A reference became a login while leased: the lease predates the sites. */
+  private staleLease(project: string, name: string): PaneError {
+    return new PaneError(
+      'SECRET_LEASE_ENDED',
+      `${paneSecretKey(project, name)} became a login after its lease started, so the lease does not cover it. Nothing was filled.`,
+      `Run \`${secretLeaseRenewCommand(project, [name])}\`, and the person approves it on the card.`,
+    );
+  }
+
   private serial<T>(work: () => Promise<T>): Promise<T> {
     const run = this.queue.then(work, work);
     this.queue = run.catch(() => undefined);
     return run;
   }
 
-  /** Live secrets, sorted by project then name. */
+  private hasPlain(key: string): boolean {
+    const meta = this.index()[key];
+    return Boolean(meta && !meta.deleted);
+  }
+
+  /** Live typed secrets and logins, sorted by project then name. A login hides a plain secret of its name. */
   list(project?: string): PaneSecretSummary[] {
-    return Object.entries(this.index()).flatMap(([key, meta]) => {
+    const entries: Array<[string, PaneLoginMeta]> = [
+      ...Object.entries(this.index()).filter(([key]) => this.typedLoginSites(key) === null),
+      ...Object.entries(this.loginIndex()),
+    ];
+    return entries.flatMap(([key, meta]) => {
       const address = parsePaneSecretKey(key);
       if (!address || meta.deleted || (project !== undefined && address.project !== project)) return [];
-      return [{ ...address, updatedAt: meta.updatedAt, machine: meta.source }];
+      const summary: PaneSecretSummary = { ...address, updatedAt: meta.updatedAt, machine: meta.source };
+      const sites = this.typedLoginSites(key);
+      return [sites ? { ...summary, sites } : summary];
     }).sort((a, b) => a.project.localeCompare(b.project) || a.name.localeCompare(b.name));
   }
 
-  /** Whether `project/name` exists here, typed or as a 1Password reference. */
+  /** Whether `project/name` exists here: typed, a login, or as a 1Password reference. */
   has(project: string, name: string): boolean {
-    const meta = this.index()[paneSecretKey(project, name)];
-    return Boolean(meta && !meta.deleted) || this.referenceOf(project, name) !== null;
+    const key = paneSecretKey(project, name);
+    return this.hasPlain(key) || this.typedLoginSites(key) !== null || this.referenceOf(project, name) !== null;
   }
 
-  /** Store `value` under `project/name`, replacing any saved value. */
+  /** The person's own new value for `project/name`: a login keeps its sites, anything else is `set`. */
+  async replaceValue(project: string, name: string, value: string): Promise<{ replaced: boolean }> {
+    const key = paneSecretKey(project, name);
+    const sites = this.referenceOf(project, name) ? null : this.typedLoginSites(key);
+    if (!sites) return this.set(project, name, value);
+    checkValue(value);
+    await this.writeLogin(project, name, value, sites);
+    return { replaced: true };
+  }
+
+  /** Store `value` under `project/name`, replacing any saved value. Refused for a login, whoever asks. */
   async set(project: string, name: string, value: string): Promise<{ replaced: boolean; secret: PaneSecretSummary }> {
     validatePaneSecretAddress(project, name);
-    if (!value) throw invalidSecret('A secret value cannot be empty.');
-    if (Buffer.byteLength(value, 'utf8') > MAX_VALUE_BYTES) throw invalidSecret('A secret value can be at most 64 KiB.');
-    if (this.referenceOf(project, name)) {
-      throw new PaneError(
-        'SECRET_IS_REFERENCE',
-        `${paneSecretKey(project, name)} comes from 1Password, so Pane does not store a value for it. Nothing was changed.`,
-        `Run \`${secretLeaseRenewCommand(project, [name])}\` to use it, or remove the reference in Settings → Secrets first.`,
-      );
-    }
+    checkValue(value);
+    if (this.referenceOf(project, name)) throw secretIsReference(project, name);
+    if (this.sitesOf(project, name)) throw secretIsLogin(project, name);
     return this.serial(async () => {
       const key = paneSecretKey(project, name);
       const replaced = this.has(project, name);
       try {
         await this.values.write(key, value);
       } catch (error) {
-        throw new PaneError(
-          'SECRET_WRITE_FAILED',
-          `Pane could not store ${key}: ${reasonOf(error)}. Nothing was changed.`,
-          this.values.storage().kind === 'keychain'
-            ? 'Unlock the login keychain in Keychain Access, then try again.'
-            : 'Check that Pane can write to its data directory, then try again.',
-        );
+        throw this.writeFailed(key, error);
       }
       const meta: PaneSecretMeta = { updatedAt: this.now().toISOString(), source: this.hostLabel() };
       await this.config.updateConfigWith(config => ({ paneSecrets: { ...config.paneSecrets, [key]: meta } }));
@@ -419,12 +609,24 @@ export class PaneSecretStore {
   async delete(project: string, name: string): Promise<void> {
     validatePaneSecretAddress(project, name);
     if (this.referenceOf(project, name)) return this.deleteReference(project, name);
+    if (!this.has(project, name)) throw secretNotFound(project, name);
+    const key = paneSecretKey(project, name);
+    const login = this.typedLoginSites(key) !== null;
+    // The plain copy too, when one is left under a login's name, so deleting the login never brings it back.
+    if (this.hasPlain(key)) await this.deletePlain(project, name);
+    if (login) await this.deleteTyped(project, name, 'paneLogins');
+  }
+
+  private deletePlain(project: string, name: string): Promise<void> {
+    return this.deleteTyped(project, name, 'paneSecrets');
+  }
+
+  private async deleteTyped(project: string, name: string, index: 'paneSecrets' | 'paneLogins'): Promise<void> {
     return this.serial(async () => {
-      if (!this.has(project, name)) throw secretNotFound(project, name);
       const key = paneSecretKey(project, name);
       // The value first, so a refused removal leaves the secret listed and the delete can be retried.
       try {
-        await this.values.remove(key);
+        await this.values.remove(index === 'paneLogins' ? loginValueKey(key) : key);
       } catch (error) {
         throw new PaneError(
           'SECRET_WRITE_FAILED',
@@ -435,26 +637,21 @@ export class PaneSecretStore {
         );
       }
       const meta: PaneSecretMeta = { updatedAt: this.now().toISOString(), source: this.hostLabel(), deleted: true };
-      await this.config.updateConfigWith(config => ({ paneSecrets: { ...config.paneSecrets, [key]: meta } }));
-      this.known.delete(key);
+      await this.config.updateConfigWith(config => ({ [index]: { ...config[index], [key]: meta } }));
+      if (index === 'paneSecrets') this.known.delete(key);
       this.onLocalChange();
     });
   }
 
   /**
    * The value of `project/name`: typed, or from its live lease when it is a 1Password reference.
-   * Throws SECRET_NOT_FOUND, SECRET_LEASE_ENDED or SECRET_UNREADABLE, never with the value.
+   * Throws SECRET_IS_LOGIN, SECRET_NOT_FOUND, SECRET_LEASE_ENDED or SECRET_UNREADABLE, never with the value.
    */
   async read(project: string, name: string): Promise<string> {
     validatePaneSecretAddress(project, name);
+    if (this.sitesOf(project, name)) throw secretIsLogin(project, name);
     const leases = this.leases();
-    if (this.config.getConfig().workspaces?.visibility === 'tailnet' && (leases?.has(project, name) || this.referenceOf(project, name))) {
-      throw new PaneError(
-        'SECRET_LEASE_REFUSED',
-        `${paneSecretKey(project, name)} comes from 1Password, and this machine is shared with everyone on the tailnet, so it holds no leases. Nothing was run.`,
-        'Set this machine to "Only me" in Settings → Workspaces, then start a lease again.',
-      );
-    }
+    this.refuseSharedLease(project, name);
     // A lease answers first: a host can hold a lease pushed before the reference itself has synced.
     if (leases) {
       await leases.ready();
@@ -479,12 +676,22 @@ export class PaneSecretStore {
     }
   }
 
+  private refuseSharedLease(project: string, name: string): void {
+    if (this.config.getConfig().workspaces?.visibility !== 'tailnet') return;
+    if (!this.leases()?.has(project, name) && !this.referenceOf(project, name)) return;
+    throw new PaneError(
+      'SECRET_LEASE_REFUSED',
+      `${paneSecretKey(project, name)} comes from 1Password, and this machine is shared with everyone on the tailnet, so it holds no leases. Nothing was run.`,
+      'Set this machine to "Only me" in Settings → Workspaces, then start a lease again.',
+    );
+  }
+
   /** References and their removals, for the other hosts. Addresses only: a reference carries no value. */
   exportReferencesForSync() {
     const records: Record<string, SharedCredential> = {};
     for (const [key, meta] of Object.entries(this.referenceIndex())) {
       if (!parsePaneSecretKey(key)) continue;
-      records[key] = { value: meta.deleted ? null : meta.reference ?? null, updatedAt: meta.updatedAt, source: meta.source };
+      records[key] = { value: meta.deleted || !meta.reference ? null : encodeReference(meta.reference, meta.sites), updatedAt: meta.updatedAt, source: meta.source };
     }
     return records;
   }
@@ -496,17 +703,67 @@ export class PaneSecretStore {
       const applied: Record<string, PaneSecretReferenceMeta> = {};
       for (const [key, record] of Object.entries(incoming)) {
         if (!parsePaneSecretKey(key) || !isNewer(record, current[key])) continue;
-        if (record.value !== null && paneSecretReferenceProblem(record.value)) continue;
+        const reference = record.value === null ? null : decodeReference(record.value);
+        if (record.value !== null && !reference) continue;
         // A stamp from the future would win every later edit; no real host's clock is that far ahead.
         if (Date.parse(record.updatedAt) > this.now().getTime() + MAX_CLOCK_AHEAD_MS) continue;
-        applied[key] = record.value === null
-          ? { updatedAt: record.updatedAt, source: record.source, deleted: true }
-          : { updatedAt: record.updatedAt, source: record.source, reference: record.value };
+        applied[key] = reference
+          ? { updatedAt: record.updatedAt, source: record.source, ...reference }
+          : { updatedAt: record.updatedAt, source: record.source, deleted: true };
       }
       const changed = Object.keys(applied);
       if (changed.length > 0) {
         await this.config.updateConfigWith((config: AppConfig) => ({ paneSecretReferences: { ...config.paneSecretReferences, ...applied } }));
       }
+      return changed;
+    });
+  }
+
+  /** Typed logins, each with its sites and value together, and their deletions. Only a login whose stored sites match its list syncs. */
+  async exportLoginsForSync(): Promise<Record<string, SharedCredential>> {
+    const records: Record<string, SharedCredential> = {};
+    for (const [key, meta] of Object.entries(this.loginIndex())) {
+      const address = parsePaneSecretKey(key);
+      if (!address) continue;
+      if (meta.deleted) {
+        records[key] = { value: null, updatedAt: meta.updatedAt, source: meta.source };
+        continue;
+      }
+      try {
+        const login = await this.readTypedLogin(address.project, address.name);
+        if (JSON.stringify(login.sites) !== JSON.stringify(meta.sites)) throw new Error('its sites were edited outside Pane');
+        records[key] = { value: encodeLogin(login), updatedAt: meta.updatedAt, source: meta.source };
+      } catch (error) {
+        console.warn(`[PaneSecrets] Not sharing the login ${key}: ${reasonOf(error)}`);
+      }
+    }
+    return records;
+  }
+
+  /** Saves each login newer than this host's copy. Returns the keys that changed. */
+  async applyLoginsFromSync(incoming: Record<string, SharedCredential>): Promise<string[]> {
+    return this.serial(async () => {
+      const current = this.loginIndex();
+      const applied: Record<string, PaneLoginMeta> = {};
+      for (const [key, record] of Object.entries(incoming)) {
+        if (!parsePaneSecretKey(key) || !isNewer(record, current[key])) continue;
+        // A stamp from the future would win every later edit; no real host's clock is that far ahead.
+        if (Date.parse(record.updatedAt) > this.now().getTime() + MAX_CLOCK_AHEAD_MS) continue;
+        const login = record.value === null ? null : decodeLogin(record.value);
+        if (record.value !== null && !login) continue;
+        try {
+          if (login) await this.values.write(loginValueKey(key), encodeLogin(login));
+          else await this.values.remove(loginValueKey(key)).catch(() => undefined);
+        } catch (error) {
+          console.warn(`[PaneSecrets] Could not save the login ${key} from ${record.source}: ${reasonOf(error)}`);
+          continue;
+        }
+        applied[key] = login
+          ? { updatedAt: record.updatedAt, source: record.source, sites: login.sites }
+          : { updatedAt: record.updatedAt, source: record.source, deleted: true };
+      }
+      const changed = Object.keys(applied);
+      if (changed.length > 0) await this.config.updateConfigWith(config => ({ paneLogins: { ...config.paneLogins, ...applied } }));
       return changed;
     });
   }
@@ -564,6 +821,13 @@ export class PaneSecretStore {
 let shared: PaneSecretStore | null = null;
 let sharedValues: SecretValueBackend | null = null;
 let sharedLeases: SecretLeaseStore | null = null;
+let sharedUses: LoginUseLog | null = null;
+
+/** This host's record of each time a saved login was filled. */
+export function loginUseLog(): LoginUseLog {
+  sharedUses ??= new LoginUseLog(getAppDirectory(), () => getPaneEventSink().send('pane-secrets:changed'));
+  return sharedUses;
+}
 
 /** One value store per host, so secrets and leases share its write queue. */
 function hostValueBackend(): SecretValueBackend {

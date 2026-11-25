@@ -7,7 +7,7 @@ import { RunpaneError } from './errors';
 // Pane fills in the Pane from the caller and checks every request; nothing here names a Pane.
 
 /** The browser commands, and the flags each one takes. */
-export const BROWSER_VERBS = ['open', 'tabs', 'close', 'snapshot', 'screenshot', 'click', 'type', 'press', 'select', 'scroll', 'navigate', 'wait', 'dialog', 'evaluate', 'upload'] as const;
+export const BROWSER_VERBS = ['open', 'tabs', 'close', 'snapshot', 'screenshot', 'click', 'type', 'fill', 'press', 'select', 'scroll', 'navigate', 'wait', 'dialog', 'evaluate', 'upload'] as const;
 
 /** Flags that take a value, by request field. Numbers and JSON arrays are parsed here; Pane checks the rest. */
 export const BROWSER_VALUE_FLAGS = new Map<string, { field: string; kind: 'text' | 'number' | 'list' }>([
@@ -18,6 +18,9 @@ export const BROWSER_VALUE_FLAGS = new Map<string, { field: string; kind: 'text'
   ['--y', { field: 'y', kind: 'number' }],
   ['--button', { field: 'button', kind: 'text' }],
   ['--text', { field: 'text', kind: 'text' }],
+  // `browser fill` names a saved login; its value never passes through here.
+  ['--project', { field: 'project', kind: 'text' }],
+  ['--name', { field: 'name', kind: 'text' }],
   ['--key', { field: 'key', kind: 'text' }],
   ['--values', { field: 'values', kind: 'list' }],
   ['--dx', { field: 'dx', kind: 'number' }],

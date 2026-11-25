@@ -1137,12 +1137,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       machines: [{ id: 'local', name: 'This computer', online: true, refusal: null, memoryOnly: false }],
       leaseLengths: {},
       moveVault: null,
+      loginUses: [],
       ...mockOptions.paneSecrets,
     });
     /** What Settings asked of paneSecrets; values are never recorded. */
     type PaneSecretCall =
       | { action: 'set' | 'delete' | 'moveToOnePassword'; project: string; name: string }
       | { action: 'setReference'; project: string; name: string; reference: string }
+      | { action: 'setSites'; project: string; name: string; sites: string[] }
       | { action: 'startLease'; request: SecretLeaseStartRequest }
       | { action: 'endLease'; leaseId: string }
       | { action: 'endAllLeases' | 'listVaults' }
@@ -1160,14 +1162,21 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let leaseCount = 0;
     const paneSecretsApi = {
       list: () => Promise.resolve({ success: true, data: clone(paneSecrets) }),
-      set: (project: string, name: string, _value: string) => {
+      set: (project: string, name: string, _value: string, sites?: string[]) => {
         paneSecretCalls.push({ action: 'set', project, name });
         const replaced = paneSecrets.secrets.some(sameSecret(project, name));
         paneSecrets.secrets = [
           ...paneSecrets.secrets.filter((secret) => !sameSecret(project, name)(secret)),
-          { project, name, updatedAt: new Date().toISOString(), machine: 'this-mac' },
+          { project, name, updatedAt: new Date().toISOString(), machine: 'this-mac', ...(sites ? { sites } : {}) },
         ];
         return Promise.resolve({ success: true, data: replaced });
+      },
+      setSites: (project: string, name: string, sites: string[]) => {
+        paneSecretCalls.push({ action: 'setSites', project, name, sites });
+        const withSites = <T extends { project: string; name: string }>(secret: T) => (sameSecret(project, name)(secret) ? { ...secret, sites } : secret);
+        paneSecrets.secrets = paneSecrets.secrets.map(withSites);
+        paneSecrets.references = paneSecrets.references.map(withSites);
+        return Promise.resolve({ success: true, data: true });
       },
       delete: (project: string, name: string) => {
         paneSecretCalls.push({ action: 'delete', project, name });

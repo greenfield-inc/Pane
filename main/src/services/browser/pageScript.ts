@@ -31,6 +31,19 @@ function pageScript(limit: number) {
   // Ref numbers count up for the life of the document and are never reused, so a ref from an
   // older snapshot (another agent's, or one before a takeover) can only miss, never hit another element.
   let counter = 0;
+  /** Pane filled a saved login in this document: nothing here reads a field's value, or a copy of one, again. */
+  let filled = false;
+
+  /** Whether the page's copy of a filled login shows as dots here (loginScript.ts marks it so). */
+  function concealed(el: Element | null): boolean {
+    if (!filled || !el) return false;
+    const security = getComputedStyle(el).getPropertyValue('-webkit-text-security');
+    return security !== '' && security !== 'none';
+  }
+
+  function textNode(node: Node): string {
+    return concealed(node.parentElement) ? MASK : node.textContent ?? '';
+  }
 
   function inputRole(input: HTMLInputElement): string {
     switch (input.type) {
@@ -94,6 +107,7 @@ function pageScript(limit: number) {
   }
 
   function textOf(el: Element): string {
+    if (filled) return flatText(el);
     return clean(el instanceof HTMLElement ? el.innerText : el.textContent);
   }
 
@@ -107,7 +121,8 @@ function pageScript(limit: number) {
   function flatText(el: Element): string {
     let text = '';
     const walk = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) text += `${node.textContent ?? ''} `;
+      if (node.nodeType === Node.TEXT_NODE) text += `${textNode(node)} `;
+      else if (filled && node instanceof Element && node !== el && (hidden(node) || node instanceof HTMLTextAreaElement)) return;
       else if (node instanceof HTMLSlotElement) slotted(node).forEach(walk);
       else if (node instanceof Element && !['SCRIPT', 'STYLE'].includes(node.tagName)) (node.shadowRoot ?? node).childNodes.forEach(walk);
     };
@@ -132,7 +147,7 @@ function pageScript(limit: number) {
   function ownText(label: Element): string {
     let text = '';
     const walk = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) text += `${node.textContent ?? ''} `;
+      if (node.nodeType === Node.TEXT_NODE) text += `${textNode(node)} `;
       else if (node instanceof Element && !['SELECT', 'TEXTAREA', 'INPUT', 'BUTTON', 'SCRIPT', 'STYLE'].includes(node.tagName)) node.childNodes.forEach(walk);
     };
     walk(label);
@@ -162,11 +177,11 @@ function pageScript(limit: number) {
       if (['checkbox', 'radio', 'button', 'submit', 'reset', 'image', 'hidden'].includes(el.type)) return undefined;
       if (el.type === 'file') return el.files && el.files.length > 0 ? Array.from(el.files).map(file => file.name).join(', ') : undefined;
       if (!el.value) return undefined;
-      return masked(el) ? MASK : el.value;
+      return filled || masked(el) ? MASK : el.value;
     }
-    if (el instanceof HTMLTextAreaElement) return el.value ? (masked(el) ? MASK : el.value) : undefined;
+    if (el instanceof HTMLTextAreaElement) return el.value ? (filled || masked(el) ? MASK : el.value) : undefined;
     if (el instanceof HTMLSelectElement) return Array.from(el.selectedOptions).map(option => clean(option.label || option.text)).join(', ') || undefined;
-    if (editable(el)) return masked(el) ? MASK : textOf(el) || undefined;
+    if (editable(el)) return filled || masked(el) ? MASK : textOf(el) || undefined;
     return undefined;
   }
 
@@ -260,7 +275,7 @@ function pageScript(limit: number) {
     const walk = (node: Node, depth: number, inFrame: boolean) => {
       if (truncated) return;
       if (node.nodeType === Node.TEXT_NODE) {
-        const text = clean(node.textContent);
+        const text = clean(textNode(node));
         if (text) pushText(depth, text);
         return;
       }
@@ -415,7 +430,7 @@ function pageScript(limit: number) {
 
   function check(text: string | null, url: string | null, ref: string | null): PageCheck {
     if (url !== null && !location.href.includes(url)) return { met: false };
-    if (text !== null && !(document.body?.innerText ?? '').includes(text)) return { met: false };
+    if (text !== null && !(filled ? (document.body ? textOf(document.body) : '') : document.body?.innerText ?? '').includes(text)) return { met: false };
     if (ref !== null) {
       const el = lookup(ref);
       if ('stale' in el) return { met: false, stale: el.stale };
@@ -429,6 +444,16 @@ function pageScript(limit: number) {
   function revoke(): true {
     refs = new Map();
     return true;
+  }
+
+  /** Pane is about to fill a saved login in this document. */
+  function holdLogin(): true {
+    filled = true;
+    return true;
+  }
+
+  function holdsLogin(): boolean {
+    return filled;
   }
 
   /** What kind of field takes typing at `el`: a password field, another text field, or none. */
@@ -470,13 +495,14 @@ function pageScript(limit: number) {
       if (masked(active)) return '';
       return active.value.slice(active.selectionStart ?? 0, active.selectionEnd ?? 0).slice(0, 100_000);
     }
+    if (concealed(window.getSelection()?.anchorNode?.parentElement ?? null)) return '';
     return (window.getSelection()?.toString() ?? '').slice(0, 100_000);
   }
 
-  return { snapshot, point, focus, select, mark, scrollBy, check, revoke, focusedField, selection };
+  return { snapshot, point, focus, select, mark, scrollBy, check, revoke, focusedField, selection, holdLogin, holdsLogin };
 }
 
 /** One call on the page script, with JSON arguments; the first call in a document defines it. */
-export function pageCall(method: 'snapshot' | 'point' | 'focus' | 'select' | 'mark' | 'scrollBy' | 'check' | 'revoke' | 'focusedField' | 'selection', ...args: PageArgument[]): string {
+export function pageCall(method: 'snapshot' | 'point' | 'focus' | 'select' | 'mark' | 'scrollBy' | 'check' | 'revoke' | 'focusedField' | 'selection' | 'holdLogin' | 'holdsLogin', ...args: PageArgument[]): string {
   return `(globalThis.__paneBrowser ??= (${pageScript.toString()})(${SNAPSHOT_CHAR_LIMIT})).${method}(${args.map(arg => JSON.stringify(arg ?? null)).join(', ')})`;
 }

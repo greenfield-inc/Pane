@@ -6,6 +6,7 @@ import {
   SECRET_LEASE_MAX_MS,
   SECRET_LEASE_MIN_MS,
   SECRET_LEASE_REMINDER_MS,
+  type PaneLoginUse,
   type SecretLeaseMachine,
   type SecretLeaseOnMachine,
   type SecretLeaseStartResult,
@@ -14,8 +15,9 @@ import {
 import type { AppConfig } from '../types/config';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import type { OnePassword } from './onePassword';
+import { decodeLogin, encodeLogin, loginUsesSchema } from './paneLogins';
 import type { PaneSecretStore } from './paneSecrets';
-import { MAX_TIMER_MS, type SecretLeaseRecord, type SecretLeaseStore } from './secretLeases';
+import { MAX_TIMER_MS, type SecretLeaseGrant, type SecretLeaseRecord, type SecretLeaseStore } from './secretLeases';
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 
 const LIST_TIMEOUT_MS = 3_000;
@@ -35,6 +37,8 @@ export interface HostLeaseList {
   memoryOnly: boolean;
   /** Why this machine refuses leases, or null. */
   refusal: string | null;
+  /** The newest uses of saved logins there; absent on a machine from before logins. */
+  loginUses?: PaneLoginUse[];
 }
 
 const leaseSummarySchema = boundary.object({
@@ -51,6 +55,7 @@ const hostLeaseListSchema = boundary.object({
   leases: boundary.array(leaseSummarySchema),
   memoryOnly: boundary.boolean,
   refusal: boundary.nullable(boundary.string),
+  loginUses: boundary.optional(loginUsesSchema),
 });
 
 /** The push a desktop sends a machine: values and time remaining, never an absolute expiry. */
@@ -58,10 +63,21 @@ export const leasePushSchema = boundary.object({
   id: boundary.nonEmptyString,
   project: boundary.string,
   secrets: boundary.array(boundary.object({ name: boundary.string, reference: boundary.string, value: boundary.string })),
+  /** Leased logins, their sites stored in `login`. A field of its own, so a machine from before logins never takes one as a plain secret. */
+  logins: boundary.optional(boundary.array(boundary.object({ name: boundary.string, reference: boundary.string, login: boundary.string }))),
   expiresInMs: boundary.number,
   requestedBy: boundary.string,
   grantedOn: boundary.string,
 });
+/** What a push asks the receiving machine to store. Throws when a login in it is not one Pane wrote. */
+export function pushedSecrets(push: ReturnType<typeof leasePushSchema['decode']>): SecretLeaseGrant['secrets'] {
+  const logins = (push.logins ?? []).map(({ name, reference, login }) => {
+    const stored = decodeLogin(login);
+    if (!stored) throw new PaneError('SECRET_INVALID', 'A login in the lease is malformed. Nothing was stored.', 'Update Pane on both machines, then start the lease again.');
+    return { name, reference, ...stored };
+  });
+  return [...push.secrets, ...logins];
+}
 export const leaseEndSchema = boundary.object({ id: boundary.nonEmptyString });
 
 /** Why this machine can't take a lease: teammates on "Everyone on tailnet" run as the owner and could use it. */
@@ -184,7 +200,11 @@ export class SecretLeaseService {
     }
     const targets = request.renews ? previous?.pushedTo ?? [] : request.machines.filter(id => id !== LOCAL_MACHINE_ID);
     const values = await this.deps.onePassword().read(references);
-    const secrets = request.names.map((name, index) => ({ name, reference: references[index], value: values[index] }));
+    const secrets = request.names.map((name, index): SecretLeaseGrant['secrets'][number] => {
+      const sites = this.deps.secrets().sitesOf(request.project, name);
+      const secret = { name, reference: references[index], value: values[index] };
+      return sites ? { ...secret, sites } : secret;
+    });
     const lengthMs = request.lengthMs ?? this.lengthFor(request.project);
     const lease = await this.deps.store.grant({
       id: request.renews,
@@ -211,7 +231,13 @@ export class SecretLeaseService {
     const pushed: LeaseMachineLink[] = [];
     const refused: Array<{ machine: string; reason: string }> = [];
     if (!lease) return { pushed, refused };
-    const secrets = await Promise.all(lease.secrets.map(async secret => ({ ...secret, value: await this.deps.store.read(lease.project, secret.name) })));
+    const secrets: Array<{ name: string; reference: string; value: string }> = [];
+    const logins: Array<{ name: string; reference: string; login: string }> = [];
+    for (const { name, reference, login } of lease.secrets) {
+      const stored = login ? await this.deps.store.readLogin(lease.project, name) : null;
+      if (stored) logins.push({ name, reference, login: encodeLogin(stored) });
+      else secrets.push({ name, reference, value: await this.deps.store.read(lease.project, name) });
+    }
     await Promise.all(ids.map(async machineId => {
       const link = links.find(candidate => candidate.id === machineId);
       if (!link) {
@@ -227,6 +253,7 @@ export class SecretLeaseService {
           id,
           project: lease.project,
           secrets,
+          ...(logins.length > 0 ? { logins } : {}),
           expiresInMs: Date.parse(lease.expiresAt) - this.now(),
           requestedBy: lease.requestedBy,
           grantedOn: lease.grantedOn,
@@ -280,22 +307,24 @@ export class SecretLeaseService {
   }
 
   /** Leases on this desktop and on each machine that answers, and the machines a lease can go to. */
-  async overview(): Promise<{ leases: SecretLeaseOnMachine[]; machines: SecretLeaseMachine[] }> {
+  async overview(): Promise<{ leases: SecretLeaseOnMachine[]; machines: SecretLeaseMachine[]; loginUses: PaneLoginUse[] }> {
     const label = this.deps.hostLabel();
     const ownRefusal = hostLeaseRefusal(this.deps.config());
     const leases: SecretLeaseOnMachine[] = this.deps.store.list().map(lease => ({ ...lease, machineId: LOCAL_MACHINE_ID, machine: label }));
     const machines: SecretLeaseMachine[] = [{ id: LOCAL_MACHINE_ID, name: label, online: true, refusal: ownRefusal, memoryOnly: this.deps.store.memoryOnly() }];
     const lists = await this.remoteLists();
+    const loginUses: PaneLoginUse[] = [];
     for (const link of this.deps.machines()) {
       const list = lists.get(link.id);
       for (const lease of list?.leases ?? []) leases.push({ ...lease, machineId: link.id, machine: link.name });
+      for (const use of list?.loginUses ?? []) loginUses.push({ ...use, machine: link.name });
       const refusal = !link.online
         ? `${link.name} is offline`
         : list ? list.refusal : `Pane on ${link.name} needs an update for leases`;
       machines.push({ id: link.id, name: link.name, online: link.online, refusal, memoryOnly: list?.memoryOnly ?? false });
     }
     leases.sort((a, b) => Date.parse(a.expiresAt) - Date.parse(b.expiresAt));
-    return { leases, machines };
+    return { leases, machines, loginUses };
   }
 
   /**
