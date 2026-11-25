@@ -383,6 +383,13 @@ export class ChatTabManager {
     this.relaunchWhenFree(panelId);
   }
 
+  /** The agent is in a reply (or a message is about to start one): a switch to another agent waits for it to end. */
+  replying(panelId: string): boolean {
+    const tab = this.tabs.get(panelId);
+    const runtime = tab?.runtime;
+    return !!tab && (!!this.options.store.state(panelId)?.turn || tab.delivering || !!runtime?.isAlive() && (runtime.isRunning() || runtime.isWorkingAlone()));
+  }
+
   /** Whether a Reload or Switch is waiting for the agent's reply to end or restarting it. */
   relaunchPending(panelId: string): boolean {
     return !!this.options.store.state(panelId)?.relaunch || this.tabs.get(panelId)?.relaunching === true;
@@ -428,8 +435,7 @@ export class ChatTabManager {
     const divider: ChatDivider = keep
       ? { sessionId: before.acpSessionId, text: request.divider, at, ...withAfter(tab.transcript?.lastReplayedId()) }
       : { leading: true, text: request.divider, at };
-    await this.release(tab);
-    if (!keep) forgetConversation(tab);
+    // Saved before the agent stops: a send while it stops starts the new launch, never the old one.
     this.update(panelId, current => {
       const next: ChatPanelState = {
         ...current, relaunch: undefined, launch: request.launch, status: 'starting', problem: undefined,
@@ -439,6 +445,8 @@ export class ChatTabManager {
       if (!keep) Object.assign(next, { acpSessionId: undefined, turn: undefined, turnTimes: undefined, clearedAt: undefined, banner: undefined, open: undefined });
       return next;
     });
+    if (!keep) forgetConversation(tab);
+    await this.release(tab);
     if (!keep && request.newConversation) {
       if (transcript) this.queueTranscript(panelId, transcript, request.newConversation.reason);
       else if (saveFailure) tab.notice = `The earlier conversation could not be saved for the new one (${saveFailure}), so it starts without it.`;

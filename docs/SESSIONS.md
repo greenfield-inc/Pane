@@ -111,7 +111,8 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   asks first. A new conversation then starts in the Session's tab for that agent
   and is given the old one, saved as `transcripts/<conversation>.md` in the
   Session folder. Agents say which kind they are with the contract's
-  `chat.profileSwitchKeepsConversation`.
+  `chat.profileSwitchKeepsConversation`. A switch to the other agent is refused
+  while the agent is still replying, since the transcript must include the reply.
 - If the agent can't load the conversation after a Reload or Switch, Pane starts
   a new one given the saved transcript, and the divider says so. It never drops
   the history silently.

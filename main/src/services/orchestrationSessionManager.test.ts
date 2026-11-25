@@ -447,7 +447,7 @@ describe('OrchestrationSessionManager', () => {
       const chatTabs = () => {
         const port = {
           ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' as const,
-          relaunch: vi.fn(), saveTranscript: vi.fn(() => '/sessions/s/transcripts/old.md'), stop: vi.fn(async () => undefined),
+          relaunch: vi.fn(), saveTranscript: vi.fn(() => '/sessions/s/transcripts/old.md'), stop: vi.fn(async () => undefined), replying: vi.fn(() => false),
         };
         return port;
       };
@@ -472,6 +472,10 @@ describe('OrchestrationSessionManager', () => {
         const port = chatTabs();
         fixture.manager.attachChatTabs(port);
         const created = await fixture.manager.create({ name: 'Crosses agents', agent: 'claude' });
+        // A reply in progress must end first: the other agent gets the transcript as it stands.
+        port.replying.mockReturnValueOnce(true);
+        await expect(fixture.manager.switchProfile({ sessionId: created.session.id }, 'greenfield/product-researcher')).rejects.toMatchObject({ code: 'SESSION_PROFILE_BUSY' });
+        expect(port.saveTranscript).not.toHaveBeenCalled();
         const switched = await fixture.manager.switchProfile({ sessionId: created.session.id }, 'greenfield/product-researcher');
         expect(switched).toMatchObject({ effect: 'new-conversation', session: { agent: 'codex', launchCommand: '', agentProfile: { ref: 'greenfield/product-researcher' } } });
         expect(port.saveTranscript).toHaveBeenCalledWith(created.panel.id);

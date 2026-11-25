@@ -32,6 +32,8 @@ export interface SessionChatTabs {
   /** Saves the conversation in the Session folder for a new conversation to read. */
   saveTranscript(panelId: string): string | undefined;
   stop(panelId: string, reason: { message: string; next: string }): Promise<void>;
+  /** The agent is in a reply. */
+  replying(panelId: string): boolean;
 }
 
 /** What a Session needs from Pane's own Agent Farm (T-63). */
@@ -658,6 +660,10 @@ export class OrchestrationSessionManager extends EventEmitter {
         throw new PaneError('SESSION_PROFILE_TERMINAL', `${current.name}'s ${configuredAgent(target.agent).title} tab is a terminal, which can't run a profile. ${outcome}`, `Start a new Session with ${profileDisplayName(ref)}.`);
       }
       const name = profileDisplayName(ref);
+      // The other agent gets the transcript as it stands, so the reply in progress must end first.
+      if (agentChanging && this.chatTabs().replying(fromPanel.id)) {
+        throw new PaneError('SESSION_PROFILE_BUSY', `${current.name}'s ${configuredAgent(current.agent).title} is still replying. ${outcome}`, `Switch to ${name} again when the reply ends, or press Stop first.`);
+      }
       const next: OrchestrationSessionRecord = {
         ...current, agent: target.agent, agentProfile: target.profile,
         revision: current.revision + 1, updatedAt: new Date().toISOString(), activity: [...current.activity],
