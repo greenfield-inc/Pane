@@ -8,8 +8,8 @@ import { ArchiveHoldProvider } from '@/features/approvals/ArchiveUndo';
 import { HomeScreen } from '@/features/home/HomeScreen';
 import { useTheme } from '@/theme';
 
-import { InColumn, useWideLayout } from './wideLayout';
-import { columnWidth } from './windowRule';
+import { InColumn, useRail, useWideLayout } from './wideLayout';
+import { columnWidth, RAIL_WIDTH } from './windowRule';
 
 /**
  * The signed-in app's frame. In a wide window Home is docked in a column to the left of the stack;
@@ -20,6 +20,7 @@ export function WideFrame({ children }: { children: ReactNode }) {
   const theme = useTheme();
   const wide = useWideLayout(state => state.wide);
   const width = useWideLayout(state => state.window.width);
+  const rail = useRail();
   const setWindow = useWideLayout(state => state.setWindow);
   const setOpen = useWideLayout(state => state.setOpen);
   const navigation = useNavigationContainerRef();
@@ -34,7 +35,7 @@ export function WideFrame({ children }: { children: ReactNode }) {
       {/* What is really laid out, not the reported window: React Native can report a stale size on a fold. */}
       <View style={styles.row} onLayout={({ nativeEvent: { layout } }) => setWindow({ width: layout.width, height: layout.height })}>
         {wide ? (
-          <View key="home" testID="home-column" style={[styles.column, { width: columnWidth(width), backgroundColor: theme.colors.background, borderRightColor: theme.colors.border }]}>
+          <View key="home" testID="home-column" style={[styles.column, { width: rail ? RAIL_WIDTH : columnWidth(width), backgroundColor: theme.colors.background, borderRightColor: theme.colors.border }]}>
             <InColumn value>
               {/* The column is always in view, whatever the stack shows. */}
               <ScreenFocus value>

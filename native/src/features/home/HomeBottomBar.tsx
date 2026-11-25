@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { use, useEffect, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -38,6 +38,11 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
   useEffect(() => () => {
     if (inColumn) setSearching(false);
   }, [inColumn, setSearching]);
+  // Search on the rail expands Home with the keyboard up.
+  const input = useRef<TextInput>(null);
+  useEffect(() => {
+    if (inColumn && useWideLayout.getState().takeSearchRequest()) input.current?.focus();
+  }, [inColumn]);
   const onFocusChange = (focused: boolean) => {
     setTyping(focused);
     if (inColumn) setSearching(focused);
@@ -61,6 +66,7 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
       <View style={[styles.search, { backgroundColor: theme.colors.surfaceRaised }]}>
         <Icon ios="magnifyingglass" android="search" size={16} />
         <TextInput
+          ref={input}
           testID="panes-search"
           accessibilityLabel="Search panes"
           placeholder="Search panes"
