@@ -98,7 +98,17 @@ describe('ProfileEditor: save', () => {
     expect(existsSync(path.join(agentFarmConfigRoot(paneDir), 'drafts', 'labtest'))).toBe(false);
   }, 60_000);
 
-  it('refuses to write outside the plugin sections', async () => {
+  it('names the YAML error, not the snippet under it, when a file doesn\'t parse', async () => {
+    const paneDir = tempDir();
+    await installFixture(paneDir);
+    const error = await editor(paneDir).save('labtest', [{ path: 'agents/writer.md', content: '---\nharness: claude\nmodel: claude-opus-5-5\nbad: [x\n---\n' }]).catch(cause => cause);
+    expect(error).toMatchObject({ code: 'PROFILE_INVALID' });
+    expect(error.message).toContain('Agent Farm says labtest/agents/writer.md: Flow sequence');
+    expect(error.message).toMatch(/line \d+/);
+    expect(error.message).not.toMatch(/says \^/);
+  }, 60_000);
+
+    it('refuses to write outside the plugin sections', async () => {
     const paneDir = tempDir();
     await installFixture(paneDir);
     await expect(editor(paneDir).save('labtest', [{ path: 'agents/../../escape.md', content: 'x' }])).rejects.toMatchObject({ code: 'PROFILE_PATH_INVALID' });

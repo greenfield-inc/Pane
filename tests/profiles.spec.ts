@@ -180,6 +180,31 @@ test('a sample photo shows in the profile, the list and its Session row; removin
   await expect(row.getByTestId('profile-avatar').first()).toHaveAttribute('data-avatar', 'initials');
 });
 
+test('Enter on the sidebar\'s Profiles row puts keyboard focus on the first profile (QA bug 2)', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profiles-nav').click();
+  await expect(page.getByTestId('profiles-view')).toHaveCount(0);
+  await page.getByTestId('profiles-nav').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('profile-row-greenfield-orchestrator')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByTestId('profile-row-greenfield-planner')).toBeFocused();
+});
+
+test('after Restore, a file you added and Restore removed gives way to the identity file (QA bug 3)', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-greenfield-planner').click();
+  await page.getByTestId('profiles-add').click();
+  await page.getByRole('menuitem', { name: /New subagent/ }).click();
+  await page.getByTestId('profiles-new-file-dialog').getByLabel('Name').fill('helper');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('profiles-path')).toHaveText('greenfield/agents/helper.md');
+  await page.getByTestId('profiles-restore').click();
+  await page.getByRole('button', { name: 'Restore', exact: true }).click();
+  await expect(page.getByTestId('profiles-path')).toHaveText('greenfield/agents/planner.md');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
 test('the Profiles row opens Profiles and, clicked again, returns to where you were', async ({ page }) => {
   await openProfilesTab(page);
   await expect(page.getByTestId('profiles-nav')).toHaveAttribute('aria-pressed', 'true');

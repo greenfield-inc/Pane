@@ -4,6 +4,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { profileFileChangesSchema } from '../../../shared/types/profileEditor';
 import { ProfileEditor } from '../services/agentFarm/profileEditor';
 import { getAppDirectory } from '../utils/appDirectory';
+import { computerName } from '../utils/computerName';
 import type { AppServices } from './types';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 
@@ -29,6 +30,8 @@ const kindSchema = boundary.enumeration('subagent', 'skill', 'reference');
 export function registerProfileHandlers(ipcMain: IpcMain, services: AppServices): void {
   const editor = new ProfileEditor({
     paneDir: getAppDirectory(),
+    // The name the sidebar and the relay give this computer.
+    machine: () => computerName() || 'this computer',
     onChanged: () => {
       void services.orchestrationSessionManager?.refreshPluginHashes(true)
         .catch(error => console.warn(`[Profiles] Could not re-check Sessions' profiles after a save: ${reasonOf(error)}`));
