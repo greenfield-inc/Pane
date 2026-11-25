@@ -72,6 +72,7 @@ function setup(registered: boolean, pageUrl = 'https://example.com/', extra: Par
 const GOOGLE_REFUSED = 'https://accounts.google.com/v3/signin/rejected?rrk=46&hl=en';
 // Google's OAuth error page for an embedded browser; authError is base64 of the error, code first.
 const GOOGLE_DISALLOWED = 'https://accounts.google.com/signin/oauth/error?authError=ChNkaXNhbGxvd2VkX3VzZXJhZ2VudBJkR29vZ2xl&client_id=1';
+const GOOGLE_DISALLOWED_V2 = 'https://accounts.google.com/signin/oauth/error/v2?authError=ChNkaXNhbGxvd2VkX3VzZXJhZ2VudBJkR29vZ2xl&client_id=1';
 
 describe('routeWebviewPopups', () => {
   it('opens an https link as a browser tab', () => {
@@ -132,7 +133,7 @@ describe('routeWebviewPopups', () => {
     expect(routing.openExternal).not.toHaveBeenCalled();
   });
 
-  it.each([GOOGLE_REFUSED, GOOGLE_DISALLOWED])('stops at Google\'s refusal %s and offers the page the tab is on', (refusal) => {
+  it.each([GOOGLE_REFUSED, GOOGLE_DISALLOWED, GOOGLE_DISALLOWED_V2])('stops at Google\'s refusal %s and offers the page the tab is on', (refusal) => {
     const { follow, redirectTo, routing } = setup(true, 'https://www.reddit.com/login/');
     expect(follow(refusal)).toBe(false);
     expect(redirectTo(refusal, true)).toBe(false);

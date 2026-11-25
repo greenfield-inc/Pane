@@ -151,6 +151,8 @@ const signInListeners = new Set<SignInListener>();
  * does every screen streaming it (browser:view), each offering its own browser.
  */
 export function refuseSignIn(panelId: string, site: string, url: string): void {
+  // The line offers a web page in another browser; a tab on any other page stops without one.
+  if (!/^https?:\/\//i.test(url)) return;
   const notice: BrowserTabNotice = { kind: 'sign-in', site, url };
   popupHost?.getMainWindow()?.webContents.send(BROWSER_TAB_NOTICE_CHANNEL, { panelId, notice });
   for (const listener of signInListeners) listener(panelId, { site, url });
