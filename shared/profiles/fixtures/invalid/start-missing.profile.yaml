@@ -1,7 +1,0 @@
-# expect: FLOW_START_MISSING
-format: pane-profile/1
-name: start-missing
-version: 1.0.0
-flow:
-  start: build
-  test: { run: npm test }

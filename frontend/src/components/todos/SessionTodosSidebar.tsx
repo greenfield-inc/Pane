@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { todoKeyOfRow } from '../../../../shared/todoKey';
 import { todoRef } from '../../../../shared/types/todos';
 import { useSessionTodoApprovals, useSessionTodoEntries } from '../../stores/todosStore';
 import { cn } from '../../utils/cn';
@@ -24,7 +25,7 @@ interface SessionTodosSidebarProps {
 export function SessionTodosSidebar({ sessionId, machineId, onOpen }: SessionTodosSidebarProps) {
   const entries = useSessionTodoEntries(sessionId, machineId);
   // The same approvals as the tab's count, so a row's count clears with it (dismissed, sent or answered).
-  const { byTodo } = useSessionTodoApprovals(sessionId, machineId);
+  const { byTodo, machineId: todosMachine } = useSessionTodoApprovals(sessionId, machineId);
   const now = useNow();
   const shown = useMemo(() => flattenGroups(sessionTodoGroups(entries ?? [], now)), [entries, now]);
   if (entries === null) return null;
@@ -34,7 +35,7 @@ export function SessionTodosSidebar({ sessionId, machineId, onOpen }: SessionTod
     <ul className="flex flex-col gap-0.5 p-2 text-[12px]" aria-label="To-dos this Session requested" data-testid="sidebar-todos">
       {shown.map(({ key, row }) => {
         const { todo, status, subCounts } = row;
-        const waiting = byTodo.get(todo.number) ?? 0;
+        const waiting = byTodo.get(todoKeyOfRow(todosMachine, row)) ?? 0;
         return (
           <li key={key}>
             <button type="button" onClick={() => onOpen(todo.number)}

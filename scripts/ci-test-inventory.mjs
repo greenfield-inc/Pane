@@ -49,7 +49,7 @@ export const LANES = [
   ] } },
   { workflow: 'quality.yml', job: 'main-tests', run: 'pnpm --filter main exec vitest run --shard', list: { vitest: 'main' } },
   { workflow: 'quality.yml', job: 'cross-os-main-tests', run: 'pnpm --filter main exec vitest run --shard', list: { vitest: 'main' } },
-  { workflow: 'quality.yml', job: 'typecheck-lint', list: { named: ['scripts/ci-gate.test.mjs', 'scripts/ci-timings.test.mjs', 'scripts/pre-push.test.mjs', 'scripts/ci-test-inventory.test.mjs'] } },
+  { workflow: 'quality.yml', job: 'typecheck-lint', list: { named: ['scripts/ci-gate.test.mjs', 'scripts/ci-timings.test.mjs', 'scripts/pre-push.test.mjs', 'scripts/ci-test-inventory.test.mjs', 'scripts/todo-key-lint.test.mjs'] } },
   { workflow: 'quality.yml', job: 'functional-smoke-browser', run: 'playwright test --config=playwright.ci.minimal.config.ts', list: { playwright: 'playwright.ci.minimal.config.ts' } },
   { workflow: 'quality.yml', job: 'functional-smoke-stabilizing', run: 'playwright test --config=playwright.ci.stabilizing.config.ts', list: { playwright: 'playwright.ci.stabilizing.config.ts' }, stabilizing: STABILIZING },
   { workflow: 'quality.yml', job: 'functional-smoke-webgl', run: 'playwright test --config=playwright.ci.webgl.config.ts', list: { playwright: 'playwright.ci.webgl.config.ts' } },

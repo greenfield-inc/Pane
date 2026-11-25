@@ -247,7 +247,8 @@ These apply to every browser tab, whoever drives it.
   (`accounts.google.com/…/signin/rejected`) or a `disallowed_useragent` error. AWS's sign-in form
   (`signin.aws.amazon.com/signin`, and `*.signin.aws`) always refuses. The tab stays where it was
   and says "Google won't sign in here." with **Open this page in your browser**, which opens the
-  page you were on (the site's login page, not Google's) in the browser of the screen you are on.
+  page the tab is on in the browser of the screen you are on: the site's own page when the refusal
+  came in a popup or straight away, or Google's sign-in page when it came partway through one.
   A sign-in popup that reaches a refusal closes, and its opener's tab says so. The line shows once
   per page: dismissed or used, it stays away until the page loads again.
   When a site's passkey prompt doesn't appear in a tab, use **Open in your browser**.

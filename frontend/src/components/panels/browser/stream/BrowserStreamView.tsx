@@ -383,6 +383,8 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   useEffect(() => { if (view?.driver?.by === 'agent') setLastAgent(view.driver.agent); }, [view?.driver]);
   const signIn = view?.signIn;
   const [signInDismissed, setSignInDismissed] = useState<string | undefined>(undefined);
+  // The host drops the sign-in when the page loads again, so the next refusal shows its line.
+  if (!signIn && signInDismissed !== undefined) setSignInDismissed(undefined);
   const download = view?.downloads.at(-1);
   const [downloadSeenAt, setDownloadSeenAt] = useState(0);
   const firstDownload = useRef<number | undefined | null>(null);

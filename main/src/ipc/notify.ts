@@ -3,6 +3,7 @@ import { getChatTabManager, setChatTabNotify } from '../services/chatTabs';
 import { app, BrowserWindow, powerMonitor, type IpcMain } from 'electron';
 import fs from 'fs';
 import path from 'path';
+import { isDesktopAlertHandedOff, showDesktopAlert } from './desktopAlerts';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import { paneCommandSignal, teammatePaneCaller } from '../daemon/commandRegistry';
@@ -29,7 +30,7 @@ import { checkCard, fitLinks } from '../services/notify/cardCheck';
 import { summaryPage } from '../services/notify/summaryPage';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import type { MachineHealthCard } from '../../../shared/types/machineHealth';
-import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage } from '../../../shared/types/notify';
+import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage, type NotifyTodoLink } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import { thisMachineName, type ApprovalStore } from '../services/approvals/approvalStore';
@@ -134,6 +135,7 @@ const notifyCommandSchema = boundary.union(
   idCommand('skip'),
   idCommand('open-in-pane'),
   idCommand('ask-agent'),
+  idCommand('open-resources'),
   boundary.object({ type: boundary.literal('open-link'), id: boundary.nonEmptyString, index: boundary.number, paneId: boundary.optional(boundary.nonEmptyString) }),
   boundary.object({ type: boundary.literal('open-url'), id: boundary.nonEmptyString, url: boundary.nonEmptyString }),
   boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('3m', '5m', '15m', '10m', '1h', 'pane') }),
@@ -217,6 +219,19 @@ const machineHealthCardSchema = boundary.object({
  * kind, a changed field) is dropped, and the item shows as a plain card whose choices still answer it.
  */
 const machineHealthField: BoundarySchema<MachineHealthCard | undefined> = { decode: current => decodeOptionalBoundary(current.value, machineHealthCardSchema) };
+const todoLinkSchema = boundary.object({
+  number: boundary.number,
+  title: boundary.string,
+  kind: boundary.optional(boundary.enumeration('review', 'stuck', 'question', 'reminder')),
+  installId: boundary.optional(boundary.string),
+});
+/**
+ * A card's to-do link, read on its own (T-51): one this Pane can't read (a newer machine's kind, say) leaves the
+ * card unlinked, rather than refusing the card and with it every card that machine shares.
+ */
+const tolerantTodoLinkSchema: BoundarySchema<NotifyTodoLink | undefined> = {
+  decode: (cursor) => decodeOptionalBoundary(cursor.value, todoLinkSchema),
+};
 const notifyItemSchema = boundary.object({
   id: boundary.nonEmptyString,
   ui: boundary.enumeration('options', 'approve', 'ask', 'secret', 'info'),
@@ -301,6 +316,9 @@ const notifyItemSchema = boundary.object({
   }))),
   readyAgain: boundary.optional(boundary.number),
   relayedBy: boundary.optional(boundary.object({ panelId: boundary.string, name: boundary.string })),
+  // The to-do it is linked to, by its number on the asking machine (T-51): the renderer reads it with the card's
+  // machineId, so another machine's T-28 names that machine and never matches this one's. Absent from older machines.
+  todo: tolerantTodoLinkSchema,
 });
 const notifySharedStateSchema = boundary.object({
   machine: boundary.string,
@@ -315,7 +333,7 @@ const windowSizeSchema = boundary.object({ width: boundary.number, height: bound
 const panelAgentSchema = boundary.object({ agentType: boundary.optional(boundary.string) });
 
 /** What Notify reads from the app's services: the config, Panes by id, and the main window. */
-type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & Partial<Pick<AppServices, 'todoService'>> & {
+type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow' | 'workspaceWatchLeases'> & Partial<Pick<AppServices, 'todoService'>> & {
   sessionManager: Pick<AppServices['sessionManager'], 'getSession'> & Partial<Pick<AppServices['sessionManager'], 'on' | 'off'>>;
   databaseService?: Pick<AppServices['databaseService'], 'getAllProjects'> & Partial<Pick<AppServices['databaseService'], 'getSession' | 'getPanel'>>;
   /** Files each Approvals item under its Session. */
@@ -478,6 +496,12 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       }
       return { id: started.leaseId, expiresAt: started.expiresAt, machines: started.machines, refused };
     },
+    // The queue already held it until this computer is where alerts go. Approvals' own Sound setting
+    // chimes. Dictate shows blocked tabs, so a tab's prompt is left to it (dictateShowsTabs); it shows
+    // no other approval, so those still notify while it runs.
+    dictateShowsTabs: () => isDesktopAlertHandedOff(services.workspaceWatchLeases),
+    isChatTab: (panelId) => panelManager.getPanel(panelId)?.type === 'chat',
+    alert: (title, body, onClick) => { showDesktopAlert(services, true, title, body, { onClick, silent: true, keepFromDictate: true }); },
     publish: (state) => getPaneEventSink().send('notify:shared-changed', state),
     sendToMachine: async (machineId, command) => {
       if (!saved) throw new PaneError('ERR_MACHINE_UNKNOWN', 'Pane is still starting its machine connections. Nothing was sent.', 'Answer again in a moment.');
@@ -769,6 +793,16 @@ export function followSavedMachines(machines: NotifyMachines): void {
   followMachines?.(machines);
 }
 
+/**
+ * T-51: a card's to-do link is that machine's own to-do. A link naming another machine's install id than the
+ * one this machine connected to is shown unlinked rather than as the wrong to-do; a link or machine with no
+ * install id (an older Pane) is kept, since on screen a link is read with the card's machine.
+ */
+function withOwnTodoLinks(state: NotifySharedState, installId: string | undefined): NotifySharedState {
+  if (!installId || !state.items.some(item => item.todo?.installId && item.todo.installId !== installId)) return state;
+  return { ...state, items: state.items.map(item => (item.todo?.installId && item.todo.installId !== installId ? { ...item, todo: undefined } : item)) };
+}
+
 /** One Notify slot per saved machine: read on first sight, on reconnect and resync; kept, unanswerable, while offline. */
 function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): SavedMachinesLink {
   const queue = notify.queue;
@@ -782,7 +816,7 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
       return;
     }
     // A read finishing after the machine went offline must not mark its cards answerable again.
-    queue.setRemote(machineId, { machine: machine.label, online: machine.status !== 'offline', state });
+    queue.setRemote(machineId, { machine: machine.label, online: machine.status !== 'offline', state: withOwnTodoLinks(state, machine.installId) });
   };
   const read = async (machineId: string) => {
     if (!known.has(machineId)) return;

@@ -12,7 +12,6 @@ import type {
 } from '../shared/types/remoteDaemon';
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop';
-import type { ProfileLibraryView } from '../shared/types/profiles';
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
@@ -115,9 +114,6 @@ export type ElectronApiMockOptions = {
   /** The host runs an older Pane with no Pane order commands: they fail as the remote client says. */
   paneOrderUnsupported?: boolean;
   initialLoops?: Loop[];
-  /** profiles:list answer (the Profiles page); profiles:get reads each file's text from profileYaml. */
-  profileLibrary?: ProfileLibraryView;
-  profileYaml?: Record<string, string>;
   /** remote-daemon:list-tailnet-machines answer. */
   tailnetMachines?: TailnetMachineList;
   /** Remote connections end in `error` with this message instead of connecting. */
@@ -452,7 +448,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockSessions = clone(mockOptions.initialSessions ?? []);
     const mockArchivedSessions: JsonObject[] = [];
     let mockLoops = clone(mockOptions.initialLoops ?? []);
-    const mockProfiles: ProfileLibraryView = clone(mockOptions.profileLibrary ?? { profiles: [] });
     /** A plausible loops:preview answer for the form's preset shapes. */
     const previewLoopCron = (cron: string): LoopSchedulePreview => {
       const fields = cron.trim().split(/\s+/);
@@ -744,9 +739,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onSessionCreated') {
           return (callback: MockEventCallback) => subscribe('session:created', callback);
         }
-        if (prop === 'onProfilesChanged') {
-          return (callback: MockEventCallback) => subscribe('profiles:changed', callback);
-        }
         if (prop === 'onLoopsChanged') {
           return (callback: MockEventCallback) => subscribe('loops:changed', callback);
         }
@@ -791,6 +783,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         }
         if (prop === 'onTodosChanged') {
           return (callback: MockEventCallback) => subscribe('todos:changed', callback);
+        }
+        if (prop === 'onStartLinkRequest') {
+          return (callback: MockEventCallback) => subscribe('pane:start-link-request', callback);
         }
         return () => unsubscribe;
       },
@@ -1284,6 +1279,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       todo.updatedAt = Date.now();
       detail.status = status;
+      // oxlint-disable-next-line pane/no-bare-todo-number -- the mock stands in for one machine's to-do API, which main keys by number.
       const listed = state.snapshot.rows.find((row) => row.todo.number === todo.number);
       if (listed) {
         listed.todo = clone(todo);
@@ -1412,6 +1408,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         isFocused: () => Promise.resolve(mockOptions.initialWindowFocused !== false),
         reportVisibility: () => {},
+        answerStartLink: (answer: JsonObject) => {
+          trackCall('pane:start-link-answer', [answer]);
+          return Promise.resolve();
+        },
+        pendingStartLink: () => Promise.resolve(null),
       },
       getPlatform: () => Promise.resolve(mockOptions.platform ?? 'linux'),
       windowControlsOverlayEnabled: mockOptions.windowControlsOverlayEnabled === true,
@@ -1810,25 +1811,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }),
       resourceMonitor: namespace({
         getSnapshot: () => success(null),
-      }),
-      profiles: namespace({
-        list: () => success(clone(mockProfiles)),
-        get: (name: string) => {
-          const profile = mockProfiles.profiles.find((candidate) => candidate.name === name);
-          return profile ? success({ profile: clone(profile), yaml: mockOptions.profileYaml?.[name] ?? '' }) : Promise.resolve({ success: false, error: `No profile is named "${name}".` });
-        },
-        setEnabled: (name: string, enabled: boolean) => {
-          trackCall('profiles:set-enabled', [name, enabled]);
-          for (const profile of mockProfiles.profiles) if (profile.name === name) profile.enabled = enabled;
-          return success(clone(mockProfiles));
-        },
-        launch: (input: JsonObject) => {
-          trackCall('profiles:launch', [input]);
-          return Promise.resolve({ success: false, error: 'Launching is not available in this preview.' });
-        },
-        runs: () => success([]),
-        setOutcome: () => success(null),
-        stop: () => success(null),
       }),
       loops: namespace({
         list: () => success(clone(mockLoops)),
@@ -2390,6 +2372,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         emitRemoteConnectionState(updates: Partial<RemotePaneConnectionState>) {
           setRemoteConnectionState(updates);
         },
+        /** Stands in for main asking the window to confirm a `pane://new` link; answers land in getInvokeCalls('pane:start-link-answer'). */
+        emitStartLinkRequest(request: JsonObject) {
+          emit('pane:start-link-request', clone(request));
+        },
         emitNativeAppearanceUpdated(prefersDark: boolean) {
           emit('window:appearance-native-updated', { prefersDark });
         },
@@ -2599,6 +2585,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           remoteDaemonConfig.client.mode = 'remote';
           remoteDaemonConfig.client.activeProfileId = computerId;
           configState.remoteDaemon = clone(remoteDaemonConfig);
+          // As main does, the window's machine is now that computer, when it is a saved one (T-51).
+          const computer = remoteDaemonConfig.client.computers.find((candidate) => candidate.id === computerId);
+          if (computer) {
+            setRemoteConnectionState({
+              mode: 'remote', status: 'connected', activeProfileId: computerId, activeProfileLabel: computer.label,
+              activeBaseUrl: computer.routes[0]?.baseUrl ?? null, activeRouteId: computer.routes[0]?.id ?? null, lastError: null,
+            });
+          }
           if (todosState) {
             todosState.snapshot = clone(todos.snapshot);
             todosState.details = clone(todos.details);

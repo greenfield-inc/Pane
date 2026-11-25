@@ -190,8 +190,6 @@ export interface AppConfig {
   missionControlEnabled?: boolean;
   // Experimental: show Notes tabs and give agents their scoped notes (off by default).
   notesEnabled?: boolean;
-  // Profiles (docs/PROFILES.md): the Profiles page, its nav entry, + menu › Profile… and `runpane profiles` (off by default).
-  profilesEnabled?: boolean;
   // Experimental: To-dos (docs/TODOS.md), every screen, `runpane todos`, the supervisor and the agents' To-dos instructions (off by default).
   todosEnabled?: boolean;
   // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
@@ -293,8 +291,6 @@ export interface UpdateConfigRequest {
   missionControlEnabled?: boolean;
   // Experimental: show Notes tabs and give agents their scoped notes (off by default).
   notesEnabled?: boolean;
-  // Profiles (docs/PROFILES.md): the Profiles page, its nav entry, + menu › Profile… and `runpane profiles` (off by default).
-  profilesEnabled?: boolean;
   // Experimental: To-dos (docs/TODOS.md), every screen, `runpane todos`, the supervisor and the agents' To-dos instructions (off by default).
   todosEnabled?: boolean;
   // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { HealthProcess, MachineHealthSnapshot, PaneUsage, StorageInventory } from '../../../../shared/types/machineHealth';
+import type { HealthProcess, MachineHealthSnapshot, PaneUsage } from '../../../../shared/types/machineHealth';
 import { HealthCardController } from './healthCardController';
 import { CardGate, type CardQuestion } from './healthCards';
 
@@ -42,21 +42,18 @@ describe('CardGate', () => {
 
 describe('HealthCardController', () => {
   const GB = 1024 ** 3;
-  const snapshot = (disk: 'ok' | 'warning' | 'critical', panes: PaneUsage[] = [], memory: 'ok' | 'warning' | 'critical' = 'ok'): MachineHealthSnapshot => ({
+  const snapshot = (disk: 'ok' | 'warning' | 'critical', panes: PaneUsage[] = [], memory: 'ok' | 'warning' | 'critical' = 'ok', freeGB = 13): MachineHealthSnapshot => ({
     sampledAt: 0, platform: 'darwin', hostname: 'mac', cpuPercent: 0, app: { rssMB: 100, cpuPercent: 0 }, panes, leaks: [],
-    disk: { level: disk, volumes: [{ path: '/', roles: ['pane-data'], totalBytes: 500 * GB, freeBytes: 13 * GB, level: disk }] },
+    disk: { level: disk, volumes: [{ path: '/', roles: ['pane-data'], totalBytes: 500 * GB, freeBytes: freeGB * GB, level: disk }] },
     memory: { level: memory, source: 'macos-pressure', detail: '', totalBytes: 32 * GB, freeBytes: 2 * GB, swapUsedBytes: null },
   });
-  const scanned: StorageInventory = { scannedAt: 0, durationMs: 0, panes: [], buckets: { paneWorktrees: 0, dependencies: 0, qaAndScratch: 0, agentTemp: 0, paneData: 0 },
-    items: [{ id: 'update-snapshot:/u', kind: 'update-snapshot', tier: 1, path: '/u', sizeBytes: 9 * GB, modifiedAt: 0, sessionId: null, reason: 'old update' }] };
   const escaped = (pid: number, sessionId = 'p1'): HealthProcess => ({ pid, started: `start-${pid}`, name: 'tmux', sessionId, panelId: null, rssMB: 50, cpuPercent: 0, escaped: true });
 
   // A one-process leftovers card offers 'Stop it' / 'Keep it'.
   const singular = (answer: string) => (answer === 'Stop them' ? 'Stop it' : answer === 'Keep them' ? 'Keep it' : answer);
 
-  function controller(answer: string | null, options: { inventory?: StorageInventory | null; paneState?: 'archived' | 'paused' | 'open'; kept?: string[]; awayFor?: number; notifications?: boolean; unavailable?: boolean } = {}) {
+  function controller(answer: string | null, options: { paneState?: 'archived' | 'paused' | 'open'; kept?: string[]; awayFor?: number; notifications?: boolean; unavailable?: boolean } = {}) {
     const asked: CardQuestion[] = [];
-    const cleaned: string[][] = [];
     const stopped: number[][] = [];
     const alerts: string[] = [];
     const withdrawn: Array<{ title: string; reason: string }> = [];
@@ -71,37 +68,43 @@ describe('HealthCardController', () => {
     let now = 0;
     let notifications = options.notifications ?? true;
     let unavailable = options.unavailable ?? false;
-    let inventory = options.inventory === undefined ? scanned : options.inventory;
     const c = new HealthCardController({
       // A null answer leaves the card waiting.
       now: () => now, notificationsOn: () => notifications, ask: (question, id) => { asked.push(question); titles.set(id, question.title); if (unavailable) return Promise.resolve({ unavailable: 'Approvals are not running.', next: 'Turn on Approvals in Settings.' }); return answer === null ? new Promise(() => {}) : Promise.resolve({ answer: question.choices.includes(answer) ? answer : singular(answer) }); },
-      inventory: () => inventory, idleOffer: () => ({ paneIds: [], memoryMB: 0 }), pauseIdleHours: () => 2, paneName: id => id,
+      paneName: id => id,
       paneState: () => options.paneState ?? 'archived', tabName: () => null,
-      canRestart: async () => false, cleanUp: async ids => { cleaned.push(ids); }, pauseIdle: async () => {}, stopProcess: async () => {},
+      canRestart: async () => false, stopProcess: async () => {},
       stopProcesses: async processes => { stopped.push(processes.map(proc => proc.pid)); return { at: now, source: 'card', removed: [], skipped: [], freedBytes: 0 }; },
       withdraw: (id, reason) => { withdrawn.push({ title: titles.get(id) ?? id, reason }); },
       restartProcess: async () => {}, ignoreLeak: () => {}, archive: async () => {}, alert: title => { alerts.push(title); return delivered(); }, log: () => {},
       readKept: () => [...(options.kept ?? [])], writeKept: ids => { if (options.kept) options.kept.splice(0, options.kept.length, ...ids); },
     });
-    return { c, asked, cleaned, stopped, alerts, withdrawn, setNow: (value: number) => { now = value; }, setInventory: (value: StorageInventory | null) => { inventory = value; },
-      setNotifications: (value: boolean) => { notifications = value; }, setUnavailable: (value: boolean) => { unavailable = value; } };
+    return { c, asked, stopped, alerts, withdrawn, setNow: (value: number) => { now = value; },  setNotifications: (value: boolean) => { notifications = value; }, setUnavailable: (value: boolean) => { unavailable = value; } };
   }
   const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
-  it('raises the disk card once, runs Clean up on the listed items, and alerts only at critical', async () => {
-    const { c, asked, cleaned, alerts } = controller('Clean up');
+  it('warns about the disk without offering a cleanup, and alerts only at critical', async () => {
+    const { c, asked, alerts } = controller(null);
     c.onSnapshot(snapshot('warning'));
-    await settle();
     c.onSnapshot(snapshot('warning'));
-    await settle();
-    expect(asked.map(question => question.title)).toEqual(['Disk almost full']);
-    expect(asked[0].card.rows.map(row => row.label)).toEqual(['u']);
-    expect(cleaned).toEqual([['update-snapshot:/u']]);
     expect(alerts).toEqual([]);
     c.onSnapshot(snapshot('critical'));
     await settle();
-    expect(asked.map(question => question.title)).toEqual(['Disk almost full', 'Disk is almost full']);
+    expect(asked.map(question => [question.title, question.context, question.choices])).toEqual([
+      ['Disk space is low', '13 GB free. Open Resources to see what uses the disk.', ['Not now']],
+      ['Disk is almost full', '13 GB free. Open Resources to see what uses the disk.', ['Not now']],
+    ]);
+    expect(asked.map(question => question.card.freesBytes)).toEqual([undefined, undefined]);
     expect(alerts).toEqual(['Disk is almost full']);
+  });
+
+  it.each([true, false])('never alerts a person about memory (switch on: %s)', async notifications => {
+    const { c, asked, alerts } = controller(null, { notifications });
+    c.onSnapshot(snapshot('ok', [], 'warning'));
+    c.onSnapshot(snapshot('ok', [], 'critical'));
+    await settle();
+    expect(asked).toEqual([]);
+    expect(alerts).toEqual([]);
   });
 
   it('replaces a waiting warning card with the critical one when disk turns critical, alerting once per episode', async () => {
@@ -110,11 +113,23 @@ describe('HealthCardController', () => {
     c.onSnapshot(snapshot('critical'));
     c.onSnapshot(snapshot('critical'));
     await settle();
-    expect(asked.map(question => question.title)).toEqual(['Disk almost full', 'Disk is almost full']);
-    expect(withdrawn).toEqual([{ title: 'Disk almost full', reason: 'it turned critical, and a new card replaces it' }]);
+    expect(asked.map(question => question.title)).toEqual(['Disk space is low', 'Disk is almost full']);
+    expect(withdrawn).toEqual([{ title: 'Disk space is low', reason: 'it turned critical, and a new card replaces it' }]);
     expect(alerts).toEqual(['Disk is almost full']);
-    c.onSnapshot(snapshot('warning'));
+    c.onSnapshot(snapshot('ok'));
     c.onSnapshot(snapshot('critical'));
+    expect(alerts).toHaveLength(2);
+  });
+
+  it.each([true, false])('alerts once while free space hovers at the line, and again after it recovers by 2 GB (switch on: %s)', async notifications => {
+    const { c, alerts } = controller(null, { notifications });
+    for (let sample = 0; sample < 5; sample += 1) {
+      c.onSnapshot(snapshot('critical', [], 'ok', 4.9));
+      c.onSnapshot(snapshot('warning', [], 'ok', 5.1));
+    }
+    expect(alerts).toHaveLength(1);
+    c.onSnapshot(snapshot('warning', [], 'ok', 7));
+    c.onSnapshot(snapshot('critical', [], 'ok', 4.9));
     expect(alerts).toHaveLength(2);
   });
 
@@ -139,29 +154,6 @@ describe('HealthCardController', () => {
     expect(withdrawn).toEqual([{ title: 'Disk is almost full', reason: 'free disk is back above the warning line' }]);
     c.onSnapshot(snapshot('critical'));
     expect(asked.map(question => question.title)).toEqual(['Disk is almost full', 'Disk is almost full']);
-  });
-
-  it('takes back a critical memory card when pressure returns to normal, but keeps a warning card waiting', () => {
-    const { c, asked, withdrawn } = controller(null);
-    c.onSnapshot(snapshot('ok', [], 'warning'));
-    c.onSnapshot(snapshot('ok', [], 'ok'));
-    c.onSnapshot(snapshot('ok', [], 'warning'));
-    expect(asked).toHaveLength(1);
-    expect(withdrawn).toEqual([]);
-    c.onSnapshot(snapshot('ok', [], 'critical'));
-    c.onSnapshot(snapshot('ok', [], 'ok'));
-    expect(withdrawn.map(card => card.reason)).toEqual(['it turned critical, and a new card replaces it', 'memory pressure is back to normal']);
-  });
-
-  it('waits for the storage scan before raising the disk card', async () => {
-    const { c, asked, setInventory } = controller('Not now', { inventory: null });
-    c.onSnapshot(snapshot('warning'));
-    await settle();
-    expect(asked).toHaveLength(0);
-    setInventory(scanned);
-    c.onSnapshot(snapshot('warning'));
-    await settle();
-    expect(asked.map(question => question.choices)).toEqual([['Clean up', 'Not now']]);
   });
 
   it('after Not now, stays quiet for 24 hours', async () => {
@@ -231,27 +223,25 @@ describe('HealthCardController', () => {
       expect(alerts).toEqual([]);
     });
 
-    it('still raises critical disk and memory, once per episode, saying what to do', async () => {
+    it('still raises critical disk, once per episode', async () => {
       const { c, asked, alerts, setNow } = controller(null, { notifications: false });
       c.onSnapshot(snapshot('critical', [], 'critical'));
       await settle();
-      expect(asked.map(question => question.title)).toEqual(['Disk is almost full', 'Memory is almost out']);
-      expect(alerts).toEqual(['Disk is almost full', 'Memory is almost out']);
-      expect(asked[0].context).toBe('13 GB free. Pane can free about 9.0 GB of its own leftovers and finished work. Open Resources to see what uses the disk and clean up.');
-      expect(asked[1].context).toContain("Quit apps you don't need");
+      expect(asked.map(question => question.title)).toEqual(['Disk is almost full']);
+      expect(alerts).toEqual(['Disk is almost full']);
 
       // Still critical a day later: the episode already notified.
       setNow(24 * HOUR);
       c.onSnapshot(snapshot('critical', [], 'critical'));
       await settle();
-      expect(asked).toHaveLength(2);
-      expect(alerts).toHaveLength(2);
+      expect(asked).toHaveLength(1);
+      expect(alerts).toHaveLength(1);
 
       // A new episode notifies again.
       c.onSnapshot(snapshot('ok'));
       c.onSnapshot(snapshot('critical'));
       await settle();
-      expect(alerts).toEqual(['Disk is almost full', 'Memory is almost out', 'Disk is almost full']);
+      expect(alerts).toEqual(['Disk is almost full', 'Disk is almost full']);
     });
 
     it('keeps a critical card snoozed with Not now when the switch is turned off after it', async () => {

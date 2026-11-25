@@ -2,7 +2,7 @@
 // orchestration-sessions.known-bug.spec.ts: Session and Pane records, a mocked
 // orchestration host, and the gestures the specs share.
 import { expect, type Locator, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import type { TailnetMachineList } from '../shared/types/workspaceAccess';
 import type { NotifySnapshot } from '../shared/types/notify';
@@ -80,6 +80,12 @@ export type SessionFixtureOptions = {
   notifySnapshot?: NotifySnapshot;
   initialPanels?: JsonObject[];
   initialLayout?: JsonObject;
+  /** Machines for All machines (T-45): the other machines, their reads, and this computer's name. */
+  machines?: Pick<NonNullable<Parameters<typeof installElectronApiMock>[1]>, 'initialPreferences' | 'machineConnections' | 'workspaceAccess' | 'platform'>;
+  /** To-dos and saved machines, for a Session whose to-dos meet another machine's (T-51). */
+  todos?: ElectronApiMockOptions['todos'];
+  machineConnections?: ElectronApiMockOptions['machineConnections'];
+  computers?: ElectronApiMockOptions['computers'];
 };
 
 export function sessionFixture(
@@ -174,6 +180,10 @@ export async function installSessionsFixture(
     notifySnapshot: fixtureOptions.notifySnapshot,
     initialPanels: fixtureOptions.initialPanels,
     initialLayout: fixtureOptions.initialLayout,
+    todos: fixtureOptions.todos,
+    machineConnections: fixtureOptions.machineConnections,
+    computers: fixtureOptions.computers,
+    ...fixtureOptions.machines,
   });
   await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes, distributions }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]>; distributions: string[] }) => {
     type SessionRecord = UiSessionFixture;

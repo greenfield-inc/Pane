@@ -1,7 +1,7 @@
 import { registerChatTabHandlers } from './chatTabs';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
-import { app, ipcMain, powerMonitor } from 'electron';
+import { app, dialog, ipcMain, powerMonitor, type BrowserWindow, type MessageBoxOptions } from 'electron';
 import type { AppServices } from './types';
 import { registerAppHandlers } from './app';
 import { registerNotesHandlers } from './notes';
@@ -47,7 +47,6 @@ import { registerExportHandlers } from './export';
 import { registerSetupHandlers } from './setup';
 import { registerLoopHandlers } from './loops';
 import { registerTodoHandlers } from './todos';
-import { registerProfileHandlers } from './profiles';
 import { registerMissionControlHandlers } from './missionControl';
 import { createDaemonBridgeRouter, registerDaemonBridgeHandlers } from './daemon';
 import { registerPermissionHandlers } from './permissions';
@@ -59,6 +58,12 @@ import { registerPaneSecretHandlers } from './paneSecrets';
 import { registerCustomThemeHandlers } from './customTheme';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { registerPaneLinkHandler } from '../services/paneLinks';
+import { RepositoryIdentities } from '../services/repositoryIdentity';
+import { registerStartLinkConfirm } from './startLinkConfirm';
+import { submitOnlyToAgent } from './runpane';
+import { isOnPath } from '../utils/onPath';
+import { configuredAgent, CONFIGURED_AGENT_IDS } from '../../../shared/agents';
+import { normalizePaneChatAgent } from '../../../shared/types/paneChat';
 import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { registerWorkspaceAccessHandlers } from './workspaceAccess';
@@ -146,26 +151,43 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerDesktopAlertHandlers(ipcMain, services);
   const notify = registerNotifyHandlers(ipcMain, services, commandRegistry);
   services.notifyService = notify;
+  const raiseMainWindow = (): BrowserWindow | undefined => {
+    const window = services.getMainWindow();
+    if (!window || window.isDestroyed()) return undefined;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+    return window;
+  };
+  const showMessage = (options: MessageBoxOptions) => {
+    const window = raiseMainWindow();
+    return window ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options);
+  };
+  const repositoryIdentities = new RepositoryIdentities();
   registerPaneLinkHandler(commandRegistry, {
     showWaitingCard: (paneId, panelId) => notify.showWaitingCard(paneId, panelId),
     repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),
+    listRepos: async () => {
+      const projects = services.databaseService.getAllProjects();
+      const identities = await repositoryIdentities.of(projects);
+      return projects.map((project, index) => ({ id: project.id, name: project.name, identity: identities[index] ?? null }));
+    },
+    installedAgents: async () => {
+      const installed = await Promise.all(CONFIGURED_AGENT_IDS.map(async (id) =>
+        (await Promise.all(configuredAgent(id).executables.map((executable) => isOnPath(executable)))).some(Boolean)));
+      return CONFIGURED_AGENT_IDS.filter((_id, index) => installed[index]);
+    },
+    defaultAgent: () => normalizePaneChatAgent(services.configManager.getConfig().defaultOrchestratorAgent),
+    confirmStart: registerStartLinkConfirm(ipcMain, raiseMainWindow),
+    submitToAgent: (panelId, submit) => submitOnlyToAgent(panelId, submit),
+    showError: (message) => void showMessage({ type: 'warning', message: 'Pane could not open this link', detail: message }),
     navigate: (target) => {
-      const window = services.getMainWindow();
-      if (window && !window.isDestroyed()) {
-        if (window.isMinimized()) window.restore();
-        window.show();
-        window.focus();
-      }
+      raiseMainWindow();
       getPaneEventSink().send('pane:open-link', target);
     },
     // A pairing link opened outside Pane: bring the window up on its confirm page.
     openPairLink: (link) => {
-      const window = services.getMainWindow();
-      if (window && !window.isDestroyed()) {
-        if (window.isMinimized()) window.restore();
-        window.show();
-        window.focus();
-      }
+      raiseMainWindow();
       getPaneEventSink().send('relay:link-opened', { link });
     },
   });
@@ -184,7 +206,6 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerSessionMoveHandlers(ipcMain, services, commandRegistry);
   if (services.loopManager) registerLoopHandlers(ipcMain, services.loopManager, commandRegistry);
   registerTodoHandlers(ipcMain, services, commandRegistry);
-  registerProfileHandlers(ipcMain, services, commandRegistry);
   registerMissionControlHandlers(ipcMain, services, commandRegistry);
   registerOnboardingHandlers(ipcMain, services);
   registerDaemonBridgeHandlers(ipcMain, bridgeRouter);

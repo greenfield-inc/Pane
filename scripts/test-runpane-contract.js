@@ -527,6 +527,75 @@ async function checkPanesAdoptCliParity() {
   assert.deepStrictEqual(frames.pip, frames.npm, 'Python and Node panes adopt sent different daemon requests');
 }
 
+async function checkStartLinkParity() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-start-link-'));
+  const prompt = 'Fix "can\'t log in" (run *42*) ~ 100% — naïve 日本\nSee the log.';
+  const cases = [
+    [['links', 'create', '--repo', 'owner/app', '--prompt', prompt, '--agent', 'codex', '--json'], 0],
+    [['links', 'create', '--repo', '3', '--prompt', 'hi'], 0],
+    [['links', 'create', '--pane', 'p', '--agent', 'codex'], 1],
+    [['links', 'create', '--repo', 'a/../b', '--prompt', 'hi'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'a\u001b[2Jb'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'x'.repeat(4001)], 1],
+    // 1,400 emoji fit the 4,000-character cap but encode to more than the 16,384 characters Pane opens.
+    [['links', 'create', '--repo', '3', '--prompt', '\u{1F600}'.repeat(1400)], 1],
+    // Invisible and format characters, edge characters npm trim() and Python strip() treat differently, a leading dash.
+    [['links', 'create', '--repo', '3', '--prompt', 'hi\u{E0041}'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'a\u200Bb'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', '\uFEFFhi'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', '\u001Chi'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'a\u2028b'], 1],
+    // Default-ignorable characters; one emoji variation selector after a visible character is kept.
+    [['links', 'create', '--repo', '3', '--prompt', 'a\uFE00b'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'a\uFE0F\uFE0Fb'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'a\u3164b'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'Fix the \u26A0\uFE0F warning'], 0],
+    [['links', 'create', '--repo', '3', '--prompt', '--settings=/tmp/x'], 1],
+    [['links', 'create', '--repo', '3', '--prompt', 'Fix it.   \n\n\n\n  \nThen stop.', '--json'], 0],
+    // No repo: a new Session. A Session by name. --repo with --session, --agent with --session.
+    [['links', 'create', '--prompt', prompt, '--agent', 'claude', '--json'], 0],
+    [['links', 'create', '--prompt', 'hi', '--session', ' Build fixes ', '--json'], 0],
+    [['links', 'create', '--prompt', 'hi', '--repo', '3', '--session', 's'], 1],
+    [['links', 'create', '--prompt', 'hi', '--session', 's', '--agent', 'codex'], 1],
+    [['links', 'create', '--prompt', 'hi', '--session', '\u200Bs'], 1],
+    [['links', 'create', '--prompt', 'hi', '--session', 'a\tb'], 1],
+    [['links', 'create', '--prompt', 'hi', '--session', 's'.repeat(101)], 1],
+    [['links', 'create', '--pane', 'p', '--web'], 1],
+    // --web prints the runpane.com/open form, refused past the 2,048 characters Chrome and Edge pass.
+    [['links', 'create', '--prompt', prompt, '--agent', 'codex', '--web'], 0],
+    [['links', 'create', '--prompt', 'x'.repeat(2020), '--web'], 1],
+    [['links', 'create', '--prompt', 'x'.repeat(2020)], 0],
+  ];
+  try {
+    for (const [args, code] of cases) {
+      const [npm, pip] = await Promise.all([runCliOnce('npm', args, paneDir), runCliOnce('pip', args, paneDir)]);
+      assert.strictEqual(npm.code, code, `npm ${args.slice(0, 4).join(' ')} exited ${npm.code}: ${npm.stderr}`);
+      assert.deepStrictEqual({ code: pip.code, stdout: lf(pip.stdout), stderr: lf(pip.stderr) }, { code: npm.code, stdout: lf(npm.stdout), stderr: lf(npm.stderr) }, `Python and Node differ on links create ${args.slice(2, 4).join(' ')}`);
+    }
+    const { url, webUrl, html, target } = JSON.parse((await runCliOnce('npm', cases[0][0], paneDir)).stdout);
+    assert.deepStrictEqual(target, { kind: 'new', id: 'owner/app', prompt, agent: 'codex', repo: 'owner/app' });
+    const parsed = new URL(url);
+    assert.strictEqual(parsed.host, 'new');
+    assert.deepStrictEqual([...parsed.searchParams], [['agent', 'codex'], ['repo', 'owner/app'], ['prompt', prompt]]);
+    assert.strictEqual(webUrl, `https://runpane.com/open${parsed.search}`);
+    assert.strictEqual(html, `<a href="${webUrl.replace(/&/g, '&amp;')}">Open in Pane with Codex</a>`);
+    const web = await runCliOnce('npm', ['links', 'create', '--prompt', prompt, '--agent', 'codex', '--repo', 'owner/app', '--web'], paneDir);
+    assert.strictEqual(web.stdout.trim(), webUrl);
+    const session = JSON.parse((await runCliOnce('npm', ['links', 'create', '--prompt', 'hi', '--session', ' Build fixes ', '--json'], paneDir)).stdout);
+    assert.deepStrictEqual(session, {
+      ok: true,
+      url: 'pane://new?session=Build+fixes&prompt=hi',
+      webUrl: 'https://runpane.com/open?session=Build+fixes&prompt=hi',
+      html: '<a href="https://runpane.com/open?session=Build+fixes&amp;prompt=hi">Open in Pane</a>',
+      target: { kind: 'new', prompt: 'hi', session: 'Build fixes' },
+    });
+    const tooLong = await runCliOnce('npm', ['links', 'create', '--prompt', 'x'.repeat(2020), '--web'], paneDir);
+    assertIncludes(tooLong.stderr, 'Chrome and Edge open links up to 2048');
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
 async function checkPanesCreateBaseNotice() {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-create-base-'));
   const notice = 'Could not refresh origin/main before creating this Pane (git fetch timed out after 10s). '
@@ -1247,230 +1316,6 @@ async function checkReportStructuredOptions() {
   }
 }
 
-/**
- * `report --outcome` ends a profile step: it sends state done with the trimmed outcome, takes
- * --state only as done, and refuses --question. A refusal sends nothing.
- */
-async function checkReportOutcome() {
-  const report = { state: 'done', reportedAt: '2026-11-16T00:00:00.000Z' };
-  const result = { ok: true, paneId: 'pane-1', panelId: 'panel-1', report, sessionIds: [], liveWatchers: 0 };
-  for (const runtime of ['npm', 'pip']) {
-    const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-report-outcome-${runtime}-`));
-    try {
-      for (const args of [['--outcome', ' plan ready '], ['--outcome', 'plan ready', '--state', 'done'], ['--state=done', '--outcome=plan ready']]) {
-        const frames = [];
-        const run = await withFakeDaemon(paneDir, () => ({ result }),
-          () => runCliOnce(runtime, ['report', ...args, '--panel', 'panel-1', '--json'], paneDir),
-          (frame) => { if (frame.type === 'request' && frame.id === 1) frames.push(frame); });
-        assert.strictEqual(run.code, 0, `${runtime} report ${args.join(' ')} exits 0. stderr=${run.stderr} stdout=${run.stdout}`);
-        assert.strictEqual(frames[0].args[0].state, 'done', `${runtime} report ${args.join(' ')} sends state done`);
-        assert.strictEqual(frames[0].args[0].outcome, 'plan ready', `${runtime} report ${args.join(' ')} sends the trimmed outcome`);
-      }
-      const text = await withFakeDaemon(paneDir, () => ({ result }),
-        () => runCliOnce(runtime, ['report', '--outcome', 'plan ready', '--panel', 'panel-1'], paneDir));
-      assertIncludes(text.stdout, 'Reported outcome "plan ready" (done) for panel panel-1.', `${runtime} report --outcome names the outcome in its text`);
-      const plain = [];
-      await withFakeDaemon(paneDir, () => ({ result }),
-        () => runCliOnce(runtime, ['report', '--state', 'done', '--panel', 'panel-1', '--json'], paneDir),
-        (frame) => { if (frame.type === 'request' && frame.id === 1) plain.push(frame); });
-      assert.ok(!('outcome' in plain[0].args[0]), `${runtime} report without --outcome sends no outcome`);
-      for (const [args, code] of [
-        [['--outcome', 'plan ready', '--state', 'blocked', '--question', 'q'], 'ERR_REPORT_OUTCOME_STATE'],
-        [['--outcome', 'plan ready', '--state', 'ready'], 'ERR_REPORT_OUTCOME_STATE'],
-        [['--outcome', 'plan ready', '--question', 'Which plan?'], 'ERR_REPORT_OUTCOME_QUESTION'],
-        [['--outcome', '   '], 'ERR_RUNPANE_INVALID_ARGUMENT'],
-      ]) {
-        let sent = 0;
-        const run = await withFakeDaemon(paneDir, () => { sent += 1; return { result }; },
-          () => runCliOnce(runtime, ['report', ...args, '--panel', 'panel-1', '--json'], paneDir));
-        assert.strictEqual(run.code, 1, `${runtime} report ${args.join(' ')} exits 1. stdout=${run.stdout}`);
-        const { error } = JSON.parse(run.stdout);
-        assert.strictEqual(error.code, code, `${runtime} report ${args.join(' ')}`);
-        assertIncludes(error.message, '--outcome', `${runtime} report ${args.join(' ')} names --outcome`);
-        assertIncludes(error.next, 'runpane report', `${runtime} report ${args.join(' ')} says how to fix the report`);
-        assert.strictEqual(sent, 0, `${runtime} a refused --outcome report sends nothing`);
-      }
-      const elsewhere = await withFakeDaemon(paneDir, () => ({ result }),
-        () => runCliOnce(runtime, ['notify', '--ui', 'info', '--title', 'T', '--outcome', 'x', '--json'], paneDir));
-      assert.strictEqual(elsewhere.code, 1, `${runtime} --outcome on another command is refused. stdout=${elsewhere.stdout}`);
-      // A daemon refusal (an outcome the step does not declare) prints its message and next step.
-      const refusal = { code: 'ERR_PROFILE_OUTCOME_UNKNOWN', message: 'Step plan has no outcome "shipped". Allowed: plan ready, plan blocked.', next: 'Run `runpane report --outcome "plan ready"`.' };
-      const refused = await withFakeDaemon(paneDir, () => ({ error: refusal }),
-        () => runCliOnce(runtime, ['report', '--outcome', 'shipped', '--panel', 'panel-1', '--json'], paneDir));
-      assert.notStrictEqual(refused.code, 0, `${runtime} a daemon refusal fails the report`);
-      const shown = JSON.parse(refused.stdout).error;
-      assert.strictEqual(shown.message, refusal.message, `${runtime} prints the daemon's message`);
-      assert.strictEqual(shown.next, refusal.next, `${runtime} prints the daemon's next step`);
-    } finally {
-      fs.rmSync(paneDir, { recursive: true, force: true });
-    }
-  }
-}
-
-/**
- * `profiles list|show|runs` print the daemon's JSON unchanged with --json and the same text from
- * both CLIs; `profiles launch` sends the request with its defaults (the caller's Pane's repo, its
- * orchestrated Session and its tab), refuses a launch without --prompt before sending anything, and
- * passes a daemon refusal through with its code, message and next.
- */
-async function checkProfiles() {
-  const greenfield = {
-    name: 'greenfield', version: '1.0.0', title: 'Greenfield', origin: 'bundled', file: '/profiles/greenfield/profile.yaml',
-    valid: true, launchable: true, teamOnly: false, enabled: true, errors: [],
-    profile: {
-      format: 'pane-profile/1', name: 'greenfield', version: '1.0.0', loopLimit: 3, samples: {}, runs: {},
-      agents: [{ id: 'planner', runs: 'claude/opus', cli: 'claude', model: 'opus', reads: [], skills: [] }],
-      flow: {
-        start: 'plan',
-        steps: [
-          { id: 'plan', kind: 'agent', title: 'Plan the work', agent: 'planner', goal: 'Plan', outcomes: [{ name: 'plan ready', to: 'approve' }] },
-          { id: 'approve', kind: 'ask', title: 'Approve the plan', ask: 'Go?', choices: [{ name: 'yes', to: 'end' }] },
-        ],
-      },
-    },
-  };
-  const broken = {
-    name: 'broken', origin: 'yours', file: '/profiles/broken.yaml', valid: false, launchable: false, teamOnly: false, enabled: true,
-    errors: [{ code: 'PROFILE_STEP_UNKNOWN', message: 'Step plan points to "nowhere".', fix: 'Point it at a step or end.', step: 'plan' }],
-  };
-  const team = {
-    ...greenfield, name: 'reviewers', version: '0.2.0', launchable: false, teamOnly: true, enabled: false,
-    profile: Object.fromEntries(Object.entries(greenfield.profile).filter(([key]) => key !== 'flow')),
-  };
-  const list = {
-    ok: true, profiles: [greenfield, team, broken],
-    agentFarm: { state: 'installing', version: '0.9.0' }, ownAgentFarm: { profiles: [{ name: 'mine', source: '/home/me/farm' }] },
-  };
-  const run = {
-    id: 'run-1', profile: 'greenfield', profileVersion: '1.0.0', sessionId: 'sess-1', repoId: 7, paneId: 'pane-9', prompt: 'Add dark mode',
-    harness: {}, commands: {}, state: 'running', step: 'plan', wait: { kind: 'step', panelId: 'panel-3' }, edgeCounts: {}, history: [],
-    createdAt: '2026-11-17T00:00:00.000Z', updatedAt: '2026-11-17T00:00:00.000Z',
-  };
-  const callerPane = {
-    id: 'pane-1', paneId: 'pane-1', name: 'feature', status: 'ready', agentStatus: 'idle', worktreePath: '/repo/worktrees/feature',
-    repoId: 7, panelCount: 1, pinned: false, ownership: 'pane',
-  };
-  const results = {
-    'runpane:profiles:list': list,
-    'runpane:profiles:show': { ok: true, profile: greenfield, yaml: 'format: pane-profile/1\nname: greenfield\n' },
-    'runpane:profiles:runs': { ok: true, runs: [{ ...run, attention: 'Answer the trust prompt.' }, { ...run, id: 'run-2', state: 'failed', step: 'approve', error: 'The tab closed.' }] },
-    'runpane:profiles:launch': { ok: true, run },
-    'runpane:panes:list': { ok: true, panes: [callerPane] },
-  };
-  const answer = (frame) => ({ result: results[frame.channel] });
-  const outsidePane = { PANE_SESSION_ID: '', PANE_PANEL_ID: '', PANE_ORCHESTRATION_SESSION_ID: '' };
-  const texts = {};
-  for (const runtime of ['npm', 'pip']) {
-    const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-profiles-${runtime}-`));
-    try {
-      const call = async (args, env = outsidePane, respond = answer) => {
-        const frames = [];
-        const result = await withFakeDaemon(paneDir, respond,
-          () => runCliOnce(runtime, args, paneDir, 20_000, env),
-          (frame) => { if (frame.type === 'request' && frame.id === 1) frames.push({ channel: frame.channel, args: frame.args }); });
-        // Python writes text-mode stdout, which is CRLF on Windows.
-        return { ...result, stdout: result.stdout.replace(/\r\n/g, '\n'), frames };
-      };
-      for (const [args, channel, request] of [
-        [['profiles', 'list', '--json'], 'runpane:profiles:list', {}],
-        [['profiles', 'show', 'greenfield', '--json'], 'runpane:profiles:show', { name: 'greenfield' }],
-        [['profiles', 'runs', '--json'], 'runpane:profiles:runs', {}],
-      ]) {
-        const result = await call(args);
-        assert.strictEqual(result.code, 0, `${runtime} ${args.join(' ')} exits 0. stderr=${result.stderr}`);
-        assert.deepStrictEqual(JSON.parse(result.stdout), results[channel], `${runtime} ${args.join(' ')} prints the daemon's JSON unchanged`);
-        assert.deepStrictEqual(result.frames, [{ channel, args: [request] }], `${runtime} ${args.join(' ')} sends ${channel}`);
-      }
-      const yaml = await call(['profiles', 'show', 'greenfield', '--yaml']);
-      assert.strictEqual(yaml.stdout, 'format: pane-profile/1\nname: greenfield\n', `${runtime} show --yaml prints the file only`);
-      texts[runtime] = [];
-      for (const args of [['profiles', 'list'], ['profiles', 'show', 'greenfield'], ['profiles', 'show', 'broken'], ['profiles', 'runs'], ['profiles', 'launch', 'greenfield', '--prompt', 'Add dark mode', '--yes']]) {
-        const respond = args[2] === 'broken' ? () => ({ result: { ok: true, profile: broken, yaml: '' } }) : answer;
-        const result = await call(args, outsidePane, respond);
-        assert.strictEqual(result.code, 0, `${runtime} ${args.join(' ')} exits 0. stderr=${result.stderr}`);
-        texts[runtime].push(result.stdout);
-      }
-
-      // Launch inside a Session orchestrator's Pane: its repo and Session are the defaults.
-      const inPane = await call(['profiles', 'launch', 'greenfield', '--prompt', 'Add dark mode', '--yes', '--json'],
-        { PANE_SESSION_ID: 'pane-1', PANE_PANEL_ID: 'panel-9', PANE_ORCHESTRATION_SESSION_ID: 'sess-1' });
-      assert.strictEqual(inPane.code, 0, `${runtime} launch exits 0. stderr=${inPane.stderr}`);
-      assert.deepStrictEqual(JSON.parse(inPane.stdout), results['runpane:profiles:launch'], `${runtime} launch prints the run as Pane sent it`);
-      assert.deepStrictEqual(inPane.frames, [
-        { channel: 'runpane:panes:list', args: [{}] },
-        { channel: 'runpane:profiles:launch', args: [{ name: 'greenfield', prompt: 'Add dark mode', repo: { id: 7 }, session: 'sess-1' }] },
-      ], `${runtime} launch defaults to the caller's repo and Session`);
-      // Outside Pane: the active repo, and no Session (Pane makes one).
-      const outside = await call(['profiles', 'launch', 'greenfield', '--prompt', 'Add dark mode', '--yes', '--json']);
-      assert.deepStrictEqual(outside.frames, [
-        { channel: 'runpane:profiles:launch', args: [{ name: 'greenfield', prompt: 'Add dark mode', repo: { active: true } }] },
-      ], `${runtime} launch outside Pane runs in the active repo`);
-      // Flags win over the defaults; --agent-harness and --command repeat or take a JSON object.
-      const flagged = await call(['profiles', 'launch', 'greenfield', '--prompt=Add dark mode', '--repo', '3', '--session', 'Nightly', '--harness', 'codex',
-        '--agent-harness', 'planner=claude/opus', '--agent-harness={"reviewer":"codex"}', '--command', 'aider=aider --yes-always', '--yes', '--json'],
-      { PANE_SESSION_ID: 'pane-1', PANE_PANEL_ID: '', PANE_ORCHESTRATION_SESSION_ID: 'sess-1' });
-      assert.strictEqual(flagged.code, 0, `${runtime} flagged launch exits 0. stderr=${flagged.stderr}`);
-      assert.deepStrictEqual(flagged.frames, [{
-        channel: 'runpane:profiles:launch',
-        args: [{
-          name: 'greenfield', prompt: 'Add dark mode', repo: '3', session: 'Nightly', harness: 'codex',
-          agentHarness: { planner: 'claude/opus', reviewer: 'codex' }, commands: { aider: 'aider --yes-always' },
-        }],
-      }], `${runtime} launch sends its flags`);
-
-      // Refused before anything is sent.
-      for (const [args, code] of [
-        [['profiles', 'launch', 'greenfield', '--yes', '--json'], 'ERR_PROFILES_PROMPT_REQUIRED'],
-        [['profiles', 'launch', 'greenfield', '--prompt', '  ', '--yes', '--json'], 'ERR_PROFILES_PROMPT_REQUIRED'],
-        [['profiles', 'launch', '--prompt', 'x', '--yes', '--json'], 'ERR_PROFILES_NAME_REQUIRED'],
-        [['profiles', 'launch', 'greenfield', '--prompt', 'x', '--json'], 'ERR_RUNPANE_CONFIRMATION_REQUIRED'],
-        [['profiles', 'launch', 'greenfield', '--prompt', 'x', '--agent-harness', 'planner', '--yes', '--json'], 'ERR_RUNPANE_INVALID_ARGUMENT'],
-        [['profiles', 'launch', 'greenfield', '--prompt', 'x', '--command={"aider":1}', '--yes', '--json'], 'ERR_RUNPANE_INVALID_ARGUMENT'],
-      ]) {
-        const refused = await call(args);
-        assert.strictEqual(refused.code, 1, `${runtime} ${args.join(' ')} exits 1. stdout=${refused.stdout}`);
-        const { error } = JSON.parse(refused.stdout);
-        assert.strictEqual(error.code, code, `${runtime} ${args.join(' ')}`);
-        assert.ok(error.next, `${runtime} ${args.join(' ')} says what to do next`);
-        assert.deepStrictEqual(refused.frames, [], `${runtime} ${args.join(' ')} sends nothing`);
-      }
-      const misplaced = await call(['panes', 'list', '--harness', 'codex', '--json']);
-      assert.strictEqual(misplaced.code, 1, `${runtime} --harness on another command is refused`);
-
-      // A daemon refusal fails with its code, message and next.
-      const refusal = { code: 'PROFILE_TEAM_ONLY', message: 'reviewers is a team with no workflow, so it cannot launch. Nothing was started.', next: 'Launch a profile with a workflow, such as greenfield.' };
-      for (const json of [true, false]) {
-        const refused = await call(['profiles', 'launch', 'reviewers', '--prompt', 'x', '--yes', ...(json ? ['--json'] : [])], outsidePane, () => ({ error: refusal }));
-        assert.strictEqual(refused.code, 1, `${runtime} a refused launch exits 1`);
-        if (json) assert.deepStrictEqual(JSON.parse(refused.stdout).error, refusal, `${runtime} prints the daemon's code, message and next`);
-        assertIncludes(refused.stderr, refusal.message);
-        assertIncludes(refused.stderr, `Next: ${refusal.next}`);
-      }
-    } finally {
-      fs.rmSync(paneDir, { recursive: true, force: true });
-    }
-  }
-  assert.deepStrictEqual(texts.pip, texts.npm, 'both CLIs print the same profiles text');
-  const [listText, showText, brokenText, runsText, launchText] = texts.npm;
-  assert.strictEqual(listText, [
-    'greenfield 1.0.0 · bundled · on · launchable',
-    'reviewers 0.2.0 · bundled · off · no flow',
-    'broken - · yours · on · invalid: Step plan points to "nowhere".',
-    'Agent Farm 0.9.0: installing',
-    'Your Agent Farm: mine',
-    '',
-  ].join('\n'));
-  assert.strictEqual(showText, [
-    'greenfield 1.0.0 · bundled · on · launchable', 'Greenfield', 'File: /profiles/greenfield/profile.yaml',
-    '', 'Agents:', '  planner  runs claude/opus',
-    '', 'Steps (start: plan):', '  plan (agent planner): Plan the work', '    plan ready → approve', '  approve (ask): Approve the plan', '    yes → end',
-    '',
-  ].join('\n'));
-  assertIncludes(brokenText, '  PROFILE_STEP_UNKNOWN: Step plan points to "nowhere". Fix: Point it at a step or end.');
-  assert.strictEqual(runsText, 'run-1 · greenfield · running · step plan · Answer the trust prompt.\nrun-2 · greenfield · failed · step approve · The tab closed.\n');
-  assert.strictEqual(launchText, 'Started run run-1 of greenfield in Session sess-1: step plan in Pane pane-9.\n');
-}
-
 /** Runs the CLI with its stdin held open until `holdMs` passes, and times the run. */
 function runCliHoldingStdin(runtime, args, paneDir, extraEnv, holdMs) {
   const command = runtime === 'npm' ? process.execPath : findPython();
@@ -1704,7 +1549,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false, stackTabs: [], stackNext: false,
   todoArgs: [], noStart: false, escalate: false, remindMe: false,
-  answerApprove: false, answerDeny: false, hook: false, yaml: false,
+  answerApprove: false, answerDeny: false, hook: false, web: false, yaml: false,
 };
 
 function normalizeParsedArgs(value) {
@@ -3810,6 +3655,78 @@ print(json.dumps({"codes": codes, "calls": calls, "stdout": stdout.getvalue().sp
   assert.ok(python.stdout.includes('Reported ready pr#747 fc5dce9 for panel panel-1. Recorded on Session session-a.'), python.stdout.join('\n'));
   assert.ok(python.stdout.includes('Opened PR #747.'), python.stdout.join('\n'));
   assert.ok(python.stderr.includes('transcript-unavailable: No claude transcript reply found.'), python.stderr.join('\n'));
+}
+
+/**
+ * T-51 (D-4): a report with --todo comes back with the reference and the sending machine's install id, and,
+ * when the Pane is in no Session on this machine, a warning. Both CLIs print them with --json, and the reply
+ * matches the published schema; an older daemon's reply (none of them) prints and validates as before.
+ */
+async function checkReportTodoParity() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const localControl = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const Ajv = require(require.resolve('ajv', { paths: [rootDir] }));
+  const ajv = new Ajv({ allErrors: true });
+  ajv.addSchema({ jsonSchemas: contract.jsonSchemas }, 'contract');
+  const validResult = ajv.compile({ $ref: 'contract#/jsonSchemas/reportResult' });
+  const warning = 'T-28 was not checked on this machine: this tab\'s Pane is in no Session here, so the machine whose Session it is in reads T-28 as its own to-do. Nothing was recorded on this machine\'s to-dos.';
+  const withTodo = {
+    ok: true, generation: 3, paneId: 'session-1', panelId: 'panel-1', sessionIds: [], liveWatchers: 0,
+    report: { state: 'blocked', question: 'Q-84: Which sign-up flow?', todo: 'T-28', installId: 'install-b', reportedAt: '2026-11-24T17:00:00.000Z' },
+    warnings: [warning],
+  };
+  const older = { ok: true, paneId: 'session-1', panelId: 'panel-1', sessionIds: [], report: { state: 'ready', reportedAt: '2026-11-24T17:00:00.000Z' } };
+  for (const [label, reply] of [['with --todo', withTodo], ['older daemon', older]]) {
+    assert.ok(validResult(reply), `${label}: ${ajv.errorsText(validResult.errors)}`);
+  }
+
+  const cases = [
+    { reply: withTodo, args: ['report', '--state', 'blocked', '--question', 'Q-84: Which sign-up flow?', '--todo', 'T-28', '--panel', 'panel-1', '--json'] },
+    { reply: older, args: ['report', '--state', 'ready', '--panel', 'panel-1', '--json'] },
+    { reply: withTodo, args: ['report', '--state', 'blocked', '--question', 'Q-84: Which sign-up flow?', '--todo', 'T-28', '--panel', 'panel-1'] },
+  ];
+  const npmOut = [];
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  try {
+    for (const { reply, args } of cases) {
+      const lines = [];
+      // Decode with the caller's boundary schema, as the real client does, so dropped keys show.
+      daemonClient.invokeDaemon = async (_channel, _args, schema) => decodeBoundary(JSON.parse(JSON.stringify(reply)), schema);
+      console.log = (line) => lines.push(String(line));
+      assert.strictEqual(await localControl.runReport(parseRunpaneArgs(args), {}), 0);
+      npmOut.push(lines);
+    }
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+  assert.deepStrictEqual(JSON.parse(npmOut[0].join('\n')), withTodo, 'npm prints the report\'s todo, installId and the warning');
+  assert.deepStrictEqual(JSON.parse(npmOut[1].join('\n')), older, 'npm prints an older reply unchanged');
+  assert.ok(npmOut[2].includes(`Warning: ${warning}`), npmOut[2].join('\n'));
+
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+cases = json.loads(${JSON.stringify(JSON.stringify(cases))})
+outputs = []
+for case in cases:
+    local_control.invoke_daemon = lambda channel, args, reply=case["reply"], **kwargs: reply
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        local_control.run_report(parse_args(case["args"]), {})
+    outputs.append(stdout.getvalue().splitlines())
+print(json.dumps(outputs))
+`));
+  assert.deepStrictEqual(JSON.parse(python[0].join('\n')), withTodo, 'Python prints the report\'s todo, installId and the warning');
+  assert.deepStrictEqual(JSON.parse(python[1].join('\n')), older, 'Python prints an older reply unchanged');
+  assert.ok(python[2].includes(`Warning: ${warning}`), python[2].join('\n'));
 }
 
 async function checkOlderOutputNote() {
@@ -7667,12 +7584,10 @@ const checks = [
   checkPanelsConversation,
   checkWatchUntilEvent,
   checkNotifyParity,
-  checkProfiles,
   checkDispatchWait,
   checkSecretsParity,
   compareAgentContextParity,
   checkPythonDaemonTimeouts,
-  checkReportOutcome,
   checkReportStructuredOptions,
   runPythonParityTests,
   checkPauseCommands,
@@ -7683,7 +7598,9 @@ const checks = [
   checkSessionPinCommands,
   checkHelpOutput,
   checkPanesCreateBaseNotice,
+  checkStartLinkParity,
   checkReportParity,
+  checkReportTodoParity,
   checkCliEventSubscriptions,
   checkPaneArchiveDryRunParity,
   compareRemoteSetupDiagnosticParity,

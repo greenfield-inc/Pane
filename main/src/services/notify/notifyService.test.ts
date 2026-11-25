@@ -1,9 +1,16 @@
 import { EventEmitter } from 'events';
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from '../configManager';
 import type { AppConfig } from '../../types/config';
 import { NotifyService } from './notifyService';
+import Database from 'better-sqlite3-multiple-ciphers';
+import type { TerminalAgentReport } from '../../../../shared/types/panels';
+import type { RunpaneInboxItem } from '../../../../shared/types/runpaneOrchestration';
+import { TodoService } from '../todos/todoService';
+import { FakeHost } from '../todos/todoTestHost';
+import { TodoStore } from '../todos/todoStore';
+import { activeTodoService } from '../todos/todosFeature';
 
 describe('NotifyService in-use poll', () => {
   let idleSeconds: number;
@@ -82,6 +89,66 @@ describe('NotifyService in-use poll', () => {
   });
 });
 
+describe('NotifyService in the background', () => {
+  let dictate = false;
+  it('sends one system notification per question, whose click opens it in Approvals, and counts what waits on the app badge', async () => {
+    vi.stubEnv('PANE_DISABLE_OS_INTEGRATION', '1');
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
+    const navigated = vi.fn();
+    // The main window, with only what navigating uses.
+    const window: BrowserWindow = Object.assign(Object.create(BrowserWindow.prototype), { isDestroyed: () => false, isMinimized: () => false, restore: () => {}, show: () => {}, focus: () => {}, webContents: { send: navigated } });
+    class FakeConfigManager extends EventEmitter {
+      getConfig(): AppConfig { return { machineId: 'mini' }; }
+    }
+    const alerts: Array<{ title: string; body: string; click: () => void }> = [];
+    const service = new NotifyService({
+      // SAFETY: NotifyService reads only getConfig() and 'config-updated' from its ConfigManager.
+      configManager: new FakeConfigManager() as ConfigManager,
+      getMainWindow: () => window,
+      findPane: () => undefined,
+      rendererArguments: () => [],
+      headless: false,
+      machine: 'mini',
+      publish: () => {},
+      sendToMachine: async () => {},
+      refreshMachine: async () => {},
+      alert: (title, body, click) => { alerts.push({ title, body, click }); },
+      dictateShowsTabs: () => dictate,
+      isChatTab: (panelId) => panelId === 'chat-1',
+    });
+    const settle = () => new Promise(resolve => setImmediate(() => setImmediate(resolve)));
+    try {
+      void service.queue.ask({ question: { ui: 'ask', title: 'Ship it?' }, source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 't1' } });
+      await settle();
+      service.queue.setActiveMachine('devbox');
+      await settle();
+      expect(alerts.map(({ title, body }) => [title, body])).toEqual([['feature needs your answer', 'Ship it?']]);
+      expect(app.setBadgeCount).toHaveBeenLastCalledWith(1);
+
+      const id = service.queue.snapshot().queue[0];
+      alerts[0].click();
+      expect(navigated).toHaveBeenCalledWith('notify:navigate', { approval: id });
+
+      service.queue.run({ type: 'close', id });
+      await settle();
+      expect(app.setBadgeCount).toHaveBeenLastCalledWith(0);
+
+      // While Dictate shows this computer's blocked tabs, a tab's prompt is left to it; anything else still notifies.
+      dictate = true;
+      service.queue.setActiveMachine('local');
+      void service.queue.ask({ question: { ui: 'options', title: 'Run npm test?', choices: [{ label: 'Yes' }, { label: 'No' }], agentPrompt: { yes: 'Yes', no: 'No' } }, source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 't1' } });
+      void service.queue.ask({ question: { ui: 'ask', title: 'Which colour?' }, source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 'chat-1' } });
+      void service.queue.ask({ question: { ui: 'ask', title: 'Deploy now?' }, source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 't2' } });
+      await settle();
+      expect(alerts.slice(1).map(({ title, body }) => [title, body])).toEqual([['feature needs your answer', 'Deploy now?']]);
+    } finally {
+      service.dispose();
+      vi.restoreAllMocks();
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
 describe('NotifyService links in a card', () => {
   let service: NotifyService | undefined;
   afterEach(() => {
@@ -129,5 +196,95 @@ describe('NotifyService links in a card', () => {
     await service.run({ type: 'open-url', id, url: 'https://example.com/preview' });
     expect(opened).toHaveBeenCalledWith('https://example.com/preview');
     expect(navigated).not.toHaveBeenCalled();
+  });
+});
+
+describe('NotifyService: a remote member\'s --todo (T-51, D-1 C, D-4)', () => {
+  let service: NotifyService | undefined;
+  const dbs: Database.Database[] = [];
+  afterEach(() => {
+    service?.dispose();
+    for (const db of dbs.splice(0)) db.close();
+    vi.unstubAllEnvs();
+  });
+
+  /** A machine's to-dos up to T-28, its T-28 titled `title`. */
+  async function machineWithT28(title: string, installId: string | undefined) {
+    const db = new Database(':memory:');
+    dbs.push(db);
+    const host = new FakeHost();
+    host.installIdValue = installId;
+    const todos = new TodoService(new TodoStore(db), host, () => Date.UTC(2026, 10, 24, 9, 0));
+    for (let i = 1; i < 28; i += 1) await todos.create({ title: `Filler ${i}`, startNow: false }, { kind: 'person' });
+    await todos.create({ title, startNow: false }, { kind: 'person' });
+    return todos;
+  }
+
+  /** Machine A's Notify, holding a blocked report from a member Pane on the MacBook. */
+  function sessionMachine(todos: TodoService, report: TerminalAgentReport, todosOn = true) {
+    vi.stubEnv('PANE_DISABLE_OS_INTEGRATION', '1');
+    class FakeConfigManager extends EventEmitter {
+      getConfig(): AppConfig { return { machineId: 'install-a', todosEnabled: todosOn }; }
+    }
+    const entry: RunpaneInboxItem = { id: 'in-1', sessionId: 'sess-a', kind: 'report', at: new Date(Date.UTC(2026, 10, 24, 9, 0)).toISOString(), paneId: 'pane-b', paneName: 'Signup', panelId: 'tab-b', agentType: 'claude', report };
+    const configManager = new FakeConfigManager();
+    service = new NotifyService({
+      // SAFETY: NotifyService reads only getConfig() and 'config-updated' from its ConfigManager.
+      configManager: configManager as ConfigManager,
+      getMainWindow: () => null,
+      findPane: () => undefined,
+      rendererArguments: () => [],
+      headless: true,
+      machine: 'mini',
+      publish: () => {},
+      sendToMachine: async () => {},
+      refreshMachine: async () => {},
+      memberMachine: (paneId) => (paneId === 'pane-b' ? 'tylers-macbook-pro' : undefined),
+      // As main wires it (ipc/notify.ts): the to-do service only while To-dos is on.
+      todoOf: (panelId, explicit) => activeTodoService({ todoService: todos, configManager })?.todoLinkFor(panelId, explicit),
+      sessionRecord: () => ({ name: 'Firecracker Grain', paneId: 'owner-a', archived: false }),
+      inbox: { all: () => [entry], subscribe: () => () => {}, subscribeEnded: () => () => {} },
+    });
+    return service.queue.snapshot().items.find(item => item.id === 'in-1');
+  }
+
+  it('both machines have a T-28: the card on the Session\'s machine links its own T-28, and the worker\'s T-28 is untouched', async () => {
+    const worker = await machineWithT28('Phone-number sign-up, sign-in and invites', 'install-b');
+    const session = await machineWithT28('Accept Google Cloud\'s HIPAA BAA', 'install-a');
+    const workersOwn = worker.require(28);
+    // On the MacBook: the Pane is in no Session there, so its check writes nothing.
+    const check = worker.checkReportTodo('tab-b', 'T-28', false);
+    expect(check.todoNumber).toBeUndefined();
+    worker.recordReportTodo(check);
+    expect(worker.require(28)).toEqual(workersOwn);
+    // On the mini: the report arrives with the MacBook's install id, and links the mini's T-28.
+    const card = sessionMachine(session, { state: 'blocked', question: 'Q-84: Phone-number accounts: go?', todo: 'T-28', installId: 'install-b', reportedAt: new Date().toISOString() });
+    expect(card?.todo).toEqual({ number: 28, title: 'Accept Google Cloud\'s HIPAA BAA', installId: 'install-a' });
+    expect(card?.source.name).toBe('Signup on tylers-macbook-pro');
+  });
+
+  it('a number the Session\'s machine has no open to-do for leaves the card unlinked, and says why in the log', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const session = await machineWithT28('Mine', 'install-a');
+    const card = sessionMachine(session, { state: 'blocked', question: 'Q-2: go?', todo: 'T-99', installId: 'install-b', reportedAt: new Date().toISOString() });
+    expect(card).toBeDefined();
+    expect(card?.todo).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('A worker on tylers-macbook-pro asked about T-99, which is no open to-do on this machine'));
+    warn.mockRestore();
+  });
+
+  it('an older worker machine sends no install id: the Session\'s machine still links its own T-28', async () => {
+    const session = await machineWithT28('Accept Google Cloud\'s HIPAA BAA', 'install-a');
+    const card = sessionMachine(session, { state: 'blocked', question: 'Q-84: go?', todo: 'T-28', reportedAt: new Date().toISOString() });
+    expect(card?.todo).toMatchObject({ number: 28, title: 'Accept Google Cloud\'s HIPAA BAA' });
+  });
+
+  it('To-dos off on the Session\'s machine: the card shows with no to-do link and its T-28 is untouched', async () => {
+    const session = await machineWithT28('Accept Google Cloud\'s HIPAA BAA', 'install-a');
+    const before = session.require(28);
+    const card = sessionMachine(session, { state: 'blocked', question: 'Q-84: go?', todo: 'T-28', installId: 'install-b', reportedAt: new Date().toISOString() }, false);
+    expect(card).toBeDefined();
+    expect(card?.todo).toBeUndefined();
+    expect(session.require(28)).toEqual(before);
   });
 });

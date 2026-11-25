@@ -64,6 +64,11 @@ export interface TerminalAgentReport {
   questions?: NotifySubQuestion[];
   /** To-dos (D-408): `--todo T-14`, the to-do the report (and its question) is about. */
   todo?: string;
+  /**
+   * T-51: the install id of the machine the report was made on, sent with `todo`. The Session's machine
+   * resolves `todo` against its own to-dos (D-1 C); this says which machine sent the number. Absent from older machines.
+   */
+  installId?: string;
   reportedAt: string;
 }
 

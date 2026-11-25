@@ -329,9 +329,9 @@ export function useIPCEvents() {
       }
       useNavigationStore.getState().navigateToPaneChat();
       void useOrchestrationSessionStore.getState().select({ sessionId: target.sessionId }).then(() => {
-        // A Session link lands on the Session's Overview, which its workspace selects once loaded.
+        // A Session link lands on the tab it names (a started link's agent tab), else on the Session's Overview.
         const internal = useOrchestrationSessionStore.getState().sessions.find(session => session.id === target.sessionId)?.internalSessionId;
-        if (internal) usePanelStore.getState().requestActivation({ sessionId: internal, panelId: sessionOverviewTabId(internal) });
+        if (internal) usePanelStore.getState().requestActivation({ sessionId: internal, panelId: target.panelId ?? sessionOverviewTabId(internal) });
       }, () => undefined);
     });
     unsubscribeFunctions.push(unsubscribePaneOpenLink);

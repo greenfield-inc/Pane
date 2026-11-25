@@ -332,6 +332,10 @@ export class MoveCoordinator {
     if (record.archived || record.move) {
       throw new PaneError('ERR_MOVE_SESSION_STATE', `Session “${record.name}” is ${record.archived ? 'archived' : record.move?.state ?? 'busy'}, so it can't move.`, record.archived ? 'Restore it first.' : 'Wait for the current move to finish.');
     }
+    // T-51 (W11): a to-do's own Session stays with its to-do, whose number means a different to-do on another machine.
+    if (record.todoNumber !== undefined) {
+      return { target, ready: false, checks: [{ id: 'todo', level: 'block', title: `T-${record.todoNumber}'s Session stays on this machine`, detail: `It belongs to to-do T-${record.todoNumber}, which lives here; to-dos don't move between machines, and T-${record.todoNumber} on ${target} is a different to-do. Nothing was moved.` }], paneCount: 0, tabCount: 0, bytes: 0 };
+    }
     const peer = resolvePeer(target, this.services.configManager);
     const checks: SessionMoveCheck[] = [];
     // An older Pane on the target says so before anything else is asked of it.
@@ -399,6 +403,7 @@ export class MoveCoordinator {
     const preflight = await this.check({ sessionId, target });
     if (!preflight.ready) {
       const block = preflight.checks.find(check => check.level === 'block');
+      if (block?.id === 'todo') throw new PaneError('ERR_MOVE_TODO_SESSION', `${block.title}: ${block.detail ?? 'it belongs to a to-do on this machine.'}`, `Work on it from this machine, or start a new to-do on ${target}.`);
       // Open approvals and waiting messages are this Session's, not the target's.
       const here = block?.id === 'approvals' || block?.id.startsWith('queue:');
       throw new PaneError('ERR_MOVE_NOT_READY', here ? `The Session can't move yet: ${block?.title}.` : `${target} isn't ready: ${block?.title ?? 'a check failed'}.`, here ? block?.detail ?? 'Check again.' : 'Fix what the dialog lists, then move again.');

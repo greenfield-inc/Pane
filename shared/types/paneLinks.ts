@@ -6,7 +6,7 @@
 export type PaneLinkTarget =
   | { kind: 'pane'; paneId: string; panelId?: string }
   | { kind: 'repo'; repoId: number }
-  | { kind: 'session'; sessionId: string };
+  | { kind: 'session'; sessionId: string; /** A tab to open instead of the Session's Overview. */ panelId?: string };
 
 /** The targets a host asks the renderer to navigate to. */
 export type PaneLinkNavigation = Exclude<PaneLinkTarget, { kind: 'pane' }>;

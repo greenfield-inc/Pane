@@ -28,7 +28,8 @@ describe('NotifyQueue replies (the reply contract)', () => {
   let closedTabs: Set<string>;
 
   const queueWith = (extra: Partial<NotifyQueueEnvironment> = {}) => new NotifyQueue({
-    settings: () => DEFAULT_NOTIFY_SETTINGS,
+    // The floating strip is off by default; these tests read it.
+    settings: () => ({ ...DEFAULT_NOTIFY_SETTINGS, showOutsidePane: true }),
     showOutsideSupported: true,
     shortcutRegistered: () => true,
     instructionFiles: () => [],
@@ -691,5 +692,87 @@ describe('NotifyQueue replies (the reply contract)', () => {
     await vi.advanceTimersByTimeAsync(3_000);
     expect(typed).toContainEqual(['orch', 'answer: Q-4 → Yes — "after lunch" (by you)']);
     queue.dispose();
+  });
+  describe('a Q-n two Sessions share, read by Autopilot', () => {
+    const otherSession = { id: 's2', name: 'Firecracker Grain', paneId: 'sp2', orchestrator: true };
+    const otherOrchestrator: NotifySource = { name: 'Session: Firecracker Grain', agent: 'Claude', paneId: 'sp2', panelId: 'orch2', session: otherSession };
+    const q1 = (title: string): NotifyQuestion => ({ ui: 'options', title: `Q-1: ${title}`, choices: [{ label: 'Yes', recommended: true }, { label: 'No' }] });
+    /** Each Session's orchestrator asks its own Q-1, then its tab closes, so Autopilot reads what the person types. */
+    const twoQ1s = () => {
+      const first = queueWith();
+      void first.ask({ question: q1('Ship the Doozy build?'), source: orchestrator, id: 'a1' });
+      void first.ask({ question: q1('Merge the Grain fix?'), source: otherOrchestrator, id: 'b1' });
+      first.dispose();
+      tabs.set('orch', 'gone');
+      tabs.set('orch2', 'gone');
+      autopilot = { panelId: 'autopilot-chat' };
+      return queueWith();
+    };
+    const refusal = (run: () => void): PaneError => {
+      try {
+        run();
+      } catch (error) {
+        if (error instanceof PaneError) return error;
+        throw error;
+      }
+      throw new Error('expected a refusal');
+    };
+
+    it('refuses --took and --update by Q-n when both replies went to Autopilot, names both ids, and changes nothing', async () => {
+      const queue = twoQ1s();
+      queue.run({ type: 'answer', id: 'a1', answer: { picks: [], text: 'why?' } });
+      queue.run({ type: 'answer', id: 'b1', answer: { picks: [], text: 'what for?' } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(item(queue, 'a1')?.reply?.reader?.kind).toBe('autopilot');
+      expect(item(queue, 'b1')?.reply?.reader?.kind).toBe('autopilot');
+      const before = [item(queue, 'a1'), item(queue, 'b1')];
+
+      const took = refusal(() => queue.took({ panelId: 'autopilot-chat' }, 'Q-1', 'question'));
+      expect(took.code).toBe('ERR_NOTIFY_AMBIGUOUS');
+      expect(took.message).toContain('a1');
+      expect(took.message).toContain('b1');
+      expect(took.next).toMatch(/id/);
+      const update = refusal(() => queue.update({ panelId: 'autopilot-chat' }, 'Q-1', { asked: 'why?', whatChanged: ['Said why'] }));
+      expect(update.code).toBe('ERR_NOTIFY_AMBIGUOUS');
+      expect([item(queue, 'a1'), item(queue, 'b1')]).toEqual(before);
+
+      // Its id still names one card.
+      expect(queue.took({ panelId: 'autopilot-chat' }, 'b1', 'question')).toMatchObject({ took: 'question', id: 'b1' });
+      expect(item(queue, 'a1')).toEqual(before[0]);
+      queue.dispose();
+    });
+
+    it('F-1: refuses a Q-1 Autopilot itself asked about two Sessions, both replies taken as answers, naming both ids', async () => {
+      const autopilotSource: NotifySource = { name: 'Autopilot', agent: 'Claude', panelId: 'autopilot-chat', autopilot: true };
+      const first = queueWith();
+      void first.ask({ question: { ...q1('Ship the Doozy build?'), connected: { kind: 'session', id: session.id, name: session.name, paneId: session.paneId } }, source: autopilotSource, id: 'ap-a' });
+      void first.ask({ question: { ...q1('Merge the Grain fix?'), connected: { kind: 'session', id: otherSession.id, name: otherSession.name, paneId: otherSession.paneId } }, source: autopilotSource, id: 'ap-b' });
+      first.dispose();
+      const queue = queueWith();
+      queue.run({ type: 'answer', id: 'ap-a', answer: { picks: [], text: 'only after lunch' } });
+      queue.run({ type: 'answer', id: 'ap-b', answer: { picks: [], text: 'what for?' } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(item(queue, 'ap-a')?.reply).toMatchObject({ state: 'answer', reader: { panelId: 'autopilot-chat' } });
+      expect(item(queue, 'ap-b')?.reply).toMatchObject({ state: 'answer', reader: { panelId: 'autopilot-chat' } });
+      const before = [item(queue, 'ap-a'), item(queue, 'ap-b')];
+
+      const took = refusal(() => queue.took({ panelId: 'autopilot-chat' }, 'Q-1', 'question'));
+      expect(took.code).toBe('ERR_NOTIFY_AMBIGUOUS');
+      expect(took.message).toContain('ap-a (Doozy)');
+      expect(took.message).toContain('ap-b (Firecracker Grain)');
+      expect(refusal(() => queue.update({ panelId: 'autopilot-chat' }, 'Q-1', { asked: 'why?', whatChanged: ['Said why'] })).code).toBe('ERR_NOTIFY_AMBIGUOUS');
+      expect([item(queue, 'ap-a'), item(queue, 'ap-b')]).toEqual(before);
+      queue.dispose();
+    });
+
+    it('takes the card whose reply went to Autopilot when the other Session\'s Q-1 only waits', async () => {
+      const queue = twoQ1s();
+      queue.run({ type: 'answer', id: 'b1', answer: { picks: [], text: 'what for?' } });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(item(queue, 'a1')?.reply).toBeUndefined();
+      expect(queue.took({ panelId: 'autopilot-chat' }, 'Q-1', 'question')).toMatchObject({ took: 'question', id: 'b1' });
+      expect(item(queue, 'a1')?.state).toBe('waiting');
+      queue.dispose();
+    });
   });
 });

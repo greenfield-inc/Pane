@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { EMPTY_TODO_SCOPE, inTodoScope, type TodoApprovalScope } from '../components/todos/sessionTodos';
 import { isOpenForSession } from '../../../shared/approvalOpen';
-import type { NotifyCommand, NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
+import { machineOfItem } from '../../../shared/todoKey';
+import { countsAsWaiting, type NotifyCommand, type NotifyItem, type NotifySnapshot } from '../../../shared/types/notify';
 import { showActionError } from './errorStore';
 import { isTodosEnabled, useConfigStore } from './configStore';
 
@@ -204,13 +205,7 @@ export function notifyItem(snapshot: NotifySnapshot | null, id: string | null | 
   return snapshot.items.find((item) => item.id === id);
 }
 
-/**
- * An item the person can answer now: what every count counts. A stale item waits in its own group,
- * an offline machine's collapses to one row, and a mirror from an older machine takes no answer.
- */
-export function countsAsWaiting(item: NotifyItem): boolean {
-  return item.state === 'waiting' && !item.unreachable && item.staleSince === undefined && !item.relay;
-}
+export { countsAsWaiting };
 
 /** Questions still waiting for an answer. Updates never count. */
 export function waitingCount(snapshot: NotifySnapshot | null): number {
@@ -218,28 +213,27 @@ export function waitingCount(snapshot: NotifySnapshot | null): number {
 }
 
 /**
- * How many items from this Session (its orchestrator, worker prompts, fallback items) wait on you;
- * with `machineId`, only that machine's (`local` for this computer). A dismissed item still waits in
- * Approvals but isn't open for its Session (`isOpenForSession`), so the row's count leaves it out.
+ * How many items from this Session (its orchestrator, worker prompts, fallback items) wait on you, from
+ * the machine the Session is on (`todos.machineId`, T-51). A dismissed item still waits in Approvals but
+ * isn't open for its Session (`isOpenForSession`), so the row's count leaves it out.
  */
-export function sessionWaitingCount(snapshot: NotifySnapshot | null, sessionId: string, machineId?: string, todos: TodoApprovalScope = EMPTY_TODO_SCOPE): number {
-  // With `todos`, the approvals of the to-dos this Session requested count too, each once (T-22).
-  return snapshot?.items.filter((item) => countsAsWaiting(item) && isOpenForSession(item) && (item.source.session?.id === sessionId || inTodoScope(item, todos))
-    && (machineId === undefined || (item.machineId ?? 'local') === machineId)).length ?? 0;
+export function sessionWaitingCount(snapshot: NotifySnapshot | null, sessionId: string, todos: TodoApprovalScope = EMPTY_TODO_SCOPE): number {
+  // The approvals of the to-dos this Session requested count too, each once (T-22).
+  return snapshot?.items.filter((item) => countsAsWaiting(item) && isOpenForSession(item) && machineOfItem(item) === todos.machineId
+    && (item.source.session?.id === sessionId || inTodoScope(item, todos))).length ?? 0;
 }
 
 /**
  * How many approvals of a Session's to-dos wait on you, each once: the amber count on its To-dos tab
  * (T-23). The Session's own questions are left out; its sidebar row counts both (`sessionWaitingCount`).
  */
-export function todosWaitingCount(snapshot: NotifySnapshot | null, todos: TodoApprovalScope, machineId?: string): number {
-  return snapshot ? sessionTodoApprovals(snapshot.items, todos, machineId).length : 0;
+export function todosWaitingCount(snapshot: NotifySnapshot | null, todos: TodoApprovalScope): number {
+  return snapshot ? sessionTodoApprovals(snapshot.items, todos).length : 0;
 }
 
-/** A Session's to-dos' approvals waiting on you (open: not dismissed or sent), from machine `machineId` when given. */
-export function sessionTodoApprovals(items: readonly NotifyItem[], todos: TodoApprovalScope, machineId?: string): NotifyItem[] {
-  return items.filter((item) => countsAsWaiting(item) && isOpenForSession(item) && inTodoScope(item, todos)
-    && (machineId === undefined || (item.machineId ?? 'local') === machineId));
+/** A Session's to-dos' approvals waiting on you (open: not dismissed or sent), from the scope's machine only (T-51). */
+export function sessionTodoApprovals(items: readonly NotifyItem[], todos: TodoApprovalScope): NotifyItem[] {
+  return items.filter((item) => countsAsWaiting(item) && isOpenForSession(item) && inTodoScope(item, todos));
 }
 
 /** Waiting items from machines other than the one the app is on (`local` for this computer). */

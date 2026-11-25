@@ -3,9 +3,11 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { usePanelStore } from '../../stores/panelStore';
 import { useSessionStore } from '../../stores/sessionStore';
 
-import { parsePaneLink } from './paneLink';
+import { isPaneStartLink, parsePaneLink } from './paneLink';
 
 export async function openPaneLink(uri: string): Promise<void> {
+  // Main validates it and asks the person before anything starts, as for a link from the OS.
+  if (isPaneStartLink(uri)) return window.electronAPI.window.openPaneLink(uri);
   const target = parsePaneLink(uri);
   if (target) await openPaneTarget(target);
 }

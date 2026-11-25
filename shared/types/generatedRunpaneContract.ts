@@ -2347,11 +2347,12 @@ const CONTRACT_SECTION_11 = [
   },
   {
     "name": "links create",
-    "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session in the Pane app.",
+    "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session, or a start link that starts an agent on a prompt once the person confirms.",
     "usage": [
       "runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
       "runpane links create --repo <repo-id> [--json]",
-      "runpane links create --session <session-id> [--json]"
+      "runpane links create --session <session-id> [--json]",
+      "runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--repo <repo> | --session <id|name>] [--web] [--json]"
     ],
     "toolsets": [
       "core",
@@ -2488,7 +2489,7 @@ const CONTRACT_SECTION_11 = [
     "name": "report",
     "summary": "Hand back a worker's structured report: state, PR, head commit, summary, and the question when blocked.",
     "usage": [
-      "runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--todo <T-n>] [--json] [--pane-dir <path>]"
+      "runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--todo <T-n>] [--json] [--pane-dir <path>]"
     ],
     "mutates": true,
     "additive": true,
@@ -3399,76 +3400,6 @@ const CONTRACT_SECTION_11 = [
       "todoResult"
     ],
     "localControl": true
-  },
-  {
-    "name": "profiles list",
-    "summary": "List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.",
-    "usage": [
-      "runpane profiles list [--json] [--pane-dir <path>]"
-    ],
-    "toolsets": [
-      "core",
-      "profiles",
-      "plugin"
-    ],
-    "jsonSchemas": [
-      "profileListResult"
-    ],
-    "localControl": true
-  },
-  {
-    "name": "profiles show",
-    "summary": "Show one profile: its agents, its workflow's steps and outcomes, its errors, and its file.",
-    "usage": [
-      "runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]"
-    ],
-    "cliOnlyFlags": [
-      "--yaml"
-    ],
-    "toolsets": [
-      "core",
-      "profiles",
-      "plugin"
-    ],
-    "jsonSchemas": [
-      "profileShowResult"
-    ],
-    "localControl": true
-  },
-  {
-    "name": "profiles launch",
-    "summary": "Launch a profile: Pane runs its workflow step by step, the first step in a new Pane of a Session.",
-    "usage": [
-      "runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]"
-    ],
-    "mutates": true,
-    "additive": true,
-    "toolsets": [
-      "core",
-      "profiles",
-      "plugin"
-    ],
-    "jsonSchemas": [
-      "profileLaunchRequest",
-      "profileLaunchResult"
-    ],
-    "localControl": true
-  },
-  {
-    "name": "profiles runs",
-    "summary": "List profile runs: each run's profile, state and current step.",
-    "usage": [
-      "runpane profiles runs [--json] [--pane-dir <path>]"
-    ],
-    "toolsets": [
-      "core",
-      "profiles",
-      "plugin"
-    ],
-    "jsonSchemas": [
-      "profileRunsResult"
-    ],
-    "localControl": true
   }
 ] as const;
 
@@ -4191,26 +4122,6 @@ const CONTRACT_SECTION_12 = {
       "name": "--todo",
       "value": "<T-n>",
       "description": "notify, report and agents start: the to-do this card, report or agent works on."
-    },
-    {
-      "name": "--outcome",
-      "value": "<name>",
-      "description": "Which of a profile step's declared outcomes happened, for runpane report; implies --state done."
-    },
-    {
-      "name": "--harness",
-      "value": "<cli[/model]>",
-      "description": "profiles launch: one CLI (`cli` or `cli/model`) for every agent of the profile."
-    },
-    {
-      "name": "--agent-harness",
-      "value": "<agent>=<cli[/model]>",
-      "description": "profiles launch: the CLI for one agent of the profile; repeat it per agent."
-    },
-    {
-      "name": "--command",
-      "value": "<cli>=<command>",
-      "description": "profiles launch: the command that starts a CLI Pane does not know; repeat it per CLI."
     }
   ],
   "localBoolean": [
@@ -4391,8 +4302,8 @@ const CONTRACT_SECTION_12 = {
       "description": "todos snooze only: at the time, raise a reminder card for the person instead of waking its agents."
     },
     {
-      "name": "--yaml",
-      "description": "profiles show: print the profile's file text only."
+      "name": "--web",
+      "description": "runpane links create: print a start link in its https://runpane.com/open form, for web pages."
     }
   ]
 } as const;
@@ -4478,9 +4389,6 @@ const CONTRACT_SECTION_13 = {
       "  runpane todos show|start|stop|done|drop|archive <todo> [--json]",
       "  runpane todos attach <todo> <file|url> [--kind <kind>] [--label <label>] [--json]",
       "  runpane todos ask <todo> <question> | comment <todo> <text> | review <todo> [--json]",
-      "  runpane profiles list|runs [--json]",
-      "  runpane profiles show <name> [--yaml] [--json]",
-      "  runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] --yes [--json]",
       "  runpane panes list [--repo <selector>] [--json]",
       "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
       "  runpane workspace state [--repo <selector>] [--json]",
@@ -4518,7 +4426,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
       "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
       "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
-      "  runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
+      "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
       "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--close <id|Q-n>] [--json]",
       "  runpane inbox [--session <id|name>] [--json]",
       "  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]",
@@ -5233,7 +5141,7 @@ const CONTRACT_SECTION_13 = {
       "The MCP server ships in the npm package and inside the Pane app. The Python package does not include it.",
       "",
       "Options:",
-      "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, loops, profiles, workspace, machine, git, docs, links, admin",
+      "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, loops, workspace, machine, git, docs, links, admin",
       "  --read-only                    Serve only read-only tools"
     ],
     "relay": [
@@ -5715,14 +5623,18 @@ const CONTRACT_SECTION_13 = {
       "  runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
       "  runpane links create --repo <repo-id> [--json]",
       "  runpane links create --session <session-id> [--json]",
+      "  runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--repo <repo> | --session <id|name>] [--web] [--json]",
       "",
-      "Build a pane:// link that opens a Pane, panel, repository, or Session in the Pane app.",
+      "Build a pane:// link that opens a Pane, panel, repository, or Session, or a start link that starts an agent on a prompt once the person confirms.",
       "",
       "Options:",
       "  --pane <pane-id>                Pane to open.",
       "  --panel <panel-id>              Panel inside the Pane to select.",
-      "  --repo <repo-id>                Repository id from repos list.",
-      "  --session <session-id>          Session id or name from sessions list.",
+      "  --repo <repo-id>                Repository id from repos list; with --prompt, also a saved name or owner/repo.",
+      "  --session <session-id>          Session id from sessions list; with --prompt, also a Session name.",
+      "  --prompt <task>                 Start link: the prompt Pane shows, then sends once the person presses Start.",
+      "  --agent <agent>                 Start link: the agent to start (default: the person's default agent).",
+      "  --web                           Start link: print the https://runpane.com/open form, for web pages.",
       "  --json                          Print machine-readable output."
     ],
     "links open": [
@@ -5732,7 +5644,7 @@ const CONTRACT_SECTION_13 = {
       "Open a pane:// link in the running Pane app.",
       "",
       "Options:",
-      "  --url <pane-url>                A pane://open link from links create.",
+      "  --url <pane-url>                A pane://open or pane://new link from links create.",
       "  --yes                           Confirm this change; required in non-interactive shells.",
       "  --json                          Print machine-readable output.",
       "  --pane-dir <path>               Connect to a specific Pane data directory."
@@ -5813,7 +5725,7 @@ const CONTRACT_SECTION_13 = {
     ],
     "report": [
       "Usage:",
-      "  runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--todo <T-n>] [--json] [--pane-dir <path>]",
+      "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--todo <T-n>] [--json] [--pane-dir <path>]",
       "",
       "Hands back a worker's structured report for its panel: the orchestrator receives it as an",
       "agent.report watch event and reads it in `agents status` and `sessions overview`.",
@@ -5828,12 +5740,8 @@ const CONTRACT_SECTION_13 = {
       "brackets with a spaced slash, \"(requests / second)\", reads as options too: word it as prose",
       "(\"in requests per second\") or write it without spaces (\"(requests/second)\").",
       "",
-      "--outcome <name> ends a profile step with one of its declared outcomes (implies --state done).",
-      "Pane refuses an outcome the step does not declare and lists the ones it does.",
-      "",
       "Options:",
       "  --state <state>                ready, blocked, failed, or done",
-      "  --outcome <name>               A profile step's declared outcome; implies --state done, no --question",
       "  --pr <number>                  Pull request number",
       "  --head <sha>                   Head commit, 7-40 hex characters",
       "  --summary <text>               Summary text; up to 16,000 characters are kept",
@@ -5850,7 +5758,6 @@ const CONTRACT_SECTION_13 = {
       "",
       "Examples:",
       "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md",
-      "  runpane report --outcome \"plan ready\" --summary-file status.json",
       "  runpane report --state blocked --question 'Q-3: Use the invoice id in the PDF filename?' --choices '[{\"label\":\"Invoice id\",\"recommended\":true},{\"label\":\"Invoice number\"}]'"
     ],
     "notify": [
@@ -5861,7 +5768,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
       "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
       "",
-      "Asks the person a question, or tells them something, on screen wherever they are, and",
+      "Asks the person a question, or tells them something, in Pane, and",
       "prints their answer. The call waits until they answer; --ui info returns at once.",
       "Inside a Pane terminal the question names its Pane from PANE_SESSION_ID and PANE_PANEL_ID.",
       "When Pane is not running it prints an unavailable result: ask in the terminal instead.",
@@ -6223,84 +6130,6 @@ const CONTRACT_SECTION_13 = {
       "Options:",
       "  --loop <id>                     Loop id, from runpane loops list.",
       "  --yes                           Confirm the change.",
-      "  --json                          Print JSON output.",
-      "  --pane-dir <path>               Connect to a specific Pane data directory."
-    ],
-    "profiles": [
-      "Usage:",
-      "  runpane profiles <list|show|launch|runs> [options]",
-      "",
-      "A profile is one YAML file that defines a team of agents and a fixed workflow.",
-      "Pane runs a launched profile's workflow itself, step by step: each step opens as a tab",
-      "in the run's Pane, and an agent step ends when its agent runs",
-      "`runpane report --outcome \"<outcome>\"`. See docs/PROFILES.md.",
-      "",
-      "Commands:",
-      "  runpane profiles list [--json] [--pane-dir <path>]",
-      "  runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]",
-      "  runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]",
-      "  runpane profiles runs [--json] [--pane-dir <path>]"
-    ],
-    "profiles list": [
-      "Usage:",
-      "runpane profiles list [--json] [--pane-dir <path>]",
-      "",
-      "List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.",
-      "",
-      "Each line: name, version, bundled or yours, on or off, and launchable, no flow",
-      "(no workflow), or invalid with its first error.",
-      "",
-      "Options:",
-      "  --json                          Print JSON output.",
-      "  --pane-dir <path>               Connect to a specific Pane data directory."
-    ],
-    "profiles show": [
-      "Usage:",
-      "runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]",
-      "",
-      "Show one profile: its agents, its workflow's steps and outcomes, its errors, and its file.",
-      "",
-      "Options:",
-      "  <name>                          The profile's name, from runpane profiles list.",
-      "  --yaml                          Print the profile's file text only.",
-      "  --json                          Print JSON output.",
-      "  --pane-dir <path>               Connect to a specific Pane data directory."
-    ],
-    "profiles launch": [
-      "Usage:",
-      "runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]",
-      "",
-      "Launch a profile: Pane runs its workflow step by step, the first step in a new Pane of a Session.",
-      "",
-      "Without --repo it runs in the repo of the Pane this terminal is in, else the active repo.",
-      "Without --session a Session orchestrator's runs join its Session; anything else gets a new Session.",
-      "It prints the run id, its Session, its first step and its Pane. Follow it with `runpane profiles runs`.",
-      "",
-      "Options:",
-      "  <name>                          The profile's name, from runpane profiles list.",
-      "  --prompt <text>                 What you want done: the first agent step's request. Required.",
-      "  --repo <selector>               Repository: active, id, exact path, or saved name.",
-      "  --session <id|name>             An existing Session to run in.",
-      "  --harness <cli[/model]>         One CLI for every agent, over the file's runs.",
-      "  --agent-harness <agent>=<cli>   The CLI for one agent; repeat per agent.",
-      "  --command <cli>=<command>       The command that starts a CLI Pane does not know; repeat.",
-      "  --yes                           Confirm the launch.",
-      "  --json                          Print JSON output.",
-      "  --pane-dir <path>               Connect to a specific Pane data directory.",
-      "",
-      "Examples:",
-      "  runpane profiles launch greenfield --prompt \"Add dark mode to settings\" --yes",
-      "  runpane profiles launch greenfield --prompt \"Fix the flaky test\" --agent-harness planner=claude/opus --yes --json"
-    ],
-    "profiles runs": [
-      "Usage:",
-      "runpane profiles runs [--json] [--pane-dir <path>]",
-      "",
-      "List profile runs: each run's profile, state and current step.",
-      "",
-      "Each line: run id, profile, state (running, asking, paused, ended or failed) and step.",
-      "",
-      "Options:",
       "  --json                          Print JSON output.",
       "  --pane-dir <path>               Connect to a specific Pane data directory."
     ],
@@ -7465,7 +7294,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
       "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
       "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
-      "  runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
+      "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
       "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--close <id|Q-n>] [--json]",
       "  runpane inbox [--session <id|name>] [--json]",
       "  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]",
@@ -7497,9 +7326,6 @@ const CONTRACT_SECTION_13 = {
       "  python -m runpane todos show|start|stop|done|drop|archive <todo> [--json]",
       "  python -m runpane todos attach <todo> <file|url> [--kind <kind>] [--label <label>] [--json]",
       "  python -m runpane todos ask <todo> <question> | comment <todo> <text> | review <todo> [--json]",
-      "  python -m runpane profiles list|runs [--json]",
-      "  python -m runpane profiles show <name> [--yaml] [--json]",
-      "  python -m runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] --yes [--json]",
       "  runpane help [command]",
       "",
       "Quick start:",
@@ -8651,14 +8477,18 @@ const CONTRACT_SECTION_13 = {
       "  runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
       "  runpane links create --repo <repo-id> [--json]",
       "  runpane links create --session <session-id> [--json]",
+      "  runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--repo <repo> | --session <id|name>] [--web] [--json]",
       "",
-      "Build a pane:// link that opens a Pane, panel, repository, or Session in the Pane app.",
+      "Build a pane:// link that opens a Pane, panel, repository, or Session, or a start link that starts an agent on a prompt once the person confirms.",
       "",
       "Options:",
       "  --pane <pane-id>                Pane to open.",
       "  --panel <panel-id>              Panel inside the Pane to select.",
-      "  --repo <repo-id>                Repository id from repos list.",
-      "  --session <session-id>          Session id or name from sessions list.",
+      "  --repo <repo-id>                Repository id from repos list; with --prompt, also a saved name or owner/repo.",
+      "  --session <session-id>          Session id from sessions list; with --prompt, also a Session name.",
+      "  --prompt <task>                 Start link: the prompt Pane shows, then sends once the person presses Start.",
+      "  --agent <agent>                 Start link: the agent to start (default: the person's default agent).",
+      "  --web                           Start link: print the https://runpane.com/open form, for web pages.",
       "  --json                          Print machine-readable output."
     ],
     "links open": [
@@ -8668,7 +8498,7 @@ const CONTRACT_SECTION_13 = {
       "Open a pane:// link in the running Pane app.",
       "",
       "Options:",
-      "  --url <pane-url>                A pane://open link from links create.",
+      "  --url <pane-url>                A pane://open or pane://new link from links create.",
       "  --yes                           Confirm this change; required in non-interactive shells.",
       "  --json                          Print machine-readable output.",
       "  --pane-dir <path>               Connect to a specific Pane data directory."
@@ -8716,7 +8546,7 @@ const CONTRACT_SECTION_13 = {
     ],
     "report": [
       "Usage:",
-      "  runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--todo <T-n>] [--json] [--pane-dir <path>]",
+      "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--todo <T-n>] [--json] [--pane-dir <path>]",
       "",
       "Hands back a worker's structured report for its panel: the orchestrator receives it as an",
       "agent.report watch event and reads it in `agents status` and `sessions overview`.",
@@ -8731,12 +8561,8 @@ const CONTRACT_SECTION_13 = {
       "brackets with a spaced slash, \"(requests / second)\", reads as options too: word it as prose",
       "(\"in requests per second\") or write it without spaces (\"(requests/second)\").",
       "",
-      "--outcome <name> ends a profile step with one of its declared outcomes (implies --state done).",
-      "Pane refuses an outcome the step does not declare and lists the ones it does.",
-      "",
       "Options:",
       "  --state <state>                ready, blocked, failed, or done",
-      "  --outcome <name>               A profile step's declared outcome; implies --state done, no --question",
       "  --pr <number>                  Pull request number",
       "  --head <sha>                   Head commit, 7-40 hex characters",
       "  --summary <text>               Summary text; up to 16,000 characters are kept",
@@ -8753,7 +8579,6 @@ const CONTRACT_SECTION_13 = {
       "",
       "Examples:",
       "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md",
-      "  runpane report --outcome \"plan ready\" --summary-file status.json",
       "  runpane report --state blocked --question 'Q-3: Use the invoice id in the PDF filename?' --choices '[{\"label\":\"Invoice id\",\"recommended\":true},{\"label\":\"Invoice number\"}]'"
     ],
     "notify": [
@@ -8764,7 +8589,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
       "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
       "",
-      "Asks the person a question, or tells them something, on screen wherever they are, and",
+      "Asks the person a question, or tells them something, in Pane, and",
       "prints their answer. The call waits until they answer; --ui info returns at once.",
       "Inside a Pane terminal the question names its Pane from PANE_SESSION_ID and PANE_PANEL_ID.",
       "When Pane is not running it prints an unavailable result: ask in the terminal instead.",
@@ -9126,84 +8951,6 @@ const CONTRACT_SECTION_13 = {
       "Options:",
       "  --loop <id>                     Loop id, from runpane loops list.",
       "  --yes                           Confirm the change.",
-      "  --json                          Print JSON output.",
-      "  --pane-dir <path>               Connect to a specific Pane data directory."
-    ],
-    "profiles": [
-      "Usage:",
-      "  python -m runpane profiles <list|show|launch|runs> [options]",
-      "",
-      "A profile is one YAML file that defines a team of agents and a fixed workflow.",
-      "Pane runs a launched profile's workflow itself, step by step: each step opens as a tab",
-      "in the run's Pane, and an agent step ends when its agent runs",
-      "`runpane report --outcome \"<outcome>\"`. See docs/PROFILES.md.",
-      "",
-      "Commands:",
-      "  python -m runpane profiles list [--json] [--pane-dir <path>]",
-      "  python -m runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]",
-      "  python -m runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]",
-      "  python -m runpane profiles runs [--json] [--pane-dir <path>]"
-    ],
-    "profiles list": [
-      "Usage:",
-      "python -m runpane profiles list [--json] [--pane-dir <path>]",
-      "",
-      "List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.",
-      "",
-      "Each line: name, version, bundled or yours, on or off, and launchable, no flow",
-      "(no workflow), or invalid with its first error.",
-      "",
-      "Options:",
-      "  --json                          Print JSON output.",
-      "  --pane-dir <path>               Connect to a specific Pane data directory."
-    ],
-    "profiles show": [
-      "Usage:",
-      "python -m runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]",
-      "",
-      "Show one profile: its agents, its workflow's steps and outcomes, its errors, and its file.",
-      "",
-      "Options:",
-      "  <name>                          The profile's name, from runpane profiles list.",
-      "  --yaml                          Print the profile's file text only.",
-      "  --json                          Print JSON output.",
-      "  --pane-dir <path>               Connect to a specific Pane data directory."
-    ],
-    "profiles launch": [
-      "Usage:",
-      "python -m runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]",
-      "",
-      "Launch a profile: Pane runs its workflow step by step, the first step in a new Pane of a Session.",
-      "",
-      "Without --repo it runs in the repo of the Pane this terminal is in, else the active repo.",
-      "Without --session a Session orchestrator's runs join its Session; anything else gets a new Session.",
-      "It prints the run id, its Session, its first step and its Pane. Follow it with `runpane profiles runs`.",
-      "",
-      "Options:",
-      "  <name>                          The profile's name, from runpane profiles list.",
-      "  --prompt <text>                 What you want done: the first agent step's request. Required.",
-      "  --repo <selector>               Repository: active, id, exact path, or saved name.",
-      "  --session <id|name>             An existing Session to run in.",
-      "  --harness <cli[/model]>         One CLI for every agent, over the file's runs.",
-      "  --agent-harness <agent>=<cli>   The CLI for one agent; repeat per agent.",
-      "  --command <cli>=<command>       The command that starts a CLI Pane does not know; repeat.",
-      "  --yes                           Confirm the launch.",
-      "  --json                          Print JSON output.",
-      "  --pane-dir <path>               Connect to a specific Pane data directory.",
-      "",
-      "Examples:",
-      "  python -m runpane profiles launch greenfield --prompt \"Add dark mode to settings\" --yes",
-      "  python -m runpane profiles launch greenfield --prompt \"Fix the flaky test\" --agent-harness planner=claude/opus --yes --json"
-    ],
-    "profiles runs": [
-      "Usage:",
-      "python -m runpane profiles runs [--json] [--pane-dir <path>]",
-      "",
-      "List profile runs: each run's profile, state and current step.",
-      "",
-      "Each line: run id, profile, state (running, asking, paused, ended or failed) and step.",
-      "",
-      "Options:",
       "  --json                          Print JSON output.",
       "  --pane-dir <path>               Connect to a specific Pane data directory."
     ],
@@ -10212,8 +9959,6 @@ const CONTRACT_SECTION_14 = {
     "runpane todos ask T-12 \"Should the sheet list chat shortcuts too?\" --json",
     "runpane todos review T-12 --summary \"Ready; see the PR.\" --json",
     "runpane todos snooze T-12 --until tomorrow --note \"Check Sentry after the deploy\" --json",
-    "runpane profiles list --json",
-    "runpane profiles launch greenfield --prompt \"Add dark mode to settings\" --yes --json",
     "runpane agents start --repo active --name fix-login --agent claude --prompt \"Fix the login redirect\" --yes --json",
     "runpane agents start --pane <pane-id> --agent codex --prompt \"Review the PR from this branch and report findings\" --yes --json",
     "runpane agents status --pane <pane-id> --json",
@@ -10277,7 +10022,7 @@ const CONTRACT_SECTION_14 = {
     "When running from WSL while Pane is installed on Windows, a Linux-installed runpane cannot reach Pane: it looks for a missing `/tmp/pane-daemon.../daemon.sock`. Pane's own `runpane` (on PATH in Pane's WSL terminals, or `/mnt/c/Users/<you>/.pane/bin/runpane` from any WSL shell) runs the Windows CLI through WSL interop and converts path arguments. With a Pane build older than that shim, invoke the Windows wrapper through PowerShell from a Windows cwd, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.",
     "`runpane watch` waits for agent, Pane, panel, and PR events from the daemon journal without polling. `--follow` keeps watching with defaults tuned for an agent watching unattended (quiet, batched, and it ends itself after 3 hours with nothing happening); individual duration flags override these defaults. Cadence requires a named follow consumer; `--follow --since <generation>` has no consumer name and bypasses settling and batching. `--until-event` waits for one event worth waking for, prints it immediately without follow settling or batching, and exits 0. The defaults are listed in the contract under defaults.watch.",
     "A watch releases its pending slot when its client socket or named pipe disconnects. Re-arming the same named cursor takes over the previous request; the superseded watcher exits with a WATCH ERROR instead of competing for the cursor. Anonymous concurrent watchers retain the eight-wait limit. Each request also has a 125-second lease (slightly longer than the maximum 120-second long poll), so an abandoned request is reclaimed even if no disconnect arrives.",
-    "The desktop app treats one consumer name specially: while a `runpane watch --as dictate` request is in flight, and for 30 seconds after the last one ends, Pane skips its own \"needs your input\" and \"finished\" desktop notifications, because [Dictate](https://github.com/parsakhaz/open-dictate) shows those events on its pill. When that watcher stops, Pane's notifications come back. The CLI's flags and output are unchanged.",
+    "The desktop app treats one consumer name specially: while a `runpane watch --as dictate` request is in flight, and for 30 seconds after the last one ends, Pane skips its own \"needs your input\" and \"finished\" desktop notifications, because [Dictate](https://github.com/parsakhaz/open-dictate) shows those events on its pill. A Claude prompt or chat-tab question in one of this computer's tabs shows there as that tab needing input, so Pane sends no approval notification for it; every other approval still notifies from Pane. When that watcher stops, Pane's notifications come back. The CLI's flags and output are unchanged.",
     "`sessions list` list durable named orchestration Sessions.",
     "`sessions create` create a durable named orchestration Session and its hidden terminal owner.",
     "`sessions get` read one durable named orchestration Session.",
@@ -10291,11 +10036,9 @@ const CONTRACT_SECTION_14 = {
     "`runpane machine health` shows this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free by tier. `runpane machine cleanup --kind <kind>` lists one kind of tier 1 or 2 item (a dry run) and deletes them with `--yes`; tier 3 items are not Pane's, so it refuses them and says how to free them. Agents free disk only through this command, never with rm.",
     "`runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).",
     "`runpane todos create|update|attach|detach|show|list|assign|ask|comment|review|done|drop|archive|start|stop` manage to-dos, the person's list of agent work: each started to-do gets its own Session and orchestrator, and Pane keeps it moving until it is done. Each call records the caller's tab ($PANE_PANEL_ID). Attach plans, mock-ups, designs, PRs, findings and decisions as soon as they exist; ask the requester first with `todos ask`; replies are summaries of at most 2,000 characters; `todos review` needs attachments or `--no-attachments`; an agent marks a top-level to-do done only after the person's Accept or with `--person-said`. `--todo <T-n>` on `notify`, `report` and `agents start` links that card, report or agent to a to-do.",
-    "`runpane profiles list|show|launch|runs` work with Pane profiles: a profile is one YAML file that defines a team of agents and a fixed workflow, and Pane runs a launched profile's workflow itself (see [PROFILES.md](PROFILES.md)). `list` prints each profile in the library with its version, origin (`bundled` or `yours`), whether it is on, and whether it can launch (`launchable`, `no flow` for a profile with no workflow, or `invalid` with its first error); `--json` adds the bundled Agent Farm's state and the person's own Agent Farm profiles. `show <name>` prints its agents, steps and outcomes, and errors (`--yaml` prints the file text only; `--json` carries both as `profile` and `yaml`). `launch <name> --prompt <text> --yes` starts a run and prints it (`run`: id, Session, step, Pane): it runs in `--repo`, else the repo of the Pane the caller's terminal is in (`PANE_SESSION_ID`), else the active repo; in `--session`, else the caller's orchestrated Session (`PANE_ORCHESTRATION_SESSION_ID`), else a new Session. `--harness <cli[/model]>` picks one CLI for every agent, `--agent-harness <agent>=<cli[/model]>` one agent's CLI, and `--command <cli>=<command>` the command that starts a CLI Pane does not know (each repeatable, or one JSON object). A launch without `--prompt` fails with `ERR_PROFILES_PROMPT_REQUIRED`; Pane refuses a profile it cannot launch with `PROFILE_NOT_FOUND`, `PROFILE_NOT_LAUNCHABLE` or `PROFILE_TEAM_ONLY` and a next step. Profiles is off until Settings › Advanced › Profiles turns it on; until then `list`, `show` and `launch` fail with `PROFILES_OFF`, while runs already started keep going and `runs` still lists them. `runs` lists runs with their state (`running`, `asking`, `paused`, `ended`, `failed`) and current step. The MCP tools are `profiles_list`, `profiles_show`, `profiles_launch` and `profiles_runs`, in the `core`, `profiles` and `plugin` toolsets.",
     "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
     "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered, with its buttons as `--choices` or `--questions` in notify's JSON), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
-    "`runpane report --outcome <name>` ends one step of a Pane profile workflow: it names which of the step's declared outcomes happened (`runpane report --outcome \"plan ready\" --summary-file status.json`) and sends `state: done` with `outcome`. `--state` is then optional and may only be `done` (otherwise `ERR_REPORT_OUTCOME_STATE`), and `--question` is refused (`ERR_REPORT_OUTCOME_QUESTION`): an outcome ends the step, a question would block it. Pane checks the outcome against the step the panel runs and refuses an undeclared one with an error that lists the allowed outcomes.",
-    "`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab), and Pane records the reply as the answer once it is delivered. If the reply asks something instead, `--took <id|Q-n> question [--status <text>]` reopens the approval and shows that the agent is getting more context (`--took <id|Q-n> answer` confirms it, and changes nothing), and `runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. `runpane notify --close <id|Q-n>` withdraws a waiting card the calling tab asked and prints `{closed: true, id}`; nothing is sent to anyone. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A question asked from a Pane tab outlives its call: if the call ends first (killed, timed out, the agent restarted), the card stays open and its answer is typed into the asking tab as `answer: Q-n → <answer> (by you)`. A `{waiting: true, id, next}` result means the wait can continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
+    "`runpane notify` asks the person a question, or tells them something, in Pane, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab), and Pane records the reply as the answer once it is delivered. If the reply asks something instead, `--took <id|Q-n> question [--status <text>]` reopens the approval and shows that the agent is getting more context (`--took <id|Q-n> answer` confirms it, and changes nothing), and `runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. `runpane notify --close <id|Q-n>` withdraws a waiting card the calling tab asked and prints `{closed: true, id}`; nothing is sent to anyone. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A question asked from a Pane tab outlives its call: if the call ends first (killed, timed out, the agent restarted), the card stays open and its answer is typed into the asking tab as `answer: Q-n → <answer> (by you)`. A `{waiting: true, id, next}` result means the wait can continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
     "Work sent to an agent through `runpane panels create`, `panes create` (with a prompt), or `panels submit` records that the sender waits for a `runpane report`, unless the request says `--source user` (Pane's own UI does) or `--no-expect-report`; `--expect-report` asks for one anyway. Typing into a tab never does. If the agent then goes ready or its panel exits without a report, Pane journals one opt-in `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id> panel <panel-id> ready|exited`) whose `lastOutput` is the agent's last transcript reply or last screen lines; it skips the `--min-interval` batch and reaches only watchers that list it in `--kinds`. While the agent's screen shows background work (Claude's `· 1 shell` footer or a running background subagent row, Codex's `background terminal running` line), Pane waits and looks again every 10 seconds instead. `agent.blocked` entries carry `screenLines`, the prompt the agent waits on, and are journalled once a panel has stayed blocked for 2 seconds.",
     "The orchestrator guide prescribes submit without `--wait`, followed by its named watch; use one completion consumer. As an optional CLI route, `--wait` on `runpane panels submit`, `panels create`, and `panes create` turns the expected report on and blocks on that panel until the first `agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or `pane.gone`, then prints one line of JSON (`dispatchWaitResult`): the outcome, ids, the report's state, summary, `summaryPath`, PR and head, `screenLines` for a prompt, or `lastOutput` for a missing report, never the transcript. It exits 0 for a report, 3 missing, 4 blocked, 5 exited or gone, and 124 when `--timeout <duration>` passes. It follows the journal from the position the daemon took before delivering the work, so nothing that happens right after delivery is missed. It reuses watch --until-event and returns indeterminate (exit 6) if the journal epoch changes or retained history is lost; inspect the panel and inbox before retrying. Report-expected dispatches are serialized per panel and refused before writing while a result or missing-output collection is outstanding. A send with --no-expect-report is a reply (an answer, or an addition to the current work): it is delivered while a report is outstanding and leaves that expectation in place. Then watch for the original result.",
     "`runpane inbox [--session <id|name>] [--json]` lists what a Session's orchestrator has not acknowledged: reports, missing reports, and on-screen questions (a question clears itself once its panel moves on), plus `answers`, what its workers were told, kept 7 days; an answer with no `decision` still needs its D-n. `runpane inbox ack <item-id>...` or `--all --session <id|name>` clears items, and `runpane inbox ack <item-id>... --decision <D-n>` records the D-n, even on an item already cleared. An orchestrator runs it when it starts or resumes, to catch anything that finished while it was down; Pane never injects the inbox into its turns.",
@@ -10304,7 +10047,7 @@ const CONTRACT_SECTION_14 = {
     "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
     "`runpane panels conversation --conversation <id> [--source startup|resume|clear|compact]` records which conversation a terminal panel's agent is on (daemon action `runpane:panels:conversation`, request `{ panelId, paneId?, conversationId, source? }`, result `{ ok: true, paneId, panelId, conversationId, source?, sure }`; `sure` is true when the report came since the panel's agent started). It is not an `agent.report` event. The panel comes from `--panel` (with an optional `--pane`), else `PANE_PANEL_ID` and `PANE_SESSION_ID`, as for `runpane report`. `runpane panels conversation --hook` is the command for a Claude Code `SessionStart` hook: it reads the hook's JSON from stdin (`session_id`, `source`; at most 64 KiB, for at most 2 seconds), reports it for `PANE_PANEL_ID`, prints nothing on stdout or stderr, and always exits 0: outside Pane, on bad input, when Pane is not running, and with a Pane that predates the action. Without `--hook` it prints `Recorded conversation <id> for panel <panel-id>.` and fails like any other command.",
     "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
-    "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
+    "`runpane links create` builds `pane://open?...` links, which select what they name and never change Pane state, and `pane://new?...` start links, which ask the person before Pane starts an agent on the prompt.",
     "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.",
     "`runpane handoff` hands a task to another agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. When the sender is a Pane tab running a Claude, Codex, Cursor or OpenCode session and the receiver is the same agent, the handoff carries that session: on another machine its files are copied into that machine's agent store and the receiver resumes the same id; on this machine the receiver resumes a fork, because two agents never resume one session on one machine. The receiver starts with no prompt, and the CLI runs the continuity check and reports JSON `continuity.result` `continued`, `inconclusive` (exit 0; `next` gives a probe question) or `not-continued` (exit 1; the receiver is kept and `next` gives the `--note-only` command). `--note-only`, a different agent, or a tab with no carried session starts a fresh agent with the note (`fresh-agent`). JSON `continuity` is `{ carried, result, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched?, originalAppended? }, reason, next }`: `sessionId` is the sender's session, `resumedId` the id the receiver resumes (the fork's on this machine), `checks` are the continuity checks (`historyLoaded` is null when there was nothing to compare; `originalUntouched` is set for forks), and a dry run sets `carried`, `sessionId`, `fork`, `files` and `bytes` with no `result`. After `continued` or `inconclusive` the sending agent ends its turn and makes no more changes on the branch. An OpenCode session travels as its export: `opencode export` on this machine, then `opencode import` inside the receiving repository there, and an OpenCode receiver is accepted only to continue an OpenCode session. A Cursor session is carried only to another machine, best effort since Cursor's store is undocumented: Cursor has no fork, and a copied chat still writes to the original, so on this machine the result is `not-continued` and nothing is started. A destination's agent store is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`); a copy already there is replaced only when the sender's holds all of it and no agent there runs it, otherwise nothing is copied and the result is `not-continued`. A destination Pane too old to resume a carried session is refused before anything is sent (`ERR_HANDOFF_RESUME_UNSUPPORTED`). From a Session's terminal it skips git and creates a Session with the same name, goal and agent on the other machine instead; a same-agent Session starts on the sender's conversation. The receiver reports back to the sender's panel.",
     "`runpane ask --agent <agent> --prompt \"<question>\"` asks one agent one read-only question and prints its answer, with no tab left behind: the agent's own headless mode runs once, on this machine or another one (`--machine`), in a saved repository (`--repo`, a WSL repository runs in WSL) or a Pane's worktree (`--pane`), with any model it accepts (`--model`). It can read files but not edit them or run shell commands; an agent with no such mode is refused (`ERR_ASK_UNSUPPORTED`). A missing agent, a sign-in error, an unknown model and a timeout each fail with the agent's own words and the next step. Use it for a second opinion or a question to another model; work that edits files goes to a tab.",
@@ -12152,54 +11895,6 @@ const CONTRACT_SECTION_15 = {
       "T-12",
       "--yes",
       "--json"
-    ],
-    [
-      "report",
-      "--outcome",
-      " plan ready ",
-      "--summary-file",
-      "status.json"
-    ],
-    [
-      "profiles",
-      "list",
-      "--json"
-    ],
-    [
-      "profiles",
-      "show",
-      "greenfield",
-      "--yaml"
-    ],
-    [
-      "profiles",
-      "launch",
-      "greenfield",
-      "--prompt",
-      "Add dark mode",
-      "--repo",
-      "active",
-      "--session",
-      "Nightly",
-      "--harness",
-      "claude/opus",
-      "--agent-harness",
-      "planner=codex",
-      "--agent-harness={\"reviewer\":\"claude\"}",
-      "--command",
-      "aider=aider --yes-always",
-      "--yes",
-      "--json"
-    ],
-    [
-      "profiles",
-      "runs",
-      "--pane-dir",
-      "/tmp/pane"
-    ],
-    [
-      "profiles",
-      "--help"
     ]
   ],
   "topLevelHelpIncludes": [
@@ -15205,6 +14900,14 @@ const CONTRACT_SECTION_16 = {
           "additionalProperties": false
         },
         "description": "A blocked report's several questions (--questions), each with its own buttons."
+      },
+      "todo": {
+        "type": "string",
+        "description": "The reference the report was sent with (\"T-28\"). A worker's Session machine reads it as its own. Absent when none was sent, and from older daemons."
+      },
+      "installId": {
+        "type": "string",
+        "description": "The install id of the machine the report was made on; sent with todo. Absent from older daemons."
       }
     },
     "additionalProperties": false
@@ -18510,24 +18213,42 @@ const CONTRACT_SECTION_16 = {
       "url": {
         "type": "string"
       },
+      "webUrl": {
+        "type": "string"
+      },
+      "html": {
+        "type": "string"
+      },
       "target": {
         "type": "object",
         "required": [
-          "kind",
-          "id"
+          "kind"
         ],
         "properties": {
           "kind": {
             "enum": [
               "pane",
               "repo",
-              "session"
+              "session",
+              "new"
             ]
           },
           "id": {
             "type": "string"
           },
           "panelId": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "prompt": {
             "type": "string"
           }
         },
@@ -18830,6 +18551,13 @@ const CONTRACT_SECTION_16 = {
       "liveWatchers": {
         "type": "number",
         "description": "Watches that were waiting for this report when it was journaled and received it. A snapshot: a named-cursor watch that waits later still receives it. Absent from older daemons."
+      },
+      "warnings": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Recorded anyway, but worth reading: a blocked report's card check, and a reference this machine left to the Session's machine (its Pane is in no Session here). Absent when there is none."
       }
     },
     "additionalProperties": false
@@ -23565,394 +23293,6 @@ const CONTRACT_SECTION_16 = {
       }
     },
     "additionalProperties": false
-  },
-  "libraryProfile": {
-    "type": "object",
-    "description": "A profile in the library. `profile` is the normalized profile (agents, flow, samples, runs); absent when the file could not be read as one.",
-    "required": [
-      "name",
-      "origin",
-      "file",
-      "valid",
-      "launchable",
-      "teamOnly",
-      "enabled",
-      "errors"
-    ],
-    "properties": {
-      "name": {
-        "type": "string"
-      },
-      "version": {
-        "type": "string"
-      },
-      "title": {
-        "type": "string"
-      },
-      "origin": {
-        "enum": [
-          "bundled",
-          "yours"
-        ]
-      },
-      "file": {
-        "type": "string"
-      },
-      "valid": {
-        "type": "boolean"
-      },
-      "launchable": {
-        "type": "boolean"
-      },
-      "teamOnly": {
-        "type": "boolean"
-      },
-      "enabled": {
-        "type": "boolean"
-      },
-      "errors": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "required": [
-            "code",
-            "message",
-            "fix"
-          ],
-          "properties": {
-            "code": {
-              "type": "string"
-            },
-            "message": {
-              "type": "string"
-            },
-            "fix": {
-              "type": "string"
-            },
-            "step": {
-              "type": "string"
-            },
-            "outcome": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "profile": {
-        "type": "object"
-      }
-    }
-  },
-  "profileRun": {
-    "type": "object",
-    "description": "A launched profile: where its steps run and where it is now.",
-    "required": [
-      "id",
-      "profile",
-      "profileVersion",
-      "sessionId",
-      "repoId",
-      "prompt",
-      "state",
-      "step",
-      "wait",
-      "history"
-    ],
-    "properties": {
-      "id": {
-        "type": "string"
-      },
-      "profile": {
-        "type": "string"
-      },
-      "profileVersion": {
-        "type": "string"
-      },
-      "sessionId": {
-        "type": "string"
-      },
-      "repoId": {
-        "type": "number"
-      },
-      "paneId": {
-        "type": "string"
-      },
-      "prompt": {
-        "type": "string"
-      },
-      "harness": {
-        "type": "object",
-        "additionalProperties": {
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "commands": {
-        "type": "object",
-        "additionalProperties": {
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "state": {
-        "enum": [
-          "running",
-          "asking",
-          "paused",
-          "ended",
-          "failed"
-        ]
-      },
-      "step": {
-        "type": "string"
-      },
-      "wait": {
-        "type": "object"
-      },
-      "history": {
-        "type": "array",
-        "items": {
-          "type": "object"
-        }
-      },
-      "error": {
-        "type": "string"
-      },
-      "createdAt": {
-        "type": "string"
-      },
-      "updatedAt": {
-        "type": "string"
-      }
-    }
-  },
-  "profileListResult": {
-    "type": "object",
-    "required": [
-      "ok",
-      "profiles"
-    ],
-    "properties": {
-      "ok": {
-        "const": true
-      },
-      "profiles": {
-        "type": "array",
-        "items": {
-          "$ref": "#/jsonSchemas/libraryProfile"
-        }
-      },
-      "agentFarm": {
-        "type": "object",
-        "required": [
-          "state"
-        ],
-        "properties": {
-          "state": {
-            "enum": [
-              "missing",
-              "installing",
-              "ready",
-              "failed"
-            ]
-          },
-          "version": {
-            "type": "string"
-          },
-          "error": {
-            "type": "string"
-          }
-        }
-      },
-      "ownAgentFarm": {
-        "type": "object",
-        "required": [
-          "profiles"
-        ],
-        "properties": {
-          "profiles": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": [
-                "name",
-                "source"
-              ],
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "source": {
-                  "type": "string"
-                },
-                "harness": {
-                  "type": "string"
-                },
-                "model": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "error": {
-            "type": "string"
-          }
-        }
-      }
-    }
-  },
-  "profileShowResult": {
-    "type": "object",
-    "required": [
-      "ok",
-      "profile",
-      "yaml"
-    ],
-    "properties": {
-      "ok": {
-        "const": true
-      },
-      "profile": {
-        "$ref": "#/jsonSchemas/libraryProfile"
-      },
-      "yaml": {
-        "type": "string"
-      }
-    }
-  },
-  "profileLaunchRequest": {
-    "type": "object",
-    "description": "What `runpane profiles launch` sends to Pane.",
-    "required": [
-      "name",
-      "prompt",
-      "repo"
-    ],
-    "properties": {
-      "name": {
-        "type": "string",
-        "minLength": 1
-      },
-      "prompt": {
-        "type": "string",
-        "minLength": 1
-      },
-      "repo": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "object",
-            "required": [
-              "id"
-            ],
-            "properties": {
-              "id": {
-                "type": "number"
-              }
-            },
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "required": [
-              "path"
-            ],
-            "properties": {
-              "path": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "required": [
-              "name"
-            ],
-            "properties": {
-              "name": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "required": [
-              "active"
-            ],
-            "properties": {
-              "active": {
-                "const": true
-              }
-            },
-            "additionalProperties": false
-          }
-        ]
-      },
-      "session": {
-        "type": "string",
-        "minLength": 1
-      },
-      "harness": {
-        "type": "string",
-        "minLength": 1
-      },
-      "agentHarness": {
-        "type": "object",
-        "additionalProperties": {
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "commands": {
-        "type": "object",
-        "additionalProperties": {
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "callerPanelId": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
-    "additionalProperties": false
-  },
-  "profileLaunchResult": {
-    "type": "object",
-    "required": [
-      "ok",
-      "run"
-    ],
-    "properties": {
-      "ok": {
-        "const": true
-      },
-      "run": {
-        "$ref": "#/jsonSchemas/profileRun"
-      }
-    }
-  },
-  "profileRunsResult": {
-    "type": "object",
-    "required": [
-      "ok",
-      "runs"
-    ],
-    "properties": {
-      "ok": {
-        "const": true
-      },
-      "runs": {
-        "type": "array",
-        "items": {
-          "$ref": "#/jsonSchemas/profileRun"
-        }
-      }
-    }
   }
 } as const;
 
@@ -23992,8 +23332,7 @@ const CONTRACT_SECTION_17 = {
     "Session: where a workstream lives, and the default home for orchestrated work. Its folder ($PANE_SESSION_DIR) holds plans, notes and reports.",
     "Pane: one per feature (one worktree, one branch). Before creating one, find the feature's Pane (`runpane panes list --json`, match the branch) and create one only when none exists.",
     "Tab: reviews, review reruns, QA, fixes and follow-ups for a feature go in new tabs in its Pane (`runpane panels create --pane <id>`), never a new Pane or a plain `git worktree`.",
-    "Scratch: in Pane, put temporary files, clones, captures, downloads, logs and test instances (an isolated PANE_DIR and HOME for QA) in `$PANE_SCRATCH_DIR`, not /tmp or your tool's own scratchpad. When the feature is done, archive the Pane and Pane cleans it up.",
-    "Profiles: a profile is a team and a fixed workflow Pane runs from its file (docs/PROFILES.md). Once Profiles is on (Settings › Advanced › Profiles), `runpane profiles list` and `runpane profiles launch <name> --prompt <text>` start one; in a profile step's tab, end the step with `runpane report --outcome \"<one of the step's outcomes>\"`, which the step's first message names."
+    "Scratch: in Pane, put temporary files, clones, captures, downloads, logs and test instances (an isolated PANE_DIR and HOME for QA) in `$PANE_SCRATCH_DIR`, not /tmp or your tool's own scratchpad. When the feature is done, archive the Pane and Pane cleans it up."
   ],
   "brief": {
     "title": "Pane agent context",
@@ -24722,7 +24061,7 @@ const CONTRACT_SECTION_17 = {
           "name": "--toolsets",
           "value": "<name,...>",
           "required": false,
-          "description": "Comma-separated toolsets to serve: core (default), all, read, repos, panes, panels, agents, sessions, loops, profiles, workspace, machine, git, docs, links, admin."
+          "description": "Comma-separated toolsets to serve: core (default), all, read, repos, panes, panels, agents, sessions, loops, workspace, machine, git, docs, links, admin."
         },
         {
           "name": "--read-only",
@@ -28113,8 +27452,8 @@ const CONTRACT_SECTION_17 = {
     },
     "links create": {
       "name": "links create",
-      "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session in the Pane app.",
-      "details": "Use this to hand the user a clickable link. It only builds the URL; opening it navigates and never changes Pane state.",
+      "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session, or a start link that starts an agent on a prompt once the person confirms.",
+      "details": "Use this to hand the user a clickable link. It only builds the URL. An open link navigates and never changes Pane state; a start link (--prompt) shows the prompt, the agent and where it runs in Pane, and starts work only when the person presses Start.",
       "requiresPaneDaemon": false,
       "mutates": false,
       "arguments": [
@@ -28134,13 +27473,30 @@ const CONTRACT_SECTION_17 = {
           "name": "--repo",
           "value": "<repo-id>",
           "required": false,
-          "description": "Repository id from repos list."
+          "description": "Repository id from repos list; with --prompt, also a saved name or owner/repo."
         },
         {
           "name": "--session",
           "value": "<session-id>",
           "required": false,
-          "description": "Session id or name from sessions list."
+          "description": "Session id from sessions list; with --prompt, also a Session name."
+        },
+        {
+          "name": "--prompt",
+          "value": "<task>",
+          "required": false,
+          "description": "Start link: the prompt Pane shows, then sends once the person presses Start."
+        },
+        {
+          "name": "--agent",
+          "value": "<agent>",
+          "required": false,
+          "description": "Start link: the agent to start (default: the person's default agent)."
+        },
+        {
+          "name": "--web",
+          "required": false,
+          "description": "Start link: print the https://runpane.com/open form, for web pages."
         },
         {
           "name": "--json",
@@ -28149,19 +27505,23 @@ const CONTRACT_SECTION_17 = {
         }
       ],
       "examples": [
-        "runpane links create --pane <pane-id> --json"
+        "runpane links create --pane <pane-id> --json",
+        "runpane links create --prompt \"Fix the failing test\" --agent codex --repo owner/repo --json",
+        "runpane links create --prompt \"Summarize this repository\" --agent claude --web"
       ],
       "jsonSchemas": [
         "linkCreateResult"
       ],
       "notes": [
-        "Links look like `pane://open?pane=<pane-id>&panel=<panel-id>`. Give exactly one of --pane, --repo, or --session."
+        "Links look like `pane://open?pane=<pane-id>&panel=<panel-id>`. Give exactly one of --pane, --repo, or --session.",
+        "Start links look like `pane://new?agent=<id>&repo=<repo>&prompt=<text>`. Without --repo or --session the agent starts in a new Session; --repo (id, saved name, or owner/repo matched against each saved repository's origin remote) starts it in a new Pane; --session sends the prompt to that Session's agent. The prompt is at most 4000 characters, with no control or invisible characters but tab and newline. Pane never runs a start link on its own.",
+        "With --web the link is `https://runpane.com/open?...`, which opens Pane or offers its download, and must be at most 2,048 characters. --json adds `webUrl` and `html`, a one-line Open in Pane button. See docs/OPEN_IN_PANE_LINKS.md."
       ]
     },
     "links open": {
       "name": "links open",
       "summary": "Open a pane:// link in the running Pane app.",
-      "details": "Use this to navigate the app to a Pane, panel, repository, or Session. It raises the Pane window, so run it only when the user asked.",
+      "details": "Use this to navigate the app to a Pane, panel, repository, or Session, or to ask the person about a start link. It raises the Pane window, so run it only when the user asked.",
       "requiresPaneDaemon": true,
       "mutates": true,
       "arguments": [
@@ -28169,7 +27529,7 @@ const CONTRACT_SECTION_17 = {
           "name": "--url",
           "value": "<pane-url>",
           "required": true,
-          "description": "A pane://open link from links create."
+          "description": "A pane://open or pane://new link from links create."
         },
         {
           "name": "--yes",
@@ -28195,7 +27555,7 @@ const CONTRACT_SECTION_17 = {
         "daemonActionResult"
       ],
       "notes": [
-        "Opening a link never changes Pane state; it selects what the link names."
+        "An open link never changes Pane state; it selects what the link names. A start link (pane://new) only asks: Pane creates a Pane when the person presses Start."
       ]
     },
     "docs search": {
@@ -28469,7 +27829,7 @@ const CONTRACT_SECTION_17 = {
           "name": "--state",
           "value": "<ready|blocked|failed|done>",
           "required": true,
-          "description": "ready: work is ready for review; done: finished with nothing to review; blocked: needs an answer; failed: could not finish. Optional with --outcome, which implies done."
+          "description": "ready: work is ready for review; done: finished with nothing to review; blocked: needs an answer; failed: could not finish."
         },
         {
           "name": "--pr",
@@ -28541,17 +27901,10 @@ const CONTRACT_SECTION_17 = {
           "value": "<path>",
           "required": false,
           "description": "Connect to a specific Pane data directory."
-        },
-        {
-          "name": "--outcome",
-          "value": "<name>",
-          "required": false,
-          "description": "Ends a profile step with one of its declared outcomes (implies --state done). Refused with --question, or with --state other than done (ERR_REPORT_OUTCOME_STATE)."
         }
       ],
       "examples": [
         "runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json",
-        "runpane report --outcome \"plan ready\" --summary-file status.json",
         "runpane report --state blocked --question \"Should the migration drop the old column?\"",
         "runpane report --state blocked --question 'Q-3: Use the invoice id in the PDF filename?' --choices '[{\"label\":\"Invoice id\",\"detail\":\"Ids are stable\",\"recommended\":true},{\"label\":\"Invoice number\"}]' --summary 'Invoice PDFs'"
       ],
@@ -28564,8 +27917,7 @@ const CONTRACT_SECTION_17 = {
         "agent.report is in the default kinds of `runpane watch --follow` and `--until-event`, and arrives from any panel, a shell tab included. REPORT lines skip the --min-interval batch.",
         "The output says who received it: \"Delivered to N waiting watcher(s).\" counts watches waiting at that moment (liveWatchers in JSON). With no Session and nobody waiting it adds that the report is stored on the panel (runpane agents status --panel <id>) and that a named-cursor watch (runpane watch --as <name> --kinds agent.report) still receives it when it next waits. Zero is not a failure; the exit code is 0 either way.",
         "With --state blocked and --question, the person sees an answerable card at once; it rings once the orchestrator relays it or after 10 minutes. The answer reaches this tab as `answer: Q-n → <answer> (by you)`. `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)` lines are the person's word too.",
-        "A blocked report's buttons come from --choices or --questions first, then from the `needs_you` block of the status file passed as --summary-file. Invalid --choices or --questions JSON fails with ERR_NOTIFY_INVALID, as notify does. A --question that ends with an option list in brackets (\"(A / B)\" or \"(A (recommended) / B)\") and has no options from either source is refused with ERR_REPORT_PACKED_OPTIONS and nothing is shown; a question with no option list is accepted as an open question. A bracketed unit with a spaced slash (\"(requests / second)\") reads as an option list too; when the question asks for a value, word the unit as prose (\"in requests per second\") or drop the spaces (\"(requests/second)\").",
-        "`--outcome <name>` ends one step of a Pane profile workflow by naming which of the step's declared outcomes happened, such as `runpane report --outcome \"plan ready\" --summary-file status.json`. It sends `state: done` with `outcome`; --state is optional and may only be done (else ERR_REPORT_OUTCOME_STATE), and --question is refused (ERR_REPORT_OUTCOME_QUESTION). Pane checks the outcome against the step the panel runs and refuses one the step does not declare, listing the allowed outcomes."
+        "A blocked report's buttons come from --choices or --questions first, then from the `needs_you` block of the status file passed as --summary-file. Invalid --choices or --questions JSON fails with ERR_NOTIFY_INVALID, as notify does. A --question that ends with an option list in brackets (\"(A / B)\" or \"(A (recommended) / B)\") and has no options from either source is refused with ERR_REPORT_PACKED_OPTIONS and nothing is shown; a question with no option list is accepted as an open question. A bracketed unit with a spaced slash (\"(requests / second)\") reads as an option list too; when the question asks for a value, word the unit as prose (\"in requests per second\") or drop the spaces (\"(requests/second)\")."
       ]
     },
     "sessions list": {
@@ -30081,202 +29433,10 @@ const CONTRACT_SECTION_17 = {
       ],
       "notes": []
     },
-    "profiles list": {
-      "name": "profiles list",
-      "summary": "List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.",
-      "details": "Lists every profile in Pane's library: name, version, title, origin (bundled with Pane, or yours in <PANE_DIR>/profiles), file, enabled, valid, launchable (valid and has a workflow), teamOnly (a team with no workflow), errors ({code, message, fix, step?, outcome?}) and the normalized profile. agentFarm is the state of the Agent Farm bundled in Pane; ownAgentFarm lists the person's own Agent Farm profiles when one is installed.",
-      "requiresPaneDaemon": true,
-      "mutates": false,
-      "arguments": [
-        {
-          "name": "--json",
-          "required": false,
-          "description": "Print machine-readable output."
-        },
-        {
-          "name": "--pane-dir",
-          "value": "<path>",
-          "required": false,
-          "description": "Connect to a specific Pane data directory."
-        }
-      ],
-      "examples": [
-        "runpane profiles list --json"
-      ],
-      "jsonSchemas": [
-        "profileListResult"
-      ],
-      "notes": [
-        "Launch a profile whose launchable is true with `runpane profiles launch <name> --prompt <text> --yes`; one with no flow, an invalid one, or any while Profiles is off is refused."
-      ]
-    },
-    "profiles show": {
-      "name": "profiles show",
-      "summary": "Show one profile: its agents, its workflow's steps and outcomes, its errors, and its file.",
-      "details": "Returns the profile as `profiles list` does, plus `yaml`, its file's text. The normalized profile names its agents ({id, runs, cli, model?, reads, skills}) and its flow: start, and steps that are agent steps (agent, goal, outcomes), command steps (run, outcomes) or asks (ask, choices, next?). Each outcome or choice is {name, to}, where to is a step id or end.",
-      "requiresPaneDaemon": true,
-      "mutates": false,
-      "arguments": [
-        {
-          "name": "<name>",
-          "required": true,
-          "description": "The profile's name, from `runpane profiles list`."
-        },
-        {
-          "name": "--yaml",
-          "required": false,
-          "description": "Print the profile's file text only (CLI only)."
-        },
-        {
-          "name": "--json",
-          "required": false,
-          "description": "Print machine-readable output."
-        },
-        {
-          "name": "--pane-dir",
-          "value": "<path>",
-          "required": false,
-          "description": "Connect to a specific Pane data directory."
-        }
-      ],
-      "examples": [
-        "runpane profiles show greenfield --json",
-        "runpane profiles show greenfield --yaml"
-      ],
-      "jsonSchemas": [
-        "profileShowResult"
-      ],
-      "notes": [
-        "A name not in the library fails with PROFILE_NOT_FOUND; see names with `runpane profiles list`."
-      ]
-    },
-    "profiles launch": {
-      "name": "profiles launch",
-      "summary": "Launch a profile: Pane runs its workflow step by step, the first step in a new Pane of a Session.",
-      "details": "Starts a run of the profile: Pane makes (or joins) a Session, opens the first step as a tab in a new Pane of the repo, and follows the workflow from there. Each agent step ends when its agent runs `runpane report --outcome \"<outcome>\"` with one of the step's declared outcomes, a command step when its tab exits, and an ask when the person answers its card. Returns the run: id, sessionId, paneId, state, step and wait.",
-      "requiresPaneDaemon": true,
-      "mutates": true,
-      "arguments": [
-        {
-          "name": "<name>",
-          "required": true,
-          "description": "The profile's name, from `runpane profiles list`."
-        },
-        {
-          "name": "--prompt",
-          "value": "<text>",
-          "required": true,
-          "description": "What the person wants done: the first agent step's request."
-        },
-        {
-          "name": "--repo",
-          "value": "<selector>",
-          "required": false,
-          "description": "Repository: active, id, exact path, or saved name. Defaults to the repo of the Pane the caller runs in, else the active repo."
-        },
-        {
-          "name": "--session",
-          "value": "<id|name>",
-          "required": false,
-          "description": "An existing Session to run in. Defaults to the caller's orchestrated Session (PANE_ORCHESTRATION_SESSION_ID); otherwise Pane makes a new Session."
-        },
-        {
-          "name": "--harness",
-          "value": "<cli[/model]>",
-          "required": false,
-          "description": "One CLI (`cli` or `cli/model`) for every agent, over the file's runs."
-        },
-        {
-          "name": "--agent-harness",
-          "value": "<agent>=<cli[/model]>",
-          "required": false,
-          "description": "Agent id → the CLI (`cli` or `cli/model`) that agent runs, over the file's runs and --harness.",
-          "schema": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        },
-        {
-          "name": "--command",
-          "value": "<cli>=<command>",
-          "required": false,
-          "description": "A CLI Pane doesn't know → the command that starts it.",
-          "schema": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        },
-        {
-          "name": "--yes",
-          "required": true,
-          "description": "Confirm the launch."
-        },
-        {
-          "name": "--json",
-          "required": false,
-          "description": "Print machine-readable output."
-        },
-        {
-          "name": "--pane-dir",
-          "value": "<path>",
-          "required": false,
-          "description": "Connect to a specific Pane data directory."
-        }
-      ],
-      "examples": [
-        "runpane profiles launch greenfield --prompt \"Add dark mode to settings\" --yes --json",
-        "runpane profiles launch greenfield --prompt \"Fix the flaky test\" --repo active --agent-harness planner=claude/opus --agent-harness implementer=codex --yes --json"
-      ],
-      "jsonSchemas": [
-        "profileLaunchRequest",
-        "profileLaunchResult"
-      ],
-      "notes": [
-        "A launch without --prompt fails with ERR_PROFILES_PROMPT_REQUIRED and starts nothing.",
-        "Pane refuses a profile it cannot launch: PROFILE_NOT_FOUND (no such profile), PROFILES_OFF (Profiles is off in Settings › Advanced), PROFILE_TEAM_ONLY (no flow) or PROFILE_NOT_LAUNCHABLE (invalid, or off); the error's next says what to do.",
-        "A --harness or --agent-harness CLI that Pane doesn't know needs --command <cli>=<command that starts it>; without one the launch fails with PROFILE_CLI_UNKNOWN and starts nothing.",
-        "Follow the run with `runpane profiles runs --json`; its steps are tabs in the run's Pane (`runpane agents status --pane <paneId>`)."
-      ]
-    },
-    "profiles runs": {
-      "name": "profiles runs",
-      "summary": "List profile runs: each run's profile, state and current step.",
-      "details": "Lists every profile run Pane knows: id, profile and profileVersion, sessionId, repoId, paneId, prompt, state (running, asking, paused, ended or failed), step (the current one, or the last once ended), wait (a step's tab, a card, or none), history of finished steps, and error when it failed.",
-      "requiresPaneDaemon": true,
-      "mutates": false,
-      "arguments": [
-        {
-          "name": "--json",
-          "required": false,
-          "description": "Print machine-readable output."
-        },
-        {
-          "name": "--pane-dir",
-          "value": "<path>",
-          "required": false,
-          "description": "Connect to a specific Pane data directory."
-        }
-      ],
-      "examples": [
-        "runpane profiles runs --json"
-      ],
-      "jsonSchemas": [
-        "profileRunsResult"
-      ],
-      "notes": [
-        "A run waits on a step's tab (wait.kind step, with its panelId), a card for the person (wait.kind card), or nothing once it has ended. Read a step's agent with `runpane agents status --panel <panelId>`."
-      ]
-    },
     "notify": {
       "name": "notify",
       "summary": "Ask the person a question, or tell them something, wherever they are, and get their answer back.",
-      "details": "Asks the person through Pane: to pick between options (ui options), to approve or deny an action (ui approve), to type a short answer (ui ask), or tells them something that needs no answer (ui info). Pane shows it on screen even while the person works in another app, and the call waits until they answer, however long that takes. info returns at once.",
+      "details": "Asks the person through Pane: to pick between options (ui options), to approve or deny an action (ui approve), to type a short answer (ui ask), or tells them something that needs no answer (ui info). A question waits in Approvals and the person is told wherever they work (a system notification, or a card over other apps if they turned that on); an update pops up only where a card can show, and otherwise waits in the list (delivered: inbox). The call waits until they answer, however long that takes. info returns at once.",
       "requiresPaneDaemon": true,
       "mutates": true,
       "arguments": [
@@ -32943,7 +32103,6 @@ const CONTRACT_SECTION_17 = {
     "To free disk or memory, run `runpane machine health` and delete only with `runpane machine cleanup` (a dry run until `--yes`), never `rm`. Put QA roots and test instances in the Pane's scratch folder (`$PANE_SCRATCH_DIR`).",
     "",
     "Loops: before `runpane loops create` or `loops update`, read its `--help`. A loop runs while the person is away, so it reaches them only through cards that wait, keeps a ledger so it never repeats itself, and keeps its prompt in a file.",
-    "Profiles: a profile is a team of agents and a fixed workflow in one file. Once Profiles is on (Settings › Advanced › Profiles), `runpane profiles list` shows them, `profiles launch <name> --prompt <text> --yes` runs one (Pane opens each step as a tab), and an agent in a profile step ends it with `\"$PANE_RUNPANE_BIN\" report --outcome \"<outcome>\"`, using one of the outcomes its first message lists.",
     "",
     "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
     "",

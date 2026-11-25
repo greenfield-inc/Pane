@@ -327,6 +327,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly remotes = new Map<string, RemoteQueue>();
   /** The machine the app is on: `local`, or a saved machine's id. Open in Pane works only there. */
   private activeMachineId = LOCAL_MACHINE;
+  /** Questions that rang and were neither seen nor announced yet (takeUnannounced). */
+  private unannounced = new Set<string>();
   /** Orders this machine's shared states for other screens (see NotifySharedState). */
   private readonly epoch = randomUUID();
   private revision = 0;
@@ -467,7 +469,7 @@ export class NotifyQueue extends EventEmitter {
     this.queue.push(item.id);
     // A question never waits behind an update; the update stays under For your information.
     if (this.transient?.view.kind === 'info') this.clearTransient();
-    this.chime();
+    this.chime(item.id);
     const result = this.wait(entry, request.returnAfterMs, signal);
     this.changed();
     return result;
@@ -784,7 +786,7 @@ export class NotifyQueue extends EventEmitter {
     if (this.env.todosOff?.() && isTodosOwnCard(entry.item)) return;
     entry.item.quiet = undefined;
     this.save(entry);
-    if (entry.item.staleSince === undefined) this.chime();
+    if (entry.item.staleSince === undefined) this.chime(entry.item.id);
     this.changed();
   }
 
@@ -902,6 +904,7 @@ export class NotifyQueue extends EventEmitter {
     this.queue = this.queue.map(other => (other === old.id ? fresh.item.id : other));
     this.hidden.delete(old.id);
     this.entries.set(fresh.item.id, fresh);
+    if (this.unannounced.has(old.id)) this.unannounced.add(fresh.item.id);
     this.save(fresh);
     this.changed();
     return fresh.item.id;
@@ -1111,6 +1114,7 @@ export class NotifyQueue extends EventEmitter {
     // A newer reply still on its way to the reader stays; the one this version answers is done.
     if (item.reply?.state !== 'reading') item.reply = undefined;
     item.readyAgain = now;
+    this.unannounced.add(item.id);
     clearTimeout(entry.graceTimer);
     item.staleSince = undefined;
     item.dismissedAt = undefined;
@@ -1217,7 +1221,7 @@ export class NotifyQueue extends EventEmitter {
     // The caller's own card first; a card it reads only as another run of the same loop comes
     // after, newest first, so a run never acts on an older run's card that shares its Q-n.
     const own = candidates.filter(entry => this.mayRead(entry, caller, wanted, false));
-    if (own.length > 0) return pickOwn(own);
+    if (own.length > 0) return pickNamed(own, caller, wanted, what);
     const mine = candidates.filter(entry => this.mayRead(entry, caller, wanted)).sort((a, b) => b.item.createdAt - a.item.createdAt);
     if (mine.length === 0) {
       const reader = candidates[0].item.reply?.reader?.name ?? candidates[0].item.source.name;
@@ -1448,9 +1452,28 @@ export class NotifyQueue extends EventEmitter {
     return this.inUse() && this.cardsOn().kind !== 'elsewhere';
   }
 
-  private chime(): void {
+  private chime(id: string): void {
+    this.unannounced.add(id);
     const settings = this.env.settings();
     if (settings.enabled && settings.sound && !this.isPaused() && this.alertsHere()) this.emit('chime');
+  }
+
+  /**
+   * What started waiting and needs a system notification: Pane is in the background and no floating
+   * card shows it. It waits while the person is away or Approvals is paused, and each is returned
+   * once. A machine health card has its own alert, on the machine that raised it; a linked machine's
+   * nearly full disk is announced here too, since nobody may be at that machine.
+   */
+  takeUnannounced(): NotifyItem[] {
+    for (const id of this.unannounced) if (this.find(id)?.state !== 'waiting') this.unannounced.delete(id);
+    const settings = this.env.settings();
+    if (this.unannounced.size === 0 || !settings.enabled || this.isPaused() || !this.alertsHere()) return [];
+    const ids = this.unannounced;
+    this.unannounced = new Set();
+    if (this.paneFocused || this.roundOpen || this.canShowStrip()) return [];
+    const { items, hidden } = this.snapshot();
+    return items.filter(item => ids.has(item.id) && item.state === 'waiting' && !hidden.includes(item.id)
+      && (!item.machineHealth || (item.machineId !== undefined && item.machineId !== LOCAL_MACHINE && item.machineHealth.kind === 'disk' && item.machineHealth.level === 'critical')));
   }
 
   /** What no surface should raise, whatever it's asked: quiet and stale items, and what's hidden. */
@@ -1608,9 +1631,10 @@ export class NotifyQueue extends EventEmitter {
     // The card key, as the glasses key cards: `<machineId>:<id>`.
     const key = (id: string) => `${machineId}:${id}`;
     // A lease card shows the length and references this desktop will grant, not the asking host's (F-3).
-    const keyed = state.items.map(item => this.asGranted({ ...item, id: key(item.id), machine, machineId }));
+    // Memory never alerts a person (D-175); only a machine on an older Pane still sends that card.
+    const keyed = state.items.filter(item => item.machineHealth?.kind !== 'memory').map(item => this.asGranted({ ...item, id: key(item.id), machine, machineId }));
     const items = new Map(keyed.map(item => [item.id, item]));
-    const queue = state.queue.map(key);
+    const queue = state.queue.map(key).filter(id => items.has(id));
     const stripId = this.strip()?.itemId;
     this.remotes.set(machineId, {
       machineId, machine, hostName: state.machine, online: next.online, epoch: state.epoch, revision: state.revision,
@@ -1625,14 +1649,16 @@ export class NotifyQueue extends EventEmitter {
         if (item.state === 'waiting') {
           if (this.transient?.view.kind === 'info') this.clearTransient();
           // The computer you're using rings for every machine's items (D-144), but not for what's quiet or stale.
-          if (!item.quiet && item.staleSince === undefined && !item.relay) this.chime();
+          if (!item.quiet && item.staleSince === undefined && !item.relay) this.chime(item.id);
         } else if (item.state === 'info') {
           const current = this.strip();
           if (this.canShowStrip() && (current === null || current.kind === 'info')) this.showInfo(item.id);
         }
         continue;
       }
-      if (before.quiet && !item.quiet && item.state === 'waiting' && item.staleSince === undefined) this.chime();
+      // A snooze that ended there, or a new version: announced here as on its own machine.
+      if (item.state === 'waiting' && ((before.snoozedUntil && !item.snoozedUntil) || (item.readyAgain && item.readyAgain !== before.readyAgain))) this.unannounced.add(item.id);
+      if (before.quiet && !item.quiet && item.state === 'waiting' && item.staleSince === undefined) this.chime(item.id);
       if (before.state === 'waiting' && item.state === 'sent' && (this.answeredHere.has(item.id) || stripId === item.id)) {
         if (this.transient?.view.kind === 'sent' && this.transient.view.itemId === item.id) continue;
         this.setTransient({ kind: 'sent', itemId: item.id }, NOTIFY_UNDO_MS);
@@ -2224,6 +2250,7 @@ export class NotifyQueue extends EventEmitter {
       entry.remindTimer = setTimeout(() => {
         entry.item.snoozedUntil = undefined;
         this.hidden.delete(id);
+        this.unannounced.add(id);
         this.changed();
       }, REMIND_AFTER_MS[after]);
     }
@@ -2357,6 +2384,11 @@ export class NotifyQueue extends EventEmitter {
     const settings = this.env.settings();
     if (!settings.enabled || this.isPaused() || this.roundOpen || !this.alertsHere()) return false;
     return this.paneFocused || (settings.showOutsidePane && this.env.showOutsideSupported);
+  }
+
+  /** A card would float over other apps here now, so a system notification would repeat it. */
+  floatsOutsidePane(): boolean {
+    return !this.paneFocused && this.canShowStrip();
   }
 
   private stripSurface(strip: NotifyStripView | null): NotifySnapshot['stripSurface'] {
@@ -2502,6 +2534,40 @@ function picksText(picks: readonly string[]): string {
 /** What a reader with an open call does if the reply was a question: it names the reply's id, which only this call was given. */
 function tookNext(item: NotifyItem, replyId: string): string {
   return `The person replied, and Pane recorded the reply as the answer to ${refOf(item)}. If it asks about it instead, run \`runpane notify --took ${replyId} question\`, find out, then \`runpane notify --update ${replyId} --asked "<their question>" --what-changed "<one line per change>"\`. Use this reply id, not the Q-n: it is what lets this call continue.`;
+}
+
+/**
+ * The card `wanted` names among those the caller reads: by id or continuation exactly; by Q-n, one
+ * asker's card about one Session (`pickOwn`). Cards from two askers or about two Sessions share a
+ * Q-n when a reader reads or asks about several Sessions (Autopilot): the one whose reply came to
+ * the caller wins, and if that leaves two, Pane refuses with their ids rather than guess.
+ */
+function pickNamed(own: Entry[], caller: NotifyReaderCaller, wanted: string, what: 'took' | 'update'): Entry {
+  const exact = own.find(entry => entry.item.id === wanted || (entry.continuation !== undefined && entry.continuation === wanted));
+  if (exact) return exact;
+  if (askerCount(own) <= 1) return pickOwn(own);
+  const toCaller = caller.panelId ? own.filter(entry => entry.item.reply?.reader?.panelId === caller.panelId) : [];
+  if (toCaller.length > 0 && askerCount(toCaller) <= 1) return pickOwn(toCaller);
+  const left = toCaller.length > 0 ? toCaller : own;
+  const named = left.map(entry => `${entry.item.id} (${entry.item.connected?.name ?? entry.item.source.session?.name ?? entry.item.source.name})`).join(', ');
+  throw new PaneError(
+    'ERR_NOTIFY_AMBIGUOUS',
+    `${wanted} names ${left.length} approvals this tab reads, from different askers or Sessions: ${named}. Nothing was changed.`,
+    `Run --${what} again with the id of the one you mean, for example \`runpane notify --${what} ${left[0].item.id} …\`.`,
+  );
+}
+
+/**
+ * How many askers, each in one Session (or Pane), these cards have: one asker's cards about one
+ * Session share a Q-n only when it asked again. Autopilot asks from one tab about several Sessions
+ * (`connected`), so its Session counts as well as its tab.
+ */
+function askerCount(entries: readonly Entry[]): number {
+  return new Set(entries.map(({ item }) => {
+    const asker = item.source.panelId ?? item.source.paneId ?? item.id;
+    const about = item.connected ? `${item.connected.kind}:${item.connected.id}` : item.source.session?.id ?? '';
+    return `${asker}\u0000${about}`;
+  })).size;
 }
 
 /**

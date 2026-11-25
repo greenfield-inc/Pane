@@ -227,6 +227,52 @@ test.describe('Approvals in the main window', () => {
     await expect(column).not.toContainText('open it there');
   });
 
+  /** Q-1 in this card's own Session, in another Session, and on a saved machine (T-56). */
+  const sharedQ1 = (withOwn: boolean) => {
+    const fixture = notifyFixture();
+    const [options] = fixture.items;
+    const launch = options.source.session;
+    const grain = { id: 'session-grain', name: 'Firecracker Grain', paneId: 'session-grain-pane' };
+    const linking = { ...options, id: 'q-link', title: 'Q-2: Ship the refactor after the store change?', links: [{ label: 'Q-1', approval: 'Q-1' }] };
+    const otherSession = { ...options, id: 'q-grain', title: 'Q-1: Merge the Grain fix first?', source: { ...options.source, paneId: 'pane-sms', panelId: 'panel-sms', name: 'sms-retry', session: grain }, links: [] };
+    const otherMachine = { ...options, id: 'mini:q-1', machineId: 'mini', machine: 'qa-mini', title: 'Q-1: Turn on phone-number accounts?', source: { ...options.source, session: launch }, links: [] };
+    const own = { ...options, id: 'q-own', title: 'Q-1: Which database for the session store?', links: [] };
+    const machines: MachineState[] = [
+      { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+      { id: 'mini', label: 'qa-mini', kind: 'remote', status: 'online', offlineSince: null },
+    ];
+    const items = [linking, otherSession, otherMachine, ...(withOwn ? [own] : [])];
+    return { snapshot: { ...fixture, items }, machines };
+  };
+
+  for (const todosEnabled of [true, false]) {
+    test(`a Q-1 link opens the linking card's own Q-1, not another Session's or machine's (To-dos ${todosEnabled ? 'on' : 'off'})`, async ({ page }) => {
+      const { snapshot, machines } = sharedQ1(true);
+      await boot(page, snapshot, { todosEnabled }, undefined, [], null, { machines, reads: {} });
+      await page.getByTestId('approvals-nav').click();
+      const column = page.getByTestId('approval-column');
+      await page.getByTestId('approvals-queue').getByTestId('approvals-row').filter({ hasText: 'Q-2: Ship the refactor' }).click();
+      await expect(column.getByTestId('approval-title')).toHaveText('Q-2: Ship the refactor after the store change?');
+      await column.getByTestId('approval-tab').filter({ hasText: /^Q-1$/ }).click();
+      await column.getByRole('button', { name: 'Open it here' }).click();
+      await expect(column.getByTestId('approval-back')).toBeVisible();
+      await expect(column.getByTestId('approval-title')).toHaveText('Q-1: Which database for the session store?');
+      if (process.env.PANE_VERIFY_DIR) await column.screenshot({ path: `${process.env.PANE_VERIFY_DIR}/qn-link-own-${todosEnabled ? 'on' : 'off'}.png` });
+    });
+  }
+
+  test("a Q-1 link says so when only another Session and another machine have a Q-1", async ({ page }) => {
+    const { snapshot, machines } = sharedQ1(false);
+    await boot(page, snapshot, {}, undefined, [], null, { machines, reads: {} });
+    await page.getByTestId('approvals-nav').click();
+    const column = page.getByTestId('approval-column');
+    await page.getByTestId('approvals-queue').getByTestId('approvals-row').filter({ hasText: 'Q-2: Ship the refactor' }).click();
+    await column.getByTestId('approval-tab').filter({ hasText: /^Q-1$/ }).click();
+    await expect(column.getByTestId('approval-link-missing')).toContainText("Q-1 isn't here any more. Pane looks for Q-1 only among this Session's approvals");
+    await expect(column.getByRole('button', { name: 'Open it here' })).toHaveCount(0);
+    if (process.env.PANE_VERIFY_DIR) await column.screenshot({ path: `${process.env.PANE_VERIFY_DIR}/qn-link-missing.png` });
+  });
+
   test('another machine\'s file says so with Retry when that machine doesn\'t answer, and Retry reads again', async ({ page }) => {
     const { snapshot, machines } = remoteApproval();
     // No document comes back: what an unreachable machine looks like to the column.
@@ -522,7 +568,7 @@ test.describe('Settings → Approvals', () => {
     await boot(page);
     await openApprovalsSettings(page);
     await expect(page.getByRole('switch', { name: 'Approvals' })).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'false');
     await expect(page.getByRole('radio', { name: 'Bottom center' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('switch', { name: 'Sound' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('combobox', { name: 'Updates hide after' })).toContainText('6 seconds');
@@ -531,10 +577,10 @@ test.describe('Settings → Approvals', () => {
     await expect(instructionFiles.filter({ hasText: 'Codex' })).toContainText('Not found');
 
     await page.getByRole('switch', { name: 'Show outside Pane' }).click();
-    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'true');
     await page.getByRole('radio', { name: 'Top right' }).click();
     await expect.poll(() => configUpdates(page)).toEqual([
-      { notify: { showOutsidePane: false } },
+      { notify: { showOutsidePane: true } },
       { notify: { position: 'top-right' } },
     ]);
   });
@@ -543,10 +589,10 @@ test.describe('Settings → Approvals', () => {
     await boot(page);
     await openApprovalsSettings(page);
     const fromTray = notifyFixture();
-    fromTray.settings.showOutsidePane = false;
+    fromTray.settings.showOutsidePane = true;
     // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
     await page.evaluate((snapshot) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(snapshot), fromTray);
-    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'true');
 
     await page.getByRole('radio', { name: 'Top right' }).click();
     await expect.poll(() => configUpdates(page)).toEqual([{ notify: { position: 'top-right' } }]);

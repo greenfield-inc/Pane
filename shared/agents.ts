@@ -56,8 +56,6 @@ interface AgentConfigBase {
     session?: AgentSessionConfig;
   };
   install: { url: string; command: string };
-  /** How a launch picks a model and reasoning effort: a flag, then an effort flag or a `-c <key>=<value>` config. */
-  models?: { flag: string; effortFlag?: string; effortConfig?: string };
   /** Transcript folders, relative to the home the CLI runs with. */
   transcriptDirs?: readonly string[];
   /** Per-session temp folders: `{tmp}` is /tmp on macOS and Linux, the OS temp folder on Windows; `{uid}` the user id. */
@@ -97,17 +95,6 @@ export function configuredAgent(id: ConfiguredAgentId): AgentConfig {
 export function agentTerminalCommand(id: ConfiguredAgentId): string {
   const agent = configuredAgent(id);
   return [agent.executables[0], ...agent.terminal.fullAccessArgs, ...agent.terminal.args].join(' ');
-}
-
-/** The flags that pick a model and reasoning effort for one launch; an effort the CLI has no flag for is left out. */
-export function agentModelArgs(id: string, model: string | undefined, effort: string | undefined): string[] {
-  const models = agentConfig(id)?.models;
-  if (!models) return [];
-  const args: string[] = [];
-  if (model) args.push(models.flag, model);
-  if (effort && models.effortFlag) args.push(models.effortFlag, effort);
-  else if (effort && models.effortConfig) args.push('-c', `${models.effortConfig}=${effort}`);
-  return args;
 }
 
 /** Whether Pane types this agent's starting message into its input box rather than passing it as an argument. */

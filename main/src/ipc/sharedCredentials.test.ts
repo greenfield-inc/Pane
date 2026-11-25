@@ -225,6 +225,14 @@ describe('the Approvals switch on a host', () => {
     expect(await readSwitch()).toMatchObject({ enabled: true, changedAt: 1 });
   });
 
+  it('keeps a machine health switch saved on with no time when a host nobody changed shares its own', async () => {
+    const untouched = await switchOf();
+    const shared = await untouched.readSwitch();
+    const { configManager, applySwitch } = await switchOf({ machineHealth: { notifications: true } });
+    await applySwitch(shared);
+    expect(configManager.getConfig().machineHealth?.notifications).toBe(true);
+  });
+
   it('refuses a caller that is not a paired client', async () => {
     const { registry } = await switchOf();
 

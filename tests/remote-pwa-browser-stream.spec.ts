@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openConnectedRemotePwa, setRemoteBrowserDriver } from './remotePwaMock';
+import { openConnectedRemotePwa, setRemoteBrowserDriver, setRemoteBrowserSignIn } from './remotePwaMock';
 
 // The web app shows a browser tab as its own copy, and while an agent acts on it, as frames from
 // the host's page with input sent back (docs/BROWSER_AGENTS.md, On another screen).
@@ -139,4 +139,29 @@ test('after a Take over the person\'s typing keeps the stream; 30 s after their 
   await expect(handBack).toContainText("You're driving · Claude Code is waiting");
   await handBack.getByRole('button', { name: 'Hand to Claude Code' }).click();
   await expect.poll(() => host.browserStream?.calls.filter(call => call.channel === 'browser:driver').map(call => call.args[1])).toEqual(['person', 'agent']);
+});
+
+test('a streamed tab\'s sign-in line opens its page once, and returns after the page loads again', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const host = await openConnectedRemotePwa(page, {
+    browserPanels: [{ title: 'Log in', url: 'https://www.reddit.com/login/', driver: AGENT }],
+    activePanelIndex: 2,
+    browserStream: { driver: AGENT },
+  });
+  await expect(page.getByTestId('browser-stream')).toBeVisible();
+  await page.evaluate(() => { window.open = (url?: string | URL) => { document.body.dataset.opened = String(url); return null; }; });
+  const line = page.getByTestId('browser-stream-sign-in');
+  const signIn = { site: 'Google', url: 'https://www.reddit.com/login/' };
+
+  setRemoteBrowserSignIn(page, signIn);
+  await expect(line).toContainText("Google won't sign in here.");
+  await line.getByRole('button', { name: 'Open this page in your browser' }).click();
+  await expect(page.locator('body')).toHaveAttribute('data-opened', 'https://www.reddit.com/login/');
+  await expect(line).toHaveCount(0);
+
+  // The host drops the sign-in when the page loads again; Google refusing after that shows the line.
+  setRemoteBrowserSignIn(page, undefined);
+  await expect.poll(() => host.browserStream?.servedVersion).toBe(host.browserStream?.version);
+  setRemoteBrowserSignIn(page, signIn);
+  await expect(line).toBeVisible();
 });

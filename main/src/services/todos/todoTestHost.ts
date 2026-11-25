@@ -22,6 +22,9 @@ export class FakeHost implements TodoHost {
   private nextSession = 1;
 
   machineName() { return 'This Mac'; }
+  /** T-51: this machine's install id; undefined plays an older Pane that sends none. */
+  installIdValue: string | undefined = 'install-a';
+  installId() { return this.installIdValue; }
   /** Every to-do number a created Session was marked with, in order. */
   createdFor: number[] = [];
   async createSession(input: { name: string; openingPrompt: string; todoNumber: number }) {

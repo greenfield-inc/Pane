@@ -22,7 +22,8 @@ describe('NotifyQueue with its store', () => {
   let using: boolean;
 
   const queueWith = (extra: Partial<NotifyQueueEnvironment> = {}) => new NotifyQueue({
-    settings: () => DEFAULT_NOTIFY_SETTINGS,
+    // The floating strip is off by default; these tests are about it.
+    settings: () => ({ ...DEFAULT_NOTIFY_SETTINGS, showOutsidePane: true }),
     showOutsideSupported: true,
     shortcutRegistered: () => true,
     instructionFiles: () => [],
@@ -62,6 +63,17 @@ describe('NotifyQueue with its store', () => {
     expect(queue.snapshot().queue).toEqual([]);
     queue.dispose();
     expect(item(queueWith(), 'disk-1')).toMatchObject(closed);
+  });
+
+  it('a card whose asker has no tab, such as a removed profile run, ends at the next start instead of waiting', () => {
+    const before = queueWith();
+    void before.ask({ question: { ui: 'options', title: 'Ship it?', choices: [{ label: 'Yes' }, { label: 'No' }], optionsOnly: true }, source: { name: 'greenfield run', agent: 'Pane profile', paneId: 'p1' }, id: 'run-card' });
+    expect(item(before, 'run-card')).toMatchObject({ state: 'waiting' });
+
+    const after = queueWith();
+    expect(item(after, 'run-card')).toMatchObject({ state: 'expired', closed: { by: 'pane', reason: 'the asker stopped waiting' } });
+    expect(after.snapshot().queue).toEqual([]);
+    expect(store.readItem('run-card')?.state).toBe('expired');
   });
 
   it('J6: an item outlives a restart, and its answer goes to the tab once', async () => {
@@ -672,6 +684,65 @@ describe('NotifyQueue with its store', () => {
     expect(queue.snapshot().stripSurface).toBe('pane');
     void queue.ask({ question: ask('Q-3: y?'), source: orchestrator });
     expect(chimes).toHaveBeenCalledTimes(1);
+  });
+
+  describe('system notifications while Pane is in the background', () => {
+    const background = () => queueWith({ settings: () => DEFAULT_NOTIFY_SETTINGS });
+    const titles = (queue: NotifyQueue) => queue.takeUnannounced().map(entry => entry.title);
+    const waiting: NotifyItem = { id: 'r1', ui: 'ask', title: 'remote', state: 'waiting', createdAt: 0, source: { name: 'x', agent: 'Claude' } };
+    const share = (queue: NotifyQueue, revision: number, ...items: NotifyItem[]) => queue.setRemote('b', { machine: 'book', online: true, state: { machine: 'book', epoch: 'e', revision, enabled: true, items, queue: items.map(entry => entry.id), hidden: [] } });
+
+    it('holds a question for a person who is away until they are back, and only once', () => {
+      using = false;
+      const queue = background();
+      void queue.ask({ question: ask('Q-2: x?'), source: orchestrator });
+      expect(titles(queue)).toEqual([]);
+      using = true;
+      expect(titles(queue)).toEqual(['Q-2: x?']);
+      expect(titles(queue)).toEqual([]);
+    });
+
+    it('announces a Claude prompt once when it arrives and once when its snooze ends', () => {
+      const queue = background();
+      void queue.ask({ id: 'p1', question: { ui: 'options', title: 'Run npm test?', choices: [{ label: 'Yes' }, { label: 'No' }], agentPrompt: { yes: 'Yes', no: 'No' } }, source: worker });
+      expect(titles(queue)).toEqual(['Run npm test?']);
+      queue.run({ type: 'remind', id: 'p1', after: '10m' });
+      expect(titles(queue)).toEqual([]);
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(titles(queue)).toEqual(['Run npm test?']);
+    });
+
+    it('announces what Autopilot reworded while the person was away, once, as reworded', () => {
+      using = false;
+      const queue = background();
+      void queue.ask({ id: 'q1', question: ask('Q-2: x?'), source: orchestrator });
+      expect(titles(queue)).toEqual([]);
+      queue.agentAct({ type: 'agent-rewrite', id: 'q1', question: ask('Q-2: which region?') });
+      using = true;
+      expect(titles(queue)).toEqual(['Q-2: which region?']);
+    });
+
+    it('announces another machine\'s snooze end, new version and nearly full disk, and nothing about its memory', () => {
+      const queue = background();
+      const chimes = vi.fn();
+      queue.on('chime', chimes);
+      share(queue, 1, { ...waiting, snoozedUntil: 1 });
+      share(queue, 2, waiting);
+      expect(titles(queue)).toEqual(['remote']);
+      share(queue, 3, { ...waiting, readyAgain: 5 });
+      share(queue, 4, { ...waiting, readyAgain: 5 });
+      expect(titles(queue)).toEqual(['remote']);
+      expect(chimes).not.toHaveBeenCalled();
+
+      const health = (id: string, kind: 'disk' | 'memory', level: 'warning' | 'critical'): NotifyItem => ({ ...waiting, id, title: `${kind} ${level}`, machineHealth: { kind, level, hostname: 'book', rows: [], agentPrompt: '' } });
+      share(queue, 5, health('d1', 'disk', 'warning'), health('d2', 'disk', 'critical'), health('m1', 'memory', 'critical'));
+      expect(titles(queue)).toEqual(['disk critical']);
+      expect(queue.snapshot().items.map(entry => entry.title)).toEqual(['disk warning', 'disk critical']);
+      expect(queue.snapshot().queue).toEqual(['b:d1', 'b:d2']);
+      // This computer's own nearly full disk has its own alert, even with a machine linked.
+      void queue.ask({ question: { ui: 'options', title: 'Disk is almost full', choices: [{ label: 'Not now' }], machineHealth: { kind: 'disk', level: 'critical', hostname: 'mini', rows: [], agentPrompt: '' } }, source: { name: 'Pane', agent: 'Pane' } });
+      expect(titles(queue)).toEqual([]);
+    });
   });
 
   it('Show cards on this machine still waits for it to be in use (D-6)', () => {

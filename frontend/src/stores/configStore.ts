@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { API } from '../utils/api';
 import type { AppConfig, HtmlFileOpenMode, UpdateConfigRequest } from '../types/config';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
+import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 
 interface ConfigStore {
   config: AppConfig | null;
@@ -40,14 +42,14 @@ export function isNotesEnabled(config: AppConfig | null): boolean {
   return config?.notesEnabled === true;
 }
 
-/** Profiles is opt-in (D-106): its page, nav entry and + menu entry wait for this. */
-export function isProfilesEnabled(config: AppConfig | null): boolean {
-  return config?.profilesEnabled === true;
-}
-
 /** To-dos is experimental (T-39): every screen, shortcut and palette entry waits for this opt-in. */
 export function isTodosEnabled(config: AppConfig | null): boolean {
   return config?.todosEnabled === true;
+}
+
+/** The computer this window shows: this one (`local`), or the saved machine it was switched to (All machines, T-37). */
+export function shownHostId(config: AppConfig | null): string {
+  return getActiveRemoteHostId(config?.remoteDaemon) ?? LOCAL_MACHINE_ID;
 }
 
 /** Copy on select (Settings > Terminal); always on in remote mode, so text lands on this computer's clipboard. */

@@ -32,7 +32,6 @@ import { RunCommandManager } from '../services/runCommandManager';
 import { VersionChecker } from '../services/versionChecker';
 import { SkillCacheManager } from '../services/skillCacheManager';
 import { installBundledAgentFarm } from '../services/agentFarm/bundledAgentFarm';
-import { startProfileRunner } from '../services/profiles/profileRunnerHost';
 import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import type { AppConfig } from '../types/config';
 import { PaneChatManager } from '../services/paneChatManager';
@@ -353,10 +352,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
         : Promise.resolve(true),
     ]).catch(error => logger.warn('[Todos] Could not rewrite agent instructions after To-dos was turned on or off', error instanceof Error ? error : undefined));
   });
-  // Bundled profiles: set up greenfield and the other bundled plugins in Pane's own Agent Farm
+  // Bundled Agent Farm: set up greenfield and the other bundled plugins in Pane's own Agent Farm
   // config root, without delaying startup. It never touches the person's own Agent Farm.
-  // The Profiles page shows the install's state, so it reads the library again when it ends.
-  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) }).then(() => getPaneEventSink().send('profiles:changed'));
+  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) });
   if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {
     // Retry until all saved repositories are available, without delaying startup.
     const migrationConfig = configManager.getConfig();
@@ -846,8 +844,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   );
 
   setupEventListeners(services);
-  // Profiles: Pane runs each launched profile's workflow from its file, and resumes saved runs.
-  startProfileRunner(services, commandRegistry, workspaceJournal, message => logger.info(message));
   // A member Pane's reports and exits go to every connected computer: one whose Session holds this
   // Pane records them (`RemoteMemberEvents`). Entries recorded from another machine are not sent on.
   workspaceJournal.subscribe(entry => {
@@ -1011,7 +1007,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   }
   const healthCards = new HealthCardController({
     now: () => Date.now(),
-    notificationsOn: () => configManager.getConfig().machineHealth?.notifications !== false,
+    notificationsOn: () => configManager.getConfig().machineHealth?.notifications === true,
     ask: (question, id) => {
       const queue = services.notifyService?.queue;
       if (!queue) return Promise.resolve({ unavailable: 'Approvals are not running.', next: 'Turn on Approvals in Settings.' });
@@ -1022,18 +1018,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       });
     },
     withdraw: (id, reason) => services.notifyService?.queue.withdraw(id, reason),
-    inventory: () => machineHealth.cachedInventory(),
-    idleOffer: () => memoryRelief.idleOffer(),
-    pauseIdleHours: () => configManager.getConfig().machineHealth?.pauseIdleHours ?? 2,
     paneName: paneId => databaseService.getSession(paneId)?.name ?? paneId,
     paneState,
     tabName: panelId => panelManager.getPanel(panelId)?.title ?? null,
     canRestart: leak => canRestartProcess(machineHealth.latestSnapshot(), leak, paneId => logsManager.isRunning(paneId)),
-    cleanUp: async itemIds => {
-      await machineCleanup.run({ source: 'card', tiers: [1, 2], ids: itemIds });
-      // Rescan so Resources and the CLI stop listing what the card removed.
-      void machineHealth.scanInventory().catch(() => undefined);
-    },
     readKept: () => {
       try {
         return decodeOptionalBoundary(JSON.parse(databaseService.getUserPreference(KEPT_PROCESSES_PREFERENCE) ?? '[]'), boundary.array(boundary.string)) ?? [];
@@ -1042,13 +1030,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       }
     },
     writeKept: identities => databaseService.setUserPreference(KEPT_PROCESSES_PREFERENCE, JSON.stringify(identities)),
-    pauseIdle: async () => { await memoryRelief.pauseIdle('card'); },
     stopProcess: async leak => { await commandRegistry.invoke(MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, [{ source: 'card', processes: [{ pid: leak.pid, started: leak.started }] }]); },
     stopProcesses: processes => memoryRelief.stopProcesses(processes, 'card'),
     restartProcess: async leak => { await commandRegistry.invoke(MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, [{ pid: leak.pid, started: leak.started }]); },
     ignoreLeak: leak => machineHealth.ignoreLeak(leak.pid, leak.started),
     archive: async paneIds => { await finishedPanes.archive(paneIds, 'card'); },
-    alert: (title, body) => showDesktopAlert(services, services.notifyService?.queue.alertsHere() ?? true, title, body),
+    // The card chimes and, when it floats over other apps, is the one notice.
+    alert: (title, body) => services.notifyService?.queue.floatsOutsidePane()
+      || showDesktopAlert(services, services.notifyService?.queue.alertsHere() ?? true, title, body, { silent: true, onClick: () => services.notifyService?.openResources() }),
     log: message => logger.warn(message),
   });
   if (duties.housekeeping) {
