@@ -173,6 +173,8 @@ export interface ParsedArgs {
   conversationSource?: ConversationSource;
   /** panels conversation `--hook`: read a SessionStart hook's stdin, silently. */
   hook?: boolean;
+  /** links create: print the https://runpane.com/open form of a start link. */
+  web?: boolean;
   /** panels create|submit, panes create `--wait`: block until that panel reports, misses its report, is blocked, or exits. */
   waitForResult?: boolean;
   /** `--timeout` with `--wait`: give up after this long (exit 124). */
@@ -356,6 +358,7 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--todo', ['notify', 'report', 'agents start']],
   ['--conversation', ['panels conversation']],
   ['--hook', ['panels conversation']],
+  ['--web', ['links create']],
 ]);
 const LOCAL_VALUE_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localValue);
 const LOCAL_BOOLEAN_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localBoolean);
@@ -1045,6 +1048,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--hook') {
     parsed.hook = true;
+    return;
+  }
+  if (flag === '--web') {
+    parsed.web = true;
     return;
   }
   if (flag === '--fix') {

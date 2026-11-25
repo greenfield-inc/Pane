@@ -426,7 +426,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panes move`: Move a Pane into a sidebar folder.
 - `folders list`: List the sidebar folders of a repository.
 - `folders create`: Create a sidebar folder in a repository.
-- `links create`: Build a pane:// link that opens a Pane, panel, repository, or Session, or that starts an agent on a prompt once the person confirms.
+- `links create`: Build a pane:// link that opens a Pane, panel, repository, or Session, or a start link that starts an agent on a prompt once the person confirms.
 - `links open`: Open a pane:// link in the running Pane app.
 - `docs search`: Search Pane's docs, runpane help, and the Pane Chat skills.
 - `docs read`: Read one Pane doc, help topic, or skill in full.
@@ -610,7 +610,7 @@ runpane folders create --repo <repo-id> --name <name> --yes [--json] [--pane-dir
 runpane links create --pane <pane-id> [--panel <panel-id>] [--json]
 runpane links create --repo <repo-id> [--json]
 runpane links create --session <session-id> [--json]
-runpane links create --repo <repo> --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--json]
+runpane links create --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--repo <repo> | --session <id|name>] [--web] [--json]
 runpane links open --url <pane-url> --yes [--json] [--pane-dir <path>]
 runpane docs search --query <text> [--limit <count>] [--json]
 runpane docs read --doc <path> [--json]
@@ -950,6 +950,7 @@ These flags are consumed by local daemon-control commands:
 --no-start
 --escalate
 --remind-me
+--web
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, use Pane's own `runpane` (on PATH in Pane's WSL terminals, or `/mnt/c/Users/<you>/.pane/bin/runpane`), which reaches the Windows named-pipe daemon through WSL interop; older Pane builds need `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'`.
