@@ -10,6 +10,7 @@ import {
   type ProfileSaveResult,
   type ProfilesOverview,
 } from '../../../shared/types/profileEditor';
+import { reconcileFromDisk, type FileCopy } from '../components/profiles/profileDiskSync';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 
 /** Where the Profiles tab is: the list, or a profile's files with one file open. */
@@ -27,6 +28,12 @@ interface ProfilesState {
   saved: Record<string, string>;
   /** Unsaved edits, by `plugin/path`; kept while you look at other files or leave the tab. */
   drafts: Record<string, string>;
+  /** Files that changed on disk while they had unsaved edits: the new content, or null when removed (profileDiskSync.ts). */
+  onDisk: Record<string, string | null>;
+  /** Reads the list and the open file again, picking up changes made outside the tab. */
+  refresh: () => Promise<void>;
+  /** The changed-on-disk choice: take the disk's version (dropping your edit), or keep your edit. */
+  resolveDiskChange: (plugin: string, file: string, take: 'disk' | 'mine') => void;
   load: () => Promise<void>;
   loadPhotos: () => Promise<void>;
   open: (plugin: string, profile: string, file?: string) => void;
@@ -64,6 +71,32 @@ async function answer<T>(call: Promise<{ success: boolean; data?: unknown; error
 /** A `profiles:*` answer that carries no data. */
 const nothing: BoundarySchema<null> = { decode: () => null };
 
+/** One refresh at a time: a slow read is never overtaken by the next poll. */
+let refreshing = false;
+
+/** The open file's place in `state`, as one record (profileDiskSync.ts's FileCopy). */
+function copyOf(state: Pick<ProfilesState, 'saved' | 'drafts' | 'onDisk'>, key: string): FileCopy {
+  const copy: FileCopy = {};
+  if (key in state.saved) copy.saved = state.saved[key];
+  if (key in state.drafts) copy.draft = state.drafts[key];
+  if (key in state.onDisk) copy.onDisk = state.onDisk[key];
+  return copy;
+}
+
+/** Writes one file's copy back into the three maps. */
+function withCopy(state: Pick<ProfilesState, 'saved' | 'drafts' | 'onDisk'>, key: string, copy: FileCopy): Pick<ProfilesState, 'saved' | 'drafts' | 'onDisk'> {
+  const saved = { ...state.saved };
+  const drafts = { ...state.drafts };
+  const onDisk = { ...state.onDisk };
+  delete saved[key];
+  delete drafts[key];
+  delete onDisk[key];
+  if (copy.saved !== undefined) saved[key] = copy.saved;
+  if (copy.draft !== undefined) drafts[key] = copy.draft;
+  if (copy.onDisk !== undefined) onDisk[key] = copy.onDisk;
+  return { saved, drafts, onDisk };
+}
+
 function replacePlugin(overview: ProfilesOverview | null, plugin: ProfilePlugin): ProfilesOverview | null {
   if (!overview) return overview;
   const known = overview.plugins.some(entry => entry.name === plugin.name);
@@ -71,7 +104,7 @@ function replacePlugin(overview: ProfilesOverview | null, plugin: ProfilePlugin)
 }
 
 /** Drops the saved copies and drafts of a plugin's files, which a restore replaced. */
-function withoutPlugin(record: Record<string, string>, plugin: string): Record<string, string> {
+function withoutPlugin<Value>(record: Record<string, Value>, plugin: string): Record<string, Value> {
   return Object.fromEntries(Object.entries(record).filter(([key]) => !key.startsWith(`${plugin}/`)));
 }
 
@@ -90,6 +123,7 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
     place: { level: 'list' },
     saved: {},
     drafts: {},
+    onDisk: {},
     load: async () => {
       set({ loading: true });
       try {
@@ -119,7 +153,56 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
     back: () => set({ place: { level: 'list' } }),
     readFile: async (plugin, file) => {
       const content = await answer(api().read(plugin, file), boundary.string);
-      set(state => ({ saved: { ...state.saved, [fileKey(plugin, file)]: content } }));
+      const key = fileKey(plugin, file);
+      set(state => withCopy(state, key, reconcileFromDisk(copyOf(state, key), content)));
+    },
+    refresh: async () => {
+      if (refreshing || !window.electronAPI?.profiles) return;
+      refreshing = true;
+      try {
+        const overview = await answer(api().list(), profilesOverviewSchema).catch(() => undefined);
+        if (overview && JSON.stringify(overview) !== JSON.stringify(get().overview)) set({ overview, error: null });
+        const place = get().place;
+        const openKey = place.level === 'profile' ? fileKey(place.plugin, place.file) : null;
+        // Files you aren't looking at and haven't edited are read again when opened.
+        set(state => ({ saved: Object.fromEntries(Object.entries(state.saved).filter(([key]) => key === openKey || key in state.drafts)) }));
+        if (place.level !== 'profile' || !openKey) return;
+        const plugin = get().overview?.plugins.find(entry => entry.name === place.plugin);
+        if (!plugin) return;
+        let disk: string | null | undefined = null;
+        if (plugin.files.includes(place.file)) disk = await answer(api().read(place.plugin, place.file), boundary.string).catch(() => undefined);
+        if (disk === undefined) return;
+        set(state => {
+          // You may have opened another file while it was read.
+          const now = state.place;
+          if (now.level !== 'profile' || fileKey(now.plugin, now.file) !== openKey) return {};
+          const next = withCopy(state, openKey, reconcileFromDisk(copyOf(state, openKey), disk));
+          // A file removed on disk with nothing of yours in it gives way to the profile's identity.
+          if (disk === null && !(openKey in next.drafts)) {
+            const entry = plugin.profiles.find(item => item.name === now.profile)?.entry;
+            return { ...next, place: { ...now, file: entry ?? 'plugin.yaml' } };
+          }
+          return next;
+        });
+      } finally {
+        refreshing = false;
+      }
+    },
+    resolveDiskChange: (plugin, file, take) => {
+      const key = fileKey(plugin, file);
+      set(state => {
+        const copy = copyOf(state, key);
+        if (copy.onDisk === undefined) return {};
+        if (take === 'mine') {
+          // Your edit stays; it is now measured against what is on disk, and Save writes it (the last save wins).
+          return withCopy(state, key, { saved: copy.onDisk ?? copy.saved, draft: copy.draft });
+        }
+        if (copy.onDisk !== null) return withCopy(state, key, { saved: copy.onDisk });
+        // Taking the disk's version of a removed file: it is gone, so open the profile's identity.
+        const place = state.place;
+        const entry = place.level === 'profile' ? state.overview?.plugins.find(item => item.name === place.plugin)?.profiles.find(item => item.name === place.profile)?.entry : undefined;
+        return { ...withCopy(state, key, {}), place: place.level === 'profile' && entry ? { ...place, file: entry } : place };
+      });
     },
     edit: (plugin, file, content) => {
       const key = fileKey(plugin, file);
@@ -137,8 +220,11 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
       const result = applied(await answer(api().save(plugin, [{ path: file, content }]), profileSaveResultSchema));
       set(state => {
         const drafts = { ...state.drafts };
+        const onDisk = { ...state.onDisk };
         if (drafts[key] === content) delete drafts[key];
-        return { drafts, saved: { ...state.saved, [key]: content } };
+        // Your save is now what is on disk.
+        delete onDisk[key];
+        return { drafts, onDisk, saved: { ...state.saved, [key]: content } };
       });
       return result;
     },
@@ -158,7 +244,7 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
         const place = current.level === 'profile' && current.plugin === plugin && !result.plugin.files.includes(current.file)
           ? { ...current, file: result.plugin.profiles.find(item => item.name === current.profile)?.entry ?? result.path }
           : current;
-        return { place, saved: withoutPlugin(state.saved, plugin), drafts: withoutPlugin(state.drafts, plugin) };
+        return { place, saved: withoutPlugin(state.saved, plugin), drafts: withoutPlugin(state.drafts, plugin), onDisk: withoutPlugin(state.onDisk, plugin) };
       });
       return result;
     },

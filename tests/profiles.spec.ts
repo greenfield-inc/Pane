@@ -59,6 +59,13 @@ async function openProfilesTab(page: Page, options: { theme?: string; saveError?
   await expect(page.getByTestId('profiles-view')).toBeVisible();
 }
 
+/** Changes a profile file "on disk" behind the tab's back, as an agent, the CLI or sync would. Null removes it. */
+const writeOnDisk = (page: Page, plugin: string, path: string, content: string | null) => page.evaluate(({ plugin, path, content }) => {
+  // SAFETY: installElectronApiMock adds this control before the app loads.
+  const mockWindow = window as typeof window & { __paneTestElectronMock: { writeProfileFile: (plugin: string, path: string, content: string | null) => void } };
+  mockWindow.__paneTestElectronMock.writeProfileFile(plugin, path, content);
+}, { plugin, path, content });
+
 const shotsDir = process.env.PANE_PROFILES_SHOTS;
 async function shot(page: Page, name: string): Promise<void> {
   // Menus and dialogs finish their entrance first.
@@ -205,6 +212,52 @@ test('after Restore, a file you added and Restore removed gives way to the ident
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
+test('a change made outside Pane shows in the open file, the file tree and the list', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-writer-writer').click();
+  const editor = page.getByTestId('profiles-editor');
+  await expect(editor).toHaveValue('# agents/writer.md\n');
+  await writeOnDisk(page, 'writer', 'agents/writer.md', '# Writer\n\nMarker: KUMQUAT\n');
+  await writeOnDisk(page, 'writer', 'skills/recap/SKILL.md', '# recap\n');
+  // No unsaved edits: the new content just shows, and the new file joins the tree.
+  await expect(editor).toHaveValue(/Marker: KUMQUAT/, { timeout: 8000 });
+  await expect(page.getByTestId('profiles-file-skills/recap/SKILL.md')).toBeVisible();
+  await expect(page.getByTestId('profiles-disk-changed')).toHaveCount(0);
+  await writeOnDisk(page, 'writer', 'skills/recap/SKILL.md', null);
+  await expect(page.getByTestId('profiles-file-skills/recap/SKILL.md')).toHaveCount(0, { timeout: 8000 });
+  await page.getByTestId('profiles-back').click();
+  // The list picks up a profile added outside Pane.
+  await writeOnDisk(page, 'writer', 'profiles/editor.yaml', 'agent: writer\n');
+  await expect(page.getByTestId('profile-row-writer-editor')).toBeVisible({ timeout: 8000 });
+});
+
+test('with unsaved edits, a change on disk keeps them and asks: reload, or keep mine', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-writer-writer').click();
+  const editor = page.getByTestId('profiles-editor');
+  await editor.fill('# Mine\n');
+  await writeOnDisk(page, 'writer', 'agents/writer.md', '# Theirs\n');
+  const notice = page.getByTestId('profiles-disk-changed');
+  await expect(notice).toContainText('changed outside Pane', { timeout: 8000 });
+  await expect(editor).toHaveValue('# Mine\n');
+  await page.getByTestId('profiles-disk-keep').click();
+  await expect(notice).toHaveCount(0);
+  await expect(editor).toHaveValue('# Mine\n');
+  await expect(page.getByTestId('profiles-editor-status')).toHaveText('Unsaved changes');
+  // Another change on disk asks again; this time take it.
+  await writeOnDisk(page, 'writer', 'agents/writer.md', '# Theirs again\n');
+  await expect(notice).toBeVisible({ timeout: 8000 });
+  await page.getByTestId('profiles-disk-reload').click();
+  await expect(notice).toHaveCount(0);
+  await expect(editor).toHaveValue('# Theirs again\n');
+  await expect(page.getByTestId('profiles-save')).toBeDisabled();
+  // Removed on disk while edited: the edit stays and Save would put it back.
+  await editor.fill('# Mine again\n');
+  await writeOnDisk(page, 'writer', 'agents/writer.md', null);
+  await expect(notice).toContainText('removed outside Pane', { timeout: 8000 });
+  await expect(editor).toHaveValue('# Mine again\n');
+});
+
 test('the Profiles row opens Profiles and, clicked again, returns to where you were', async ({ page }) => {
   await openProfilesTab(page);
   await expect(page.getByTestId('profiles-nav')).toHaveAttribute('aria-pressed', 'true');
@@ -253,5 +306,13 @@ for (const theme of ['light', 'dark']) {
     await page.keyboard.press('Escape');
     await page.getByTestId('profiles-sync').hover({ force: true });
     await shot(page, `sync-later-${theme}`);
+    await page.getByTestId('profile-row-writer-writer').click();
+    await page.getByTestId('profiles-editor').fill('# Writer\n\nMy edit, not saved yet.\n');
+    await writeOnDisk(page, 'writer', 'agents/writer.md', '# Writer\n\nAn agent changed this.\n');
+    await expect(page.getByTestId('profiles-disk-changed')).toBeVisible({ timeout: 8000 });
+    await shot(page, `disk-changed-${theme}`);
+    await writeOnDisk(page, 'writer', 'agents/writer.md', null);
+    await expect(page.getByTestId('profiles-disk-changed')).toContainText('removed', { timeout: 8000 });
+    await shot(page, `disk-removed-${theme}`);
   });
 }
