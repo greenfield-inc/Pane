@@ -135,7 +135,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
         <SettingRow
           settingId="agent-farm-telemetry"
           label="Save Agent Farm telemetry on this computer"
-          description="Agent Farm, which runs agent profiles for Pane, can record each agent it starts: the agent's own traces, logs and metrics, with its profile, model, folder, branch, username and hostname. They stay as files in Pane's agent-farm/telemetry folder and are never sent anywhere. Conversation text is recorded only if Agent Farm's own capture_content setting is on. Off by default; each computer keeps its own setting, and agents started after a change follow it."
+          description="Agent Farm, which runs agent profiles for Pane, can record each agent it starts: the agent's own traces, logs and metrics, with its profile, model, folder, branch, username and hostname. They stay as local files, in Pane's agent-farm/telemetry folder unless a repository's own Agent Farm settings name another folder, and are never sent anywhere. Conversation text is recorded only if Agent Farm's capture_content setting is on. Off by default, and off means off even in a repository whose settings turn it on. Each computer keeps its own setting; agents started after a change follow it."
           saveState={persistence.saveStates['agent-farm-telemetry']}
         >
           <ImmediateToggle

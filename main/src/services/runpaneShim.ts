@@ -252,7 +252,8 @@ function windowsNodeShim(execPath: string): string {
  * agent-farm.cjs: runs the bundled Agent Farm CLI in this process with `--config-root` added
  * before any `--`. A command that names its own config root, or needs none (version, help), runs
  * as typed. The bare menu, init and doctor only ever use ~/.config/agent-farm, which Pane leaves
- * alone, so they are refused.
+ * alone, so they are refused. With Pane's telemetry switch off it sets AGENT_FARM_TELEMETRY=off,
+ * as bundledAgentFarmProcess does.
  */
 function agentFarmLauncher(target: AgentFarmShimTarget): string {
   return [
@@ -272,6 +273,12 @@ function agentFarmLauncher(target: AgentFarmShimTarget): string {
     '} else {',
     "  const asTyped = (args.length === 1 && ['version', '--version', '-v'].includes(first)) || first === 'help'",
     "    || options.some(arg => arg === '--help' || arg === '-h' || arg === '--config-root' || arg.startsWith('--config-root='));",
+    "  // Pane's telemetry switch (settings.json) loses to a repository's workspace.yaml; AGENT_FARM_TELEMETRY doesn't.",
+    "  if (!process.env.AGENT_FARM_TELEMETRY) {",
+    "    let on = false;",
+    "    try { on = JSON.parse(require('fs').readFileSync(require('path').join(configRoot, 'settings.json'), 'utf8')).telemetry.enabled === true; } catch {}",
+    "    if (!on) process.env.AGENT_FARM_TELEMETRY = 'off';",
+    '  }',
     "  process.argv = [process.argv[0], entry, ...(asTyped ? args : [...options, '--config-root', configRoot, ...args.slice(end)])];",
     "  import(require('url').pathToFileURL(entry).href).catch(error => {",
     "    process.stderr.write(`agent-farm: Pane couldn't start its bundled Agent Farm (${error && error.message ? error.message : error}). Nothing was run. Restart Pane, or reinstall it from https://runpane.com.\\n`);",

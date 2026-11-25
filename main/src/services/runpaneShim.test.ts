@@ -153,7 +153,7 @@ describe('the agent-farm shim', () => {
     fs.mkdirSync(path.dirname(entry), { recursive: true });
     // The real entry is an ES module (the package is "type": "module"); this one prints what it got.
     fs.writeFileSync(path.join(path.dirname(entry), '..', 'package.json'), '{"type":"module"}');
-    fs.writeFileSync(entry, "console.log(`AF ${process.argv.slice(2).join('|')} NODE=${process.env.ELECTRON_RUN_AS_NODE}`);\n");
+    fs.writeFileSync(entry, "console.log(`AF ${process.argv.slice(2).join('|')} NODE=${process.env.ELECTRON_RUN_AS_NODE}`); console.error(`TELEMETRY=${process.env.AGENT_FARM_TELEMETRY}`);\n");
     configRoot = path.join(appDirectory, 'agent-farm');
   });
 
@@ -171,6 +171,18 @@ describe('the agent-farm shim', () => {
     const state = installWithAgentFarm();
     expect(agentFarm(state, ['profiles', 'list']).stdout.trim()).toBe(`AF profiles|list|--config-root|${configRoot} NODE=1`);
     expect(agentFarm(state, ['run', 'greenfield/planner', '--', '--resume', 'x']).stdout.trim()).toBe(`AF run|greenfield/planner|--config-root|${configRoot}|--|--resume|x NODE=1`);
+  });
+
+  it.skipIf(process.platform === 'win32')('turns Agent Farm telemetry off unless Pane\'s switch is on, keeping a value already set', () => {
+    const state = installWithAgentFarm();
+    const telemetry = (env: Record<string, string> = {}) => spawnSync(path.join(state.binDir, 'agent-farm'), ['profiles', 'list'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ...env } }).stderr.trim();
+    expect(telemetry()).toBe('TELEMETRY=off');
+    fs.mkdirSync(configRoot, { recursive: true });
+    fs.writeFileSync(path.join(configRoot, 'settings.json'), JSON.stringify({ telemetry: { enabled: true } }));
+    expect(telemetry()).toBe('TELEMETRY=undefined');
+    fs.writeFileSync(path.join(configRoot, 'settings.json'), JSON.stringify({ telemetry: { enabled: false } }));
+    expect(telemetry()).toBe('TELEMETRY=off');
+    expect(telemetry({ AGENT_FARM_TELEMETRY: 'on' })).toBe('TELEMETRY=on');
   });
 
   it.skipIf(process.platform === 'win32')('passes a command through unchanged when it names its own config root, or needs none', () => {

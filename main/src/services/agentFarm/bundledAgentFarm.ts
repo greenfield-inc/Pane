@@ -59,10 +59,28 @@ export interface AgentFarmProcess {
   env: NodeJS.ProcessEnv;
 }
 
-/** `agent-farm <args> --config-root <root>` with the bundled copy. */
+/**
+ * Whether Pane's telemetry switch is on, as written to the config root's settings.json. Off when
+ * the file or the field is missing or unreadable. The shim launcher in runpaneShim.ts reads it the same way.
+ */
+function telemetrySwitchOn(configRoot: string): boolean {
+  try {
+    const settings = decodeOptionalBoundary(JSON.parse(readFileSync(path.join(configRoot, 'settings.json'), 'utf8')), boundary.jsonObject);
+    return decodeOptionalBoundary(settings?.telemetry, boundary.jsonObject)?.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `agent-farm <args> --config-root <root>` with the bundled copy. With Pane's telemetry switch off
+ * it sets AGENT_FARM_TELEMETRY=off, the one setting that outranks a repository's
+ * .agent-farm/workspace.yaml, unless the environment already chose a value.
+ */
 export function bundledAgentFarmProcess(bundle: BundledAgentFarm, args: string[], configRoot: string, env: NodeJS.ProcessEnv = process.env, runtime: string = process.execPath): AgentFarmProcess {
   const rest = { ...env };
   delete rest.AGENT_FARM_CONFIG_ROOT;
+  if (!rest.AGENT_FARM_TELEMETRY && !telemetrySwitchOn(configRoot)) rest.AGENT_FARM_TELEMETRY = 'off';
   return { executable: runtime, args: [bundle.entry, ...args, '--config-root', configRoot], env: { ...rest, ELECTRON_RUN_AS_NODE: '1' } };
 }
 
