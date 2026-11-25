@@ -1,6 +1,6 @@
 import type { ILink, ILinkProvider } from '@xterm/xterm';
 import type { LinkProviderConfig } from './types';
-import { isMac, getModifierKeyName } from '../../../utils/platformUtils';
+import { urlLinkHandlers } from './urlLink';
 
 /**
  * Creates a git link provider that detects git SHAs and issue references.
@@ -17,7 +17,9 @@ export function createGitLinkProvider(config: LinkProviderConfig): ILinkProvider
   }
 
   // Regex patterns for git-related content
-  const GIT_SHA = /\b([0-9a-f]{7,40})\b/gi; // Accept some false positives
+  // A commit hash stands alone and mixes letters and digits: a timestamp, a word like "deadbeef", a
+  // UUID part, or hex inside a path or URL is no commit, and a plain click on one would open a 404.
+  const GIT_SHA = /(?<![\w./-])(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])([0-9a-f]{7,40})(?![\w./-])/gi;
   const ISSUE_REF = /(?:^|[\s(])#(\d+)\b/g;
   const CROSS_REPO_ISSUE = /([a-z0-9_-]+\/[a-z0-9_-]+)#(\d+)/gi;
 
@@ -32,8 +34,6 @@ export function createGitLinkProvider(config: LinkProviderConfig): ILinkProvider
       const text = line.translateToString();
       const links: ILink[] = [];
 
-      const isMacPlatform = isMac();
-      const modifierKey = getModifierKeyName();
 
       // Match Git SHAs
       GIT_SHA.lastIndex = 0;
@@ -48,18 +48,7 @@ export function createGitLinkProvider(config: LinkProviderConfig): ILinkProvider
             end: { x: shaMatch.index + shaMatch[0].length + 1, y: lineNumber + 1 },
           },
           text: sha,
-          activate: (event: MouseEvent) => {
-            // Only activate on Ctrl/Cmd+Click
-            if (isMacPlatform ? event.metaKey : event.ctrlKey) {
-              config.onOpenUrl(commitUrl);
-            }
-          },
-          hover: (event: MouseEvent) => {
-            config.onShowTooltip(event, commitUrl, `${modifierKey}+Click to open`);
-          },
-          leave: () => {
-            config.onHideTooltip();
-          },
+          ...urlLinkHandlers(config, commitUrl),
         });
       }
 
@@ -76,18 +65,7 @@ export function createGitLinkProvider(config: LinkProviderConfig): ILinkProvider
             end: { x: issueMatch.index + issueMatch[0].length + 1, y: lineNumber + 1 },
           },
           text: `#${issueNumber}`,
-          activate: (event: MouseEvent) => {
-            // Only activate on Ctrl/Cmd+Click
-            if (isMacPlatform ? event.metaKey : event.ctrlKey) {
-              config.onOpenUrl(issueUrl);
-            }
-          },
-          hover: (event: MouseEvent) => {
-            config.onShowTooltip(event, issueUrl, `${modifierKey}+Click to open`);
-          },
-          leave: () => {
-            config.onHideTooltip();
-          },
+          ...urlLinkHandlers(config, issueUrl),
         });
       }
 
@@ -105,18 +83,7 @@ export function createGitLinkProvider(config: LinkProviderConfig): ILinkProvider
             end: { x: crossRepoMatch.index + crossRepoMatch[0].length + 1, y: lineNumber + 1 },
           },
           text: `${repo}#${issueNumber}`,
-          activate: (event: MouseEvent) => {
-            // Only activate on Ctrl/Cmd+Click
-            if (isMacPlatform ? event.metaKey : event.ctrlKey) {
-              config.onOpenUrl(crossRepoUrl);
-            }
-          },
-          hover: (event: MouseEvent) => {
-            config.onShowTooltip(event, crossRepoUrl, `${modifierKey}+Click to open`);
-          },
-          leave: () => {
-            config.onHideTooltip();
-          },
+          ...urlLinkHandlers(config, crossRepoUrl),
         });
       }
 

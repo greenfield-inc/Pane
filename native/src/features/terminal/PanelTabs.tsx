@@ -27,15 +27,24 @@ export const TAB_TYPES: Record<ToolPanelType, { ios: SFSymbol; android: AndroidS
 };
 const CHAT = { ios: 'bubble.left', android: 'chat_bubble', label: 'chat' } as const;
 
-/** A long press's menu for tab `title`: Close or Cancel. */
-export function offerClose(title: string, close: () => void) {
+/** A long press's menu for tab `title`: View live (a page tab an agent used), Close or Cancel. */
+export function offerClose(title: string, close: () => void, viewLive?: () => void) {
   if (Platform.OS === 'ios') {
+    const options = viewLive ? ['View live', 'Close', 'Cancel'] : ['Close', 'Cancel'];
+    const closeIndex = viewLive ? 1 : 0;
     ActionSheetIOS.showActionSheetWithOptions(
-      { title, options: ['Close', 'Cancel'], destructiveButtonIndex: 0, cancelButtonIndex: 1 },
-      index => { if (index === 0) close(); },
+      { title, options, destructiveButtonIndex: closeIndex, cancelButtonIndex: closeIndex + 1 },
+      index => {
+        if (index === closeIndex) close();
+        else if (viewLive && index === 0) viewLive();
+      },
     );
   } else {
-    Alert.alert(title, undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Close', style: 'destructive', onPress: close }]);
+    Alert.alert(title, undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      ...(viewLive ? [{ text: 'View live', onPress: viewLive }] : []),
+      { text: 'Close', style: 'destructive', onPress: close },
+    ]);
   }
 }
 

@@ -58,8 +58,9 @@ export interface BrowserHost {
   personDownloads(): string;
   /** Where downloads an agent's call caused go: the Pane's scratch folder, deleted with the Pane. */
   agentDownloads(paneId: string): Promise<string>;
-  /** Tells the tab a file finished downloading: "Downloaded <name> · Show in folder". */
-  /** Shows the download's notice in the tab; `agent` names the agent whose call caused it. */
+  /** Calls `listener` when a tab stops a sign-in that refuses to run inside apps (Google, AWS). */
+  onSignInRefused(listener: (panelId: string, signIn: { site: string; url: string }) => void): void;
+  /** Shows the download's notice in the tab ("Downloaded <name> · Show in folder"); `agent` names the agent whose call caused it. */
   showDownload(panelId: string, file: string, agent?: string): void;
 }
 
@@ -135,7 +136,7 @@ const driverSchema = boundary.optional(boundary.union(
   boundary.object({ by: boundary.literal('person'), agentWaiting: boundary.optional(boundary.string) }),
 ));
 const pageSizeSchema = boundary.object({ width: boundary.number, height: boundary.number, mobile: boundary.boolean, scale: boundary.optional(boundary.number) });
-const tabStateSchema = boundary.object({ currentUrl: boundary.optional(boundary.string), isPopup: boundary.optional(boundary.boolean), driver: driverSchema, pageSize: boundary.optional(pageSizeSchema) });
+const tabStateSchema = boundary.object({ currentUrl: boundary.optional(boundary.string), isPopup: boundary.optional(boundary.boolean), signInPopup: boundary.optional(boundary.literal(true)), driver: driverSchema, pageSize: boundary.optional(pageSizeSchema), agentUse: boundary.optional(boundary.enumeration('used', 'typed')) });
 /** What a screen showing a tab reports (`browser:watch`); null when it stops showing it. */
 const watchReportSchema = boundary.optional(boundary.object({
   kind: boundary.enumeration('desktop', 'phone', 'web'),
@@ -156,6 +157,8 @@ const inputSchema: BoundarySchema<BrowserInput[]> = boundary.array(boundary.unio
   boundary.object({ kind: boundary.literal('files'), files: boundary.array(boundary.object({ name: boundary.string, data: boundary.string })) }),
   boundary.object({ kind: boundary.literal('files-cancel') }),
 ));
+/** Agent calls that put input into a page, which its URL doesn't hold (BrowserPanelState.agentUse). */
+const TYPING_VERBS: ReadonlySet<VerbRequest['verb']> = new Set(['type', 'select', 'upload', 'press']);
 /** How long a frame read waits on the host for a newer frame before answering "unchanged". */
 const FRAME_WAIT_MS = 1_000;
 /** The screencast stops this long after the last frame read. */
@@ -241,6 +244,8 @@ const DEFAULT_HOLDS: BrowserHoldSettings = { limit: 4, idleMs: 15 * 60_000, swee
 export function registerBrowserHandlers(services: BrowserServices, commandRegistry: PaneCommandRegistry, host: BrowserHost, settingsOverride: Partial<BrowserHoldSettings> = {}): () => void {
   const holdSettings = { ...DEFAULT_HOLDS, ...settingsOverride };
   const pages = new Map<number, PageDriver>();
+  /** How many documents each page has loaded since Pane began driving it, so a typing call knows it left the page. */
+  const documents = new Map<number, number>();
   /** Tabs another device watches: their pages keep painting and running while hidden here. */
   const remotelyWatched = (): string[] => holds.held().filter(tabId => holds.viewers(tabId).some(viewer => viewer.kind !== 'host' && viewer.onScreen));
   const holds = new BrowserHolds({ limit: holdSettings.limit, idleMs: holdSettings.idleMs, watch: holdSettings.watch, onChange: held => host.setHeld(held, remotelyWatched()) });
@@ -455,7 +460,17 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (driver) return driver;
     driver = new PageDriver(page, holdSettings.screenshotMs);
     pages.set(page.id, driver);
-    page.once('destroyed', () => pages.delete(page.id));
+    // A page that went (the tab slept, or Pane quit) reloads from its URL, so nothing typed survives.
+    page.once('destroyed', () => {
+      pages.delete(page.id);
+      documents.delete(page.id);
+      forgetTyping(tabId, 'its page closed');
+    });
+    // A new document holds nothing an agent typed, so other screens may go back to their own copy.
+    page.on('did-navigate', () => {
+      documents.set(page.id, (documents.get(page.id) ?? 0) + 1);
+      forgetTyping(tabId, 'its page loaded a new document');
+    });
     // The person touching a page an agent drives takes it over until they stop (TOUCH_HOLD_MS).
     page.on('input-event', (_event, input) => {
       if (!['mouseDown', 'rawKeyDown', 'keyDown', 'mouseWheel', 'touchStart', 'gestureScrollBegin'].includes(input.type)) return;
@@ -471,6 +486,13 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       }
     });
     return driver;
+  }
+
+  /** Marks a tab `used` once its page no longer holds what an agent typed, so other screens may go back to their own copy. */
+  function forgetTyping(tabId: string, why: string): void {
+    const tab = host.tab(tabId);
+    if (!tab || tabState(tab).agentUse !== 'typed') return;
+    void host.update(tab, { ...tabState(tab), agentUse: 'used' }).catch(cause => console.warn(`[browser] Tab ${tabId} stays marked typed although ${why}; other screens keep streaming it until Back to my copy:`, cause));
   }
 
   function tabOf(tabId: string): BrowserPanelState | undefined {
@@ -627,6 +649,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     // A size whose screen left goes back before the call, so the agent works on (and captures) the page at its own size.
     if (sizeOutlivedItsScreen(tab.id)) await setPageSize(tab.id, undefined);
     host.setBusy(tab.id, true);
+    const documentBefore = documents.get(contents.id);
     let outcome: VerbOutcome;
     try {
       // A hidden page starts painting again for the call; give it a frame before capturing it.
@@ -636,12 +659,27 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       host.setBusy(tab.id, false);
     }
     refuseNonWebPage(contents, 'is now on');
+    // Typing that loaded a new document (Enter submitting the form) left nothing typed on the page.
+    const typed = TYPING_VERBS.has(request.verb) && documents.get(contents.id) === documentBefore;
+    if (write) await noteAgentUse(tab.id, typed ? 'typed' : 'used');
     if (outcome.cursor) {
       host.showCursor(tab.id, outcome.cursor.x, outcome.cursor.y);
       agentCursors.set(tab.id, { ...outcome.cursor, at: Date.now() });
       changedView(tab.id);
     }
     return outcome;
+  }
+
+  /**
+   * Records what an agent did on a tab, for the screens showing it: any action makes it `used`; typing
+   * into its page makes it `typed` until the page loads a new document (driverFor).
+   */
+  async function noteAgentUse(tabId: string, use: 'used' | 'typed'): Promise<void> {
+    const tab = host.tab(tabId);
+    if (!tab) return;
+    const state = tabState(tab);
+    if (state.agentUse === use || (use === 'used' && state.agentUse === 'typed')) return;
+    await host.update(tab, { ...state, agentUse: use });
   }
 
   /**
@@ -856,9 +894,12 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
 
   /** The frame size the screens watching from afar need: the largest of them, in device pixels. */
   function settingsFor(tabId: string): ScreencastSettings {
-    const remote = holds.viewers(tabId).filter(viewer => viewer.kind !== 'host');
-    const shown = remote.filter(viewer => viewer.onScreen);
-    const far = shown.length ? shown : remote;
+    const viewers = holds.viewers(tabId);
+    const remote = viewers.filter(viewer => viewer.kind !== 'host');
+    // A sign-in popup's tab streams to this computer's own window too, when nobody afar watches it.
+    const watching = remote.length ? remote : viewers;
+    const shown = watching.filter(viewer => viewer.onScreen);
+    const far = shown.length ? shown : watching;
     const maxWidth = Math.round(Math.max(320, ...far.map(viewer => viewer.width * Math.min(viewer.scale ?? 1, 3))));
     const maxHeight = Math.round(Math.max(320, ...far.map(viewer => viewer.height * Math.min(viewer.scale ?? 1, 3))));
     return { maxWidth, maxHeight, quality: FRAME_QUALITY };
@@ -1033,6 +1074,15 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   const pointers = new Map<string, string>();
   /** Downloads that saved on this computer, by tab, for other screens' notices. */
   const tabDownloads = new Map<string, Array<{ name: string; at: number; agent?: string }>>();
+  /** The sign-in each tab stopped, until its page navigates, for other screens' line. */
+  const signIns = new Map<string, { site: string; url: string }>();
+  host.onSignInRefused((tabId, signIn) => {
+    signIns.set(tabId, signIn);
+    // Hear the page's next navigation now, which ends the line, even before any screen views the tab.
+    const page = host.page(tabId);
+    if (page && !page.isDestroyed()) followPage(tabId, page);
+    changedView(tabId);
+  });
 
   function viewOf(tabId: string) {
     let view = views.get(tabId);
@@ -1065,6 +1115,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (view.pages.has(page.id)) return;
     view.pages.add(page.id);
     const changed = () => changedView(tabId);
+    // The page moved on (the person went elsewhere, or signed in another way): the sign-in line goes.
+    page.on('did-navigate', () => { signIns.delete(tabId); });
     for (const event of ['did-navigate', 'did-navigate-in-page', 'page-title-updated', 'did-start-loading', 'did-stop-loading'] as const) page.on(event, changed);
     page.on('cursor-changed', (_event, type) => {
       const css = CSS_CURSOR.get(type) ?? type;
@@ -1106,6 +1158,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (cursor) view.agentCursor = cursor;
     if (driver?.pendingDialog) view.dialog = driver.pendingDialog;
     if (driver?.pendingChooser) view.fileChooser = driver.pendingChooser;
+    const signIn = signIns.get(tabId);
+    if (signIn) view.signIn = signIn;
     if (live) view.page = `${HOST_RUN}-${live.id}`;
     if (!live) view.stopped = holds.isAsleep(tabId) ? 'asleep' : 'gone';
     return view;

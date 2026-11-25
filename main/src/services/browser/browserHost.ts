@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, webContents } from 'electron';
+import { app, BrowserWindow, session, webContents, type WebContents } from 'electron';
 import { hasHeadlessDaemonLaunchArg } from '../../utils/runtimeMode';
 import { SHARED_BROWSER_PARTITION } from '../../../../shared/constants/browserPartitions';
 import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../../../shared/types/browser';
@@ -13,6 +13,7 @@ import os from 'os';
 import { mkdtemp, rm } from 'fs/promises';
 import { paneScratchDirectory } from '../paneScratch';
 import { panelManager } from '../panelManager';
+import { routeWebviewPopups, type PopupTabRequest } from '../webviewPopups';
 
 /** The renderer hears where an agent clicked, to draw its cursor on the tab. */
 const BROWSER_AGENT_CURSOR_EVENT = 'browser-panel:agent-cursor';
@@ -23,11 +24,18 @@ const BROWSER_BUSY_EVENT = 'browser-panel:busy';
 
 /** Browser tabs as this computer's main process has them: the panel store and the pages its window registered. */
 export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, commandRegistry: PaneCommandRegistry, sessions: Pick<NodeJS.EventEmitter, 'on'>): BrowserHost {
+  popupHost = { getMainWindow, commandRegistry };
+  // A sign-in popup's tab closed: its page goes with it.
+  panelManager.onPanelDeleted(panelId => {
+    const popup = popupPages.get(panelId);
+    popupPages.delete(panelId);
+    if (popup && !popup.isDestroyed()) popup.destroy();
+  });
   return {
     tabs: (paneId) => panelManager.getPanelsBySessionAndType(paneId, 'browser'),
     tab: (panelId) => panelManager.getPanel(panelId),
     open: (paneId, url, callerPanelId) => {
-      const customState: BrowserPanelState = { currentUrl: url };
+      const customState: BrowserPanelState = { currentUrl: url, agentUse: 'used' };
       return panelManager.createPanel({
         sessionId: paneId,
         type: 'browser',
@@ -49,7 +57,7 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
     },
     page: (panelId) => newestPage(panelId),
     sizeHidden: (panelId, size) => {
-      const window = headlessPages.get(panelId);
+      const window = headlessPages.get(panelId) ?? popupPages.get(panelId);
       if (window && !window.isDestroyed()) window.setContentSize(size?.width ?? HIDDEN_PAGE.width, size?.height ?? HIDDEN_PAGE.height);
     },
     hasWindow: () => getMainWindow() !== null,
@@ -68,6 +76,7 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
       sessions.on('session-deleted', () => listener());
     },
     setHeld: (tabIds, painting) => {
+      remotelyWatched = new Set(painting);
       const window = getMainWindow();
       if (!window) {
         holdHeadless(tabIds);
@@ -93,6 +102,9 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
     },
     personDownloads: () => app.getPath('downloads'),
     agentDownloads: async (paneId) => path.join(await paneScratchDirectory(paneId) ?? os.tmpdir(), 'browser-downloads'),
+    onSignInRefused: (listener) => {
+      signInListeners.add(listener);
+    },
     showDownload: (panelId, file, agent) => {
       const notice: BrowserTabNotice = { kind: 'downloaded', name: path.basename(file), file };
       if (agent) notice.agent = agent;
@@ -110,7 +122,7 @@ function newestPage(panelId: string): Electron.WebContents | undefined {
     // Only a browser tab's own page (a tab's webview, or the hidden window holding it on a host with
     // no window): never another kind of WebContents that reused a mapped id.
     if (!contents || contents.isDestroyed()) continue;
-    if (contents.getType() !== 'webview' && headlessPages.get(panelId)?.webContents !== contents) continue;
+    if (contents.getType() !== 'webview' && headlessPages.get(panelId)?.webContents !== contents && popupPages.get(panelId)?.webContents !== contents) continue;
     if (!newest || contents.id > newest.id) newest = contents;
   }
   return newest;
@@ -122,14 +134,147 @@ const HIDDEN_PAGE = { width: 1280, height: 800 };
 /** A host with no window keeps each held tab's page in a hidden window, in the shared sign-in store. */
 const headlessPages = new Map<string, BrowserWindow>();
 
+/** Sign-in popups that became tabs, by tab: each one's hidden window, still linked to its opener. */
+const popupPages = new Map<string, BrowserWindow>();
+
+/** Tabs another device watches now (setHeld's `painting`): their sign-in popups become tabs. */
+let remotelyWatched = new Set<string>();
+
+/** What popup tabs need from the host, once electronBrowserHost has run. */
+let popupHost: { getMainWindow: () => BrowserWindow | null; commandRegistry: PaneCommandRegistry } | undefined;
+
+type SignInListener = (panelId: string, signIn: { site: string; url: string }) => void;
+const signInListeners = new Set<SignInListener>();
+
+/**
+ * A tab stopped a sign-in that refuses to run inside apps: the tab in this window says so, and so
+ * does every screen streaming it (browser:view), each offering its own browser.
+ */
+export function refuseSignIn(panelId: string, site: string, url: string): void {
+  const notice: BrowserTabNotice = { kind: 'sign-in', site, url };
+  popupHost?.getMainWindow()?.webContents.send(BROWSER_TAB_NOTICE_CHANNEL, { panelId, notice });
+  for (const listener of signInListeners) listener(panelId, { site, url });
+}
+
+/**
+ * How a sign-in popup from `opener` opens: as a tab beside it when nobody would see a window on this
+ * computer (another device watches the opener, or there is no window), else undefined.
+ */
+export function popupTabFor(opener: { panelId: string }): ((request: PopupTabRequest) => WebContents) | undefined {
+  if (!popupHost) return undefined;
+  return remotelyWatched.has(opener.panelId) || !popupHost.getMainWindow() ? openPopupTab : undefined;
+}
+
+/**
+ * Opens a sign-in popup as a tab beside its opener. Its page is the one Chromium made for the popup,
+ * in a hidden window here, so it keeps its opener and can report the sign-in back; every screen
+ * streams it. The tab closes when the popup closes itself or its opener goes.
+ */
+function openPopupTab({ url, options, opener, openerUrl }: PopupTabRequest): WebContents {
+  const webPreferences = { ...options.webPreferences };
+  hardenWebviewPreferences(webPreferences);
+  const window = new BrowserWindow({
+    ...options,
+    show: false,
+    useContentSize: true,
+    width: options.width ?? HIDDEN_PAGE.width,
+    height: options.height ?? HIDDEN_PAGE.height,
+    paintWhenInitiallyHidden: true,
+    webPreferences,
+  });
+  const page = window.webContents;
+  let tabId: string | undefined;
+  const closeTab = () => {
+    if (!tabId) return;
+    popupPages.delete(tabId);
+    // Every screen goes back to the opener, where the sign-in reported back (or its line shows).
+    void popupHost?.commandRegistry.invoke('panels:delete', [tabId])
+      .then(() => panelManager.getPanel(opener.panelId) && panelManager.setActivePanel(opener.sessionId, opener.panelId))
+      .catch(() => undefined);
+  };
+  window.once('closed', closeTab);
+  routeHiddenPage(page, {
+    // A sign-in the popup reaches that refuses apps closes the popup; its opener says so, offering
+    // the opener's page, since the popup's own page needs its opener.
+    refuseSignIn: ({ site }) => {
+      refuseSignIn(opener.panelId, site, openerUrl);
+      if (!window.isDestroyed()) window.close();
+    },
+  });
+  let title = 'Sign in';
+  try { title = new URL(url).host || title; } catch { /* about:blank until the sign-in script navigates it */ }
+  const customState: BrowserPanelState = { currentUrl: url, signInPopup: true };
+  void panelManager.createPanel({
+    sessionId: opener.sessionId,
+    type: 'browser',
+    title,
+    initialState: { customState },
+    metadata: { openPlacement: 'split' },
+    // Brings the tab forward on every screen showing this Pane, where the person signs in.
+    activate: true,
+    announceActivation: true,
+  }).then(panel => {
+    tabId = panel.id;
+    if (window.isDestroyed()) {
+      closeTab();
+      return;
+    }
+    popupPages.set(panel.id, window);
+    getPaneWebviewContextMap().set(page.id, { panelId: panel.id, sessionId: opener.sessionId });
+    rememberUrl(page, panel.id);
+  }).catch(error => {
+    console.warn('[browser] A sign-in popup could not open as a tab:', error);
+    if (!window.isDestroyed()) window.destroy();
+  });
+  return page;
+}
+
+/** The tab remembers where its page went, as a tab in a window does, so waking it returns there. */
+function rememberUrl(page: WebContents, panelId: string): void {
+  page.on('did-navigate', (_event, pageUrl) => {
+    const current = panelManager.getPanel(panelId);
+    if (!current) return;
+    void panelManager.updatePanel(panelId, { state: { ...current.state, customState: { ...decodeOptionalBoundary(current.state.customState, boundary.jsonObject), currentUrl: pageUrl } } }).catch(() => undefined);
+  });
+}
+
+/**
+ * A hidden page's popups and navigations. Nobody sits at it, so it hands nothing to this computer:
+ * no system browser, no app (zoommtg:, slack:), no pane:// link. Its sign-in popups and new-tab
+ * links open as tabs beside it, which the screens watching it stream.
+ */
+function routeHiddenPage(page: WebContents, overrides: { refuseSignIn?: (request: { url: string; site: string; panelId: string | undefined }) => void } = {}): void {
+  routeWebviewPopups(page, {
+    contextOf: id => getPaneWebviewContextMap().get(id),
+    openBrowserTab: ({ url, sourceSessionId }) => {
+      const customState: BrowserPanelState = { currentUrl: url, isPopup: true };
+      void panelManager.createPanel({ sessionId: sourceSessionId, type: 'browser', title: hostOf(url), initialState: { customState }, metadata: { openPlacement: 'split' }, activate: true, announceActivation: true })
+        .catch(error => console.warn('[browser] A hidden page\'s new tab did not open:', error));
+    },
+    openExternal: url => console.warn(`[browser] A hidden page asked to open ${url} outside Pane; nobody is here to see it.`),
+    openPaneLink: () => console.warn('[browser] Ignored a pane:// link from a hidden page'),
+    offerApp: () => undefined,
+    refuseSignIn: overrides.refuseSignIn ?? (({ url, site, panelId }) => { if (panelId) refuseSignIn(panelId, site, url); }),
+    popupTab: () => openPopupTab,
+  });
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}
+
 let headlessPartitionGuarded = false;
 
 /**
- * Nobody watches a hidden page: it opens no windows, and the OS hands it no app (zoommtg:, slack:),
- * where a tab in a window would ask the person first. A window's tabs set the partition's own rules.
+ * Nobody sits at a hidden page: its popups open as tabs (routeHiddenPage), and the OS hands it no
+ * app, where a tab in a window would ask the person first. A window's tabs set the partition's own rules.
  */
 function guardHeadlessPage(contents: Electron.WebContents): void {
-  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  routeHiddenPage(contents);
   if (headlessPartitionGuarded || !hasHeadlessDaemonLaunchArg()) return;
   headlessPartitionGuarded = true;
   session.fromPartition(SHARED_BROWSER_PARTITION).setPermissionRequestHandler((_contents, permission, callback) => callback(permission !== 'openExternal'));
@@ -143,7 +288,8 @@ function holdHeadless(tabIds: readonly string[]): void {
     if (!window.isDestroyed()) window.destroy();
   }
   for (const panelId of wanted) {
-    if (headlessPages.has(panelId)) continue;
+    // A sign-in popup's tab already has its page, linked to its opener.
+    if (headlessPages.has(panelId) || popupPages.has(panelId)) continue;
     const panel = panelManager.getPanel(panelId);
     const url = decodeOptionalBoundary(panel?.state.customState, boundary.object({ currentUrl: boundary.optional(boundary.string) }))?.currentUrl;
     if (!panel || !url) continue;
@@ -155,12 +301,7 @@ function holdHeadless(tabIds: readonly string[]): void {
     headlessPages.set(panelId, window);
     getPaneWebviewContextMap().set(window.webContents.id, { panelId, sessionId: panel.sessionId });
     window.webContents.once('destroyed', () => { if (headlessPages.get(panelId) === window) headlessPages.delete(panelId); });
-    // The tab remembers where its page went, as a tab in a window does, so waking it returns there.
-    window.webContents.on('did-navigate', (_event, pageUrl) => {
-      const current = panelManager.getPanel(panelId);
-      if (!current) return;
-      void panelManager.updatePanel(panelId, { state: { ...current.state, customState: { ...decodeOptionalBoundary(current.state.customState, boundary.jsonObject), currentUrl: pageUrl } } }).catch(() => undefined);
-    });
+    rememberUrl(window.webContents, panelId);
     void window.loadURL(url).catch(error => console.warn(`[browser] A held tab's hidden page did not load ${url}:`, error));
   }
 }

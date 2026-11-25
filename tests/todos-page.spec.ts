@@ -115,6 +115,7 @@ test('the to-do page: plan beside it, comments and replies reach the right tab, 
     await expect(overlay).toHaveCount(0);
     await card.getByTestId('todo-thread-answer').click();
     await expect(overlay).toBeVisible();
+    // oxlint-disable-next-line pane/no-bare-todo-number -- one isolated Pane, so every card here is this machine's.
     const item = (await approvals(page)).items.find(entry => entry.todo?.number === 1 && entry.state === 'waiting');
     await page.evaluate(async id => { await window.electronAPI.notify.run({ type: 'answer', id, answer: { choice: 'EUR' } }); }, item?.id ?? '');
     await expect(overlay).toHaveCount(0, { timeout: 15_000 });
@@ -220,6 +221,7 @@ test('a comment on a to-do waiting for your review reopens it (T-20)', async ({ 
     await expect.poll(async () => (await detail(page, 1)).todo.state, { timeout: 15_000 }).toBe('in_progress');
     await expect.poll(() => statusOf(page, 1), { timeout: 15_000 }).not.toBe('waiting');
     await expect.poll(() => transcript(page, orchestrator.panelId), { timeout: 30_000 }).toContain('Can you include a root cause report?');
+    // oxlint-disable-next-line pane/no-bare-todo-number -- one isolated Pane, so every card here is this machine's.
     await expect.poll(async () => (await approvals(page)).items.filter(item => item.todo?.number === 1 && item.state === 'waiting').length, { timeout: 15_000 }).toBe(0);
     await shot(page, 't20-reopened-light');
   } finally {

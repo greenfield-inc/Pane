@@ -215,15 +215,25 @@ describe('Add a device › Phone without a code', () => {
   const noCertificate = "Phones can't reach this computer yet: it needs a security certificate, and the service that issues them is turning away new computers for now. Pane asks again at 2:16 PM by itself; keep Pane open and the code appears then.";
 
   it('says why there is no code and what happens next, with "Try again"', () => {
-    const html = renderToStaticMarkup(<PhoneTab view={{ step: 'error', message: noCertificate }} paired={null} renewed={false} onRetry={() => undefined} />);
+    const html = renderToStaticMarkup(<PhoneTab view={{ step: 'error', message: noCertificate, cause: 'relay' }} paired={null} renewed={false} onRetry={() => undefined} onSetUpTailscale={() => undefined} />);
     expect(text(html)).toContain('be paired right now');
     expect(text(html)).toContain('Pane asks again at 2:16 PM by itself');
     expect(text(html)).not.toContain('internet connection');
     expect(buttons(html)).toContain('Try again');
   });
 
+  it('pauses relay pairing while both certificate services refuse, without a code, and points to Tailscale', () => {
+    const html = renderToStaticMarkup(<PhoneTab view={{ step: 'limited', until: '2026-11-20T22:16:39Z' }} paired={null} renewed={false} onRetry={() => undefined} onSetUpTailscale={() => undefined} />);
+    expect(text(html)).toContain('New pairings through Pane relay are paused until');
+    expect(text(html)).toContain('Tailscale still works.');
+    expect(html).toContain('data-paused=""');
+    expect(html).not.toContain('data-url=');
+    expect(buttons(html)).toContain('Set up Tailscale');
+    expect(buttons(html)).not.toContain('Try again');
+  });
+
   it('says what this computer is waiting for while the code is on its way', () => {
-    const html = renderToStaticMarkup(<PhoneTab view={{ step: 'preparing', label: 'Getting a certificate…' }} paired={null} renewed={false} onRetry={() => undefined} />);
+    const html = renderToStaticMarkup(<PhoneTab view={{ step: 'preparing', label: 'Getting a certificate…' }} paired={null} renewed={false} onRetry={() => undefined} onSetUpTailscale={() => undefined} />);
     expect(text(html)).toContain('Getting a certificate…');
   });
 });

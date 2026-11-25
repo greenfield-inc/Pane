@@ -22,6 +22,8 @@ import type { AppConfig } from '../types/config';
 import { readingMachines } from './readingMachines';
 import { remoteEventStreams } from './remoteEventStreams';
 import { PaneError } from '../../../shared/paneError';
+import type { ForwardedClient } from './relay/computerTlsServer';
+import { setPairingAnalytics } from '../services/pairingAnalytics';
 
 interface ConfigManagerStub {
   getConfig(): { deepgramApiKey?: string; remoteDaemon?: RemoteDaemonConfig; machineId?: string };
@@ -556,7 +558,7 @@ describe('PaneRemoteHttpApiServer', () => {
     const config = createEnabledRemoteConfig();
     const exchange = new PairingExchange({ addClient: async (record) => { config.host.clients.push(record); } });
     const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config), {
-      pairing: { exchange: (request) => exchange.exchange(request), preview: async () => ({ ok: false, status: 404, code: 'ERR_UNUSED', message: 'Not used here.' }), clientAddress: () => null },
+      pairing: { exchange: (request) => exchange.exchange(request), preview: async () => ({ ok: false, status: 404, code: 'ERR_UNUSED', message: 'Not used here.' }), forwardedClient: () => null },
     });
     activeServers.push(server);
     await server.start();
@@ -578,6 +580,48 @@ describe('PaneRemoteHttpApiServer', () => {
     await expect(owner.sessions()).resolves.toMatchObject({ statusCode: 200 });
   });
 
+  it('reports each pairing with its device kind and how it arrived, never the label or address', async () => {
+    const config = createEnabledRemoteConfig();
+    const exchange = new PairingExchange({ addClient: async (record) => { config.host.clients.push(record); } });
+    let forwarded: ForwardedClient | null = null;
+    const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), createConfigManagerStub(config), {
+      pairing: {
+        exchange: (request) => exchange.exchange(request),
+        preview: async () => ({ ok: false, status: 404, code: 'ERR_UNUSED', message: 'Not used here.' }),
+        forwardedClient: () => forwarded,
+      },
+    });
+    activeServers.push(server);
+    await server.start();
+    const sent: Array<[string, object | undefined]> = [];
+    setPairingAnalytics({ track: (name, properties) => { sent.push([name, properties]); } });
+    const pair = (label: string, headers?: Record<string, string>) =>
+      requestJson(server, 'POST', '/pair/exchange', { secret: exchange.createSecret().secret, label }, undefined, headers);
+    try {
+      // This listener is on loopback: phones on the network and the relay reach it through this
+      // computer's TLS server, which says how each one came in.
+      forwarded = { address: '192.168.1.24', route: 'lan' };
+      await pair('Ana’s iPhone');
+      forwarded = { address: '203.0.113.7', route: 'relay' };
+      await pair('Ben’s Pixel');
+      forwarded = null;
+      // Tailscale Serve names the tailnet caller; anything else on loopback is a tunnel such as SSH.
+      await pair('Cy’s iPad', { 'Tailscale-User-Login': 'cy@example.com', 'X-Forwarded-For': '100.101.102.103' });
+      await pair('Di’s Pixel');
+      // A wrong code pairs nothing and reports nothing.
+      await requestJson(server, 'POST', '/pair/exchange', { secret: 'guess', label: 'Ben’s Pixel' });
+    } finally {
+      setPairingAnalytics(null);
+    }
+
+    expect(sent).toEqual([
+      ['pairing_completed', { device: 'phone', route: 'lan' }],
+      ['pairing_completed', { device: 'phone', route: 'relay' }],
+      ['pairing_completed', { device: 'phone', route: 'tailscale' }],
+      ['pairing_completed', { device: 'phone', route: 'other' }],
+    ]);
+  });
+
   it('previews a one-time code without spending it, and locks out a source that guesses', async () => {
     const config = createEnabledRemoteConfig();
     const exchange = new PairingExchange({ addClient: async (record) => { config.host.clients.push(record); } });
@@ -588,7 +632,7 @@ describe('PaneRemoteHttpApiServer', () => {
           const checked = exchange.check(secret, source);
           return checked.ok ? { ok: true, group: [{ id: 'studiostudiostud', name: 'Studio Mac' }], expiresAt: checked.expiresAt } : checked;
         },
-        clientAddress: () => null,
+        forwardedClient: () => null,
       },
     });
     activeServers.push(server);

@@ -10,6 +10,8 @@ import { GlassesRows } from '../GlassesSettings';
 import { ComputerRow } from '../computers/ComputerRow';
 import { PublicUrlField } from '../computers/PublicUrlField';
 import { useAddDeviceStore } from '../../addDevice/addDeviceStore';
+import { RelayLimitNotice } from '../../addDevice/RelayLimitNotice';
+import { useRelayCertificateLimit } from '../../../hooks/useRelayPairing';
 import { useMachines } from '../../../hooks/useMachines';
 import { useConfigStore } from '../../../stores/configStore';
 import { THIS_COMPUTER, type MachineEntry } from '../../../utils/machineList';
@@ -20,6 +22,7 @@ import { Bone, Skeleton, LoadingStatus, useSkeletonHold } from '../../ui/Skeleto
 import { computerRelayId } from '../../../../../shared/types/remoteComputers';
 import { relayCarrier } from '../../../utils/relayCarrier';
 import type { RemoteDaemonClientRecord } from '../../../../../shared/types/remoteDaemon';
+import type { RelayStatus } from '../../../../../shared/types/relay';
 import type { RemoteAccessSubviewId, SettingSaveState, SettingsSettingId } from '../../../types/settings';
 import type { RemoteAccessController } from '../useRemoteAccessSettings';
 
@@ -69,6 +72,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
     wrapConnect: controller.showChecklist,
   });
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
+  const relayLimitUntil = useRelayCertificateLimit();
   const openAddDevice = useAddDeviceStore((state) => state.open);
   const requestedTab = settingRequest && tabHolding(settingRequest.setting);
   const [tab, setShownTab] = useState<RemoteAccessTab>(requestedTab ?? shownTab);
@@ -272,6 +276,11 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
 
         {tab === 'devices' && (
           <>
+            {relayLimitUntil && (
+              <div className="rounded-lg border border-border-secondary bg-surface-secondary p-4">
+                <RelayLimitNotice until={relayLimitUntil} onSetUpTailscale={() => setTab('tailscale')} />
+              </div>
+            )}
             <RemoteGroup
               title="Devices"
               scope={scope}
@@ -282,6 +291,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
             </RemoteGroup>
             <RemoteGroup title="Pane relay">
               <RelayAddressRow controller={controller} />
+              <RelayCertificateRow />
             </RemoteGroup>
           </>
         )}
@@ -603,6 +613,32 @@ function LinkedComputerRow({ computer, controller, onOutcome }: { computer: Remo
         )}
       </div>
     </div>
+  );
+}
+
+const certificateDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+
+/** Which CA issued this computer's relay certificate, and until when; nothing until it has one. */
+function RelayCertificateRow() {
+  const [certificate, setCertificate] = useState<RelayStatus['certificate']>(null);
+  useEffect(() => {
+    let current = true;
+    window.electronAPI.invoke('relay:status').then(
+      (status: RelayStatus) => { if (current) setCertificate(status.certificate); },
+      () => undefined,
+    );
+    const off = window.electronAPI.events.onRelayStatusChanged((status) => setCertificate(status.certificate));
+    return () => { current = false; off(); };
+  }, []);
+  if (!certificate) return null;
+  return (
+    <SettingRow
+      label="Certificate"
+      description={`Issued by ${certificate.issuer}. Pane renews it on ${certificateDate(certificate.renewAt)}.`}
+      className={CARD_ROW}
+    >
+      <span className="text-sm text-text-secondary sm:text-right">Valid until {certificateDate(certificate.notAfter)}</span>
+    </SettingRow>
   );
 }
 

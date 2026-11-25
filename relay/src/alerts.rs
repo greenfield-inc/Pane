@@ -65,7 +65,7 @@ struct Fcm {
     auth: FcmAuth,
     project: String,
     url: String,
-    token: tokio::sync::Mutex<Option<(String, Instant)>>,
+    token: TokenCache,
 }
 
 /// Where FCM access tokens come from.
@@ -273,7 +273,7 @@ impl Alerts {
         let fcm = match &cfg.fcm_service_account {
             None => cfg.fcm_project.as_ref().map(|project| Fcm {
                 auth: FcmAuth::Metadata {
-                    url: cfg.fcm_metadata_url.clone(),
+                    url: cfg.metadata_url.clone(),
                 },
                 project: project.clone(),
                 url: cfg.fcm_url.trim_end_matches('/').to_string(),
@@ -610,36 +610,51 @@ impl Apns {
 impl Fcm {
     /// An OAuth2 access token, fetched again 5 minutes before it expires.
     async fn access_token(&self, http: &Http) -> Result<String, String> {
-        let mut cached = self.token.lock().await;
-        if let Some((token, until)) = &*cached
-            && Instant::now() < *until
-        {
-            return Ok(token.clone());
-        }
-        let (status, body) = match &self.auth {
-            FcmAuth::Key {
-                key,
-                email,
-                token_url,
-            } => key_token(http, key, email, token_url).await?,
-            FcmAuth::Metadata { url } => metadata_get(url).await?,
-        };
-        if status != 200 {
-            return Err(format!("the FCM token endpoint answered {status}"));
-        }
-        let v: Value = serde_json::from_slice(&body)
-            .map_err(|_| "the FCM token endpoint answered invalid JSON".to_string())?;
-        let token = v["access_token"]
-            .as_str()
-            .ok_or("the FCM token endpoint answered no access_token")?
-            .to_string();
-        let lifetime = Duration::from_secs(v["expires_in"].as_u64().unwrap_or(3600));
-        *cached = Some((
-            token.clone(),
-            Instant::now() + lifetime.saturating_sub(FCM_TOKEN_MARGIN),
-        ));
-        Ok(token)
+        cached_token(&self.token, "the FCM token endpoint", async {
+            match &self.auth {
+                FcmAuth::Key {
+                    key,
+                    email,
+                    token_url,
+                } => key_token(http, key, email, token_url).await,
+                FcmAuth::Metadata { url } => metadata_get(url).await,
+            }
+        })
+        .await
     }
+}
+
+/// An OAuth2 access token held until 5 minutes before it expires.
+pub(crate) type TokenCache = tokio::sync::Mutex<Option<(String, Instant)>>;
+
+/// The cached access token, or a new one from `fetch` (a token endpoint's status and JSON body).
+pub(crate) async fn cached_token(
+    cache: &TokenCache,
+    source: &str,
+    fetch: impl std::future::Future<Output = Result<(u16, Bytes), String>>,
+) -> Result<String, String> {
+    let mut cached = cache.lock().await;
+    if let Some((token, until)) = &*cached
+        && Instant::now() < *until
+    {
+        return Ok(token.clone());
+    }
+    let (status, body) = fetch.await?;
+    if status != 200 {
+        return Err(format!("{source} answered {status}"));
+    }
+    let v: Value =
+        serde_json::from_slice(&body).map_err(|_| format!("{source} answered invalid JSON"))?;
+    let token = v["access_token"]
+        .as_str()
+        .ok_or_else(|| format!("{source} answered no access_token"))?
+        .to_string();
+    let lifetime = Duration::from_secs(v["expires_in"].as_u64().unwrap_or(3600));
+    *cached = Some((
+        token.clone(),
+        Instant::now() + lifetime.saturating_sub(FCM_TOKEN_MARGIN),
+    ));
+    Ok(token)
 }
 
 /// Trades a JWT signed with the service account key for an access token.
@@ -677,13 +692,19 @@ async fn key_token(
 }
 
 /// GETs a token from the GCE metadata server (plain HTTP/1.0 on the VM's link).
-async fn metadata_get(url: &str) -> Result<(u16, Bytes), String> {
+pub(crate) async fn metadata_get(url: &str) -> Result<(u16, Bytes), String> {
     let rest = url
         .strip_prefix("http://")
-        .ok_or("--fcm-metadata-url must start with http://")?;
+        .ok_or("--metadata-url must start with http://")?;
     let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    // http:// without a port means 80, as in production's http://metadata.google.internal/...
+    let address = if authority.contains(':') {
+        authority.to_string()
+    } else {
+        format!("{authority}:80")
+    };
     let fetch = async {
-        let mut tcp = TcpStream::connect(authority).await?;
+        let mut tcp = TcpStream::connect(address.as_str()).await?;
         let req =
             format!("GET {path} HTTP/1.0\r\nhost: {authority}\r\nmetadata-flavor: Google\r\n\r\n");
         tcp.write_all(req.as_bytes()).await?;
@@ -694,7 +715,7 @@ async fn metadata_get(url: &str) -> Result<(u16, Bytes), String> {
     let out = tokio::time::timeout(TIMEOUT, fetch)
         .await
         .map_err(|_| "the metadata server timed out".to_string())?
-        .map_err(|e| format!("the metadata server at {authority}: {e}"))?;
+        .map_err(|e| format!("the metadata server at {address}: {e}"))?;
     let split = out
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
@@ -708,13 +729,13 @@ async fn metadata_get(url: &str) -> Result<(u16, Bytes), String> {
 }
 
 /// A minimal HTTP/2 client that keeps one connection per provider host.
-struct Http {
+pub(crate) struct Http {
     tls: tokio_rustls::TlsConnector,
     conns: Mutex<HashMap<String, h2::client::SendRequest<Bytes>>>,
 }
 
 impl Http {
-    fn new(extra_ca: Option<&std::path::Path>) -> Result<Http, Error> {
+    pub(crate) fn new(extra_ca: Option<&std::path::Path>) -> Result<Http, Error> {
         let mut roots = rustls::RootCertStore::empty();
         for cert in rustls_native_certs::load_native_certs().certs {
             let _ = roots.add(cert);
@@ -779,7 +800,7 @@ impl Http {
     }
 
     /// POSTs `body` (JSON unless a content-type header says otherwise); returns the status and body.
-    async fn post(
+    pub(crate) async fn post(
         &self,
         url: &str,
         headers: &[(&str, String)],

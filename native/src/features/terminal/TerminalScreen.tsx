@@ -8,7 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PaneError } from '@shared/paneError';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import type { OrchestrationSessionView } from '@shared/types/orchestrationSession';
-import { pausedMarkOf, type EditorPanelState, type TerminalPanelState, type ToolPanel } from '@shared/types/panels';
+import { pausedMarkOf, type BrowserPanelState, type EditorPanelState, type TerminalPanelState, type ToolPanel } from '@shared/types/panels';
+import { offersViewLive, streamChoices, viewLive } from '@shared/utils/streamChoice';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
 import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
@@ -35,10 +36,12 @@ import { useAgentStatuses, useMarkPaneSeen } from '../panes/hooks';
 import { ShortcutsSheet } from '../shortcuts/ShortcutsSheet';
 import { PlaceholderTab } from '../tabs/PlaceholderTab';
 import { ChatTabBody } from '../chatTab/ChatTabBody';
+import { LinkPane } from '../links/LinkMenu';
 import { AttachSheet } from '../upload/AttachSheet';
 import { UploadReceipts } from '../upload/UploadReceipts';
 import { useUploads } from '../upload/useUploads';
 import { useVoiceDictation } from '../voice/useVoiceDictation';
+import { VoiceAudio } from '../voice/VoiceAudio';
 import { VoiceSetupSheet } from '../voice/VoiceSetupSheet';
 import { CopySheet } from './CopySheet';
 import { controllerLayout } from './controllerLayout';
@@ -170,7 +173,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   };
 
 
-  // A long press on a tab offers Close; a tab whose agent is still at work asks once more.
+  // A long press on a tab offers Close (and View live on a page tab an agent used); a tab whose agent is still at work asks once more.
   const closePanel = (tab: ToolPanel) => {
     const close = () => deletePanel.mutate([tab.id], { onError: error => Alert.alert('Couldn’t close the tab', error.message) });
     const state = statuses.data?.agentStatus[tab.id];
@@ -180,7 +183,10 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
         { text: 'Close', style: 'destructive', onPress: close },
       ])
       : close;
-    offerClose(tab.title, confirm);
+    // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
+    const page = tab.type === 'browser' ? tab.state.customState as BrowserPanelState | undefined : undefined;
+    const live = tab.type === 'browser' && offersViewLive(streamChoices.all().get(tab.id), page) ? () => { viewLive(tab.id, page); selectPanel(tab); } : undefined;
+    offerClose(tab.title, confirm, live);
   };
 
   return (
@@ -189,6 +195,8 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       behavior="padding"
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
+      {/* Dictation's audio, here so a recording survives switching tabs; mounted on first use. */}
+      {voice.audio ? <VoiceAudio {...voice.audio} /> : null}
       {topBar ?? <TerminalTopBar paneName={title} onClearScrollback={terminalActive ? () => terminalActions.current?.clearScrollback() : undefined} />}
       {/* An approval's layout is final once the tabs and the tab body stop moving (perf marks). */}
       <View onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `tabs=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
@@ -272,8 +280,12 @@ export function LeadingBodies({ leading, selectedId }: { leading: LeadingTabs; s
   );
 }
 
-/** A tab that is not a terminal, drawn by its type. */
+/** A tab that is not a terminal, drawn by its type; its links open in Pane in the tab's Pane. */
 function TabBody({ panel, title, panels }: { panel: ToolPanel; title: string; panels: readonly ToolPanel[] }) {
+  return <LinkPane value={panel.sessionId}><TabView panel={panel} title={title} panels={panels} /></LinkPane>;
+}
+
+function TabView({ panel, title, panels }: { panel: ToolPanel; title: string; panels: readonly ToolPanel[] }) {
   switch (tabView(panel)) {
     case 'chat':
       return <ChatTabBody panel={panel} panels={panels} />;

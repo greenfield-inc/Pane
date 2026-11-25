@@ -144,7 +144,11 @@ download yourself, and the container image is
 `--acme-directory` points at another CA, such as Let's Encrypt staging
 (`https://acme-staging-v02.api.letsencrypt.org/directory`) while you try
 things out. The relay's DNS publishes CAA records that allow only Let's
-Encrypt; with another CA, set `--caa-issuer` to its domain. `--cert` and `--key` take your own certificate instead. It must
+Encrypt and Google Trust Services; with another CA, add its domain to `--caa-issuer`
+(computers still order from those two). Computers fall back to Google Trust
+Services when Let's Encrypt refuses; that needs a relay on Google Compute
+Engine with `--eab-project` and `--acme-email` (see
+[relay/README.md](../relay/README.md)). Without them, computers use Let's Encrypt only. `--cert` and `--key` take your own certificate instead. It must
 cover `relay.example.com` and `us.relay.relay.example.com`: each relay has a
 region (`us` unless you set `--region`) and also answers at
 `<region>.relay.<your domain>`. `--direct-quic` is optional: it helps phones and computers find a
@@ -220,6 +224,9 @@ and its devices, at `https://us.relay.relay.example.com/` on the same port
 
 Which computer each connection is for (the TLS server name), IP addresses,
 timing and byte counts. It never decrypts traffic: each computer ends TLS
-with its own key. It logs no payloads, tokens or URLs. Packets on direct
-paths are encrypted between the two ends; the relay sees their iroh endpoint
-ids, IP addresses and byte counts.
+with its own key. It logs no payloads, tokens or URLs. Once an hour it also
+logs a `relay usage` line of counts: computers and clients connected, and
+computers seen in the last 24 hours. Its logs stay on your machine, except
+that with `--usage-project` it writes that one line to Cloud Logging.
+Packets on direct paths are encrypted between the two ends; the relay sees
+their iroh endpoint ids, IP addresses and byte counts.

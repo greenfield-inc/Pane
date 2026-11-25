@@ -205,17 +205,29 @@ export class ArchiveCleanupManager {
   getTasks(): ArchiveProgressTask[] {
     const jobs = [...this.jobs.values()];
     const recentCompleted = jobs.filter(job => job.status === 'completed').slice(-10);
+    const now = Date.now();
     return [...jobs.filter(job => job.status !== 'completed'), ...recentCompleted].map(job => ({
       sessionId: job.sessionId, sessionName: job.sessionName, worktreeName: job.worktreeName, projectName: job.projectName,
-      status: this.waitingForTeardown.has(job.sessionId) ? 'pending' : job.status === 'running'
-        ? job.phase === 'script' ? 'running-archive-script' : job.phase === 'artifacts' ? 'cleaning-artifacts' : 'removing-worktree'
-        : job.status,
+      status: this.taskStatus(job, now),
       startTime: job.startTime, endTime: job.endTime, error: job.error,
       trashDeletion: job.phase === 'purge' ? 'pending' : job.status === 'completed' ? 'done' : undefined,
       cleanupId: job.id, attempts: job.attempts, nextAttempt: job.nextAttempt || undefined,
       remainingPath: job.phase === 'purge' ? job.quarantine : job.source,
       interruptedScript: job.scriptStarted && !job.scriptFinished,
     }));
+  }
+
+  /**
+   * A purge runs in short batches, and the job goes back to `queued` between
+   * them so other repositories get a turn. Only a job that hasn't started, or
+   * one waiting out a retry, reads as queued; any other keeps showing its
+   * phase, so the row doesn't flip between "Queued" and "Removing worktree".
+   */
+  private taskStatus(job: ArchiveCleanupJob, now: number): ArchiveProgressTask['status'] {
+    if (this.waitingForTeardown.has(job.sessionId)) return 'pending';
+    const between = job.status === 'queued' && job.phase !== 'script' && job.nextAttempt <= now;
+    if (job.status !== 'running' && !between) return job.status;
+    return job.phase === 'script' ? 'running-archive-script' : job.phase === 'artifacts' ? 'cleaning-artifacts' : 'removing-worktree';
   }
 
   private save(job: ArchiveCleanupJob): void {

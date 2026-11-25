@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
 import { notifyFixture } from '../../../tests/fixtures/notifySnapshot';
 import { archiveApprovals, paneHasWaitingQuestion, selectNotifyItems, sendArchived, sessionWaitingCount, subscribeNotify, todosWaitingCount, undoArchive, useNotifyStore, waitingCount, waitingElsewhere } from './notifyStore';
-import { EMPTY_TODO_SCOPE } from '../components/todos/sessionTodos';
+import { EMPTY_TODO_SCOPE, emptyTodoScope } from '../components/todos/sessionTodos';
+import { todoKey } from '../../../shared/todoKey';
 
 const launch = { id: 'session-launch', name: 'Launch', paneId: 'session-launch-pane' };
 
@@ -25,8 +26,8 @@ describe('Approvals counts', () => {
     // A mirror from an older machine takes no answer, so it isn't counted.
     expect(sessionWaitingCount(snapshot, 'session-launch')).toBe(2);
     expect(sessionWaitingCount(snapshot, 'session-other')).toBe(0);
-    expect(sessionWaitingCount(snapshot, 'session-launch', 'local')).toBe(2);
-    expect(sessionWaitingCount(snapshot, 'session-launch', 'studio')).toBe(0);
+    expect(sessionWaitingCount(snapshot, 'session-launch', emptyTodoScope('local'))).toBe(2);
+    expect(sessionWaitingCount(snapshot, 'session-launch', emptyTodoScope('studio'))).toBe(0);
     // The badge: every Session's count plus what isn't in a Session.
     expect(waitingCount(snapshot)).toBe(3);
   });
@@ -46,7 +47,7 @@ describe('Approvals counts', () => {
   it("leaves dismissed items out of their Session's row count, which still counts a genuinely open one", () => {
     const dismissed = withItems(item('a', { dismissedAt: 5 }), item('b', { dismissedAt: 6, machineId: 'studio' }));
     expect(sessionWaitingCount(dismissed, 'session-launch')).toBe(0);
-    expect(sessionWaitingCount(dismissed, 'session-launch', 'studio')).toBe(0);
+    expect(sessionWaitingCount(dismissed, 'session-launch', emptyTodoScope('studio'))).toBe(0);
     // Still waiting in Approvals: the overall count keeps them.
     expect(waitingCount(dismissed)).toBe(2);
     expect(sessionWaitingCount(withItems(item('a', { dismissedAt: 5 }), item('open')), 'session-launch')).toBe(1);
@@ -63,9 +64,18 @@ describe('Approvals counts', () => {
     expect(waitingElsewhere(snapshot, 'studio')).toBe(2);
   });
 
+  it("T-51: a Session's row counts its own machine's card for its T-28, never another machine's T-28", () => {
+    const snapshot = withItems(
+      item('macbook:q-84', { source: { name: 'Workspaces, Signup orchestrator', agent: 'Claude', session: { id: 'workspaces', name: 'Workspaces, Signup', paneId: 'mbp', orchestrator: true } }, todo: { number: 28, title: 'Phone-number sign-up' }, machineId: 'macbook' }),
+    );
+    const firecracker = { machineId: 'local', sessionIds: new Set<string>(), todoKeys: new Set([todoKey('local', 27), todoKey('local', 28)]) };
+    expect(sessionWaitingCount(snapshot, 'firecracker', firecracker)).toBe(0);
+    expect(sessionWaitingCount(withItems(item('local-28', { source: { name: 'x', agent: 'Claude' }, todo: { number: 28, title: 'BAA' } })), 'firecracker', firecracker)).toBe(1);
+  });
+
   it("counts a Session's to-dos' waiting approvals once each, for its To-dos tab (T-23)", () => {
     const hidden = { id: 'hidden-15', name: 'T-15', paneId: 'p-15' };
-    const scope = { sessionIds: new Set(['hidden-15']), todoNumbers: new Set([15, 16]) };
+    const scope = { machineId: 'local', sessionIds: new Set(['hidden-15']), todoKeys: new Set([todoKey('local', 15), todoKey('local', 16)]) };
     const snapshot = withItems(
       // Linked to T-15 and asked in its hidden Session: one approval, counted once.
       item('q-31', { source: { name: 'planner', agent: 'Claude', session: hidden }, todo: { number: 15, title: 'Cadence' } }),
@@ -77,8 +87,9 @@ describe('Approvals counts', () => {
       item('dismissed', { todo: { number: 16, title: 'Copy' }, dismissedAt: 5 }),
       item('elsewhere', { todo: { number: 15, title: 'Cadence' }, machineId: 'studio' }),
     );
-    expect(todosWaitingCount(snapshot, scope)).toBe(4);
-    expect(todosWaitingCount(snapshot, scope, 'local')).toBe(3);
+    // Another machine's T-15 is its own to-do (T-51): it counts on that machine's scope only.
+    expect(todosWaitingCount(snapshot, scope)).toBe(3);
+    expect(todosWaitingCount(snapshot, { machineId: 'studio', sessionIds: new Set(), todoKeys: new Set([todoKey('studio', 15)]) })).toBe(1);
     expect(todosWaitingCount(snapshot, EMPTY_TODO_SCOPE)).toBe(0);
     expect(todosWaitingCount(null, scope)).toBe(0);
   });

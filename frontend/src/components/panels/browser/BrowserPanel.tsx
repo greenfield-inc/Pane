@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { ArrowLeft, ArrowRight, RotateCw, Loader2, ChevronDown, Copy, Check, FileCode, ExternalLink } from 'lucide-react';
+import { ArrowLeft, ArrowRight, RotateCw, Loader2, ChevronDown, Copy, Check, FileCode, ExternalLink, Radio } from 'lucide-react';
 import type { ToolPanel, BrowserPanelState } from '../../../../../shared/types/panels';
 import { cn } from '../../../utils/cn';
 import { panelApi } from '../../../services/panelApi';
@@ -18,7 +18,7 @@ import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../../ui/Skeleton';
 import { PortsList } from './PortsList';
 import { RefusedFilesNotice, type FileRefusal } from './RefusedFilesNotice';
 import { TabNotices, type ShownTabNotice } from './TabNotices';
-import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../../../../shared/types/browser';
+import { BROWSER_TAB_NOTICE_CHANNEL, BROWSER_VIEW_LIVE_CHANNEL, type BrowserTabNotice } from '../../../../../shared/types/browser';
 import { FindBar } from '../../find/FindBar';
 import { usePanelFind } from '../../find/usePanelFind';
 import { closeFind, getFindBar, reportFindResult, setFindQuery, useFindBar } from '../../find/findController';
@@ -32,9 +32,11 @@ const MAX_NOTICES = 3;
 interface BrowserPanelProps {
   panel: ToolPanel;
   isActive: boolean;
+  /** This desktop's own copy of another computer's page an agent used: switch to the host's live page. */
+  onViewLive?: () => void;
 }
 
-const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
+const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive, onViewLive }) => {
   const initRef = useRef(false);
   const [url, setUrl] = useState('');
   const [inputUrl, setInputUrl] = useState('');
@@ -44,6 +46,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [urlError, setUrlError] = useState('');
   const [refusals, setRefusals] = useState<FileRefusal[]>([]);
   const [notices, setNotices] = useState<ShownTabNotice[]>([]);
+  // Pages whose sign-in line the person dismissed or used: a repeat refusal stays quiet until the page loads again.
+  const signInsHandledRef = useRef(new Set<string>());
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
@@ -529,6 +533,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     const onDidNavigateDocument = () => {
       setUrlError('');
       setRefusals([]);
+      // A sign-in line belongs to the page it offers; a new page starts without it.
+      signInsHandledRef.current.clear();
+      setNotices(current => current.filter(shown => shown.notice.kind !== 'sign-in'));
     };
     const onDidStartLoading = () => setIsLoading(true);
     const onDidFailLoad = (event: Electron.DidFailLoadEvent) => {
@@ -615,15 +622,18 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     return () => window.removeEventListener('browser-panel:file-refused', handler);
   }, [panel.id]);
 
-  // Main's lines for this tab: an app link to confirm, a sign-in sent out, a finished download.
+  // Main's lines for this tab: an app link to confirm, a sign-in that refuses apps, a finished download.
   // The newest few stay until the person acts on them.
   useEffect(() => {
     const handler = (e: Event) => {
       // SAFETY: The preload bridge is the only sender of this event.
       const { panelId, notice } = (e as CustomEvent<{ panelId: string; notice: BrowserTabNotice }>).detail;
       if (panelId !== panel.id) return;
+      if (notice.kind === 'sign-in' && signInsHandledRef.current.has(notice.url)) return;
       setNotices(current => {
-        const next = [...current, { key: crypto.randomUUID(), notice }];
+        // A sign-in stopped again (a link, then its redirect) keeps one line.
+        const kept = notice.kind === 'sign-in' ? current.filter(shown => shown.notice.kind !== 'sign-in') : current;
+        const next = [...kept, { key: crypto.randomUUID(), notice }];
         // Over the limit, the oldest notice goes, but never an app bar still waiting for Open or Cancel.
         while (next.length > MAX_NOTICES) {
           const oldest = next.findIndex(shown => shown.notice.kind !== 'app');
@@ -635,11 +645,51 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     window.addEventListener(BROWSER_TAB_NOTICE_CHANNEL, handler);
     return () => window.removeEventListener(BROWSER_TAB_NOTICE_CHANNEL, handler);
   }, [panel.id]);
-  const dismissNotice = useCallback((key: string) => setNotices(current => current.filter(shown => shown.key !== key)), []);
+  // The page's right-click menu offers View live while this tab does (main's attachEditContextMenu).
+  const offersLive = onViewLive !== undefined;
+  const viewLiveRef = useRef(onViewLive);
+  useEffect(() => { viewLiveRef.current = onViewLive; }, [onViewLive]);
+  useEffect(() => {
+    if (!webview || !offersLive) return;
+    const offer = (on: boolean) => {
+      try {
+        void window.electronAPI?.invoke('browser-panel:offer-live', webview.getWebContentsId(), on);
+      } catch {
+        // Not attached yet: did-attach offers it.
+      }
+    };
+    const onAttach = () => offer(true);
+    offer(true);
+    webview.addEventListener('did-attach', onAttach);
+    return () => {
+      webview.removeEventListener('did-attach', onAttach);
+      offer(false);
+    };
+  }, [webview, offersLive]);
+  useEffect(() => {
+    const handler = (event: Event) => {
+      // SAFETY: preload dispatches this event with BROWSER_VIEW_LIVE_CHANNEL's payload.
+      const { panelId } = (event as CustomEvent<{ panelId: string }>).detail;
+      if (panelId === panel.id) viewLiveRef.current?.();
+    };
+    window.addEventListener(BROWSER_VIEW_LIVE_CHANNEL, handler);
+    return () => window.removeEventListener(BROWSER_VIEW_LIVE_CHANNEL, handler);
+  }, [panel.id]);
+  const dismissNotice = useCallback((key: string) => setNotices(current => current.filter(shown => {
+    if (shown.key !== key) return true;
+    if (shown.notice.kind === 'sign-in') signInsHandledRef.current.add(shown.notice.url);
+    return false;
+  })), []);
   const openApp = useCallback((key: string, id: string) => {
     dismissNotice(key);
     void window.electronAPI.invoke('browser-panel:open-app-link', id).then((result: { success: boolean; error?: string }) => {
       if (!result.success) setUrlError(result.error || 'Pane could not open the app.');
+    });
+  }, [dismissNotice]);
+  const openSignIn = useCallback((key: string, url: string) => {
+    dismissNotice(key);
+    void window.electronAPI.openExternal(url).then(result => {
+      if (!result.success) setUrlError(result.error || 'Pane could not open your browser.');
     });
   }, [dismissNotice]);
   const showInFolder = useCallback((file: string) => {
@@ -772,6 +822,21 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             </span>
           )}
         </form>
+        {onViewLive && (
+          <button
+            type="button"
+            onClick={onViewLive}
+            className={cn(
+              'flex flex-shrink-0 items-center gap-1 rounded border border-border-primary px-2 py-1 text-xs text-text-secondary',
+              'transition-colors hover:bg-surface-hover hover:text-text-primary'
+            )}
+            title="Show the page live from the computer the agent works on"
+            data-testid="browser-view-live"
+          >
+            <Radio className="h-3 w-3" />
+            View live
+          </button>
+        )}
         <button
           type="button"
           onClick={handleCopyUrl}
@@ -856,7 +921,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
         </div>
       )}
       {refusals.length > 0 && <RefusedFilesNotice refusals={refusals} onDismiss={() => setRefusals([])} />}
-      <TabNotices notices={notices} onOpenApp={openApp} onShowInFolder={showInFolder} onDismiss={dismissNotice} />
+      <TabNotices notices={notices} onOpenApp={openApp} onOpenSignIn={openSignIn} onShowInFolder={showInFolder} onDismiss={dismissNotice} />
 
       {/* Content area */}
       {!url ? (

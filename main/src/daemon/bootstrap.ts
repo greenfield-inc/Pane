@@ -13,6 +13,7 @@ import { ConfigManager } from '../services/configManager';
 import { Logger } from '../utils/logger';
 import { DatabaseService } from '../database/database';
 import { AnalyticsManager } from '../services/analyticsManager';
+import { setPairingAnalytics } from '../services/pairingAnalytics';
 import { SessionManager } from '../services/sessionManager';
 import { ArchiveProgressManager } from '../services/archiveProgressManager';
 import { ArchiveCleanupManager } from '../services/archiveCleanupManager';
@@ -31,7 +32,6 @@ import { RunCommandManager } from '../services/runCommandManager';
 import { VersionChecker } from '../services/versionChecker';
 import { SkillCacheManager } from '../services/skillCacheManager';
 import { installBundledAgentFarm } from '../services/agentFarm/bundledAgentFarm';
-import { startProfileRunner } from '../services/profiles/profileRunnerHost';
 import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import type { AppConfig } from '../types/config';
 import { PaneChatManager } from '../services/paneChatManager';
@@ -235,6 +235,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   databaseService.initialize();
 
   const analyticsManager = new AnalyticsManager(configManager);
+  setPairingAnalytics(analyticsManager);
   const sessionManager = new SessionManager(databaseService, analyticsManager);
   sessionManager.initializeFromDatabase();
 
@@ -351,10 +352,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
         : Promise.resolve(true),
     ]).catch(error => logger.warn('[Todos] Could not rewrite agent instructions after To-dos was turned on or off', error instanceof Error ? error : undefined));
   });
-  // Bundled profiles: set up greenfield and the other bundled plugins in Pane's own Agent Farm
+  // Bundled Agent Farm: set up greenfield and the other bundled plugins in Pane's own Agent Farm
   // config root, without delaying startup. It never touches the person's own Agent Farm.
-  // The Profiles page shows the install's state, so it reads the library again when it ends.
-  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) }).then(() => getPaneEventSink().send('profiles:changed'));
+  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) });
   if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {
     // Retry until all saved repositories are available, without delaying startup.
     const migrationConfig = configManager.getConfig();
@@ -455,7 +455,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     startRun: (loop, slotAtMs) => startLoopRun(commandRegistry, loop, slotAtMs, { launchedCommand: panelId => terminalPanelManager.launchedCommand(panelId) }),
     archiveRun: sessionId => archiveLoopRun(commandRegistry, sessionId),
     projectExists: projectId => Boolean(databaseService.getProject(projectId)),
-    prepareSession: (target, loop) => prepareLoopSession(commandRegistry, target, loop),
+    prepareSession: (target, loop) => prepareLoopSession(commandRegistry, target, loop, { isChatTab: panelId => panelManager.getPanel(panelId)?.type === 'chat' }),
     ask: async (card, signal) => {
       const queue = services.notifyService?.queue;
       if (!queue) return null;
@@ -844,8 +844,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   );
 
   setupEventListeners(services);
-  // Profiles: Pane runs each launched profile's workflow from its file, and resumes saved runs.
-  startProfileRunner(services, commandRegistry, workspaceJournal, message => logger.info(message));
   // A member Pane's reports and exits go to every connected computer: one whose Session holds this
   // Pane records them (`RemoteMemberEvents`). Entries recorded from another machine are not sent on.
   workspaceJournal.subscribe(entry => {
@@ -1010,14 +1008,16 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const healthCards = new HealthCardController({
     now: () => Date.now(),
     notificationsOn: () => configManager.getConfig().machineHealth?.notifications !== false,
-    ask: question => {
+    ask: (question, id) => {
       const queue = services.notifyService?.queue;
       if (!queue) return Promise.resolve({ unavailable: 'Approvals are not running.', next: 'Turn on Approvals in Settings.' });
       return queue.ask({
         question: { ui: 'options', title: question.title, context: question.context, choices: question.choices.map((label, index) => ({ label, recommended: index === 0 })), machineHealth: question.card },
         source: { name: 'Pane', agent: 'Pane' },
+        id,
       });
     },
+    withdraw: (id, reason) => services.notifyService?.queue.withdraw(id, reason),
     inventory: () => machineHealth.cachedInventory(),
     idleOffer: () => memoryRelief.idleOffer(),
     pauseIdleHours: () => configManager.getConfig().machineHealth?.pauseIdleHours ?? 2,

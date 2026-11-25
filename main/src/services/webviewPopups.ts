@@ -1,4 +1,4 @@
-import type { BrowserWindow, WebContents } from 'electron';
+import type { BrowserWindow, BrowserWindowConstructorOptions, WebContents } from 'electron';
 import { appLinkOrNull, externalUrlOrNull } from '../utils/externalUrl';
 
 interface WebviewPopupRouting {
@@ -11,24 +11,53 @@ interface WebviewPopupRouting {
   openPaneLink(url: string): void;
   /** The page asked for an app link (zoommtg:, slack:): the tab asks the person before the OS opens it. */
   offerApp(request: { url: string; panelId: string }): void;
-  /** Opens a sign-in that fails in an embedded browser in the system browser, and the tab says so. */
-  sendOut(request: { url: string; site: string; panelId: string | undefined }): void;
+  /**
+   * The tab reached a sign-in that refuses to run inside apps and stayed where it was: it says so,
+   * with Open this page in your browser for `url`, the page the person was on (a popup's opener).
+   */
+  refuseSignIn(request: { url: string; site: string; panelId: string | undefined }): void;
+  /**
+   * How a sign-in popup from this tab opens when it becomes a tab beside its opener (a page nobody
+   * sees on this screen: another screen streams it, or the host has no window), or undefined for a
+   * window here. The page it returns keeps its opener, so the sign-in can report back.
+   */
+  popupTab?(opener: { panelId: string; sessionId: string }): ((request: PopupTabRequest) => WebContents) | undefined;
+}
+
+export interface PopupTabRequest {
+  url: string;
+  /** Chromium's options for the popup, with the page it already made for it (`webContents`). */
+  options: BrowserWindowConstructorOptions;
+  opener: { panelId: string; sessionId: string };
+  /** The opener's page, which the tab offers when the sign-in refuses Pane. */
+  openerUrl: string;
 }
 
 /**
- * Sites whose sign-in refuses an embedded browser, by host, with the name the tab's notice uses.
- * Their pages open in the system browser instead (docs/BROWSER_AGENTS.md).
+ * Sign-ins that refuse to run inside apps, with the name the tab's line uses. The tab stays where
+ * it was and offers its page in the system browser (docs/BROWSER_AGENTS.md).
  */
-const SYSTEM_BROWSER_SITES: ReadonlyMap<string, string> = new Map([
-  // Google refuses sign-in in embedded browsers ("This browser or app may not be secure", disallowed_useragent).
-  ['accounts.google.com', 'Google sign-in'],
-]);
+const IN_APP_REFUSED_SIGN_INS: ReadonlyArray<{ site: string; matches: (url: URL) => boolean }> = [
+  // Google signs in inside Pane until it refuses: its "This browser or app may not be secure" page
+  // (/signin/rejected), or an OAuth error whose authError names disallowed_useragent.
+  { site: 'Google', matches: url => url.searchParams.get('error') === 'disallowed_useragent' || (url.hostname === 'accounts.google.com' && (url.pathname.endsWith('/signin/rejected') || googleAuthError(url) === 'disallowed_useragent')) },
+  // AWS's sign-in forms; console federation and the OAuth hop after a sign-in load normally.
+  { site: 'AWS', matches: url => (url.hostname === 'signin.aws.amazon.com' && url.pathname.startsWith('/signin')) || url.hostname === 'signin.aws' || url.hostname.endsWith('.signin.aws') },
+];
 
-/** The name of the sign-in `url` belongs to when it only works in the system browser. */
-function systemBrowserSite(url: string): string | undefined {
+/** The error code in Google's OAuth error page (/signin/oauth/error), whose authError is base64 with the code first. */
+function googleAuthError(url: URL): string | undefined {
+  const authError = url.pathname.endsWith('/signin/oauth/error') ? url.searchParams.get('authError') : null;
+  if (!authError) return undefined;
+  return /^[\s\S]{2}([a-z_]+)/.exec(Buffer.from(authError, 'base64').toString('latin1'))?.[1];
+}
+
+/** The name of the sign-in `url` belongs to when it refuses to run inside apps. */
+function refusedSignIn(url: string): string | undefined {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === 'https:' ? SYSTEM_BROWSER_SITES.get(parsed.hostname) : undefined;
+    if (parsed.protocol !== 'https:') return undefined;
+    return IN_APP_REFUSED_SIGN_INS.find(entry => entry.matches(parsed))?.site;
   } catch {
     return undefined;
   }
@@ -50,20 +79,26 @@ type NavigationEvent = { preventDefault: () => void };
 
 /**
  * Routes a browser tab's window.open calls and navigations. Sign-in popups become real windows in
- * the tab's own store, so they share its logins; other links open as Pane tabs. App links wait for
- * the person's OK, and sign-ins that refuse an embedded browser go to the system browser.
+ * the tab's own store, so they share its logins, or tabs beside the opener when `popupTab` says so;
+ * other links open as Pane tabs. App links wait for the person's OK, and sign-ins that refuse an
+ * embedded browser stop there, with a line offering the system browser.
  */
 export function routeWebviewPopups(
   wvContents: Pick<WebContents, 'id' | 'getURL' | 'setWindowOpenHandler' | 'on' | 'once'>,
   routing: WebviewPopupRouting,
 ): void {
   const panelId = () => routing.contextOf(wvContents.id)?.panelId;
-  /** Sends a page that only works in the system browser there; true when it did. */
+  /** The page the person is on, which the system browser can open with its own sign-in. */
+  const pageUrl = (fallback: string): string => {
+    const current = wvContents.getURL();
+    return current && current !== 'about:blank' ? current : fallback;
+  };
+  /** Stops a sign-in that refuses to run inside apps, and the tab says so; true when it did. */
   const leaveFor = (event: NavigationEvent, url: string): boolean => {
-    const site = systemBrowserSite(url);
+    const site = refusedSignIn(url);
     if (!site) return false;
     event.preventDefault();
-    routing.sendOut({ url, site, panelId: panelId() });
+    routing.refuseSignIn({ url: pageUrl(url), site, panelId: panelId() });
     return true;
   };
 
@@ -97,7 +132,10 @@ export function routeWebviewPopups(
     // disposition 'new-window'. Let these open as real BrowserWindows so the
     // postMessage channel between popup and opener remains intact.
     if (disposition === 'new-window') {
-      if (!routing.contextOf(wvContents.id)) {
+      const opener = routing.contextOf(wvContents.id);
+      const createPopup = opener ? routing.popupTab?.(opener) : undefined;
+      if (opener && createPopup) return { action: 'allow', createWindow: options => createPopup({ url, options, opener, openerUrl: pageUrl(url) }) };
+      if (!opener) {
         console.warn('[BrowserPanel] Auth popup allowed for unregistered webview (pre-dom-ready), wcId:', wvContents.id);
       }
       return {
@@ -127,8 +165,8 @@ export function routeWebviewPopups(
   // Track and manage auth popup windows created by { action: 'allow' }.
   // Clean up when the parent webview is destroyed so popups don't orphan.
   wvContents.on('did-create-window', (popupWindow: BrowserWindow) => {
-    // A sign-in popup that reaches a site refusing embedded browsers closes, and the sign-in goes
-    // to the system browser instead.
+    // A sign-in popup that reaches a refusal closes, and its opener's tab offers the opener's page
+    // in the system browser: the popup's own page needs its opener.
     const leavePopup = (event: NavigationEvent, url: string) => {
       if (leaveFor(event, url) && !popupWindow.isDestroyed()) popupWindow.close();
     };

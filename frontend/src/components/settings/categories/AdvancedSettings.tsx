@@ -6,7 +6,7 @@ import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
-import { isChatTabsEnabled, isMissionControlEnabled, isNotesEnabled, isProfilesEnabled, isTodosEnabled } from '../../../stores/configStore';
+import { isChatTabsEnabled, isMissionControlEnabled, isNotesEnabled, isTodosEnabled } from '../../../stores/configStore';
 import type { Journey, JourneyTimingSummary } from '../../../../../shared/types/journeyTimings';
 import type { IPCResponse } from '../../../utils/api';
 import { useAutopilotStore } from '../../../stores/autopilotStore';
@@ -218,18 +218,6 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
             label="Notes"
             value={isNotesEnabled(config)}
             onSave={(value) => persistence.saveConfig('notes', { notesEnabled: value })}
-          />
-        </SettingRow>
-        <SettingRow
-          settingId="profiles"
-          label="Profiles"
-          description="Add the Profiles page, the + menu's Profile… and runpane profiles: teams of agents that run a fixed workflow, one step per tab. Turning it off hides them; runs already started keep going."
-          saveState={persistence.saveStates.profiles}
-        >
-          <ImmediateToggle
-            label="Profiles"
-            value={isProfilesEnabled(config)}
-            onSave={(value) => persistence.saveConfig('profiles', { profilesEnabled: value })}
           />
         </SettingRow>
         <SettingRow

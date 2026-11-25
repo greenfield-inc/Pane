@@ -587,7 +587,8 @@ fn a_records(m: &Message) -> Vec<Ipv4Addr> {
 }
 
 #[tokio::test]
-async fn caa_lets_only_lets_encrypt_issue_and_no_wildcard_for_the_whole_domain() {
+async fn caa_lets_only_lets_encrypt_and_google_trust_services_issue_and_no_wildcard_for_the_whole_domain()
+ {
     let env = Env::start(&["--dns", "127.0.0.1:0", "--public-ip", "203.0.113.10"]).await;
     let agent = Agent::connect(&env, &SigningKey::generate()).await;
     let id = agent.id.clone();
@@ -605,16 +606,22 @@ async fn caa_lets_only_lets_encrypt_issue_and_no_wildcard_for_the_whole_domain()
     // A certificate for *.<D> would cover every computer's name.
     assert_eq!(
         caa(format!("{D}.")).await,
-        vec!["0 issue \"letsencrypt.org\"", "0 issuewild \";\""]
+        vec![
+            "0 issue \"letsencrypt.org\"",
+            "0 issue \"pki.goog\"",
+            "0 issuewild \";\""
+        ]
     );
-    // Each computer's own names, *.<id>.<D> included, only through DNS-01 at Let's Encrypt,
+    // Each computer's own names, *.<id>.<D> included, only through DNS-01 at those two CAs,
     // whether or not the relay knows the id.
     for name in [format!("{id}.{D}."), format!("aaaaaaaaaaaaaaaa.{D}.")] {
         assert_eq!(
             caa(name).await,
             vec![
                 "0 issue \"letsencrypt.org; validationmethods=dns-01\"",
+                "0 issue \"pki.goog; validationmethods=dns-01\"",
                 "0 issuewild \"letsencrypt.org; validationmethods=dns-01\"",
+                "0 issuewild \"pki.goog; validationmethods=dns-01\"",
             ]
         );
     }
@@ -1914,7 +1921,7 @@ async fn android_alerts_without_a_key_use_the_metadata_server_token() {
     let env = Env::start(&[
         "--fcm-project",
         "pane-keyless",
-        "--fcm-metadata-url",
+        "--metadata-url",
         &metadata_url,
         "--fcm-url",
         &fcm.url,
@@ -2424,4 +2431,310 @@ async fn the_resync_restores_the_region_of_a_computer_connected_here() {
         (&ours["region"], &ours["online"]),
         (&json!("us"), &json!(true))
     );
+}
+
+#[tokio::test]
+async fn computers_get_one_time_google_trust_services_keys_minted_with_the_vm_account() {
+    let mut publicca = Provider::start(|path, _| match path {
+        "/v1/projects/pane-eab/locations/global/externalAccountKeys" => (
+            200,
+            r#"{"name":"projects/pane-eab/locations/global/externalAccountKeys/k1","keyId":"kid-production","b64MacKey":"c2VjcmV0LXByb2R1Y3Rpb24="}"#.to_string(),
+        ),
+        "/staging/v1/projects/pane-eab/locations/global/externalAccountKeys" => (
+            200,
+            r#"{"keyId":"kid-staging","b64MacKey":"c2VjcmV0LXN0YWdpbmc="}"#.to_string(),
+        ),
+        _ => (404, String::new()),
+    })
+    .await;
+    let (metadata_url, _metadata) = metadata_server().await;
+    let staging_url = format!("{}/staging", publicca.url);
+    let env = Env::start(&[
+        "--eab-project",
+        "pane-eab",
+        "--acme-email",
+        "certificates@pane.example",
+        "--limit-eab-per-day",
+        "2",
+        "--metadata-url",
+        &metadata_url,
+        "--publicca-url",
+        &publicca.url,
+        "--publicca-staging-url",
+        &staging_url,
+        "--provider-ca",
+        publicca.ca.to_str().unwrap(),
+    ])
+    .await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+
+    agent.send(json!({"t": "eab", "req": "1"})).await;
+    assert_eq!(
+        agent.next().await,
+        json!({"t": "ok", "req": "1", "keyId": "kid-production", "hmacKey": "c2VjcmV0LXByb2R1Y3Rpb24=",
+            "email": "certificates@pane.example"})
+    );
+    let mint = publicca.next().await;
+    assert_eq!(header(&mint, "authorization"), Some("Bearer ya29.keyless"));
+
+    agent
+        .send(json!({"t": "eab", "req": "2", "staging": true}))
+        .await;
+    assert_eq!(
+        agent.next().await,
+        json!({"t": "ok", "req": "2", "keyId": "kid-staging", "hmacKey": "c2VjcmV0LXN0YWdpbmc=",
+            "email": "certificates@pane.example"})
+    );
+    assert_eq!(
+        publicca.next().await.path,
+        "/staging/v1/projects/pane-eab/locations/global/externalAccountKeys"
+    );
+
+    // Past its daily keys the computer is refused without a call to Google.
+    agent.send(json!({"t": "eab", "req": "3"})).await;
+    let answer = agent.next().await;
+    assert_eq!(
+        (answer["req"].as_str(), answer["code"].as_str()),
+        (Some("3"), Some("throttled"))
+    );
+    assert!(publicca.received.try_recv().is_err());
+
+    // Another computer has its own keys.
+    let mut other = Agent::connect(&env, &SigningKey::generate()).await;
+    other.send(json!({"t": "eab", "req": "1"})).await;
+    assert_eq!(other.next().await["keyId"], "kid-production");
+}
+
+#[tokio::test]
+async fn a_relay_without_an_eab_project_and_email_says_it_has_no_keys() {
+    // Google Trust Services refuses accounts without a contact, so the project alone is not enough.
+    // A dead metadata URL keeps the test off the real one even if PANE_RELAY_ACME_EMAIL is set.
+    let env = Env::start(&[
+        "--eab-project",
+        "pane-eab",
+        "--metadata-url",
+        "http://127.0.0.1:9/token",
+    ])
+    .await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    agent.send(json!({"t": "eab", "req": "1"})).await;
+    let answer = agent.next().await;
+    assert_eq!(
+        (answer["req"].as_str(), answer["code"].as_str()),
+        (Some("1"), Some("unconfigured"))
+    );
+}
+
+#[tokio::test]
+async fn a_public_ca_refusal_reaches_the_computer_without_a_key() {
+    let publicca = Provider::start(|_, _| {
+        (
+            403,
+            r#"{"error":{"code":403,"message":"Permission 'publicca.externalAccountKeys.create' denied","status":"PERMISSION_DENIED"}}"#.to_string(),
+        )
+    })
+    .await;
+    let (metadata_url, _metadata) = metadata_server().await;
+    let env = Env::start(&[
+        "--eab-project",
+        "pane-eab",
+        "--acme-email",
+        "certificates@pane.example",
+        "--limit-eab-per-day",
+        "1",
+        "--metadata-url",
+        &metadata_url,
+        "--publicca-url",
+        &publicca.url,
+        "--provider-ca",
+        publicca.ca.to_str().unwrap(),
+    ])
+    .await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    agent.send(json!({"t": "eab", "req": "1"})).await;
+    let answer = agent.next().await;
+    assert_eq!(answer["code"], "provider");
+    // A failed mint doesn't spend the computer's key for the day: the next ask reaches Google again.
+    agent.send(json!({"t": "eab", "req": "2"})).await;
+    assert_eq!(agent.next().await["code"], "provider");
+    assert!(
+        answer["message"]
+            .as_str()
+            .unwrap()
+            .contains("answered 403 Permission 'publicca.externalAccountKeys.create' denied"),
+        "{answer}"
+    );
+    assert!(answer.get("hmacKey").is_none());
+}
+
+#[tokio::test]
+async fn a_relay_hands_out_only_so_many_keys_an_hour_across_its_computers() {
+    let mut publicca =
+        Provider::start(|_, _| (200, r#"{"keyId":"kid","b64MacKey":"c2VjcmV0"}"#.to_string()))
+            .await;
+    let (metadata_url, _metadata) = metadata_server().await;
+    let env = Env::start(&[
+        "--eab-project",
+        "pane-eab",
+        "--acme-email",
+        "certificates@pane.example",
+        "--limit-eab-per-hour",
+        "2",
+        "--metadata-url",
+        &metadata_url,
+        "--publicca-url",
+        &publicca.url,
+        "--provider-ca",
+        publicca.ca.to_str().unwrap(),
+    ])
+    .await;
+    for _ in 0..2 {
+        let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+        agent.send(json!({"t": "eab", "req": "1"})).await;
+        assert_eq!(agent.next().await["t"], "ok");
+        publicca.next().await;
+    }
+    // A third computer, with its own day untouched, is refused for the relay's hour.
+    let mut third = Agent::connect(&env, &SigningKey::generate()).await;
+    third.send(json!({"t": "eab", "req": "1"})).await;
+    let answer = third.next().await;
+    assert_eq!(answer["code"], "throttled");
+    assert!(publicca.received.try_recv().is_err());
+}
+
+/// Opens a client connection to `sni` and holds it without sending, so it stays open.
+async fn hold_client(env: &Env, agent: &Agent, sni: &str) -> TlsStream<TcpStream> {
+    tls_connect(env.addr(), sni, &agent.cert).await.unwrap()
+}
+
+async fn wait_counts(env: &Env, want: pane_relay::Counts) {
+    let relay = env.relay.as_ref().unwrap();
+    let deadline = Instant::now() + WAIT;
+    while relay.counts() != want && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(relay.counts(), want);
+}
+
+#[tokio::test]
+async fn usage_counts_computers_their_clients_and_computers_seen_today() {
+    let env = Env::start(&[]).await;
+    let a = Agent::connect(&env, &SigningKey::generate()).await;
+    let b = Agent::connect(&env, &SigningKey::generate()).await;
+    let host = format!("{}.{D}", a.id);
+    // One device holding two connections to computer a.
+    let _c1 = hold_client(&env, &a, &host).await;
+    let _c2 = hold_client(&env, &a, &host).await;
+    wait_counts(
+        &env,
+        pane_relay::Counts {
+            computers: 2,
+            computers_seen_24h: 2,
+            clients: 1,
+            client_connections: 2,
+            computers_with_clients: 1,
+        },
+    )
+    .await;
+
+    // A computer that leaves still counts as seen today.
+    b.close().await;
+    drop((_c1, _c2));
+    wait_counts(
+        &env,
+        pane_relay::Counts {
+            computers: 1,
+            computers_seen_24h: 2,
+            clients: 0,
+            client_connections: 0,
+            computers_with_clients: 0,
+        },
+    )
+    .await;
+}
+
+/// The JSON body of the next `entries:write` call whose entry says `reason`.
+async fn next_usage_entry(logging: &mut Provider, reason: &str) -> (Received, Value) {
+    loop {
+        let r = logging.next().await;
+        let body: Value = serde_json::from_slice(&r.body).unwrap();
+        if body["entries"][0]["jsonPayload"]["reason"] == reason {
+            return (r, body);
+        }
+    }
+}
+
+#[tokio::test]
+async fn usage_counts_go_to_cloud_logging_without_ids_or_addresses() {
+    let mut logging = Provider::start(|_, _| (200, "{}".to_string())).await;
+    let (metadata_url, _metadata) = metadata_server().await;
+    let mut env = Env::start(&[
+        "--usage-project",
+        "pane-usage",
+        "--usage-period-secs",
+        "1",
+        "--metadata-url",
+        &metadata_url,
+        "--logging-url",
+        &logging.url,
+        "--provider-ca",
+        logging.ca.to_str().unwrap(),
+    ])
+    .await;
+    // A deploy kills the relay without a shutdown line, so a start line marks each restart.
+    let (_, body) = next_usage_entry(&mut logging, "start").await;
+    assert_eq!(body["entries"][0]["jsonPayload"]["computers"], 0);
+    let agent = Agent::connect(&env, &SigningKey::generate()).await;
+
+    let (request, body) = loop {
+        let (r, body) = next_usage_entry(&mut logging, "hourly").await;
+        if body["entries"][0]["jsonPayload"]["computers"] == 1 {
+            break (r, body);
+        }
+    };
+    assert_eq!(request.path, "/v2/entries:write");
+    assert_eq!(
+        header(&request, "authorization"),
+        Some("Bearer ya29.keyless")
+    );
+    assert_eq!(body["logName"], "projects/pane-usage/logs/pane-relay-usage");
+    assert_eq!(
+        body["entries"][0]["jsonPayload"],
+        json!({"region": "us", "reason": "hourly", "computers": 1, "computers_seen_24h": 1,
+            "clients": 0, "client_connections": 0, "computers_with_clients": 0})
+    );
+    let text = String::from_utf8_lossy(&request.body);
+    assert!(
+        !text.contains(&agent.id) && !text.contains("127.0.0.1"),
+        "{text}"
+    );
+
+    // Stopping cleanly sends a last line.
+    env.relay.take().unwrap().shutdown().await;
+    let (_, body) = next_usage_entry(&mut logging, "shutdown").await;
+    assert_eq!(body["entries"][0]["jsonPayload"]["computers"], 1);
+}
+
+#[tokio::test]
+async fn a_metadata_url_without_a_port_is_reached_on_port_80() {
+    // Production's metadata URL names no port (http://metadata.google.internal/...). Nothing
+    // listens on 127.0.0.1:80 here, so the relay must get as far as connecting there.
+    let env = Env::start(&[
+        "--eab-project",
+        "pane-eab",
+        "--acme-email",
+        "certificates@pane.example",
+        "--metadata-url",
+        "http://127.0.0.1/computeMetadata/v1/instance/service-accounts/default/token",
+    ])
+    .await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    agent.send(json!({"t": "eab", "req": "1"})).await;
+    let answer = agent.next().await;
+    let message = answer["message"].as_str().unwrap();
+    assert!(
+        message.contains("the metadata server at 127.0.0.1:"),
+        "{answer}"
+    );
+    assert!(!message.contains("invalid socket address"), "{answer}");
 }

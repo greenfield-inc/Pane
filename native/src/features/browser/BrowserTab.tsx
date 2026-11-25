@@ -5,7 +5,7 @@ import { browserInputQueue, fitFrame, keyboardField, movesFocus, pagePoint, Phon
 import * as Clipboard from 'expo-clipboard';
 import { useIsFocused } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Image, Keyboard, Modal, PixelRatio, Platform, Pressable, StyleSheet, TextInput, View, type LayoutChangeEvent } from 'react-native';
+import { Alert, AppState, Image, Keyboard, Linking, Modal, PixelRatio, Platform, Pressable, StyleSheet, TextInput, View, type LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -34,8 +34,8 @@ const NOTICE_MS = 4_000;
 /**
  * A page tab. It shows the phone's own copy of the page until an agent acts on it; then it streams
  * the page from the computer that owns the Pane, where the agent works, and the phone sends touch
- * and typing back, until 30 s after its driver clears or Back to my copy
- * (docs/BROWSER_AGENTS.md). Host files and dev servers always stay a copy. The address field and who
+ * and typing back, until 30 s after its driver clears or Back to my copy; a page the agent typed into,
+ * or one the person chose View live on, streams until Back to my copy (docs/BROWSER_AGENTS.md). Host files and dev servers always stay a copy. The address field and who
  * drives sit on top, Back, Forward, Reload and the keyboard at the bottom. A computer on an older
  * Pane streams nothing: the phone then keeps its own copy.
  */
@@ -45,19 +45,22 @@ const UPLOAD_LIMIT_BYTES = 10 * 1_048_576;
 export function BrowserTab({ panel }: { panel: ToolPanel }) {
   const { profile } = useDaemon();
   const state = panel.state.customState as BrowserPanelState | undefined;
-  const choice = useStreamChoice(state?.driver?.by === 'agent');
+  const choice = useStreamChoice(panel.id, state);
   // The demo's pages are sample files on the phone.
   if (isDemoProfile(profile)) return <OwnCopyBrowserTab panel={panel} />;
-  if (isHostLocalUrl(state?.currentUrl) || !choice.stream) {
+  const hostLocal = isHostLocalUrl(state?.currentUrl);
+  // A sign-in popup always streams, even on a localhost callback: a copy would lose its opener.
+  if (!state?.signInPopup && (hostLocal || !choice.stream)) {
     const driver = state?.driver;
     return (
       <View style={styles.fill}>
         {driver?.by === 'person' ? <HandBackRow panelId={panel.id} agent={driver.agentWaiting} /> : null}
-        <OwnCopyBrowserTab panel={panel} />
+        <OwnCopyBrowserTab panel={panel} onViewLive={state?.agentUse && !hostLocal ? choice.live : undefined} />
       </View>
     );
   }
-  return <StreamedBrowserTab panel={panel} onBack={choice.back} onInput={choice.input} />;
+  // A sign-in popup's page exists only on the host: there is no copy to go back to.
+  return <StreamedBrowserTab panel={panel} onBack={state?.signInPopup ? undefined : choice.back} onInput={choice.input} />;
 }
 
 /** On the own copy while the person drives the tab (they took over): hand it back to the agent from here. */
@@ -75,7 +78,7 @@ function HandBackRow({ panelId, agent }: { panelId: string; agent: string | unde
   );
 }
 
-function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBack(): void; onInput(): void }) {
+function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBack: (() => void) | undefined; onInput(): void }) {
   const theme = useTheme();
   const { colors } = theme;
   const { client, profile } = useDaemon();
@@ -289,6 +292,7 @@ function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBa
     ], { cancelable: false });
   }, [fileChooser, host, send]);
 
+  const [signInOpened, setSignInOpened] = useState<string | null>(null);
   const download = view?.downloads.at(-1);
   const seenDownload = useRef<number | null>(null);
   useEffect(() => {
@@ -371,10 +375,20 @@ function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBa
       </View>
       <View testID="browser-live" style={[styles.live, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
         <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.shrink}>{liveLine(host)}</Text>
-        <Pressable testID="browser-back-to-copy" accessibilityRole="button" hitSlop={6} onPress={onBack}>
-          <Text variant="footnote" style={{ color: colors.accentText }}>Back to my copy</Text>
-        </Pressable>
+        {onBack ? (
+          <Pressable testID="browser-back-to-copy" accessibilityRole="button" hitSlop={6} onPress={onBack}>
+            <Text variant="footnote" style={{ color: colors.accentText }}>Back to my copy</Text>
+          </Pressable>
+        ) : null}
       </View>
+      {view?.signIn && view.signIn.url !== signInOpened ? (
+        <View testID="browser-sign-in" style={[styles.live, { borderBottomColor: colors.border, backgroundColor: colors.surface }]}>
+          <Text variant="footnote" tone="secondary" style={styles.shrink}>{`${view.signIn.site} won't sign in here.`}</Text>
+          <Pressable accessibilityRole="button" hitSlop={6} onPress={() => { const { url } = view.signIn ?? {}; if (!url) return; setSignInOpened(url); void Linking.openURL(url); }}>
+            <Text variant="footnote" style={{ color: colors.accentText }}>Open this page in your browser</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {addressError ? (
         <Pressable testID="browser-input-error" onPress={() => setAddressError(null)} accessibilityHint="Dismiss" style={styles.notice}>
           <Text variant="footnote" tone="danger">{addressError}</Text>

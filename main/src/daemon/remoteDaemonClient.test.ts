@@ -37,12 +37,14 @@ function createFakeHost() {
   let hostDown = false;
   let tunnelDown = false;
   let ready = '{"replay":"none"}';
+  let roundTripMs = 0;
   let invokeHandler: (body: { channel: string; args: unknown[]; requestId?: string }) => Response | Promise<Response> = () =>
     Response.json({ ok: true, result: null });
 
   const fetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
     requests.push({ url, init });
     const path = new URL(url).pathname;
+    if (roundTripMs) await new Promise(resolve => setTimeout(resolve, roundTripMs));
     if (hostDown) throw new TypeError('Network request failed');
     // Like a VPN tunnel still coming back after sleep: the request goes nowhere, even once the tunnel returns.
     if (tunnelDown) {
@@ -89,6 +91,8 @@ function createFakeHost() {
     hangEvents(hang: boolean) { hangEvents = hang; },
     goDown(down: boolean) { hostDown = down; },
     dropTunnel(down: boolean) { tunnelDown = down; },
+    /** Every answer arrives this long after its request, like a host across the internet. */
+    setRoundTrip(ms: number) { roundTripMs = ms; },
     onInvoke(handler: typeof invokeHandler) { invokeHandler = handler; },
   };
 }
@@ -534,6 +538,23 @@ describe('RemoteDaemonClient when the phone leaves and returns', () => {
     client.disconnect();
   });
 
+  it('keeps the event stream it asked for on return when the path is healthy, so a return costs one round trip', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+
+    client.suspend();
+    host.setRoundTrip(200);
+    const before = host.requests.length;
+    client.resume();
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(client.getState().status).toBe('connected');
+    expect(host.requests.slice(before).filter(request => request.url.endsWith('/events'))).toHaveLength(1);
+    client.disconnect();
+  });
+
   it('keeps probing on the backoff after the first seconds, so a longer outage still ends well before the stale-stream timer', async () => {
     const host = createFakeHost();
     const client = createClient(host, 20_000);
@@ -564,6 +585,19 @@ describe('RemoteDaemonClient when the phone leaves and returns', () => {
     client.resume();
     await flush();
     expect(client.getState().status).toBe('connected');
+    client.disconnect();
+  });
+
+  it('sends the reads of the listener registered last first, so the screen in view is not queued behind app-wide lists', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 600_000);
+    client.onRestore(async () => { await client.read('panels:list', ['pane-1'], { timeoutMs: 5_000 }); }, 'lists');
+    client.onRestore(async () => { await client.read('panels:checkInitialized', ['panel-1'], { timeoutMs: 5_000 }); }, 'terminal');
+    await client.connect();
+    await flush();
+
+    const bodies = host.requests.filter(request => request.url.endsWith('/invoke')).map(request => JSON.parse(String(request.init?.body)));
+    expect(bodies).toMatchObject([{ channel: 'panels:checkInitialized' }, { channel: 'panels:list' }]);
     client.disconnect();
   });
 

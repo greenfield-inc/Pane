@@ -6,6 +6,9 @@ import type { ComputerKey, KeyStore } from './computerKey';
 export const LETS_ENCRYPT_DIRECTORY = 'https://acme-v02.api.letsencrypt.org/directory';
 /** Let's Encrypt's test CA: its certificates are not trusted, and its limits are separate from the real one's. */
 export const LETS_ENCRYPT_STAGING_DIRECTORY = 'https://acme-staging-v02.api.letsencrypt.org/directory';
+export const GOOGLE_TRUST_SERVICES_DIRECTORY = 'https://dv.acme-v02.api.pki.goog/directory';
+/** Google Trust Services' test CA: untrusted certificates, its own limits, and EAB keys from the Public CA API's staging endpoint. */
+export const GOOGLE_TRUST_SERVICES_STAGING_DIRECTORY = 'https://dv.acme-v02.test-api.pki.goog/directory';
 /** Each request to the CA gives up after this long, so an order never hangs. */
 const ACME_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -16,14 +19,44 @@ export interface CertificateStatus {
   notBefore: string;
   notAfter: string;
   renewAt: string;
+  /** The issuing CA's organization, as the certificate names it. */
+  issuer: string;
 }
 
-/** The CA refused for now because of its rate limits; `retryAt` is when it said to ask again, if it said. */
+/**
+ * The CA refused for now because of its rate limits; `retryAt` is when it said to ask again, if it
+ * said. `refusedBy` names the CAs that refused, when more than one was asked.
+ */
 export class CertificateRateLimited extends Error {
-  constructor(message: string, readonly retryAt: number | null) {
+  constructor(message: string, readonly retryAt: number | null, readonly refusedBy: string[] = []) {
     super(message);
     this.name = 'CertificateRateLimited';
   }
+}
+
+/** A CA this computer can't use at all right now, as when its relay has no EAB keys to give: the next CA is asked. */
+export class CertificateAuthorityUnavailable extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CertificateAuthorityUnavailable';
+  }
+}
+
+export interface ExternalAccountKey { keyId: string; hmacKey: string; email?: string }
+
+/** An ACME CA the computer may order from. */
+export interface CertificateAuthority {
+  /** The organization its certificates name as issuer: a renewal goes first to the CA that issued the current certificate. */
+  name: string;
+  directoryUrl: string;
+  /** The ACME account key PEM for this CA. */
+  accountStore: KeyStore;
+  /**
+   * A one-time EAB key for registering a new account, for a CA that requires one, with the contact
+   * email to register it with. Throws `CertificateRateLimited` when none is to be had for now, and
+   * `CertificateAuthorityUnavailable` when none will be.
+   */
+  externalAccountKey?(): Promise<ExternalAccountKey>;
 }
 
 export interface ComputerCertificateOptions {
@@ -31,13 +64,14 @@ export interface ComputerCertificateOptions {
   domain: string;
   /** The certificate chain PEM; not secret. */
   certificateStore: KeyStore;
-  /** The ACME account key PEM. */
-  accountStore: KeyStore;
+  /** In order of preference: a CA that refuses for its rate limits passes the order to the next. */
+  authorities: CertificateAuthority[];
   /** Sets the `_acme-challenge.<id>.<domain>` TXT values through the relay. */
   setTxt(values: string[]): Promise<void>;
-  directoryUrl?: string;
   /** Extra CA for the ACME server (a test server's own CA). */
   acmeCa?: string;
+  /** Called after each certificate is issued: the issuer's organization, and whether it replaced one this computer held. */
+  onIssued?: (event: { issuer: string; renewal: boolean }) => void;
   now?: () => number;
   log?: (line: string) => void;
 }
@@ -92,16 +126,50 @@ export class ComputerCertificate {
     return this.inFlight;
   }
 
+  /**
+   * Orders from each CA in turn, the one that issued the current certificate first. A CA that
+   * refuses for its rate limits, or can't be used, passes the order on; so does the issuing CA on
+   * any failure, as when a relay rollback took it out of CAA. Throws `CertificateRateLimited` when
+   * every usable CA refused: with the earliest time one gave, or none when one refused without a
+   * time, so Pane asks again soon instead of waiting for a later CA's date.
+   */
   private async issue(): Promise<void> {
+    const issuer = this.status?.issuer ?? '';
+    const issuedBy = (authority: CertificateAuthority) => issuer.includes(authority.name);
+    const authorities = [...this.options.authorities].sort((a, b) => Number(issuedBy(b)) - Number(issuedBy(a)));
+    const refusals: { name: string; error: CertificateRateLimited }[] = [];
+    let failure: Error | null = null;
+    for (const [index, authority] of authorities.entries()) {
+      try {
+        await this.order(authority);
+        return;
+      } catch (error) {
+        const reason = error instanceof Error ? error : new Error(String(error));
+        this.options.log?.(`[relay] ${authority.name} did not issue a certificate: ${reason.message}`);
+        if (reason instanceof CertificateRateLimited) refusals.push({ name: authority.name, error: reason });
+        else if (reason instanceof CertificateAuthorityUnavailable) failure ??= reason;
+        else if (index === 0 && issuedBy(authority) && authorities.length > 1) failure = reason;
+        else throw reason;
+      }
+    }
+    if (refusals.length === 0) throw failure ?? new Error('No certificate authority is set up.');
+    const times = refusals.map(({ error }) => error.retryAt);
+    const retryAt = times.includes(null) ? null : Math.min(...times.filter((time): time is number => time !== null));
+    const message = refusals.map(({ name, error }) => `${name}: ${error.message}`).join(' ');
+    throw new CertificateRateLimited(message, retryAt, refusals.map(({ name }) => name));
+  }
+
+  private async order(authority: CertificateAuthority): Promise<void> {
     const { key, domain } = this.options;
     const base = `${key.id}.${domain}`;
+    const renewal = this.status !== null;
     // Loaded on first use: with its x509 and axios dependencies it delayed app ready
     // at every launch, and only issuing a certificate needs it.
     const acme = await import('acme-client');
     const [, csr] = await acme.crypto.createCsr({ commonName: base, altNames: [base, `*.${base}`] }, key.privateKeyPem);
-    const savedAccountKey = await this.options.accountStore.read();
+    const savedAccountKey = await authority.accountStore.read();
     const accountKey = savedAccountKey ?? (await acme.crypto.createPrivateEcdsaKey('P-256')).toString();
-    if (!savedAccountKey) await this.options.accountStore.write(accountKey);
+    if (!savedAccountKey) await authority.accountStore.write(accountKey);
     if (this.options.acmeCa) acme.axios.defaults.httpsAgent = new https.Agent({ ca: this.options.acmeCa });
     // A refused or slow request fails the order instead of waiting: acme-client otherwise sleeps
     // through a rate limit's Retry-After, hours with nothing on screen. The caller retries.
@@ -109,18 +177,24 @@ export class ComputerCertificate {
     const defaults: { timeout?: number; acmeSettings?: { retryMaxAttempts: number } } = acme.axios.defaults;
     defaults.timeout = ACME_REQUEST_TIMEOUT_MS;
     if (defaults.acmeSettings) defaults.acmeSettings.retryMaxAttempts = 0;
-    const client = new acme.Client({ directoryUrl: this.options.directoryUrl ?? LETS_ENCRYPT_DIRECTORY, accountKey });
-    if (savedAccountKey) {
-      // Looks the saved account up, so `auto` reuses it: registering a known key again makes
-      // acme-client send an empty account update, which ACME servers refuse. An account this server
-      // never saw (another directory) is registered by `auto`, which also reports any other failure.
-      await client.createAccount({ onlyReturnExisting: true }).catch(() => undefined);
+    let client = new acme.Client({ directoryUrl: authority.directoryUrl, accountKey });
+    // Looks the saved account up, so `auto` reuses it: registering a known key again makes
+    // acme-client send an empty account update, which ACME servers refuse. An account this server
+    // never saw (another directory) is registered by `auto`, which also reports any other failure.
+    const registered = savedAccountKey !== null && await client.createAccount({ onlyReturnExisting: true }).then(() => true, () => false);
+    let email: string | undefined;
+    if (!registered && authority.externalAccountKey) {
+      // Each EAB key registers one account, so one is asked for only when registering.
+      const eab = await authority.externalAccountKey();
+      email = eab.email;
+      client = new acme.Client({ directoryUrl: authority.directoryUrl, accountKey, externalAccountBinding: { kid: eab.keyId, hmacKey: eab.hmacKey } });
     }
     // The wildcard and the base name share one TXT name, so both values are published together.
     const values = new Set<string>();
-    this.options.log?.(`[relay] requesting a certificate for ${base}`);
+    this.options.log?.(`[relay] requesting a certificate for ${base} from ${authority.name}`);
     const pem = await client.auto({
       csr,
+      email,
       termsOfServiceAgreed: true,
       challengePriority: ['dns-01'],
       // The relay confirmed the record; the ACME server checks it anyway.
@@ -136,7 +210,8 @@ export class ComputerCertificate {
     }).catch((error: Error) => { throw rateLimitOf(error.message) ?? error; });
     this.use(pem);
     await this.options.certificateStore.write(pem);
-    this.options.log?.(`[relay] certificate for ${base} valid until ${this.status?.notAfter}`);
+    this.options.log?.(`[relay] certificate for ${base} from ${this.status?.issuer} valid until ${this.status?.notAfter}`);
+    if (this.status) this.options.onIssued?.({ issuer: this.status.issuer, renewal });
   }
 
   private use(pem: string): void {
@@ -153,8 +228,15 @@ export class ComputerCertificate {
       notBefore: new Date(notBefore).toISOString(),
       notAfter: new Date(notAfter).toISOString(),
       renewAt: new Date(renewAt).toISOString(),
+      issuer: issuerName(leaf.issuer),
     };
   }
+}
+
+/** The organization (O) in an X509 issuer such as "C=US\nO=Google Trust Services\nCN=WR1", else its common name. */
+function issuerName(issuer: string): string {
+  const field = (name: string) => issuer.split('\n').find((line) => line.startsWith(`${name}=`))?.slice(name.length + 1);
+  return field('O') ?? field('CN') ?? issuer;
 }
 
 /**
@@ -162,7 +244,7 @@ export class ComputerCertificate {
  * throws, with the time Let's Encrypt says to ask again ("retry after 2026-11-20 22:16:39 UTC").
  */
 function rateLimitOf(message: string): CertificateRateLimited | null {
-  if (!/rate.?limit|too many (?:certificates|new orders|failed authorizations)/iu.test(message)) return null;
+  if (!/rate.?limit|quota|too many (?:certificates|new orders|failed authorizations|requests)/iu.test(message)) return null;
   const when = /retry after (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) UTC/iu.exec(message);
   const retryAt = when ? Date.parse(`${when[1]}T${when[2]}Z`) : Number.NaN;
   return new CertificateRateLimited(message, Number.isNaN(retryAt) ? null : retryAt);

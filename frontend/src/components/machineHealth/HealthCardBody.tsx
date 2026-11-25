@@ -1,9 +1,9 @@
-import { Archive, Ghost, HardDrive, MemoryStick, Moon, Sparkles, TrendingUp } from 'lucide-react';
+import { HardDrive, Moon, Sparkles } from 'lucide-react';
 import type { MachineHealthCard } from '../../../../shared/types/machineHealth';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
 import { formatBytes, formatMB } from '../../../../shared/utils/formatBytes';
-import { cardTitle } from './healthCardActions';
+import { cardTitle, KIND_ICON } from './healthCardActions';
 
 const NOT_NOW = 'Not now';
 const PAUSE_IDLE = 'Pause idle Panes';
@@ -21,7 +21,6 @@ export interface HealthCardBodyProps {
   compact?: boolean;
 }
 
-const KIND_ICON = { disk: HardDrive, memory: MemoryStick, leak: TrendingUp, finished: Archive, leftovers: Ghost } as const;
 
 /** A small rising line of the process's memory across the window. */
 function Sparkline({ series }: { series: number[] }) {

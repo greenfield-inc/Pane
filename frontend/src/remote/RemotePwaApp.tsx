@@ -55,9 +55,10 @@ import { remoteDeviceClient } from './components/remoteDeviceClient';
 import { RemoteTodos } from './components/RemoteTodos';
 import { startRemoteTodos } from './runtime/remoteTodosHost';
 import { isOverlayRoute, parseRouteView, routeParent, routeView, stepTodosStack, type PhoneTodosRoute } from '../components/todos/phone/phoneRoute';
-import { useSessionTodosWaiting, useTodosStore } from '../stores/todosStore';
+import { todoDetailNow, useSessionTodosWaiting, useTodosStore } from '../stores/todosStore';
 import type { PhoneTodosSession } from '../components/todos/phone/PhoneSessionTodos';
 import { LoadingStatus } from '../components/ui/Skeleton';
+import { LinkPopoverHost, type LinkActions } from '../components/links/LinkPopover';
 
 const EMPTY_AFFORDANCES: RemotePwaAffordances = {
   terminalShortcuts: [],
@@ -525,7 +526,7 @@ export function RemotePwaApp() {
       setTodosRoute(routeParent(route));
       return;
     }
-    const parentNumber = route.screen === 'todo' ? useTodosStore.getState().details.get(route.number)?.todo.parentNumber ?? null : null;
+    const parentNumber = route.screen === 'todo' ? todoDetailNow(route.number)?.todo.parentNumber ?? null : null;
     const parent = routeParent(route, parentNumber);
     const stack = todosStackRef.current;
     const under = stack[stack.length - 1];
@@ -985,6 +986,13 @@ export function RemotePwaApp() {
     refresh: () => void resyncHost(adapter),
   }), [adapter, cancelRequest, closeTodos, loadArchived, loadArchivedIfShown, openCreateOrchestrationSession, openCreateSession, openRemoteOrchestrationSession, refreshOrchestrationSessions, refreshProjects, requestView, resyncHost, runSidebarAction, selectRemoteSession]);
 
+  // Links in a chat: Open in Pane opens a tab on the host, as the desktop does; the browser and clipboard are this device's.
+  const linkActions = useMemo<LinkActions | null>(() => adapter && ({
+    openInPane: async (paneId, url) => { await adapter.invoke('runpane:panels:open', [{ paneId, url, placement: 'split', source: 'user' }]); },
+    openInBrowser: async url => { window.open(url, '_blank', 'noopener,noreferrer'); },
+    copy: url => navigator.clipboard.writeText(url),
+  }), [adapter]);
+
   const dismissArchivedSessionToast = useCallback(() => setArchivedSessionToast(null), []);
   const archivedSessionToastElement = archivedSessionToast && (
     <UndoToast
@@ -1265,6 +1273,8 @@ export function RemotePwaApp() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+      {/* Once for the whole app, outside the drawer: links in chats need it whether or not the drawer is open. */}
+      {linkActions && <LinkPopoverHost actions={linkActions} />}
 
       <RemoteSidebar
         loading={loading}
@@ -1383,8 +1393,8 @@ export function RemotePwaApp() {
             >
               {selectedPanel.type === 'browser' && adapter && (
                 // The page's own copy, or the host's stream while an agent acts on it.
-                <RemoteStreamedBrowser key={selectedPanel.id} adapter={adapter} panel={selectedPanel} hostName={activeProfile?.label ?? listeningPorts?.host ?? 'the computer'} ownCopy={() => (
-                  <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onRefreshPorts={refreshListeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} onRelayAddress={isRelayComputer ? relayAddress : undefined} />
+                <RemoteStreamedBrowser key={selectedPanel.id} adapter={adapter} panel={selectedPanel} hostName={activeProfile?.label ?? listeningPorts?.host ?? 'the computer'} ownCopy={onViewLive => (
+                  <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onRefreshPorts={refreshListeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} onRelayAddress={isRelayComputer ? relayAddress : undefined} onViewLive={onViewLive} />
                 )} />
               )}
               {selectedPanel.type === 'explorer' && adapter && (

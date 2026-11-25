@@ -72,6 +72,7 @@ export function deriveTodoStatus(inputs: TodoStatusInputs): TodoStatus {
 
   if (inputs.waiting.length > 0) {
     const first = inputs.waiting[0];
+    // oxlint-disable-next-line pane/no-bare-todo-number -- main's to-do service reads only this machine's database, so every to-do number here is this machine's.
     const review = todo.state === 'in_review' && first.todoNumber === todo.number;
     const question = first.title.replace(/^Q-\d+:\s*/, '');
     const waiting: TodoStatus = {

@@ -251,6 +251,24 @@ The sanitizer drops any other value.
 | `remote_pane_pwa_client_disconnected` | `main/src/daemon/httpApiServer.ts` | Browser/PWA client disconnected |
 | `remote_pane_remote_runtime_used` | `main/src/daemon/client/remotePaneClient.ts` | Remote runtime actually used |
 
+## Pairing and Certificate Events
+
+Four events count how devices pair with a computer. Their properties are
+enums only: never a device label, computer id, hostname, IP address or
+error message.
+
+| Event | Source | Properties |
+|---|---|---|
+| `pairing_opened` | `frontend/src/hooks/pairingReport.ts`, once per opening of Add a device that shows its Phone tab | `qr`: `shown` or `paused`; when paused, `paused_reason`: `certificate_limit`, `relay_unreachable`, `other` or `not_ready` (closed before a code was ready) |
+| `pairing_failed` | the same, once per reason per opening | `reason`: `certificate_limit`, `relay_unreachable` (phone access couldn't start), `timeout` (a code ran out unused) or `other` (the code couldn't be made) |
+| `pairing_completed` | `main/src/daemon/httpApiServer.ts`, when a pairing code or glasses secret is traded for a token | `device`: `phone`, `computer` or `glasses`; `route`: `relay`, `direct` (a direct path the relay set up), `lan`, `tailscale`, or `other` (a loopback tunnel such as SSH) |
+| `certificate_issued` | `main/src/daemon/relay/computerCertificate.ts` through `main/src/services/pairingAnalytics.ts` | `ca`: `letsencrypt` or `google`; `renewal`: whether it replaced a certificate this computer held. Other CAs send nothing. `renewal: false` counts new computers on Pane relay |
+
+The main-process events go through `AnalyticsManager.track`, so the opt-out
+gate above applies; the renderer's go through `capture`. Relay-side counts
+(computers online, clients per computer) come from the relays' own logs, not
+PostHog: see [relay/deploy/RUNBOOK.md](../relay/deploy/RUNBOOK.md#watch).
+
 ## Failure Volume and Error Privacy
 
 Keep core desktop activity (`app_opened`, `app_closed`, `session_created`,
@@ -333,6 +351,7 @@ or add coverage in:
 - `main/src/services/analyticsManager.test.ts` (error events and the heartbeat)
 - `main/src/utils/analyticsEnvironment.test.ts` (environment tags)
 - `frontend/src/services/posthog.test.ts` (aliases and environment tags on events)
+- `main/src/services/pairingAnalytics.test.ts` and `frontend/src/hooks/pairingReport.test.ts` (pairing and certificate events)
 - `tests/analytics-consent.spec.ts`
 
 The Playwright test should verify both event order and payload shape, including

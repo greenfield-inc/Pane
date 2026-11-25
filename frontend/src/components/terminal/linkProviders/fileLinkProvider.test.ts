@@ -11,7 +11,7 @@ it('opens a detected worktree file with a relative editor path and absolute reve
   const terminal = { buffer: { active: { getLine: (index: number) => index === 0 ? { translateToString: () => './src/app.ts:42' } : undefined } } } as Terminal;
   const provider = createFileLinkProvider({
     terminal, workingDirectory: '/repo', onShowFilePopover,
-    onShowTooltip: vi.fn(), onHideTooltip: vi.fn(), onOpenUrl: vi.fn(),
+    onShowTooltip: vi.fn(), onHideTooltip: vi.fn(), onOpenUrl: vi.fn(), onHoverUrl: vi.fn(), onLeaveUrl: vi.fn(),
   });
   let links: ILink[] = [];
   provider.provideLinks(1, result => { links = result ?? []; });

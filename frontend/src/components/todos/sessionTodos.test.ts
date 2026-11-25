@@ -69,7 +69,53 @@ describe('a Session\'s to-dos (T-22, T-23)', () => {
       item('perm', { session: 'hidden-3' }),
       item('conn', { connected: 'hidden-10' }),
       item('stray', { session: 'nobody' }),
-    ], rows);
-    expect(Object.fromEntries(counts)).toEqual({ 3: 1, 10: 3 });
+    ], rows, 'local');
+    expect(Object.fromEntries(counts)).toEqual({ 'local:3': 1, 'local:10': 3 });
+  });
+});
+
+describe('to-dos keyed by machine and number (T-51)', () => {
+  // The reported bug: the MacBook's Q-84, linked to the MacBook's T-28, docked in the mini's Firecracker Grain, whose
+  // T-27 has a sub-to-do that is also numbered T-28.
+  const mini = [row(27, { own: 'hidden-27', requestedBy: 'firecracker' }), row(28, { parent: 27, requestedBy: 'firecracker' })];
+  const fromMacbook = (made: NotifyItem): NotifyItem => ({ ...made, machineId: 'macbook', machine: 'Tylers-MacBook-Pro' });
+
+  it('another machine\'s T-28 is not in a local Session\'s scope; this machine\'s T-28 is', () => {
+    const scope = todoApprovalScope(mini, 'firecracker', 'local');
+    expect(inTodoScope(fromMacbook(item('q-84', { session: 'workspaces', todo: 28 })), scope)).toBe(false);
+    expect(inTodoScope(item('local-28', { todo: 28 }), scope)).toBe(true);
+    expect(inTodoScope({ ...item('local-28', { todo: 28 }), machineId: 'local' }, scope)).toBe(true);
+  });
+
+  it('a row\'s count takes only its own machine\'s card on that number (T-51 PR 5, the lint rule\'s hit)', () => {
+    const counts = approvalsByTodo([fromMacbook(item('q-84', { todo: 28 })), item('local-28', { todo: 28 })], mini, 'local');
+    expect(Object.fromEntries(counts)).toEqual({ 'local:27': 1 });
+    expect(Object.fromEntries(approvalsByTodo([fromMacbook(item('q-84', { todo: 28 }))], mini, 'local'))).toEqual({});
+    expect(Object.fromEntries(approvalsByTodo([fromMacbook(item('q-84', { todo: 28 }))], mini, 'macbook'))).toEqual({ 'macbook:27': 1 });
+  });
+
+  it('a card from another machine asked or connected in a Session with the same id counts nowhere (review F-5)', () => {
+    const asked = fromMacbook(item('q-90', { session: 'hidden-27' }));
+    const connected = fromMacbook(item('q-91', { connected: 'hidden-27' }));
+    expect(Object.fromEntries(approvalsByTodo([asked, connected], mini, 'local'))).toEqual({});
+    expect(Object.fromEntries(approvalsByTodo([item('own', { session: 'hidden-27' })], mini, 'local'))).toEqual({ 'local:27': 1 });
+  });
+
+  it('builds nothing when no approval is waiting (review F-6)', () => {
+    const untouched = Object.defineProperty([...mini], 'map', { value: () => { throw new Error('rows were indexed'); } });
+    expect(approvalsByTodo([], untouched, 'local').size).toBe(0);
+  });
+
+  it('a hidden Session\'s card counts only from the to-do\'s own machine', () => {
+    const scope = todoApprovalScope(mini, 'firecracker', 'local');
+    expect(inTodoScope(item('perm', { session: 'hidden-27' }), scope)).toBe(true);
+    expect(inTodoScope(fromMacbook(item('perm', { session: 'hidden-27' })), scope)).toBe(false);
+    expect(inTodoScope(fromMacbook(item('conn', { connected: 'hidden-27' })), scope)).toBe(false);
+  });
+
+  it('a saved machine\'s Session takes that machine\'s cards, not this one\'s', () => {
+    const scope = todoApprovalScope(mini, 'firecracker', 'macbook');
+    expect(inTodoScope(fromMacbook(item('q-84', { todo: 28 })), scope)).toBe(true);
+    expect(inTodoScope(item('local-28', { todo: 28 }), scope)).toBe(false);
   });
 });

@@ -106,8 +106,8 @@ A tab's page lives on the computer that owns its Pane (the host), signed in with
 sign-ins, and every agent call runs on that page. Each computer's own Panes keep that computer's
 sign-ins; nothing is copied between computers. When the tab is not in view, its page loads in the
 background and the tab never comes forward. With no Pane window (a headless host), Pane loads the
-page in a hidden window, where it can't open popups or hand links to other apps, since nobody is
-there to approve them. When the window closes or comes back, each live page moves between it and
+page in a hidden window, where it hands no links to other apps, since nobody is there to approve
+them. When the window closes or comes back, each live page moves between it and
 a hidden window and reloads once from its URL.
 
 When the page doesn't load within 5 seconds, the call fails with `ERR_BROWSER_NOT_SHOWING`. A call
@@ -128,7 +128,12 @@ The stream stays while the agent drives and while you use it (after **Take over*
 and scrolls keep it). Thirty seconds after the last input by anyone, the screen goes back to its own
 copy at the page's current URL; **Back to my copy** goes back sooner, and the agent's next action
 streams again. Anything on the page that its URL doesn't hold (a half-filled form, the scroll
-position) stays on the host. While you are the driver, the copy shows "You're driving" with **Hand
+position) stays on the host, so a page the agent typed into (`browser_type`, `browser_select`,
+`browser_upload` or `browser_press`) keeps streaming until you press **Back to my copy**, the page
+loads a new document or the tab goes to sleep; a screen that opens the tab later streams it too. **View live** shows the
+host's page on any tab an agent has used, until **Back to my copy**: it sits next to the address bar
+of the own copy, in the tab's right-click menu and the page's right-click menu on a desktop, and in
+the tab's long-press menu in the Pane phone app. While you are the driver, the copy shows "You're driving" with **Hand
 to** the agent. Links and redirects you follow in your own copy stay in it: only an address you
 enter moves the host's page. Host files and dev servers never stream.
 
@@ -218,10 +223,17 @@ small pages and 100 MB for the GitHub page, 320 MB in all, with no CPU use and a
   browser**. With System browser, links from terminals, chats, cards, the command palette, the
   docs dialog and command-line tools all open in your system browser, at once, in terminals
   already open too.
+- **Click or Cmd-click.** A plain click on a link in a terminal, a chat or a file preview opens
+  it where **Open links in** says; Cmd-click (Ctrl-click on Windows and Linux) opens it in the
+  other place. Resting the pointer on a link for half a second, or right-clicking it, shows a
+  popover with **Open in Pane**, **Open in browser** and **Copy link**; an approval's web links
+  show it too. Open in browser and Copy link act on the computer you are using, also from the web
+  app. In the phone app, long-press a link in a chat or a file for the same three actions; a tap
+  opens the phone's browser.
 - **Leave any page.** On the computer that runs the tab, its **Open in your browser** button
-  sends the page to your system browser, and right-clicking a link, in a tab or in a chat,
-  offers **Open in System Browser**. A tab streamed to another screen has neither: its address
-  bar has **Copy URL** (the host's address).
+  sends the page to your system browser, right-clicking a link in a tab offers **Open in System
+  Browser**, and the link popover elsewhere offers **Open in browser**. A tab streamed to another
+  screen has neither: its address bar has **Copy URL** (the host's address).
 
 ## Apps, sign-ins and downloads
 
@@ -230,9 +242,20 @@ These apply to every browser tab, whoever drives it.
 - **Apps.** When a page opens an app link, such as a Zoom meeting (`zoommtg:`), the tab asks
   first: "This page wants to open zoom.us. Open · Cancel". Only **Open** hands it to the app.
   Links that reach local files or programs (`file:`, `search-ms:`, `ms-msdt:`) never open.
-- **Sign-ins that refuse embedded browsers.** Google sign-in (`accounts.google.com`) refuses
-  to run inside an app's browser, so Pane opens it in your system browser and the tab says so.
+- **Sign-ins that refuse embedded browsers.** Google sign-in runs in the tab, popups included,
+  until Google refuses it: its "This browser or app may not be secure" page
+  (`accounts.google.com/…/signin/rejected`) or a `disallowed_useragent` error. AWS's sign-in form
+  (`signin.aws.amazon.com/signin`, and `*.signin.aws`) always refuses. The tab stays where it was
+  and says "Google won't sign in here." with **Open this page in your browser**, which opens the
+  page you were on (the site's login page, not Google's) in the browser of the screen you are on.
+  A sign-in popup that reaches a refusal closes, and its opener's tab says so. The line shows once
+  per page: dismissed or used, it stays away until the page loads again.
   When a site's passkey prompt doesn't appear in a tab, use **Open in your browser**.
+- **Sign-in popups.** A popup a page opens to sign in (`window.open` with a size, as
+  "Sign in with GitHub" does) opens as a window on the computer that runs the tab. When nobody
+  would see that window (another screen watches the tab, or the host has no window), it opens
+  as a tab beside its opener instead, still linked to it, so the sign-in reports back. Every
+  screen streams that tab, the host's own window included, and it closes when the popup does.
 - **Downloads.** A file you download in a tab saves to your Downloads folder with no save
   dialog, and the tab shows "Downloaded report.pdf · Show in folder". A download an agent's call
   caused goes to the Pane's scratch folder instead (see above), and the notice names the agent.

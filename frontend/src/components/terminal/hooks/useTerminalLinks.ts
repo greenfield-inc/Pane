@@ -5,7 +5,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { LinkProviderConfig } from '../linkProviders/types';
 import { registerAllLinkProviders } from '../linkProviders';
-import { openInPaneTab, openLink } from '../../../utils/openLink';
+import { openInPaneTab, openLink, opensLink, swapsDestination } from '../../../utils/openLink';
+import { closeLinkPopover, hoverLink, hoveredLink, leaveLink, showLinkPopover } from '../../links/linkPopoverState';
 import { openFileInEditor } from '../../../services/openFileInEditor';
 import { isCopyOnSelectEnabled, useConfigStore } from '../../../stores/configStore';
 import { isMac } from '../../../utils/platformUtils';
@@ -40,6 +41,32 @@ interface SelectionPopoverState {
   x: number;
   y: number;
   text: string;
+}
+
+/** How long a click on a terminal link waits for a second click, which selects the word instead. */
+const DOUBLE_CLICK_MS = 300;
+let pendingOpen: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * A click on a web link in a terminal opens it (Cmd/Ctrl-click in the other place). xterm activates
+ * a link on the mouseup of any button and of any click, so a right-click (the link popover), a
+ * double-click (selecting the word) and a drag that leaves a selection open nothing.
+ */
+export function openTerminalLink(url: string, paneId: string, event: MouseEvent, terminal: Pick<Terminal, 'hasSelection'>): void {
+  if (!opensLink(event)) return;
+  closeLinkPopover();
+  clearTimeout(pendingOpen);
+  if (event.detail > 1 || terminal.hasSelection()) return;
+  const swap = swapsDestination(event);
+  pendingOpen = setTimeout(() => {
+    if (terminal.hasSelection()) return;
+    void openLink(url, paneId, { swap }).catch(error => console.error('[terminal] Could not open the link:', error));
+  }, DOUBLE_CLICK_MS);
+}
+
+/** The pointer rests on a web link in a terminal: the link popover shows just below the pointer. */
+export function hoverTerminalLink(url: string, paneId: string, event: MouseEvent): void {
+  hoverLink({ url, paneId, x: event.clientX, y: event.clientY + 12, flipY: event.clientY - 12 });
 }
 
 export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalLinksConfig) {
@@ -126,9 +153,11 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
       onShowFilePopover: (event, path, line) => {
         setFilePopover({ visible: true, x: event.clientX, y: event.clientY, ...path, line: line ?? 0 });
       },
-      onOpenUrl: (url) => {
-        void openLink(url, config.sessionId);
+      onOpenUrl: (url, event) => {
+        openTerminalLink(url, config.sessionId, event, terminal);
       },
+      onHoverUrl: (url, event) => hoverTerminalLink(url, config.sessionId, event),
+      onLeaveUrl: leaveLink,
     };
 
     const disposables = registerAllLinkProviders(providerConfig);
@@ -137,6 +166,23 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
       disposables.forEach((d) => d.dispose());
     };
   }, [terminal, config.workingDirectory, config.sessionId, customLinks, githubRemoteUrl, pathContext]);
+
+  // Right-clicking a web link shows the link popover instead of the terminal's menu, unless text is
+  // selected: then the menu's Copy and Paste stay, and it offers the URL's actions itself. This runs
+  // before xterm's and SelectionPopover's handlers on the same element, so neither sees the click.
+  useEffect(() => {
+    const element = terminal?.element;
+    if (!element) return;
+    const onContextMenu = (event: MouseEvent) => {
+      const link = hoveredLink();
+      if (!link || terminal.hasSelection()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      showLinkPopover({ ...link, x: event.clientX, y: event.clientY });
+    };
+    element.addEventListener('contextmenu', onContextMenu, { capture: true });
+    return () => element.removeEventListener('contextmenu', onContextMenu, { capture: true });
+  }, [terminal]);
 
   // Listen for selection changes
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { isOpenTodoState, type TodoListRow } from '../../../../shared/types/todos';
 import { sessionTodos } from './sessionTodos';
+import { todoKeyOfRow } from '../../../../shared/todoKey';
 import { flattenGroups, groupTodos, tabCounts, type TodoEntry, type TodoGroup, type TodoListStop } from './todoList';
 
 /**
@@ -17,7 +18,7 @@ export const SESSION_SNOOZED_GROUP = 'status:snoozed';
 /** The Session's to-dos as list entries, keyed `<machine id>:<number>` as the To-dos screen keys them. */
 export function sessionTodoEntries(rows: readonly TodoListRow[], sessionId: string, machineId: string = LOCAL_MACHINE_ID): TodoEntry[] {
   return sessionTodos(rows, sessionId)
-    .map((row): TodoEntry => ({ key: `${machineId}:${row.todo.number}`, row, machineId, remote: false, offline: false }))
+    .map((row): TodoEntry => ({ key: todoKeyOfRow(machineId, row), row, machineId, remote: false, offline: false }))
     .sort((a, b) => b.row.todo.updatedAt - a.row.todo.updatedAt);
 }
 

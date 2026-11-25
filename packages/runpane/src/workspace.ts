@@ -111,6 +111,8 @@ const relayStatusSchema = boundary.object({
   phase: boundary.string,
   address: boundary.nullable(boundary.string),
   lastError: boundary.nullable(boundary.string),
+  /** Absent from a Pane before it; set while the CA's certificate limit keeps new devices off the relay. */
+  certificateLimit: boundary.optional(boundary.nullable(boundary.object({ until: boundary.string }))),
 });
 
 // ---------------------------------------------------------------- tailnet
@@ -708,6 +710,10 @@ async function readRelayStatus(paneDir?: string): Promise<ReturnType<typeof rela
 }
 
 function describeRelay(relay: ReturnType<typeof relayStatusSchema.decode>): string {
+  if (relay.certificateLimit) {
+    const until = new Date(relay.certificateLimit.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return `not accepting new phone pairings through Pane relay until ${until}: both certificate services are turning away new computers. Connect with Tailscale instead`;
+  }
   if (relay.phase === 'ready') return `reachable through Pane relay (${relay.address ?? 'its relay address'})`;
   return `not reachable through Pane relay yet (${relay.lastError ?? 'still connecting'})`;
 }

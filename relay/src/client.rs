@@ -32,7 +32,7 @@ pub async fn run(
         tracing::debug!(id, peer = %peer.ip(), "client for a computer that is not connected");
         return;
     };
-    let Some(_slot) = state.client_slot() else {
+    let Some(_slot) = state.client_slot(Some((&id, &source))) else {
         tracing::warn!(id, peer = %peer.ip(), "client refused: relay at --max-connections");
         return;
     };

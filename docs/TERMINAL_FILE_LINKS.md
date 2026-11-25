@@ -25,14 +25,14 @@ The xterm link-provider line number is one-based; the terminal buffer's
 Settings › Links turns text matching your own regular expressions into links,
 such as issue keys opening your tracker. Each entry has a pattern and a URL
 template that must start with `http://` or `https://`; `$0` inserts the whole
-match and `$1` to `$9` insert capture groups, URL-encoded. Cmd-click (Ctrl-click
-on Windows and Linux) opens the link. File, URL and git links keep working
-alongside. Entries travel with Settings › Import & Export.
+match and `$1` to `$9` insert capture groups, URL-encoded. A click opens the
+link. File, URL and git links keep working alongside. Entries travel with Settings › Import & Export.
 
 Web links, custom or not, follow **Settings › Links › Open links in**: **Pane's
 browser** (the default) opens a Pane browser tab beside where you clicked, and
-**System browser** opens your system browser. The right-click menu offers both.
-See [Links](BROWSER_AGENTS.md#links).
+**System browser** opens your system browser. Cmd-click (Ctrl-click on Windows
+and Linux) opens the other one. Resting the pointer on a link, or
+right-clicking it, shows the link popover. See [Links](BROWSER_AGENTS.md#links).
 
 Patterns run in a web worker (`frontend/src/utils/customLinkMatcher.ts`), one
 terminal row at a time with trailing padding trimmed. A row that takes longer

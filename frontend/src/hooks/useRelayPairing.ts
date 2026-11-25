@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RelayPairingInfo, RelayStatus } from '../../../shared/types/relay';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
+import { capture } from '../services/posthog';
+import { PairingReport } from './pairingReport';
 
 /** What Add a device › Phone shows in its code box. */
 export type PairingView =
   /** `label` says what this computer is waiting for. */
   | { step: 'preparing'; label: string }
-  | { step: 'error'; message: string }
+  /** `cause` says whether phone access couldn't start (`relay`) or only the code failed (`code`). */
+  | { step: 'error'; message: string; cause: 'relay' | 'code' }
+  /** The CA is turning this computer away until `until`: the relay pairs no new devices; Tailscale still works. */
+  | { step: 'limited'; until: string }
   | { step: 'code'; url: string; secondsLeft: number }
   /** The last code ran out; a new one is on its way. */
   | { step: 'renewing' };
@@ -17,17 +22,20 @@ const SETUP_FAILED = "Pane's servers didn't answer. Check this computer's intern
  * Pairing while `open`: turns phone access on if it is off and waits for this computer to be ready.
  * With `showCode` it keeps one current 10-minute pairing code; a used code (`relay:paired`) or an
  * expired one is replaced at once. Phone access it turned on is turned off again if it closes before
- * ever being ready.
+ * ever being ready. `dialogOpen` (default `open`) is how long one opening of the dialog lasts, for
+ * its pairing report: switching to a tab that doesn't use the relay and back is the same opening.
  */
-export function useRelayPairing(open: boolean, showCode = true) {
+export function useRelayPairing(open: boolean, showCode = true, dialogOpen = open) {
   const [status, setStatus] = useState<RelayStatus | null>(null);
   const [code, setCode] = useState<RelayPairingInfo | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ message: string; cause: 'relay' | 'code' } | null>(null);
   /** The phone that used the last code, until the dialog closes. */
   const [paired, setPaired] = useState<string | null>(null);
   /** Why the current code replaced an earlier one. */
   const [renewal, setRenewal] = useState<'paired' | 'expired' | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  /** False until this opening's state is reset, so the first render after reopening isn't read as this opening's. */
+  const [fresh, setFresh] = useState(false);
   // Bumped per request and on close, so a late answer never lands on a newer state.
   const generation = useRef(0);
   const requesting = useRef(false);
@@ -48,7 +56,7 @@ export function useRelayPairing(open: boolean, showCode = true) {
       if (restart || !next.enabled) next = await window.electronAPI.invoke('relay:set-enabled', true);
       if (asked === generation.current) setStatus(next);
     } catch (cause) {
-      if (asked === generation.current) setFailure(ipcErrorMessage(cause, SETUP_FAILED));
+      if (asked === generation.current) setFailure({ message: ipcErrorMessage(cause, SETUP_FAILED), cause: 'relay' });
     }
   }, []);
 
@@ -59,6 +67,7 @@ export function useRelayPairing(open: boolean, showCode = true) {
     setFailure(null);
     setPaired(null);
     setRenewal(null);
+    setFresh(true);
     void prepare(false);
     const offStatus = window.electronAPI.events.onRelayStatusChanged((next) => setStatus(next));
     const offPaired = window.electronAPI.events.onRelayPaired(({ kind, label }) => {
@@ -71,6 +80,7 @@ export function useRelayPairing(open: boolean, showCode = true) {
     return () => {
       generation.current += 1;
       requesting.current = false;
+      setFresh(false);
       offStatus();
       offPaired();
       const undo = reachedReady.current ? null : turnedOn.current;
@@ -96,7 +106,7 @@ export function useRelayPairing(open: boolean, showCode = true) {
       (cause: Error) => {
         if (asked !== generation.current) return;
         requesting.current = false;
-        setFailure(ipcErrorMessage(cause, "Pane couldn't make a pairing code. Choose Try again."));
+        setFailure({ message: ipcErrorMessage(cause, "Pane couldn't make a pairing code. Choose Try again."), cause: 'code' });
       },
     );
   }, [ready, showCode, code, failure]);
@@ -124,12 +134,28 @@ export function useRelayPairing(open: boolean, showCode = true) {
   }, [prepare]);
 
   let view: PairingView;
-  if (failure) view = { step: 'error', message: failure };
-  else if (status?.phase === 'error') view = { step: 'error', message: status.lastError ?? SETUP_FAILED };
+  if (status?.certificateLimit) view = { step: 'limited', until: status.certificateLimit.until };
+  else if (failure) view = { step: 'error', ...failure };
+  else if (status?.phase === 'error') view = { step: 'error', message: status.lastError ?? SETUP_FAILED, cause: 'relay' };
   else if (code && expiresAt !== null) view = { step: 'code', url: code.url, secondsLeft: Math.max(0, Math.ceil((expiresAt - now) / 1000)) };
   else if (renewal === 'expired' && status?.phase === 'ready') view = { step: 'renewing' };
   else if (status?.phase === 'certificate') view = { step: 'preparing', label: 'Getting a certificate…' };
   else view = { step: 'preparing', label: 'Connecting to Pane…' };
+
+  // Each opening of the dialog reports once (PairingReport), across tab switches; only the Phone tab shows a code.
+  const report = useRef<PairingReport | null>(null);
+  useEffect(() => {
+    if (!dialogOpen) return;
+    const opening = new PairingReport(capture);
+    report.current = opening;
+    return () => {
+      opening.close();
+      report.current = null;
+    };
+  }, [dialogOpen]);
+  useEffect(() => {
+    if (open && fresh && showCode) report.current?.observe(view);
+  }, [open, fresh, showCode, view]);
 
   return { view, ready, paired, renewal, retry, relay: status?.relay ?? null };
 }
@@ -142,4 +168,19 @@ async function turnOff(hostWasOn: boolean): Promise<void> {
   } catch (cause) {
     console.warn('[relay] Could not turn phone access back off:', cause);
   }
+}
+
+/** When Pane relay pairs no new devices because of the CA's limit, until when; read without turning phone access on. */
+export function useRelayCertificateLimit(): string | null {
+  const [until, setUntil] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    window.electronAPI.invoke('relay:status').then(
+      (status: RelayStatus) => { if (live) setUntil(status.certificateLimit?.until ?? null); },
+      () => undefined,
+    );
+    const off = window.electronAPI.events.onRelayStatusChanged((status) => setUntil(status.certificateLimit?.until ?? null));
+    return () => { live = false; off(); };
+  }, []);
+  return until;
 }

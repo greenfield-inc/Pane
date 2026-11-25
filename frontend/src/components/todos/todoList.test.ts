@@ -176,11 +176,13 @@ describe('snoozed (round 9, T-17)', () => {
   });
 
   it('R wakes a snoozed row now; Z snoozes top-level open to-dos that are not in review or accepted', () => {
+    // oxlint-disable-next-line pane/no-bare-todo-number -- the fixture rows are one machine's.
     const asleep = entries.find(entry => entry.row.todo.number === 19)!;
     expect(rowAction(asleep.row)).toBe('wake');
     expect(actionForKey(asleep.row, 'r')).toBe('wake');
     expect(actionForKey(asleep.row, 's')).toBeNull();
     expect(canSnooze(asleep)).toBe(true);
+    // oxlint-disable-next-line pane/no-bare-todo-number -- the fixture rows are one machine's.
     expect(canSnooze(entries.find(entry => entry.row.todo.number === 1)!)).toBe(true);
     expect(canSnooze(mergeTodoEntries(snapshot([row({ number: 5, state: 'in_review', status: 'waiting' })]), [])[0])).toBe(false);
     expect(canSnooze(mergeTodoEntries(snapshot([row({ number: 6, state: 'done', status: 'done' })]), [])[0])).toBe(false);

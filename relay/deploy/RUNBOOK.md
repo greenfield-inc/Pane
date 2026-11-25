@@ -7,8 +7,10 @@ Google Compute Engine in the project `pane-pwa-preview`: `us` (us-central1),
 To add one, add a line to `RELAYS` in `deploy.sh` and its region to
 `PANE_RELAYS` in `main/src/daemon/relay/relayService.ts`. `us` and `eu` also answer DNS
 for `runpane.net` (`ns1`, `ns2`). Each relay gets and renews its own Let's
-Encrypt certificate, and sends Android alerts as the service account
-`pane-push-sender` with no key file.
+Encrypt certificate, sends Android alerts as the service account
+`pane-push-sender` with no key file, and with the same account mints the
+one-time Google Trust Services EAB keys computers use when Let's Encrypt turns
+them away.
 
 The desktop app connects to these relays as soon as a release with QR pairing
 ships. **Deploy and verify the relays before tagging that desktop release.**
@@ -29,6 +31,8 @@ Merging the PR to `main` does not release the desktop app.
 | Android app links (`assetlinks.json`) | The SHA-256 of the Play app signing certificate (Play Console › App integrity) |
 | iOS universal links | Team id and bundle id `com.dcouple.pane.mobile` |
 | Android alerts | `pane-push-sender` with Firebase Cloud Messaging send rights, and `roles/artifactregistry.reader` on the `pane-preview` repository so the VMs can pull the relay image |
+| Usage counts in Cloud Logging | `pane-push-sender` granted `roles/logging.logWriter` on the project (once, by hand). `deploy.sh` enables `logging.googleapis.com` and passes `--usage-project` |
+| Google Trust Services EAB keys | `publicca.googleapis.com` enabled (`deploy.sh` enables it) and `pane-push-sender` granted `roles/publicca.externalAccountKeyCreator` on the project (once, by hand: done 2026-11-20). The VMs already have the `cloud-platform` scope |
 
 ## Steps
 
@@ -68,8 +72,11 @@ Merging the PR to `main` does not release the desktop app.
    with a `_psl.runpane.net` TXT record pointing at it). Until it is listed,
    all computers share Let's Encrypt's weekly limit of 50 new certificates
    per registered domain; ask Let's Encrypt for a rate limit increase if
-   sign-ups outpace it. A computer that Let's Encrypt turns away says so in
-   **Add a device** and asks again at the time Let's Encrypt gives.
+   sign-ups outpace it. A computer that Let's Encrypt turns away orders from
+   Google Trust Services instead (100 orders an hour for the project, renewals
+   included). Only when both refuse does **Add a device** say so and ask again:
+   at the time Let's Encrypt gives when Google Trust Services can't be used,
+   otherwise within 30 minutes.
 8. **Release the desktop app** through the normal [stable release](../../RUNBOOK.md#stable-release),
    then pair a phone with a QR code against production
    ([QR pairing](../../docs/QR_PAIRING.md)).
@@ -80,10 +87,38 @@ Rerun the workflow with `apply` on from the commit to deploy: it pushes
 `pane-relay:<commit>` and restarts each VM on it. Computers reconnect on their
 own within 30 seconds. To roll back, run it from the earlier commit.
 
+- **Deploy the relays before releasing a desktop build that needs a new relay
+  feature.** A desktop with the Google Trust Services fallback asks its relay
+  for EAB keys; an older relay never answers, so the fallback is skipped.
+- A rollback to a commit before the Google Trust Services fallback drops
+  `pki.goog` from CAA, and computers holding a Google Trust Services
+  certificate then renew at Let's Encrypt. Keep `--caa-issuer
+  letsencrypt.org,pki.goog` on such a rollback when Let's Encrypt is still
+  refusing new computers.
+
 ## Watch
 
 - Uptime checks `pane-relay-us`, `-eu`, `-asia`, `-west` in Cloud Monitoring.
 - Logs: `gcloud compute ssh pane-relay-us --zone us-central1-a -- docker logs pane-relay`.
-  They show ids, IP addresses, byte counts and close reasons, never payloads.
+  They show ids, IP addresses, byte counts and close reasons, never payloads,
+  and stay on the VM until the next deploy replaces the container.
+- Usage: when it starts, once an hour, and when it stops cleanly, each relay
+  writes a `relay usage` line to Cloud Logging (log `pane-relay-usage`, kept
+  30 days). It holds counts only: `computers` connected now,
+  `computers_seen_24h`, `clients` (distinct computer and client address
+  pairs with a connection through this relay: devices reaching a computer
+  through it, never same-network or Tailscale ones; the relay can't tell a
+  phone from glasses), `client_connections` and `computers_with_clients`. A
+  restart starts the counts again. Deploys set `google-logging-enabled=false`
+  on every VM, so the container's own logs never reach Cloud Logging. New
+  computers are PostHog's `certificate_issued` events with `renewal: false`.
+  For a daily table of online peak, computers seen and clients per computer:
+
+  ```sh
+  node relay/deploy/usage.mjs --account <you@example.com> [--days 7]
+  ```
 - Block a computer: add its id to the blocklist file and pass `--blocklist`
   (see [relay/README.md](../README.md)).
+- Google Trust Services keys: the logs show each key minted (`EAB key minted`,
+  with the computer id and the key id, never the key itself) or failed, and
+  `EAB keys throttled relay-wide` when a relay reaches its hourly cap.

@@ -12,7 +12,6 @@ import type {
 } from '../shared/types/remoteDaemon';
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop';
-import type { ProfileLibraryView } from '../shared/types/profiles';
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
@@ -115,9 +114,6 @@ export type ElectronApiMockOptions = {
   /** The host runs an older Pane with no Pane order commands: they fail as the remote client says. */
   paneOrderUnsupported?: boolean;
   initialLoops?: Loop[];
-  /** profiles:list answer (the Profiles page); profiles:get reads each file's text from profileYaml. */
-  profileLibrary?: ProfileLibraryView;
-  profileYaml?: Record<string, string>;
   /** remote-daemon:list-tailnet-machines answer. */
   tailnetMachines?: TailnetMachineList;
   /** Remote connections end in `error` with this message instead of connecting. */
@@ -212,10 +208,14 @@ export type ElectronApiMockOptions = {
     /** The phase turning it on reaches, with this lastError for `error`. */
     phaseWhenOn?: RelayStatus['phase'];
     lastError?: string;
+    /** Turning it on meets the CA's certificate limit until this time (ISO), as `RelayStatus.certificateLimit`. */
+    certificateLimitUntil?: string;
     /** How long each pairing code lasts. */
     codeTtlMs?: number;
     /** What the "everywhere" commands report. */
     everywhere?: { removed: string[]; notReached: string[] };
+    /** This computer's relay certificate from the start. */
+    certificate?: RelayStatus['certificate'];
   };
   /** Client records this computer's host holds: phones, linked computers, glasses. */
   hostClients?: RemoteDaemonClientRecord[];
@@ -353,11 +353,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const relayOptions = mockOptions.relay ?? {};
     const relayStatus: RelayStatus = {
       enabled: false, phase: 'off', id: null, domain: null, address: null, relay: null, region: null,
-      localAddresses: [], certificate: null, lastError: null,
+      localAddresses: [], certificate: relayOptions.certificate ?? null, lastError: null, certificateLimit: null,
     };
     let relayCodes = 0;
     const turnRelayOn = () => {
-      const phase = relayOptions.phaseWhenOn ?? 'ready';
+      const limitUntil = relayOptions.certificateLimitUntil;
+      const phase = limitUntil ? 'error' : relayOptions.phaseWhenOn ?? 'ready';
       Object.assign(relayStatus, {
         enabled: true,
         phase,
@@ -365,7 +366,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         domain: 'pane.example',
         address: 'https://k7q2m9.pane.example',
         relay: 'us.relay.pane.example',
-        lastError: phase === 'error' ? relayOptions.lastError ?? null : null,
+        lastError: phase === 'error' ? relayOptions.lastError ?? (limitUntil ? "Let's Encrypt is turning away new computers" : null) : null,
+        certificateLimit: limitUntil ? { until: limitUntil } : null,
       });
       remoteDaemonConfig.relay = { ...remoteDaemonConfig.relay, enabled: true };
     };
@@ -446,7 +448,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockSessions = clone(mockOptions.initialSessions ?? []);
     const mockArchivedSessions: JsonObject[] = [];
     let mockLoops = clone(mockOptions.initialLoops ?? []);
-    const mockProfiles: ProfileLibraryView = clone(mockOptions.profileLibrary ?? { profiles: [] });
     /** A plausible loops:preview answer for the form's preset shapes. */
     const previewLoopCron = (cron: string): LoopSchedulePreview => {
       const fields = cron.trim().split(/\s+/);
@@ -737,9 +738,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         }
         if (prop === 'onSessionCreated') {
           return (callback: MockEventCallback) => subscribe('session:created', callback);
-        }
-        if (prop === 'onProfilesChanged') {
-          return (callback: MockEventCallback) => subscribe('profiles:changed', callback);
         }
         if (prop === 'onLoopsChanged') {
           return (callback: MockEventCallback) => subscribe('loops:changed', callback);
@@ -1278,6 +1276,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       todo.updatedAt = Date.now();
       detail.status = status;
+      // oxlint-disable-next-line pane/no-bare-todo-number -- the mock stands in for one machine's to-do API, which main keys by number.
       const listed = state.snapshot.rows.find((row) => row.todo.number === todo.number);
       if (listed) {
         listed.todo = clone(todo);
@@ -1804,25 +1803,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }),
       resourceMonitor: namespace({
         getSnapshot: () => success(null),
-      }),
-      profiles: namespace({
-        list: () => success(clone(mockProfiles)),
-        get: (name: string) => {
-          const profile = mockProfiles.profiles.find((candidate) => candidate.name === name);
-          return profile ? success({ profile: clone(profile), yaml: mockOptions.profileYaml?.[name] ?? '' }) : Promise.resolve({ success: false, error: `No profile is named "${name}".` });
-        },
-        setEnabled: (name: string, enabled: boolean) => {
-          trackCall('profiles:set-enabled', [name, enabled]);
-          for (const profile of mockProfiles.profiles) if (profile.name === name) profile.enabled = enabled;
-          return success(clone(mockProfiles));
-        },
-        launch: (input: JsonObject) => {
-          trackCall('profiles:launch', [input]);
-          return Promise.resolve({ success: false, error: 'Launching is not available in this preview.' });
-        },
-        runs: () => success([]),
-        setOutcome: () => success(null),
-        stop: () => success(null),
       }),
       loops: namespace({
         list: () => success(clone(mockLoops)),
@@ -2593,6 +2573,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           remoteDaemonConfig.client.mode = 'remote';
           remoteDaemonConfig.client.activeProfileId = computerId;
           configState.remoteDaemon = clone(remoteDaemonConfig);
+          // As main does, the window's machine is now that computer, when it is a saved one (T-51).
+          const computer = remoteDaemonConfig.client.computers.find((candidate) => candidate.id === computerId);
+          if (computer) {
+            setRemoteConnectionState({
+              mode: 'remote', status: 'connected', activeProfileId: computerId, activeProfileLabel: computer.label,
+              activeBaseUrl: computer.routes[0]?.baseUrl ?? null, activeRouteId: computer.routes[0]?.id ?? null, lastError: null,
+            });
+          }
           if (todosState) {
             todosState.snapshot = clone(todos.snapshot);
             todosState.details = clone(todos.details);

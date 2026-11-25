@@ -142,7 +142,6 @@ import { MachineConnections, remoteMachineAccess } from './services/machineConne
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
 import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
-import { prepareProfileRunnerForQuit } from './services/profiles/profileRunnerHost';
 import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
@@ -157,10 +156,12 @@ import { runRemoteSetupCli } from './daemon/setupRemoteHostCli';
 import { PowerSaveManager } from './services/powerSaveManager';
 import { warmShellPath } from './utils/shellPath';
 import { routeWebviewPopups } from './services/webviewPopups';
+import { popupTabFor, refuseSignIn } from './services/browser/browserHost';
 import { openExternalUrl } from './utils/openExternalUrl';
 import { offerAppLink, openOfferedAppLink } from './services/browser/appLinks';
 import { PaneError, paneErrorText } from '../../shared/paneError';
-import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
+import { BROWSER_TAB_NOTICE_CHANNEL, BROWSER_VIEW_LIVE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
+import type { PaneWebviewContext } from './core/runtime';
 import { DOCS_BROWSER_PARTITION } from '../../shared/constants/browserPartitions';
 import { hardenWebviewPreferences } from './services/webviewPreferences';
 import { APP_MENU_ACTION_CHANNEL, attachEditContextMenu, installApplicationMenu, type AppMenuAction } from './services/nativeMenus';
@@ -170,9 +171,9 @@ export let mainWindow: BrowserWindow | null = null;
 
 // Map webContentsId → {panelId, sessionId} for webview popup interception.
 // Populated by browser-panel:register-webview IPC, consumed by did-attach-webview handler.
-export const webviewContextMap = new Map<number, { panelId: string; sessionId: string }>();
+export const webviewContextMap = new Map<number, PaneWebviewContext>();
 
-/** Shows a line under a browser tab's address bar: an app link to confirm, a sign-in sent out, a download. */
+/** Shows a line under a browser tab's address bar: an app link to confirm, a sign-in that refused Pane, a download. */
 function sendTabNotice(panelId: string, notice: BrowserTabNotice): void {
   mainWindow?.webContents.send(BROWSER_TAB_NOTICE_CHANNEL, { panelId, notice });
 }
@@ -661,7 +662,11 @@ async function createWindow() {
   // This prevents the race condition where a page calls window.open() before dom-ready fires.
   // The context map (panelId/sessionId) is populated later by the browser-panel:register-webview IPC.
   mainWindow.webContents.on('did-attach-webview', (_event, wvContents: WebContents) => {
-    attachEditContextMenu(wvContents);
+    attachEditContextMenu(wvContents, () => {
+      const context = webviewContextMap.get(wvContents.id);
+      if (!context?.viewLive) return [];
+      return [{ label: 'View live', click: () => mainWindow?.webContents.send(BROWSER_VIEW_LIVE_CHANNEL, { panelId: context.panelId }) }];
+    });
     const openOutside = (url: string) => void openExternalUrl(url).catch((error) => {
       console.error('[BrowserPanel] Did not open popup URL externally:', error);
     });
@@ -672,10 +677,8 @@ async function createWindow() {
       openExternal: url => wvContents.session === session.fromPartition(DOCS_BROWSER_PARTITION) ? mainWindow?.webContents.send('docs:open-link', url) : openOutside(url),
       openPaneLink,
       offerApp: ({ url, panelId }) => offerAppLink(url, panelId, sendTabNotice),
-      sendOut: ({ url, site, panelId }) => {
-        openOutside(url);
-        if (panelId) sendTabNotice(panelId, { kind: 'sent-out', site });
-      },
+      refuseSignIn: ({ url, site, panelId }) => { if (panelId) refuseSignIn(panelId, site, url); },
+      popupTab: popupTabFor,
     });
 
     wvContents.setBackgroundThrottling(true);
@@ -1774,8 +1777,6 @@ if (launchRemoteSetup) {
   }, 30_000);
 
   try {
-    // Step tabs that Pane's quit stops are not steps finishing: no profile run moves on them.
-    prepareProfileRunnerForQuit();
     if (paneDaemonHost?.paneDaemonServer) {
       logToFile('Stopping local daemon server early');
       console.log('[Main] Stopping local daemon server early...');

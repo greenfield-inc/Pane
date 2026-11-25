@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
-import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dockKey, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals } from './approvalCard';
+import { todoKey } from '../../../../shared/todoKey';
+import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dockKey, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals, sessionColumnNext } from './approvalCard';
 
 const q20: NotifyItem = {
   id: 'q20',
@@ -128,9 +129,32 @@ describe('the approval card', () => {
     const fromHidden = { ...q20, id: 'perm', source: { ...q20.source, session: { id: 'todo-3', name: 'T-3 · Pane Selection', paneId: 'h' } } };
     const linked = { ...q20, id: 'review', source: { ...q20.source, session: { id: 'todo-3', name: 'T-3 · Pane Selection', paneId: 'h' } }, todo: { number: 3, title: 'Pane Selection' } };
     const unrelated = { ...q20, id: 'other', source: { ...q20.source, session: { id: 'todo-9', name: 'T-9', paneId: 'n' } } };
-    const scope = { sessionIds: new Set(['todo-3']), todoNumbers: new Set([3]) };
+    const scope = { machineId: 'local', sessionIds: new Set(['todo-3']), todoKeys: new Set([todoKey('local', 3)]) };
     expect(sessionApprovals([q20, fromHidden, linked, unrelated], 's1', scope).map(item => item.id).sort()).toEqual(['perm', 'q20', 'review'].sort());
     expect(sessionApprovals([fromHidden, linked], 's1').map(item => item.id)).toEqual([]);
+  });
+
+  it('T-51: a Session docks only its own machine\'s cards, and none from a machine gone offline', () => {
+    const local28 = { ...q20, id: 'local-28', source: { ...q20.source, session: { id: 'other', name: 'Other', paneId: 'o' } }, todo: { number: 28, title: 'Accept the BAA' } };
+    const macbook28 = { ...local28, id: 'macbook:q-84', machineId: 'macbook', machine: 'Tylers-MacBook-Pro', title: 'Q-84: Phone-number accounts' };
+    const offline = { ...q20, id: 'offline', machineId: 'local', unreachable: true };
+    const scope = { machineId: 'local', sessionIds: new Set<string>(), todoKeys: new Set([todoKey('local', 27), todoKey('local', 28)]) };
+    expect(sessionApprovals([q20, local28, macbook28, offline], 's1', scope).map(item => item.id)).toEqual(['q20', 'local-28']);
+    // The MacBook's own Session, opened from All machines, docks the MacBook's card and not this computer's.
+    const onMacbook = { machineId: 'macbook', sessionIds: new Set<string>(), todoKeys: new Set([todoKey('macbook', 28)]) };
+    expect(sessionApprovals([local28, macbook28], 's1', onMacbook).map(item => item.id)).toEqual(['macbook:q-84']);
+  });
+
+  it('T-51 F-2: a Session\'s open column moves on when its card\'s machine goes offline or the card is another machine\'s', () => {
+    const mine = { ...q20, id: 'mine', machineId: 'macbook' };
+    const other = { ...q20, id: 'other', machineId: 'macbook', createdAt: 2_000 };
+    expect(sessionColumnNext(mine, [mine, other], 'macbook')).toEqual({ keep: true });
+    // Answered or gone from the list, it stays for its receipt.
+    expect(sessionColumnNext({ ...mine, state: 'answered' }, [other], 'macbook')).toEqual({ keep: true });
+    expect(sessionColumnNext(undefined, [other], 'macbook')).toEqual({ keep: true });
+    expect(sessionColumnNext({ ...mine, unreachable: true }, [other], 'macbook')).toEqual({ open: 'other' });
+    expect(sessionColumnNext({ ...mine, unreachable: true }, [], 'macbook')).toEqual({ close: true });
+    expect(sessionColumnNext(mine, [], 'local')).toEqual({ close: true });
   });
 
   it('a Session whose approvals were dismissed has none open, so no count or badge', () => {

@@ -91,10 +91,12 @@ app:
 - **Phone access certificates**: every new data directory is a new computer
   with its own `<id>.runpane.net` certificate, and all computers share Let's
   Encrypt's weekly limit for runpane.net. A dev (unpackaged) build orders from
-  Let's Encrypt staging, so phones and browsers don't trust it and pairing a real
-  phone fails at the TLS step. To test real pairing, launch with
+  Let's Encrypt staging, then Google Trust Services staging when Let's Encrypt
+  refuses, so phones and browsers don't trust it and pairing a real phone fails
+  at the TLS step. To test real pairing, launch with
   `PANE_ACME_DIRECTORY=https://acme-v02.api.letsencrypt.org/directory` and reuse
-  one data directory, so its certificate is ordered once.
+  one data directory, so its certificate is ordered once. `PANE_ACME_DIRECTORY`
+  pins that one CA; `PANE_ACME_FALLBACK_DIRECTORY` adds a fallback to it.
 - **Electron's browser profile** (localStorage, cache, cookies) is not covered
   by `PANE_DIR`. An unpackaged build uses the same profile folder as the
   installed app (`~/Library/Application Support/Pane` on macOS). `pnpm dev`

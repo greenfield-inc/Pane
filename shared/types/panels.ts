@@ -64,6 +64,11 @@ export interface TerminalAgentReport {
   questions?: NotifySubQuestion[];
   /** To-dos (D-408): `--todo T-14`, the to-do the report (and its question) is about. */
   todo?: string;
+  /**
+   * T-51: the install id of the machine the report was made on, sent with `todo`. The Session's machine
+   * resolves `todo` against its own to-dos (D-1 C); this says which machine sent the number. Absent from older machines.
+   */
+  installId?: string;
   reportedAt: string;
 }
 
@@ -346,6 +351,19 @@ export interface BrowserPanelState {
    * so the page keeps it through a sleep. Unset while the page fills its own tab. Only main writes it.
    */
   pageSize?: BrowserPageSize;
+  /**
+   * What agents did on the tab, so other screens offer View live and know when to keep streaming:
+   * `used` once an agent acted on it; `typed` while its page holds input an agent typed, selected,
+   * uploaded or pressed into, back to `used` when the page loads a new document. Only main writes it.
+   */
+  agentUse?: 'used' | 'typed';
+  /**
+   * The tab is a sign-in popup another tab opened while nobody saw it on this computer (another
+   * screen streamed the opener, or the host has no window). Its page lives only on the host, still
+   * linked to its opener, so every screen streams it, the host's own window included, and the tab
+   * closes when the popup does. Only main writes it.
+   */
+  signInPopup?: true;
 }
 
 /** A browser tab page's size in CSS pixels; `mobile` gives it a phone's layout and touch. */

@@ -92,6 +92,8 @@ interface Fixture {
   shownDownloads: Array<[string, string]>;
   /** Archives a Pane, as Pane does: it is marked archived, then the host hears it went. */
   archive(paneId: string): void;
+  /** The tab's page stopped a sign-in that refuses to run inside apps, as the host reports it. */
+  refuseSignIn(tabId: string, site: string, url: string): void;
 }
 
 function browserTab(id: string, paneId: string, openedByPanel?: string, url = 'http://localhost:4173/'): ToolPanel {
@@ -114,6 +116,7 @@ function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: 
   const pages = new Map<string, ReturnType<typeof fakePage>>();
   let nextPage = 1;
   let downloadListener: ((download: TabDownload) => void) | undefined;
+  const signInListeners: Array<(panelId: string, signIn: { site: string; url: string }) => void> = [];
   const shownDownloads: Array<[string, string]> = [];
   for (const tab of initial) {
     if (tab.type !== 'browser') continue;
@@ -157,6 +160,7 @@ function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: 
     onGone: (listener) => { goneListeners.push(listener); },
     setBusy: () => undefined,
     onDownload: (listener) => { downloadListener = listener; },
+    onSignInRefused: (listener) => { signInListeners.push(listener); },
     personDownloads: () => path.join(worktree, 'Downloads'),
     agentDownloads: async () => path.join(worktree, '.scratch', 'browser-downloads'),
     showDownload: (panelId, file) => { shownDownloads.push([panelId, file]); },
@@ -179,7 +183,8 @@ function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: 
   const registry = new PaneCommandRegistry();
   onTestFinished(registerBrowserHandlers(services, registry, host, options.holds));
   const archive = (paneId: string) => { archived.add(paneId); for (const listener of goneListeners) listener(); };
-  return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree, download, shownDownloads, archive };
+  const refuseSignIn = (tabId: string, site: string, url: string) => { for (const listener of signInListeners) listener(tabId, { site, url }); };
+  return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree, download, shownDownloads, archive, refuseSignIn };
 }
 
 const signal = new AbortController().signal;
@@ -785,6 +790,54 @@ describe('browser tabs: streaming a page to another screen', () => {
     // What screens decode (shared/validation/browserStreamSchemas.ts) is what the host sends.
     expect(decodeBoundary(await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined }), browserTabViewSchema)).toMatchObject({ driver: { by: 'agent' }, agentCursor: { x: 40, y: 80 } });
     expect(decodeBoundary(await fixture.registry.invokeRemote('browser:view', ['closed', 0], { caller: undefined }), browserTabViewSchema)).toMatchObject({ stopped: 'gone' });
+  });
+
+  it('marks a tab an agent typed into, so other screens keep streaming it, until its page loads a new document', async () => {
+    const fixture = setup([browserTab('form', 'pane-a', 'claude-a'), browserTab('browsed', 'pane-a', 'claude-a')], { holds });
+    // SAFETY: browserTab builds every tab's customState as a BrowserPanelState.
+    const use = (id: string) => (fixture.tabs.find(tab => tab.id === id)?.state.customState as BrowserPanelState | undefined)?.agentUse;
+    await call(fixture, 'snapshot', { tab: 'form' });
+    await call(fixture, 'snapshot', { tab: 'browsed' });
+    expect(use('form')).toBeUndefined();
+    await call(fixture, 'click', { tab: 'browsed', ref: 'e2' });
+    expect(use('browsed')).toBe('used');
+    await call(fixture, 'type', { tab: 'form', ref: 'e1', text: 'ada@example.com' });
+    expect(use('form')).toBe('typed');
+    await call(fixture, 'click', { tab: 'form', ref: 'e2' });
+    expect(use('form')).toBe('typed');
+    fixture.pages.get('form')?.emit('did-navigate');
+    await vi.waitFor(() => expect(use('form')).toBe('used'));
+    // Typing that submits the form (Enter) loads the next document during the call itself.
+    const page = fixture.pages.get('form');
+    if (!page) throw new Error('The form tab has no page.');
+    Object.assign(page, { insertText: async () => { page.emit('did-navigate'); } });
+    await call(fixture, 'type', { tab: 'form', ref: 'e1', text: 'ada@example.com' });
+    expect(use('form')).toBe('used');
+    // A page that goes (the tab slept) reloads from its URL later, without what was typed.
+    await call(fixture, 'type', { tab: 'browsed', ref: 'e1', text: 'ada@example.com' });
+    expect(use('browsed')).toBe('typed');
+    fixture.pages.get('browsed')?.emit('destroyed');
+    await vi.waitFor(() => expect(use('browsed')).toBe('used'));
+  });
+
+  it('tells other screens about a sign-in the tab stopped, until its page moves on', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a')], { holds });
+    const view = async () => decodeBoundary(await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined }), browserTabViewSchema);
+    const before = await view();
+    expect(before.signIn).toBeUndefined();
+    const waiting = fixture.registry.invokeRemote('browser:view', ['mine', before.version], { caller: undefined });
+    fixture.refuseSignIn('mine', 'Google', 'https://accounts.google.com/v3/signin/identifier');
+    expect(decodeBoundary(await waiting, browserTabViewSchema).signIn).toEqual({ site: 'Google', url: 'https://accounts.google.com/v3/signin/identifier' });
+    fixture.pages.get('mine')?.emit('did-navigate');
+    expect((await view()).signIn).toBeUndefined();
+  });
+
+  it('ends a sign-in line when the page moves on before any screen looked at the tab', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a')], { holds });
+    fixture.refuseSignIn('mine', 'Google', 'https://accounts.google.com/');
+    fixture.pages.get('mine')?.emit('did-navigate');
+    const view = decodeBoundary(await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined }), browserTabViewSchema);
+    expect(view.signIn).toBeUndefined();
   });
 
   it('says a tab is asleep, so the screen offers to wake it', async () => {

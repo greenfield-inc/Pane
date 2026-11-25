@@ -174,7 +174,6 @@ export class ConfigManager extends EventEmitter {
       chatTabsEnabled: true,
       autopilotEnabled: false,
       notesEnabled: false,
-      profilesEnabled: false,
       todosEnabled: false,
       autoStartOnBoot: true,
       keepAwakeWhileSessionsActive: true,

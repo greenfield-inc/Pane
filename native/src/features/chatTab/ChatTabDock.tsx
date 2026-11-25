@@ -12,6 +12,7 @@ import type { JsonValue } from '@shared/validation/boundaryDecoder';
 import { monoFontFamily, useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
+import { useLinkRenderer } from '../links/LinkMenu';
 import { queuedLabel } from './chatComposer';
 
 /**
@@ -44,7 +45,8 @@ export function ProblemBanner({ problem, agent, busy, onRestart, onSignIn }: { p
 
 function Plan({ text }: { text: string }) {
   const theme = useTheme();
-  const content = useMarkdown(text, { colorScheme: theme.scheme, styles: { text: { color: theme.chat.foreground, fontSize: 14, lineHeight: 20 } } });
+  const renderer = useLinkRenderer();
+  const content = useMarkdown(text, { colorScheme: theme.scheme, renderer, styles: { text: { color: theme.chat.foreground, fontSize: 14, lineHeight: 20 } } });
   return <View style={[styles.detail, { borderColor: theme.chat.border, backgroundColor: theme.chat.background }]}>{content}</View>;
 }
 

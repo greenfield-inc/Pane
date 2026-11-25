@@ -12,6 +12,7 @@ import { useDaemon } from '@/daemon';
 import { monoFontFamily, useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
 
+import { useLinkRenderer } from '../links/LinkMenu';
 import { StateScreen } from '../tabs/StateScreen';
 import { TabFooter } from '../tabs/TabFooter';
 import { fileViewer, formatSize, highlightLines, languageOf, MAX_IMAGE_BYTES, MAX_TEXT_BYTES, parentOf, posixPath, type Token } from './files';
@@ -273,7 +274,8 @@ function CodeView({ content, language }: { content: string; language: Parameters
 function MarkdownView({ content }: { content: string }) {
   const theme = useTheme();
   const { colors } = theme;
-  const rendered = useMarkdown(content, { colorScheme: theme.scheme, styles: {
+  const renderer = useLinkRenderer();
+  const rendered = useMarkdown(content, { colorScheme: theme.scheme, renderer, styles: {
     text: { color: colors.text, fontSize: 16, lineHeight: 26 },
     link: { color: colors.accentText },
     codespan: { color: colors.text, backgroundColor: colors.surfaceRaised, fontFamily: monoFontFamily, fontStyle: 'normal' },

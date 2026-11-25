@@ -1,4 +1,4 @@
-import { HealthCardDialog } from './components/machineHealth/HealthCardDialog';
+import { HealthCardPopups } from './components/machineHealth/HealthCardPopups';
 import { BrowserLayer } from './components/panels/browser/BrowserLayer';
 import { askAgentAbout, isHealthCard } from './components/machineHealth/healthCardActions';
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
@@ -42,6 +42,7 @@ import { ResumeSessionsDialog } from './components/ResumeSessionsDialog';
 import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
 import { openLink } from './utils/openLink';
+import { LinkPopoverHost } from './components/links/LinkPopover';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeSessionActivity } from './services/sessionActivitySync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
@@ -1090,7 +1091,6 @@ function App() {
               ? <MachineOfflineView onMachineDetails={() => openSettings({ category: 'remote-access', setting: 'remote-machines' })} />
               : <SessionView />}
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
-          <HealthCardDialog suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </RemoteWorkspace>
         </div>
         <OnboardingDialog
@@ -1113,6 +1113,7 @@ function App() {
         <FeedbackDialog isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
         <LoopDrawer />
         <RestartToUpdateToast />
+        <HealthCardPopups suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         <KeySequenceHint />
         <KeymapNotice onOpenKeyboardShortcuts={() => openSettings({ category: 'shortcuts', setting: 'keyboard-shortcut-map' })} />
         <UpdateDialog
@@ -1174,6 +1175,7 @@ function App() {
         />
         <DocsDialog isOpen={isDocsOpen} onClose={() => setIsDocsOpen(false)} />
         <ShortcutHintsOverlay isVisible={shortcutHintsVisible} shortcuts={terminalShortcuts} />
+        <LinkPopoverHost />
         </div>
       </div>
     </ContextMenuProvider>

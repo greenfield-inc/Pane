@@ -2,6 +2,7 @@
 
 use crate::alerts::Alerts;
 use crate::config::Config;
+use crate::eab::Eab;
 use crate::io::BoxStream;
 use crate::registry::{Registry, Update};
 use std::collections::{HashMap, HashSet};
@@ -71,10 +72,12 @@ impl Bucket {
 
 const MINUTE: Duration = Duration::from_secs(60);
 const HOUR: Duration = Duration::from_secs(3600);
+const DAY: Duration = Duration::from_secs(86_400);
 /// A control connection sending more frames than this a minute is cut off.
 const MAX_FRAMES_PER_MIN: u64 = 600;
 
 /// What a usage counter counts, each with its own limit (see PROTOCOL.md, Limits).
+#[derive(Clone, Copy)]
 pub enum Charge<'a> {
     /// Client connections to a computer, by computer id and client source.
     Client(&'a str, &'a str),
@@ -88,6 +91,10 @@ pub enum Charge<'a> {
     AgentConns(&'a str),
     /// Computers new to this relay, by source.
     NewIds(&'a str),
+    /// Google Trust Services EAB keys, by computer id.
+    Eab(&'a str),
+    /// Google Trust Services EAB keys across all of this relay's computers.
+    EabRelay,
 }
 
 /// The address a client is counted under: IPv4 as is, IPv6 by its /64, the
@@ -121,6 +128,7 @@ pub struct State {
     pub domain: String,
     pub registry: Registry,
     pub alerts: Alerts,
+    pub eab: Eab,
     /// The in-process iroh relay's loopback address.
     pub direct_addr: SocketAddr,
     /// The port the https listener is bound to.
@@ -134,16 +142,48 @@ pub struct State {
     buckets: Mutex<HashMap<String, Bucket>>,
     blocked: RwLock<HashSet<String>>,
     open_clients: AtomicUsize,
+    /// Open client connections per computer and client source.
+    client_pairs: Mutex<HashMap<(String, String), usize>>,
+    /// When each computer last connected here, for `counts`.
+    seen: Mutex<HashMap<String, Instant>>,
     next_session: AtomicU64,
 }
 
-/// Holds one of the --max-connections client slots.
-pub struct ClientSlot(Arc<State>);
+/// Holds one of the --max-connections client slots, and for a computer's client
+/// its place in `counts`.
+pub struct ClientSlot(Arc<State>, Option<(String, String)>);
 
 impl Drop for ClientSlot {
     fn drop(&mut self) {
         self.0.open_clients.fetch_sub(1, Ordering::Relaxed);
+        if let Some(pair) = self.1.take() {
+            let mut pairs = self.0.client_pairs.lock().unwrap();
+            if let Some(n) = pairs.get_mut(&pair) {
+                *n -= 1;
+                if *n == 0 {
+                    pairs.remove(&pair);
+                }
+            }
+        }
     }
+}
+
+/// What the relay logs once an hour and at shutdown: counts only, never ids or addresses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Counts {
+    /// Computers with a control connection here now.
+    pub computers: usize,
+    /// Distinct computers that connected here in the last 24 hours.
+    pub computers_seen_24h: usize,
+    /// Distinct computer and client-address pairs with an open connection through this relay:
+    /// the phones, glasses and other Panes reaching a computer through it. Devices on the
+    /// computer's own network or Tailscale don't pass through the relay, and the relay forwards
+    /// TLS without decrypting it, so it can't tell which kind each one is.
+    pub clients: usize,
+    /// Open client connections; one device often holds several.
+    pub client_connections: usize,
+    /// Computers with at least one open client connection.
+    pub computers_with_clients: usize,
 }
 
 pub fn frame(v: serde_json::Value) -> String {
@@ -162,6 +202,7 @@ impl State {
         domain: String,
         registry: Registry,
         alerts: Alerts,
+        eab: Eab,
         direct_addr: SocketAddr,
         https_port: u16,
     ) -> Self {
@@ -170,6 +211,7 @@ impl State {
             domain,
             registry,
             alerts,
+            eab,
             direct_addr,
             https_port,
             shutdown: CancellationToken::new(),
@@ -181,6 +223,8 @@ impl State {
             buckets: Mutex::default(),
             blocked: RwLock::default(),
             open_clients: AtomicUsize::new(0),
+            client_pairs: Mutex::default(),
+            seen: Mutex::default(),
             next_session: AtomicU64::new(1),
         }
     }
@@ -209,6 +253,10 @@ impl State {
         let handle = AgentHandle { session, tx, cut };
         agents.insert(id.to_string(), handle.clone());
         drop(agents);
+        self.seen
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), Instant::now());
         if let Some(old) = old {
             let _ = old.tx.send(close_frame(
                 "replaced",
@@ -282,16 +330,44 @@ impl State {
         self.pending.lock().unwrap().remove(conn)
     }
 
-    pub fn client_slot(self: &Arc<Self>) -> Option<ClientSlot> {
+    /// A client slot for the iroh relay, or for a computer's client with `computer`
+    /// (its id and the client's source).
+    pub fn client_slot(self: &Arc<Self>, computer: Option<(&str, &str)>) -> Option<ClientSlot> {
         let n = self.open_clients.fetch_add(1, Ordering::Relaxed);
-        let slot = ClientSlot(self.clone());
+        let pair = computer.map(|(id, source)| (id.to_string(), source.to_string()));
+        if let Some(pair) = &pair {
+            *self
+                .client_pairs
+                .lock()
+                .unwrap()
+                .entry(pair.clone())
+                .or_default() += 1;
+        }
+        let slot = ClientSlot(self.clone(), pair);
         (n < self.cfg.max_connections).then_some(slot)
     }
 
-    /// Adds `n` to a counter and returns its level: over its limit slows, over twice refuses.
-    pub fn charge(&self, charge: Charge, n: u64) -> Level {
+    /// Forgets computers last seen more than a day ago, then counts.
+    pub fn counts(&self) -> Counts {
+        let mut seen = self.seen.lock().unwrap();
+        seen.retain(|_, at| at.elapsed() < DAY);
+        let computers_seen_24h = seen.len();
+        drop(seen);
+        let pairs = self.client_pairs.lock().unwrap();
+        let with_clients: HashSet<&str> = pairs.keys().map(|(id, _)| id.as_str()).collect();
+        Counts {
+            computers: self.computers(),
+            computers_seen_24h,
+            clients: pairs.len(),
+            client_connections: pairs.values().sum(),
+            computers_with_clients: with_clients.len(),
+        }
+    }
+
+    /// A counter's key, window and limit.
+    fn counter(&self, charge: Charge) -> (String, Duration, u64) {
         let cfg = &self.cfg;
-        let (key, window, limit) = match charge {
+        match charge {
             Charge::Client(id, source) => (
                 format!("client {id} {source}"),
                 MINUTE,
@@ -310,7 +386,14 @@ impl State {
                 cfg.limit_agent_conns_per_min,
             ),
             Charge::NewIds(source) => (format!("new {source}"), HOUR, cfg.limit_new_ids_per_hour),
-        };
+            Charge::Eab(id) => (format!("eab {id}"), DAY, cfg.limit_eab_per_day),
+            Charge::EabRelay => ("eab *".to_string(), HOUR, cfg.limit_eab_per_hour),
+        }
+    }
+
+    /// Adds `n` to a counter and returns its level: over its limit slows, over twice refuses.
+    pub fn charge(&self, charge: Charge, n: u64) -> Level {
+        let (key, window, limit) = self.counter(charge);
         let mut usage = self.usage.lock().unwrap();
         let now = Instant::now();
         let fresh = Usage {
@@ -330,6 +413,14 @@ impl State {
             Level::Slow
         } else {
             Level::Ok
+        }
+    }
+
+    /// Takes back one count, for a charge whose work failed before it was used.
+    pub fn refund(&self, charge: Charge) {
+        let (key, _, _) = self.counter(charge);
+        if let Some(u) = self.usage.lock().unwrap().get_mut(&key) {
+            u.count = u.count.saturating_sub(1);
         }
     }
 
@@ -437,7 +528,16 @@ mod tests {
         let alerts = Alerts::load(&cfg).unwrap();
         let registry = Registry::new(&[], None, None, 10).unwrap();
         let direct = "127.0.0.1:1".parse().unwrap();
-        let state = State::new(cfg, "pane.localhost".into(), registry, alerts, direct, 8443);
+        let eab = Eab::load(&cfg).unwrap();
+        let state = State::new(
+            cfg,
+            "pane.localhost".into(),
+            registry,
+            alerts,
+            eab,
+            direct,
+            8443,
+        );
         let new_id = |ip: &str| {
             let source = registration_source(ip.parse().unwrap());
             state.charge(Charge::NewIds(&source), 1)
