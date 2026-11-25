@@ -491,14 +491,14 @@ export class TerminalPanelManager extends EventEmitter {
 
   /**
    * An argument-mode prompt as one literal shell word: its prompt file read by the shell, or the
-   * quoted text. Only POSIX shells pass a quoted word to the agent unchanged: Windows PowerShell
+   * single-quoted text, inside which no POSIX shell expands `!`, `$` or backticks. Only POSIX shells pass a quoted word to the agent unchanged: Windows PowerShell
    * drops embedded `"` when it hands an argument to a native program, and cmd expands `%` and `!`.
    * Elsewhere this is undefined, and the prompt is typed into the agent once it is ready instead.
    */
   private initialPromptWord(customState: TerminalPanelState, shellType: string | undefined): string | undefined {
     const fileWord = customState.initialInputFile ? promptFileShellWord(customState.initialInputFile) : undefined;
     if (fileWord) return fileWord;
-    return isPosixShell(shellType) ? this.quoteCommandArgument(customState.initialInput ?? '') : undefined;
+    return isPosixShell(shellType) ? quoteShellWord(customState.initialInput ?? '', shellType) : undefined;
   }
 
   private hasUnsentArgumentPrompt(customState: TerminalPanelState): boolean {
@@ -868,7 +868,7 @@ export class TerminalPanelManager extends EventEmitter {
         nextState.initialInputSentAt = new Date().toISOString();
         nextState.initialInputError = undefined;
       }
-      const promptWord = promptArgument && customState.initialInputFile ? this.initialPromptWord(customState, shellType) : undefined;
+      const promptWord = promptArgument ? this.initialPromptWord(customState, shellType) : undefined;
       return {
         commandToRun: buildCursorLaunchCommand({ baseCommand: initialCommand, promptArgument, promptWord, shellType }),
         customState: nextState,

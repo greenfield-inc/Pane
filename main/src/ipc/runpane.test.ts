@@ -7320,6 +7320,17 @@ describe('runpane IPC handlers', () => {
       expect(fs.readFileSync(state.initialInputFile ?? '', 'utf8')).toBe('Line one with !bang\nLine two\n');
     });
 
+    it('launches a short prompt with a tab from the prompt file, since a typed tab is shell completion', async () => {
+      vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
+
+      await createRegistry().invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'tab', tool: { agent: 'claude', initialInput: 'Rename\tcolumns' } }],
+      }]);
+
+      expect(fs.readFileSync(createdInitialState().initialInputFile ?? '', 'utf8')).toBe('Rename\tcolumns\n');
+    });
+
     it('keeps a short single-line create prompt as a launch argument', async () => {
       vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
 

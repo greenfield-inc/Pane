@@ -8,9 +8,10 @@ import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { RunpanePromptWarning } from '../../../../shared/types/runpaneOrchestration';
 
 /**
- * Longest single-line prompt Pane types as is. Longer or multi-line text is
- * pasted into a composer, or read from a file at launch, so a shell or a TUI
- * never sees it as keystrokes.
+ * Longest single-line prompt Pane types as is. Longer or multi-line text, and
+ * text with a tab (which a shell or TUI takes as completion), is pasted into a
+ * composer, or read from a file at launch, so a shell or a TUI never sees it as
+ * keystrokes.
  */
 const LONG_PROMPT_THRESHOLD = 512;
 
@@ -31,7 +32,7 @@ export function stripTrailingNewlines(text: string): string {
 }
 
 export function isLongPrompt(text: string): boolean {
-  return text.includes('\n') || text.length > LONG_PROMPT_THRESHOLD;
+  return text.includes('\n') || text.includes('\t') || text.length > LONG_PROMPT_THRESHOLD;
 }
 
 /**

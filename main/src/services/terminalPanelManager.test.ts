@@ -1243,7 +1243,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
 
     expect(result).toMatchObject({
-      commandToRun: 'codex --yolo "Read \\"the guide\\" and initialize \\`Pane Chat\\`."',
+      commandToRun: "codex --yolo 'Read \"the guide\" and initialize `Pane Chat`.'",
       isCliCommand: true,
       customState: {
         agentType: 'codex',
@@ -1599,10 +1599,10 @@ describe('TerminalPanelManager hidden output delivery', () => {
       initialInput: 'Read the guide and initialize Pane Chat.',
     });
 
-    expect(unsafeCommandSubstitution.commandToRun).toBe('codex --yolo "BACKSLASH\\\\\\$(touch /tmp/pwned)"');
+    expect(unsafeCommandSubstitution.commandToRun).toBe("codex --yolo 'BACKSLASH\\$(touch /tmp/pwned)'");
     expect(unsafeCommandSubstitution.commandToRun).not.toMatch(/(^|[^\\])(?:\\\\)*\$\(/);
-    expect(escapedShellSyntax.commandToRun).toBe('codex --yolo "plain \\$value and \\`cmd\\`"');
-    expect(ordinaryPrompt.commandToRun).toBe('codex --yolo "Read the guide and initialize Pane Chat."');
+    expect(escapedShellSyntax.commandToRun).toBe("codex --yolo 'plain $value and `cmd`'");
+    expect(ordinaryPrompt.commandToRun).toBe("codex --yolo 'Read the guide and initialize Pane Chat.'");
   });
 
   it('never puts a startup prompt on a PowerShell or cmd command line, and drops it rather than typing it later', () => {
@@ -1639,7 +1639,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     );
 
     expect(result).toMatchObject({
-      commandToRun: 'claude --dangerously-skip-permissions --session-id 11111111-1111-4111-8111-111111111111 "/do TM-x"',
+      commandToRun: "claude --dangerously-skip-permissions --session-id 11111111-1111-4111-8111-111111111111 '/do TM-x'",
       isCliCommand: true,
       customState: {
         initialInputSentAt: expect.any(String),
@@ -1663,7 +1663,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     );
 
     expect(result.commandToRun).toBe(
-      'claude --dangerously-skip-permissions --session-id 11111111-1111-4111-8111-111111111111 "First line\nSecond line with \\$value"',
+      "claude --dangerously-skip-permissions --session-id 11111111-1111-4111-8111-111111111111 'First line\nSecond line with $value'",
     );
     expect(result.customState.initialInputSentAt).toEqual(expect.any(String));
   });
@@ -1980,7 +1980,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       initialInput: 'Read "the guide" and initialize `Pane Chat`.',
     });
 
-    const quoted = '"Read \\"the guide\\" and initialize \\`Pane Chat\\`."';
+    const quoted = "'Read \"the guide\" and initialize `Pane Chat`.'";
     expect(result.commandToRun).toContain(`--resume "$__PANE_CURSOR_CHAT" ${quoted}; `);
     expect(result.commandToRun).toContain(`else cursor-agent --force --trust ${quoted}; fi`);
     expect(result.customState).toMatchObject({
@@ -2711,7 +2711,7 @@ describe('TerminalPanelManager long prompt delivery', () => {
       initialInput: 'Plan issue 42',
     }, 'zsh');
 
-    expect(result.commandToRun).toBe('codex --yolo "Plan issue 42"');
+    expect(result.commandToRun).toBe("codex --yolo 'Plan issue 42'");
   });
 
   it.each([
