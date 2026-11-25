@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'crypto';
+import { authenticateRemoteDaemonBearerToken } from '../auth';
 import { PairingExchange } from './pairingExchange';
 import type { RemoteDaemonClientRecord } from '../../../../shared/types/remoteDaemon';
 
@@ -133,5 +134,26 @@ describe('QR pairing exchange', () => {
     const { secret } = exchange.createSecret('1h');
     await exchange.exchange({ secret, label: 'Build Box', computerId: 'buildbox0000000a', source: PHONE });
     expect(saved[0]).toMatchObject({ label: 'Build Box', kind: 'computer', computerId: 'buildbox0000000a' });
+  });
+
+  it('keeps a read-only link read-only through a restart, and a Pane from before access levels refuses its secret and token', async () => {
+    let text: string | null = null;
+    const store = { read: () => text, write: (next: string) => { text = next; } };
+    const saved: RemoteDaemonClientRecord[] = [];
+    const deps = { store, addClient: async (record: RemoteDaemonClientRecord) => { saved.push(record); } };
+    const { secret } = new PairingExchange(deps).createSecret('1h', 'read');
+    // What an older Pane compares: the plain hash of the presented secret or token.
+    const plain = (value: string) => createHash('sha256').update(value).digest('hex');
+    expect(text).not.toContain(plain(secret));
+
+    const result = await new PairingExchange(deps).exchange({ secret, label: 'Parsa', source: PHONE });
+
+    expect(result).toMatchObject({ ok: true, access: 'read' });
+    if (!result.ok) return;
+    expect(saved).toEqual([expect.objectContaining({ access: 'read' })]);
+    expect(saved[0].tokenHash).not.toBe(plain(result.token));
+    expect(authenticateRemoteDaemonBearerToken(`Bearer ${result.token}`, saved)).toMatchObject({ ok: true, client: { access: 'read' } });
+    const { access: _dropped, ...stripped } = saved[0];
+    expect(authenticateRemoteDaemonBearerToken(`Bearer ${result.token}`, [stripped])).toMatchObject({ ok: false });
   });
 });

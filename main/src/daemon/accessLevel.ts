@@ -143,11 +143,13 @@ const READ_EVENT_CHANNELS: ReadonlySet<string> = new Set([
   'loops:changed',
 ]);
 
-const REACH: Record<CallerAccess, { channels: ReadonlySet<string>; events: ReadonlySet<string> } | null> = {
+interface Reach { channels: ReadonlySet<string>; events: ReadonlySet<string> }
+
+const REACH = {
   full: null,
   read: { channels: READ_CHANNELS, events: READ_EVENT_CHANNELS },
   glasses: { channels: GLASSES_CHANNELS, events: GLASSES_EVENT_CHANNELS },
-};
+} satisfies Record<CallerAccess, Reach | null>;
 
 /** The one access check: whether a caller at this level may run a command. */
 export function mayInvoke(access: CallerAccess, channel: string): boolean {
@@ -165,7 +167,7 @@ export function readOnlyAnswer(channel: string): JsonValue | undefined {
 }
 
 /** What a read-only device is told when it asks for something it may not do. */
-export function readOnlyRefusal(what: string): { message: string; code: string; next: string } {
+export function readOnlyRefusal(what: string) {
   return {
     message: `This device is paired Read only with this computer, so it can't use ${what}. Nothing was run or changed.`,
     code: READ_ONLY_ACCESS_CODE,
