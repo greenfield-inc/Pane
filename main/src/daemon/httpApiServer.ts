@@ -16,7 +16,7 @@ import { terminalPanelManager } from '../services/terminalPanelManager';
 import type { PaneCommandRegistry } from './commandRegistry';
 import { buildRoutesReport } from './computerCommands';
 import type { ComputerRoutesReport } from '../../../shared/types/remoteComputers';
-import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, type WorkspaceAccessPolicy } from './auth';
+import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, isWorkspaceRequestAdmitted, type WorkspaceAccessPolicy } from './auth';
 
 export type { WorkspaceAccessPolicy } from './auth';
 import { isPaneDaemonEventChannel } from './server';
@@ -631,7 +631,8 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
-    const auth = glasses ? null : this.authenticateRequest(request, url.searchParams.get('access_token'));
+    const auth = glasses ? null : await this.authenticateUpgrade(request, socket, url);
+    if (socket.destroyed) return;
     if (auth && !auth.ok) {
       writeRawHttpError(socket, auth.statusCode, auth.error.message);
       return;
@@ -658,11 +659,26 @@ export class PaneRemoteHttpApiServer {
   }
 
   /**
+   * The upgrade request's auth check, which can wait on a password hash. Node drops its own error
+   * listener on upgrade, so a client that resets meanwhile would otherwise throw in main.
+   */
+  private async authenticateUpgrade(request: IncomingMessage, socket: Duplex, url: URL): Promise<RemoteRequestAuthResult> {
+    const ignoreReset = () => socket.destroy();
+    socket.on('error', ignoreReset);
+    try {
+      return await this.authenticateRequest(request, url.searchParams.get('access_token'));
+    } finally {
+      socket.removeListener('error', ignoreReset);
+    }
+  }
+
+  /**
    * Connects an authenticated client to a host loopback port in the forwarded list and copies raw
    * bytes both ways, one WebSocket per TCP connection the client accepted.
    */
   private async handlePortStreamUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, port: number, url: URL): Promise<void> {
-    const auth = this.authenticateRequest(request, url.searchParams.get('access_token'));
+    const auth = await this.authenticateUpgrade(request, socket, url);
+    if (socket.destroyed) return;
     if (!auth.ok) {
       writeRawHttpError(socket, auth.statusCode, auth.error.message, auth.error.code);
       return;
@@ -878,7 +894,7 @@ export class PaneRemoteHttpApiServer {
     }
 
     if (url.pathname === '/events') {
-      this.handleEventStreamRequest(request, response, url);
+      await this.handleEventStreamRequest(request, response, url);
       return;
     }
 
@@ -968,7 +984,7 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
-    const headerAuth = this.authenticateRequest(request);
+    const headerAuth = await this.authenticateRequest(request);
     const maxBodyBytes = headerAuth.ok
       ? MAX_AUTHENTICATED_REQUEST_BODY_BYTES
       : MAX_UNAUTHENTICATED_REQUEST_BODY_BYTES;
@@ -1003,7 +1019,7 @@ export class PaneRemoteHttpApiServer {
     }
 
     // The header check only sizes the upload; access can change while the body arrives.
-    const auth = this.authenticateRequest(request, headerAuth.ok ? undefined : invokeRequest.token);
+    const auth = await this.authenticateRequest(request, headerAuth.ok ? undefined : invokeRequest.token);
     if (!auth.ok) {
       this.writeJson(response, auth.statusCode, auth);
       return;
@@ -1101,7 +1117,7 @@ export class PaneRemoteHttpApiServer {
       this.writeMethodNotAllowed(response, 'GET');
       return;
     }
-    const auth = this.authenticateRequest(request);
+    const auth = await this.authenticateRequest(request);
     if (!auth.ok) {
       this.writeJson(response, auth.statusCode, auth);
       return;
@@ -1138,12 +1154,12 @@ export class PaneRemoteHttpApiServer {
     } satisfies RemoteHealthPayload);
   }
 
-  private handleEventStreamRequest(
+  private async handleEventStreamRequest(
     request: IncomingMessage,
     response: ServerResponse,
     url: URL,
     glassesClient?: NonNullable<GlassesAdmission['client']>,
-  ): void {
+  ): Promise<void> {
     if (request.method !== 'GET') {
       this.writeMethodNotAllowed(response, 'GET');
       return;
@@ -1151,11 +1167,13 @@ export class PaneRemoteHttpApiServer {
 
     const auth: RemoteRequestAuthResult = glassesClient
       ? { ok: true, client: glassesClient }
-      : this.authenticateRequest(request, url.searchParams.get('access_token'));
+      : await this.authenticateRequest(request, url.searchParams.get('access_token'));
     if (!auth.ok) {
       this.writeJson(response, auth.statusCode, auth);
       return;
     }
+    // The password check can wait on a hash; a client that left meanwhile would never fire 'close' below.
+    if (response.destroyed || request.socket.destroyed) return;
 
     if (url.searchParams.get('auth_check') === '1') {
       response.writeHead(204, withCorsHeaders({
@@ -1368,7 +1386,7 @@ export class PaneRemoteHttpApiServer {
       return;
     }
     if (url.pathname === '/events' && admission.client) {
-      this.handleEventStreamRequest(request, response, url, admission.client);
+      await this.handleEventStreamRequest(request, response, url, admission.client);
       return;
     }
     if (url.pathname !== '/invoke' || !glasses) {
@@ -1551,7 +1569,7 @@ export class PaneRemoteHttpApiServer {
     return address === '127.0.0.1' || address === '::1' ? 'other' : 'lan';
   }
 
-  private authenticateRequest(request: IncomingMessage, token?: string | null): RemoteRequestAuthResult {
+  private async authenticateRequest(request: IncomingMessage, token?: string | null): Promise<RemoteRequestAuthResult> {
     if (this.workspace) {
       // A linked computer's or paired phone's token is accepted on every listener, Tailscale's too (D-51).
       const paired = authenticateRemoteDaemonBearerToken(
@@ -1671,11 +1689,12 @@ export class PaneRemoteHttpApiServer {
     }
     if (this.workspace) {
       // Narrower visibility or a new password applies to clients that are already connected.
-      return workspaceCredentials !== null && authenticateWorkspaceRequest(
+      // Runs on every event and heartbeat, so it never hashes: a password counts once a check proved it.
+      return workspaceCredentials !== null && isWorkspaceRequestAdmitted(
         workspaceCredentials.login,
         workspaceCredentials.authorization,
         this.workspace.access(),
-      ).ok;
+      );
     }
     const remoteConfig = this.getRemoteConfig();
     if (!remoteConfig.host.config.enabled) {
