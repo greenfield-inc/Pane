@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { useHostsStore } from '@/auth/hostsStore';
+import { useNavigatorReady } from '@/features/app/useNavigatorReady';
 import { openRoute, resolveOpenTarget } from '@/features/links/links';
 import { useTheme } from '@/theme';
 import { Button, EmptyState } from '@/ui';
@@ -24,9 +25,11 @@ export default function OpenScreen() {
 
   const hostId = resolved.type === 'open' ? resolved.hostId : null;
   const switchHost = resolved.type === 'open' && resolved.switchHost;
+  // A link that starts the app mounts this screen before the navigator is ready.
+  const ready = useNavigatorReady();
 
   useEffect(() => {
-    if (!hostId) return;
+    if (!hostId || !ready) return;
     // Switching hosts remounts the signed-in stack; this screen runs again on the new host.
     if (switchHost) {
       void setActive(hostId);
@@ -37,7 +40,7 @@ export default function OpenScreen() {
     // A Notify alert opens its approval screen over the pane list.
     const route = openRoute({ paneId, panelId, notifyId, sessionId, sessionPaneId, list });
     if (route) router.push(route);
-  }, [hostId, switchHost, paneId, panelId, notifyId, sessionId, sessionPaneId, list, setActive]);
+  }, [ready, hostId, switchHost, paneId, panelId, notifyId, sessionId, sessionPaneId, list, setActive]);
 
   if (resolved.type === 'unknown-host') {
     return (
