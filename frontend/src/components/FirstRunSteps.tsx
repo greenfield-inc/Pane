@@ -136,7 +136,7 @@ export function PhoneStepBody() {
       <p className="text-sm text-text-primary">
         Pair your phone with this computer. You&apos;ll get alerts when an agent needs you, can answer it from anywhere, and can open your dev servers on the phone.
       </p>
-      <p className="text-sm text-text-tertiary">No Pane app? The link opens Pane in your phone&apos;s browser and offers the app.</p>
+      <p className="text-sm text-text-tertiary">No Pane app? The link offers it and your phone&apos;s browser. The iPhone app is on the App Store.</p>
       <p className="text-sm text-text-tertiary">Pair more phones later from Home or Settings › Remote Access.</p>
     </div>
   );

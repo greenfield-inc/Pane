@@ -229,7 +229,7 @@ function ApnsSettings({ persistence, draft, setDraft, dirty }: ApnsSettingsProps
             label="APNs environment"
             value={draft.environment}
             options={[
-              { id: 'production', label: 'Production', description: 'TestFlight and App Store builds.' },
+              { id: 'production', label: 'Production', description: 'App Store builds.' },
               { id: 'sandbox', label: 'Sandbox', description: 'Development builds from Xcode or Expo.' },
             ]}
             onChange={value => setDraft(current => ({ ...current, environment: value }))}

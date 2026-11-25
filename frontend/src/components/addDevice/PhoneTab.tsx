@@ -5,7 +5,7 @@ import type { PairingView } from '../../hooks/useRelayPairing';
 import { cn } from '../../utils/cn';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { Tooltip } from '../ui/Tooltip';
-import { QR_PAPER, QrCode, TestFlightLine } from './QrCode';
+import { QR_PAPER, QrCode, AppStoreLine } from './QrCode';
 import { AccessPicker } from './AccessPicker';
 import { RelayLimitNotice, RelayLimitTip } from './RelayLimitNotice';
 import { relayLimitSentence, relayLimitTime } from './relayLimit';
@@ -15,7 +15,7 @@ const CODE_BOX = 'h-[200px] w-[200px]';
 
 const STEPS = [
   "Point your phone's camera at the code.",
-  "Tap the link. It opens the Pane app, or Pane in your phone's browser.",
+  "Tap the link. It opens the Pane app, or a page that offers the app and your phone's browser.",
   'Your phone shows up under Phones and glasses.',
 ];
 
@@ -134,7 +134,7 @@ export function PhoneTab({ view, paired, pairedReadOnly = false, renewed, onRetr
         <div className="min-w-0 flex-1 space-y-5 pt-2">
           {side}
           {view.step !== 'limited' && <AccessPicker />}
-          <TestFlightLine />
+          <AppStoreLine />
         </div>
       </div>
     </div>
