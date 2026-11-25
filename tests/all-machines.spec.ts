@@ -6,6 +6,9 @@ import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder
 import { notifyFixture } from './fixtures/notifySnapshot';
 import { layoutBox } from './orchestrationSessionsFixture';
 
+/** Profiles on (T-63): avatar rows. */
+const PROFILES_ON = { appearanceMode: 'system', sessionProfilesEnabled: true };
+
 type MachinesMock = {
   getMachineRuns: () => Array<{ machineId: string; command: MachineCommand }>;
   getMachineReads: () => Array<{ machineId: string; channel: string }>;
@@ -157,7 +160,7 @@ test('agent events move no Session or Pane row', async ({ page }) => {
   await expect(sessionRows(page)).toHaveText([/Spring sale launch/, /Backup rotation/]);
 
   // build-box's worker starts working, then asks you something. Its Session spins while build-box
-  // says it is working, and the spinner goes (never red) when it waits on you (T-63).
+  // says it is working, and goes back to the idle ring (never red) when it waits on you.
   const icon = () => sessionRows(page).filter({ hasText: 'Backup rotation' }).getByTestId('session-activity-icon');
   for (const state of ['working', 'blocked'] as const) {
     await (await mock(page)).evaluate((api, build) => {
@@ -171,13 +174,9 @@ test('agent events move no Session or Pane row', async ({ page }) => {
       'orchestration-sessions:activity-list': { success: true, data: [{ sessionId: 's1', state: state === 'working' ? 'working' : 'idle', workingPanes: state === 'working' ? 1 : 0 }] },
     });
     // The event landed: build-box's activity was read again and its Session shows it.
-    if (state === 'working') {
-      await expect(icon()).toHaveAttribute('data-state', 'working');
-      await expect(sessionRows(page).filter({ hasText: 'Backup rotation' })).toContainText('1 working');
-    } else {
-      await expect(icon()).toHaveCount(0);
-    }
-    await expect(sessionRows(page).filter({ hasText: 'Backup rotation' }).locator('.border-status-error, .text-status-error')).toHaveCount(0);
+    await expect(icon()).toHaveAttribute('data-state', state === 'working' ? 'working' : 'idle');
+    if (state === 'working') await expect(sessionRows(page).filter({ hasText: 'Backup rotation' })).toContainText('1 working');
+    await expect(icon()).not.toHaveClass(/status-error/);
     await expect(projectRows(page, 'acme-web')).toHaveText(before);
     await expect(sessionRows(page)).toHaveText([/Spring sale launch/, /Backup rotation/]);
   }
@@ -191,20 +190,30 @@ test('All machines shows each machine\'s own Session activity, and an offline ma
     { type: 'event', machineId: 'build', channel: 'orchestration-sessions:activity', args: [] }, { build },
   ), { 'orchestration-sessions:activity-list': { success: true, data: [{ sessionId: 's1', state: 'working', workingPanes: 1 }] } });
   await expect(icon('Backup rotation')).toHaveAttribute('data-state', 'working');
-  await expect(icon('Spring sale launch')).toHaveCount(0);
+  await expect(icon('Spring sale launch')).toHaveAttribute('data-state', 'idle');
   await page.screenshot({ path: testInfo.outputPath('j13-all-machines-working.png') });
   // build-box goes offline: past the grace its rows dim and its Session reads idle.
   const offline = machines.map(machine => machine.id === 'build' ? { ...machine, status: 'offline' as const, offlineSince: new Date(Date.now() - 60_000).toISOString() } : machine);
   await (await mock(page)).evaluate((api, list) => api.emitMachineEvent({ type: 'machines', machines: list }), offline);
-  await expect(icon('Backup rotation')).toHaveCount(0);
+  await expect(icon('Backup rotation')).toHaveAttribute('data-state', 'idle');
   await page.screenshot({ path: testInfo.outputPath('j13-all-machines-offline.png') });
+});
+
+test('with Profiles off, a Session row keeps its activity icon after the chevron, and no avatar (T-63)', async ({ page }) => {
+  await openAllMachines(page);
+  const row = sessionRows(page).filter({ hasText: 'Spring sale launch' });
+  await expect(row.getByTestId('profile-avatar')).toHaveCount(0);
+  await expect(row.getByTestId('session-activity-icon')).toHaveAttribute('data-state', 'idle');
+  const toggle = await layoutBox(row.getByRole('button', { name: /^(Expand|Collapse) Spring sale launch/ }));
+  const name = await layoutBox(row.locator('span.truncate').first());
+  expect(name.x - (toggle.x + toggle.width)).toBe(6 + 12 + 6);
 });
 
 test('a Session row shows its avatar at the row\'s padding, and while it works a spinner before its count and machine mark (T-63, J18)', async ({ page }, testInfo) => {
   const withProfile = { ...reads, build: { ...reads.build, 'orchestration-sessions:list': { success: true, data: { sessions: [
     { ...session('s1', 'Backup rotation', ['b2']), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' } },
   ] } } } };
-  await openAllMachines(page, 'light', { extra: { machineConnections: { machines, reads: withProfile } } });
+  await openAllMachines(page, 'light', { extra: { machineConnections: { machines, reads: withProfile }, initialConfig: PROFILES_ON } });
   const row = sessionRows(page).filter({ hasText: 'Backup rotation' });
   const plain = sessionRows(page).filter({ hasText: 'Spring sale launch' });
   await expect(row.getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Profile Greenfield orchestrator');
@@ -245,7 +254,7 @@ test('a working Session with approvals waiting reads spinner, badge, machine mar
   const notifySnapshot = { settings: notifyFixture().settings, history: [], items: [
     { id: 'q-row', ui: 'approve' as const, title: 'Apply migration?', source: { name: 'checkout', agent: 'Claude', session: { id: 's1', name: 'Spring sale launch' } }, state: 'waiting' as const, createdAt: Date.now() },
   ] };
-  await openAllMachines(page, 'light', { extra: { machineConnections: { machines, reads: working }, notifySnapshot } });
+  await openAllMachines(page, 'light', { extra: { machineConnections: { machines, reads: working }, notifySnapshot, initialConfig: PROFILES_ON } });
   const row = sessionRows(page).filter({ hasText: 'Spring sale launch' });
   const badge = row.getByTestId('session-approvals-count');
   await expect(badge).toHaveText('1');

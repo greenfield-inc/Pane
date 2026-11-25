@@ -6,19 +6,6 @@ import type { PanelActivationRequest, PanelLayoutNode, SessionPanelLayout, ToolP
 import type { TailnetMachine } from '../shared/types/workspaceAccess';
 import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
 
-/** The New Session palette (T-63), and what it asked the host to create. */
-const newSessionPalette = (page: Page) => page.getByRole('dialog', { name: 'New Session', exact: true });
-const sessionChoice = (page: Page, key: string) => newSessionPalette(page).getByTestId(`session-choice-${key}`);
-const paletteOptions = (page: Page) => newSessionPalette(page).getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option');
-const createInputs = (page: Page) => page.evaluate(() => {
-  // SAFETY: installSessionsFixture adds this control before the app loads.
-  const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationCreateInputs: () => JsonObject[] } };
-  return mockWindow.__paneTestElectronMock.getOrchestrationCreateInputs();
-});
-const asPlatform = (page: Page, platform: string) => page.addInitScript((value) => {
-  Object.defineProperty(navigator, 'platform', { configurable: true, get: () => value });
-}, platform);
-
 for (const theme of ['light', 'night-owl']) {
   for (const compact of [false, true]) {
     test(`sidebar actions remain reachable while scrolling (${theme}, compact: ${compact})`, async ({ page }) => {
@@ -74,7 +61,7 @@ for (const theme of ['light', 'night-owl']) {
       await expect(creation).toHaveCSS('outline-width', '2px');
       await reachable(creation);
       await page.keyboard.press('Enter');
-      await expect(newSessionPalette(page)).toBeVisible();
+      await expect(page.getByRole('dialog', { name: 'Create Session', exact: true })).toBeVisible();
       await page.keyboard.press('Escape');
       await creation.focus();
       // Traverse the long list in both directions: a visible focus ring must
@@ -119,46 +106,46 @@ test('empty and folded sidebar sections keep their actions beside the headings',
   }
 });
 
-test('Run on lists this computer first, then its WSL distributions, and creates the Session in the one picked', async ({ page }) => {
+test('Session runtime defaults to Windows and submits the selected installed distribution', async ({ page }) => {
   await installSessionsFixture(page, [], [], { distributions: ['Ubuntu-24.04', 'Debian'] });
   await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
-  const runOn = newSessionPalette(page).getByRole('combobox', { name: 'Run on', exact: true });
-  await expect(runOn.locator('option')).toHaveText([/\(this computer\)$/, /· WSL Ubuntu-24\.04$/, /· WSL Debian$/]);
-  await runOn.selectOption({ index: 1 });
-  await sessionChoice(page, 'agent:claude').click();
-  await expect(newSessionPalette(page)).toHaveCount(0);
-  expect((await createInputs(page)).at(-1)).toMatchObject({ agent: 'claude', runtime: 'wsl', wslDistribution: 'Ubuntu-24.04', nameFromFirstMessage: true });
+  const runtime = page.getByLabel('Run agent in');
+  await expect(runtime).toHaveValue('');
+  await runtime.selectOption('Ubuntu-24.04');
+  await page.getByLabel('Session name (optional)', { exact: true }).fill('WSL planning');
+  await page.screenshot({ path: 'tmp/verify/session-runtime/01-wsl-create.png' });
+  await page.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'WSL planning', exact: true })).toBeAttached();
+  const result = await page.evaluate(() => window.electronAPI.orchestrationSessions.list());
+  expect(result.data?.sessions.find(session => session.name === 'WSL planning')).toMatchObject({ runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' });
 });
 
-test('Run on offers only this computer when it has no WSL distributions or other machines', async ({ page }) => {
+test('Session runtime is hidden when the host offers no WSL distributions', async ({ page }) => {
   await installSessionsFixture(page, []);
   await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
-  await expect(newSessionPalette(page).getByRole('combobox', { name: 'Run on', exact: true }).locator('option')).toHaveText([/\(this computer\)$/]);
+  await expect(page.getByLabel('Run agent in')).toHaveCount(0);
 });
 
-test('on Windows, WSL in Run on offers Cursor, and profiles say they don\'t run there', async ({ page }) => {
-  await asPlatform(page, 'Win32');
-  await installSessionsFixture(page, [], [], {
-    distributions: ['Ubuntu-24.04'],
-    initialConfig: { chatTabsEnabled: true },
-    agentFarmProfiles: { profiles: [{ ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '1.0.0', harness: 'claude', hidden: false }] },
+test('selecting WSL restores a Cursor default while preserving an explicit agent choice', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'Win32' });
   });
+  await installSessionsFixture(page, [], [], { distributions: ['Ubuntu-24.04'], defaultOrchestratorAgent: 'cursor' });
   await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
-  await expect(sessionChoice(page, 'other:cursor')).toHaveCount(0);
-  await expect(sessionChoice(page, 'profile:greenfield/orchestrator')).not.toHaveAttribute('aria-disabled');
-  await newSessionPalette(page).getByRole('combobox', { name: 'Run on', exact: true }).selectOption({ index: 1 });
-  await expect(sessionChoice(page, 'other:cursor')).toBeVisible();
-  await expect(sessionChoice(page, 'profile:greenfield/orchestrator')).toHaveAttribute('aria-disabled', 'true');
-  await newSessionPalette(page).getByRole('combobox', { name: 'Start a Session with', exact: true }).fill('orch');
-  await page.keyboard.press('Enter');
-  await expect(newSessionPalette(page).getByRole('alert')).toContainText('don\'t run in WSL');
-  expect(await createInputs(page)).toEqual([]);
+  await expect(page.getByRole('radio', { name: 'Cursor', exact: true })).toHaveCount(0);
+  const runtime = page.getByLabel('Run agent in');
+  await runtime.selectOption('Ubuntu-24.04');
+  await expect(page.getByRole('radio', { name: 'Cursor', exact: true })).toBeChecked();
+  await page.getByTestId('create-session-agent-codex').click();
+  await runtime.selectOption('');
+  await runtime.selectOption('Ubuntu-24.04');
+  await expect(page.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
 });
 
 test('Sessions create, rename, switch, and keep chat surfaces focused', async ({ page }) => {
@@ -190,14 +177,19 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
     await expect(roadmapOverview.getByText(label, { exact: true })).toHaveCount(0);
   }
 
-  // New Session asks only what to start with: no name, goal, launch command or behavior (T-63).
   await page.getByTestId('new-orchestration-session').click();
-  await expect(newSessionPalette(page).getByRole('combobox', { name: 'Start a Session with', exact: true })).toBeFocused();
-  await expect(newSessionPalette(page).getByRole('textbox')).toHaveCount(0);
-  await expect(sessionChoice(page, 'agent:claude')).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('ArrowDown');
-  await expect(sessionChoice(page, 'agent:codex')).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('Enter');
+  const createDialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
+  await expect(createDialog.getByRole('heading', { name: 'Create Session', exact: true })).toBeVisible();
+  await expect(createDialog.getByLabel('Session name (optional)', { exact: true })).toHaveValue('');
+  await expect(createDialog.getByLabel('Goal', { exact: true })).toHaveCount(0);
+  await expect(createDialog.getByLabel('Context', { exact: true })).toHaveCount(0);
+  await expect(createDialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
+  await createDialog.getByTestId('create-session-agent-codex').click();
+  await expect(createDialog.getByRole('button', { name: 'Create Session', exact: true })).toBeInViewport();
+  await expect(createDialog.getByLabel('Session behavior', { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: '/tmp/pane-session-create-compact.png' });
+  await expect(createDialog.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
+  await createDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
 
   await expect(page.getByRole('heading', { level: 1, name: 'New chat 3', exact: true })).toBeAttached();
   await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
@@ -217,12 +209,12 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
   await expect(page.getByRole('heading', { name: 'Release checklist renamed', exact: true, level: 1 })).toBeAttached();
   await expect(page.getByRole('button', { name: 'Open Session Release checklist renamed', exact: true })).toBeVisible();
 
-  // The agent picked last is where the palette starts next time.
   await page.getByTestId('new-orchestration-session').click();
-  await expect(sessionChoice(page, 'agent:codex')).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('Enter');
-  // "New chat 3" was renamed, so its name is free again.
-  await expect(page.getByRole('heading', { level: 1, name: 'New chat 3', exact: true })).toBeAttached();
+  const namedCreateDialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
+  await namedCreateDialog.getByLabel('Session name (optional)', { exact: true }).fill('  Custom named chat  ');
+  await expect(namedCreateDialog.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
+  await namedCreateDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Custom named chat', exact: true })).toBeAttached();
   await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Open Session Onboarding', exact: true }).click();
@@ -241,182 +233,39 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
 });
 
-test('the New Session palette works by keyboard: type to filter, arrows choose, Tab moves to Run on and back, Return creates', async ({ page }) => {
-  await asPlatform(page, 'Linux');
+test('Session creation agent picker supports native radio keyboard semantics', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'Linux' });
+  });
   await page.setViewportSize({ width: 1400, height: 900 });
-  await installSessionsFixture(page, [], [], {
-    initialConfig: { chatTabsEnabled: true },
-    agentFarmProfiles: { profiles: [
-      { ref: 'pane/claude', plugin: 'pane', version: '1.0.0', harness: 'claude', hidden: true },
-      { ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '1.0.0', harness: 'claude', hidden: false },
-      { ref: 'greenfield/reviewer', plugin: 'greenfield', version: '1.0.0', harness: 'codex', hidden: false },
-    ] },
-  });
-  await gotoApp(page);
-  await dismissStartupDialogs(page);
-  await page.getByTestId('new-orchestration-session').click();
-  const palette = newSessionPalette(page);
-  const options = paletteOptions(page);
-  // Claude and Codex, the profiles (Pane's own hidden), then Cursor, OpenCode and Pi under Other agents.
-  await expect(options).toHaveCount(7);
-  await expect(palette.getByText('Other agents', { exact: true })).toBeVisible();
-  await expect(sessionChoice(page, 'agent:claude')).toContainText('nothing added');
-  await expect(sessionChoice(page, 'other:pi')).toContainText('Starts directly');
-  const input = palette.getByRole('combobox', { name: 'Start a Session with', exact: true });
-  await page.keyboard.type('REV');
-  await expect(options).toHaveCount(1);
-  await expect(sessionChoice(page, 'profile:greenfield/reviewer')).toHaveAttribute('aria-selected', 'true');
-  await expect(input).toHaveAttribute('aria-activedescendant', await sessionChoice(page, 'profile:greenfield/reviewer').getAttribute('id') ?? '');
-  await input.fill('');
-  await page.keyboard.press('ArrowUp');
-  await expect(sessionChoice(page, 'other:pi')).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('ArrowDown');
-  await expect(sessionChoice(page, 'agent:claude')).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('ArrowDown');
-  await expect(sessionChoice(page, 'profile:greenfield/orchestrator')).toHaveAttribute('aria-selected', 'true');
-  const runOn = palette.getByRole('combobox', { name: 'Run on', exact: true });
-  await page.keyboard.press('Tab');
-  await expect(runOn).toBeFocused();
-  await page.keyboard.press('Shift+Tab');
-  await expect(input).toBeFocused();
-  await page.keyboard.press('Tab');
-  await page.keyboard.press('Enter');
-  await expect(palette).toHaveCount(0);
-  expect((await createInputs(page)).at(-1)).toMatchObject({ agent: 'claude', agentProfile: 'greenfield/orchestrator', name: 'New chat', nameFromFirstMessage: true, isPinned: false });
-  await expect(page.getByTestId('orchestration-session-created-session-1').getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Profile Greenfield orchestrator');
-  await page.getByTestId('new-orchestration-session').click();
-  await page.keyboard.type('zzz');
-  await expect(palette.getByText('No agent or profile matches “zzz”', { exact: true })).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(palette).toHaveCount(0);
-  expect(await createInputs(page)).toHaveLength(1);
-});
-
-test('a profile can\'t start while Chat tabs are off, and the palette says why', async ({ page }) => {
-  await installSessionsFixture(page, [], [], {
-    initialConfig: { chatTabsEnabled: false },
-    agentFarmProfiles: { profiles: [{ ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '1.0.0', harness: 'claude', hidden: false }] },
-  });
-  await gotoApp(page);
-  await dismissStartupDialogs(page);
-  await page.getByTestId('new-orchestration-session').click();
-  await page.keyboard.type('orch');
-  await page.keyboard.press('Enter');
-  await expect(newSessionPalette(page).getByRole('alert')).toContainText('Turn on Chat tabs in Settings › AI & Agents');
-  expect(await createInputs(page)).toEqual([]);
-});
-
-test('a Session row shows its profile\'s avatar where the activity icon was, and a spinner only while it works (T-63, J18)', async ({ page }, testInfo) => {
   await installSessionsFixture(page, [
-    { ...sessionFixture('profiled', 'Profiled', '', '', '2026-09-16T12:00:00.000Z'), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' } },
-    { ...sessionFixture('plain', 'Plain', '', '', '2026-09-16T12:01:00.000Z'), agent: 'codex', agentProfile: { ref: 'pane/codex', hash: 'h' } },
-    sessionFixture('older', 'Older', '', '', '2026-09-16T12:02:00.000Z'),
-  ], [], {
-    sessionActivity: [{ sessionId: 'profiled', state: 'working', workingPanes: 0 }, { sessionId: 'older', state: 'working', workingPanes: 0 }],
-    notifySnapshot: { settings: { ...DEFAULT_NOTIFY_SETTINGS }, history: [], items: [
-      { id: 'q-row', ui: 'approve', title: 'Apply migration?', source: { name: 'checkout', agent: 'Claude', session: { id: 'older', name: 'Older' } }, state: 'waiting', createdAt: Date.now() },
-    ] },
-  });
+    sessionFixture('keyboard', 'Keyboard chat', 'Keyboard goal.', 'Keyboard context.', '2026-09-16T12:00:00.000Z'),
+  ]);
   await gotoApp(page);
   await dismissStartupDialogs(page);
-  const row = (id: string) => page.getByTestId(`orchestration-session-${id}`);
-  await expect(row('profiled').getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Profile Greenfield orchestrator');
-  await expect(row('profiled').getByTestId('profile-avatar')).toHaveText('GO');
-  await expect(row('plain').getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Codex, no profile');
-  // A Session from before profiles shows its agent's logo.
-  await expect(row('older').getByTestId('profile-avatar')).toHaveAttribute('aria-label', 'Claude, no profile');
-  // No reserved left slot: the avatar starts at the row's 8px padding and the name 8px after it.
-  for (const id of ['profiled', 'plain', 'older']) {
-    const button = await layoutBox(row(id));
-    const name = await layoutBox(row(id).locator('span.truncate').first());
-    const avatar = await layoutBox(row(id).getByTestId('profile-avatar'));
-    expect(avatar.x - button.x).toBe(8);
-    expect(avatar.width).toBe(16);
-    expect(name.x - button.x).toBe(8 + 16 + 8);
-  }
-  await expect(row('profiled').getByTestId('session-activity-icon')).toHaveAttribute('data-state', 'working');
-  await expect(row('plain').getByTestId('session-activity-icon')).toHaveCount(0);
-  // The right side reads spinner, then the approvals badge.
-  await expect(row('older').getByTestId('session-approvals-count')).toHaveText('1');
-  const spinner = await layoutBox(row('older').getByTestId('session-activity-icon'));
-  const badge = await layoutBox(row('older').getByTestId('session-approvals-count'));
-  expect(spinner.x + spinner.width).toBeLessThanOrEqual(badge.x);
-  const button = await layoutBox(row('older'));
-  expect(button.x + button.width - (badge.x + badge.width)).toBeLessThanOrEqual(8);
-  await page.screenshot({ path: testInfo.outputPath('j18-session-rows.png') });
-});
 
-test('a Session with Panes shows its expand chevron in the avatar\'s place on hover and keyboard focus (T-63)', async ({ page }) => {
-  const at = '2026-09-16T12:00:00.000Z';
-  await installSessionsFixture(page, [
-    { ...sessionFixture('parent', 'Parent', '', '', at, [{ paneId: 'child', panelIds: [], attachedAt: at }]), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h' } },
-    { ...sessionFixture('lone', 'Lone', '', '', at), agentProfile: { ref: 'pane/claude', hash: 'h' } },
-  ], [paneFixture('child', 'feature/child')]);
-  await gotoApp(page);
-  await dismissStartupDialogs(page);
-  const parent = page.getByTestId('orchestration-session-parent');
-  const toggle = page.getByRole('button', { name: 'Expand Parent Panes', exact: true });
-  await expect(page.getByRole('button', { name: /Lone Panes/ })).toHaveCount(0);
-  // The chevron sits exactly over the avatar, hidden until wanted.
-  expect(await layoutBox(toggle)).toEqual(await layoutBox(parent.getByTestId('profile-avatar')));
-  await page.mouse.move(900, 600);
-  await expect(toggle).toHaveCSS('opacity', '0');
-  await expect(parent.getByTestId('profile-avatar')).toBeVisible();
-  await parent.focus();
-  await page.keyboard.press('Tab');
-  await expect(toggle).toBeFocused();
-  await expect(toggle).toHaveCSS('opacity', '1');
-  await expect(toggle).toHaveCSS('box-shadow', /rgb/);
-  await expect(parent.getByTestId('profile-avatar')).toBeHidden();
-  await page.keyboard.press('Enter');
-  await expect(page.getByRole('button', { name: 'Collapse Parent Panes', exact: true })).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.locator('#orchestration-session-panes-sessions-parent')).toBeVisible();
-});
-
-test('Run on another machine lists that machine\'s own profiles and creates the Session there', async ({ page }) => {
-  const profile = (ref: string, harness = 'claude') => ({ ref, plugin: ref.split('/')[0], version: '1.0.0', harness, hidden: ref.startsWith('pane/') });
-  await installSessionsFixture(page, [], [], {
-    initialConfig: { chatTabsEnabled: true },
-    agentFarmProfiles: { profiles: [profile('greenfield/orchestrator')] },
-    machineConnections: {
-      machines: [
-        { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
-        { id: 'build', label: 'build-box', kind: 'remote', status: 'online', offlineSince: null },
-        { id: 'travel', label: 'travel-laptop', kind: 'remote', status: 'offline', offlineSince: '2026-10-30T09:14:00' },
-      ],
-      reads: { build: {
-        'chat-tab:profiles': { success: true, data: { profiles: [profile('pane/claude'), profile('labtest/runner')] } },
-        'orchestration-sessions:list': { success: true, data: { sessions: [{ name: 'New chat' }] } },
-      } },
-    },
-    machines: { machineRunAnswers: { build: { 'create-session': { success: true, data: { session: { id: 'remote-session' } } } } } },
-  });
-  await gotoApp(page);
-  await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
-  const runOn = newSessionPalette(page).getByRole('combobox', { name: 'Run on', exact: true });
-  await expect(runOn.locator('option')).toHaveText([/\(this computer\)$/, 'build-box', 'travel-laptop (offline)']);
-  await expect(runOn.locator('option', { hasText: 'travel-laptop' })).toHaveJSProperty('disabled', true);
-  await expect(sessionChoice(page, 'profile:greenfield/orchestrator')).toBeVisible();
-  await runOn.selectOption({ label: 'build-box' });
-  await expect(sessionChoice(page, 'profile:labtest/runner')).toBeVisible();
-  await expect(sessionChoice(page, 'profile:greenfield/orchestrator')).toHaveCount(0);
-  await sessionChoice(page, 'profile:labtest/runner').hover();
-  await expect(newSessionPalette(page).getByRole('status')).toHaveText('Runs on build-box, with build-box\'s own copy of Labtest runner.');
-  await sessionChoice(page, 'profile:labtest/runner').click();
-  await expect(newSessionPalette(page)).toHaveCount(0);
-  const runs = await page.evaluate(() => {
-    // SAFETY: installElectronApiMock installs this controller before the app loads.
-    const mockWindow = window as typeof window & { __paneTestElectronMock: { getMachineRuns: () => Array<{ machineId: string; command: JsonObject }> } };
-    return mockWindow.__paneTestElectronMock.getMachineRuns();
-  });
-  expect(runs).toContainEqual({ machineId: 'build', command: { type: 'create-session', input: expect.objectContaining({ agent: 'claude', agentProfile: 'labtest/runner', name: 'New chat 2', nameFromFirstMessage: true }) } });
-  expect(await createInputs(page)).toEqual([]);
+  const dialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
+  const radios = dialog.getByRole('radio');
+  // Claude, Codex, Cursor, OpenCode and Pi.
+  await expect(radios).toHaveCount(5);
+  await expect(dialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
+
+  await radios.first().focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(radios.nth(1)).toBeFocused();
+  await expect(radios.nth(1)).toBeChecked();
+  await page.keyboard.press('ArrowRight');
+  await expect(radios.nth(2)).toBeFocused();
+  await expect(radios.nth(2)).toBeChecked();
+  await page.keyboard.press('Space');
+  await expect(radios.nth(2)).toBeChecked();
 });
 
-test('New Session leaves out Cursor on Windows and starts on Claude when Cursor was the default', async ({ page }) => {
-  await asPlatform(page, 'Win32');
+test('Session creation hides unsupported Cursor on Windows', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'Win32' });
+  });
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [
     sessionFixture('windows', 'Windows chat', 'Windows goal.', 'Windows context.', '2026-09-16T12:00:00.000Z'),
@@ -425,11 +274,12 @@ test('New Session leaves out Cursor on Windows and starts on Claude when Cursor 
   await dismissStartupDialogs(page);
 
   await page.getByTestId('new-orchestration-session').click();
+  const dialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
   // Claude, Codex, OpenCode and Pi.
-  await expect(paletteOptions(page)).toHaveCount(4);
-  await expect(sessionChoice(page, 'other:cursor')).toHaveCount(0);
-  await expect(sessionChoice(page, 'agent:claude')).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('radio')).toHaveCount(4);
+  await expect(dialog.getByRole('radio', { name: 'Cursor', exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'New chat', exact: true })).toBeAttached();
   await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
 });
@@ -648,9 +498,9 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
   await expect(sessionsToggle).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByTestId('orchestration-session-evolution')).toBeHidden();
   await page.getByTestId('new-orchestration-session').click();
-  await expect(newSessionPalette(page)).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(newSessionPalette(page)).toHaveCount(0);
+  const collapsedCreateDialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
+  await expect(collapsedCreateDialog.getByRole('heading', { name: 'Create Session', exact: true })).toBeVisible();
+  await collapsedCreateDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await sessionsToggle.click();
   await expect(sessionsToggle).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByTestId('orchestration-session-evolution')).toContainText('Pane evolution');
@@ -898,29 +748,34 @@ test('Sessions can be pinned, persist across reload, and unpin back to the norma
   })).toBe(false);
 });
 
-test('Start new Sessions pinned lives in Settings, and New Session follows it', async ({ page }) => {
+test('Start pinned creates the Session pinned and is remembered for the next Session', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 1000 });
   await installSessionsFixture(page, []);
   await gotoApp(page);
   await dismissStartupDialogs(page);
+  const dialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  const startPinned = dialog.getByRole('switch', { name: 'Start pinned', exact: true });
 
   await page.getByTestId('new-orchestration-session').click();
-  await expect(newSessionPalette(page).getByRole('switch')).toHaveCount(0);
-  await page.keyboard.press('Enter');
-  await expect(page.getByTestId('orchestration-session-created-session-1')).toBeVisible();
-  await expect(page.getByTestId('orchestration-pinned-session-created-session-1')).toHaveCount(0);
-
-  await page.getByRole('button', { name: 'Settings', exact: true }).first().click();
-  const appSettings = page.getByTestId('settings-page');
-  await appSettings.getByRole('button', { name: 'AI & Agents', exact: true }).click();
-  await appSettings.getByRole('switch', { name: 'Start new Sessions pinned', exact: true }).click();
-  await expect(appSettings.getByRole('switch', { name: 'Start new Sessions pinned', exact: true })).toBeChecked();
-  await appSettings.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(startPinned).not.toBeChecked();
+  await startPinned.click();
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByTestId('orchestration-pinned-session-created-session-1')).toBeVisible();
 
   await page.getByTestId('new-orchestration-session').click();
-  await page.keyboard.press('Enter');
-  await expect(page.getByTestId('orchestration-pinned-session-created-session-2')).toBeVisible();
-  expect((await createInputs(page)).map(input => input.isPinned)).toEqual([false, true]);
+  await expect(startPinned).toBeChecked();
+  await startPinned.click();
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByTestId('orchestration-session-created-session-2')).toBeVisible();
+  await expect(page.getByTestId('orchestration-pinned-session-created-session-2')).toHaveCount(0);
+});
+
+test('Start pinned starts on when the saved config says so', async ({ page }) => {
+  await installSessionsFixture(page, [], [], { initialConfig: { defaultSessionPinned: true } });
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+  await page.getByTestId('new-orchestration-session').click();
+  await expect(page.getByRole('dialog', { name: 'Create Session', exact: true }).getByRole('switch', { name: 'Start pinned', exact: true })).toBeChecked();
 });
 
 test('switching hosts replaces the Sessions and pinned Sessions in the sidebar', async ({ page }) => {
@@ -1538,32 +1393,60 @@ test('Session overview refreshes for associated Pane activity without reacting t
   await expect(overview.getByText('Should stay visible', { exact: true })).toHaveCount(0);
 });
 
-test('a new Session takes the launch command and behavior from Settings, and its own settings keep their changes across reload', async ({ page }) => {
+test('Session launch settings preserve custom arguments, profile, and agent across reload', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 1000 });
+  const savedCommand = 'af run orchestrator --model "large model"';
+  const launchCommand = `${savedCommand} --label 'release planning'`;
   await installSessionsFixture(page, [], [], {
     defaultOrchestratorAgent: 'codex',
     initialConfig: {
       defaultSessionCommand: 'codex --model default-model',
       defaultSessionProfile: 'Discuss the goal before delegating.',
+      customCommands: [{ name: 'Agent Farm', command: savedCommand }],
     },
   });
   await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
-  await expect(sessionChoice(page, 'agent:codex')).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('Enter');
-  await expect(page.getByRole('heading', { level: 1, name: 'New chat', exact: true })).toBeAttached();
-  // The palette sends no launch fields: the host applies the defaults.
-  expect((await createInputs(page)).at(-1)).not.toHaveProperty('launchCommand');
+  const createDialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await createDialog.getByLabel('Session name (optional)').fill('Launch settings');
+  await createDialog.getByText('Launch command and behavior', { exact: true }).click();
+  await expect(createDialog.getByRole('button', { name: 'Create Session', exact: true })).toBeInViewport();
+  await expect(createDialog.getByLabel('Session behavior', { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: '/tmp/pane-session-create-compact.png' });
+  await expect(createDialog.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
+  await expect(createDialog.getByLabel('Custom command and arguments')).toHaveValue('codex --model default-model');
+  await createDialog.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Discuss the goal before delegating.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true }).fill('Discard this draft.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
+  await createDialog.getByLabel('Launch command', { exact: true }).selectOption({ label: 'Agent Farm' });
+  await expect(createDialog.getByLabel('Custom command and arguments')).toHaveValue(savedCommand);
+  await createDialog.getByLabel('Custom command and arguments').fill(launchCommand);
+  await createDialog.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Discuss the goal before delegating.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true }).fill('Use the requested workflow.\nReport blockers.');
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior' })).toBeInViewport();
+  await page.screenshot({ path: '/tmp/pane-session-behavior-editor.png' });
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior', exact: true }).click();
+  await createDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Launch settings', exact: true })).toBeAttached();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByTestId('orchestration-session-created-session-1').click();
+  await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
   await page.getByRole('button', { name: 'Session settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Session settings', exact: true });
-  await expect(settings.getByLabel('Custom command and arguments')).toHaveValue('codex --model default-model');
+  await expect(settings.getByLabel('Custom command and arguments')).toHaveValue(launchCommand);
   await settings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Discuss the goal before delegating.');
-  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true }).fill('Keep implementation in associated Panes.');
-  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Use the requested workflow.\nReport blockers.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(settings.getByText(/Saved changes apply the next time/)).toBeVisible();
   await settings.getByLabel('Launch command', { exact: true }).selectOption('builtin');
   await expect(settings.getByLabel('Custom command and arguments')).toHaveValue('');
+  await settings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true }).fill('Keep implementation in associated Panes.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior', exact: true }).click();
   await settings.getByRole('button', { name: 'Save for next launch', exact: true }).click();
   await expect(settings).not.toBeVisible();
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -1576,24 +1459,60 @@ test('a new Session takes the launch command and behavior from Settings, and its
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
 });
 
-test('a custom resume saved in Settings reaches the next Session, which can turn it off', async ({ page }) => {
+test('new Sessions remember the last launch arguments and allow clearing them', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 1000 });
-  await installSessionsFixture(page, [], [], { initialConfig: {
-    defaultSessionCommand: 'my-launcher run profile',
-    defaultSessionResume: { mode: 'claude', initialTemplate: '{command} -- --session-id {sessionId}', resumeTemplate: '{command} -- --resume {sessionId}' },
-  } });
+  await installSessionsFixture(page, []);
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+  const dialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  const command = 'agent-farm run coordinator --label "release planning" --quiet';
+  const open = async () => {
+    await page.getByTestId('new-orchestration-session').click();
+    await dialog.getByText('Launch command and behavior', { exact: true }).click();
+  };
+  await open();
+  await dialog.getByLabel('Custom command and arguments').fill(command);
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await open();
+  await expect(dialog.getByLabel('Custom command and arguments')).toHaveValue(command);
+  await dialog.getByLabel('Custom command and arguments').fill('discard this draft');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await open();
+  await expect(dialog.getByLabel('Custom command and arguments')).toHaveValue(command);
+  await dialog.getByLabel('Launch command', { exact: true }).selectOption('builtin');
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await open();
+  await expect(dialog.getByLabel('Custom command and arguments')).toHaveValue('');
+});
+
+test('custom Session resume settings persist, seed the next Session, and can be disabled', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 1000 });
+  await installSessionsFixture(page, []);
   await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('new-orchestration-session').click();
-  await page.keyboard.press('Enter');
-  await expect(newSessionPalette(page)).toHaveCount(0);
+  const create = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  await create.getByLabel('Session name (optional)').fill('Wrapper resume');
+  await create.getByText('Launch command and behavior', { exact: true }).click();
+  await create.getByLabel('Custom command and arguments').fill('my-launcher run profile');
+  await create.getByLabel('Enable custom command resume').check();
+  await create.getByLabel('Session ID source').selectOption('claude');
+  await create.getByLabel('First launch template').fill('{command} -- --session-id {sessionId}');
+  await create.getByLabel('Resume template', { exact: true }).fill('{command} -- --resume {sessionId}');
+  await create.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(create).toBeHidden();
+  await page.getByTestId('new-orchestration-session').click();
+  await create.getByText('Launch command and behavior', { exact: true }).click();
+  await expect(create.getByLabel('Resume template', { exact: true })).toHaveValue('{command} -- --resume {sessionId}');
+  await create.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.reload();
   await page.getByTestId('orchestration-session-created-session-1').click();
   await page.getByRole('button', { name: 'Session settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Session settings', exact: true });
   await expect(settings.getByLabel('Enable custom command resume')).toBeChecked();
   await expect(settings.getByLabel('Session ID source')).toHaveValue('claude');
-  await expect(settings.getByLabel('Resume template', { exact: true })).toHaveValue('{command} -- --resume {sessionId}');
   await settings.getByLabel('Enable custom command resume').uncheck();
   await settings.getByRole('button', { name: 'Save for next launch', exact: true }).click();
   await page.getByRole('button', { name: 'Session settings', exact: true }).click();
@@ -1620,7 +1539,13 @@ test('Session app defaults save for new Sessions without changing existing launc
   await appSettings.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(appSettings).not.toBeVisible();
   await page.getByTestId('new-orchestration-session').click();
-  await page.keyboard.press('Enter');
+  const createDialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  await createDialog.getByText('Launch command and behavior', { exact: true }).click();
+  await expect(createDialog.getByLabel('Custom command and arguments')).toHaveValue('af run coordinator --quiet');
+  await createDialog.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Coordinate only the requested work.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
+  await createDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'New chat', exact: true })).toBeAttached();
   await page.getByRole('button', { name: 'Session settings', exact: true }).click();
   const sessionSettings = page.getByRole('dialog', { name: 'Session settings', exact: true });
@@ -2764,21 +2689,15 @@ test('New offers Session and Pane in one dialog and restores keyboard focus', as
   const dialog = page.getByRole('dialog');
   await expect(dialog).toHaveCount(1);
   await expect(dialog.getByRole('radio', { name: 'Session', exact: true })).toBeChecked();
-  // A Session is the same picker as New Session, with its own Run on.
-  await expect(dialog.getByRole('combobox', { name: 'Start a Session with', exact: true })).toBeFocused();
-  await expect(dialog.getByRole('combobox', { name: 'Run on', exact: true })).toBeVisible();
+  await expect(dialog.getByLabel('Session name (optional)')).toBeFocused();
+  await expect(dialog.getByLabel('Run agent in')).toHaveCount(0);
+  // One machine: no picker, and the Create button names no machine.
   await expect(dialog.getByRole('radiogroup', { name: 'Machine' })).toHaveCount(0);
-  // Tab moves through the whole dialog here, not only between the filter and Run on as in the palette.
-  await page.keyboard.press('Tab');
-  await expect(dialog.getByRole('combobox', { name: 'Run on', exact: true })).toBeFocused();
-  await page.keyboard.press('Shift+Tab');
-  await page.keyboard.press('Shift+Tab');
-  await expect(dialog.getByRole('combobox', { name: 'Start a Session with', exact: true })).not.toBeFocused();
-  await expect(dialog.getByRole('combobox', { name: 'Run on', exact: true })).not.toBeFocused();
+  await expect(dialog.getByRole('button', { name: 'Create Session', exact: true })).toBeVisible();
   await dialog.getByRole('radio', { name: 'Pane', exact: true }).click();
   await expect(dialog.getByLabel('Repository', { exact: true })).toHaveValue('1');
   await dialog.getByRole('radio', { name: 'Session', exact: true }).click();
-  await expect(dialog.getByRole('combobox', { name: 'Start a Session with', exact: true })).toBeVisible();
+  await expect(dialog.getByLabel('Session name (optional)')).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(1);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
@@ -2792,12 +2711,13 @@ test('New creates a Session with its selected WSL runtime and agent', async ({ p
   await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByRole('combobox', { name: 'Run on', exact: true }).selectOption({ index: 1 });
-  await dialog.getByTestId('session-choice-other:cursor').click();
-  await expect(page.getByRole('heading', { level: 1, name: 'New chat', exact: true })).toBeAttached();
+  await page.getByLabel('Run agent in').selectOption('Ubuntu-24.04');
+  await page.getByTestId('create-session-agent-cursor').click();
+  await page.getByLabel('Session name (optional)').fill('Coordinate new work');
+  await page.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Coordinate new work', exact: true })).toBeAttached();
   const result = await page.evaluate(() => window.electronAPI.orchestrationSessions.list());
-  expect(result.data?.sessions.find(session => session.name === 'New chat')).toMatchObject({ agent: 'cursor', runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' });
+  expect(result.data?.sessions.find(session => session.name === 'Coordinate new work')).toMatchObject({ agent: 'cursor', runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' });
 });
 
 test('New defaults to the active repository and creates a Pane from the changed repository branch', async ({ page }) => {
@@ -2842,18 +2762,19 @@ test('New explains the missing repository and remains available from the compact
   await expect(page.getByText('A Pane needs a repository. Add one with the + beside Projects.')).toBeVisible();
   await expect(page.getByRole('button', { name: /^Create/ })).toHaveCount(0);
   await page.getByRole('radio', { name: 'Session', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: 'Start a Session with', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Session name (optional)')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(newButton).toBeFocused();
 });
 
-test('New can show the Session picker when an older host has no Session API', async ({ page }) => {
+test('New can show Session settings when an older host has no Session API', async ({ page }) => {
   await installElectronApiMock(page);
   await gotoApp(page);
   await dismissStartupDialogs(page);
   await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: 'Start a Session with', exact: true })).toBeVisible();
-  await page.keyboard.press('Enter');
+  await expect(page.getByLabel('Session name (optional)')).toBeVisible();
+  await expect(page.getByLabel('Run agent in')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Create Session', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('This host does not support Sessions.');
 });
 
@@ -2869,18 +2790,16 @@ test('New keeps a pending Session creation in its dialog and enables retry after
   await dismissStartupDialogs(page);
   await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('combobox', { name: 'Start a Session with', exact: true })).toBeFocused();
-  await page.keyboard.press('Enter');
-  await expect(dialog.getByRole('status').filter({ hasText: 'Creating the Session…' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
   await expect(dialog.getByRole('radio', { name: 'Pane', exact: true })).toBeDisabled();
-  await expect(dialog.getByRole('combobox', { name: 'Start a Session with', exact: true })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled();
   await dialog.getByRole('button', { name: 'Close modal', exact: true }).click();
   await page.keyboard.press('Escape');
   await expect(dialog).toBeVisible();
   await page.evaluate(() => document.dispatchEvent(new Event('test-release-create')));
   await expect(dialog.getByRole('alert')).toHaveText('Creation unavailable; retry.');
   await expect(dialog.getByRole('radio', { name: 'Pane', exact: true })).toBeEnabled();
-  await expect(dialog.getByRole('combobox', { name: 'Start a Session with', exact: true })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled();
 });
 
 test('New preserves multiple-Pane options while switching repositories', async ({ page }) => {

@@ -1,7 +1,7 @@
 import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { NewDialog } from './NewDialog';
 import { onOpenNewDialogRequest } from '../utils/openNewDialog';
-import { NewSessionPaletteHost } from './NewSessionPalette';
+import { onOpenNewSessionRequest } from '../utils/openNewSession';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
@@ -42,7 +42,7 @@ import { RemoteHostSwitcher } from './RemoteHostSwitcher';
 import { AllMachinesSidebar } from './machines/AllMachinesSidebar';
 import { usePaneSort } from '../hooks/usePaneSort';
 import { isAllMachinesOn, startAllMachinesFeed, useAllMachinesStore } from '../stores/allMachinesStore';
-import { isMissionControlEnabled, isTodosEnabled, useConfigStore } from '../stores/configStore';
+import { isMissionControlEnabled, isProfilesEnabled, isTodosEnabled, useConfigStore } from '../stores/configStore';
 import { usePanelStore } from '../stores/panelStore';
 import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
 import { createProjectById, getPinnedSessions, groupSessionsByProject } from '../utils/sessionOrdering';
@@ -392,6 +392,8 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   // State for collapsed sidebar
   const [projects, setProjects] = useState<Project[]>([]);
   const [showNewDialog, setShowNewDialog] = useState(false);
+  // Profiles on (T-63): New Session (the + beside Sessions, Search, the shortcut) opens Create New as a Session.
+  const [newDialogMode, setNewDialogMode] = useState<'session' | undefined>(undefined);
   const [compactSessionMenu, setCompactSessionMenu] = useState<CompactSessionMenuState | null>(null);
   const activeProjectId = useNavigationStore((state) => state.activeProjectId);
   const activeView = useNavigationStore((state) => state.activeView);
@@ -425,6 +427,11 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
 
   // Home's Get Started "New" opens this same dialog.
   useEffect(() => onOpenNewDialogRequest(() => setShowNewDialog(true)), []);
+  useEffect(() => onOpenNewSessionRequest(() => {
+    if (!isProfilesEnabled(useConfigStore.getState().config)) return;
+    setNewDialogMode('session');
+    setShowNewDialog(true);
+  }), []);
 
   const handleRefreshGitStatus = async () => {
     try {
@@ -969,8 +976,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
           </div>
         </div>
 
-        {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} onClose={() => setShowNewDialog(false)} />}
-        <NewSessionPaletteHost entries={machines} onSwitchMachine={selectMachine} />
+        {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} initialMode={newDialogMode} onClose={() => { setShowNewDialog(false); setNewDialogMode(undefined); }} />}
 
         <CompactSessionMenu
           menu={compactSessionMenu}
@@ -1138,8 +1144,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
 
         </div>
     </div>
-    {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} onClose={() => setShowNewDialog(false)} />}
-    <NewSessionPaletteHost entries={machines} onSwitchMachine={selectMachine} />
+    {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} initialMode={newDialogMode} onClose={() => { setShowNewDialog(false); setNewDialogMode(undefined); }} />}
     </>
   );
 }

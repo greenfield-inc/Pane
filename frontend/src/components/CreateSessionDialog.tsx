@@ -48,6 +48,21 @@ interface CreateSessionDialogProps {
     listBranches: (projectId: number) => Promise<{ success: boolean; data?: BranchInfo[] }>;
     create: (request: CreateSessionRequest) => Promise<{ success: boolean; error?: string; details?: string; command?: string }>;
   };
+  /**
+   * Create New (T-63, Profiles on): the form is split over two screens and has no Advanced toggle.
+   * false shows the repository, branch and name; true shows only the advanced options.
+   */
+  optionsScreen?: boolean;
+  /** Create New's footer in place of Cancel and Create; its submit button targets `formId`. */
+  renderFooter?: (state: CreatePaneFooterState) => React.ReactNode;
+}
+
+/** What Create New's footer needs to submit the Pane form. */
+export interface CreatePaneFooterState {
+  formId: string;
+  submitting: boolean;
+  /** Why Create can't run yet, or undefined when it can. */
+  blocked?: string;
 }
 
 export function CreateSessionDialog(props: CreateSessionDialogProps) {
@@ -72,7 +87,14 @@ export function CreatePaneForm({
   onSessionCreated,
   machineName,
   otherMachine,
+  optionsScreen,
+  renderFooter,
 }: CreateSessionDialogProps) {
+  // Create New splits the form over two screens; the classic form shows everything at once.
+  const split = optionsScreen !== undefined;
+  const showMain = !split || !optionsScreen;
+  // Create New's screens drop the classic form's dividers between sections.
+  const sectionClass = split ? 'px-6 pt-4 last:pb-5' : 'px-6 pt-6 pb-5 border-b border-border-primary';
   const branchListboxId = useId();
   const advancedOptionsId = useId();
   const [sessionName, setSessionName] = useState<string>(initialSessionName || '');
@@ -430,12 +452,12 @@ export function CreatePaneForm({
       <ModalBody className="p-0">
         <div className="flex-1 overflow-y-auto">
           <form id="create-session-form" onSubmit={handleSubmit}>
-            {repositoryPicker}
+            {showMain && repositoryPicker}
             {/* 1. Base Branch (select first, auto-populates session name) */}
-            <SkeletonSwap loading={isLoadingBranches && branches.length === 0} skeleton={
+            {showMain && <SkeletonSwap loading={isLoadingBranches && branches.length === 0} skeleton={
               <>
                 <LoadingStatus label="Loading branches" />
-                <Skeleton className="px-6 pt-6 pb-5 border-b border-border-primary">
+                <Skeleton className={sectionClass}>
                   <div className="flex items-center gap-2 mb-2 text-sm font-medium leading-5">
                     <Bone className="w-4 h-4" />
                     <TextBone text="Base Branch" />
@@ -449,7 +471,7 @@ export function CreatePaneForm({
               </>
             }>
               {branches.length > 0 && (
-                <div className="px-6 pt-6 pb-5 border-b border-border-primary">
+                <div className={sectionClass}>
                   <div className="flex items-center gap-2 mb-2">
                     <GitBranch className="w-4 h-4 text-text-tertiary" />
                     <label htmlFor="baseBranch" className="text-sm font-medium text-text-primary">
@@ -618,10 +640,10 @@ export function CreatePaneForm({
                   </p>
                 </div>
               )}
-            </SkeletonSwap>
+            </SkeletonSwap>}
 
             {/* 2. Pane Name (empty uses the name suggested from the branch) */}
-            <div className="px-6 pt-6 pb-5 border-b border-border-primary">
+            {showMain && <div className={sectionClass}>
               <label htmlFor="worktreeTemplate" className="block text-sm font-medium text-text-primary mb-2">
                 Pane Name
               </label>
@@ -657,10 +679,10 @@ export function CreatePaneForm({
                   />
                 </div>
               )}
-            </div>
+            </div>}
 
             {/* 3. Advanced Options Toggle */}
-            <div className="px-6 py-4">
+            {!split && <div className="px-6 py-4">
               <Button
                 type="button"
                 onClick={() => {
@@ -677,11 +699,11 @@ export function CreatePaneForm({
                 {showAdvanced ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
                 Advanced
               </Button>
-            </div>
+            </div>}
 
-            {/* Advanced Options - Collapsible */}
-            {showAdvanced && (
-              <div id={advancedOptionsId} className="px-6 pb-6 border-t border-border-primary pt-5">
+            {/* Advanced Options - Collapsible; Create New shows them as their own screen */}
+            {(split ? optionsScreen : showAdvanced) && (
+              <div id={advancedOptionsId} className={split ? 'px-6 py-5' : 'px-6 pb-6 border-t border-border-primary pt-5'}>
                 <div className="rounded-lg border border-border-primary overflow-hidden divide-y divide-border-primary">
                   {/* Start Pinned Toggle */}
                   <div className="flex items-center gap-4 px-5 py-4">
@@ -789,7 +811,11 @@ export function CreatePaneForm({
         </div>
       </ModalBody>
 
-      <ModalFooter>
+      {renderFooter ? renderFooter({
+        formId: 'create-session-form',
+        submitting: isSubmitting,
+        blocked: isLoadingBranches ? 'Loading branches' : !nameToSubmit ? 'Please enter a pane name' : undefined,
+      }) : <ModalFooter>
         <Button
           type="button"
           onClick={onClose}
@@ -811,7 +837,7 @@ export function CreatePaneForm({
         >
           {isSubmitting ? 'Creating...' : <>{`Create${sessionCount > 1 ? ` ${sessionCount} Panes` : machineName ? ' Pane' : ''}${machineName ? ` on ${machineName}` : ''}`}<span className="ml-1.5 opacity-60">↵</span></>}
         </Button>
-      </ModalFooter>
+      </ModalFooter>}
     </>
   );
 }

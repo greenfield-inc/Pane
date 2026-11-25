@@ -1,4 +1,6 @@
+import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { isProfilesEnabled, useConfigStore } from '../stores/configStore';
 import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { SessionApprovalsCount } from './approvals/ApprovalsCount';
 import { SessionApprovalsCountButton } from './approvals/SessionApprovals';
@@ -16,8 +18,8 @@ import {
 } from '../stores/orchestrationSessionStore';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import type { OrchestrationSessionArchivedPanes, OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
-import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestrationSession';
-import { requestOpenNewSessionPalette } from '../utils/openNewSessionPalette';
+import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
+import { requestOpenNewSession } from '../utils/openNewSession';
 import { ProfileAvatar } from './profiles/ProfileAvatar';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
@@ -27,7 +29,7 @@ import { Tooltip } from './ui/Tooltip';
 import { UndoToast } from './ui/UndoToast';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 import { cn } from '../utils/cn';
-import { SessionActivitySummary, SessionWorkingSpinner } from './SessionActivity';
+import { SessionActivityDot, SessionActivitySummary, SessionWorkingSpinner } from './SessionActivity';
 import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../utils/sessionDrag';
 import { dropOrder, stepOrder, type SessionDropTarget } from '../utils/sessionReorder';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
@@ -150,11 +152,15 @@ export function OrchestrationSessionNav({
   const load = useOrchestrationSessionStore(state => state.load);
   const refresh = useOrchestrationSessionStore(state => state.refresh);
   const select = useOrchestrationSessionStore(state => state.select);
+  const create = useOrchestrationSessionStore(state => state.create);
   const update = useOrchestrationSessionStore(state => state.update);
   const reorder = useOrchestrationSessionStore(state => state.reorder);
   const navigateToPaneChat = useNavigationStore(state => state.navigateToPaneChat);
   const activeView = useNavigationStore(state => state.activeView);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
+  // Profiles on (T-63): avatar rows, and New Session opens Create New. Off: as before.
+  const profiles = useConfigStore(state => isProfilesEnabled(state.config));
+  const [showCreate, setShowCreate] = useState(false);
   const expandedSessions = useNavigationStore(state => state.expandedSessions);
   const toggleStoredSessionExpanded = useNavigationStore(state => state.toggleSessionExpanded);
   const [localSectionExpanded, setLocalSectionExpanded] = useState(true);
@@ -180,9 +186,26 @@ export function OrchestrationSessionNav({
   const sectionExpanded = sessionsSectionExpanded ?? localSectionExpanded;
   const setSectionExpanded = onSessionsSectionExpandedChange ?? setLocalSectionExpanded;
 
+  const createSession = useCallback(async ({ name: requestedName, ...input }: SessionCreateRequest) => {
+    await load();
+    const name = requestedName || nextOrchestrationSessionName(useOrchestrationSessionStore.getState().sessions);
+    await create({ ...input, name, nameFromFirstMessage: !requestedName });
+    setShowCreate(false);
+    setActiveSession(null);
+    navigateToPaneChat();
+  }, [create, load, navigateToPaneChat, setActiveSession]);
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Search's New Session command. Sidebar mounts exactly one nav (rail or tree), so one dialog opens.
+  // With Profiles on, the Sidebar's Create New answers it instead.
+  useEffect(() => {
+    const openCreate = () => { if (!isProfilesEnabled(useConfigStore.getState().config)) setShowCreate(true); };
+    window.addEventListener('open-create-orchestration-session', openCreate);
+    return () => window.removeEventListener('open-create-orchestration-session', openCreate);
+  }, []);
 
   useEffect(() => {
     const handleSessionsChanged = (event: Event) => {
@@ -443,9 +466,10 @@ export function OrchestrationSessionNav({
     const moveLabel = session.move && session.move.state !== 'moved' ? moveMarkLabel(session.move) : null;
     const arriving = session.move?.state === 'arriving';
     const loopName = loopsBySessionTarget.get(session.id)?.name;
-    // The row's first mark (avatar, loop or paused glyph) starts at its left padding, in one 16px box
-    // (T-63). A Session with Panes shows its expand chevron in that box on hover or keyboard focus.
-    const leading = (mark: ReactNode) => (
+    // Profiles on (T-63): the row's first mark (avatar, loop or paused glyph) starts at its left padding,
+    // in one 16px box, and a Session with Panes shows its expand chevron there on hover or keyboard
+    // focus. Off: the mark as it was, after the chevron's own column.
+    const leading = (mark: ReactNode) => !profiles ? mark : (
       <span className={cn(
         'flex h-4 w-4 flex-shrink-0 items-center justify-center',
         paneRows.length > 0 && 'group-hover/orchestration-row:invisible group-has-[[data-session-panes-toggle]:focus-visible]/orchestration-row:invisible',
@@ -472,22 +496,29 @@ export function OrchestrationSessionNav({
       >
         {moveLabel ? (
           <>
-            {leading(<PausedGlyph size="sm" />)}
+            {leading(<PausedGlyph size="sm" className="flex-shrink-0" />)}
             <span className="min-w-0 flex-1 truncate text-[13px] text-text-muted">{label}</span>
             <span data-testid="session-move-label" className="max-w-[55%] flex-shrink-0 truncate text-[11px] text-text-tertiary">{moveLabel}</span>
           </>
         ) : session.paused ? (
           <>
-            {leading(<PausedGlyph size="sm" />)}
+            {leading(<PausedGlyph size="sm" className="flex-shrink-0" />)}
             <span className="min-w-0 flex-1 truncate text-[13px] text-text-muted">{label}</span>
           </>
-        ) : (
+        ) : profiles ? (
           <>
             {leading(loopName !== undefined ? <LoopMark loopName={loopName} /> : <ProfileAvatar profileRef={session.agentProfile?.ref} agent={session.agent} size={16} />)}
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
             {loopName !== undefined && <LoopLabel loopName={loopName} />}
             {/* The right side reads spinner, then the approvals badge (or Pane count) (T-63). */}
             <SessionWorkingSpinner session={session} />
+            <SessionApprovalsCount sessionId={session.id} opensApprovals collapseWhenEmpty otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
+          </>
+        ) : (
+          <>
+            {loopName !== undefined ? <LoopMark loopName={loopName} /> : <SessionActivityDot session={session} paneIds={visiblePaneIds} />}
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
+            {loopName !== undefined && <LoopLabel loopName={loopName} />}
             <SessionApprovalsCount sessionId={session.id} opensApprovals otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
           </>
         )}
@@ -507,8 +538,16 @@ export function OrchestrationSessionNav({
           'group/orchestration-row relative mx-2 flex h-7 w-[calc(100%-1rem)] items-center rounded-md text-[13px] transition-colors',
           isOpen ? 'bg-surface-selected text-text-primary' : 'text-text-secondary hover:bg-surface-hover',
         )}>
+          {!profiles && (paneRows.length > 0 ? (
+            <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} Panes`}
+              aria-expanded={expanded} aria-controls={panesId}
+              onClick={() => toggleSessionExpanded(session.id)}
+              className="ml-1 flex h-6 w-4 flex-shrink-0 items-center justify-center rounded hover:bg-surface-hover focus:outline-none">
+              {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            </button>
+          ) : <span className="ml-1 h-6 w-4 flex-shrink-0" aria-hidden="true" />)}
           {session.paused && !moveLabel ? <Tooltip content={<PausedTooltipLines mark={session.paused} />} side="right">{rowButton}</Tooltip> : rowButton}
-          {paneRows.length > 0 && (
+          {profiles && paneRows.length > 0 && (
             <button type="button" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} Panes`}
               aria-expanded={expanded} aria-controls={panesId}
               data-session-panes-toggle
@@ -561,7 +600,7 @@ export function OrchestrationSessionNav({
               data-testid="compact-new-orchestration-session"
               data-compact-rail-item
               aria-label="New Session"
-              onClick={requestOpenNewSessionPalette}
+              onClick={() => { if (profiles) requestOpenNewSession(); else setShowCreate(true); }}
               className="flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
             >
               <Plus className="h-4 w-4" />
@@ -631,6 +670,7 @@ export function OrchestrationSessionNav({
           onMoveToHost={() => { setMovingSessionId(sessionMenu?.sessionId ?? null); setSessionMenu(null); }}
         />
         {moveDialogElement}
+        <CreateOrchestrationSessionDialog isOpen={showCreate} onClose={() => setShowCreate(false)} onCreate={createSession} />
         {archivedToastElement}
         {orderAnnouncer}
       </div>
@@ -697,7 +737,8 @@ export function OrchestrationSessionNav({
             title="New Session"
             onClick={event => {
               event.stopPropagation();
-              requestOpenNewSessionPalette();
+              if (profiles) requestOpenNewSession();
+              else setShowCreate(true);
             }}
             className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
           >
@@ -733,6 +774,7 @@ export function OrchestrationSessionNav({
         onMoveToHost={() => { setMovingSessionId(sessionMenu?.sessionId ?? null); setSessionMenu(null); }}
       />
       {moveDialogElement}
+      <CreateOrchestrationSessionDialog isOpen={showCreate} onClose={() => setShowCreate(false)} onCreate={createSession} />
       {archivedToastElement}
       {orderAnnouncer}
     </>

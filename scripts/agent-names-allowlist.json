@@ -1,4 +1,8 @@
 {
+  "frontend/src/components/CreateOrchestrationSessionDialog.tsx": {
+    "reason": "Deferred terminal launch and resume rules for Session orchestrators (OpenCode direct commands, promoted Claude/Codex conversations).",
+    "count": 1
+  },
   "frontend/src/components/CustomResumeFields.tsx": {
     "reason": "Deferred terminal resume: custom command resume modes per agent.",
     "count": 6

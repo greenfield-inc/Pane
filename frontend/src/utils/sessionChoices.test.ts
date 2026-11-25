@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentFarmProfileEntry } from '../../../shared/types/agentFarmProfiles';
-import { filterSessionChoices, modelDisplayName, sessionChoiceInput, sessionChoices } from './sessionPaletteChoices';
+import { filterSessionChoices, modelDisplayName, sessionChoiceInput, sessionChoices } from './sessionChoices';
 
 const profile = (ref: string, harness = 'claude', extra: Partial<AgentFarmProfileEntry> = {}): AgentFarmProfileEntry => ({
   ref, plugin: ref.split('/')[0], version: '1.0.0', harness, hidden: ref.startsWith('pane/'), ...extra,
@@ -31,6 +31,11 @@ describe('sessionChoices', () => {
   it('leaves out agents the machine cannot run, and profiles whose agent it cannot run', () => {
     const choices = sessionChoices({ agents: ['claude', 'opencode'], profiles: PROFILES });
     expect(choices.map(choice => choice.label)).toEqual(['Claude', 'Greenfield orchestrator', 'Dcouple business', 'OpenCode']);
+  });
+
+  it('leaves out a profile Agent Farm marks unlisted, and offers one when Agent Farm says nothing', () => {
+    const choices = sessionChoices({ agents: ['claude'], profiles: [profile('greenfield/planner', 'claude', { listed: false }), profile('greenfield/orchestrator', 'claude', { listed: true }), profile('dcouple/business')] });
+    expect(choices.filter(choice => choice.group === 'profiles').map(choice => choice.profileRef)).toEqual(['greenfield/orchestrator', 'dcouple/business']);
   });
 
   it('keeps profiles listed but unavailable, with the reason, when they cannot start', () => {
