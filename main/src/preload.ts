@@ -63,7 +63,7 @@ import type { ProjectEnvVarInput } from '../../shared/types/projectEnvVars';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../shared/types/listeningPorts';
 import type { RelayLinkOpenedEvent, RelayPairedEvent, RelayStatus } from '../../shared/types/relay';
-import { START_LINK_ANSWER_CHANNEL, START_LINK_REQUEST_CHANNEL, type StartLinkAnswer, type StartLinkRequest } from '../../shared/types/startLinks';
+import { START_LINK_ANSWER_CHANNEL, START_LINK_PENDING_CHANNEL, START_LINK_REQUEST_CHANNEL, type StartLinkAnswer, type StartLinkRequest } from '../../shared/types/startLinks';
 import type { SshRouteProgress } from './daemon/sshRouteSetup';
 import type {
   PanePermissionRequest as PermissionRequest,
@@ -1559,6 +1559,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     answerStartLink: async (answer: StartLinkAnswer): Promise<void> => {
       await invokeIpc(START_LINK_ANSWER_CHANNEL, answer);
     },
+    // SAFETY: main returns the StartLinkRequest it sent on pane:start-link-request, or null.
+    pendingStartLink: async (): Promise<StartLinkRequest | null> => (await invokeIpc(START_LINK_PENDING_CHANNEL)) as StartLinkRequest | null,
   },
 
   // ptyHost: typed wrapper over the per-window MessagePort. The raw port is

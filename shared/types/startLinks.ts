@@ -41,3 +41,5 @@ export interface StartLinkAnswer {
 
 export const START_LINK_REQUEST_CHANNEL = 'pane:start-link-request';
 export const START_LINK_ANSWER_CHANNEL = 'pane:start-link-answer';
+/** The request waiting for an answer, or null; the dialog asks on mount so none is missed. */
+export const START_LINK_PENDING_CHANNEL = 'pane:start-link-pending';

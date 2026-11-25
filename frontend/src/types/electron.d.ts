@@ -887,6 +887,8 @@ interface ElectronAPI {
     openPaneLink: (link: string) => Promise<void>;
     /** Answers a `pane:start-link-request`; main starts work only on `start: true` for the pending request. */
     answerStartLink: (answer: StartLinkAnswer) => Promise<void>;
+    /** The start link waiting for an answer, or null; read on mount so a request sent earlier is shown. */
+    pendingStartLink: () => Promise<StartLinkRequest | null>;
   };
 
   // ptyHost: typed wrapper over the per-window MessagePort installed by the

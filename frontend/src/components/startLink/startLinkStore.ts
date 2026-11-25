@@ -29,9 +29,16 @@ export const useStartLinkStore = create<StartLinkState>((set, get) => ({
 
 /** Shows each start link main asks about. A newer request answers the shown one Cancel first. Returns the unsubscribe. */
 export function startStartLinkListener(): () => void {
-  return window.electronAPI.events.onStartLinkRequest((request) => {
+  const show = (request: StartLinkRequest) => {
     const shown = useStartLinkStore.getState().request;
+    if (shown?.requestId === request.requestId) return;
     if (shown) send(shown.requestId, { start: false });
     useStartLinkStore.setState({ request });
-  });
+  };
+  const unsubscribe = window.electronAPI.events.onStartLinkRequest(show);
+  // A link that arrived before this listener (the window was still loading) is waiting in main.
+  void window.electronAPI.window.pendingStartLink().then((request) => {
+    if (request) show(request);
+  }, () => undefined);
+  return unsubscribe;
 }

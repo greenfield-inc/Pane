@@ -1412,6 +1412,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           trackCall('pane:start-link-answer', [answer]);
           return Promise.resolve();
         },
+        pendingStartLink: () => Promise.resolve(null),
       },
       getPlatform: () => Promise.resolve(mockOptions.platform ?? 'linux'),
       windowControlsOverlayEnabled: mockOptions.windowControlsOverlayEnabled === true,

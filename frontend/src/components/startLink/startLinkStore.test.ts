@@ -17,14 +17,16 @@ function request(requestId: string): StartLinkRequest {
 }
 
 const answerStartLink = vi.fn(async (_answer: StartLinkAnswer) => undefined);
+let pending: StartLinkRequest | null = null;
 let emit: (request: StartLinkRequest) => void;
 let stop: () => void;
 
 beforeEach(() => {
   answerStartLink.mockClear();
+  pending = null;
   vi.stubGlobal('window', {
     electronAPI: {
-      window: { answerStartLink },
+      window: { answerStartLink, pendingStartLink: async () => pending },
       events: { onStartLinkRequest: (callback: typeof emit) => { emit = callback; return () => undefined; } },
     },
   });
@@ -38,6 +40,17 @@ afterEach(() => {
 });
 
 describe('start link answers', () => {
+  it('shows a request main sent before the listener started', async () => {
+    stop();
+    pending = request('early');
+    stop = startStartLinkListener();
+
+    await vi.waitFor(() => expect(useStartLinkStore.getState().request?.requestId).toBe('early'));
+    // The same request arriving as an event too is not shown twice or cancelled.
+    emit(request('early'));
+    expect(answerStartLink).not.toHaveBeenCalled();
+  });
+
   it('sends Start with the chosen agent and target once, then closes', () => {
     emit(request('r-1'));
     expect(useStartLinkStore.getState().request?.requestId).toBe('r-1');
