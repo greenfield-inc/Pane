@@ -53,6 +53,9 @@ describe('reading a linked document from its machine', () => {
     // T-76: the host names its limit (16 MiB for a page, 2 MiB for text); any of them is too large, not gone.
     stubRead(async () => ({ machineId: 'mini', data: { kind: 'missing', path: '/a', message: 'index.html is larger than 16 MiB; open it in Pane instead.' } }));
     expect(await readMachineDoc(item, '/a/plan.html')).toEqual({ kind: 'too-large' });
+    // A gone file whose own name holds the phrase is still gone.
+    stubRead(async () => ({ machineId: 'mini', data: { kind: 'missing', path: '/a', message: 'There is no file at /work/review larger than 16 MiB.html any more.' } }));
+    expect(await readMachineDoc(item, '/a/plan.html')).toEqual({ kind: 'missing' });
     stubRead(async () => { throw new Error('offline'); });
     expect(await readMachineDoc(item, '/a/plan.html')).toEqual({ kind: 'unreachable' });
     stubRead(async () => ({ machineId: 'mini', data: null }));

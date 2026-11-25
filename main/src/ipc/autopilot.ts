@@ -13,6 +13,7 @@ import { getChatTabManager } from '../services/chatTabs';
 import { chatLaunchFromCommand } from '../services/chatTabs/launch';
 import { decodeChatPanelState } from '../services/chatTabs/state';
 import { getAppDirectory } from '../utils/appDirectory';
+import { readUpTo } from '../utils/boundedRead';
 import { getPaneEventSink } from '../core/runtime';
 import { parseRewriteQuestion } from './notify';
 import { listTailnetMachines } from './workspaceAccess';
@@ -336,8 +337,13 @@ export function readDocument(manager: Pick<AutopilotManager, 'snapshot'>, file: 
   // A page inlines its screenshots, so it may run to several MiB; another machine still reads it whole (T-76).
   // The message names the limit: another machine's viewer reads "larger than <n> MiB" as too large, not gone.
   const limit = html ? NOTIFY_PAGE_LIMIT_BYTES : TEXT_LIMIT_BYTES;
-  if (stat.size > limit) return { kind: 'missing', path: file, message: `${path.basename(file)} is larger than ${limit / MIB} MiB; open it in Pane instead.` };
-  const text = fs.readFileSync(file, 'utf8');
+  const tooLarge = { kind: 'missing' as const, path: file, message: `${path.basename(file)} is larger than ${limit / MIB} MiB; open it in Pane instead.` };
+  if (stat.size > limit) return tooLarge;
+  let bytes: Buffer | null;
+  try { bytes = readUpTo(file, limit); } catch { return { kind: 'missing', path: file, message: `There is no file at ${file} any more.` }; }
+  // It grew past the limit after the stat (a page still being written, say).
+  if (!bytes) return tooLarge;
+  const text = bytes.toString('utf8');
   if (html) return { kind: 'html', url: pathToFileURL(file).toString(), path: file, html: text };
   return { kind: 'text', text, path: file };
 }

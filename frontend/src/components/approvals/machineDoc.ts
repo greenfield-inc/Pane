@@ -45,7 +45,7 @@ function decodeDoc(answer: Awaited<ReturnType<NotifyMachineRead>>['data']): Mach
   const missing = decodeOptionalBoundary(answer, missingSchema);
   if (!missing) return { kind: 'unreachable' };
   // `readDocument` refuses a file over its limit (2 MiB for text, more for a page) with this wording; the file itself is still there.
-  return /larger than \d+ MiB/u.test(missing.message ?? '') ? { kind: 'too-large' } : { kind: 'missing' };
+  return /is larger than \d+ MiB; open it in Pane instead\.$/u.test(missing.message ?? '') ? { kind: 'too-large' } : { kind: 'missing' };
 }
 
 /** Reads a linked file from the item's machine (a to-do's attachment passes its to-do's). Never rejects: a failed read is a state. */

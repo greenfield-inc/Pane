@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { NOTIFY_PAGE_LIMIT_BYTES, type NotifyItem, type NotifyLink, type NotifySubQuestion, type NotifySummaryPage } from '../../../../shared/types/notify';
 import { withSummaryPolicy } from '../../../../shared/utils/summaryPolicy';
+import { readUpTo } from '../../utils/boundedRead';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 /**
@@ -125,8 +126,17 @@ function askerPage(file: string): AskerPage {
   }
   if (!stat.isFile()) return { kind: 'missing', path: file, message: `${file} is not a file, so Pane can't show it as the Summary.` };
   // A review page inlines its screenshots: several MiB is a real Summary (T-76).
-  if (stat.size > NOTIFY_PAGE_LIMIT_BYTES) return { kind: 'too-large', path: file, message: `${path.basename(file)} is larger than ${NOTIFY_PAGE_LIMIT_BYTES / (1024 * 1024)} MiB, too large to show here. Open it from References instead.` };
-  return { kind: 'page', path: file, html: withSummaryPolicy(fs.readFileSync(file, 'utf8')) };
+  const tooLarge = { kind: 'too-large' as const, path: file, message: `${path.basename(file)} is larger than ${NOTIFY_PAGE_LIMIT_BYTES / (1024 * 1024)} MiB, too large to show here. Open it from References instead.` };
+  if (stat.size > NOTIFY_PAGE_LIMIT_BYTES) return tooLarge;
+  let bytes: Buffer | null;
+  try {
+    bytes = readUpTo(file, NOTIFY_PAGE_LIMIT_BYTES);
+  } catch {
+    return { kind: 'missing', path: file, message: `The Summary page ${path.basename(file)} wasn't found at ${file}, so Pane can't show it. Its worktree may have been removed, or the path is wrong.` };
+  }
+  // It grew past the limit after the stat (a page still being written, say).
+  if (!bytes) return tooLarge;
+  return { kind: 'page', path: file, html: withSummaryPolicy(bytes.toString('utf8')) };
 }
 
 /** The approval's Summary: the asker's page when it sent one, else Pane's template. */
