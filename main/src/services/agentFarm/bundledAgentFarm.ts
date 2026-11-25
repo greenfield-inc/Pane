@@ -11,8 +11,13 @@ const execFileAsync = promisify(execFile);
 
 /** The npm package Pane ships (pinned in package.json and main/package.json). */
 const AGENT_FARM_PACKAGE = '@greenfieldco/agent-farm';
-/** Plugins the bundled package carries that Pane installs into its own config root; greenfield first. */
-export const BUNDLED_AGENT_FARM_PLUGINS = ['greenfield', 'dcouple'] as const;
+/** Plugins Pane installs from the bundled package into its own config root. */
+export const BUNDLED_AGENT_FARM_PLUGINS = ['greenfield'] as const;
+/**
+ * Plugins older Pane builds installed into its config root (dcouple was bundled; bigbrain is
+ * older still). Each start uninstalls whichever of them is still there.
+ */
+export const RETIRED_AGENT_FARM_PLUGINS = ['dcouple', 'bigbrain'] as const;
 const MANIFEST_FILE = 'pane-manifest.json';
 
 /** The bundled Agent Farm package: its CLI entry, version and plugin sources. */
@@ -74,6 +79,10 @@ const manifestSchema = boundary.object({
 });
 
 const installOutput = boundary.object({ version: boundary.string });
+const uninstallOutput = boundary.object({
+  removed: boundary.array(boundary.string),
+  stayed: boundary.array(boundary.object({ file: boundary.string, reason: boundary.string })),
+});
 
 /** Runs one Agent Farm command and returns its stdout. */
 type AgentFarmRunner = (process: AgentFarmProcess) => Promise<string>;
@@ -89,6 +98,31 @@ function installedVersion(stdout: string): string | undefined {
   const json = start >= 0 ? stdout.slice(start + 1) : stdout.trim();
   try { return decodeBoundary(JSON.parse(json), installOutput).version; }
   catch { return undefined; }
+}
+
+/**
+ * Uninstalls each retired plugin that Agent Farm's receipt says is installed in Pane's config
+ * root, with Agent Farm's own `plugin uninstall`: it deletes only files unchanged since the
+ * install and leaves changed ones in place. Never throws; each outcome is logged.
+ */
+async function uninstallRetiredPlugins(bundle: BundledAgentFarm, configRoot: string, run: AgentFarmRunner, log: (message: string) => void): Promise<void> {
+  const present = RETIRED_AGENT_FARM_PLUGINS.filter((name) => existsSync(path.join(configRoot, '.plugins', `${name}.json`)));
+  if (present.length === 0) return;
+  // A lock left by a killed install would refuse the uninstall; the config root is Pane's alone.
+  await fs.rm(path.join(configRoot, '.plugins', 'install.lock'), { recursive: true, force: true }).catch(() => undefined);
+  for (const name of present) {
+    try {
+      const stdout = await run(bundledAgentFarmProcess(bundle, ['plugin', 'uninstall', name], configRoot));
+      const start = stdout.indexOf('{');
+      const result = decodeOptionalBoundary(JSON.parse(start >= 0 ? stdout.slice(start) : '{}'), uninstallOutput);
+      const changed = result?.stayed.filter((entry) => entry.reason === 'modified').map((entry) => entry.file) ?? [];
+      const kept = changed.length ? `, left ${changed.length} changed file${changed.length === 1 ? '' : 's'} in place (${changed.join(', ')})` : '';
+      log(`[AgentFarm] Uninstalled retired plugin ${name}: removed ${result?.removed.length ?? 0} files${kept}.`);
+    } catch (error) {
+      const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);
+      log(`[AgentFarm] Pane couldn't uninstall the retired Agent Farm plugin ${name} from ${configRoot}: ${reason}. Pane will try again on its next start.`);
+    }
+  }
 }
 
 /**
@@ -128,7 +162,7 @@ export interface InstallBundledAgentFarmOptions {
 }
 
 /**
- * Installs greenfield and the other bundled plugins into `<PANE_DIR>/agent-farm` with the
+ * Uninstalls retired plugins, then installs greenfield into `<PANE_DIR>/agent-farm` with the
  * bundled Agent Farm, when the bundle (its version and plugin files) differs from what the
  * manifest there records; an unchanged bundle installs nothing. Called at startup without
  * waiting. Never throws: a failure is logged and returned in the status.
@@ -157,15 +191,17 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
     log(`[AgentFarm] ${status.error}`);
     return status;
   }
+  const run = options.run ?? runAgentFarm;
+  await uninstallRetiredPlugins(bundle, configRoot, run, log);
   const previous = await fs.readFile(manifestPath, 'utf8').then((text) => decodeOptionalBoundary(JSON.parse(text), manifestSchema)).catch(() => undefined);
   const installed = previous && BUNDLED_AGENT_FARM_PLUGINS.every((name) => existsSync(path.join(configRoot, 'plugins', name)));
-  if (previous && installed && previous.hash === hash) {
+  const sameList = previous && Object.keys(previous.plugins).sort().join() === [...BUNDLED_AGENT_FARM_PLUGINS].sort().join();
+  if (previous && installed && sameList && previous.hash === hash) {
     status = { state: 'ready', configRoot, version: bundle.version, plugins: previous.plugins };
     log(`[AgentFarm] Bundled Agent Farm ${bundle.version} is already set up in ${configRoot} (manifest hash unchanged); nothing reinstalled.`);
     return status;
   }
   log(`[AgentFarm] Setting up bundled Agent Farm ${bundle.version} in ${configRoot} (${previous ? `bundle changed from ${previous.agentFarmVersion}` : 'first start'}).`);
-  const run = options.run ?? runAgentFarm;
   const plugins: Record<string, string> = {};
   try {
     await fs.mkdir(configRoot, { recursive: true });
