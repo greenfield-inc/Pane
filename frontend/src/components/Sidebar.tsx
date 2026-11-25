@@ -536,7 +536,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
           onClick: onShortcutsClick
         },
         // Actions on the host: each re-sorts its Panes once, then drags hold until the next pick.
-        {
+        ...(readOnly ? [] : [{
           id: 'sort-newest',
           label: 'Sort: Newest first',
           description: paneSort.newPanes === 'top' ? 'Current · new on top' : 'New on top',
@@ -555,7 +555,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
           label: 'Refresh git status',
           icon: RefreshCw,
           onClick: handleRefreshGitStatus
-        },
+        }]),
         {
           id: 'remote',
           label: 'Remote',

@@ -1,6 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ profiles: [] as { label: string; id: string; token: string; access?: 'read' }[], calls: [] as string[] }));
+import { readOnlyToken } from '@shared/types/accessLevel';
+
+const state = vi.hoisted(() => ({ profiles: [] as { label: string; id: string; token: string }[], calls: [] as string[] }));
 vi.mock('react-native', () => ({ AppState: {} }));
 vi.mock('@/auth/hostsStore', () => ({ useHostsStore: { getState: () => ({ profiles: state.profiles }) } }));
 vi.mock('@/features/notifications/usePushSetup', () => ({ requestPushRegistration: () => undefined }));
@@ -17,7 +19,7 @@ const { requestSharedCredentialSync } = await import('./SharedCredentialSync');
 
 afterEach(() => { vi.useRealTimers(); });
 
-const profile = (label: string, access?: 'read') => ({ id: label, label, token: label, access });
+const profile = (label: string, access?: 'read') => ({ id: label, label, token: access ? readOnlyToken(label) : label });
 
 async function sync(...profiles: ReturnType<typeof profile>[]): Promise<string[]> {
   vi.useFakeTimers();

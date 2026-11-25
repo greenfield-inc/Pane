@@ -94,10 +94,11 @@ async function thisComputerName(): Promise<string> {
 }
 
 export const useAddDeviceStore = create<AddDeviceState>((set, get) => {
-  const redeem = async (link: string, source: LinkSource, maker: string, generation: number) => {
+  // `access` is the level the person saw: an answer at another level links nothing.
+  const redeem = async (link: string, source: LinkSource, { maker, access = 'full' }: Pick<LinkPreview, 'maker'> & { access?: DeviceAccess }, generation: number) => {
     set({ flow: { step: 'linking', source, maker } });
     try {
-      const result: LinkRedeemResult = await window.electronAPI.invoke('relay:redeem-link', { link });
+      const result: LinkRedeemResult = await window.electronAPI.invoke('relay:redeem-link', { link, access });
       if (generation === flowGeneration) set({ flow: { step: 'linked', source, maker, linked: result.linked, access: result.access } });
     } catch (cause) {
       if (generation === flowGeneration) set({ flow: { step: 'failed', source, message: refusal(cause, `Pane couldn't link with ${maker}`) } });
@@ -166,12 +167,12 @@ export const useAddDeviceStore = create<AddDeviceState>((set, get) => {
         set({ flow: { step: 'confirm', source, link, preview, here } });
         return;
       }
-      await redeem(link, source, preview.maker, generation);
+      await redeem(link, source, { maker: preview.maker }, generation);
     },
     confirmLink: async () => {
       const { flow } = get();
       if (flow.step !== 'confirm') return;
-      await redeem(flow.link, flow.source, flow.preview.maker, flowGeneration);
+      await redeem(flow.link, flow.source, flow.preview, flowGeneration);
     },
     cancelLink: () => {
       flowGeneration += 1;

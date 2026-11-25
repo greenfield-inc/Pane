@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { readOnlyToken } from '@shared/types/accessLevel';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { TailnetMachine, TailnetMachineList } from '@shared/types/workspaceAccess';
 
@@ -76,13 +77,12 @@ describe('listMachines', () => {
     ]);
   });
 
-  it('marks a machine this phone only watches, by its pairing or by what it last said', () => {
-    const tyler = saved('tyler', { id: 'relay:tyler', access: 'read' });
+  it('marks a machine this phone only watches, by its token', () => {
+    const tyler = saved('tyler', { id: 'relay:tyler', token: readOnlyToken('a') });
     const machines = listMachines({
       profiles: [studio, devbox, tyler], current: studio, connection: 'connected', presence: 'connected', tailnet: undefined,
-      levels: { [devbox.id]: { token: devbox.token, readOnly: true } },
     });
-    expect(machines.filter(machine => machine.readOnly).map(machine => machine.name)).toEqual([devbox.label, 'tyler']);
+    expect(machines.filter(machine => machine.readOnly).map(machine => machine.name)).toEqual(['tyler']);
   });
 
   it('dims a saved machine that Tailscale reports offline, and does not let it be picked', () => {

@@ -1,6 +1,6 @@
 import type { MissionControlSnapshotRequest, MissionControlSnapshotResult } from '../../../../shared/types/missionControl';
 import { READ_ONLY_HOST_ANSWERS } from '../../../../shared/remoteClient/readOnlyHost';
-import type { ReadOnlyMark } from '../../../../shared/types/accessLevel';
+import { tokenAccess, type ReadOnlyMark } from '../../../../shared/types/accessLevel';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { ChatTabClient, ChatTabCreate, ChatTabView } from '../../../../shared/types/chatTab';
 import { decodeChatAgents, decodeChatConversations, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
@@ -73,16 +73,12 @@ export class RemoteRuntimeAdapter {
   private readonly client: RemoteDaemonBrowserClient;
 
   constructor(readonly profile: RemotePaneConnectionProfile) {
-    this.access = profile.access;
-    this.client = new RemoteDaemonBrowserClient(profile, (access) => {
-      this.access = access;
-      this.onAccess?.(access);
-    });
+    this.access = tokenAccess(profile.token);
+    this.client = new RemoteDaemonBrowserClient(profile);
   }
 
-  /** The computer's level for this browser: its pairing's until it answers, then what each ready event says. */
-  access: ReadOnlyMark | undefined;
-  onAccess?: (access: ReadOnlyMark | undefined) => void;
+  /** What this browser's pairing gives, which its token says. */
+  readonly access: ReadOnlyMark | undefined;
 
   connect(): Promise<void> {
     return this.client.connect();

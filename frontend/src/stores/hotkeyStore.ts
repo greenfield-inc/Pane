@@ -171,7 +171,7 @@ function isGloballyAllowed(id: HotkeyId): boolean {
 /** Commands that change the shown computer: off while it gives read-only access. */
 const CHANGES_HOST = new Set<string>([
   'new-session', 'new-orchestration-session', 'new-project', 'open-add-tool', 'close-active-tab',
-  'archive-active-session', 'run-dev-server', 'send-approval',
+  'archive-active-session', 'run-dev-server',
   'git-commit', 'git-push', 'git-pull', 'git-soft-reset', 'git-rebase-from-main', 'git-merge-to-main',
 ]);
 function changesHost(id: string): boolean {

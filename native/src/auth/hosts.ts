@@ -24,7 +24,7 @@ export function assertSavableHost(profile: RemotePaneConnectionProfile): void {
  */
 export function addHost(hosts: SavedHosts, profile: RemotePaneConnectionProfile): SavedHosts {
   assertSavableHost(profile);
-  const full = profile.access === 'read' ? hosts.profiles.find(p => (p.baseUrl === profile.baseUrl || p.id === profile.id) && !isReadOnlyProfile(p)) : undefined;
+  const full = isReadOnlyProfile(profile) ? hosts.profiles.find(p => (p.baseUrl === profile.baseUrl || p.id === profile.id) && !isReadOnlyProfile(p)) : undefined;
   if (full) return { profiles: hosts.profiles, activeId: full.id };
   const others = hosts.profiles.filter(p => p.baseUrl !== profile.baseUrl && p.id !== profile.id);
   return { profiles: [...others, profile], activeId: profile.id };

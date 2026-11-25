@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { RelayConnectionProfile, RelayPairingLink } from '@shared/remoteClient';
 import { relayLinkJoin } from '@shared/remoteClient/relayLinkPreview';
+import { readOnlyToken } from '@shared/types/accessLevel';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 const LINK: RelayPairingLink = { secret: 's3cret', computerId: 'buildbox', name: 'Build Box', domain: 'runpane.net' };
@@ -40,7 +41,7 @@ describe('joining two groups of computers', () => {
 
   it('asks before a full-access link links a computer this device only watches with its others', async () => {
     const fetch = host({ status: 200, body: { ok: true, group: [{ id: 'buildbox', name: 'Build Box' }], expiresAt: '2026-11-15T10:00:00Z' } });
-    expect(await relayLinkJoin(fetch, LINK, [{ ...relayComputer('buildbox', 'Build Box'), access: 'read' }, relayComputer('studio', 'Studio Mac')]))
+    expect(await relayLinkJoin(fetch, LINK, [{ ...relayComputer('buildbox', 'Build Box'), token: readOnlyToken('a') }, relayComputer('studio', 'Studio Mac')]))
       .toEqual({ maker: 'Build Box', makerGroup: ['Build Box'], here: ['Studio Mac'] });
   });
 

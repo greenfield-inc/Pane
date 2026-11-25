@@ -60,6 +60,7 @@ export function useRemoteTerminal({
   };
 
   const readOnly = useReadOnlyHost();
+  const notRunningRef = useRef(false);
   const sendInput = useCallback(async (data: string) => {
     if (isReadOnlyHost()) return;
     try {
@@ -99,7 +100,9 @@ export function useRemoteTerminal({
     const hydrated = await hydrateRemoteTerminalSnapshot(terminal, async () => {
       const state = await adapter.getTerminalState(panel.id);
       fullScreen = state?.isAlternateScreen === true;
-      return terminalSnapshotText(state);
+      // Its first output, when someone starts it, replaces this line.
+      notRunningRef.current = watching && !state;
+      return watching && !state ? '\x1b[90mThis tab is not running.\x1b[0m' : terminalSnapshotText(state);
     }, () => terminalRef.current === terminal && owns());
     // A full-screen app's frame was drawn for the host's size; a forced resize makes the app repaint at this one.
     if (hydrated && fullScreen && !watching) await adapter.resizeTerminal(panel.id, terminal.cols, terminal.rows, { force: true });
@@ -183,6 +186,10 @@ export function useRemoteTerminal({
         terminalOutputPayloadSchema,
       );
       if (!payload || payload.panelId !== panel.id) return;
+      if (notRunningRef.current) {
+        notRunningRef.current = false;
+        terminal.reset();
+      }
       terminal.write(payload.output, () => {
         if (disposed) return;
         void adapter.ackTerminalOutput(

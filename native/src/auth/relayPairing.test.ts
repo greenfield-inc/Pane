@@ -1,6 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 
 import type { RelayConnectionProfile } from '@shared/remoteClient';
+import { readOnlyToken } from '@shared/types/accessLevel';
 
 const calls = vi.hoisted((): string[] => []);
 vi.mock('@/daemon/createClient', () => ({
@@ -16,7 +17,7 @@ vi.mock('@/daemon/createClient', () => ({
 const { linkWithSavedComputers } = await import('./relayPairing');
 
 function computer(label: string, access?: 'read'): RelayConnectionProfile {
-  return { id: `relay:${label}`, label, baseUrl: `https://${label}.runpane.net`, token: 't', transport: 'http+sse', relay: { computerId: label, fingerprint: 'fp', domain: 'runpane.net', local: [] }, access };
+  return { id: `relay:${label}`, label, baseUrl: `https://${label}.runpane.net`, token: access ? readOnlyToken(label) : 't', transport: 'http+sse', relay: { computerId: label, fingerprint: 'fp', domain: 'runpane.net', local: [] } };
 }
 
 beforeEach(() => { calls.length = 0; });

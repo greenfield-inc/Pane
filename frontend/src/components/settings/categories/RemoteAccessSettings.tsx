@@ -447,14 +447,17 @@ function AddMachine({ controller, startAdding }: { controller: RemoteAccessContr
 
 /**
  * "Removed from A and B." plus, for computers that didn't answer, how to finish there. `unlinked`
- * names the computer being unlinked, which can itself be one that didn't answer.
+ * names the computer being unlinked, which can itself be one that didn't answer. A computer drops a
+ * read-only device by itself when it is next online.
  */
-function everywhereResult(subject: string, result: { removed: string[]; notReached: string[] }, unlinked?: string): string {
+function everywhereResult(subject: string, result: { removed: string[]; notReached: string[] }, unlinked?: string, readOnly = false): string {
   const join = (names: string[]) => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
   const done = result.removed.length > 0 ? `${subject} from ${join(result.removed)}.` : '';
   const others = result.notReached.filter((name) => name !== unlinked);
   const one = others.length === 1;
-  const left = others.length > 0
+  const left = others.length > 0 && readOnly
+    ? ` ${join(others)} didn't answer, and ${one ? 'drops' : 'drop'} it when ${one ? "it's" : "they're"} next online.`
+    : others.length > 0
     ? ` ${join(others)} didn't answer and still ${one ? 'has' : 'have'} it. Remove it there in Settings › Remote Access once ${one ? "it's" : "they're"} back online.`
     : '';
   const itself = unlinked && result.notReached.includes(unlinked)
@@ -464,10 +467,10 @@ function everywhereResult(subject: string, result: { removed: string[]; notReach
 }
 
 /** Runs an "everywhere" command, then reloads the list; returns the line to show under the list. */
-async function runEverywhere(controller: RemoteAccessController, channel: string, args: { clientId: string } | { computerId: string }, subject: string, unlinked?: string): Promise<string> {
+async function runEverywhere(controller: RemoteAccessController, channel: string, args: { clientId: string } | { computerId: string }, subject: string, unlinked?: string, readOnly = false): Promise<string> {
   try {
     const result: { removed: string[]; notReached: string[] } = await window.electronAPI.invoke(channel, args);
-    return everywhereResult(subject, result, unlinked);
+    return everywhereResult(subject, result, unlinked, readOnly);
   } catch (cause) {
     return `Nothing was removed: ${ipcErrorMessage(cause, "Pane couldn't reach your other computers")}. Try again.`;
   } finally {
@@ -500,7 +503,16 @@ function PhoneRows({ controller, here }: { controller: RemoteAccessController; h
         return (
           <PhoneRow key={client.id} title={client.label} readOnly={client.access === 'read'} detail={detail} className={rowClass}>
             {connected && <Button type="button" variant="ghost" size="sm" disabled={controller.busy} onClick={() => controller.disconnectClients([client.id])}>Disconnect</Button>}
-            <Dropdown
+            {client.access === 'read' ? (
+              // Read-only access is one grant across your computers, so there is one way to take it back.
+              <Button type="button" variant="ghost" size="sm" aria-label={`Remove ${client.label}`} disabled={controller.busy}
+                onClick={() => {
+                  setOutcome(null);
+                  void runEverywhere(controller, RELAY_DEVICE_COMMANDS.removePhoneEverywhere, { clientId: client.id }, `Removed ${client.label}`, undefined, true).then(setOutcome);
+                }}>
+                Remove
+              </Button>
+            ) : <Dropdown
               menuLabel={`Remove ${client.label}`}
               position="bottom-right"
               width="lg"
@@ -530,7 +542,7 @@ function PhoneRows({ controller, here }: { controller: RemoteAccessController; h
                   },
                 },
               ]}
-            />
+            />}
           </PhoneRow>
         );
       })}
@@ -664,7 +676,7 @@ function WatchingComputerRow({ computer, controller, onOutcome }: { computer: Re
         onClick={() => {
           setBusy(true);
           onOutcome(null);
-          void runEverywhere(controller, RELAY_DEVICE_COMMANDS.removePhoneEverywhere, { clientId: computer.id }, `Removed ${computer.label}`).then((line) => {
+          void runEverywhere(controller, RELAY_DEVICE_COMMANDS.removePhoneEverywhere, { clientId: computer.id }, `Removed ${computer.label}`, undefined, true).then((line) => {
             setBusy(false);
             onOutcome(line);
           });

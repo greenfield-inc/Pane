@@ -9,8 +9,6 @@ import {
   type RemoteRequestContext,
 } from '../../../../shared/remoteClient/remoteDaemonClient';
 import { readEventStreamResponse } from '../../../../shared/remoteClient/fetchEventStreamTransport';
-import { withReadyAccess } from '../../../../shared/remoteClient/readyAccess';
-import type { ReadOnlyMark } from '../../../../shared/types/accessLevel';
 import type { RemotePaneConnectionProfile } from '../../../../shared/types/remoteDaemon';
 
 export type RemoteBrowserConnectionState = RemoteDaemonConnectionState;
@@ -50,8 +48,8 @@ const browserTransport: RemoteDaemonTransport = {
 };
 
 export class RemoteDaemonBrowserClient extends RemoteDaemonClient {
-  constructor(profile: RemotePaneConnectionProfile, onAccess: (access: ReadOnlyMark | undefined) => void = () => undefined) {
-    super({ profile, transport: withReadyAccess(browserTransport, onAccess), runtimeId: getRuntimeId, clientLabel: getClientLabel() });
+  constructor(profile: RemotePaneConnectionProfile) {
+    super({ profile, transport: browserTransport, runtimeId: getRuntimeId, clientLabel: getClientLabel() });
   }
 
   override async connect(): Promise<void> {

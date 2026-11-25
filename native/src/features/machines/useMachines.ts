@@ -2,7 +2,6 @@ import { router } from 'expo-router';
 import { Alert } from 'react-native';
 
 import { passwordProblem } from '@/auth/computers';
-import { useAccessStore } from '@/auth/access';
 import { useHostsStore } from '@/auth/hostsStore';
 import { useDaemon } from '@/daemon';
 import { useComputers, useConnectComputer } from '@/features/computers/useComputers';
@@ -19,11 +18,10 @@ import { listMachines, type Machine } from './machines';
 export function useMachines(): Machine[] {
   const { profile, connection } = useDaemon();
   const profiles = useHostsStore(state => state.profiles);
-  const levels = useAccessStore(state => state.levels);
   const directory = profile.tailnetMachine ? profile : profiles.find(saved => saved.tailnetMachine) ?? null;
   const computers = useComputers(directory);
   const { presence } = useConnectionPresence();
-  return listMachines({ profiles, current: profile, connection: connection.status, presence, tailnet: computers.data, levels });
+  return listMachines({ profiles, current: profile, connection: connection.status, presence, tailnet: computers.data });
 }
 
 /**

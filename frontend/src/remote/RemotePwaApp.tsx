@@ -1,3 +1,4 @@
+import { tokenAccess } from '../../../shared/types/accessLevel';
 import { setHostAccess, useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -617,7 +618,6 @@ export function RemotePwaApp() {
     activeRuntimeRef.current?.disconnect();
     activeRuntimeRef.current = runtime;
     setHostAccess(runtime.access);
-    runtime.onAccess = access => { if (runtime === activeRuntimeRef.current) setHostAccess(access); };
     updateConnection({ ...INITIAL_CONNECTION, connectionStatus: 'connecting' });
     resetHostState(profile.id);
     updateConnection({ adapter: runtime, activeProfile: profile });
@@ -698,7 +698,7 @@ export function RemotePwaApp() {
     void connectProfile(profile).then(applyRoute).catch(() => {});
   }, [activeProfile?.id, adapter, closeTodos, connectProfile, loadPanels, pendingPushRoute, profilesLoading, requestView, savedProfiles, selectSession, setLastError]);
 
-  const pairFromLink = useCallback(async (secret: string) => {
+  const pairFromLink = useCallback(async (secret: string, watching = false) => {
     setLastError(null);
     try {
       const [computer, ...linked] = await pairThisBrowser(window, secret, {
@@ -706,13 +706,14 @@ export function RemotePwaApp() {
         label: getClientLabel(),
         phoneId: getRuntimeId(),
         saved: savedProfiles,
+        watching,
       });
       if (!computer) return;
       // Computers the Pane app already linked with this one come along. The browser links none itself:
       // each computer's browser app has its own storage, so it never sees the others.
       setSavedProfiles(previous => withNewProfiles(previous, linked));
       // A read-only link never takes the place of full access this browser already has.
-      const saved = computer.access === 'read' ? savedProfiles.find(profile => profile.id === computer.id && profile.access !== 'read') : undefined;
+      const saved = tokenAccess(computer.token) === 'read' ? savedProfiles.find(profile => profile.id === computer.id && tokenAccess(profile.token) !== 'read') : undefined;
       await connectProfile(saved ?? computer);
     } catch (error) {
       setLastError(error instanceof Error ? pairingErrorText(error) : 'Pairing failed.');
@@ -1206,7 +1207,7 @@ export function RemotePwaApp() {
         join={pendingJoin.join}
         onLink={() => {
           setPendingJoin(null);
-          void pairFromLink(pendingJoin.secret);
+          void pairFromLink(pendingJoin.secret, pendingJoin.join.access === 'read');
         }}
         onCancel={() => setPendingJoin(null)}
       />

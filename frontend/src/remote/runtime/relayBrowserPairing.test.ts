@@ -1,3 +1,5 @@
+import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
+import { readOnlyToken } from '../../../../shared/types/accessLevel';
 import { describe, expect, it, vi } from 'vitest';
 
 import { linkWithSavedRelayComputers, relayProfile } from '../../../../shared/remoteClient/relay';
@@ -69,18 +71,21 @@ describe('pairing the browser app from "Continue in browser"', () => {
     ]);
   });
 
-  it('marks every computer of a read-only code read-only, and links none of them with the saved ones', async () => {
+  it('keeps only read-only computers from a read-only code, and links none of them with the saved ones', async () => {
     const fetch = async () => ({
       ok: true,
       status: 200,
       body: null,
       json: async () => ({
-        ok: true, token: 'tok', clientId: 'c', access: 'read', computer: computer('6cphy4hwgmwpp4nl', 'Tyler'),
-        linked: [{ computer: computer('kqyutsssbsalgvyf', 'Tyler 2'), token: 'tok-2' }],
+        ok: true, token: readOnlyToken('a'), clientId: 'c', access: 'read', group: [], computer: computer('6cphy4hwgmwpp4nl', 'Tyler'),
+        linked: [
+          { computer: computer('kqyutsssbsalgvyf', 'Tyler 2'), token: readOnlyToken('b') },
+          { computer: computer('jkbgxxed5x35pv6o', 'Not his to give'), token: 'full' },
+        ],
       }),
     });
     const [tyler, tyler2] = await pairThisBrowser(page(''), 's3cret', { fetch, label: 'x', phoneId: 'y' });
-    expect([tyler.access, tyler2.access]).toEqual(['read', 'read']);
+    expect([tyler.label, tyler2.label]).toEqual(['Tyler', 'Tyler 2']);
 
     const mine = relayProfile({ computer: computer('jkbgxxed5x35pv6o', 'Studio Mac'), token: 'tok-mine' });
     const asked: string[] = [];
@@ -88,6 +93,19 @@ describe('pairing the browser app from "Continue in browser"', () => {
     await linkWithSavedRelayComputers(tyler, [tyler2], [mine], clientFor);
     await linkWithSavedRelayComputers(mine, [], [tyler, tyler2], clientFor);
     expect(asked).toEqual([]);
+  });
+
+  it.each([
+    ['its preview said so', 'read', false],
+    ['the confirm said so', null, true],
+  ])('keeps nothing when a link shown Read only answers with full access (%s)', async (_why, level, watching) => {
+    const fetch = async (url: string) => ({
+      ok: true, status: 200, body: null,
+      json: async (): Promise<JsonValue> => (url.endsWith('/pair/preview')
+        ? { ok: true, access: level, group: [{ id: '6cphy4hwgmwpp4nl', name: 'Tyler' }] }
+        : { ok: true, token: 'full', clientId: 'c', computer: computer('6cphy4hwgmwpp4nl', 'Tyler'), linked: [] }),
+    });
+    await expect(pairThisBrowser(page(''), 's3cret', { fetch, label: 'x', phoneId: 'y', watching })).rejects.toThrow('This code changed');
   });
 
   it('says a read-only link joins nothing, and still asks first', async () => {

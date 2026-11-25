@@ -75,14 +75,12 @@ function currentLive(connection: RemotePaneConnectionStatus, presence: Connectio
  * a password. State comes from the shared connection presence (its grace rule) for the current
  * machine and from the Tailscale list for the rest.
  */
-export function listMachines({ profiles, current, connection, presence, tailnet, levels }: {
+export function listMachines({ profiles, current, connection, presence, tailnet }: {
   profiles: readonly RemotePaneConnectionProfile[];
   current: RemotePaneConnectionProfile;
   connection: RemotePaneConnectionStatus;
   presence: ConnectionPresence;
   tailnet: TailnetMachineList | undefined;
-  /** What each machine last said of this phone's access; without it, its pairing's own mark decides. */
-  levels?: Parameters<typeof isReadOnlyProfile>[1];
 }): Machine[] {
   const listed = tailnet?.ok ? tailnet.machines : [];
   const domain = tailnet?.ok ? tailnet.domain : undefined;
@@ -107,7 +105,7 @@ export function listMachines({ profiles, current, connection, presence, tailnet,
       status: isRelayProfile(profile) ? `${live.status} · Via ${relayName(profile.relay.domain)}` : live.status,
       current: isCurrent,
       selectable: !isCurrent && live.state !== 'dimmed',
-      readOnly: isReadOnlyProfile(profile, levels),
+      readOnly: isReadOnlyProfile(profile),
       profile,
       tailnet: entry,
       domain,

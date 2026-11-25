@@ -1,11 +1,12 @@
 import { expect, it, vi } from 'vitest';
 
+import { readOnlyToken } from '@shared/types/accessLevel';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { readUnlessRefused } from './readOnlyReads';
 
 const mine: RemotePaneConnectionProfile = { id: 'mine', label: 'Mine', baseUrl: 'https://mine.runpane.net', token: 't', transport: 'http+sse' };
-const tyler: RemotePaneConnectionProfile = { ...mine, id: 'tyler', access: 'read' };
+const tyler: RemotePaneConnectionProfile = { ...mine, id: 'tyler', token: readOnlyToken('a') };
 
 it('never asks a read-only computer for its questions or permission requests, and lists none', async () => {
   const read = vi.fn(async () => { throw new Error('refused'); });

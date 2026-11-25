@@ -15,9 +15,17 @@ export const READ_ONLY_HOST_ANSWERS: ReadonlyMap<string, JsonValue> = new Map<st
   ['panels:emitEvent', null],
   ['terminal:saveSnapshot', null],
   ['browser:watch', null],
+  // Git is read for controls a watched Pane doesn't show; its cached status comes with the Pane.
+  ['sessions:get-git-status', { success: false }],
+  ['sessions:get-git-commands', { success: false }],
+  ['sessions:has-changes-to-rebase', { success: true, data: false }],
+  ['sessions:has-stash', { success: true, data: false }],
+  ['sessions:get-upstream', { success: true, data: null }],
+  ['git:get-github-remote', { success: true, data: null }],
   // Nothing to resume, create, run, answer, clean up or forward.
   ['panels:shouldAutoCreate', false],
   ['projects:resolve-run-script', { success: true, data: null }],
+  ['sessions:get-output', { success: true, data: [] }],
   ['sessions:get-resumable', { success: true, data: [] }],
   ['archive:get-progress', { success: true, data: null }],
   ['permission:getPending', { success: true, data: [] }],

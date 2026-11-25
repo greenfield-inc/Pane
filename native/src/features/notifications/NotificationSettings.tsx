@@ -2,7 +2,7 @@ import { Alert, Linking, Platform, StyleSheet, Switch, View } from 'react-native
 
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
-import { isReadOnlyProfile, useAccessStore } from '@/auth/access';
+import { isReadOnlyProfile } from '@/auth/access';
 import { useHostsStore } from '@/auth/hostsStore';
 import { isDemoProfile } from '@/features/demo/demoHost';
 import { useTheme, type ThemeColors } from '@/theme';
@@ -47,7 +47,7 @@ export function NotificationSettings() {
 
 function ComputerRow({ profile, result }: { profile: RemotePaneConnectionProfile; result: PushSetupResult | undefined }) {
   const theme = useTheme();
-  const readOnly = useAccessStore(state => isReadOnlyProfile(profile, state.levels));
+  const readOnly = isReadOnlyProfile(profile);
   const { summary, color, onPress } = present(profile, result, readOnly);
   return (
     <ListRow

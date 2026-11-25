@@ -4,6 +4,7 @@ import { formatDistanceToNow } from './timestampUtils';
 import {
   COMPUTER_ROUTE_LABELS,
   findComputer,
+  isWatchedComputer,
   routeProfile,
   type ComputerRouteKind,
   type RemoteComputer,
@@ -206,7 +207,7 @@ function listMachines({ connectionState, computers, tailnet, localName, localOs,
     const tailscaleOnly = computer.routes.every((route) => route.kind === 'tailscale');
     const inUse = computer.routes.find((route) => route.id === routeInUse) ?? computer.routes[0];
     const os = computer.os ?? machine?.os ?? null;
-    const base = { id: computer.id, name: computer.label, os, kind: 'computer' as const, slot: slotFor(computer.label), routes, needsLink, computer, profile: routeProfile(computer, inUse), tailnet: machine, readOnly: (active ? connectionState.access : state ? state.access : inUse?.access) === 'read' };
+    const base = { id: computer.id, name: computer.label, os, kind: 'computer' as const, slot: slotFor(computer.label), routes, needsLink, computer, profile: routeProfile(computer, inUse), tailnet: machine, readOnly: isWatchedComputer(computer) };
 
     const idle = idleState({ machine, state, needsLink, tailscaleOnly, tailnetListed: tailnet?.ok === true });
     // An active computer that now wants a password asks for it instead of retrying the stored one.

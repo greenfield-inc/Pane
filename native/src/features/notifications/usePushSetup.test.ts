@@ -1,6 +1,8 @@
 import { expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ profiles: [] as { label: string; id: string; token: string; access?: 'read' }[], calls: [] as string[] }));
+import { readOnlyToken } from '@shared/types/accessLevel';
+
+const state = vi.hoisted(() => ({ profiles: [] as { label: string; id: string; token: string }[], calls: [] as string[] }));
 vi.mock('react-native', () => ({ AppState: {} }));
 vi.mock('expo-notifications', () => ({}));
 vi.mock('@/auth/secureStore', () => ({ secureStore: { getItem: () => Promise.resolve(null), setItem: () => Promise.resolve() } }));
@@ -22,7 +24,7 @@ vi.mock('@/daemon', () => ({
 const { requestPushRegistration } = await import('./usePushSetup');
 
 it('registers for alerts with every saved computer except a read-only one', async () => {
-  state.profiles = [{ id: 'studio', label: 'studio', token: 't' }, { id: 'tyler', label: 'tyler', token: 't', access: 'read' }];
+  state.profiles = [{ id: 'studio', label: 'studio', token: 't' }, { id: 'tyler', label: 'tyler', token: readOnlyToken('a') }];
   requestPushRegistration(0);
   await vi.waitFor(() => expect(state.calls).toContain('studio mobile:push-register'));
   expect(state.calls.filter(call => call.startsWith('tyler'))).toEqual([]);

@@ -52,11 +52,19 @@ export async function relayLinkJoin(
   link: Pick<RelayPairingLink, 'secret' | 'computerId' | 'domain' | 'name'>,
   saved: readonly RemotePaneConnectionProfile[],
 ): Promise<RelayLinkJoin | null> {
+  return linkJoin(link, null, saved) && linkJoin(link, await readLinkPreview(fetch, link), saved);
+}
+
+/** `relayLinkJoin` with a preview read already; null when it could not be. */
+export function linkJoin(
+  link: Pick<RelayPairingLink, 'computerId' | 'name'>,
+  preview: LinkPreviewAnswer,
+  saved: readonly RemotePaneConnectionProfile[],
+): RelayLinkJoin | null {
   // A computer this device only watches joins nothing, so it counts on neither side.
   const mine = saved.filter(isRelayProfile).filter(profile => tokenAccess(profile.token) !== 'read');
   if (mine.length === 0 || mine.some(profile => profile.relay.computerId === link.computerId)) return null;
   const here = mine.map(profile => profile.label);
-  const preview = await readLinkPreview(fetch, link);
   if (!preview?.group.length) return { maker: link.name, makerGroup: [link.name], here };
   const join: RelayLinkJoin = { maker: preview.group[0].name, makerGroup: preview.group.map(computer => computer.name), here };
   if (preview.access) join.access = preview.access;

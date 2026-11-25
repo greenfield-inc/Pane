@@ -9,7 +9,6 @@ import {
 } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
-import { withAccessNoted } from '@/auth/access';
 import { secureStore } from '@/auth/secureStore';
 import { demoConnection, isDemoProfile } from '@/features/demo/demoHost';
 import { perfFetch } from '@/features/perf/perfFetch';
@@ -47,7 +46,7 @@ export function createDaemonClient(profile: RemotePaneConnectionProfile): Remote
     // The demo's sample computers answer in the app, whichever screen builds the client.
     ...(isDemoProfile(profile)
       ? demoConnection()
-      : { transport: withAccessNoted(profile, createFetchEventStreamTransport(fetch)), fetch }),
+      : { transport: createFetchEventStreamTransport(fetch), fetch }),
     runtimeId: getRuntimeId,
     clientLabel: CLIENT_LABEL,
     deviceLabel: DEVICE_LABEL,

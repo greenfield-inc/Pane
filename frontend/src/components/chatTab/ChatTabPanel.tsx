@@ -266,6 +266,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const stopped = view?.status === 'stopped';
   const readOnly = useReadOnlyHost();
   const disabled = !connected || stopped || !view || readOnly;
+  // Reading a chat starts no agent for a read-only viewer, so one nobody opened has no transcript to wait for.
+  const notRunning = readOnly && !snapshot.transcript && !view?.problem && (view?.status === 'idle' || view?.status === 'stopped');
   const agentName = view ? chatAgentLabel(catalog, view.agent) : 'the agent';
   const commands = matchingCommands(snapshot.draft, clearable ? withPaneCommands(view?.commands ?? []) : view?.commands ?? []);
   /** Cmd/Ctrl+Enter: the message being sent goes ahead of the queue and interrupts the turn (D-211, D-222 item 7). */
@@ -570,8 +572,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {view?.clearedAt && (snapshot.transcript?.start ?? 0) === 0 && <ClearedDivider at={view.clearedAt} />}
+          {notRunning && <p role="status" className="chat-notice">This chat isn’t running. Its messages show here once its owner opens it.</p>}
           {!snapshot.transcript && !view?.problem && (view?.status === 'starting' || !view) && <p role="status" className="chat-notice">Starting {agentName}…</p>}
-          <SkeletonSwap loading={!snapshot.transcript && !view?.problem && !!view && view.status !== 'starting'} skeleton={<TurnsSkeleton />}>
+          <SkeletonSwap loading={!snapshot.transcript && !view?.problem && !!view && view.status !== 'starting' && !notRunning} skeleton={<TurnsSkeleton />}>
             <ChatBlocksContext.Provider value={rendering}>
               {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
             </ChatBlocksContext.Provider>

@@ -134,7 +134,7 @@ describe('Add a device › Computer: pasting a link', () => {
     await useAddDeviceStore.getState().confirmLink();
 
     expect(callsTo('relay:link-preview')).toEqual([[{ link: LINK }]]);
-    expect(callsTo('relay:redeem-link')).toEqual([[{ link: LINK }]]);
+    expect(callsTo('relay:redeem-link')).toEqual([[{ link: LINK, access: 'full' }]]);
     expect(useAddDeviceStore.getState().flow).toMatchObject({ step: 'linked', maker: 'Studio Mac' });
     expect(text(renderFlow())).toContain('This computer now reaches Studio Mac and 3 other computers.');
   });
@@ -152,6 +152,7 @@ describe('Add a device › Computer: pasting a link', () => {
     expect(callsTo('relay:redeem-link')).toEqual([]);
 
     await useAddDeviceStore.getState().confirmLink();
+    expect(callsTo('relay:redeem-link')).toEqual([[{ link: LINK, access: 'read' }]]);
     expect(text(renderFlow())).toContain('Paired Read only with Studio Mac');
   });
 
@@ -165,6 +166,7 @@ describe('Add a device › Computer: pasting a link', () => {
 
   it.each([
     ['ERR_PAIRING_CODE_EXPIRED', 'This code expired. Scan the new code on the computer.', 'This code expired'],
+    ['ERR_LINK_LEVEL_CHANGED', 'Studio Mac answered with another access level than the link showed, so nothing was linked.', 'Studio Mac answered with another access level than the link showed, so nothing was linked.'],
     ['ERR_PAIRING_CODE_USED', 'This code was already used. Scan the new code on the computer.', 'This code was already used'],
   ])('shows a %s refusal in today\'s words', async (code, message, shown) => {
     preview = LINKED_ALREADY;
@@ -194,7 +196,7 @@ describe('A pane://pair link opened on this computer', () => {
     expect(callsTo('relay:redeem-link')).toEqual([]);
     await useAddDeviceStore.getState().confirmLink();
 
-    expect(callsTo('relay:redeem-link')).toEqual([[{ link: LINK }]]);
+    expect(callsTo('relay:redeem-link')).toEqual([[{ link: LINK, access: 'full' }]]);
     expect(useAddDeviceStore.getState().flow).toMatchObject({ source: 'opened' });
     const page = text(renderFlow());
     expect(page).toContain('Linked with Studio Mac');

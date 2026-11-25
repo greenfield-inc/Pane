@@ -339,6 +339,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const [isCliReady, setIsCliReady] = useState(!!terminalState?.isCliReady);
   const isRemoteMode = useConfigStore((state) => state.config?.remoteDaemon?.client.mode === 'remote');
   const readOnly = useReadOnlyHost();
+  /** A watched tab that isn't running shows one line saying so. */
+  const notRunningRef = useRef(false);
   const isCliPanelRef = useRef(isCliPanel);
 
   // ptyId for the current PTY behind this panel, delivered via
@@ -924,6 +926,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       };
 
       if (watching) {
+        // Its first output, when someone starts it, replaces the line.
+        notRunningRef.current = !state;
         const content = state ? selectTerminalRestoreContent(state)?.content : '\x1b[90mThis tab is not running.\x1b[0m';
         if (content) await new Promise<void>((resolve) => { pendingReplayWritesRef.current += 1; terminal.write(content, () => { pendingReplayWritesRef.current -= 1; resolve(); }); });
       } else if (state?.scrollbackBuffer) {
@@ -1668,6 +1672,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // Core write-and-ack: consume a raw output chunk for this panel.
           const writeAndAck = (output: string) => {
             if (!terminal || disposed) return;
+            if (notRunningRef.current) {
+              notRunningRef.current = false;
+              terminal.reset();
+            }
             const writeStarted = terminalTiming ? performance.now() : 0;
             terminal.write(output, () => {
               if (disposed) return;

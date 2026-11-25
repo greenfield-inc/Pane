@@ -23,20 +23,20 @@ export function takePairingSecret({ location, history }: PairingPage): string | 
 
 /**
  * Pairs this browser with the computer that served it: trades the secret at its own
- * `/pair/exchange`. A read-only link to a computer in `saved` with full access is refused unspent. Returns that computer first, then every computer linked with it.
+ * `/pair/exchange`. A link shown as read-only, by the confirm (`watching`) or its preview, pairs only read-only, and one to
+ * a computer in `saved` with full access is refused unspent. Returns that computer first, then every computer linked with it.
  */
 export async function pairThisBrowser(
   page: PairingPage,
   secret: string,
-  request: { fetch: RemoteFetch; label: string; phoneId: string; saved?: readonly RemotePaneConnectionProfile[] },
+  request: { fetch: RemoteFetch; label: string; phoneId: string; saved?: readonly RemotePaneConnectionProfile[]; watching?: boolean },
 ): Promise<RelayConnectionProfile[]> {
   const { computerId } = servedBy(page);
-  if (fullAccessRefusal('browser', computerId, 'read', request.saved ?? [])) {
-    const preview = await readLinkPreview(request.fetch, { ...servedBy(page), secret });
-    const refusal = fullAccessRefusal('browser', computerId, preview?.access, request.saved ?? []);
-    if (refusal) throw refusal;
-  }
-  return exchangeRelayPairing(request.fetch, servedBy(page), { secret, label: request.label, phoneId: request.phoneId });
+  const preview = await readLinkPreview(request.fetch, { ...servedBy(page), secret });
+  const refusal = fullAccessRefusal('browser', computerId, preview?.access, request.saved ?? []);
+  if (refusal) throw refusal;
+  const watching = request.watching === true || preview?.access === 'read';
+  return exchangeRelayPairing(request.fetch, servedBy(page), { secret, label: request.label, phoneId: request.phoneId }, { watching });
 }
 
 /**

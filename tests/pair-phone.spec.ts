@@ -314,6 +314,8 @@ for (const theme of ['light', 'dark'] as const) {
     expect(await calls(page, 'relay:unlink-computer-everywhere')).toEqual([]);
     await openPhonesTab(page);
     await expect(page.getByText('Read only', { exact: true })).toHaveCount(1);
+    await page.getByRole('button', { name: "Remove Alex's iPhone" }).click();
+    await expect.poll(() => calls(page, 'relay:remove-phone-everywhere')).toEqual([[{ clientId: 'computer-2' }], [{ clientId: 'phone-2' }]]);
     await shot(page, `settings-phones-${theme}`);
   });
 }
