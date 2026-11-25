@@ -1,6 +1,6 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { router } from 'expo-router';
-import { use } from 'react';
+import { use, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { DEVICE_ACCESS_LABELS } from '@shared/types/accessLevel';
@@ -33,6 +33,9 @@ export function MachineChips({ machines, showAll }: { machines: Machine[]; showA
   const { select, connecting } = useSelectMachine();
   const all = useMachinePrefs(state => state.all) && showAll;
   const setAll = useMachinePrefs(state => state.setAll);
+  // Legend List keeps each pill's measured width, so a pill measured in a narrower column (before
+  // an unfold, a turn or an expand from the rail) stays cut short. A new width lays them out again.
+  const [layout, setLayout] = useState({ width: 0, pass: 0 });
   const chips: Chip[] = [...(showAll ? [{ kind: 'all' as const }] : []), ...machines.map(machine => ({ kind: 'machine' as const, machine })), { kind: 'add' }];
 
   const press = (machine: Machine) => {
@@ -48,6 +51,11 @@ export function MachineChips({ machines, showAll }: { machines: Machine[]; showA
 
   return (
     <LegendList
+      key={layout.pass}
+      onLayout={event => {
+        const width = Math.round(event.nativeEvent.layout.width);
+        if (width !== layout.width) setLayout({ width, pass: layout.width === 0 ? 0 : layout.pass + 1 });
+      }}
       testID="machine-chips"
       horizontal
       data={chips}
