@@ -2347,11 +2347,12 @@ const CONTRACT_SECTION_11 = [
   },
   {
     "name": "links create",
-    "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session in the Pane app.",
+    "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session, or that starts an agent on a prompt once the person confirms.",
     "usage": [
       "runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
       "runpane links create --repo <repo-id> [--json]",
-      "runpane links create --session <session-id> [--json]"
+      "runpane links create --session <session-id> [--json]",
+      "runpane links create --repo <repo> --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--json]"
     ],
     "toolsets": [
       "core",
@@ -5612,13 +5613,16 @@ const CONTRACT_SECTION_13 = {
       "  runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
       "  runpane links create --repo <repo-id> [--json]",
       "  runpane links create --session <session-id> [--json]",
+      "  runpane links create --repo <repo> --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--json]",
       "",
-      "Build a pane:// link that opens a Pane, panel, repository, or Session in the Pane app.",
+      "Build a pane:// link that opens a Pane, panel, repository, or Session, or that starts an agent on a prompt once the person confirms.",
       "",
       "Options:",
       "  --pane <pane-id>                Pane to open.",
       "  --panel <panel-id>              Panel inside the Pane to select.",
-      "  --repo <repo-id>                Repository id from repos list.",
+      "  --repo <repo-id>                Repository id from repos list; with --prompt, also a saved name or owner/repo.",
+      "  --prompt <task>                 Start link: the prompt Pane shows, then sends once the person presses Start.",
+      "  --agent <agent>                 Start link: the agent to start (default: Pane's default agent).",
       "  --session <session-id>          Session id or name from sessions list.",
       "  --json                          Print machine-readable output."
     ],
@@ -5629,7 +5633,7 @@ const CONTRACT_SECTION_13 = {
       "Open a pane:// link in the running Pane app.",
       "",
       "Options:",
-      "  --url <pane-url>                A pane://open link from links create.",
+      "  --url <pane-url>                A pane://open or pane://new link from links create.",
       "  --yes                           Confirm this change; required in non-interactive shells.",
       "  --json                          Print machine-readable output.",
       "  --pane-dir <path>               Connect to a specific Pane data directory."
@@ -8457,13 +8461,16 @@ const CONTRACT_SECTION_13 = {
       "  runpane links create --pane <pane-id> [--panel <panel-id>] [--json]",
       "  runpane links create --repo <repo-id> [--json]",
       "  runpane links create --session <session-id> [--json]",
+      "  runpane links create --repo <repo> --prompt <task> [--agent <codex|claude|cursor|opencode|pi>] [--json]",
       "",
-      "Build a pane:// link that opens a Pane, panel, repository, or Session in the Pane app.",
+      "Build a pane:// link that opens a Pane, panel, repository, or Session, or that starts an agent on a prompt once the person confirms.",
       "",
       "Options:",
       "  --pane <pane-id>                Pane to open.",
       "  --panel <panel-id>              Panel inside the Pane to select.",
-      "  --repo <repo-id>                Repository id from repos list.",
+      "  --repo <repo-id>                Repository id from repos list; with --prompt, also a saved name or owner/repo.",
+      "  --prompt <task>                 Start link: the prompt Pane shows, then sends once the person presses Start.",
+      "  --agent <agent>                 Start link: the agent to start (default: Pane's default agent).",
       "  --session <session-id>          Session id or name from sessions list.",
       "  --json                          Print machine-readable output."
     ],
@@ -8474,7 +8481,7 @@ const CONTRACT_SECTION_13 = {
       "Open a pane:// link in the running Pane app.",
       "",
       "Options:",
-      "  --url <pane-url>                A pane://open link from links create.",
+      "  --url <pane-url>                A pane://open or pane://new link from links create.",
       "  --yes                           Confirm this change; required in non-interactive shells.",
       "  --json                          Print machine-readable output.",
       "  --pane-dir <path>               Connect to a specific Pane data directory."
@@ -10018,7 +10025,7 @@ const CONTRACT_SECTION_14 = {
     "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
     "`runpane panels conversation --conversation <id> [--source startup|resume|clear|compact]` records which conversation a terminal panel's agent is on (daemon action `runpane:panels:conversation`, request `{ panelId, paneId?, conversationId, source? }`, result `{ ok: true, paneId, panelId, conversationId, source?, sure }`; `sure` is true when the report came since the panel's agent started). It is not an `agent.report` event. The panel comes from `--panel` (with an optional `--pane`), else `PANE_PANEL_ID` and `PANE_SESSION_ID`, as for `runpane report`. `runpane panels conversation --hook` is the command for a Claude Code `SessionStart` hook: it reads the hook's JSON from stdin (`session_id`, `source`; at most 64 KiB, for at most 2 seconds), reports it for `PANE_PANEL_ID`, prints nothing on stdout or stderr, and always exits 0: outside Pane, on bad input, when Pane is not running, and with a Pane that predates the action. Without `--hook` it prints `Recorded conversation <id> for panel <panel-id>.` and fails like any other command.",
     "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
-    "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
+    "`runpane links create` builds `pane://open?...` links, which select what they name and never change Pane state, and `pane://new?...` start links, which ask the person before Pane starts an agent on the prompt.",
     "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.",
     "`runpane handoff` hands a task to another agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. When the sender is a Pane tab running a Claude, Codex, Cursor or OpenCode session and the receiver is the same agent, the handoff carries that session: on another machine its files are copied into that machine's agent store and the receiver resumes the same id; on this machine the receiver resumes a fork, because two agents never resume one session on one machine. The receiver starts with no prompt, and the CLI runs the continuity check and reports JSON `continuity.result` `continued`, `inconclusive` (exit 0; `next` gives a probe question) or `not-continued` (exit 1; the receiver is kept and `next` gives the `--note-only` command). `--note-only`, a different agent, or a tab with no carried session starts a fresh agent with the note (`fresh-agent`). JSON `continuity` is `{ carried, result, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched?, originalAppended? }, reason, next }`: `sessionId` is the sender's session, `resumedId` the id the receiver resumes (the fork's on this machine), `checks` are the continuity checks (`historyLoaded` is null when there was nothing to compare; `originalUntouched` is set for forks), and a dry run sets `carried`, `sessionId`, `fork`, `files` and `bytes` with no `result`. After `continued` or `inconclusive` the sending agent ends its turn and makes no more changes on the branch. An OpenCode session travels as its export: `opencode export` on this machine, then `opencode import` inside the receiving repository there, and an OpenCode receiver is accepted only to continue an OpenCode session. A Cursor session is carried only to another machine, best effort since Cursor's store is undocumented: Cursor has no fork, and a copied chat still writes to the original, so on this machine the result is `not-continued` and nothing is started. A destination's agent store is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`); a copy already there is replaced only when the sender's holds all of it and no agent there runs it, otherwise nothing is copied and the result is `not-continued`. A destination Pane too old to resume a carried session is refused before anything is sent (`ERR_HANDOFF_RESUME_UNSUPPORTED`). From a Session's terminal it skips git and creates a Session with the same name, goal and agent on the other machine instead; a same-agent Session starts on the sender's conversation. The receiver reports back to the sender's panel.",
     "`runpane ask --agent <agent> --prompt \"<question>\"` asks one agent one read-only question and prints its answer, with no tab left behind: the agent's own headless mode runs once, on this machine or another one (`--machine`), in a saved repository (`--repo`, a WSL repository runs in WSL) or a Pane's worktree (`--pane`), with any model it accepts (`--model`). It can read files but not edit them or run shell commands; an agent with no such mode is refused (`ERR_ASK_UNSUPPORTED`). A missing agent, a sign-in error, an unknown model and a timeout each fail with the agent's own words and the next step. Use it for a second opinion or a question to another model; work that edits files goes to a tab.",
@@ -18189,13 +18196,20 @@ const CONTRACT_SECTION_16 = {
             "enum": [
               "pane",
               "repo",
-              "session"
+              "session",
+              "new"
             ]
           },
           "id": {
             "type": "string"
           },
           "panelId": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "agent": {
             "type": "string"
           }
         },
@@ -27376,8 +27390,8 @@ const CONTRACT_SECTION_17 = {
     },
     "links create": {
       "name": "links create",
-      "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session in the Pane app.",
-      "details": "Use this to hand the user a clickable link. It only builds the URL; opening it navigates and never changes Pane state.",
+      "summary": "Build a pane:// link that opens a Pane, panel, repository, or Session, or that starts an agent on a prompt once the person confirms.",
+      "details": "Use this to hand the user a clickable link. It only builds the URL. An open link navigates and never changes Pane state; a start link (--prompt) shows the repository, agent and whole prompt in Pane, and creates a Pane only when the person presses Start.",
       "requiresPaneDaemon": false,
       "mutates": false,
       "arguments": [
@@ -27397,7 +27411,19 @@ const CONTRACT_SECTION_17 = {
           "name": "--repo",
           "value": "<repo-id>",
           "required": false,
-          "description": "Repository id from repos list."
+          "description": "Repository id from repos list; with --prompt, also a saved name or owner/repo."
+        },
+        {
+          "name": "--prompt",
+          "value": "<task>",
+          "required": false,
+          "description": "Start link: the prompt Pane shows, then sends once the person presses Start."
+        },
+        {
+          "name": "--agent",
+          "value": "<agent>",
+          "required": false,
+          "description": "Start link: the agent to start (default: Pane's default agent)."
         },
         {
           "name": "--session",
@@ -27412,19 +27438,21 @@ const CONTRACT_SECTION_17 = {
         }
       ],
       "examples": [
-        "runpane links create --pane <pane-id> --json"
+        "runpane links create --pane <pane-id> --json",
+        "runpane links create --repo owner/repo --prompt \"Fix the failing test\" --agent codex --json"
       ],
       "jsonSchemas": [
         "linkCreateResult"
       ],
       "notes": [
-        "Links look like `pane://open?pane=<pane-id>&panel=<panel-id>`. Give exactly one of --pane, --repo, or --session."
+        "Links look like `pane://open?pane=<pane-id>&panel=<panel-id>`. Give exactly one of --pane, --repo, or --session.",
+        "Start links look like `pane://new?repo=<repo>&prompt=<text>&agent=<id>`: --repo (id, saved name, or owner/repo matched against each saved repository's origin remote) and --prompt (at most 4000 characters, no control characters but tab and newline). Pane never runs one on its own."
       ]
     },
     "links open": {
       "name": "links open",
       "summary": "Open a pane:// link in the running Pane app.",
-      "details": "Use this to navigate the app to a Pane, panel, repository, or Session. It raises the Pane window, so run it only when the user asked.",
+      "details": "Use this to navigate the app to a Pane, panel, repository, or Session, or to ask the person about a start link. It raises the Pane window, so run it only when the user asked.",
       "requiresPaneDaemon": true,
       "mutates": true,
       "arguments": [
@@ -27432,7 +27460,7 @@ const CONTRACT_SECTION_17 = {
           "name": "--url",
           "value": "<pane-url>",
           "required": true,
-          "description": "A pane://open link from links create."
+          "description": "A pane://open or pane://new link from links create."
         },
         {
           "name": "--yes",
@@ -27458,7 +27486,7 @@ const CONTRACT_SECTION_17 = {
         "daemonActionResult"
       ],
       "notes": [
-        "Opening a link never changes Pane state; it selects what the link names."
+        "An open link never changes Pane state; it selects what the link names. A start link (pane://new) only asks: Pane creates a Pane when the person presses Start."
       ]
     },
     "docs search": {

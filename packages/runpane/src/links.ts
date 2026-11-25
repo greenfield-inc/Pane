@@ -3,6 +3,11 @@ import type { ParsedArgs } from './commands';
 /** Ids that may appear in a pane:// link. Pane's URL handler applies the same rule. */
 const LINK_ID = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 const REPO_ID = /^[1-9][0-9]{0,15}$/;
+/** A repository id, saved name, or `owner/repo` for a start link, as Pane's URL handler accepts it. */
+const REPO_SELECTOR = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}(?:\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99}){0,2}$/;
+const MAX_LINK_PROMPT_LENGTH = 4000;
+/** The longest start link Pane opens, after URL encoding. */
+const MAX_START_LINK_LENGTH = 16_384;
 
 /** A numeric repository id, as app channels and repo links take it. */
 export function parseRepoId(repo: string): number {
@@ -16,8 +21,24 @@ interface LinkTarget {
   panelId?: string;
 }
 
-/** `pane://open?pane=<id>[&panel=<id>]`, `pane://open?repo=<id>`, or `pane://open?session=<id>`. */
-export function buildPaneLink(target: LinkTarget): string {
+/** A start link: Pane asks the person, then starts the agent on the prompt in a new Pane. */
+interface StartLinkTarget {
+  kind: 'new';
+  id: string;
+  prompt: string;
+  agent?: string;
+}
+
+/**
+ * `pane://open?pane=<id>[&panel=<id>]`, `pane://open?repo=<id>`, `pane://open?session=<id>`, or
+ * `pane://new?repo=<repo>&prompt=<text>[&agent=<id>]`.
+ */
+export function buildPaneLink(target: LinkTarget | StartLinkTarget): string {
+  if (target.kind === 'new') {
+    const params = new URLSearchParams({ repo: target.id, prompt: target.prompt });
+    if (target.agent) params.set('agent', target.agent);
+    return `pane://new?${params.toString()}`;
+  }
   const params = new URLSearchParams({ [target.kind]: target.id });
   if (target.panelId) params.set('panel', target.panelId);
   return `pane://open?${params.toString()}`;
@@ -26,6 +47,9 @@ export function buildPaneLink(target: LinkTarget): string {
 export function runLinksCreate(parsed: ParsedArgs): number {
   const target = linkTargetFrom(parsed);
   const url = buildPaneLink(target);
+  if (url.length > MAX_START_LINK_LENGTH) {
+    throw new Error(`--prompt makes a ${url.length}-character link once encoded; Pane opens links up to ${MAX_START_LINK_LENGTH}. Shorten the prompt.`);
+  }
   if (parsed.json) {
     console.log(JSON.stringify({ ok: true, url, target }, null, 2));
   } else {
@@ -34,7 +58,9 @@ export function runLinksCreate(parsed: ParsedArgs): number {
   return 0;
 }
 
-function linkTargetFrom(parsed: ParsedArgs): LinkTarget {
+function linkTargetFrom(parsed: ParsedArgs): LinkTarget | StartLinkTarget {
+  if (parsed.initialInput !== undefined) return startLinkTargetFrom(parsed, parsed.initialInput);
+  if (parsed.agent) throw new Error('--agent needs --prompt: it names the agent a start link starts.');
   const given = [parsed.paneId && 'pane', parsed.repo && 'repo', parsed.sessionId && 'session'].filter(Boolean);
   if (given.length !== 1) {
     throw new Error('runpane links create needs exactly one of --pane, --repo, or --session.');
@@ -50,6 +76,33 @@ function linkTargetFrom(parsed: ParsedArgs): LinkTarget {
   const target: LinkTarget = { kind, id };
   if (parsed.panelId) target.panelId = requireId(parsed.panelId, '--panel', 'runpane panels list');
   return target;
+}
+
+function startLinkTargetFrom(parsed: ParsedArgs, prompt: string): StartLinkTarget {
+  if (!parsed.repo || parsed.paneId || parsed.panelId || parsed.sessionId) {
+    throw new Error('A start link takes --repo and --prompt (and optionally --agent), not --pane, --panel or --session.');
+  }
+  if (!REPO_SELECTOR.test(parsed.repo)) {
+    throw new Error('--repo must be a repository id, saved name, or owner/repo. Run `runpane repos list` to find it.');
+  }
+  if (UNSAFE_CHARACTER.test(prompt)) {
+    throw new Error('--prompt must not contain control characters (other than tab and newline), or text-direction or invisible characters.');
+  }
+  const text = collapsePadding(prompt);
+  if (!text) throw new Error('--prompt must not be empty.');
+  if ([...text].length > MAX_LINK_PROMPT_LENGTH) throw new Error(`--prompt must be at most ${MAX_LINK_PROMPT_LENGTH} characters for a link.`);
+  if (text.startsWith('-')) throw new Error('--prompt must not start with "-", which an agent would read as an option.');
+  const target: StartLinkTarget = { kind: 'new', id: parsed.repo, prompt: text };
+  if (parsed.agent) target.agent = parsed.agent;
+  return target;
+}
+
+/** Characters Pane refuses in a link's prompt: controls other than tab and newline, format characters, line and paragraph separators. */
+const UNSAFE_CHARACTER = /[^\t\n\P{Cc}]|[\p{Cf}\p{Zl}\p{Zp}]/u;
+
+/** The prompt as Pane shows and sends it: trailing spaces and runs of blank lines removed. */
+function collapsePadding(text: string): string {
+  return text.split('\n').map((line) => line.trimEnd()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function requireId(value: string | undefined, flag: string, lister: string): string {

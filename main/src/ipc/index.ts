@@ -1,7 +1,7 @@
 import { registerChatTabHandlers } from './chatTabs';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
-import { app, ipcMain, powerMonitor } from 'electron';
+import { app, dialog, ipcMain, powerMonitor, type BrowserWindow, type MessageBoxOptions } from 'electron';
 import type { AppServices } from './types';
 import { registerAppHandlers } from './app';
 import { registerNotesHandlers } from './notes';
@@ -58,6 +58,7 @@ import { registerPaneSecretHandlers } from './paneSecrets';
 import { registerCustomThemeHandlers } from './customTheme';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { registerPaneLinkHandler } from '../services/paneLinks';
+import { RepositoryIdentities } from '../services/repositoryIdentity';
 import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { registerWorkspaceAccessHandlers } from './workspaceAccess';
@@ -145,26 +146,45 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerDesktopAlertHandlers(ipcMain, services);
   const notify = registerNotifyHandlers(ipcMain, services, commandRegistry);
   services.notifyService = notify;
+  const raiseMainWindow = (): BrowserWindow | undefined => {
+    const window = services.getMainWindow();
+    if (!window || window.isDestroyed()) return undefined;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+    return window;
+  };
+  const showMessage = (options: MessageBoxOptions) => {
+    const window = raiseMainWindow();
+    return window ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options);
+  };
+  const repositoryIdentities = new RepositoryIdentities();
   registerPaneLinkHandler(commandRegistry, {
     showWaitingCard: (paneId, panelId) => notify.showWaitingCard(paneId, panelId),
     repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),
+    listRepos: async () => {
+      const projects = services.databaseService.getAllProjects();
+      const identities = await repositoryIdentities.of(projects);
+      return projects.map((project, index) => ({ id: project.id, name: project.name, identity: identities[index] ?? null }));
+    },
+    // A native dialog, so nothing the link opened can press Start; Cancel is the default.
+    confirmStart: async ({ repoName, agentLabel, prompt }) => (await showMessage({
+      type: 'question',
+      buttons: ['Start', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      message: `Start ${agentLabel} in ${repoName}?`,
+      detail: `A link asks Pane to create a new Pane in ${repoName} and send ${agentLabel} this prompt. ${agentLabel} runs with full access: it can edit files and run commands without asking.\n\n${prompt}`,
+    })).response === 0,
+    showError: (message) => void showMessage({ type: 'warning', message: 'Pane could not open this link', detail: message }),
     navigate: (target) => {
-      const window = services.getMainWindow();
-      if (window && !window.isDestroyed()) {
-        if (window.isMinimized()) window.restore();
-        window.show();
-        window.focus();
-      }
+      raiseMainWindow();
       getPaneEventSink().send('pane:open-link', target);
     },
     // A pairing link opened outside Pane: bring the window up on its confirm page.
     openPairLink: (link) => {
-      const window = services.getMainWindow();
-      if (window && !window.isDestroyed()) {
-        if (window.isMinimized()) window.restore();
-        window.show();
-        window.focus();
-      }
+      raiseMainWindow();
       getPaneEventSink().send('relay:link-opened', { link });
     },
   });

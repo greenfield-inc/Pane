@@ -5,7 +5,7 @@ import { usePanelStore } from '../../stores/panelStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { Session } from '../../types/session';
-import { openPaneTarget } from './openPaneLink';
+import { openPaneLink, openPaneTarget } from './openPaneLink';
 import { parsePaneLink, PANE_LINK_REGEX } from './paneLink';
 
 const paneUrl = 'pane://open?pane=fd3f9b5a-17ef-4385-917e-e5e8039fb547&panel=5d7f9f91-8301-4ba9-842c-7dcad54c92f1';
@@ -17,6 +17,24 @@ describe('Pane terminal links', () => {
       paneId: 'fd3f9b5a-17ef-4385-917e-e5e8039fb547',
       panelId: '5d7f9f91-8301-4ba9-842c-7dcad54c92f1',
     });
+  });
+
+  it('recognizes a start link up to the first space, quote or bracket', () => {
+    const startUrl = 'pane://new?repo=acme%2Fapp&prompt=Fix+the+%22login%22+test&agent=codex';
+    expect(PANE_LINK_REGEX.exec(`Start it: ${startUrl} (or ask)`)?.[0]).toBe(startUrl);
+    expect(PANE_LINK_REGEX.exec(`"${startUrl}"`)?.[0]).toBe(startUrl);
+    expect(parsePaneLink(startUrl)).toBeNull();
+  });
+
+  it('hands a start link to main, which asks the person before anything starts', async () => {
+    const openInMain = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('window', { electronAPI: { window: { openPaneLink: openInMain } } });
+    try {
+      await openPaneLink('pane://new?repo=app&prompt=hi');
+      expect(openInMain).toHaveBeenCalledWith('pane://new?repo=app&prompt=hi');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('rejects links outside the Pane open route', () => {

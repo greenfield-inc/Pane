@@ -1,8 +1,15 @@
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-export const PANE_LINK_REGEX = new RegExp(`pane://open\\?pane=${UUID}(?:&panel=${UUID})?`, 'i');
+/** A start link's query is URL-encoded, so it ends at the first space, quote or bracket. */
+const START_LINK = 'pane://new\\?[^\\s"\'<>()\\[\\]]+';
+export const PANE_LINK_REGEX = new RegExp(`pane://open\\?pane=${UUID}(?:&panel=${UUID})?|${START_LINK}`, 'i');
+
+/** `pane://new?…` asks to start an agent; only main may act on it, after the person confirms. */
+export function isPaneStartLink(uri: string): boolean {
+  return /^pane:\/\/new\?/i.test(uri);
+}
 
 export function parsePaneLink(uri: string): { paneId: string; panelId?: string } | null {
-  if (!PANE_LINK_REGEX.test(uri)) return null;
+  if (!PANE_LINK_REGEX.test(uri) || isPaneStartLink(uri)) return null;
   try {
     const url = new URL(uri);
     if (url.protocol !== 'pane:' || url.hostname !== 'open' || url.pathname) return null;
