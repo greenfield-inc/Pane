@@ -492,6 +492,53 @@ test.describe('Settings → Secrets', () => {
     ]);
   });
 
+  test('makes a login for exact sites only, edits them, and shows who filled it, where and when', async ({ page }) => {
+    const now = Date.now();
+    await boot(page, notifyFixture(), {}, {
+      secrets: [
+        { project: 'bank', name: 'PIN', updatedAt: new Date(now - 3_600_000).toISOString(), machine: 'mac-studio', sites: ['https://bank.example'] },
+        { project: 'bank', name: 'PASSWORD', updatedAt: new Date(now - 3_600_000).toISOString(), machine: 'mac-studio' },
+      ],
+      loginUses: [{ project: 'bank', name: 'PIN', site: 'https://bank.example', agent: 'Claude', pane: 'billing', at: new Date(now - 300_000).toISOString(), machine: 'parsa-devbox' }],
+    });
+    await openSecrets(page);
+    const row = (address: string) => page.locator(`[data-secret="${address}"]`);
+    await expect(row('bank/PIN').getByTestId('pane-secret-login')).toHaveText('Login for https://bank.exampleClaude in billing filled it on https://bank.example on parsa-devbox 5 minutes ago');
+    // A login is never written into 1Password from here, and never shown as a plain secret.
+    await expect(row('bank/PIN').getByRole('button', { name: 'Move to 1Password' })).toHaveCount(0);
+
+    await row('bank/PASSWORD').getByRole('button', { name: 'Use as a login' }).click();
+    const sites = page.getByLabel('Sign-in sites for bank/PASSWORD');
+    const save = row('bank/PASSWORD').getByRole('form').getByRole('button', { name: 'Use as a login' });
+    await sites.fill('http://bank.example');
+    await expect(row('bank/PASSWORD')).toContainText('"http://bank.example" can\'t be a login\'s site.');
+    await expect(save).toBeDisabled();
+    await sites.fill('b\u0430nk.example');
+    // A lookalike shows as the address it really is.
+    await expect(row('bank/PASSWORD')).toContainText('https://xn--bnk-6cd.example');
+    await sites.fill('bank.example/login https://bank.example:8443');
+    await expect(row('bank/PASSWORD')).toContainText('Agents can fill it on https://bank.example, https://bank.example:8443 and nowhere else');
+    await save.click();
+    await expect(row('bank/PASSWORD').getByTestId('pane-secret-login')).toContainText('Never filled.');
+
+    await row('bank/PIN').getByRole('button', { name: 'Edit sites' }).click();
+    await page.getByLabel('Sign-in sites for bank/PIN').fill('https://login.bank.example');
+    await row('bank/PIN').getByRole('button', { name: 'Save sites' }).click();
+
+    await page.getByRole('button', { name: 'Add secret' }).click();
+    await page.getByLabel('Secret project').fill('shop');
+    await page.getByLabel('Secret name').fill('PIN');
+    await page.getByLabel('Secret value').fill('0000');
+    await page.getByLabel('Secret sign-in site').fill('shop.example');
+    await page.getByRole('button', { name: 'Save securely' }).click();
+    await expect(row('shop/PIN').getByTestId('pane-secret-login')).toContainText('Login for https://shop.example');
+    expect(await secretCalls(page)).toEqual([
+      { action: 'setSites', project: 'bank', name: 'PASSWORD', sites: ['https://bank.example', 'https://bank.example:8443'] },
+      { action: 'setSites', project: 'bank', name: 'PIN', sites: ['https://login.bank.example'] },
+      { action: 'set', project: 'shop', name: 'PIN', sites: ['https://shop.example'] },
+    ]);
+  });
+
   test('adds a 1Password reference over a typed secret, leases it to the machines picked, and ends the lease', async ({ page }) => {
     const now = new Date().toISOString();
     await boot(page, notifyFixture(), {}, {

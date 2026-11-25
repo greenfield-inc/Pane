@@ -90,8 +90,13 @@ function ConfirmBar({ label, text, action, onConfirm, onCancel }: { label: strin
   );
 }
 
+interface ReadSites {
+  sites: string[];
+  problem: string | null;
+}
+
 /** Typed sites, separated by spaces, commas or lines, as the exact origins a login may be filled on. */
-function readSites(typed: string): { sites: string[]; problem: string | null } {
+function readSites(typed: string): ReadSites {
   const parts = typed.split(/[\s,]+/).filter(Boolean);
   const bad = parts.find((part) => loginSiteOrigin(part) === null);
   if (bad) return { sites: [], problem: `"${bad}" can't be a login's site. Use an https address, such as https://bank.example.` };

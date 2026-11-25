@@ -110,6 +110,9 @@ export interface BrowserServices {
   configManager: { getConfig(): { browser?: Partial<BrowserSettings> } };
 }
 
+/** A tool call, checked: the tab it names and the verb to run there. */
+interface ToolCall { tab: string | undefined; request: VerbRequest }
+
 /** Who called: the agent's Pane and tab. */
 interface BrowserCaller { paneId: string; panelId?: string; worktree?: string }
 
@@ -742,10 +745,10 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   }
 
   /** Validates, picks the tab, runs the verb and shapes the result: the path of every tool but open, tabs and close. */
-  function tool(verb: VerbRequest['verb'], build: (request: PaneCommandValue, caller: BrowserCaller) => { tab: string | undefined; request: VerbRequest }): void {
+  function tool(verb: VerbRequest['verb'], build: (request: PaneCommandValue, caller: BrowserCaller) => ToolCall | Promise<ToolCall>): void {
     commandRegistry.register(`runpane:browser:${verb}`, async (raw: PaneCommandValue) => {
       const caller = callerOf();
-      const { tab: tabId, request } = build(raw, caller);
+      const { tab: tabId, request } = await build(raw, caller);
       const tab = pickTab(caller, tabId, !READ_VERBS.has(verb));
       return toolResult(tab, await onTab(caller, tab, request));
     });
@@ -821,16 +824,19 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     return { tab, request: { verb: 'type', ref, text, clear: clear === true, submit: submit === true } };
   });
 
-  tool('fill', (raw, caller) => {
+  tool('fill', async (raw, caller) => {
     const { tab, ref, project, name } = decode('fill', raw, schemas.fill);
-    const teammate = teammatePaneCaller();
-    if (teammate) throw teammateSecretRefusal(teammate, 'fill a saved login');
+    // The record names the agent, so the call must come from its tab; a teammate's tab carries their tag.
+    const callerTab = caller.panelId ? host.tab(caller.panelId) : undefined;
+    if (!callerTab) throw new PaneError('ERR_BROWSER_NO_PANE', 'Saved logins are filled only for an agent in a Pane tab, and this call named none. Nothing was filled.', 'Run the command from the agent\'s own tab.');
+    if (callerTab.metadata.teammate) throw teammateSecretRefusal(callerTab.metadata.teammate, 'fill a saved login');
     const picked = pickTab(caller, tab, true);
     // A popup shares scripts with the page that opened it, which an agent may have scripted.
     if (tabState(picked).signInPopup) throw new PaneError('ERR_BROWSER_LOGIN_POPUP', 'This tab is a sign-in popup linked to the page that opened it, and saved logins don\'t go into linked pages. Nothing was filled.', 'Ask the person to sign in here.');
     const login: LoginToFill = {
       key: paneSecretKey(project, name),
-      sites: logins.sites(project, name) ?? [],
+      // Not listed here: read says why (a plain secret, none at all), or has the sites of a lease that came first.
+      sites: logins.sites(project, name) ?? (await logins.read(project, name)).sites,
       read: () => logins.read(project, name),
       record: async (site) => {
         const use: PaneLoginUse = { project, name, site, agent: agentName(caller.panelId), pane: services.sessionManager.getSession(caller.paneId)?.name ?? caller.paneId, at: new Date().toISOString() };

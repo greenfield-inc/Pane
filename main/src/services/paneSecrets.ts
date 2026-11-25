@@ -478,7 +478,7 @@ export class PaneSecretStore {
       try {
         await this.values.write(loginValueKey(key), encodeLogin({ sites, value }));
       } catch (error) {
-        throw this.writeFailed(key, error);
+        throw this.writeFailed(key, reasonOf(error));
       }
       const meta: PaneLoginMeta = { updatedAt: this.now().toISOString(), source: this.hostLabel(), sites };
       await this.config.updateConfigWith(config => ({ paneLogins: { ...config.paneLogins, [key]: meta } }));
@@ -486,10 +486,10 @@ export class PaneSecretStore {
     });
   }
 
-  private writeFailed(key: string, error: unknown): PaneError {
+  private writeFailed(key: string, reason: string): PaneError {
     return new PaneError(
       'SECRET_WRITE_FAILED',
-      `Pane could not store ${key}: ${reasonOf(error)}. Nothing was changed.`,
+      `Pane could not store ${key}: ${reason}. Nothing was changed.`,
       this.values.storage().kind === 'keychain'
         ? 'Unlock the login keychain in Keychain Access, then try again.'
         : 'Check that Pane can write to its data directory, then try again.',
@@ -595,7 +595,7 @@ export class PaneSecretStore {
       try {
         await this.values.write(key, value);
       } catch (error) {
-        throw this.writeFailed(key, error);
+        throw this.writeFailed(key, reasonOf(error));
       }
       const meta: PaneSecretMeta = { updatedAt: this.now().toISOString(), source: this.hostLabel() };
       await this.config.updateConfigWith(config => ({ paneSecrets: { ...config.paneSecrets, [key]: meta } }));

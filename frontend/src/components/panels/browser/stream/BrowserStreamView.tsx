@@ -6,7 +6,8 @@ import { DriverChip } from '../../device/DeviceToolViews';
 import { browserInputQueue, clickCounter, fitFrame, keyboardField, modifiersOf, movesFocus, pagePoint, PhoneControl } from '../../../../../../shared/utils/browserStreamInput';
 import type { BrowserStream, StreamStop } from './useBrowserStream';
 import type { BrowserStreamClient } from './streamClient';
-import { loginLine, SignInLine } from '../TabNotices';
+import { SignInLine } from '../TabNotices';
+import { browserLoginLine } from '../../../../../../shared/types/browser';
 
 /** How long the agent's cursor stays at a click before it fades (as on the host's own tab). */
 const CURSOR_SHOWN_MS = 1_200;
@@ -476,7 +477,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       )}
       {login && (
         <div role="status" className="absolute bottom-3 left-3 max-w-[calc(100%-24px)] truncate rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md" data-testid="browser-stream-login">
-          {loginLine(login)}
+          {browserLoginLine(login)}
         </div>
       )}
       {download && downloadSeenAt > 0 && Date.now() - downloadSeenAt < 60_000 && (

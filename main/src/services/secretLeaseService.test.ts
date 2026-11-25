@@ -7,7 +7,7 @@ import { memoryConfig } from '../test/memorySecretStore';
 import { fileSecretBackend, PaneSecretStore, type SecretEncryption } from './paneSecrets';
 import { OnePassword, type OpRunner } from './onePassword';
 import { SecretLeaseStore } from './secretLeases';
-import { leaseEndSchema, leasePushSchema, SecretLeaseService, type LeaseMachineLink } from './secretLeaseService';
+import { leaseEndSchema, leasePushSchema, pushedSecrets, SecretLeaseService, type LeaseMachineLink } from './secretLeaseService';
 import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppConfig } from '../types/config';
@@ -47,7 +47,8 @@ async function fakeHost(name: string, clock: { now: number }, options: { online?
       received.push({ channel, arg: args[0] });
       if (options.refuse) throw Object.assign(new Error(options.refuse), { code: 'ERR_UNKNOWN_CHANNEL' });
       if (channel === 'secrets:lease:push') {
-        return { ok: true, lease: await store.grant(decodeBoundary(args[0], leasePushSchema)) };
+        const pushed = decodeBoundary(args[0], leasePushSchema);
+        return { ok: true, lease: await store.grant({ ...pushed, secrets: pushedSecrets(pushed) }) };
       }
       if (channel === 'secrets:lease:end') return { ok: true, ended: await store.end(decodeBoundary(args[0], leaseEndSchema).id) };
       if (channel === 'secrets:lease:list') return { leases: store.list(), memoryOnly: options.memoryOnly ?? false, refusal: null };
@@ -103,6 +104,25 @@ describe('SecretLeaseService', () => {
     expect(await devbox.store.read('stripe', 'STRIPE_KEY')).toBe('sk_live_canary_1');
     expect(devbox.received[0].arg).toMatchObject({ id: started.leaseId, expiresInMs: 24 * HOUR });
     expect(store.get(started.leaseId)?.pushedTo).toEqual(['devbox-id']);
+    service.dispose();
+  });
+
+  it('pushes a login with its sites, in a field a machine from before logins drops, and renews it with the sites of then', async () => {
+    const clock = { now: Date.parse('2026-11-18T12:00:00Z') };
+    const devbox = await fakeHost('devbox', clock);
+    const { service, secrets } = await desktop(clock, [devbox.link], ITEMS);
+    await secrets.setReference('stripe', 'STRIPE_KEY', 'op://Dev/Stripe/credential', ['https://dashboard.stripe.com']);
+
+    const started = await service.start({ project: 'stripe', names: ['STRIPE_KEY'], machines: ['devbox-id'], requestedBy: 'Settings' });
+
+    expect(await devbox.store.readLogin('stripe', 'STRIPE_KEY')).toEqual({ value: 'sk_live_canary_1', sites: ['https://dashboard.stripe.com'] });
+    await expect(devbox.store.read('stripe', 'STRIPE_KEY')).rejects.toMatchObject({ code: 'SECRET_IS_LOGIN' });
+    const push = decodeBoundary(devbox.received[0].arg, leasePushSchema);
+    expect(push.secrets).toEqual([]);
+
+    await secrets.setSites('stripe', 'STRIPE_KEY', ['https://connect.stripe.com']);
+    await service.start({ project: 'stripe', names: ['STRIPE_KEY'], machines: [], requestedBy: 'Settings', renews: started.leaseId });
+    expect((await devbox.store.readLogin('stripe', 'STRIPE_KEY'))?.sites).toEqual(['https://connect.stripe.com']);
     service.dispose();
   });
 

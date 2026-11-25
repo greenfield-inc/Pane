@@ -12,6 +12,9 @@ A secret is one of two kinds:
 | Typed | Saved in Pane on every host it syncs to, until you replace or delete it. | You in Settings → Secrets, an agent with `runpane secrets set`, or you on a `secrets request` card. |
 | From 1Password | 1Password. Pane keeps only the reference, `op://vault/item/field`, and holds the value only during a [lease](#leases) you approve. | Only you, in Settings → Secrets. |
 
+Either kind can be a [login](#logins): the person gives it sites, and agents then
+only fill it on those sites in a Pane browser tab.
+
 Values stay in the OS store, never in `config.json`, the database, logs, chat or MCP
 output.
 
@@ -83,6 +86,38 @@ from 1Password fails with `SECRET_IS_REFERENCE`.
 **Move to 1Password** on a typed secret writes its value into 1Password, turns the
 secret into a reference to that new item, and deletes the typed copies on every
 host. The first move asks which vault to use; later moves use the same vault.
+
+## Logins
+
+A login is a site's password, PIN or username that agents may sign in with and
+never see.
+
+- **Make one** in Settings → Secrets: fill in **Sign-in site** when you add a
+  secret or a 1Password reference, or press **Use as a login** on one you have. A
+  site is an exact origin: `https://bank.example` covers that host on the usual
+  port, and no subdomain. Write a port to allow it (`https://bank.example:8443`).
+  `http` works only for this computer (`http://localhost:3000`). Several sites are
+  separated by spaces.
+- **Agents use it** with `runpane browser fill` (MCP: `browser_fill`); see
+  [Saved logins](BROWSER_AGENTS.md#saved-logins).
+- **Only you change it.** Sites are set and edited only in Settings → Secrets on a
+  desktop. `secrets exec`, `set` and `delete`, project environment variables and
+  **Move to 1Password** refuse a login (`SECRET_IS_LOGIN`). When an agent asks for a
+  secret of that name with `secrets request`, what you type replaces the value and
+  the sites stay.
+- **Turning a secret into a login** deletes its plain copies on every machine:
+  commands that used it stop getting it.
+- **From 1Password**, a login needs a live lease like any reference. The lease card
+  names its sites. A site you add works from the next lease; one you remove stops
+  at once.
+- **The sites are stored with the value**, in the OS store. Editing `config.json` adds
+  no site and makes no login.
+- **Uses**: Settings → Secrets lists the latest fills under each login, from this
+  desktop and each machine that answers. Every machine keeps its own in
+  `login-uses.log`, without values. A fill that can't be recorded doesn't happen.
+- **Machines from before logins** hold no login and take none in a lease. One that
+  had the plain secret deletes it when it syncs; one that had a plain 1Password
+  reference keeps that until you update it.
 
 ## Leases
 
@@ -189,7 +224,7 @@ machine only when you start it.
 
 | Where | What |
 | --- | --- |
-| Settings → Secrets | Typed secrets and references by project, with when and where each was set; Add, Add from 1Password, Replace, Move to 1Password and Delete; live leases per machine with End now and End all; lease length per project. Values are never shown again. |
+| Settings → Secrets | Typed secrets, references and logins by project, with when and where each was set, and each login's sites and latest uses; Add, Use as a login, Edit sites, Add from 1Password, Replace, Move to 1Password and Delete; live leases per machine with End now and End all; lease length per project. Values are never shown again. |
 | `runpane secrets list [--project P] [--json]` | Typed secrets with their updated time and machine, then references with when their lease ends, such as `stripe/STRIPE_LIVE_KEY  from 1Password (op://Dev/Stripe/live key)  leased until <time>` or `no lease`. MCP: `secrets_list` in the `secrets` toolset. |
 | `runpane secrets set --project P --name N --yes` | Reads the value from stdin only, so it never lands in your shell history or a process list. There is no MCP tool for it. |
 | `runpane secrets delete --project P --name N --yes` | MCP: `secrets_delete` in the `secrets` toolset. |
@@ -208,6 +243,8 @@ their own copy: see [Project environment variables](PROJECT_ENV_VARS.md).
 | Code | What happened | Next step |
 | --- | --- | --- |
 | `SECRET_NOT_FOUND` | No secret by that name on this machine. | Request it, or open Pane on a desktop connected to that machine so it syncs. |
+| `SECRET_IS_LOGIN` | The secret is a login, and the command would have put it in an environment, changed it or deleted it. Nothing was run or changed. | Fill it with `runpane browser fill`. Only the person changes a login, in Settings → Secrets. |
+| `SECRET_NOT_LOGIN` | `browser fill` named a secret the person has not made a login. Nothing was filled. | Ask the person to press **Use as a login** on it in Settings → Secrets. |
 | `SECRET_UNREADABLE` | Pane could not read a stored value (a typed secret or a leased one), for example because the keychain is locked. | Unlock the login keychain (macOS). Otherwise set a typed secret again with `runpane secrets set`, or end the lease in Settings → Secrets and run `runpane secrets lease --project <p> <NAME>`. |
 | `SECRET_LEASE_ENDED` | The secret comes from 1Password and has no live lease on this machine. Nothing was run. | Run `runpane secrets lease --project <p> <NAME...>`, and the person approves it on the card, or run with `--only` and the typed names you need. |
 | `SECRET_IS_REFERENCE` | `secrets set` named a secret that comes from 1Password. Nothing was changed. | Run `runpane secrets lease --project <p> <NAME>` to use it, or remove the reference in Settings → Secrets first. |
@@ -231,7 +268,7 @@ their own copy: see [Project environment variables](PROJECT_ENV_VARS.md).
 | Linux without a keyring (a headless server) | The same 0600 file, as plain text. `runpane secrets list` on that host says so. | Memory only, never on disk. |
 
 The index of names, times and machines lives in `config.json` under `paneSecrets`,
-and references under `paneSecretReferences`. A delete removes the stored value first. If the keychain refuses, the
+references under `paneSecretReferences` and typed logins under `paneLogins`. A delete removes the stored value first. If the keychain refuses, the
 secret stays saved and listed, and the delete can be run again once the keychain is
 unlocked.
 
@@ -252,7 +289,7 @@ never receives a lease value.
 ## Who can read a secret
 
 Any agent, and any program running as you, on any of your hosts, can use every typed
-Pane secret, and every secret from 1Password while its lease is live on that host.
+Pane secret that is not a login, and every secret from 1Password while its lease is live on that host.
 That is the point: agents keep and share their own secrets across projects. The
 safeguards stop accidental exposure; they don't sandbox anything. Setting "Everyone
 on tailnet" on any host gives everyone on the tailnet the same access to typed
@@ -263,6 +300,7 @@ secrets.
 | Any agent or process running as you on a host | Yes | runpane's local socket is mode 0600 with no token. On macOS, items trust `/usr/bin/security`. |
 | Every host Pane syncs to | Typed secrets: yes, holds a copy. From 1Password: only during a lease that names that host. | Each saved host keeps a copy of typed secrets for offline use. |
 | Your paired phone | Relays, never stores | The same rule as shared keys: a paired device can already open terminals on the host. It never receives a lease value. |
+| A login | Agents fill it on its sites and no Pane command returns it. A program running as you can still read the OS store directly. | The rows above describe the store, not `runpane`. |
 | Teammates (other Tailscale logins on your tailnet), when any one of your hosts is set to "Everyone on tailnet" | Typed secrets: yes. From 1Password: no, since that host can't receive a lease. | Their `workspace exec` commands and the terminals they open there run as you, so they can read the keychain or `secrets.json`, run `runpane`, and reach every typed secret. Each synced host keeps a copy of your typed secrets, so that setting on any one host exposes them all. Pane refuses only their direct secret requests: secret and lease cards, secret variables, chat tab keys, chat tab sign-in and [shared key sync](SHARED_CREDENTIALS.md), and their terminals and chat tabs start without secret variables or chat tab keys, including after the owner switches one of their terminals to chat. Keep "Only me" on every host unless you trust everyone on the tailnet with all your typed secrets. |
 | A Linux host without a keyring | Typed secrets at rest in a 0600 file, unencrypted. Lease values in memory only. | `runpane secrets list` on that host says so. |
 | Chat, MCP output, Notify history and broadcasts, push payloads, Pane logs (including the lease log), analytics, `sessions.db`, `config.json` | No | Pane never writes or returns a value to any of them. |

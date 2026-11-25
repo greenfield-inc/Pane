@@ -14,6 +14,11 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = { agentTools: true, ope
 /** A saved login an agent filled: `<project>/<NAME>`, the site and the agent. */
 export interface BrowserLoginUse { login: string; site: string; agent: string }
 
+/** "Claude filled bank/PIN on https://bank.example": the line every screen showing the tab gets. */
+export function browserLoginLine({ agent, login, site }: BrowserLoginUse): string {
+  return `${agent} filled ${login} on ${site}`;
+}
+
 /** What main tells a browser tab to show under its address bar (`BROWSER_TAB_NOTICE_CHANNEL`). */
 export type BrowserTabNotice =
   /** "This page wants to open <app>. Open · Cancel": the page asked for an app link (zoommtg:). */

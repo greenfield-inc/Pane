@@ -1142,7 +1142,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     });
     /** What Settings asked of paneSecrets; values are never recorded. */
     type PaneSecretCall =
-      | { action: 'set' | 'delete' | 'moveToOnePassword'; project: string; name: string }
+      | { action: 'set' | 'delete' | 'moveToOnePassword'; project: string; name: string; sites?: string[] }
       | { action: 'setReference'; project: string; name: string; reference: string }
       | { action: 'setSites'; project: string; name: string; sites: string[] }
       | { action: 'startLease'; request: SecretLeaseStartRequest }
@@ -1163,11 +1163,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const paneSecretsApi = {
       list: () => Promise.resolve({ success: true, data: clone(paneSecrets) }),
       set: (project: string, name: string, _value: string, sites?: string[]) => {
-        paneSecretCalls.push({ action: 'set', project, name });
+        paneSecretCalls.push(sites ? { action: 'set', project, name, sites } : { action: 'set', project, name });
         const replaced = paneSecrets.secrets.some(sameSecret(project, name));
         paneSecrets.secrets = [
           ...paneSecrets.secrets.filter((secret) => !sameSecret(project, name)(secret)),
-          { project, name, updatedAt: new Date().toISOString(), machine: 'this-mac', ...(sites ? { sites } : {}) },
+          { project, name, sites, updatedAt: new Date().toISOString(), machine: 'this-mac' },
         ];
         return Promise.resolve({ success: true, data: replaced });
       },

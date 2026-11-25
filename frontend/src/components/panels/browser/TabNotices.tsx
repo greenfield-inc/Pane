@@ -1,6 +1,6 @@
 import React from 'react';
 import { AppWindow, Download, ExternalLink, KeyRound, LogIn, X } from 'lucide-react';
-import type { BrowserLoginUse, BrowserTabNotice } from '../../../../../shared/types/browser';
+import { browserLoginLine, type BrowserTabNotice } from '../../../../../shared/types/browser';
 
 export interface ShownTabNotice {
   key: string;
@@ -39,7 +39,7 @@ export const TabNotices: React.FC<TabNoticesProps> = ({ notices, onOpenApp, onOp
         </>}
         {notice.kind === 'login' && <>
           <KeyRound className="h-3.5 w-3.5 flex-shrink-0 text-text-tertiary" />
-          <span className="min-w-0 flex-1 truncate" title={loginLine(notice)}>{loginLine(notice)}</span>
+          <span className="min-w-0 flex-1 truncate" title={browserLoginLine(notice)}>{browserLoginLine(notice)}</span>
         </>}
         {notice.kind !== 'app' && (
           <button type="button" onClick={() => onDismiss(key)} className="flex-shrink-0 rounded p-0.5 hover:bg-surface-hover hover:text-text-primary" title="Dismiss" aria-label="Dismiss">
@@ -50,11 +50,6 @@ export const TabNotices: React.FC<TabNoticesProps> = ({ notices, onOpenApp, onOp
     ))}
   </>
 );
-
-/** "Claude Code filled bank/PIN on https://bank.example": a tab's own line, and a stream's. */
-export function loginLine({ agent, login, site }: BrowserLoginUse): string {
-  return `${agent} filled ${login} on ${site}`;
-}
 
 /** "<site> won't sign in here. Open this page in your browser": a tab's own line, and a stream's. */
 export const SignInLine: React.FC<{ site: string; onOpen: () => void }> = ({ site, onOpen }) => (

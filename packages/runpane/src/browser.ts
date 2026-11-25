@@ -2,6 +2,7 @@ import { boundary, decodeBoundary, type JsonValue } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
 import { invokeDaemon } from './daemonClient';
 import { RunpaneError } from './errors';
+import { refuseTeammate } from './secrets';
 
 // `runpane browser`: the browser tabs of the calling tab's Pane (docs/BROWSER_AGENTS.md).
 // Pane fills in the Pane from the caller and checks every request; nothing here names a Pane.
@@ -80,6 +81,7 @@ const tabResult = boundary.object({ tab: boundary.optional(boundary.string), url
 
 export async function runBrowser(parsed: ParsedArgs): Promise<number> {
   const verb = parsed.command.slice('browser '.length);
+  if (verb === 'fill') refuseTeammate('fill a saved login');
   const request = parsed.browserRequest ?? {};
   const result = await invokeDaemon(`runpane:browser:${verb}`, [request], boundary.json, { paneDir: parsed.paneDir, timeoutMs: CALL_TIMEOUT_MS });
   console.log(parsed.json ? JSON.stringify(result, null, 2) : humanText(verb, result));

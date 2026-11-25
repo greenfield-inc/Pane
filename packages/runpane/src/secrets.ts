@@ -76,7 +76,7 @@ function invalid(message: string, next: string): RunpaneError {
  * Pane secrets are the owner's. Pane sets PANE_TEAMMATE_LOGIN on a teammate's `workspace exec`, and
  * every secrets command refuses it before asking Pane for anything.
  */
-function refuseTeammate(action: string, env: NodeJS.ProcessEnv = process.env): void {
+export function refuseTeammate(action: string, env: NodeJS.ProcessEnv = process.env): void {
   const teammate = env.PANE_TEAMMATE_LOGIN;
   if (!teammate) return;
   throw new RunpaneError(

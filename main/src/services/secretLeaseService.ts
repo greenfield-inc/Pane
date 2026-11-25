@@ -253,7 +253,7 @@ export class SecretLeaseService {
           id,
           project: lease.project,
           secrets,
-          ...(logins.length > 0 ? { logins } : {}),
+          logins,
           expiresInMs: Date.parse(lease.expiresAt) - this.now(),
           requestedBy: lease.requestedBy,
           grantedOn: lease.grantedOn,

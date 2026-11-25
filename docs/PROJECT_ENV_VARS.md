@@ -16,7 +16,7 @@ Each variable is one of:
 | Source | What the project stores |
 | --- | --- |
 | Plain text | The value, in the Pane database |
-| Pane secret | Only the secret's address, `<project>/<NAME>`. The value lives in [Pane secrets](PANE_SECRETS.md), so every repo and agent that uses it shares one copy, synced to your other machines. A secret from 1Password has a value only during a [lease](PANE_SECRETS.md#leases). |
+| Pane secret | Only the secret's address, `<project>/<NAME>`. The value lives in [Pane secrets](PANE_SECRETS.md), so every repo and agent that uses it shares one copy, synced to your other machines. A secret from 1Password has a value only during a [lease](PANE_SECRETS.md#leases). A [login](PANE_SECRETS.md#logins) never goes into an environment. |
 | macOS Keychain | Only the service and account of a generic-password item you already have (macOS hosts only) |
 
 For a Pane secret row, type a value to create or replace that secret when you save;
