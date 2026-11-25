@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -46,6 +46,8 @@ function recordingRunner(calls: AgentFarmProcess[], fail?: string) {
     const name = process.args[3] === '--config-root' ? 'greenfield' : path.basename(process.args[3]);
     const root = process.args[process.args.indexOf('--config-root') + 1];
     mkdirSync(path.join(root, 'plugins', name), { recursive: true });
+    // A plugin from a folder is copied, as Agent Farm does.
+    if (process.args[3] !== '--config-root' && path.isAbsolute(process.args[3])) cpSync(process.args[3], path.join(root, 'plugins', name), { recursive: true });
     return `note: installed\n{\n  "name": "${name}",\n  "version": "1.2.3",\n  "changed": 4\n}\n`;
   };
 }
@@ -267,7 +269,8 @@ describe('Pane\'s own plugin with the pinned package', () => {
     // Only harness, model and description: no identity text, skills or subagents.
     expect(readFileSync(path.join(configRoot, 'plugins', 'pane', 'agents', 'claude.md'), 'utf8').split('---')[2].trim()).toBe('');
     writeFileSync(path.join(configRoot, 'plugins', 'pane', 'agents', 'claude.md'), '---\nharness: claude\nmodel:\n  name: claude-sonnet-5-5\n---\nMine.\n');
-    const status = await installBundledAgentFarm({ paneDir, bundle: { ...bundle, version: '9.9.7' }, log: () => undefined });
+    // The same bundle at the next start: the edit is still replaced (QA F4).
+    const status = await installBundledAgentFarm({ paneDir, log: () => undefined });
     expect(status).toMatchObject({ state: 'ready', edited: [] });
     expect(readFileSync(path.join(configRoot, 'plugins', 'pane', 'agents', 'claude.md'), 'utf8')).not.toContain('Mine.');
   }, 180_000);

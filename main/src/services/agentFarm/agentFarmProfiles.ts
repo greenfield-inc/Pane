@@ -50,6 +50,28 @@ export function panePluginFiles(): Map<string, string> {
   return files;
 }
 
+/** Whether `plugins/pane` holds exactly the files Pane writes, so an edit there is noticed at start. */
+export async function panePluginInstalled(configRoot: string): Promise<boolean> {
+  const root = path.join(configRoot, 'plugins', PANE_PROFILE_PLUGIN);
+  const expected = panePluginFiles();
+  const found: string[] = [];
+  const visit = async (folder: string): Promise<void> => {
+    for (const child of await fs.readdir(folder, { withFileTypes: true })) {
+      const full = path.join(folder, child.name);
+      if (child.isDirectory()) await visit(full);
+      else found.push(path.relative(root, full).split(path.sep).join('/'));
+    }
+  };
+  try { await visit(root); }
+  catch { return false; }
+  if (found.length !== expected.size) return false;
+  for (const relative of found) {
+    const content = expected.get(relative);
+    if (content === undefined || await fs.readFile(path.join(root, relative), 'utf8').catch(() => undefined) !== content) return false;
+  }
+  return true;
+}
+
 /** Writes the plugin's source into `directory`, replacing whatever was there. */
 export async function writePanePluginSource(directory: string): Promise<void> {
   await fs.rm(directory, { recursive: true, force: true });
