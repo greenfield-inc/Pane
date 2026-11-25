@@ -262,8 +262,10 @@ any computer it already paired.
   linked with this one. A linked computer that is asleep or offline is named.
   After it starts or wakes, it accepts the read-only tokens it handed out only
   once this computer confirms which devices it still shares with, so the
-  removed device reaches nothing there even if it asks first. Pairing that
-  device again needs a new code or link.
+  removed device reaches nothing there even if it asks first. On a computer the
+  device was handed on to, **Remove** asks the computer that shares it; when
+  that one can't be reached, nothing is removed and Pane says which computer to
+  remove it on. Pairing that device again needs a new code or link.
 - Removing a phone also undoes the links it made: computers that phone linked
   stop reaching each other, along with the phones they shared it with. That
   keeps a lost or stolen phone from leaving a way back in. To link them again,

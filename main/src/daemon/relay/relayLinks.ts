@@ -15,6 +15,7 @@ import {
 import {
   computerRelayId,
   foundRoutes,
+  isWatchedComputer,
   routeProfile,
   upsertComputer,
   type ComputerRoute,
@@ -39,6 +40,8 @@ export const RELAY_COMPUTER_COMMANDS = {
   readDevices: 'relay:client:read-devices',
   /** `{devices}`: the caller's own such list, after it changed. */
   readDevicesChanged: 'relay:client:read-devices-changed',
+  /** `{computerId}` or `{phoneId}`: stop sharing with that read-only device; a full-access device with the same id stays. */
+  removeReadDevice: 'relay:client:remove-read-device',
   /** `{phoneId}`: revoke that phone here ("Remove from all your computers"). */
   removePhone: 'relay:client:remove-phone',
   /** `{computerId}`: forget that computer ("Unlink from all your computers"). */
@@ -87,6 +90,9 @@ export interface RelayLinksDeps {
   log?(line: string): void;
 }
 
+/** How long until a linked computer that did not answer is told, and asked, again. */
+const RETRY_READ_DEVICES_MS = 30_000;
+const MAX_RETRY_READ_DEVICES_MS = 15 * 60_000;
 /** The longest a call to a linked computer may take, start to finish. */
 const CALL_DEADLINE_MS = 30_000;
 
@@ -203,6 +209,11 @@ function sameReadDevice(one: ReadDevice | null, other: ReadDevice): boolean {
  * another's one-time link.
  */
 export class RelayLinks {
+  /** The last call to each linked computer that has to keep its order. */
+  private readonly lastCalls = new Map<string, Promise<unknown>>();
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryMs = RETRY_READ_DEVICES_MS;
+
   constructor(private readonly deps: RelayLinksDeps) {}
 
   private remote(): RemoteDaemonConfig {
@@ -311,7 +322,8 @@ export class RelayLinks {
    * read-only ones: the ids are the device's own claim, so a read-only link can't remove a full-access device.
    */
   async addClient(record: RemoteDaemonClientRecord): Promise<void> {
-    const replaces = (client: RemoteDaemonClientRecord) => (record.access !== 'read' || client.access === 'read') && (record.kind === 'computer'
+    // A hand-out never replaces the device's own pairing here, nor another computer's hand-out.
+    const replaces = (client: RemoteDaemonClientRecord) => (record.access !== 'read' || (client.access === 'read' && client.grantedBy === record.grantedBy)) && (record.kind === 'computer'
       ? client.kind === 'computer' && client.computerId === record.computerId
       : client.kind === undefined && record.kind === undefined && record.phoneId !== undefined && client.phoneId === record.phoneId);
     const replaced = this.remote().host.clients.filter(replaces).map((client) => client.id);
@@ -349,8 +361,9 @@ export class RelayLinks {
    * reported, on its record in `client.computers` (a computer saved already gains the routes).
    * Returns the record's id.
    */
-  async saveComputer(peer: { computer: RelayComputer; token: string; routes?: ComputerRoutesReport; linkedBy?: string }): Promise<string> {
-    const { computer, token, linkedBy } = peer;
+  async saveComputer(peer: { computer: RelayComputer; token: string; routes?: ComputerRoutesReport; linkedBy?: string; sharedBy?: string }): Promise<string> {
+    const { computer, token, linkedBy, sharedBy } = peer;
+    const watches = tokenAccess(token) === 'read';
     // A report about another relay id is not this computer's.
     const report = peer.routes && (!peer.routes.relay || peer.routes.relay.id === computer.id) ? peer.routes : undefined;
     const linkRoute: ComputerRoute = {
@@ -359,14 +372,15 @@ export class RelayLinks {
       source: 'link',
       baseUrl: computer.address.replace(/\/+$/u, ''),
       token,
-      relay: { computerId: computer.id, fingerprint: computer.fingerprint },
+      relay: sharedBy ? { computerId: computer.id, fingerprint: computer.fingerprint, sharedBy } : { computerId: computer.id, fingerprint: computer.fingerprint },
     };
     let id = '';
     await this.update((remote) => {
       // An install id another saved computer holds under a different relay id is not trusted to merge.
       const holder = report ? remote.client.computers.find((candidate) => candidate.machineId === report.machineId) : undefined;
       const holderRelay = holder && computerRelayId(holder);
-      const machineId = holderRelay && holderRelay !== computer.id ? undefined : report?.machineId;
+      // Nor does a read-only one merge into a computer this one reaches any other way: full access stays as it is.
+      const machineId = (holderRelay && holderRelay !== computer.id) || (watches && holder && !isWatchedComputer(holder)) ? undefined : report?.machineId;
       const saved = upsertComputer(remote.client.computers, {
         machineId,
         relayId: computer.id,
@@ -376,7 +390,10 @@ export class RelayLinks {
         routes: [...(report ? foundRoutes(report, token) : []), linkRoute],
       });
       id = saved.id;
-      return { ...remote, client: { ...remote.client, computers: saved.computers } };
+      // Full access leaves none of an earlier read-only share's routes behind.
+      const computers = watches ? saved.computers : saved.computers.map((candidate) => (
+        candidate.id === id ? { ...candidate, routes: candidate.routes.filter((route) => tokenAccess(route.token) !== 'read') } : candidate));
+      return { ...remote, client: { ...remote.client, computers } };
     });
     this.deps.log?.(`[relay] linked with ${computer.name} (${computer.id})${linkedBy ? `, linked by ${linkedBy}` : ''}`);
     return id;
@@ -454,8 +471,10 @@ export class RelayLinks {
   private async grants(channel: string, request: { label: string; phoneId?: string } | { peer: RelayComputer }, known: readonly string[], access?: ReadOnlyMark): Promise<RelayComputerGrant[]> {
     const grants = await Promise.all(this.linked().filter((profile) => !known.includes(profile.relay.computerId)).map(async (profile) => {
       try {
+        const grant = () => this.deps.call(profile, channel, [request]);
         const [result, computer] = await Promise.all([
-          this.deps.call(profile, channel, [request]),
+          // In order with the lists this computer sends it, so an older list never drops the new token.
+          access === 'read' ? this.inOrder(profile, grant) : grant(),
           this.deps.call(profile, 'relay:client:computer', []),
         ]);
         const token = decodeOptionalBoundary(result, grantedTokenSchema)?.token;
@@ -468,7 +487,25 @@ export class RelayLinks {
         return null;
       }
     }));
+    if (access === 'read' && !this.sharesWith(request)) {
+      // Removed while its tokens were on the way: the others drop them, and the device gets none.
+      void this.tellReadDevices();
+      return [];
+    }
     return grants.filter((grant): grant is RelayComputerGrant => grant !== null);
+  }
+
+  private sharesWith(request: { label: string; phoneId?: string } | { peer: RelayComputer }): boolean {
+    const key = 'peer' in request ? readDeviceKey({ computerId: request.peer.id }) : readDeviceKey({ phoneId: request.phoneId ?? '' });
+    return this.readDevices().some((device) => readDeviceKey(device) === key);
+  }
+
+  /** Runs calls to one linked computer one at a time, in the order they were asked for. */
+  private inOrder<T>(profile: LinkedComputer, run: () => Promise<T>): Promise<T> {
+    const peer = profile.relay.computerId;
+    const result = (this.lastCalls.get(peer) ?? Promise.resolve()).then(run);
+    this.lastCalls.set(peer, result.catch(() => undefined));
+    return result;
   }
 
   /** A paired phone's "Your computers" refresh. */
@@ -502,43 +539,74 @@ export class RelayLinks {
   }
 
   /** Drops read-only tokens this computer handed out for `granter`, except for the devices still paired with it. */
-  private async keepGrantsFor(granter: string, devices: readonly ReadDevice[]): Promise<void> {
+  private async keepGrantsFor(granter: string, devices: readonly ReadDevice[], asked = Infinity): Promise<void> {
     const kept = new Set(devices.map(readDeviceKey));
     const stale = (client: RemoteDaemonClientRecord) => {
       const device = readDeviceOf(client);
-      return client.access === 'read' && client.grantedBy === granter && (device === null || !kept.has(readDeviceKey(device)));
+      return client.access === 'read' && client.grantedBy === granter && Date.parse(client.createdAt) < asked && (device === null || !kept.has(readDeviceKey(device)));
     };
     if (this.remote().host.clients.some(stale)) await this.revokeLocally({ clients: stale });
     this.deps.sharerConfirmed(granter);
   }
 
-  /** Tells each linked computer which devices are still paired Read only here. One that is asleep asks when it wakes (`followReadDevices`). */
+  /** Tells each linked computer which devices are still paired Read only here; one that did not answer is told again until it does. */
   async tellReadDevices(): Promise<{ told: string[]; notReached: string[] }> {
-    const devices = this.readDevices();
     const told: string[] = [];
     const notReached: string[] = [];
     await Promise.all(this.linked().map(async (profile) => {
       try {
-        await this.deps.call(profile, RELAY_COMPUTER_COMMANDS.readDevicesChanged, [{ devices }]);
+        // The list as it is when it is sent, not when the call was queued.
+        await this.inOrder(profile, () => this.deps.call(profile, RELAY_COMPUTER_COMMANDS.readDevicesChanged, [{ devices: this.readDevices() }]));
         told.push(profile.label);
       } catch (error) {
         // A Pane from before access levels never handed out a read-only token.
         if (!(error instanceof RemoteRequestError && error.code === 'ERR_UNKNOWN_CHANNEL')) notReached.push(profile.label);
       }
     }));
+    if (notReached.length) this.retryReadDevices();
+    else this.retryMs = RETRY_READ_DEVICES_MS;
     return { told, notReached };
   }
 
   /** Asks each linked computer which devices are still paired Read only with it, and drops the tokens handed out for any other. */
   async followReadDevices(): Promise<void> {
+    let missed = false;
     await Promise.all(this.linked().map(async (profile) => {
       try {
+        // A token handed out after this was asked is newer than the answer.
+        const asked = Date.now();
         const devices = decodeOptionalBoundary(await this.deps.call(profile, RELAY_COMPUTER_COMMANDS.readDevices, []), boundary.array(readDeviceSchema));
-        if (devices) await this.keepGrantsFor(profile.relay.computerId, devices);
+        if (devices) await this.keepGrantsFor(profile.relay.computerId, devices, asked);
       } catch (error) {
-        if (!(error instanceof RemoteRequestError && error.code === 'ERR_UNKNOWN_CHANNEL')) this.deps.log?.(`[relay] ${profile.label} did not say which devices it shares with: ${reasonOf(error)}`);
+        if (error instanceof RemoteRequestError && error.code === 'ERR_UNKNOWN_CHANNEL') return;
+        missed ||= this.remote().host.clients.some((client) => client.grantedBy === profile.relay.computerId);
+        this.deps.log?.(`[relay] ${profile.label} did not say which devices it shares with: ${reasonOf(error)}`);
       }
     }));
+    if (missed) this.retryReadDevices();
+  }
+
+  /** Both ways again in a while, as long as a linked computer has not answered. */
+  private retryReadDevices(): void {
+    if (this.retryTimer) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      void Promise.all([this.tellReadDevices(), this.followReadDevices()]);
+    }, this.retryMs);
+    this.retryMs = Math.min(this.retryMs * 2, MAX_RETRY_READ_DEVICES_MS);
+    this.retryTimer.unref?.();
+  }
+
+  stop(): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+  }
+
+  /** A linked computer asks this one to stop sharing with a device it paired Read only. */
+  async removeReadDevice(device: ReadDevice, callerClientId: string): Promise<void> {
+    this.callerComputer(callerClientId);
+    await this.revokeLocally({ clients: (client) => client.access === 'read' && client.grantedBy === undefined && sameReadDevice(readDeviceOf(client), device) });
+    void this.tellReadDevices();
   }
 
   /**
@@ -591,12 +659,28 @@ export class RelayLinks {
     return { removed, notReached };
   }
 
-  /** Removes a read-only device here and tells each linked computer. Full-access devices that gave the same id stay. */
+  /**
+   * Removes a read-only device: here and, through the list, on each linked computer. One another
+   * computer shares with is removed there, or it could have its token back by asking. Full-access
+   * devices that gave the same id stay.
+   */
   private async removeReadEverywhere(record: RemoteDaemonClientRecord): Promise<{ removed: string[]; notReached: string[] }> {
+    const here = this.deps.self()?.name ?? 'This computer';
     const device = readDeviceOf(record);
-    await this.revokeLocally({ clients: (client) => client.id === record.id || (device !== null && client.access === 'read' && sameReadDevice(readDeviceOf(client), device)) });
+    if (record.grantedBy !== undefined && device) {
+      const sharer = this.linked().find((profile) => profile.relay.computerId === record.grantedBy);
+      try {
+        if (!sharer) throw new Error('it is not linked with this computer');
+        await this.deps.call(sharer, RELAY_COMPUTER_COMMANDS.removeReadDevice, [device]);
+      } catch (error) {
+        throw new PaneError('ERR_READ_ONLY_SHARER_UNREACHABLE', `${record.label} is shared by ${record.linkedBy ?? 'another computer'}, which could not be asked to stop (${reasonOf(error)}), so nothing was removed.`, `Wake that computer and try again, remove it there, or unlink that computer here.`);
+      }
+      await this.revokeLocally({ clients: (client) => client.id === record.id });
+      return { removed: [sharer.label, here], notReached: [] };
+    }
+    await this.revokeLocally({ clients: (client) => client.id === record.id });
     const { told, notReached } = await this.tellReadDevices();
-    return { removed: [this.deps.self()?.name ?? 'This computer', ...told], notReached };
+    return { removed: [here, ...told], notReached };
   }
 
   /**

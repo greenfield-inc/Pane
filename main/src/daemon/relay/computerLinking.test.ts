@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PaneError } from '../../../../shared/paneError';
 import { RemoteRequestError } from '../../../../shared/remoteClient/remoteDaemonClient';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
@@ -29,6 +29,8 @@ interface Computer {
   /** A Pane from before access levels. */
   older: boolean;
   asleep: boolean;
+  /** Holds a request before it runs. */
+  beforeAnswer?(channel: string): Promise<void>;
   links: RelayLinks;
   route: PairingRoute;
   paired: RelayPairedEvent[];
@@ -89,6 +91,7 @@ function network() {
 
   const call: CallComputer = async (profile, channel, args) => {
     const callee = at(profile.baseUrl);
+    await callee.beforeAnswer?.(channel);
     if (callee.asleep) throw new Error(`${profile.label} did not answer within 15 seconds.`);
     if (profile.relay?.fingerprint !== callee.info.fingerprint) throw new Error(`${profile.label} showed a different key.`);
     const auth = authenticateRemoteDaemonBearerToken(`Bearer ${profile.token}`, callee.config().host.clients);
@@ -556,7 +559,7 @@ describe('a read-only link', () => {
     const paired = await net.tyler.pairPhone(await net.tyler.link('10m', 'read'), 'reader-phone');
     if (!paired.ok) throw new Error(paired.message);
     const tyler = relayProfile({ computer: { ...net.tyler.info }, token: paired.token });
-    const saved = [tyler, ...(paired.linked ?? []).map((grant) => relayProfile(grant, 'Tyler'))];
+    const saved = [tyler, ...(paired.linked ?? []).map((grant) => relayProfile(grant, { name: 'Tyler', id: net.tyler.info.id }))];
     const client = net.net.phone();
     const works = async (profile: RelayConnectionProfile) => client(profile).invoke('relay:client:computer').then(() => true, () => false);
     return { ...net, saved, client, works, onTyler: saved[0], onA2: saved[1] };
@@ -648,5 +651,70 @@ describe('a read-only link', () => {
     })));
     await parsa.registry.invoke('relay:unlink-computer-everywhere', [{ computerId: tyler.info.id }]);
     expect(parsa.listed()).not.toContain('Tyler');
+  });
+
+  it('removes a device at the computer that shares it, from any computer it was handed on to, or says it could not', async () => {
+    const { tyler, a2, works, onTyler, onA2 } = await sharedPhone();
+    const onHere = () => a2.config().host.clients.find((saved) => saved.access === 'read');
+    tyler.asleep = true;
+    await expect(a2.registry.invoke('relay:remove-phone-everywhere', [{ clientId: onHere()?.id }])).rejects.toMatchObject({ code: 'ERR_READ_ONLY_SHARER_UNREACHABLE' });
+    expect(onHere()).toBeDefined();
+
+    tyler.asleep = false;
+    expect(await a2.registry.invoke('relay:remove-phone-everywhere', [{ clientId: onHere()?.id }])).toEqual({ removed: ['Tyler', 'A2'], notReached: [] });
+    expect([await works(onTyler), await works(onA2)]).toEqual([false, false]);
+  });
+
+  it('takes back a token that was on its way when the device was removed', async () => {
+    const { tyler, a2, client, works, onTyler } = await sharedPhone();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    a2.beforeAnswer = async (channel) => { if (channel === 'relay:client:grant-read') await held; };
+    const asked = client(onTyler).invoke('relay:client:computers', [{ known: [] }]);
+    await Promise.resolve();
+    await tyler.links.dropClient(tyler.config().host.clients.find((saved) => saved.access === 'read')?.id ?? '');
+    release();
+
+    expect(await asked).toEqual([]);
+    await vi.waitFor(() => expect(a2.config().host.clients.some((saved) => saved.access === 'read')).toBe(false));
+    expect(await works(onTyler)).toBe(false);
+  });
+
+  it('keeps a device\'s own read-only pairing beside another computer\'s hand-out', async () => {
+    const { tyler, a2, client, works, onTyler } = await sharedPhone();
+    const direct = await a2.pairPhone(await a2.link('10m', 'read'), 'reader-phone');
+    if (!direct.ok) throw new Error(direct.message);
+    const own = relayProfile({ computer: { ...a2.info }, token: direct.token });
+    await fetchNewRelayProfiles(client(onTyler), onTyler, []);
+    expect(await works(own)).toBe(true);
+    // Both refresh each other's way, and neither loses its own.
+    await Promise.all([tyler.links.tellReadDevices(), a2.links.tellReadDevices()]);
+    expect([await works(own), await works(onTyler)]).toEqual([true, true]);
+  });
+
+  it('leaves full access as it is: a read-only link never joins a computer reached another way, and an upgrade keeps none of the old routes', async () => {
+    const { parsa, tyler } = await shared();
+    const tailnet: RemoteComputer = { id: 'tailnet-tyler', label: 'tyler', machineId: 'tylertylertyler0-install', routes: [{ id: 'tailscale:https://tyler.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://tyler.ts.net:8443', token: '', tailnetMachine: 'tyler', tailnetDomain: 'ts.net' }] };
+    parsa.seed([...parsa.config().client.computers, tailnet]);
+    await parsa.redeem(await tyler.link('10m', 'read'));
+    expect(parsa.config().client.computers.find((computer) => computer.id === 'tailnet-tyler')).toEqual(tailnet);
+
+    parsa.seed(parsa.config().client.computers.filter((computer) => computer.id !== 'tailnet-tyler'));
+    expect(await parsa.redeem(await tyler.link())).toEqual({ linked: ['Tyler', 'A2', 'A3'] });
+    expect(parsa.config().client.computers.filter(isWatchedComputer)).toEqual([]);
+  });
+
+  it('lets a link change no computer watched through someone else', async () => {
+    const { net, parsa, tyler, a2 } = await shared();
+    await parsa.redeem(await tyler.link('10m', 'read'));
+    const mallory = net.add('Mallory', 'mallorymallory00');
+    const exchange = mallory.route.exchange;
+    mallory.route.exchange = async (request) => {
+      const result = await exchange(request);
+      return result.ok ? { ...result, linked: [{ computer: { ...a2.info, name: 'Mallory’s' }, token: 'pane_read_bogus' }] } : result;
+    };
+    await parsa.redeem(await mallory.link('10m', 'read'));
+    expect(await net.reaches(parsa, a2)).toBe(true);
+    expect(parsa.listed()).toContain('A2');
   });
 });

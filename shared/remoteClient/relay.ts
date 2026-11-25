@@ -58,10 +58,11 @@ export function isRelayProfile(profile: RemotePaneConnectionProfile): profile is
 }
 
 /** A saved profile for a computer reached through a relay. Its id follows the computer, so pairing again replaces it. */
-export function relayProfile(grant: RelayComputerGrant, linkedBy?: string): RelayConnectionProfile {
+export function relayProfile(grant: RelayComputerGrant, via?: { name: string; id: string }): RelayConnectionProfile {
   const { computer, token } = grant;
   const relay: StoredRelayProfile = { computerId: computer.id, fingerprint: computer.fingerprint, domain: computer.domain, local: computer.local };
-  if (linkedBy) relay.linkedBy = linkedBy;
+  if (via) relay.linkedBy = via.name;
+  if (via && tokenAccess(token) === 'read') relay.sharedBy = via.id;
   const profile: RelayConnectionProfile = { id: `relay:${computer.id}`, label: computer.name, baseUrl: computer.address.replace(/\/+$/u, ''), token, transport: 'http+sse', relay };
   return profile;
 }
@@ -173,7 +174,7 @@ export async function exchangeRelayPairing(
   }
   // Linked computers come at the scanned computer's own level, never another.
   const linked = result.linked.filter(grant => grant.computer.id !== scanned.computerId && tokenAccess(grant.token) === level && isRelayComputerUnder(grant.computer, scanned.domain));
-  return [relayProfile({ computer: result.computer, token: result.token }), ...linked.map(grant => relayProfile(grant, result.computer.name))];
+  return [relayProfile({ computer: result.computer, token: result.token }), ...linked.map(grant => relayProfile(grant, { name: result.computer.name, id: result.computer.id }))];
 }
 
 const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
@@ -211,16 +212,15 @@ export function isRelayComputerUnder(computer: RelayComputer, domain: string): b
 /**
  * `saved` plus each of `added` the device has no profile for yet (same id or address). A
  * computer's answer never replaces a saved computer's token or fingerprint; only scanning that
- * computer's own code does. A read-only profile is the exception: any fresh token for the same
- * computer takes its place, since the owner may have removed this device before sharing again, or
- * given it full access.
+ * computer's own code does. A read-only profile is the exception: full access takes its place, and so
+ * does a fresh read-only token from whoever shared it, who may have removed this device before sharing again.
  */
 export function withNewProfiles<T extends RemotePaneConnectionProfile>(saved: readonly T[], added: readonly T[]): T[] {
   const profiles = [...saved];
   for (const profile of added) {
     const at = profiles.findIndex(known => known.id === profile.id || known.baseUrl === profile.baseUrl);
     if (at < 0) profiles.push(profile);
-    else if (tokenAccess(profiles[at]?.token ?? '') === 'read') profiles[at] = profile;
+    else if (tokenAccess(profiles[at]?.token ?? '') === 'read' && (tokenAccess(profile.token) !== 'read' || profiles[at]?.relay?.sharedBy === profile.relay?.sharedBy)) profiles[at] = profile;
   }
   return profiles;
 }
@@ -292,11 +292,11 @@ export async function fetchNewRelayProfiles(
 ): Promise<RelayConnectionProfile[]> {
   const level = tokenAccess(from.token);
   // Read-only profiles another computer shared are not this one's business, and full access never asks to keep them.
-  const known = saved.flatMap(profile => (profile.relay && tokenAccess(profile.token) === level && (level !== 'read' || profile.relay.linkedBy === from.label) ? [profile.relay.computerId] : []));
+  const known = saved.flatMap(profile => (profile.relay && tokenAccess(profile.token) === level && (level !== 'read' || profile.relay.sharedBy === from.relay.computerId) ? [profile.relay.computerId] : []));
   const grants = decodeBoundary(await client.invoke(RELAY_CLIENT_COMMANDS.computers, [{ known }]), boundary.array(grantSchema));
   return grants
     .filter(grant => !known.includes(grant.computer.id) && tokenAccess(grant.token) === level && isRelayComputerUnder(grant.computer, from.relay.domain))
-    .map(grant => relayProfile(grant, from.label));
+    .map(grant => relayProfile(grant, { name: from.label, id: from.relay.computerId }));
 }
 
 const statusSchema = boundary.object({

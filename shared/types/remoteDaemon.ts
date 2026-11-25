@@ -126,6 +126,8 @@ export interface RemoteRelayProfile {
   fingerprint: string;
   /** Shown as "Linked by <name>" when a phone's scan linked it. */
   linkedBy?: string;
+  /** A read-only token handed out through another computer: that computer's relay id, whatever it is called now. */
+  sharedBy?: string;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -637,6 +639,7 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
     computerId: boundary.nonEmptyString,
     fingerprint: boundary.nonEmptyString,
     linkedBy: boundary.optional(boundary.nonEmptyString),
+    sharedBy: boundary.optional(boundary.nonEmptyString),
   })),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */

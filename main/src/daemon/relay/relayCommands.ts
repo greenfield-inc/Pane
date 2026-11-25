@@ -170,6 +170,10 @@ export function registerRelayCommands(
     await links.readDevicesChanged(decodeBoundary(request, boundary.object({ devices: boundary.array(readDeviceSchema) })).devices, caller(from));
     return null;
   });
+  registry.register(RELAY_COMPUTER_COMMANDS.removeReadDevice, async (request: PaneCommandValue, from: PaneCommandValue) => {
+    await links.removeReadDevice(decodeBoundary(request, readDeviceSchema), caller(from));
+    return null;
+  });
   registry.register(RELAY_COMPUTER_COMMANDS.removePhone, async (request: PaneCommandValue, from: PaneCommandValue) => {
     await links.removePhone(decodeBoundary(request, boundary.object({ phoneId: boundary.nonEmptyString })).phoneId, caller(from));
     return null;

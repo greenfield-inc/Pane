@@ -87,6 +87,7 @@ const routeSchema: BoundarySchema<ComputerRoute> = boundary.object({
     computerId: boundary.nonEmptyString,
     fingerprint: boundary.nonEmptyString,
     linkedBy: boundary.optional(boundary.nonEmptyString),
+    sharedBy: boundary.optional(boundary.nonEmptyString),
   })),
   ssh: boundary.optional(boundary.object({ host: boundary.nonEmptyString, remotePort: boundary.number })),
 });
@@ -262,6 +263,7 @@ export function routeProfile(computer: RemoteComputer, route: ComputerRoute): Re
   if (route.tailnetDomain) profile.tailnetDomain = route.tailnetDomain;
   if (route.relay) {
     profile.relay = { computerId: route.relay.computerId, fingerprint: route.relay.fingerprint };
+    if (route.relay.sharedBy) profile.relay.sharedBy = route.relay.sharedBy;
     if (computer.linkedBy) profile.relay.linkedBy = computer.linkedBy;
   }
   return profile;

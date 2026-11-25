@@ -165,6 +165,7 @@ export async function createRelayHost(deps: {
     stop: async () => {
       setRelayPushChannel(null);
       configManager.off('config-updated', tellIfChanged);
+      links.stop();
       await relay.stop();
       await proxy?.close();
     },

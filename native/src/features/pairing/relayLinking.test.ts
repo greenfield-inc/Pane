@@ -80,10 +80,10 @@ describe('"Your computers"', () => {
     const tyler = relayProfile({ computer: { ...computer('tyler'), name: 'Tyler' }, token: readOnlyToken('t') });
     const saved = [
       tyler,
-      relayProfile({ computer: computer('tyler2'), token: readOnlyToken('t2') }, 'Tyler'),
+      relayProfile({ computer: computer('tyler2'), token: readOnlyToken('t2') }, { name: 'Tyler', id: tyler.relay.computerId }),
       relayProfile({ computer: computer('mine'), token: 't' }),
       // A computer of this phone's own that happens to be linked by the same name.
-      relayProfile({ computer: computer('mine2'), token: 't' }, 'Tyler'),
+      relayProfile({ computer: computer('mine2'), token: 't' }, { name: 'Tyler', id: tyler.relay.computerId }),
     ];
     const asked: unknown[] = [];
     const client = { invoke: async <T>(_channel: string, args?: unknown[]) => { asked.push(args?.[0]); return [] as T; } };
