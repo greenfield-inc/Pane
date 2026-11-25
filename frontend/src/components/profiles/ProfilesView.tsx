@@ -356,9 +356,10 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
 }
 
 /**
- * Edit details (build-6 feedback item 6): a profile's photo, title and description. The title and
- * description go in the plugin's pane.yaml, so the agent's own file is untouched; the photo is kept
- * on this computer, as the photo menu keeps it.
+ * Edit details (build-6 feedback item 6): a profile's photo, title and description. The description
+ * is the agent's own Agent Farm `description:`, written in its identity file. The title goes in the
+ * plugin's pane.yaml and the photo stays on this computer: both TEMPORARY, until Agent Farm's profile
+ * format has title and photo fields (T-83), since profile metadata doesn't live in Pane.
  */
 function EditDetailsDialog({ plugin, profile, onClose, notify }: { plugin: ProfilePlugin; profile: ProfileSummary; onClose: () => void; notify: (text: string) => void }) {
   const setProfileDetails = useProfilesStore(state => state.setDetails);
@@ -415,7 +416,7 @@ function EditDetailsDialog({ plugin, profile, onClose, notify }: { plugin: Profi
         <textarea id="profiles-details-description" value={description} onChange={event => setDescription(event.target.value)} rows={3}
           className="mb-2 w-full rounded-md border border-border-primary bg-surface-primary px-2.5 py-1.5 text-[13px] text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive" />
         <p className="mb-4 text-[12px] text-text-secondary">
-          Saved in {plugin.name}/pane.yaml. The agent’s own description in {profile.entry} is not changed. The photo is kept on this computer.
+          The description is the agent’s own, in {profile.entry}; saving it is checked by Agent Farm{plugin.bundled ? ' and makes this Pane plugin yours (Edited)' : ''}. The title is kept in {plugin.name}/pane.yaml for now, and the photo on this computer.
         </p>
         {error && <p role="alert" className="mb-3 text-[12.5px] text-status-error">{error}</p>}
         <div className="flex justify-end gap-3">

@@ -569,9 +569,11 @@ its title, description, identity, subagents, skills and references. Beside it, a
 tree holds only that profile's own files: its identity, instructions, skills,
 references and the subagents it calls, each nested with its own files, and its
 settings. Files preview first (Markdown with its front-matter as a metadata
-header, YAML as key/value) and **Edit** opens the source. **Edit details** saves a
-profile's title and description in the plugin's `pane.yaml`, which Agent Farm
-ignores, so the agent's own file is untouched. The tab edits the plugins in
+header, YAML as key/value) and **Edit** opens the source. **Edit details**
+writes a profile's description into its identity's front-matter (Agent Farm's own
+`description:`, checked like any save). Its title goes in the plugin's `pane.yaml`
+for now, and its photo stays on this computer: both are temporary until Agent
+Farm's profile format has fields for them. The tab edits the plugins in
 place: a save is first checked with `agent-farm plugin validate` on a staged copy
 (without a pack's stale `checksums`, which launches don't read), so nothing changes
 unless Agent Farm accepts it, and Sessions using the plugin then show the changed

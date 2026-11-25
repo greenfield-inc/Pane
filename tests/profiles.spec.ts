@@ -265,7 +265,7 @@ test('files preview first: Markdown under a metadata header, YAML as key/value; 
   await expect(page.getByTestId('profiles-restore')).toHaveCount(0);
 });
 
-test('Edit details sets the title and description; the photo is kept on this computer', async ({ page }) => {
+test('Edit details writes the description into the identity, and the title (for now) beside it', async ({ page }) => {
   await openProfilesTab(page);
   await page.getByTestId('profile-row-writer-writer').click();
   await page.getByTestId('profiles-edit-details').click();
@@ -277,6 +277,10 @@ test('Edit details sets the title and description; the photo is kept on this com
   await expect(page.getByTestId('profiles-subtitle')).toContainText('Drafts posts in my voice, then cuts a third.');
   await page.getByTestId('profiles-back').click();
   await expect(page.getByTestId('profile-row-writer-writer')).toContainText('Blog writer');
+  // The description is written in the agent's own identity file.
+  await page.getByTestId('profile-row-writer-writer').click();
+  await page.getByTestId('profiles-file-agents/writer.md').click();
+  await expect(page.getByTestId('profiles-front-matter')).toContainText('Drafts posts in my voice, then cuts a third.');
 });
 
 test('a save Agent Farm refuses shows why, and keeps the edit', async ({ page }) => {

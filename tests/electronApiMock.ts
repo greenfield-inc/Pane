@@ -1487,9 +1487,15 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           const summary = pluginOf(plugin)?.profiles.find(item => item.name === profile);
           if (!summary) return Promise.resolve({ success: false, error: `${plugin} has no profile named ${profile}.` });
           if (details.title.trim()) summary.title = details.title.trim(); else delete summary.title;
-          if (details.description.trim()) summary.description = details.description.trim();
-          state.files[`${plugin}/pane.yaml`] = `profiles:\n  ${profile}:\n    title: ${details.title}\n    description: ${details.description}\n`;
-          return result(plugin, 'pane.yaml');
+          // The description is the agent's own: it goes in the identity's front-matter, as main writes it.
+          const key = `${plugin}/${summary.entry}`;
+          const identity = state.files[key] ?? '---\n---\n';
+          const description = details.description.trim();
+          if (description) summary.description = description; else delete summary.description;
+          const withoutOld = identity.replace(/^description:.*\n/m, '');
+          state.files[key] = description ? withoutOld.replace(/^---\n/, `---\ndescription: ${JSON.stringify(description)}\n`) : withoutOld;
+          state.files[`${plugin}/pane.yaml`] = `profiles:\n  ${profile}:\n    title: ${details.title}\n`;
+          return result(plugin, summary.entry);
         },
         parseYaml: (source: string) => ok(parseYamlText(source)),
         newProfile: (name: string, agent: string) => {
