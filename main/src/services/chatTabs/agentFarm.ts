@@ -192,7 +192,7 @@ export class AgentFarmProfiles implements ChatProfileResolver {
       const output = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim();
       const stderr = output?.split('\n').at(-1);
       // T-110 (D-3): Agent Farm never falls back to the installed plugins for a snapshot it can't read.
-      if (snapshotRefused(output)) throw new PaneError('CHAT_PROFILE_SNAPSHOT_UNREADABLE', `Agent Farm can't start ${profile} from its snapshot: ${(stderr ?? '').replace(/^Error:\s*/, '').replace(/\s*Agent Farm will not fall back[\s\S]*$/, '')}`, 'Reload the Session\'s profile to take a new snapshot of the plugins installed now.');
+      if (snapshotRefused(output)) throw new PaneError('CHAT_PROFILE_SNAPSHOT_UNREADABLE', `Agent Farm can't start ${profile} from its snapshot: ${(stderr ?? '').replace(/^error:\s*/i, '').replace(/\s*Agent Farm will not fall back[\s\S]*$/, '')}`, 'Reload the Session\'s profile to take a new snapshot of the plugins installed now.');
       // Agent Farm before package 2 has no --print-acp.
       const outdated = !!stderr && /unknown option.*--print-acp/i.test(stderr);
       throw new PaneError('CHAT_PROFILE_FAILED', `Agent Farm could not prepare ${profile}: ${stderr || reasonOf(error)}.`, outdated ? 'Update Agent Farm to a version with run --print-acp, then try again.' : 'Check the profile name and its launch arguments, then try again.');
