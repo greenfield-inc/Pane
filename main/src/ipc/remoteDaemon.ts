@@ -683,9 +683,10 @@ export function registerRemoteDaemonHandlers(
   });
 
   // Out of band: a switch waiting on another's probes asks for them to stop, so it runs now (T-128, D-6).
-  ipcMain.handle('remote-daemon:cancel-switch', async () => {
+  ipcMain.handle('remote-daemon:cancel-switch', async (_event, computerId: PaneCommandValue) => {
     try {
-      return { success: true, data: { cancelled: remotePaneClientController.cancelActivation() } };
+      const id = decodeBoundary(computerId, boundary.nonEmptyString);
+      return { success: true, data: { cancelled: remotePaneClientController.cancelActivation(id) } };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Failed to cancel the machine switch') };
     }

@@ -558,8 +558,8 @@ interface ElectronAPI {
     saveTailnetMachine: (input: { name: string; password?: string }) => Promise<IPCResponse<RemotePaneConnectionProfile>>;
     runCheckFix: (checkId: number, stage: RemoteConnectionCheckStage) => Promise<IPCResponse<RemotePaneConnectionState>>;
     dismissCheck: (checkId: number) => Promise<IPCResponse<RemotePaneConnectionState>>;
-    /** Stops a machine switch still checking the other machine; the window stays where it is. */
-    cancelSwitch: () => Promise<IPCResponse<{ cancelled: boolean }>>;
+    /** Stops a switch to `computerId` still checking that machine; the window stays where it is. */
+    cancelSwitch: (computerId: string) => Promise<IPCResponse<{ cancelled: boolean }>>;
     onSetupProgress: (callback: (progress: RemoteHostSetupProgress) => void) => () => void;
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => () => void;
     onHostStateChanged: (callback: (state: RemoteDaemonHostRuntimeState) => void) => () => void;

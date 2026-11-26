@@ -28,8 +28,13 @@ interface UseMachinesOptions {
 const useSwitching = create<{ id: string | null }>(() => ({ id: null }));
 // A press for another machine stops the switch still checking an older one, so the newer one starts now (D-6).
 const machineSwitches = createLatestSwitch(
-  (press: { machineId: string; job: () => Promise<MachineSelectOutcome> }) => press.job(),
-  { cancel: (running, next) => { if (running.machineId !== next.machineId) void API.remoteDaemon.cancelSwitch().catch(() => undefined); } },
+  (press: { machineId: string; computerId: string | undefined; job: () => Promise<MachineSelectOutcome> }) => press.job(),
+  {
+    // Only this sidebar's own switch, to the saved computer it named (review F-4).
+    cancel: (running, next) => {
+      if (running.computerId && running.machineId !== next.machineId) void API.remoteDaemon.cancelSwitch(running.computerId).catch(() => undefined);
+    },
+  },
 );
 
 function errorText(cause: unknown, fallback: string): string {
@@ -148,7 +153,7 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
   const select = useCallback(async (machine: MachineEntry, password?: string): Promise<MachineSelectOutcome> => {
     if (machine.action === 'none') return { ok: true };
     if (machine.action === 'password' && password === undefined) return { ok: false, needsPassword: true };
-    const result = await machineSwitches.request({ machineId: machine.id, job: () => switchTo(machine, password) });
+    const result = await machineSwitches.request({ machineId: machine.id, computerId: machine.kind === 'local' ? undefined : machine.computer?.id, job: () => switchTo(machine, password) });
     // A newer press replaced this one: it says nothing, and the newer one reports for both.
     return result.superseded ? { ok: true } : result.value;
   }, [switchTo]);
