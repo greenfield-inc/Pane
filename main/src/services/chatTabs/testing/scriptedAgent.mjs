@@ -287,6 +287,14 @@ async function prompt({ params, client }) {
       await say(`Answer: ${JSON.stringify(response)}`);
       return { stopReason: 'end_turn' };
     }
+    // A turn of tool calls only, as a watcher wake with nothing to say; and one that says something, then ends on a tool call.
+    if (word === 'quiet' || word === 'progress') {
+      if (word === 'progress') await say('Checking the workers.');
+      const toolCallId = `tool-${randomUUID()}`;
+      await send({ sessionUpdate: 'tool_call', toolCallId, title: 'runpane inbox', kind: 'execute', status: 'in_progress', rawInput: { command: 'runpane inbox' } });
+      await send({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed', rawOutput: { stdout: 'nothing new\n' } });
+      return { stopReason: 'end_turn' };
+    }
     if (word === 'plan') {
       await send({ sessionUpdate: 'plan', entries: [{ content: 'Read the code', priority: 'high', status: 'completed' }, { content: 'Write the fix', priority: 'high', status: 'in_progress' }] });
       await say('Planned.');

@@ -595,6 +595,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const sessionDeleteCalls: string[] = [];
     const sessionRestoreCalls: string[] = [];
     const sessionFavoriteToggleCalls: string[] = [];
+    const sessionMarkViewedCalls: string[] = [];
     const paneOrderCalls: JsonValue[] = [];
     let newPanePlacement: 'top' | 'bottom' | null = null;
     const hostOutdated = (channel: string) => Promise.reject(new Error(`Error invoking remote method '${channel}': Error: build-box runs an older Pane that does not have this command (${channel}). Nothing was changed. Next: Update Pane on build-box (run \`runpane update\` there), then try again.`));
@@ -1932,6 +1933,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           sessionFavoriteToggleCalls.push(sessionId);
           return success();
         },
+        markViewed: (sessionId: string) => {
+          sessionMarkViewedCalls.push(sessionId);
+          return success();
+        },
         reorderInProject: (projectId: number, paneIds: string[]) => {
           paneOrderCalls.push({ reorderInProject: { projectId, paneIds: clone(paneIds) } });
           if (mockOptions.paneOrderUnsupported) return hostOutdated('sessions:reorder-in-project');
@@ -2575,6 +2580,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getSessionFavoriteToggleCalls() {
           return clone(sessionFavoriteToggleCalls);
+        },
+        /** Panes marked viewed (a Session's chat Pane when it was opened or read), in order. */
+        getSessionMarkViewedCalls() {
+          return clone(sessionMarkViewedCalls);
         },
         getGitStageAndCommitCalls() {
           return clone(gitStageAndCommitCalls);

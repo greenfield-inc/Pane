@@ -6,7 +6,7 @@ import { claudeProjectDirName, parseClaudeLine } from './claude';
 import { CLAUDE_API_ENOTFOUND_TRANSCRIPT_LINE } from '../agentStatus/__fixtures__/claudeApiErrorScreens';
 import { agentTranscripts, turnTextMatches, type TranscriptLocator } from './index';
 
-const { assistantTextSince, findUserTurnSince, lastAssistantMessage } = agentTranscripts;
+const { findUserTurnSince, lastAssistantMessage, turnEndedWithText } = agentTranscripts;
 import { readTranscriptTail } from './tail';
 import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
 
@@ -263,39 +263,57 @@ describe('lastAssistantMessage', () => {
   });
 });
 
-describe('assistantTextSince', () => {
-  const turnStart = Date.parse('2026-09-27T18:40:00.000Z');
+describe('turnEndedWithText', () => {
+  const at = (time: string) => Date.parse(`2026-09-27T${time}Z`);
+  const tool = (id: string, timestamp: string) => claude.assistant(id, { type: 'tool_use', id: `toolu_${id}`, name: 'Bash', input: {} }, timestamp);
+  const say = (id: string, text: string, timestamp: string) => claude.assistant(id, { type: 'text', text }, timestamp);
 
-  it('finds a reply the agent wrote in a turn a Pane line started', async () => {
+  it('is true for a turn a Pane line started that ends with a reply', async () => {
     writeClaude('11111111-2222-4333-8444-555555555504', [
-      claude.assistant('msg_0', { type: 'text', text: 'Earlier turn' }, '2026-09-27T18:30:00.000Z'),
+      say('msg_0', 'Earlier turn', '2026-09-27T18:30:00.000Z'),
       claude.user('[From Pane, Workers] T-12 reported ready', '2026-09-27T18:40:00.100Z', { origin: { kind: 'pane' } }),
-      claude.assistant('msg_1', { type: 'tool_use', name: 'Bash', input: {} }, '2026-09-27T18:40:01.000Z'),
-      claude.assistant('msg_2', { type: 'text', text: 'T-12 is ready: PR 88 is green.' }, '2026-09-27T18:40:05.000Z'),
+      tool('msg_1', '2026-09-27T18:40:01.000Z'),
+      say('msg_2', 'T-12 is ready: PR 88 is green.', '2026-09-27T18:40:05.000Z'),
     ]);
 
-    await expect(assistantTextSince(claudeLocator(), turnStart)).resolves.toBe(true);
+    await expect(turnEndedWithText(claudeLocator(), at('18:40:00.000'), at('18:40:06.000'))).resolves.toBe(true);
   });
 
-  it('finds nothing in a turn of tool calls only, even with text from an earlier turn', async () => {
+  it('is false for a turn that ends on a tool call, even after progress text, thinking or a blank reply', async () => {
     writeClaude('11111111-2222-4333-8444-555555555504', [
-      claude.assistant('msg_0', { type: 'text', text: 'Earlier turn' }, '2026-09-27T18:30:00.000Z'),
-      claude.assistant('msg_1', { type: 'tool_use', name: 'Bash', input: {} }, '2026-09-27T18:40:01.000Z'),
-      claude.assistant('msg_1', { type: 'thinking', thinking: 'nothing to say' }, '2026-09-27T18:40:02.000Z'),
-      claude.assistant('msg_2', { type: 'text', text: '   ' }, '2026-09-27T18:40:03.000Z'),
+      say('msg_0', 'Earlier turn', '2026-09-27T18:30:00.000Z'),
+      say('msg_1', 'Checking the workers.', '2026-09-27T18:40:01.000Z'),
+      claude.assistant('msg_1', { type: 'thinking', thinking: 'nothing to say' }, '2026-09-27T18:40:01.500Z'),
+      say('msg_2', '   ', '2026-09-27T18:40:02.000Z'),
+      tool('msg_2', '2026-09-27T18:40:03.000Z'),
     ]);
 
-    await expect(assistantTextSince(claudeLocator(), turnStart)).resolves.toBe(false);
+    await expect(turnEndedWithText(claudeLocator(), at('18:40:00.000'), at('18:40:04.000'))).resolves.toBe(false);
   });
 
-  it('reads Codex replies too, and answers undefined without a transcript', async () => {
+  it('judges each of two adjacent turns by its own rows: the next turn\'s progress text never counts for the one before', async () => {
+    writeClaude('11111111-2222-4333-8444-555555555504', [
+      // Turn 1, 18:40:00-18:40:04: a tool-only watcher wake.
+      tool('msg_1', '2026-09-27T18:40:02.000Z'),
+      // Turn 2 starts at once from the queue and says something while still working.
+      claude.user('next', '2026-09-27T18:40:04.200Z'),
+      say('msg_2', 'Starting on the review.', '2026-09-27T18:40:05.000Z'),
+    ]);
+
+    await expect(turnEndedWithText(claudeLocator(), at('18:40:00.000'), at('18:40:04.000'))).resolves.toBe(false);
+  });
+
+  it('reads Codex replies and tool calls too, and answers undefined without a transcript or a row in the turn', async () => {
     writeCodex('01a0e428', [
       codex.meta(worktree, '2026-09-27T18:37:14.814Z'),
       codex.assistant('Watching the workers.', '2026-09-27T18:40:02.000Z'),
+      { timestamp: '2026-09-27T18:41:02.000Z', type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{}', call_id: 'c1' } },
     ]);
 
-    await expect(assistantTextSince(codexLocator(), turnStart)).resolves.toBe(true);
-    await expect(assistantTextSince(claudeLocator(), turnStart)).resolves.toBeUndefined();
+    await expect(turnEndedWithText(codexLocator(), at('18:40:00.000'), at('18:40:03.000'))).resolves.toBe(true);
+    await expect(turnEndedWithText(codexLocator(), at('18:41:00.000'), at('18:41:03.000'))).resolves.toBe(false);
+    await expect(turnEndedWithText(codexLocator(), at('18:45:00.000'), at('18:45:03.000'))).resolves.toBeUndefined();
+    await expect(turnEndedWithText(claudeLocator(), at('18:40:00.000'), at('18:40:03.000'))).resolves.toBeUndefined();
   });
 });
 
