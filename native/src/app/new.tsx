@@ -15,6 +15,7 @@ import { CreatePaneForm } from '@/features/panes/CreatePaneSheet';
 import { CreateSessionForm } from '@/features/sessions/CreateSessionSheet';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
+import { FocusScope, ScopeRing } from '@/features/controller/FocusScope';
 
 type Kind = 'session' | 'pane';
 
@@ -24,7 +25,7 @@ type Kind = 'session' | 'pane';
  * is that machine's. Create goes straight to the picked machine; then the phone switches there and
  * opens what it made.
  */
-export default function NewSheet() {
+function NewSheet() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ kind?: Kind; projectId?: string }>();
@@ -127,6 +128,7 @@ export default function NewSheet() {
             />
           )
       ) : null}
+      <ScopeRing />
     </ScrollView>
   );
 }
@@ -203,3 +205,8 @@ const styles = StyleSheet.create({
   machines: { gap: 8, paddingHorizontal: 16 },
   machine: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 34, borderRadius: 17, paddingHorizontal: 13, paddingVertical: 6 },
 });
+
+/** A controller stays inside this sheet while it is open; B closes it. */
+export default function NewSheetRoute() {
+  return <FocusScope bare onBack={() => router.back()}><NewSheet /></FocusScope>;
+}

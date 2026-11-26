@@ -11,6 +11,7 @@ import { PairingCamera } from '@/features/pairing/PairingCamera';
 import { useTheme } from '@/theme';
 import { Button, Icon, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
+import { useControllerActions } from '@/features/controller/useControllerActions';
 
 /** Pane on runpane.com, for someone who has the app but no Pane on a computer yet. */
 const GET_PANE_URL = 'https://runpane.com';
@@ -23,6 +24,8 @@ export default function ConnectScreen() {
   const theme = useTheme();
   const startDemo = useHostsStore(state => state.startDemo);
   const [mode, setMode] = useState<'camera' | 'connect' | 'computers'>('camera');
+  // A controller's B leaves Tailscale or the code form, like their Back link.
+  useControllerActions('home', { 'controller-back': () => (mode === 'camera' ? false : setMode('camera')) });
 
   if (mode === 'camera') {
     return (

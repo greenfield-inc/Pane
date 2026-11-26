@@ -276,6 +276,23 @@ export function useVoiceDictation(onText: (text: string) => void) {
     }
   };
 
+  // A controller's R2: 'released' when it came up before the recording listened (even before 'starting'
+  // rendered); the recording stops as soon as it listens. A failed start clears it.
+  const pushToTalk = useRef<'off' | 'held' | 'released'>('off');
+  const startedOnce = useRef(false);
+  useEffect(() => {
+    if (phase !== 'idle') startedOnce.current = true;
+  }, [phase]);
+  useEffect(() => {
+    if (pushToTalk.current !== 'released') return;
+    if (phase === 'listening') {
+      pushToTalk.current = 'off';
+      void stop();
+    } else if (phase === 'idle' && startedOnce.current) {
+      pushToTalk.current = 'off';
+    }
+  });
+
   // VoiceAudio releases the microphone itself when the screen goes away.
   useEffect(() => {
     mounted.current = true;
@@ -303,6 +320,22 @@ export function useVoiceDictation(onText: (text: string) => void) {
     error,
     clearError: () => setError(null),
     toggle: () => void (phase === 'listening' ? stop() : start()),
+    /** Push to talk (a controller's R2): starts listening, unless it already is. */
+    hold: () => {
+      pushToTalk.current = 'held';
+      startedOnce.current = false;
+      if (phase === 'idle') void start();
+    },
+    /** Ends a push to talk: the words go into the box, even when released before listening began. */
+    release: () => {
+      if (pushToTalk.current !== 'held') return;
+      if (phase === 'listening') {
+        pushToTalk.current = 'off';
+        void stop();
+      } else {
+        pushToTalk.current = 'released';
+      }
+    },
     /** Props for the screen to render `<VoiceAudio>` with, once dictation has been used; null before. */
     audio: audioWanted ? { onReady: onAudioReady, onBuffer } : null,
   };

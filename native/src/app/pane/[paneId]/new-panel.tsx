@@ -14,6 +14,7 @@ import { useChatAgents } from '@/features/chatTab/useChatTab';
 import { useAffordances } from '@/features/hosts/hostSettings';
 import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Sheet, Text, TextField } from '@/ui';
+import { FocusScope } from '@/features/controller/FocusScope';
 
 // Stand-ins for the web app's brand icons, which have no system symbol, by the agents config's `icon` key.
 const BRAND_ICONS: Readonly<Record<string, { ios: SFSymbol; android: AndroidSymbol }>> = {
@@ -27,7 +28,7 @@ const PROFILE_ICON = { ios: 'leaf', android: 'eco' } as const;
 const TERMINAL_ICON = { ios: 'apple.terminal', android: 'terminal' } as const;
 
 /** The web app's Add tool menu: opens a new terminal tab in the pane, a shell or an agent. */
-export default function NewPanelSheet() {
+function NewPanelSheet() {
   // `sessionId` when the pane is a Session's workspace: the new tab opens back in the Session.
   const { paneId, sessionId } = useLocalSearchParams<{ paneId: string; sessionId?: string }>();
   const theme = useTheme();
@@ -124,3 +125,8 @@ const styles = StyleSheet.create({
   icon: { marginTop: 2 },
   body: { flex: 1, minWidth: 0 },
 });
+
+/** A controller stays inside this sheet while it is open; B closes it. */
+export default function NewPanelSheetRoute() {
+  return <FocusScope bare onBack={() => router.back()}><NewPanelSheet /></FocusScope>;
+}

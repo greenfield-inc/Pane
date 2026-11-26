@@ -9,6 +9,12 @@ import { InColumn, screenJustClosed, useWideLayout } from '@/features/layout/wid
 import { IconButton } from '@/features/panes/PaneKit';
 import { useTheme } from '@/theme';
 import { Icon } from '@/ui';
+import { Focusable } from '@/features/controller/Focusable';
+import { ListeningBar } from '@/features/controller/ListeningBar';
+import { useControllerActions } from '@/features/controller/useControllerActions';
+import { useVoiceDictation } from '@/features/voice/useVoiceDictation';
+import { VoiceAudio } from '@/features/voice/VoiceAudio';
+import { insertAtSelection } from '@/features/composer/insertText';
 
 const CONTROL = 44;
 const PADDING_TOP = 10;
@@ -41,12 +47,13 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
   // Search on the rail expands Home with the keyboard up.
   const input = useRef<TextInput>(null);
   const asked = useRef(false);
+  const searchRequested = useWideLayout(state => state.searchRequested);
   useEffect(() => {
-    if (inColumn && useWideLayout.getState().takeSearchRequest()) {
+    if (searchRequested && useWideLayout.getState().takeSearchRequest()) {
       asked.current = true;
       input.current?.focus();
     }
-  }, [inColumn]);
+  }, [inColumn, searchRequested]);
   const onFocus = () => {
     const wanted = asked.current;
     asked.current = false;
@@ -54,6 +61,15 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
     if (inColumn && !wanted && screenJustClosed()) return input.current?.blur();
     onFocusChange(true);
   };
+  // While searching, a controller's R2 dictates the query.
+  const voice = useVoiceDictation(words => onQuery(insertAtSelection(query, null, words).text.trimEnd()));
+  useControllerActions('search', {
+    'dictate-hold': event => {
+      if (!voice.available) return false;
+      if (event.phase === 'start') voice.hold();
+      else voice.release();
+    },
+  }, typing);
   const onFocusChange = (focused: boolean) => {
     setTyping(focused);
     if (inColumn) setSearching(focused);
@@ -74,6 +90,8 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
         </Defs>
         <Rect width="100%" height="100%" fill="url(#home-bar-fade)" />
       </Svg>
+      {voice.audio ? <VoiceAudio {...voice.audio} /> : null}
+      {voice.phase === 'idle' ? null : <View style={styles.listening}><ListeningBar phase={voice.phase} preview={voice.preview} /></View>}
       <View style={[styles.search, { backgroundColor: theme.colors.surfaceRaised }]}>
         <Icon ios="magnifyingglass" android="search" size={16} />
         <TextInput
@@ -99,7 +117,7 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
           </IconButton>
         ) : null}
       </View>
-      {canCreate ? <Pressable
+      {canCreate ? <Focusable onActivate={() => router.push('/new')}><Pressable
         testID="home-new"
         accessibilityRole="button"
         accessibilityLabel="New"
@@ -108,7 +126,7 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
         style={({ pressed }) => [styles.new, { backgroundColor: theme.colors.accent, opacity: pressed ? 0.85 : 1 }]}
       >
         <Icon ios="plus" android="add" size={22} color={theme.colors.onAccent} />
-      </Pressable> : null}
+      </Pressable></Focusable> : null}
     </Animated.View>
   );
 }
@@ -131,6 +149,7 @@ function useReturnsToForeground(): number {
 }
 
 const styles = StyleSheet.create({
+  listening: { position: 'absolute', left: 16, right: 16, bottom: '100%' },
   bar: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: PADDING_TOP },
   search: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, height: CONTROL, borderRadius: CONTROL / 2, paddingLeft: 16, paddingRight: 7 },
   input: { flex: 1, paddingVertical: 0 },

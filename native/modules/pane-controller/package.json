@@ -1,0 +1,8 @@
+{
+  "name": "pane-controller",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Game controller input for the Pane app: buttons, sticks, device identity and rumble",
+  "license": "Apache-2.0",
+  "main": "index.ts"
+}

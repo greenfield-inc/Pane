@@ -9,6 +9,7 @@ import { Skeleton, SkeletonSwap, Text } from '@/ui';
 import { usePendingPermissions, useProjects, useRespondToPermission } from './hooks';
 import { DialogSection, DialogSheet, Notice, SheetButton } from './PaneKit';
 import { describePermission } from './permissions';
+import { Focusable } from '@/features/controller/Focusable';
 
 /** No PWA equivalent; drawn as a PWA dialog with the same tokens. */
 export function PermissionSheet({ paneId, requestId }: { paneId: string; requestId?: string }) {
@@ -92,9 +93,11 @@ export function PermissionSheet({ paneId, requestId }: { paneId: string; request
             <Text selectable variant="footnote" tone="secondary" style={{ fontFamily: monoFontFamily }}>{detail}</Text>
           </View>
         ) : (
-          <Pressable testID="permission-show-input" accessibilityRole="button" hitSlop={8} onPress={() => setShowInput(true)}>
-            <Text variant="footnote" tone="accent">{`Show full ${request.toolName} input`}</Text>
-          </Pressable>
+          <Focusable style={styles.disclosure} onActivate={() => setShowInput(true)}>
+            <Pressable testID="permission-show-input" accessibilityRole="button" hitSlop={8} onPress={() => setShowInput(true)}>
+              <Text variant="footnote" tone="accent">{`Show full ${request.toolName} input`}</Text>
+            </Pressable>
+          </Focusable>
         )}
         {respond.isError ? <Notice testID="permission-error" danger message={respond.error.message} /> : null}
       </DialogSection>
@@ -103,6 +106,8 @@ export function PermissionSheet({ paneId, requestId }: { paneId: string; request
 }
 
 const styles = StyleSheet.create({
+  // Its own width, so the ring hugs the link instead of the whole row.
+  disclosure: { alignSelf: 'flex-start' },
   // rounded-xl border bg-surface-secondary p-3.
   card: { padding: 12, borderWidth: 1 },
   answer: { flex: 1 },

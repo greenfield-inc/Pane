@@ -14,6 +14,7 @@ import { Icon, Skeleton, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
 
 import type { PaneRecentRow } from './statusBoard';
+import { Focusable } from '@/features/controller/Focusable';
 
 /** How far a row from a machine that went offline fades: the same as a disconnected home. */
 export const STALE_OPACITY = 0.45;
@@ -101,11 +102,14 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
       </View>
     </Pressable>
   );
-  if (!onArchive) return content;
   return (
-    <SwipeRow testIDPrefix="approval" id={onArchive.swipeId} onArchive={onArchive.archive}>
-      <View style={{ backgroundColor: theme.colors.background }}>{content}</View>
-    </SwipeRow>
+    <Focusable onActivate={onPress}>
+      {onArchive ? (
+        <SwipeRow testIDPrefix="approval" id={onArchive.swipeId} onArchive={onArchive.archive}>
+          <View style={{ backgroundColor: theme.colors.background }}>{content}</View>
+        </SwipeRow>
+      ) : content}
+    </Focusable>
   );
 }
 
@@ -150,11 +154,14 @@ export function ActivityRow({ row, machine, divided, onPress, swipe, background,
       <Icon ios="chevron.right" android="chevron_right" size={14} />
     </Pressable>
   );
-  if (!actions) return content;
   return (
-    <SwipeRow testIDPrefix="pane" id={pane.id} {...actions}>
-      <View style={{ backgroundColor: theme.colors.background }}>{content}</View>
-    </SwipeRow>
+    <Focusable onActivate={onPress}>
+      {actions ? (
+        <SwipeRow testIDPrefix="pane" id={pane.id} {...actions}>
+          <View style={{ backgroundColor: theme.colors.background }}>{content}</View>
+        </SwipeRow>
+      ) : content}
+    </Focusable>
   );
 }
 
@@ -180,19 +187,21 @@ export function GroupRow({ icon, title, count, open, onPress, testID }: {
     );
   }
   return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={count === undefined ? title : `${title}, ${count}`}
-      accessibilityState={open === undefined ? undefined : { expanded: open }}
-      onPress={onPress}
-      style={({ pressed }) => [styles.group, pressed && { backgroundColor: theme.colors.surfacePressed }]}
-    >
-      <View style={styles.groupIcon}><Icon ios={icon.ios} android={icon.android} size={16} color={theme.colors.textSecondary} /></View>
-      <Text variant="rowValue" numberOfLines={1} style={[styles.fill, styles.bold]}>{title}</Text>
-      {count === undefined ? null : <Text variant="rowDetail" tone="muted" style={styles.tabular}>{String(count)}</Text>}
-      <Icon ios={chevron === 'down' ? 'chevron.down' : 'chevron.right'} android={chevron === 'down' ? 'expand_more' : 'chevron_right'} size={13} />
-    </Pressable>
+    <Focusable onActivate={onPress}>
+      <Pressable
+        testID={testID}
+        accessibilityRole="button"
+        accessibilityLabel={count === undefined ? title : `${title}, ${count}`}
+        accessibilityState={open === undefined ? undefined : { expanded: open }}
+        onPress={onPress}
+        style={({ pressed }) => [styles.group, pressed && { backgroundColor: theme.colors.surfacePressed }]}
+      >
+        <View style={styles.groupIcon}><Icon ios={icon.ios} android={icon.android} size={16} color={theme.colors.textSecondary} /></View>
+        <Text variant="rowValue" numberOfLines={1} style={[styles.fill, styles.bold]}>{title}</Text>
+        {count === undefined ? null : <Text variant="rowDetail" tone="muted" style={styles.tabular}>{String(count)}</Text>}
+        <Icon ios={chevron === 'down' ? 'chevron.down' : 'chevron.right'} android={chevron === 'down' ? 'expand_more' : 'chevron_right'} size={13} />
+      </Pressable>
+    </Focusable>
   );
 }
 

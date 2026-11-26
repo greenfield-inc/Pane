@@ -15,6 +15,12 @@ import { Icon, Skeleton, SkeletonSwap, Text, TextField } from '@/ui';
 
 import { useMachineNotifyCommand, useMachineNotifyShared, useNotifyCommand, useNotifyShared } from './hooks';
 import { type AnsweredHere, initialPicks, isReply, leaseLengthText, NOTIFY_KIND_LABEL, notifySheetState, optionsAnswer, replyStatus, revisionNote, type ReplyTone } from './notifyQuestions';
+import { Focusable } from '@/features/controller/Focusable';
+import { ListeningBar } from '@/features/controller/ListeningBar';
+import { useControllerActions } from '@/features/controller/useControllerActions';
+import { useVoiceDictation } from '@/features/voice/useVoiceDictation';
+import { VoiceAudio } from '@/features/voice/VoiceAudio';
+import { insertAtSelection } from '@/features/composer/insertText';
 
 /**
  * One Notify question, drawn like the desktop card (frontend/src/components/notify/NotifyCard.tsx) in the app's sheet chrome.
@@ -179,6 +185,16 @@ export function QuestionForm({ item, answer, busy, children }: {
     if (value) answer(value);
   };
   const several = replies ? optionsAnswer(item, picks, note) : null;
+  // A controller's R2 dictates into the answer box (or the note riding on a choice); never into a secret.
+  const append = (current: string, words: string) => insertAtSelection(current, null, words).text;
+  const voice = useVoiceDictation(words => (item.ui === 'ask' ? setText(current => append(current, words)) : setNote(current => append(current, words))));
+  useControllerActions('sheet', {
+    'dictate-hold': event => {
+      if (item.ui === 'secret' || !voice.available) return false;
+      if (event.phase === 'start') voice.hold();
+      else voice.release();
+    },
+  });
   const withNote = <T extends object>(value: T) => (trimmedNote ? { ...value, note: trimmedNote } : value);
   const block = { borderRadius: theme.radius.lg, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised };
 
@@ -208,6 +224,8 @@ export function QuestionForm({ item, answer, busy, children }: {
 
   const fields = (
     <>
+      {voice.audio ? <VoiceAudio {...voice.audio} /> : null}
+      <ListeningBar phase={voice.phase} preview={voice.preview} />
       {item.ui === 'options' && item.questions ? (
         item.questions.map((question, questionIndex) => (
           <View key={`${questionIndex}:${question.title}`} testID={`notify-question-${questionIndex}`} style={styles.choices}>
@@ -343,6 +361,7 @@ function ChoiceRow({ choice, testID, selected, disabled, onPress }: { choice: No
   const theme = useTheme();
   const highlighted = selected || choice.recommended;
   return (
+    <Focusable preferred={choice.recommended} enabled={!disabled} onActivate={onPress}>
     <Pressable
       testID={testID}
       accessibilityRole="button"
@@ -363,6 +382,7 @@ function ChoiceRow({ choice, testID, selected, disabled, onPress }: { choice: No
       </View>
       {selected ? <Icon ios="checkmark" android="check" size={14} color={theme.colors.accentText} /> : choice.recommended ? <Text variant="caption" tone="muted">Recommended</Text> : null}
     </Pressable>
+    </Focusable>
   );
 }
 

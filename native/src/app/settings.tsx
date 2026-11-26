@@ -12,6 +12,8 @@ import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import type { Machine } from '@/features/machines/machines';
 import { MachineMark } from '@/features/machines/MachineMark';
 import { useAutocorrect } from '@/features/composer/autocorrectPreference';
+import { LETTER_LABELS } from '@/features/controller/CheatSheet';
+import { useControllerState } from '@/features/controller/controllerState';
 import { useMachines, useSelectMachine } from '@/features/machines/useMachines';
 import { usePushStore } from '@/features/notifications/usePushSetup';
 import { AppUpdateRow } from '@/features/updates/AppUpdateRow';
@@ -33,6 +35,7 @@ export default function SettingsScreen() {
   const others = machines.filter(machine => !machine.current);
   const shortcuts = affordances.data?.terminalShortcuts?.length;
   const on = `on ${profile.label}`;
+  const letters = useControllerState(state => state.letters);
 
   return (
     <Screen scroll grouped testID="settings-screen">
@@ -67,6 +70,7 @@ export default function SettingsScreen() {
         <NotificationsRow />
         <ListRow testID="settings-glasses" title="Glasses" value="Even G2" leading={<RowIcon ios="eyeglasses" android="eyeglasses" />} trailing="chevron" onPress={() => router.push('/settings/glasses')} />
         <AutocorrectRow />
+        <ListRow testID="settings-controller" title="Controller" value={LETTER_LABELS[letters]} leading={<RowIcon ios="gamecontroller" android="sports_esports" />} trailing="chevron" onPress={() => router.push('/settings/controller')} />
       </ListSection>
 
       {/* A machine this phone only watches keeps its settings to itself. */}

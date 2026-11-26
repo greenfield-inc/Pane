@@ -10,6 +10,7 @@ import { Icon, Text } from '@/ui';
 
 import { PausedBadge } from '../panes/StatusBadge';
 import { tabView } from './panels';
+import { Focusable } from '../controller/Focusable';
 
 /** Each tab type's icon and the word VoiceOver reads after its title. */
 export const TAB_TYPES: Record<ToolPanelType, { ios: SFSymbol; android: AndroidSymbol; label: string }> = {
@@ -210,6 +211,7 @@ function StripTab({ id, title, icon, accessibilityLabel, accessibilityHint, sele
   const { colors } = theme;
   const tint = selected ? colors.text : dimmed ? colors.textMuted : colors.textSecondary;
   return (
+    <Focusable onActivate={onSelect}>
     <Pressable
       testID={`panel-tab-${id}`}
       onLayout={event => {
@@ -247,6 +249,7 @@ function StripTab({ id, title, icon, accessibilityLabel, accessibilityHint, sele
         {title}
       </Text>
     </Pressable>
+    </Focusable>
   );
 }
 

@@ -28,6 +28,8 @@ interface WideLayoutState {
   setSearching(searching: boolean): void;
   setCollapsed(collapsed: boolean, options?: { search?: boolean }): void;
   takeSearchRequest(): boolean;
+  /** Asks Home's search box for the keyboard (a controller's L3); a collapsed column expands first. */
+  requestSearch(): void;
 }
 
 const initial = Dimensions.get('window');
@@ -51,6 +53,11 @@ export const useWideLayout = create<WideLayoutState>((set, get) => ({
   setCollapsed: (collapsed, options) => {
     set({ collapsed, searchRequested: Boolean(options?.search) });
     void secureStore.setItem(COLLAPSED_KEY, collapsed ? '1' : '0').catch(() => undefined);
+  },
+  requestSearch: () => {
+    const state = get();
+    if (state.wide && state.collapsed) state.setCollapsed(false, { search: true });
+    else set({ searchRequested: true });
   },
   takeSearchRequest: () => {
     const requested = get().searchRequested;

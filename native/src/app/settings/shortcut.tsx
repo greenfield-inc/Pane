@@ -9,9 +9,10 @@ import { saveErrorMessage, useAffordances, useSaveHostSettings } from '@/feature
 import { freeLetter, shortcutProblems } from '@/features/shortcuts/shortcuts';
 import { useTheme } from '@/theme';
 import { Button, Screen, Text, TextField } from '@/ui';
+import { FocusScope } from '@/features/controller/FocusScope';
 
 /** Edit shortcut (or a new one, with no `id`): name, text, desktop hotkey letter, on or off. */
-export default function EditShortcutScreen() {
+function EditShortcutScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const affordances = useAffordances();
   const list = affordances.data?.terminalShortcuts;
@@ -144,3 +145,8 @@ const styles = StyleSheet.create({
   switchBox: { height: 52, justifyContent: 'center' },
   switchRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, borderWidth: 1 },
 });
+
+/** A controller stays inside this screen while it is open; B closes it. */
+export default function EditShortcutScreenRoute() {
+  return <FocusScope onBack={() => router.back()}><EditShortcutScreen /></FocusScope>;
+}

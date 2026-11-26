@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/theme';
 
 import { Text } from './Text';
+import { ScopeRing } from '@/features/controller/FocusScope';
 
 /** A sheet's content stops this wide, so a tablet or an unfolded phone keeps a readable line. */
 export const SHEET_MAX_WIDTH = 640;
@@ -40,6 +41,7 @@ export function Sheet({ title, children, footer, testID }: SheetProps) {
       {title ? <Text variant="title">{title}</Text> : null}
       {children}
       {footer ? <View style={styles.footer}>{footer}</View> : null}
+      <ScopeRing />
     </ScrollView>
   );
 }
