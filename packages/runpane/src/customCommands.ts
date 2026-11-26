@@ -3,6 +3,7 @@ import type { ParsedArgs } from './commands';
 import { confirmMutation } from './daemonActions';
 import { invokeDaemon } from './daemonClient';
 import { describeFailure, RunpaneError } from './errors';
+import { RUNPANE_CONTRACT } from './generated/contract';
 import { getWrapperVersion } from './version';
 
 /**
@@ -11,7 +12,8 @@ import { getWrapperVersion } from './version';
  * list and picks the change up at once; entries are selected by exact, case-sensitive name.
  */
 
-const RESUME_MODES = ['reported', 'generated', 'claude', 'codex', 'cursor'] as const;
+/** The resume modes the contract's `customCommandResume` schema lists, in its order. */
+const RESUME_MODES = RUNPANE_CONTRACT.jsonSchemas.customCommandResume.properties.mode.enum;
 type ResumeMode = typeof RESUME_MODES[number];
 
 const resumeSchema = boundary.object({

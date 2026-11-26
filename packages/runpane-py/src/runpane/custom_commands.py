@@ -16,10 +16,12 @@ from typing import Any, Dict, List, Optional
 
 from .daemon_actions import confirm_mutation
 from .daemon_client import PaneDaemonClientError, invoke_daemon, resolve_pane_directory
+from .generated_contract import RUNPANE_CONTRACT
 from .notify import RunpaneError
 from .version import wrapper_version
 
-RESUME_MODES = ("reported", "generated", "claude", "codex", "cursor")
+# The resume modes the contract's `customCommandResume` schema lists, in its order.
+RESUME_MODES = tuple(RUNPANE_CONTRACT["jsonSchemas"]["customCommandResume"]["properties"]["mode"]["enum"])
 SHORTCUT_NOTE = "Custom command keyboard shortcuts follow list order, so the moved entries now answer to different shortcut slots."
 # The workspace forms this package hands to the Node CLI (D-8 plan, package 2).
 DELEGATED_WORKSPACE_COMMANDS = (("custom-commands",), ("sessions", "create"))

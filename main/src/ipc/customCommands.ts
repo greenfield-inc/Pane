@@ -5,7 +5,7 @@ import { applyCustomCommandEdit, type CustomCommandEdit, type CustomCommandEditO
 import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { getPaneEventSink } from '../core/runtime';
-import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
+import { CUSTOM_COMMAND_RESUME_MODES, type CustomCommandResume } from '../../../shared/types/customCommandResume';
 
 /** The channels `runpane custom-commands` calls on the machine that owns the list. */
 export const CUSTOM_COMMAND_CHANNELS = [
@@ -17,7 +17,7 @@ export const CUSTOM_COMMAND_CHANNELS = [
 ] as const;
 
 /** What `custom-commands list` shows the owner: every entry in order, legacy duplicates included. */
-export interface CustomCommandListEntry {
+interface CustomCommandListEntry {
   position: number;
   name: string;
   command: string;
@@ -29,7 +29,7 @@ interface CustomCommandConfig {
   updateConfigWith(update: (current: AppConfig) => Partial<AppConfig>): Promise<AppConfig>;
 }
 
-const resumeModeSchema = boundary.enumeration('claude', 'codex', 'cursor', 'generated', 'reported');
+const resumeModeSchema = boundary.enumeration(...CUSTOM_COMMAND_RESUME_MODES);
 const resumePatchSchema: BoundarySchema<CustomCommandResumePatch> = boundary.object({
   mode: boundary.optional(resumeModeSchema),
   initialTemplate: boundary.optional(boundary.string),
