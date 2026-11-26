@@ -222,7 +222,7 @@ function DisplayRows() {
         )}
       />
       <ListRow
-        title="Terminal font size"
+        title="Terminal font"
         leading={<RowIcon ios="terminal" android="terminal" />}
         trailing={(
           <Stepper

@@ -37,6 +37,23 @@ interface WideLayoutState {
   requestSearch(): void;
 }
 
+const COLUMN_WIDTHS_KEY = 'pane.native.homeColumnWidths';
+
+/** Read synchronously, so the first frame already draws the column at its width. */
+function readColumnWidths(): Partial<Record<Orientation, number>> {
+  try {
+    const saved: unknown = JSON.parse(SecureStore.getItem(COLUMN_WIDTHS_KEY) ?? '{}');
+    const widths: Partial<Record<Orientation, number>> = {};
+    for (const orientation of ['portrait', 'landscape'] as const) {
+      const width = (saved as Record<string, unknown> | null)?.[orientation];
+      if (typeof width === 'number' && Number.isFinite(width)) widths[orientation] = width;
+    }
+    return widths;
+  } catch {
+    return {};
+  }
+}
+
 const initial = Dimensions.get('window');
 
 /** The window rule's answer for the app's window, and what is open beside Home. */
@@ -82,22 +99,6 @@ export const useWideLayout = create<WideLayoutState>((set, get) => ({
 }));
 
 const COLLAPSED_KEY = 'pane.native.homeCollapsed';
-const COLUMN_WIDTHS_KEY = 'pane.native.homeColumnWidths';
-
-/** Read synchronously, so the first frame already draws the column at its width. */
-function readColumnWidths(): Partial<Record<Orientation, number>> {
-  try {
-    const saved: unknown = JSON.parse(SecureStore.getItem(COLUMN_WIDTHS_KEY) ?? '{}');
-    const widths: Partial<Record<Orientation, number>> = {};
-    for (const orientation of ['portrait', 'landscape'] as const) {
-      const width = (saved as Record<string, unknown> | null)?.[orientation];
-      if (typeof width === 'number' && Number.isFinite(width)) widths[orientation] = width;
-    }
-    return widths;
-  } catch {
-    return {};
-  }
-}
 void secureStore.getItem(COLLAPSED_KEY).then(saved => {
   if (saved === '1') useWideLayout.setState({ collapsed: true });
 }).catch(() => undefined);

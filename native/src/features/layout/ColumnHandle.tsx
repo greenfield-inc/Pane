@@ -68,7 +68,7 @@ export function ColumnHandle({ left, width, min, max, onResize, onReset }: Colum
   const guideStyle = useAnimatedStyle(() => ({ opacity: dragging.value ? 1 : 0 }));
   const gripStyle = useAnimatedStyle(() => ({
     backgroundColor: dragging.value ? theme.colors.accent : theme.colors.textMuted,
-    opacity: dragging.value ? 1 : 0.5,
+    opacity: dragging.value ? 1 : 0.7,
   }));
 
   return (
@@ -101,5 +101,5 @@ function tick() {
 const styles = StyleSheet.create({
   handle: { position: 'absolute', top: 0, bottom: 0, width: HIT_WIDTH, alignItems: 'center', justifyContent: 'center' },
   guide: { position: 'absolute', top: 0, bottom: 0, width: 2 },
-  grip: { width: 4, height: 36, borderRadius: 2 },
+  grip: { width: 5, height: 44, borderRadius: 2.5 },
 });
