@@ -1,16 +1,6 @@
 import { messageRef } from '../../../../shared/types/agentMessages';
 
-/**
- * The two phrases every surface that teaches the rule must carry, word for word (whitespace aside):
- * replyRule.test.ts checks them, so a change to the reply syntax can't leave a stale copy behind.
- */
-export const REPLY_RULE_PHRASES = ['runpane reply M-12 "…"', 'never only in your own chat'] as const;
-
-/**
- * The rule every agent instruction carries (the Session AGENTS.md, the pane-orchestrator and
- * pane-orchestration skills; runpane agent-context has the same words in its workspace rules).
- */
-export const AGENT_REPLY_RULE = 'A message from another agent (another Session\'s orchestrator, a worker, Autopilot) ends with a reply line, `Reply with runpane reply M-12 "…"`: answer it with `runpane reply M-12 "…"`, never only in your own chat, which the sender never sees. Its reply reaches you as `reply: M-12 → "…"`.';
+export { AGENT_REPLY_RULE, REPLY_RULE_PHRASES } from '../../../../shared/types/agentMessages';
 
 /**
  * Every line Pane adds to an agent-to-agent message (T-104). Tabs read them as plain text, so each
