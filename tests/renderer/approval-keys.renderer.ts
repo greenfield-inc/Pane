@@ -208,8 +208,8 @@ test.describe('a Session chat\'s approval key (D-381)', () => {
     await openSessionApprovalKey(page);
     const column = page.getByTestId('approval-column');
     await expect(column).toBeVisible();
-    // The oldest waiting approval opens, with focus on its first question's option.
-    await expect(page.getByTestId('approval-title')).toHaveText('Q-13: Run the invoice migration on staging?');
+    // The newest waiting approval opens (T-88), with focus on its first question's option.
+    await expect(page.getByTestId('approval-title')).toHaveText('Q-12: Which key opens the keyboard shortcut sheet?');
     await expect(column.getByRole('radio').first()).toBeFocused();
 
     await openSessionApprovalKey(page);
