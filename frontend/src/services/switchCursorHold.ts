@@ -13,7 +13,6 @@
 /** A sidebar row as the hold uses it; an HTMLElement is one. */
 interface CursorRow {
   readonly isConnected: boolean;
-  closest?(selector: string): unknown;
   getAttribute(name: string): string | null;
   focus(options?: FocusOptions): void;
 }
@@ -70,8 +69,6 @@ const KEEPS_FOCUS = [
   'input', 'textarea', 'select', '[contenteditable]:not([contenteditable="false"])',
 ].join(', ');
 
-interface FocusTarget { closest?(selector: string): unknown }
-
 /**
  * Starts a hold for `options.switching`, replacing any hold already running. While it runs, the
  * person's own moves end it: a click, or a key that isn't the sidebar's. Every other move is the
@@ -108,11 +105,11 @@ export function holdCursorThroughSwitch(options: SwitchCursorHoldOptions): void 
   };
   let restoring = false;
   // A focus move with no key or click from the person since the hold began is the switch's.
-  const onFocusIn = (event: FocusEvent) => {
+  // focusin fires once the new element is active.
+  const onFocusIn = () => {
     if (released) return;
-    const target = event.target as FocusTarget | null;
-    if (!target || target === document.body || typeof target.closest !== 'function') return;
-    if (target.closest(KEEPS_FOCUS)) return;
+    const target = document.activeElement;
+    if (!target || target === document.body || target.closest(KEEPS_FOCUS)) return;
     if (restoring) {
       // Something took focus back while the hold was restoring it: let it have focus.
       release();
