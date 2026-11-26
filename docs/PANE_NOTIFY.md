@@ -335,8 +335,9 @@ asker stopped waiting").
   from anywhere in the approval. With nothing picked or typed, ⇧↩ sends each
   question's recommended option (its chip reads "Recommended · ⇧↩ sends");
   nothing starts picked, so it is the person's own key. When a question has no
-  recommendation it sends nothing and says which; it never fires in a text
-  field. ⌥⌘A (Ctrl+K Ctrl+A on Windows and Linux)
+  recommendation it sends nothing and says which. It never fires in a text
+  field or while the Close form is open, and holding it answers one card: the
+  next one needs a fresh press. ⌥⌘A (Ctrl+K Ctrl+A on Windows and Linux)
   opens it from the chat and goes back again; ⇧⌘A opens or closes Approvals
   while Pane is in front. ⌘F finds text in Decide, the Summary (the frame
   shares Pane's origin so it can be searched, with scripts still off) and

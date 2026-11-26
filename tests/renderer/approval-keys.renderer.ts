@@ -114,7 +114,7 @@ test.describe('the approval column (D-381)', () => {
     expect(await commands(page)).toEqual([]);
   });
 
-  test('⇧↩ never fires while typing, in the reply box or the chat composer (T-88)', async ({ page }) => {
+  test('⇧↩ never fires while typing, in the reply box or the chat composer, nor with words saved in the box (T-88)', async ({ page }) => {
     const box = page.getByTestId('approval-reply-box');
     await box.click();
     await page.keyboard.press('Shift+Enter');
@@ -122,8 +122,43 @@ test.describe('the approval column (D-381)', () => {
     await expect(box).toHaveValue('\nx');
     await page.getByLabel('Chat composer').click();
     await page.keyboard.press('Shift+Enter');
+    // Back on an option, the words in the box are the person's own answer: ⇧↩ leaves them be.
+    await option(page, 0, 'Both').focus();
+    await page.keyboard.press('Shift+Enter');
+    await expect(box).toHaveValue('\nx');
     await page.waitForTimeout(200);
     expect(await commands(page)).toEqual([]);
+  });
+
+  test('⇧↩ during an input method\'s composition sends nothing (T-88)', async ({ page }) => {
+    await option(page, 0, 'Both').focus();
+    await page.evaluate(() => document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, isComposing: true, bubbles: true, cancelable: true })));
+    await page.waitForTimeout(200);
+    expect(await commands(page)).toEqual([]);
+  });
+
+  test('⇧↩ from the card itself, its Decide tab or its pager sends as the chip says (T-88)', async ({ page }) => {
+    await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText(RECOMMENDED_SENDS);
+    await page.getByRole('tab', { name: 'Decide' }).focus();
+    await page.keyboard.press('Shift+Enter');
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q12', answer: { picks: ['⌘/ everywhere', 'Yes, a small dot'] } }]);
+  });
+
+  test('⇧↩ from the card region itself sends (T-88)', async ({ page }) => {
+    await page.getByTestId('approval-column').focus();
+    await page.keyboard.press('Shift+Enter');
+    await expect.poll(() => commands(page)).toHaveLength(1);
+  });
+
+  test('⇧↩ does nothing while the Close form is open, from its reason or its buttons; the chip drops the key (T-88)', async ({ page }) => {
+    await page.getByTestId('approval-close-item').click();
+    await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText('Recommended');
+    await page.keyboard.type('superseded');
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Cancel' })).toBeFocused();
+    await page.keyboard.press('Shift+Enter');
+    await page.waitForTimeout(200);
+    expect((await commands(page)).filter((command) => command.type === 'answer')).toEqual([]);
   });
 
   test('the palette\'s Next and Previous Approval page the approval shown', async ({ page }) => {
@@ -275,9 +310,11 @@ test.describe('⇧↩ with a question that has no recommendation (T-88)', () => 
     await page.goto('/renderer-tests/approval-keys.html?surface=column&unrecommended');
     await expect(page.getByTestId('approval-pager')).toHaveText('1 of 2');
     await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText('Recommended');
+    // The live region is there before the key, so the hint is announced.
+    await expect(page.getByTestId('approval-reply-hint')).toHaveAttribute('role', 'status');
     await option(page, 0, '⌘/ everywhere Recommended').focus();
     await page.keyboard.press('Shift+Enter');
-    await expect(page.getByTestId('approval-reply-hint')).toHaveText(/^Question 2 has no recommended option: pick, then .+ sends\.$/);
+    await expect(page.getByTestId('approval-reply-hint')).toHaveText(/^Question 2 has no recommended option: pick an option for each question, then .+ sends\.$/);
     expect(await commands(page)).toEqual([]);
     // Picking clears the hint.
     await page.keyboard.press('Space');

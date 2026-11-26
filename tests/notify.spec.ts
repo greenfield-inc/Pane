@@ -481,6 +481,40 @@ test.describe('Approvals newest first, one after another (T-88)', () => {
     expect(await commands(page)).toHaveLength(1);
   });
 
+  test('a held ⇧↩ answers one card: its repeats never answer the next, a fresh press does (T-88)', async ({ page }) => {
+    const snapshot = notifyFixture();
+    const [options, approve, ask] = snapshot.items.filter(item => item.state === 'waiting');
+    // The second card has a recommendation too, so a repeat could answer it.
+    const second = { ...approve, ui: 'options' as const, choices: [{ label: 'Apply it', recommended: true }, { label: 'Wait for QA' }] };
+    snapshot.items = [options, second, ask];
+    snapshot.queue = snapshot.items.map(item => item.id);
+    await page.addInitScript(() => localStorage.setItem('pane-approvals-sort', 'recent'));
+    await boot(page, snapshot);
+    await page.getByTestId('approvals-nav').click();
+    const column = page.getByTestId('approval-column');
+    await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
+    await column.getByRole('radio', { name: /Keep Redis/ }).focus();
+    await page.keyboard.down('Shift');
+    await page.keyboard.down('Enter');
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-options', answer: { picks: ['Postgres table'] } }]);
+    await emit(page, { ...snapshot, items: [{ ...options, state: 'sent', answerSummary: 'Postgres table' }, second, ask], queue: [second.id, ask.id] });
+    await expect(column.getByTestId('approval-title')).toHaveText('Apply migration 0042 to staging?');
+    await expect.poll(() => focusInColumn(page)).toBe(true);
+    // Still held: the key repeats on the card it moved on to, and nothing is sent.
+    for (let at = 0; at < 3; at += 1) await page.keyboard.down('Enter');
+    await page.waitForTimeout(300);
+    expect(await commands(page)).toHaveLength(1);
+    await expect(column.getByTestId('approval-title')).toHaveText('Apply migration 0042 to staging?');
+    // Let go, then a fresh press answers it.
+    await page.keyboard.up('Enter');
+    await page.keyboard.press('Enter');
+    await page.keyboard.up('Shift');
+    await expect.poll(() => commands(page)).toEqual([
+      { type: 'answer', id: 'q-options', answer: { picks: ['Postgres table'] } },
+      { type: 'answer', id: 'q-approve', answer: { picks: ['Apply it'] } },
+    ]);
+  });
+
   /** The fixture's three waiting cards, with Most recent: q-options (2m), q-approve (6m), q-ask (11m). */
   async function bootWaiting(page: Page) {
     const snapshot = notifyFixture();

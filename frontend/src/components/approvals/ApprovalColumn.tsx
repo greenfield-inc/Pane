@@ -30,6 +30,7 @@ import { FindBar } from '../find/FindBar';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { approvalFindId, useSurfaceFind } from '../find/surfaceFind';
 import { isTypingTarget } from '../../utils/typingTarget';
+import { enterHeld, holdEnterUntilReleased } from './heldEnter';
 import { ReminderSnoozeLink } from '../todos/ReminderSnoozeLink';
 import {
   askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, recommendedAnswer, replyLine,
@@ -130,6 +131,14 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
   // "3 left": what still waits on the person in this column, the card shown included (T-88).
   const left = pager.filter((id) => { const other = byId.get(id); return other !== undefined && canAdvanceTo(other); }).length;
   const [rootRef, narrow] = useNarrow();
+  // ⇧↩ from the card itself, its pager or its tabs goes to its Decide tab (T-88); a nested card
+  // (an approval it links to) takes its own keys inside itself.
+  const sendRecommendedFromCard = useRef<((event: React.KeyboardEvent) => void) | null>(null);
+  const cardKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    pagerKey(event, step);
+    if (event.target instanceof Element && event.target.closest(DECIDE_ROOT)) return;
+    sendRecommendedFromCard.current?.(event);
+  };
   // ⌘F searches what the column shows; on the Approvals screen, the screen searches it with its list.
   useSurfaceFind(approvalFindId(surface), rootRef, surface !== 'approvals');
 
@@ -149,7 +158,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
 
   return (
     // Focusable, so its ← → keys belong to it alone; clicking anywhere in it gives it focus.
-    <div ref={rootRef} role="region" aria-label={`Approval: ${item.title}`} tabIndex={-1} data-focus-entry={focused !== undefined || undefined} onKeyDown={(event) => pagerKey(event, step)} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid={APPROVAL_COLUMN_ID} data-surface={surface} data-item-id={item.id} data-narrow={narrow || undefined}>
+    <div ref={rootRef} role="region" aria-label={`Approval: ${item.title}`} tabIndex={-1} data-focus-entry={focused !== undefined || undefined} onKeyDown={cardKey} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid={APPROVAL_COLUMN_ID} data-surface={surface} data-item-id={item.id} data-narrow={narrow || undefined}>
       <ColumnHeader
         narrow={narrow}
         index={index}
@@ -169,7 +178,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
           nested
             ? <NestedApproval item={nested} onBack={() => openNested(surface, itemId, undefined)} />
             // A new version starts afresh: its options may have changed under the picks.
-            : <QuestionsTab key={`${item.id}:${item.version ?? 1}`} item={item} onSent={onSent} tabs={tabs} onOpenTab={(key) => setTab(surface, itemId, key)} />
+            : <QuestionsTab key={`${item.id}:${item.version ?? 1}`} item={item} onSent={onSent} tabs={tabs} onOpenTab={(key) => setTab(surface, itemId, key)} fromCard={sendRecommendedFromCard} />
         )}
         {tab?.kind === 'summary' && <SummaryTab key={item.id} item={item} />}
         {tab?.kind === 'link' && <LinkTab item={item} link={tab.link} target={'approval' in tab.link ? resolveApprovalLink(items ?? [], item, tab.link.approval) : undefined} onOpenApproval={(id) => openNested(surface, itemId, id)} />}
@@ -334,7 +343,14 @@ function TabBar({ tabs, active, focused, onPick }: { tabs: CardTab[]; active: st
 }
 
 /** Decide: who asks, the question, how it changed, its options and the one reply box. */
-function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onSent?: () => void; tabs: CardTab[]; onOpenTab: (key: string) => void }) {
+/** The Decide tab's root: ⇧↩ inside it is its own; the card routes the rest to it. */
+const DECIDE_ROOT = '[data-approval-decide]';
+
+function QuestionsTab({ item, onSent, tabs, onOpenTab, fromCard }: {
+  item: NotifyItem; onSent?: () => void; tabs: CardTab[]; onOpenTab: (key: string) => void;
+  /** Set to this tab's ⇧↩ handler, for keys pressed elsewhere on its card (not given to a nested card). */
+  fromCard?: React.MutableRefObject<((event: React.KeyboardEvent) => void) | null>;
+}) {
   const now = useNow();
   const questions = useMemo(() => markedQuestions(item), [item]);
   // The draft lives in the store, so it survives paging away and a refused Send (F-4).
@@ -423,24 +439,42 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
 
   // ⇧↩ sends each question's recommended option while nothing is picked or typed (T-88, D-385
   // holds: nothing is preselected). With a pick of the person's own it does nothing special, and
-  // with a question that has no recommendation it says so instead. Never while typing.
-  const recommended = sendable && !item.relay && !item.unreachable ? recommendedAnswer(item, picks, text) : null;
+  // with a question that has no recommendation it says so instead. Never while typing or
+  // composing, nor while the Close form is open (its reason isn't an answer).
+  const recommended = sendable && !item.relay && !item.unreachable && !closing ? recommendedAnswer(item, picks, text) : null;
   const [noRecommended, setNoRecommended] = useState<number[] | null>(null);
   useEffect(() => { setNoRecommended(null); }, [picks, text]);
-  const sendRecommended = (event: React.KeyboardEvent<HTMLDivElement>) => {
+  const sendRecommended = (event: React.KeyboardEvent) => {
     if (event.key !== 'Enter' || !event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) return;
-    if (!sendable || item.relay || isTypingTarget(event.target)) return;
+    if (enterHeld()) {
+      // Still the press that answered the card before: its repeats never answer this one.
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (event.nativeEvent.isComposing || !sendable || item.relay || closing || isTypingTarget(event.target)) return;
     // Taken even when it sends nothing, so a focused option or button isn't clicked by it.
     event.preventDefault();
     event.stopPropagation();
-    if (!recommended) return;
-    if ('missing' in recommended) setNoRecommended(recommended.missing);
-    else void send(recommended.send);
+    if (!recommended || event.repeat) return;
+    if ('missing' in recommended) {
+      setNoRecommended(recommended.missing);
+      return;
+    }
+    holdEnterUntilReleased();
+    void send(recommended.send);
   };
+  const latestSendRecommended = useCommittedRef(sendRecommended);
+  useEffect(() => {
+    if (!fromCard) return;
+    const route = (event: React.KeyboardEvent) => latestSendRecommended.current(event);
+    fromCard.current = route;
+    return () => { if (fromCard.current === route) fromCard.current = null; };
+  }, [fromCard, latestSendRecommended]);
   const recommendedKey = recommended && 'send' in recommended ? formatKeyDisplay('shift+Enter') : undefined;
 
   return (
-    <div ref={rootRef} className="flex h-full min-h-0 flex-col" onKeyDown={(event) => { pickByNumber(event); sendRecommended(event); }}>
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col" data-approval-decide="" onKeyDown={(event) => { pickByNumber(event); sendRecommended(event); }}>
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5" data-testid="approval-qa">
         <p className="text-[13px] text-text-tertiary">{[...askedBy(item), relativeAge(item.createdAt, now)].join(' · ')}</p>
         <h2 className="mt-1.5 text-[19px] font-semibold leading-snug text-text-primary" data-testid="approval-title">{item.title}</h2>
@@ -589,7 +623,7 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
           {waiting && closing && <ItemCloseForm item={item} onCommand={(command) => { runNotify(command); setClosing(false); }} onCancel={() => setClosing(false)} className="mt-2" />}
           {waiting && !closing && (
             <div className="mt-2 flex items-center gap-3">
-              <p className="min-w-0 flex-1 text-[12.5px] text-text-tertiary" role={noRecommended ? 'status' : undefined} data-testid="approval-reply-hint">
+              <p className="min-w-0 flex-1 text-[12.5px] text-text-tertiary" role="status" data-testid="approval-reply-hint">
                 {noRecommended ? noRecommendedLine(noRecommended, questions.length, sendKeys ? formatKeyDisplay(sendKeys) : 'Send')
                   : item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.'
                   : replyBeingRead(item) ? `${sentenceStart(item.reply?.reader?.name ?? item.source.name)} is reading your last reply. You can send another once it says how it took it, or pick an option now.`
@@ -636,7 +670,7 @@ function noRecommendedLine(missing: number[], count: number, sendKey: string): s
   if (count === 1) return `Nothing here is recommended: pick an option, then ${sendKey} sends it.`;
   const names = missing.map((at) => String(at + 1));
   const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
-  return `Question ${list} ${names.length === 1 ? 'has' : 'have'} no recommended option: pick, then ${sendKey} sends.`;
+  return `Question ${list} ${names.length === 1 ? 'has' : 'have'} no recommended option: pick an option for each question, then ${sendKey} sends.`;
 }
 
 /** A tooltip's words and the key that does the same ("Send ⌘↩"). */
