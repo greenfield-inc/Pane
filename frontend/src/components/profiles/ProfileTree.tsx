@@ -85,12 +85,13 @@ export function ProfileTree({ plugin, profile, file, selectedId, onSelect, onOpe
     return selectedId === null || selectedId === node.id || !rows.some(row => row.node.id === selectedId);
   };
 
-  // The row on show stays visible: its folders open (a file opened from a cover's chip, or after New).
+  // The row on show stays visible: its folders open when it is shown (a file opened from a cover's
+  // chip, or after New). Only then: closing its folder afterwards hides it and keeps it selected.
   useEffect(() => {
     const id = coverId || (selectedId ?? undefined) || firstWithPath(profile.tree, file)?.id;
     const trail = id ? ancestorsOf(profile.tree, id) : undefined;
-    if (trail?.length && trail.some(item => !open.has(item))) setOpen(current => new Set([...current, ...trail]));
-  }, [coverId, file, open, profile.tree, selectedId]);
+    if (trail?.length) setOpen(current => (trail.every(item => current.has(item)) ? current : new Set([...current, ...trail])));
+  }, [coverId, file, profile.tree, selectedId]);
 
   // Opening a profile (the parent keys this tree by profile) puts the keys in its tree, on the cover page.
   useEffect(() => { treeRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus({ preventScroll: true }); }, []);

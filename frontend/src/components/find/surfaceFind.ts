@@ -155,19 +155,21 @@ function createSurfaceFindAdapter(findId: string, getRoot: () => HTMLElement | n
  * Make a container searchable with Pane's find: the one way to do it for
  * rendered content (a terminal, a log or a browser tab brings its own adapter
  * to `usePanelFind`). `enabled: false` leaves it to a surface around it (the
- * Approvals screen searches its column itself).
+ * Approvals screen searches its column itself). `searchRef` searches only part
+ * of the root: focus anywhere in the root (the Profiles tree) routes ⌘F here,
+ * and only the file beside it is searched.
  */
-export function useSurfaceFind(findId: string, rootRef: RefObject<HTMLElement | null>, enabled = true): void {
-  const [adapter] = useState(() => createSurfaceFindAdapter(findId, () => rootRef.current));
+export function useSurfaceFind(findId: string, rootRef: RefObject<HTMLElement | null>, enabled = true, searchRef: RefObject<HTMLElement | null> = rootRef): void {
+  const [adapter] = useState(() => createSurfaceFindAdapter(findId, () => searchRef.current));
   useEffect(() => () => adapter.dispose(), [adapter]);
   usePanelFind(findId, rootRef, enabled ? adapter : null);
 
   const open = useFindBarOpen(findId);
   useEffect(() => {
-    const root = rootRef.current;
+    const root = searchRef.current;
     if (!enabled || !open || !root) return;
     return watchFindMode(findId, root);
-  }, [enabled, open, findId, rootRef]);
+  }, [enabled, open, findId, searchRef]);
 }
 
 /** A theme token as a colour the frame can use (it can't resolve Pane's variables). */
