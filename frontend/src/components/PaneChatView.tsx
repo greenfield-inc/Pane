@@ -202,6 +202,11 @@ function SessionWorkspace() {
     if (sessionId === useOrchestrationSessionStore.getState().selectedSessionId) return;
     void select({ sessionId }).catch(() => undefined);
   }, [select]);
+  /** A select the layout makes on its own; it never replaces the Session a machine switch landed on. */
+  const selectAutomatically = useCallback((sessionId: string) => {
+    if (sessionId === useOrchestrationSessionStore.getState().selectedSessionId) return;
+    void select({ sessionId }, { automatic: true }).catch(() => undefined);
+  }, [select]);
 
   // The Session on screen counts as opened when it shows (a launch restores one without a click)
   // and each time the window comes back to it: a phone's Recent lists Sessions by when they were opened.
@@ -219,8 +224,8 @@ function SessionWorkspace() {
     if (selectedSessionId || activeSessionIds.length === 0) return;
     const current = currentLayout();
     const focused = current ? focusedSessionId(current) : undefined;
-    selectSession(focused && activeSessionIds.includes(focused) ? focused : activeSessionIds[0]);
-  }, [activeSessionIds, currentLayout, selectSession, selectedSessionId]);
+    selectAutomatically(focused && activeSessionIds.includes(focused) ? focused : activeSessionIds[0]);
+  }, [activeSessionIds, currentLayout, selectAutomatically, selectedSessionId]);
 
   // Read the host's remembered layout once its Sessions are known, then let the
   // selection adopt what it restored. The store hydrates once per host and only
@@ -237,10 +242,10 @@ function SessionWorkspace() {
     void hydrateLayout(activeSessionIds, selectedSessionId, selectionRevision > 0).then(hydrated => {
       if (!hydrated || cancelled) return;
       const focused = focusedSessionId(hydrated);
-      if (activeSessionIds.includes(focused)) selectSession(focused);
+      if (activeSessionIds.includes(focused)) selectAutomatically(focused);
     });
     return () => { cancelled = true; };
-  }, [activeSessionIds, hydrateLayout, remoteHostId, selectSession, selectedSessionId, selectionRevision]);
+  }, [activeSessionIds, hydrateLayout, remoteHostId, selectAutomatically, selectedSessionId, selectionRevision]);
 
   // Archiving or deleting a Session retires its tile.
   useEffect(() => {

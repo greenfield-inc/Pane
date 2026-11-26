@@ -125,7 +125,12 @@ async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
   }
   // A switch clears the outgoing host's selection before restoring the incoming
   // host's; don't let those intermediate states be remembered as either one's.
-  await withHostNavigationWritesPaused(() => reloadRemoteRuntimeState(loadSessions, true, ownsRuntime));
+  try {
+    await withHostNavigationWritesPaused(() => reloadRemoteRuntimeState(loadSessions, true, ownsRuntime));
+  } finally {
+    // The Session a press landed on stays held a moment longer, then the layout may pick again.
+    useOrchestrationSessionStore.getState().settleLanding();
+  }
 }
 
 // Frontend validation helpers

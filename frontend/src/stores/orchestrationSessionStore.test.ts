@@ -230,6 +230,46 @@ describe('landing on the Session pressed on another machine (T-128)', () => {
     expect(store.getState().selectedSessionId).toBe('a');
   });
 
+  // #1767 review F-12: the first open to a machine landed on its Onboarding Session, later ones on the host's own selection.
+  it('first open: an automatic select of the host\'s Onboarding Session after the landing leaves the pressed Session shown', async () => {
+    list.mockResolvedValue(reply('a'));
+    const store = await setup();
+
+    store.getState().landOn('b');
+    store.getState().invalidateHost();
+    await store.getState().load();
+    // The restored layout or first-run state picks the host's Onboarding Session after the list landed.
+    await store.getState().select({ sessionId: 'a' }, { automatic: true });
+
+    expect(store.getState().selectedSessionId).toBe('b');
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it('later opens: the host\'s own selection, in every list and automatic select through the restore, never replaces the pressed Session', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    list.mockResolvedValue(reply('a'));
+    select.mockResolvedValue(reply('a'));
+    const store = await setup();
+
+    store.getState().landOn('b');
+    store.getState().invalidateHost();
+    await store.getState().refresh({ adoptServerSelection: true });
+    await store.getState().refresh();
+    await store.getState().select({ sessionId: 'a' }, { automatic: true });
+    store.getState().settleLanding();
+    now.mockReturnValue(1_900);
+    await store.getState().select({ sessionId: 'a' }, { automatic: true });
+    await store.getState().refresh({ adoptServerSelection: true });
+    expect(store.getState().selectedSessionId).toBe('b');
+    expect(select).not.toHaveBeenCalled();
+
+    // A second after the restore ends, the layout may pick again.
+    now.mockReturnValue(2_100);
+    await store.getState().select({ sessionId: 'a' }, { automatic: true });
+    expect(store.getState().selectedSessionId).toBe('a');
+    now.mockRestore();
+  });
+
   it('drops a landing that a newer press or a cancelled switch replaced', async () => {
     list.mockResolvedValue(reply('a'));
     const store = await setup();
