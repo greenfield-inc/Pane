@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { AlertTriangle, Asterisk, ChevronRight, FileText, Folder, LayoutTemplate, Repeat } from 'lucide-react';
+import { AlertTriangle, Asterisk, ChevronRight, FileText, Folder, LayoutTemplate, Repeat, SquareTerminal } from 'lucide-react';
 import { agentLabel } from '../../../../shared/agents';
 import type { ProfileSubagentNode, ProfileSummary, ProfileTreeNode } from '../../../../shared/types/profileEditor';
 import { coverPlace, fileKey, isCoverPlace, useProfilesStore } from '../../stores/profilesStore';
 import { cn } from '../../utils/cn';
 import { ProfileAvatar } from './ProfileAvatar';
 import { LINK_MODE_SHORT, LINK_MODE_TEXT, ancestorsOf, isExpandable, subagentLabel, subagentState, variantsText, visibleRows } from './profilePreview';
+import { tabActionLabel, tabCommand, useTabPane } from './subagentTab';
+import { isMac } from '../../utils/platformUtils';
+
+/** The row key that opens a launch or process agent in a tab. */
+const TAB_KEY = isMac() ? '⌘↩' : 'Ctrl+Enter';
 
 /**
  * A linked agent's mark, always the 16 px box an avatar takes: its avatar, ↻ for a link back to an
@@ -56,7 +61,7 @@ function initiallyOpen(tree: readonly ProfileTreeNode[]): Set<string> {
  * chevron, or ← →); clicking a subagent shows its own cover. ↑↓ move, Return shows a row.
  * Keyed by profile, so another profile opens with its own folders.
  */
-export function ProfileTree({ plugin, profile, file, selectedId, onSelect }: {
+export function ProfileTree({ plugin, profile, file, selectedId, onSelect, onOpenTab }: {
   plugin: string;
   profile: ProfileSummary;
   /** What the page shows: a file path, or a cover place. */
@@ -64,8 +69,11 @@ export function ProfileTree({ plugin, profile, file, selectedId, onSelect }: {
   /** The row last chosen, to tell apart a file that appears under two subagents. */
   selectedId: string | null;
   onSelect: (id: string | null, file: string) => void;
+  /** Opens a launch or process agent in a tab (T-83 P4): its row's tab button, or ⌘↩ on the row. */
+  onOpenTab: (node: ProfileSubagentNode) => void;
 }) {
   const drafts = useProfilesStore(state => state.drafts);
+  const pane = useTabPane();
   const [open, setOpen] = useState<Set<string>>(() => initiallyOpen(profile.tree));
   const treeRef = useRef<HTMLDivElement>(null);
 
@@ -108,7 +116,12 @@ export function ProfileTree({ plugin, profile, file, selectedId, onSelect }: {
     const id = items[index]?.dataset.treeRow;
     const row = rows.find(item => item.node.id === id);
     const focus = (target: HTMLElement | undefined) => { if (target) { event.preventDefault(); target.focus(); target.scrollIntoView({ block: 'nearest' }); } };
-    if (event.key === 'ArrowDown') focus(items[Math.min(index + 1, items.length - 1)]);
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      if (row?.node.kind === 'subagent' && tabCommand(row.node)) {
+        event.preventDefault();
+        onOpenTab(row.node);
+      }
+    } else if (event.key === 'ArrowDown') focus(items[Math.min(index + 1, items.length - 1)]);
     else if (event.key === 'ArrowUp') focus(items[Math.max(index - 1, 0)]);
     else if (event.key === 'ArrowRight' && row && isExpandable(row.node)) {
       event.preventDefault();
@@ -145,6 +158,7 @@ export function ProfileTree({ plugin, profile, file, selectedId, onSelect }: {
           const isOpen = expandable && open.has(node.id);
           const dirty = node.kind === 'file' && drafts[fileKey(plugin, node.path)] !== undefined;
           const state = node.kind === 'subagent' ? subagentState(node) : undefined;
+          const tab = node.kind === 'subagent' && tabCommand(node) ? node : undefined;
           return (
             <button
               key={node.id}
@@ -157,7 +171,8 @@ export function ProfileTree({ plugin, profile, file, selectedId, onSelect }: {
               data-testid={node.kind === 'file' ? `profiles-file-${node.path}` : `profiles-tree-${node.id}`}
               title={node.kind === 'file' ? node.path : node.kind === 'subagent' ? subagentTooltip(node) : undefined}
               onClick={() => choose(node)}
-              className={cn(ROW, isOn ? 'bg-surface-hover text-text-primary' : 'text-text-primary hover:bg-surface-hover')}
+              aria-keyshortcuts={tab ? 'Meta+Enter Control+Enter' : undefined}
+              className={cn(ROW, 'group', isOn ? 'bg-surface-hover text-text-primary' : 'text-text-primary hover:bg-surface-hover')}
               style={{ paddingLeft: pad }}
             >
               {expandable ? (
@@ -182,6 +197,21 @@ export function ProfileTree({ plugin, profile, file, selectedId, onSelect }: {
                 </span>
               )}
               {dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-status-warning" title="Unsaved changes" aria-label="unsaved" data-testid="profiles-file-dirty" />}
+              {tab && (
+                // Inside the row, as the chevron is, so the tree holds only rows; ⌘↩ (Ctrl+Enter) on the row does the same.
+                <span
+                  role="presentation"
+                  title={`${tabActionLabel(tab, pane)} (${TAB_KEY})`}
+                  data-testid={`profiles-tree-tab-${node.id}`}
+                  onClick={event => { event.stopPropagation(); onOpenTab(tab); }}
+                  className={cn(
+                    '-mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-tertiary hover:text-text-primary group-hover:opacity-100 group-focus-visible:opacity-100',
+                    isOn ? 'opacity-100' : 'opacity-0',
+                  )}
+                >
+                  <SquareTerminal className="h-3.5 w-3.5" aria-hidden="true" />
+                </span>
+              )}
             </button>
           );
         })}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FileText, LayoutTemplate, Pencil, Save } from 'lucide-react';
 import { agentLabel } from '../../../../shared/agents';
-import type { ProfilePlugin, ProfileSummary } from '../../../../shared/types/profileEditor';
+import type { ProfilePlugin, ProfileSubagentNode, ProfileSummary } from '../../../../shared/types/profileEditor';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { fileKey, isCoverPlace, shownFile, useProfilesStore } from '../../stores/profilesStore';
 import { isMac } from '../../utils/platformUtils';
@@ -28,13 +28,15 @@ function useSessionsOnPlugin(plugin: ProfilePlugin): number {
  * leaves without saving, asking first when there are edits. A file you have unsaved edits in opens
  * in Edit. The changed-on-disk notice (profileDiskSync.ts) shows here either way.
  */
-export function ProfileFilePane({ plugin, profile, file, notify, onShow }: {
+export function ProfileFilePane({ plugin, profile, file, notify, onShow, onOpenTab }: {
   plugin: ProfilePlugin;
   profile: ProfileSummary;
   file: string;
   notify: (text: string) => void;
   /** Shows another row of the tree: a subagent's cover from a cover's chip, or a subagent's profile. */
   onShow: (id: string | null, file: string) => void;
+  /** Opens a launch or process agent in a tab (T-83 P4), from its cover. */
+  onOpenTab: (node: ProfileSubagentNode) => void;
 }) {
   const overview = useProfilesStore(state => state.overview);
   const open = useProfilesStore(state => state.open);
@@ -132,7 +134,7 @@ export function ProfileFilePane({ plugin, profile, file, notify, onShow }: {
       />
     );
   } else if (cover && !path) {
-    body = <GeneratedCover plugin={plugin.name} profile={profile} subagent={subagent} onOpenSubagent={id => onShow(id, `cover:${id}`)} />;
+    body = <GeneratedCover plugin={plugin.name} profile={profile} subagent={subagent} onOpenSubagent={id => onShow(id, `cover:${id}`)} onOpenTab={onOpenTab} />;
   } else if (saved === undefined || !path) body = <div className="flex-1" />;
   else {
     const kind = previewKind(path);
