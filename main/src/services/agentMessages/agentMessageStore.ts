@@ -13,7 +13,7 @@ const rowSchema = boundary.object({
   number: boundary.number, kind: boundary.enumeration(...AGENT_MESSAGE_KINDS), reply_to: num,
   sender_panel_id: str, sender_pane_id: str, sender_session_id: str, sender_name: boundary.string, sender_orchestrator: boundary.number,
   receiver_panel_id: str, receiver_pane_id: str, receiver_session_id: str, receiver_name: boundary.string, receiver_orchestrator: boundary.number,
-  body: boundary.string, state: boundary.enumeration(...AGENT_MESSAGE_STATES), delivered_via: boundary.nullable(boundary.enumeration('tab')),
+  body: boundary.string, state: boundary.enumeration(...AGENT_MESSAGE_STATES), delivered_via: str,
   undelivered_reason: str, created_at: boundary.number, delivered_at: num, answered_at: num,
   operation_id: boundary.optional(str),
   request_key: boundary.optional(str),
@@ -78,9 +78,17 @@ function party(row: MessageRow, side: 'sender' | 'receiver'): AgentMessageParty 
 function toStored(row: MessageRow): StoredMessage {
   return {
     number: row.number, kind: row.kind, replyTo: row.reply_to, sender: party(row, 'sender'), receiver: party(row, 'receiver'),
-    body: row.body, state: row.state, deliveredVia: row.delivered_via, undeliveredReason: row.undelivered_reason,
+    body: row.body, state: row.state, deliveredVia: deliveredViaOf(row.delivered_via), undeliveredReason: row.undelivered_reason,
     createdAt: row.created_at, deliveredAt: row.delivered_at, answeredAt: row.answered_at, pointer: pointerOf(row),
   };
+}
+
+/**
+ * `tab`, or null. An earlier preview build also wrote `call` (handed to a waiting call, not typed); that and any
+ * other value reads as null, so an old row never breaks a read.
+ */
+function deliveredViaOf(value: string | null): 'tab' | null {
+  return value === 'tab' ? 'tab' : null;
 }
 
 const iso = (ms: number | null): string | null => ms === null ? null : new Date(ms).toISOString();

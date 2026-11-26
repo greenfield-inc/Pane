@@ -29,14 +29,22 @@ class FakeHost implements AgentMessageHost {
     return Promise.resolve(true);
   }
   isMidTurn(panelId: string): boolean { return this.busy.has(panelId); }
-  hasUnsentText(): Promise<boolean> { return Promise.resolve(false); }
+  /** When set, the composer-draft check waits for this (a slow readiness check). */
+  draftGate: Promise<void> | undefined;
+  async hasUnsentText(): Promise<boolean> {
+    if (this.draftGate) await this.draftGate;
+    return false;
+  }
   /** Every typing attempt, delivered or not. */
   attempts = 0;
+  /** Tabs that turn out closed when typed into. */
+  goneOnType = new Set<string>();
   async typeIntoTab(panelId: string, text: string): Promise<MessageTypeResult> {
     this.attempts += 1;
-    if (this.typeResult === 'delivered') this.typed.push({ panelId, text });
+    const result = this.goneOnType.has(panelId) ? 'gone' : this.typeResult;
+    if (result === 'delivered') this.typed.push({ panelId, text });
     if (this.typingGate) await this.typingGate;
-    return this.typeResult;
+    return result;
   }
   log(): void { /* quiet */ }
 }
@@ -309,5 +317,88 @@ describe('AgentMessageService', () => {
     it('refuses to wait on a message that does not exist', async () => {
       await expect(service.waitForReply(99, 10)).rejects.toMatchObject({ code: 'ERR_MESSAGE_NOT_FOUND' });
     });
+  });
+  // Review 8, Must-Fix 1: the route is read again at the delivery boundary, after every await before typing.
+  describe('a Session handoff during delivery', () => {
+    const replyLines = () => host.typed.filter(entry => entry.text.startsWith('reply: '));
+    const handOff = () => {
+      host.add('a2', 'the "Omni Chat" Session orchestrator', { sessionId: 's1', orchestrator: true });
+      host.orchestrators.set('s1', 'a2');
+    };
+
+    it("types the reply into the new orchestrator when the Session switches during the old tab's readiness check", async () => {
+      host.orchestrators.set('s1', 'a');
+      service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+      let open: () => void = () => undefined;
+      host.draftGate = new Promise<void>(resolve => { open = resolve; });
+      const replying = service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
+      await Promise.resolve();
+      handOff();
+      open();
+      host.draftGate = undefined;
+      await replying;
+      await service.flush();
+      expect(replyLines()).toEqual([{ panelId: 'a2', text: expect.stringContaining('reply: M-1 → "A"') }]);
+      expect(service.show(1).replies[0]).toMatchObject({ state: 'delivered', deliveredVia: 'tab' });
+    });
+
+    it('does not settle the reply undelivered when the old tab closes during the check and the Session has a new orchestrator', async () => {
+      host.orchestrators.set('s1', 'a');
+      service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+      let open: () => void = () => undefined;
+      host.draftGate = new Promise<void>(resolve => { open = resolve; });
+      const replying = service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
+      await Promise.resolve();
+      handOff();
+      host.panels.delete('a');
+      open();
+      host.draftGate = undefined;
+      await replying;
+      await service.flush();
+      expect(replyLines().map(entry => entry.panelId)).toEqual(['a2']);
+      expect(service.show(1).replies[0]).toMatchObject({ state: 'delivered' });
+    });
+
+    it('tries the new orchestrator when the old tab turns out gone while being typed into', async () => {
+      host.orchestrators.set('s1', 'a');
+      service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+      let open: () => void = () => undefined;
+      host.typingGate = new Promise<void>(resolve => { open = resolve; });
+      host.goneOnType.add('a');
+      const replying = service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
+      await Promise.resolve();
+      handOff();
+      host.panels.delete('a');
+      host.typingGate = undefined;
+      open();
+      await replying;
+      await service.flush();
+      expect(replyLines().map(entry => entry.panelId)).toEqual(['a2']);
+      expect(service.show(1).replies[0]).toMatchObject({ state: 'delivered' });
+    });
+  });
+
+  // Review 8, Must-Fix 3: a reply an earlier preview build handed to a waiting call (delivered_via 'call') still reads.
+  it("reads a preview build's reply recorded as delivered to a call, as not typed (deliveredVia null)", async () => {
+    const legacy = new Database(':memory:');
+    try {
+      legacy.prepare(`CREATE TABLE agent_messages (
+        number INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, reply_to INTEGER,
+        sender_panel_id TEXT, sender_pane_id TEXT, sender_session_id TEXT, sender_name TEXT NOT NULL, sender_orchestrator INTEGER NOT NULL DEFAULT 0,
+        receiver_panel_id TEXT, receiver_pane_id TEXT, receiver_session_id TEXT, receiver_name TEXT NOT NULL, receiver_orchestrator INTEGER NOT NULL DEFAULT 0,
+        body TEXT NOT NULL, state TEXT NOT NULL,
+        delivered_via TEXT CHECK (delivered_via IS NULL OR delivered_via IN ('tab', 'call')),
+        undelivered_reason TEXT, created_at INTEGER NOT NULL, delivered_at INTEGER, answered_at INTEGER)`).run();
+      const insert = legacy.prepare(`INSERT INTO agent_messages (kind, reply_to, sender_panel_id, sender_name, receiver_panel_id, receiver_name, body, state, delivered_via, created_at, delivered_at, answered_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1000, ?, ?)`);
+      insert.run('message', null, 'a', 'A', 'b', 'B', 'Q', 'answered', 'tab', 1000, 2000);
+      insert.run('reply', 1, 'b', 'B', 'a', 'A', 'Yes', 'delivered', 'call', 2000, null);
+      const upgraded = new AgentMessageService(new AgentMessageStore(legacy), host, () => clock);
+      expect(upgraded.show(1).replies[0]).toMatchObject({ ref: 'M-2', text: 'Yes', state: 'delivered', deliveredVia: null });
+      expect(upgraded.list().map(record => [record.ref, record.deliveredVia])).toEqual([['M-2', null], ['M-1', 'tab']]);
+      await expect(upgraded.waitForReply(1, 10)).resolves.toMatchObject({ ref: 'M-2', deliveredVia: null });
+    } finally {
+      legacy.close();
+    }
   });
 });

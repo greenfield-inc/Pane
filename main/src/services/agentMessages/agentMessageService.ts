@@ -41,6 +41,8 @@ export interface OutgoingMessage {
 }
 
 const RESUME_TRIES = 3;
+/** Passes one flush makes when replies' routes keep moving under it; the 3s timer picks up the rest. */
+const MAX_REROUTE_PASSES = 3;
 /** The prefix Autopilot's relay of the person's own words starts with: those words are the person's, not Autopilot's. */
 const PERSON_RELAY_PREFIX = '[From the person, via Autopilot]';
 const MAX_REPLY_CHARS = 8000;
@@ -228,6 +230,15 @@ export class AgentMessageService extends EventEmitter {
   }
 
   private async flushOnce(): Promise<void> {
+    // A reply whose route moved mid-attempt (a Session handoff) is tried again at once, for its new tab.
+    for (let pass = 0; pass < MAX_REROUTE_PASSES; pass += 1) {
+      if (!await this.flushPass()) return;
+    }
+  }
+
+  /** One pass over the outbox, one attempt per tab. True when an attempt found its reply's route had moved. */
+  private async flushPass(): Promise<boolean> {
+    let rerouted = false;
     const tried = new Set<string>();
     for (const number of [...this.outbox]) {
       const reply = this.store.get(number);
@@ -243,14 +254,20 @@ export class AgentMessageService extends EventEmitter {
       if (tried.has(target)) continue;
       tried.add(target);
       try {
-        await this.deliver(reply, target);
+        if (await this.deliver(reply, target) === 'rerouted') rerouted = true;
       } catch (error) {
         this.host.log(`[Messages] delivery of ${messageRef(number)} to ${target} failed`, error instanceof Error ? error : String(error));
       }
     }
+    return rerouted;
   }
 
-  private async deliver(reply: StoredMessage, panelId: string): Promise<void> {
+  /**
+   * One attempt to type `reply` into `panelId`, the route it had when the pass began. The readiness
+   * checks await, so the route is read again just before typing (and after a tab turns out gone): a
+   * Session that switched orchestrator meanwhile gets the reply in its new tab, never the old one.
+   */
+  private async deliver(reply: StoredMessage, panelId: string): Promise<'rerouted' | undefined> {
     if (await this.host.isPanelDown(panelId)) {
       // Resume before delivery: the sender's tab is down after a restart. A resume that throws failed too.
       let why = 'it would not restart';
@@ -262,20 +279,26 @@ export class AgentMessageService extends EventEmitter {
       }
       if (resumed) this.resumeFailures.delete(reply.number);
       else this.resumeFailed(reply, why);
-      return;
+      return undefined;
     }
-    if (this.host.isMidTurn(panelId) || await this.host.hasUnsentText(panelId)) return;
-    if (this.mustGet(reply.number).state !== 'queued') return;
+    if (this.host.isMidTurn(panelId) || await this.host.hasUnsentText(panelId)) return undefined;
+    const current = this.store.get(reply.number);
+    if (current?.state !== 'queued') return undefined;
+    if (this.targetOf(current) !== panelId) return 'rerouted';
     const original = reply.replyTo === null ? undefined : this.store.get(reply.replyTo);
     const result = await this.host.typeIntoTab(panelId, replyLine(original?.number ?? reply.number, reply.number, reply.body, reply.sender.name));
-    if (result === 'busy') return;
+    if (result === 'busy') return undefined;
     if (result !== 'delivered') {
+      // The tab closed while it was typed into, and the Session has another orchestrator tab now: try that one.
+      const moved = this.targetOf(current);
+      if (result === 'gone' && moved !== null && moved !== panelId) return 'rerouted';
       this.settleUndelivered(reply, UNDELIVERED[result]);
-      return;
+      return undefined;
     }
     this.dropFromOutbox(reply.number);
     this.store.setState(reply.number, 'delivered', { via: 'tab', at: this.now() });
     this.changed();
+    return undefined;
   }
 
   /**

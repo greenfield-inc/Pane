@@ -89,9 +89,16 @@ Delivery reuses the path that to-do messages and owed answers take
   orchestrator tab as it is now, even when the tab that sent it still exists
   (Switch to chat, a new agent). Any other message is answered to the tab
   that sent it.
-- Every reply is typed into its tab exactly once, through one ordered outbox,
-  whether or not a waiting call also returned it (see below). Replies to one
-  tab are typed in the order they were recorded.
+- Pane types every reply into its tab through one ordered outbox, whether or
+  not a waiting call also returned it (see below). Replies to one tab are typed
+  in the order they were recorded. The route is read again just before typing,
+  so a Session that switches orchestrator while Pane checks the old tab gets the
+  reply in its new tab.
+- Delivery is at least once. Pane saves `delivered` right after the tab takes
+  the reply. If Pane itself crashes or quits in between, the reply is still
+  `queued` when Pane starts again, and it is typed again. Pane can't ask a tab
+  whether it already took a line, so it doesn't guess. The reply's id (`M-13`)
+  is the same both times: act on each reply once, by its id.
 - Overlapping retries of one operation take turns, so only the first writes a
   prompt file. Every retry returns the recorded file.
 - A sender whose tab is gone for good (a closed worker tab) gets nothing, and
@@ -113,13 +120,22 @@ Both block until the first reply to the message is recorded and print it
 (`messageWaitResult`, exit 0), or exit 124 after `--timeout`. Without
 `--timeout`, the wait gives up after a day.
 
-They only watch. A waiting call never holds, claims or holds back a reply: Pane
-types every reply into the sender's tab as described above, whether or not a
-call returned it, after a timeout, or after the Session switched orchestrator
-tabs. So the sender gets the same reply twice, once as the call's result and
-once as the `reply: M-12 → …` line, and acts on it once, from whichever reaches
-it first. This is the rule `runpane notify` answers follow, and the typed line
-says so. A wait answers with the first reply even when it is already there
+They only watch. A waiting call never holds, claims or holds back a reply.
+The call's result goes to whoever made the call. The typed `reply: M-12 → …`
+line goes to the reply's route as it is now, as described above. Usually that
+is the same tab, so it sees the reply twice, and it acts on it once, from
+whichever reaches it first, matching the two by the reply's id (`M-13`). This
+is the rule `runpane notify` answers follow, and the typed line says so.
+
+The two copies can reach different places, or only one place:
+
+- After a Session handoff, the old orchestrator tab's call returns the reply.
+  Pane types the line into the new orchestrator tab, and that tab acts on it.
+- A reply that can't be typed (`undelivered`: its tab closed, say) can still be
+  returned by a wait. Then the call's result is the only copy.
+- After a crash, the line can be typed twice (see above).
+
+A wait answers with the first reply even when it is already there
 (it came before the wait started, or was already typed), and it may return
 that reply while it is still `queued` for the tab. While a tab waits, Pane
 counts it as waiting rather than working, as it does for `runpane notify`.
