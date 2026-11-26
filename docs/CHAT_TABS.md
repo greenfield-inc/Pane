@@ -485,7 +485,8 @@ After Pane restarts, a chat tab starts again when you open it (or on
 replays the history) and shows it. A turn that was running when Pane closed is
 marked *Stopped when Pane closed*; a message sent then continues the same
 conversation. If the agent exits, the tab shows why with **Restart**, which
-loads the same conversation.
+loads the same conversation. An agent saves a conversation with its first
+message, so a tab that never had one starts a new conversation instead.
 
 Auto-pause (Settings > Pause) stops the agent of a chat tab idle for
 `chatIdleReleaseMinutes` (30 by default), which frees its memory. It skips the

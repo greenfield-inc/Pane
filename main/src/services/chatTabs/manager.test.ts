@@ -153,6 +153,26 @@ describe('chat tab manager', () => {
     await manager.cancel('p1');
   });
 
+  it('starts a new conversation when the one it would reopen never had a message, so the agent never saved it', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', { ...newTab(directory), acpSessionId: 'never-saved' });
+    await manager.ensure('p1');
+    await expect.poll(() => manager.view('p1').status, { timeout: 10_000 }).toBe('idle');
+    expect(manager.view('p1').problem).toBeUndefined();
+    expect(store.state('p1')?.acpSessionId).not.toBe('never-saved');
+    manager.send('p1', { operationId: 'op-1', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'op-1')?.state, { timeout: 10_000 }).toBe('completed');
+  });
+
+  it('keeps saying the conversation is missing when it had turns, rather than starting another', async () => {
+    const { manager, store, directory } = harness();
+    const turn = { after: 'op-0', stopReason: 'end_turn', startedAt: '2026-11-25T00:00:00.000Z', endedAt: '2026-11-25T00:00:01.000Z' };
+    store.add('p1', { ...newTab(directory), acpSessionId: 'deleted', turnTimes: { sessionId: 'deleted', turns: [turn] } });
+    await expect(manager.ensure('p1')).rejects.toThrow(/Resource not found/);
+    expect(manager.view('p1')).toMatchObject({ status: 'stopped', problem: { action: 'restart' } });
+    expect(store.state('p1')?.acpSessionId).toBe('deleted');
+  });
+
   it('forgets the tool calls of an agent that exited mid-call in a turn of its own, so the next agent\'s silent turn of its own still stalls', { timeout: 30_000 }, async () => {
     const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_OWN_TURN_AFTER_LOAD: '1' });
     store.add('p1', newTab(directory));

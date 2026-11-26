@@ -778,14 +778,22 @@ export class ChatTabManager {
       const request: NewSessionRequest = { cwd: state.cwd, mcpServers: launch.mcpServers ?? [] };
       if (launch.meta) request._meta = launch.meta;
       const open = async () => {
-        if (state.acpSessionId) {
-          tab.loading = true;
-          try { await runtime.load({ ...request, sessionId: state.acpSessionId }); } finally { tab.loading = false; }
-          transcript.replayed();
-        } else {
+        const create = async () => {
           const created = await runtime.create(request);
           this.update(panelId, current => ({ ...current, acpSessionId: created.sessionId, settings: { ...launch.initialSettings, ...current.settings } }));
-        }
+        };
+        if (!state.acpSessionId) return create();
+        tab.loading = true;
+        try { await runtime.load({ ...request, sessionId: state.acpSessionId }); }
+        catch (error) {
+          // An agent saves a conversation with its first message, so one that never had a turn can't be
+          // reopened: it starts again. A conversation that had turns and is gone says so.
+          const hadTurns = state.turnTimes?.sessionId === state.acpSessionId;
+          if (hadTurns || !(error instanceof PaneError) || error.code !== 'CHAT_CONVERSATION_NOT_FOUND') throw error;
+          console.log(`[ChatTabs] ${panelId} starts a new conversation: ${state.acpSessionId} had no message, so the agent never saved it.`);
+          return create();
+        } finally { tab.loading = false; }
+        transcript.replayed();
       };
       await open();
       if (launch.mode) await runtime.setMode(launch.mode);
