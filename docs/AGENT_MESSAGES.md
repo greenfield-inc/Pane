@@ -42,6 +42,20 @@ Reply with runpane reply M-12 "…": it reaches the "Omni Chat" Session orchestr
 The submit result carries `messageId: "M-12"`. If the submit fails, or sends
 nothing (`blocked`), the message is recorded as `undelivered` with the reason.
 
+A message sent with `--as-file-pointer` works the same way: Pane writes the
+prompt file first, without the reply line, then types the pointer line with the
+reply line after it:
+
+```text
+Read and follow .pane/prompts/2026-11-26T05-00-00-000Z-ab12cd.md
+
+Reply with runpane reply M-12 "…": it reaches the "Omni Chat" Session orchestrator, who never sees your own chat.
+```
+
+The record's `text` is always what was typed, without Pane's reply line: for a
+file-pointer message, that's the `Read and follow …` line, not the file's
+contents.
+
 ## Replying
 
 ```sh
@@ -127,7 +141,13 @@ this computer, and `--limit` caps the count (default 50).
 The app reads a tab's messages with
 `window.electronAPI.agentMessages.forPanel(panelId)`
 (`agent-messages:for-panel`). That returns up to 200 records, newest first,
-that the tab sent or received. `onAgentMessagesChanged` fires
+that the tab sent or received. To read further back (a chat paged back past
+those), pass a cursor: `forPanel(panelId, { before: 'M-12' })` returns the page
+of messages older than M-12. Pass the oldest `ref` you have, and stop when a page
+comes back empty. `before` also takes the number (`12`), and `limit` (at most
+200) sets the page size. Replies always have higher numbers than the message
+they answer, so a page that holds a message's reply also holds the message, or
+the message is on a later (older) page. `onAgentMessagesChanged` fires
 (`agent-messages:changed`, with no payload) when any message changes. A chat
 or terminal history shows a message's text with its reply line at the end. To
 draw a message as a message, match the line `Reply with runpane reply M-n` (or a

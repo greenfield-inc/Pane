@@ -364,7 +364,8 @@ interface ElectronAPI {
   };
   // Agent-to-agent messages (T-104): one tab's messages, sent and received, newest first (docs/AGENT_MESSAGES.md)
   agentMessages: {
-    forPanel: (panelId: string) => Promise<IPCResponse<AgentMessageRecord[]>>;
+    /** Newest first, at most 200 (or `limit`); `before` (the oldest ref you have, "M-12") reads the page older than it. */
+    forPanel: (panelId: string, page?: { before?: string | number; limit?: number }) => Promise<IPCResponse<AgentMessageRecord[]>>;
   };
   // Mission Control — every agent pane across all sessions
   missionControl: {

@@ -11,6 +11,9 @@ interface AgentMessageHandlerServices {
   agentMessageService?: AgentMessageService;
 }
 
+/** The most messages one read of a tab's messages returns; `before` pages further back. */
+const FOR_PANEL_PAGE = 200;
+
 /** The longest `--await-reply` waits without a `--timeout`: a day. */
 const DEFAULT_WAIT_MS = 24 * 60 * 60_000;
 
@@ -74,11 +77,15 @@ export function registerAgentMessageHandlers(ipcMain: IpcMainHandleLike, service
     };
   });
 
-  // The app: one tab's messages, sent and received, for its chat and terminal history (T-105).
-  commandRegistry.register(AGENT_MESSAGES_FOR_PANEL_CHANNEL, (value: PaneCommandValue) => {
+  // The app: one tab's messages, sent and received, for its chat and terminal history (T-105). A page is at most
+  // 200, newest first; `before` (the oldest ref the app has, "M-12", or its number) reads the page older than it.
+  commandRegistry.register(AGENT_MESSAGES_FOR_PANEL_CHANNEL, (value: PaneCommandValue, options: PaneCommandValue) => {
     try {
       const panelId = decodeBoundary(value, boundary.string);
-      return { success: true, data: service().list({ panelId, limit: 200 }) };
+      const page = decodeBoundary(options ?? {}, boundary.object({ before: boundary.optional(boundary.union(boundary.string, boundary.number)), limit: boundary.optional(boundary.number) }));
+      const before = page.before === undefined ? undefined : requireRef(String(page.before));
+      const limit = Math.max(1, Math.min(page.limit ?? FOR_PANEL_PAGE, FOR_PANEL_PAGE));
+      return { success: true, data: service().list({ panelId, limit, before }) };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }

@@ -247,4 +247,11 @@ describe('AgentMessageService', () => {
     expect(service.list().map(message => message.ref)).toEqual(['M-1']);
     expect(service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q', operationId: 'op-2' })?.ref).toBe('M-2');
   });
+  it("pages a tab's messages back with before, newest first", async () => {
+    for (let index = 0; index < 5; index++) service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: `Q${index}` });
+    expect(service.list({ panelId: 'a', limit: 2 }).map(message => message.ref)).toEqual(['M-5', 'M-4']);
+    expect(service.list({ panelId: 'a', limit: 2, before: 4 }).map(message => message.ref)).toEqual(['M-3', 'M-2']);
+    expect(service.list({ panelId: 'a', limit: 2, before: 2 }).map(message => message.ref)).toEqual(['M-1']);
+    expect(service.list({ panelId: 'a', before: 1 })).toEqual([]);
+  });
 });

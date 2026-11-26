@@ -700,7 +700,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   // Agent-to-agent messages (T-104): one tab's messages, sent and received, newest first
   agentMessages: {
-    forPanel: (panelId: string): Promise<IPCResponse> => invokeIpc('agent-messages:for-panel', panelId),
+    forPanel: (panelId: string, page?: { before?: string | number; limit?: number }): Promise<IPCResponse> => invokeIpc('agent-messages:for-panel', panelId, page ?? {}),
   },
   // Mission Control — live overview of every agent pane across all sessions
   missionControl: {

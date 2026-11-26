@@ -102,8 +102,7 @@ export class AgentMessageService extends EventEmitter {
     /** `--await-reply`: hold a reply for the sender's wait call from before the message is typed. */
     awaitReply?: boolean;
   }): OutgoingMessage | undefined {
-    if (!input.callerPanelId || input.source === 'user' || input.callerPanelId === input.receiverPanelId || !input.body.trim()) return undefined;
-    if (input.personWords || input.body.trimStart().startsWith(PERSON_RELAY_PREFIX)) return undefined;
+    if (!input.callerPanelId || !this.isAgentMessage(input)) return undefined;
     const sender = this.host.panel(input.callerPanelId);
     const receiver = this.host.panel(input.receiverPanelId);
     if (!sender?.agent || !receiver) return undefined;
@@ -114,6 +113,16 @@ export class AgentMessageService extends EventEmitter {
     if (input.awaitReply && !this.reservations.has(message.number) && this.store.replies(message.number).length === 0) this.reserve(message.number);
     if (!replayed) this.changed();
     return { number: message.number, ref: messageRef(message.number), text: withReplyRoute(message.body, message.number, message.sender.name) };
+  }
+
+  /**
+   * Whether `panels submit` would send this as an agent's message (beginMessage's rule), before
+   * anything is recorded: a file-pointer send writes its prompt file first, then sends its line.
+   */
+  isAgentMessage(input: { callerPanelId: string | undefined; receiverPanelId: string; body: string; source?: 'user' | 'agent'; personWords?: boolean }): boolean {
+    if (!input.callerPanelId || input.source === 'user' || input.callerPanelId === input.receiverPanelId || !input.body.trim()) return false;
+    if (input.personWords || input.body.trimStart().startsWith(PERSON_RELAY_PREFIX)) return false;
+    return this.host.panel(input.callerPanelId)?.agent === true && this.host.panel(input.receiverPanelId) !== null;
   }
 
   private reserve(number: number): void {
@@ -228,7 +237,8 @@ export class AgentMessageService extends EventEmitter {
     });
   }
 
-  list(filter: { panelId?: string; limit?: number } = {}): AgentMessageRecord[] {
+  /** Newest first; `before` (a message number) pages further back, older than that message. */
+  list(filter: { panelId?: string; limit?: number; before?: number } = {}): AgentMessageRecord[] {
     return this.store.list(filter).map(message => messageRecord(message, this.store.replyNumbers(message.number)));
   }
 

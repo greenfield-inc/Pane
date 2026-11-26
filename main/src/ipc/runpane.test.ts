@@ -3521,6 +3521,44 @@ describe('runpane IPC handlers', () => {
     }
   });
 
+  it("puts a file-pointer message's id and reply line on the typed line, and records that line as its text (T-104)", async () => {
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-message-pointer-'));
+    const worktree = path.join(root, 'worktree');
+    fs.mkdirSync(worktree);
+    execFileSync('git', ['init', '-q'], { cwd: worktree });
+    const db = new Database(':memory:');
+    const tabs = new Map<string, MessagePanelInfo>([
+      ['agent-tab', { panelId: 'agent-tab', paneId: 'pane-a', sessionId: 's1', name: 'Omni Chat', orchestrator: false, agent: true }],
+      [terminalPanel.id, { panelId: terminalPanel.id, paneId: session.id, sessionId: null, name: 'Worker', orchestrator: false, agent: true }],
+    ]);
+    const messages = new AgentMessageService(new AgentMessageStore(db), {
+      panel: id => tabs.get(id) ?? null, orchestratorPanel: () => null, isPanelDown: async () => false, resumePanel: async () => true,
+      isMidTurn: () => false, hasUnsentText: async () => false, typeIntoTab: async () => 'delivered', log: () => undefined,
+    });
+    try {
+      const base = createServices();
+      const registry = createRegistry(createServices({
+        agentMessageService: messages,
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        sessionManager: { ...base.sessionManager, getSession: vi.fn(() => ({ ...session, worktreePath: worktree })) } as never,
+      }));
+      // SAFETY: The panels:submit handler resolves to a RunpanePanelSubmitResult.
+      const result = await registry.invokeConnected('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Long brief\nwith lines', asFilePointer: true, expectReport: false }],
+        new AbortController().signal, { panelId: 'agent-tab' }) as { messageId?: string; promptFile?: string };
+
+      const relative = path.relative(fs.realpathSync.native(worktree), result.promptFile ?? '');
+      expect(result.messageId).toBe('M-1');
+      expect(fs.readFileSync(result.promptFile ?? '', 'utf8')).toBe('Long brief\nwith lines\n');
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenLastCalledWith(terminalPanel.id,
+        `Read and follow ${relative}\n\nReply with runpane reply M-1 "…": it reaches Omni Chat, who never sees your own chat.\r`);
+      expect(messages.show(1).message.text).toBe(`Read and follow ${relative}`);
+    } finally {
+      db.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('types nothing into a Pi selector, and submits once Pi\'s input box is back', async () => {
     const rule = '─'.repeat(40);
     // An extension's confirm in place of the input box, footer kept; Enter would choose Yes.

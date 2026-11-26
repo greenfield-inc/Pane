@@ -113,11 +113,13 @@ export class AgentMessageStore {
   }
 
   /** Newest first: every message, or those a tab sent or received. */
-  list(filter: { panelId?: string; limit?: number } = {}): StoredMessage[] {
+  list(filter: { panelId?: string; limit?: number; before?: number } = {}): StoredMessage[] {
     const limit = filter.limit ?? 50;
+    // `before`: a page further back, older than message number `before` (exclusive).
+    const before = filter.before ?? Number.MAX_SAFE_INTEGER;
     const rows: unknown[] = filter.panelId
-      ? this.db.prepare('SELECT * FROM agent_messages WHERE sender_panel_id = ? OR receiver_panel_id = ? ORDER BY number DESC LIMIT ?').all(filter.panelId, filter.panelId, limit)
-      : this.db.prepare('SELECT * FROM agent_messages ORDER BY number DESC LIMIT ?').all(limit);
+      ? this.db.prepare('SELECT * FROM agent_messages WHERE (sender_panel_id = ? OR receiver_panel_id = ?) AND number < ? ORDER BY number DESC LIMIT ?').all(filter.panelId, filter.panelId, before, limit)
+      : this.db.prepare('SELECT * FROM agent_messages WHERE number < ? ORDER BY number DESC LIMIT ?').all(before, limit);
     return rows.map(row => toStored(decodeBoundary(row, rowSchema)));
   }
 

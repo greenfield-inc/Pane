@@ -1740,13 +1740,29 @@ export function registerRunpaneHandlers(
       const panel = resolveAgentPanel(normalized.panelId);
       // T-104: one agent's tab writing to another gets an id (M-n) and a reply line; the person's text goes as typed.
       const messages = services.agentMessageService;
-      const outgoing = normalized.fromPane ? undefined : messages?.beginMessage({
-        callerPanelId: paneCommandCaller()?.panelId, receiverPanelId: panel.id, body: normalized.input, source: normalized.source,
+      const callerPanelId = paneCommandCaller()?.panelId;
+      const isMessage = !normalized.fromPane && messages?.isAgentMessage({
+        callerPanelId, receiverPanelId: panel.id, body: normalized.input, source: normalized.source, personWords: normalized.personWords,
+      }) === true;
+      // A file-pointer message writes its prompt file first, so the line the tab shows (`Read and follow <path>`)
+      // is the message, and carries its id and reply route like any other.
+      let toSend = normalized;
+      let pointerFields: PointerResultFields = {};
+      if (isMessage && normalized.asFilePointer) {
+        const wslContext = sessionWslContext(services, panel.sessionId);
+        const pointer = await writeAgentPromptFile(panel.sessionId, panel.type === 'chat' ? normalized.input : stripTrailingNewlines(normalizePromptNewlines(normalized.input)), {
+          worktreePath: localWorktreePath(services, panel.sessionId, wslContext), attachments: normalized.attachments,
+        });
+        toSend = { ...normalized, input: pointerLine(pointer, wslContext), asFilePointer: false, attachments: undefined };
+        pointerFields = pointerResultFields(pointer);
+      }
+      const outgoing = isMessage ? messages?.beginMessage({
+        callerPanelId, receiverPanelId: panel.id, body: toSend.input, source: normalized.source,
         personWords: normalized.personWords, operationId: normalized.operationId, awaitReply: normalized.awaitReply,
-      });
-      if (!outgoing) return submitResolvedPanel(normalized, panel);
+      }) : undefined;
+      if (!outgoing) return { ...await submitResolvedPanel(toSend, panel), ...pointerFields };
       try {
-        const result = await submitResolvedPanel({ ...normalized, input: outgoing.text }, panel);
+        const result = { ...await submitResolvedPanel({ ...toSend, input: outgoing.text }, panel), ...pointerFields };
         messages?.finishMessage(outgoing.number, result.ok ? { ok: true } : { ok: false, reason: result.blocked?.message ?? 'Pane could not verify it was sent' });
         return { ...result, messageId: outgoing.ref };
       } catch (error) {
