@@ -10,6 +10,8 @@ import { ConfirmDialog } from '../ConfirmDialog';
 import { TODOS_HEADER_BUTTON } from '../todos/todoStyles';
 import { GeneratedCover, HtmlPage, MarkdownWithMeta, YamlPreview } from './ProfilePreviews';
 import { findNode, previewKind } from './profilePreview';
+import { savedSyncText } from './profileSyncText';
+import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
 
 const MOD = isMac() ? '⌘' : 'Ctrl+';
 
@@ -76,7 +78,13 @@ export function ProfileFilePane({ plugin, profile, file, notify, onShow }: {
     try {
       await save(plugin.name, path);
       setEditing(false);
-      notify(`Saved ${plugin.name}/${path}.${sessions ? ` ${sessions} Session${sessions === 1 ? '' : 's'} can reload it.` : ''}`);
+      // Where the save goes (PR 6), with the computers reachable right now, so the notice doesn't name one that just went offline (QA F-4).
+      let sent = '';
+      if (isProfilesEnabled(useConfigStore.getState().config)) {
+        await useProfilesStore.getState().loadSync();
+        sent = savedSyncText(useProfilesStore.getState().sync);
+      }
+      notify(`Saved ${plugin.name}/${path}.${sent}${sessions ? ` ${sessions} Session${sessions === 1 ? '' : 's'} can reload it.` : ''}`);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error));
     } finally {

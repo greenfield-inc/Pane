@@ -184,7 +184,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerSessionMoveHandlers(ipcMain, services, commandRegistry);
   if (services.loopManager) registerLoopHandlers(ipcMain, services.loopManager, commandRegistry);
   registerTodoHandlers(ipcMain, services, commandRegistry);
-  registerProfileHandlers(ipcMain, services);
+  registerProfileHandlers(ipcMain, services, undefined, commandRegistry);
   registerMissionControlHandlers(ipcMain, services, commandRegistry);
   registerOnboardingHandlers(ipcMain, services);
   registerDaemonBridgeHandlers(ipcMain, bridgeRouter);

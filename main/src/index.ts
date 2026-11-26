@@ -137,6 +137,7 @@ import { worktreePoolManager } from './services/worktreePoolManager';
 import { removePaneFsmonitorConfig } from './services/gitPerformanceConfig';
 import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
+import { profileSync } from './ipc/profiles';
 import { startSecretLeases } from './services/secretLeaseRuntime';
 import { MachineConnections, remoteMachineAccess } from './services/machineConnections';
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
@@ -1285,7 +1286,10 @@ async function initializeServices() {
       saveReport: (computerId, routeId, report) => remotePaneClientController.saveRoutesReport(computerId, routeId, report),
     },
   });
-  registerMachineConnectionHandlers(ipcMain, machineConnections);
+  registerMachineConnectionHandlers(ipcMain, machineConnections, {
+    // A Session started with a profile on another computer runs that computer's copy, brought up to date first.
+    beforeCreateSession: (machineId, plugin) => profileSync()?.bringCurrent(plugin, machineId) ?? Promise.resolve(),
+  });
   setDeviceMachines(machineConnections);
   const machines = machineConnections;
   powerMonitor.on('suspend', () => machines.suspend());
@@ -1668,6 +1672,8 @@ if (launchRemoteSetup) {
     machineConnections.start();
     sharedCredentialSync = new SharedCredentialSync(configManager, machineConnections);
     sharedCredentialSync.start();
+    // Every profile save reaches your other computers, and a computer that was away catches up (T-63 PR 6).
+    profileSync()?.start(machineConnections);
     // Secret leases: renewal reminders, and pushing a lease again to a machine that lost it.
     startSecretLeases({ configManager, machines: machineConnections, notifyQueue: () => paneDaemonHost?.services.notifyService?.queue, packaged: app.isPackaged });
   }
@@ -1714,6 +1720,7 @@ if (launchRemoteSetup) {
 
   usageManager.stop();
   void sharedCredentialSync?.stop();
+  profileSync()?.stop();
   void machineConnections?.stop();
 
   // Guard against multiple shutdown attempts

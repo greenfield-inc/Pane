@@ -1,7 +1,7 @@
 import type { IpcMain, WebContents } from 'electron';
 import { rejectWithPaneErrorText, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { MachineConnections } from '../services/machineConnections';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 
 const readSchema = boundary.object({
   machineId: boundary.nonEmptyString,
@@ -13,7 +13,14 @@ const readSchema = boundary.object({
  * The renderer's channels for every machine: `machines:list`, `machines:read`, `machines:run`,
  * `machines:retry`, `machines:latency`, and `machines:event` pushed to each window that sent `machines:subscribe`.
  */
-export function registerMachineConnectionHandlers(ipcMain: IpcMain, machines: MachineConnections): void {
+const createSessionSchema = boundary.object({ type: boundary.literal('create-session'), input: boundary.object({ agentProfile: boundary.optional(boundary.string) }) });
+
+export interface MachineConnectionHooks {
+  /** Before a Session with a profile starts on another machine: bring that profile's plugin up to date there (T-63 PR 6). */
+  beforeCreateSession?: (machineId: string, plugin: string) => Promise<void>;
+}
+
+export function registerMachineConnectionHandlers(ipcMain: IpcMain, machines: MachineConnections, hooks: MachineConnectionHooks = {}): void {
   // Only windows showing every machine pay for its events.
   const subscribers = new Set<WebContents>();
   machines.subscribe((event) => {
@@ -31,8 +38,12 @@ export function registerMachineConnectionHandlers(ipcMain: IpcMain, machines: Ma
     const request = decodeBoundary({ machineId, channel, args: args ?? [] }, readSchema);
     return rejectWithPaneErrorText(machines.read(request.machineId, request.channel, request.args));
   });
-  ipcMain.handle('machines:run', (_event, machineId: PaneCommandValue, command: PaneCommandValue) =>
-    rejectWithPaneErrorText(machines.run(decodeBoundary(machineId, boundary.nonEmptyString), command)));
+  ipcMain.handle('machines:run', async (_event, machineId: PaneCommandValue, command: PaneCommandValue) => {
+    const machine = decodeBoundary(machineId, boundary.nonEmptyString);
+    const plugin = decodeOptionalBoundary(command, createSessionSchema)?.input.agentProfile?.split('/')[0];
+    if (plugin && hooks.beforeCreateSession) await hooks.beforeCreateSession(machine, plugin);
+    return rejectWithPaneErrorText(machines.run(machine, command));
+  });
   ipcMain.handle('machines:latency', (_event, machineId: PaneCommandValue) =>
     rejectWithPaneErrorText(machines.measureLatency(decodeBoundary(machineId, boundary.nonEmptyString))));
   ipcMain.handle('machines:retry', (_event, machineId: PaneCommandValue) =>

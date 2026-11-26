@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import type { AgentFarmProfileList } from '../shared/types/agentFarmProfiles';
 import type { ParsedYaml, ProfilePhotos, ProfilePlugin, ProfileTreeNode, ProfilesOverview } from '../shared/types/profileEditor';
+import type { ProfileSyncStatus } from '../shared/types/profileSync';
 import type { ArchiveProgressSnapshot } from '../shared/types/archiveProgress';
 import type { PaneChatAgent } from '../shared/types/paneChat';
 import type { PanePermissionRequest, PanePermissionResponse } from '../shared/types/permissions';
@@ -200,7 +201,7 @@ export type ElectronApiMockOptions = {
    * `plugin/path`, and photos. `saveError` makes every save fail with that PaneError text, as a
    * plugin Agent Farm rejects does. Absent: no Profiles API, so no Profiles row.
    */
-  profileEditor?: { overview: ProfilesOverview; files: Record<string, string>; photos?: ProfilePhotos; saveError?: string };
+  profileEditor?: { overview: ProfilesOverview; files: Record<string, string>; photos?: ProfilePhotos; saveError?: string; sync?: ProfileSyncStatus };
   /** Each chat tab's conversation, by panel id (plain text turns). Absent: no messages. */
   chatMessages?: Record<string, Array<{ id: string; role: 'user' | 'assistant'; text: string }>>;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
@@ -1399,6 +1400,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       const photos: { profiles: Record<string, string>; plugins: Record<string, string> } = state.photos ?? { profiles: {}, plugins: {} };
       const pristine = clone(state.files);
       const pristinePlugins = clone(state.overview.plugins);
+      const sync: ProfileSyncStatus = state.sync ?? { running: false, lastSyncAt: 1, computers: [] };
       const ok = <T,>(data: T) => Promise.resolve({ success: true, data: clone(data) });
       const pluginOf = (name: string) => state.overview.plugins.find(plugin => plugin.name === name);
       const result = (name: string, path: string) => ok({ plugin: pluginOf(name), path });
@@ -1560,6 +1562,15 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         setPhoto: (ref: string, base64: string) => { photos.profiles[ref] = `data:image/png;base64,${base64}`; return ok(null); },
         removePhoto: (ref: string) => { delete photos.profiles[ref]; return ok(null); },
+        // Profile sync (T-63 PR 6): each other computer's state; Sync now reports the online ones up to date.
+        syncStatus: () => ok(sync),
+        syncNow: () => {
+          sync.computers = sync.computers.map(computer => (computer.state === 'offline' ? computer : { ...computer, state: 'up-to-date' as const, waiting: [] }));
+          sync.lastSyncAt = Date.now();
+          return ok(sync);
+        },
+        onSyncStatus: () => () => undefined,
+        onChanged: () => () => undefined,
       };
     })() : undefined;
     /** Every call the renderer made to the Profiles API, by method; a spec checks none happen with Profiles off. */

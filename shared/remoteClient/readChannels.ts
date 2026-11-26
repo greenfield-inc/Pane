@@ -11,6 +11,8 @@ export const REMOTE_READ_CHANNELS = new Set([
   'chat-tab:agents',
   // The host's Agent Farm profiles (T-63); nothing on the host changes.
   'chat-tab:profiles',
+  // The host's profile sync records (T-63 PR 6); reading them only records what changed there already.
+  'profile-sync:state',
   // Lists the folder's past conversations for the picker; nothing on the host changes.
   'chat-tab:conversations',
   // Autopilot's state and its documents; nothing on the host changes.

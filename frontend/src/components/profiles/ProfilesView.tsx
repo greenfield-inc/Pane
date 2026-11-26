@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { Bot, ChevronDown, ChevronRight, FileText, ImageIcon, Pencil, Pin, Plus, RefreshCw, RotateCcw, Sparkles, X } from 'lucide-react';
 import { DEFAULT_AGENT_ID, agentLabel, configuredAgent } from '../../../../shared/agents';
 import { isTemporarilyShownProfile, plainProfileAgents } from '../../../../shared/agentProfiles';
-import { PROFILE_NAME_PATTERN, PROFILE_SYNC_AVAILABLE, type ProfileNewFileKind, type ProfilePlugin, type ProfileSummary } from '../../../../shared/types/profileEditor';
-import { useConfigStore } from '../../stores/configStore';
+import { PROFILE_NAME_PATTERN, type ProfileNewFileKind, type ProfilePlugin, type ProfileSummary } from '../../../../shared/types/profileEditor';
+import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { profilePhotoSource, useProfilesStore } from '../../stores/profilesStore';
 import { usePausableDismiss } from '../../hooks/usePausableDismiss';
@@ -22,10 +22,23 @@ import { ProfileTree } from './ProfileTree';
 import { isPinned, pinnedFirst, togglePinnedProfile, usePinnedProfiles } from './profilePins';
 import { PHOTO_SAMPLES, readFileAsDataUrl, squarePhoto } from './profilePhotos';
 import { leaveProfiles } from './profilesNavigation';
+import { syncFooterText, syncNowText, syncStateText } from './profileSyncText';
+import { MachineMark } from '../machines/MachineMark';
+import { useAllMachinesStore } from '../../stores/allMachinesStore';
+import { machineLetter } from '../../../../shared/utils/machineMarks';
 
 /** How often the open tab looks for changes made outside it. */
 const PROFILES_REFRESH_MS = 3000;
-const SYNC_LATER = 'Sync to your other computers arrives in the next update';
+
+/** Sync (PR 6) follows the Profiles switch (D-474): off, no Sync button, sync line or sync wording. */
+function useSyncOn(): boolean {
+  return useConfigStore(state => isProfilesEnabled(state.config));
+}
+
+/** The words a notice adds when a change also goes to your other computers. */
+function elsewhere(): string {
+  return isProfilesEnabled(useConfigStore.getState().config) ? ' It goes to your other computers too.' : '';
+}
 
 /** How many Sessions on this computer use each profile (`plugin/profile`, variant left out). */
 function useSessionsByProfile(): Map<string, number> {
@@ -108,8 +121,18 @@ export function ProfilesView() {
   const [notice, setNotice] = useState<{ key: number; text: string } | null>(null);
   const notify = useCallback((text: string) => setNotice({ key: Date.now(), text }), []);
   const [creating, setCreating] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const loadSync = useProfilesStore(state => state.loadSync);
+  const follow = useProfilesStore(state => state.follow);
+  const syncOn = useSyncOn();
 
   useEffect(() => { void load(); }, [load]);
+  // Saves sync to your other computers: the footer follows each sync, and saves that arrive show here.
+  useEffect(() => {
+    if (!syncOn) return undefined;
+    void loadSync();
+    return follow();
+  }, [follow, loadSync, syncOn]);
 
   // Changes made outside the tab (an agent, `runpane profiles`, sync from another computer) show
   // within a few seconds: while the tab is visible it reads the list and the open file again, and at
@@ -155,15 +178,17 @@ export function ProfilesView() {
               <h1 className="shrink-0 whitespace-nowrap text-[15px] font-semibold">Profiles</h1>
               {overview && <span className="truncate text-[12px] text-text-tertiary" data-testid="profiles-machine">on {overview.machine}</span>}
               <span className="flex-1" />
-              <button
-                type="button"
-                className={TODOS_HEADER_BUTTON}
-                data-testid="profiles-sync"
-                disabled={!PROFILE_SYNC_AVAILABLE}
-                title={PROFILE_SYNC_AVAILABLE ? 'Send every profile to your other computers now' : SYNC_LATER}
-              >
-                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Sync
-              </button>
+              {syncOn && (
+                <button
+                  type="button"
+                  className={TODOS_HEADER_BUTTON}
+                  data-testid="profiles-sync"
+                  title="Send every profile to your other computers now"
+                  onClick={() => setSyncing(true)}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Sync
+                </button>
+              )}
               <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-new" onClick={() => setCreating(true)}>
                 <Plus className="h-3.5 w-3.5" aria-hidden="true" />New profile
               </button>
@@ -178,6 +203,7 @@ export function ProfilesView() {
         )}
       <ProfilesFooter />
       {creating && <NewProfileDialog onClose={() => setCreating(false)} notify={notify} />}
+      {syncing && syncOn && <SyncSheet onClose={() => setSyncing(false)} notify={notify} />}
       {notice && <Notice key={notice.key} text={notice.text} onDismiss={() => setNotice(null)} />}
     </div>
   );
@@ -259,6 +285,8 @@ function ProfileList({ plugins }: { plugins: ProfilePlugin[] }) {
 
 function ProfilesFooter() {
   const overview = useProfilesStore(state => state.overview);
+  const sync = useProfilesStore(state => state.sync);
+  const syncOn = useSyncOn();
   const telemetry = useConfigStore(state => state.config?.agentFarmTelemetry === true);
   const used = useSessionsByProfile();
   if (!overview) return null;
@@ -268,7 +296,7 @@ function ProfilesFooter() {
   return (
     <div className="flex h-[34px] shrink-0 items-center gap-4 border-t border-border-primary px-4 text-[12px] text-text-secondary" data-testid="profiles-footer">
       <span>{profiles} profile{profiles === 1 ? '' : 's'} · {sessions} Session{sessions === 1 ? ' uses' : 's use'} one</span>
-      <span className="truncate text-text-tertiary" data-testid="profiles-sync-status">{PROFILE_SYNC_AVAILABLE ? '' : SYNC_LATER}</span>
+      {syncOn && <span className="truncate text-text-tertiary" data-testid="profiles-sync-status">{syncFooterText(sync)}</span>}
       <span className="ml-auto shrink-0">
         Agent Farm telemetry: {telemetry ? 'on' : 'off'} ·{' '}
         <button type="button" className="text-interactive hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive" onClick={() => requestOpenSettings({ category: 'ai-agents', setting: 'agent-farm-telemetry' })}>Settings</button>
@@ -295,7 +323,7 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
   const runRestore = async () => {
     try {
       await restore(plugin.name);
-      notify(`Restored Pane's ${plugin.name}. Sessions using it can reload it.`);
+      notify(`Restored Pane's ${plugin.name}${isProfilesEnabled(useConfigStore.getState().config) ? ', here and on your other computers' : ''}. Sessions using it can reload it.`);
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error));
     }
@@ -457,7 +485,11 @@ function PhotoMenu({ profile, notify }: { profile: ProfileSummary; notify: (text
         onChange={event => {
           const chosen = event.target.files?.[0];
           event.target.value = '';
-          if (chosen) void readFileAsDataUrl(chosen).then(src => apply(src, 'Photo set for this computer.'), error => notify(error instanceof Error ? error.message : String(error)));
+          if (chosen) {
+            readFileAsDataUrl(chosen)
+              .then(src => apply(src, `Photo set.${elsewhere()}`))
+              .catch(error => notify(error instanceof Error ? error.message : String(error)));
+          }
         }}
       />
       <Dropdown
@@ -498,7 +530,7 @@ function PhotoMenu({ profile, notify }: { profile: ProfileSummary; notify: (text
                 title={sample.label}
                 aria-label={`Use sample: ${sample.label}`}
                 data-testid={`profile-photo-sample-${sample.id}`}
-                onClick={() => { close(); void apply(sample.src, 'Photo set for this computer.'); }}
+                onClick={() => { close(); void apply(sample.src, `Photo set.${elsewhere()}`); }}
                 className="h-7 w-7 overflow-hidden rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
               >
                 <img src={sample.src} alt="" className="h-full w-full" />
@@ -517,6 +549,73 @@ function PhotoMenu({ profile, notify }: { profile: ProfileSummary; notify: (text
 function nameProblem(name: string): string | null {
   if (!name) return null;
   return PROFILE_NAME_PATTERN.test(name) ? null : 'Use lowercase letters, digits, - and _, starting with a letter.';
+}
+
+/** Sync now (the chosen design): each computer's state, and a button that sends every profile again. */
+function SyncSheet({ onClose, notify }: { onClose: () => void; notify: (text: string) => void }) {
+  const sync = useProfilesStore(state => state.sync);
+  const syncNow = useProfilesStore(state => state.syncNow);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const computers = sync?.computers ?? [];
+  // Each computer's mark as the sidebar draws it; one the sidebar hasn't listed takes its letter and the next colour.
+  const entries = useAllMachinesStore(state => state.entries);
+  const mark = (key: string, name: string, index: number) => {
+    const entry = entries.find(item => item.id === key);
+    return entry ? { letters: entry.letters, slot: entry.slot } : { letters: machineLetter(name), slot: (index + 1) % 6 };
+  };
+
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      notify(syncNowText(await syncNow()));
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} size="md" ariaLabel="Sync profiles now" initialFocusRef={confirmRef}>
+      <div className="p-6 pt-2" data-testid="profiles-sync-sheet">
+        <h3 className="mb-2 text-lg font-medium text-text-primary">Sync profiles now</h3>
+        <p className="mb-4 text-[13px] leading-relaxed text-text-secondary">
+          Pane already pushes every profile save from this computer to your others. Sync now sends all profiles again, for example after a computer was away for a long time. The newest save of each profile wins.
+        </p>
+        {computers.length
+          ? (
+            <table className="mb-4 w-full border-collapse text-[13px]" data-testid="profiles-sync-table">
+              <thead>
+                <tr className="border-b border-border-primary text-left text-[12px] text-text-tertiary">
+                  <th className="py-1.5 pr-3 font-medium">Computer</th>
+                  <th className="py-1.5 font-medium">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {computers.map((computer, index) => (
+                  <tr key={`${computer.id}:${computer.name}`} className="border-b border-border-primary last:border-b-0" data-testid={`profiles-sync-row-${computer.name}`}>
+                    <td className="py-2 pr-3 align-top text-text-primary">
+                      <span className="inline-flex items-center gap-2"><MachineMark {...mark(computer.key, computer.name, index)} size="logo" />{computer.name}</span>
+                    </td>
+                    <td className={cn('py-2 align-top', computer.state === 'failed' || computer.state === 'outdated' ? 'text-status-warning' : 'text-text-secondary')}>{syncStateText(computer)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+          : <p className="mb-4 text-[13px] text-text-secondary">No other computers are linked to this one, so there is nothing to sync with.</p>}
+        {error && <p role="alert" className="mb-3 text-[12.5px] text-status-error">{error}</p>}
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button ref={confirmRef} type="button" onClick={() => { void run(); }} disabled={busy || !computers.length} data-testid="profiles-sync-now">{busy ? 'Syncing…' : 'Sync now'}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 function NewProfileDialog({ onClose, notify }: { onClose: () => void; notify: (text: string) => void }) {

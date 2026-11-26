@@ -33,6 +33,7 @@ import {
   type BundledAgentFarm,
 } from './bundledAgentFarm';
 import { parseProfileList } from './agentFarmProfiles';
+import { forgetSyncedEdit, syncedPluginEdits } from './profileSyncFile';
 
 /** The folders of a plugin Agent Farm reads, besides plugin.yaml (Agent Farm's plugins.js). */
 const SECTIONS = ['profiles', 'agents', 'skills', 'instructions', 'references'];
@@ -50,6 +51,11 @@ export interface ProfileEditorOptions {
   run?: AgentFarmRunner;
   /** Called after a plugin's files changed (save, new file, restore), so Sessions using it can show the changed dot. */
   onChanged?: (plugin: string) => void;
+  /**
+   * Runs a change to `plugin` under profile sync's lock and records it before letting go, so a save
+   * here never interleaves with one arriving from another computer (T-63 PR 6, review F-2).
+   */
+  exclusive?: <T>(plugin: string, work: () => Promise<T>) => Promise<T>;
 }
 
 const receiptSchema = boundary.object({ name: boundary.string, layout: boundary.optional(boundary.number) });
@@ -136,7 +142,7 @@ const COVER_FILE = /^covers\/([a-z][a-z0-9_-]*)\.(html|md)$/;
  * A plugin-relative path with `/`, checked to stay inside plugin.yaml, the plugin's sections,
  * pane.yaml and the covers folder.
  */
-function checkRelative(relative: string): string[] {
+export function checkRelative(relative: string): string[] {
   const parts = relative.split('/');
   const inside = relative === 'plugin.yaml' || relative === PANE_META_FILE || COVER_FILE.test(relative) || (SECTIONS.includes(parts[0]) && parts.length > 1);
   if (!inside || path.isAbsolute(relative) || relative.includes('\\') || parts.some(part => !part || part === '.' || part === '..')) {
@@ -168,7 +174,7 @@ async function checkNoLinks(root: string, parts: string[]): Promise<void> {
   }
 }
 
-async function writeAtomic(file: string, content: string | Buffer): Promise<void> {
+export async function writeAtomic(file: string, content: string | Buffer): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${randomBytes(4).toString('hex')}.tmp`;
   await fs.writeFile(temporary, content);
@@ -227,6 +233,19 @@ function filesAsNodes(files: string[], folder: string, id: string): ProfileTreeN
   ];
 }
 
+/** Installed plugins in an Agent Farm config root, by their receipts, sorted; Pane's own plain plugin is left out. */
+async function installedPluginNames(configRoot: string): Promise<string[]> {
+  const files = await fs.readdir(path.join(configRoot, '.plugins')).catch(() => []);
+  const names: string[] = [];
+  for (const file of files.filter(entry => entry.endsWith('.json')).sort()) {
+    const receipt = await fs.readFile(path.join(configRoot, '.plugins', file), 'utf8')
+      .then(content => decodeOptionalBoundary(JSON.parse(content), receiptSchema)).catch(() => undefined);
+    if (!receipt || receipt.layout !== 2 || file !== `${receipt.name}.json` || receipt.name === PANE_PROFILE_PLUGIN || !PROFILE_NAME_PATTERN.test(receipt.name)) continue;
+    names.push(receipt.name);
+  }
+  return names;
+}
+
 /** The agent a profile file starts: `agent:`, or its default variant's. */
 function profileAgent(profileYaml: string): string | undefined {
   let data: JsonObject | undefined;
@@ -255,6 +274,11 @@ export class ProfileEditor {
     this.configRoot = agentFarmConfigRoot(options.paneDir);
   }
 
+  /** A change to `plugin`, under profile sync's lock when there is one (`exclusive`). */
+  private guard<T>(plugin: string, work: () => Promise<T>): Promise<T> {
+    return this.options.exclusive ? this.options.exclusive(plugin, work) : work();
+  }
+
   private pluginRoot(name: string): string {
     return path.join(this.configRoot, 'plugins', name);
   }
@@ -270,16 +294,8 @@ export class ProfileEditor {
   }
 
   /** Installed plugins, by their Agent Farm receipts; Pane's own plain plugin is left out. */
-  private async pluginNames(): Promise<string[]> {
-    const files = await fs.readdir(path.join(this.configRoot, '.plugins')).catch(() => []);
-    const names: string[] = [];
-    for (const file of files.filter(entry => entry.endsWith('.json')).sort()) {
-      const receipt = await fs.readFile(path.join(this.configRoot, '.plugins', file), 'utf8')
-        .then(content => decodeOptionalBoundary(JSON.parse(content), receiptSchema)).catch(() => undefined);
-      if (!receipt || receipt.layout !== 2 || file !== `${receipt.name}.json` || receipt.name === PANE_PROFILE_PLUGIN || !PROFILE_NAME_PATTERN.test(receipt.name)) continue;
-      names.push(receipt.name);
-    }
-    return names;
+  private pluginNames(): Promise<string[]> {
+    return installedPluginNames(this.configRoot);
   }
 
   private async requirePlugin(name: string): Promise<string> {
@@ -436,7 +452,7 @@ export class ProfileEditor {
       name,
       version: text(manifest.version) ?? '',
       bundled,
-      edited: bundled && await installedState(this.configRoot, name) === 'edited',
+      edited: bundled && (await installedState(this.configRoot, name) === 'edited' || (await syncedPluginEdits(this.configRoot)).has(name)),
       profiles,
       files,
     };
@@ -475,7 +491,11 @@ export class ProfileEditor {
    * Saves files into a plugin: copies it to a staging folder in drafts/, applies the changes there,
    * and has Agent Farm check the result. Only a plugin it accepts is written, file by file in place.
    */
-  async save(plugin: string, changes: ProfileFileChange[]): Promise<ProfileSaveResult> {
+  save(plugin: string, changes: ProfileFileChange[]): Promise<ProfileSaveResult> {
+    return this.guard(plugin, () => this.saveNow(plugin, changes));
+  }
+
+  private async saveNow(plugin: string, changes: ProfileFileChange[]): Promise<ProfileSaveResult> {
     const root = await this.requirePlugin(plugin);
     if (!changes.length) return { plugin: await this.readPlugin(plugin), path: '' };
     const checked = changes.map(change => ({ ...change, parts: checkRelative(change.path) }));
@@ -510,7 +530,11 @@ export class ProfileEditor {
   }
 
   /** A new plugin with one profile and its identity file, installed so Agent Farm finds it. */
-  async newProfile(name: string, agent: string): Promise<ProfileSaveResult> {
+  newProfile(name: string, agent: string): Promise<ProfileSaveResult> {
+    return this.guard(name, () => this.newProfileNow(name, agent));
+  }
+
+  private async newProfileNow(name: string, agent: string): Promise<ProfileSaveResult> {
     checkName(name);
     const harness = plainProfileAgents().find(id => id === agent);
     if (!harness) throw new PaneError('PROFILE_AGENT_INVALID', `Profiles run on ${plainProfileAgents().join(' or ')}, not ${agent}.`, 'Choose one of those.');
@@ -540,7 +564,11 @@ export class ProfileEditor {
   }
 
   /** A new subagent, skill or reference file, added to the profile's identity, saved as one change. */
-  async newFile(plugin: string, profile: string, kind: ProfileNewFileKind, name: string): Promise<ProfileSaveResult> {
+  newFile(plugin: string, profile: string, kind: ProfileNewFileKind, name: string): Promise<ProfileSaveResult> {
+    return this.guard(plugin, () => this.newFileNow(plugin, profile, kind, name));
+  }
+
+  private async newFileNow(plugin: string, profile: string, kind: ProfileNewFileKind, name: string): Promise<ProfileSaveResult> {
     await this.requirePlugin(plugin);
     checkName(name, kind);
     const summary = (await this.readPlugin(plugin)).profiles.find(entry => entry.name === profile);
@@ -585,7 +613,11 @@ export class ProfileEditor {
    * pane.yaml, TEMPORARY until Agent Farm has a title field (T-83, see PANE_META_FILE). An empty
    * value removes it.
    */
-  async setDetails(plugin: string, profile: string, details: ProfileDetails): Promise<ProfileSaveResult> {
+  setDetails(plugin: string, profile: string, details: ProfileDetails): Promise<ProfileSaveResult> {
+    return this.guard(plugin, () => this.setDetailsNow(plugin, profile, details));
+  }
+
+  private async setDetailsNow(plugin: string, profile: string, details: ProfileDetails): Promise<ProfileSaveResult> {
     const root = await this.requirePlugin(plugin);
     checkName(profile, 'profile');
     const summary = (await this.readPlugin(plugin)).profiles.find(entry => entry.name === profile);
@@ -621,7 +653,11 @@ export class ProfileEditor {
   }
 
   /** Restore Pane's version (A-3): the bundled copy replaces your edits to greenfield or dcouple. */
-  async restore(plugin: string): Promise<ProfileSaveResult> {
+  restore(plugin: string): Promise<ProfileSaveResult> {
+    return this.guard(plugin, () => this.restoreNow(plugin));
+  }
+
+  private async restoreNow(plugin: string): Promise<ProfileSaveResult> {
     checkName(plugin);
     if (!BUNDLED.includes(plugin)) throw new PaneError('PROFILE_NOT_BUNDLED', `${plugin} doesn't ship with Pane, so there's no Pane version to restore.`, 'Edit it and save instead.');
     try {
@@ -631,6 +667,7 @@ export class ProfileEditor {
       const reason = agentFarmReason({ stderr: decodeOptionalBoundary(error, stderrSchema)?.stderr ?? '', fallback: reasonOf(error) });
       throw new PaneError('PROFILE_RESTORE_FAILED', `Pane couldn't restore its version of ${plugin}: ${reason}.`, 'Restart Pane, which reinstalls it, then try again.');
     }
+    await forgetSyncedEdit(this.configRoot, plugin);
     this.options.onChanged?.(plugin);
     const restored = await this.readPlugin(plugin);
     return { plugin: restored, path: restored.profiles[0]?.entry ?? 'plugin.yaml' };
@@ -645,7 +682,11 @@ export class ProfileEditor {
   }
 
   /** Your photo for a profile on this computer: a PNG, in avatars/, which overrides the plugin's picture. */
-  async setPhoto(ref: string, base64: string): Promise<void> {
+  setPhoto(ref: string, base64: string): Promise<void> {
+    return this.guard(ref.split('/')[0], () => this.setPhotoNow(ref, base64));
+  }
+
+  private async setPhotoNow(ref: string, base64: string): Promise<void> {
     const file = this.photoFile(ref);
     const bytes = Buffer.from(base64, 'base64');
     if (bytes.length > MAX_PHOTO_BYTES || !bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
@@ -654,10 +695,16 @@ export class ProfileEditor {
     const avatars = path.dirname(file);
     if ((await fs.lstat(avatars).catch(() => undefined))?.isSymbolicLink()) throw new PaneError('PROFILE_PATH_INVALID', 'The avatars folder is a link, which Pane doesn\'t follow.', `Replace ${avatars} with a folder.`);
     await writeAtomic(file, bytes);
+    this.options.onChanged?.(ref.split('/')[0]);
   }
 
-  async removePhoto(ref: string): Promise<void> {
+  removePhoto(ref: string): Promise<void> {
+    return this.guard(ref.split('/')[0], () => this.removePhotoNow(ref));
+  }
+
+  private async removePhotoNow(ref: string): Promise<void> {
     await fs.rm(this.photoFile(ref), { force: true });
+    this.options.onChanged?.(ref.split('/')[0]);
   }
 
   /** Every photo here, and each plugin's own picture (avatar.png at its root), as data URLs. */

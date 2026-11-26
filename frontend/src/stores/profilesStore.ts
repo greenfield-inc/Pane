@@ -13,6 +13,7 @@ import {
 } from '../../../shared/types/profileEditor';
 import { reconcileFromDisk, type FileCopy } from '../components/profiles/profileDiskSync';
 import { findNode } from '../components/profiles/profilePreview';
+import { profileSyncStatusSchema, type ProfileSyncStatus } from '../../../shared/types/profileSync';
 import { boundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 /** Where the Profiles tab is: the list, or a profile's files with one file open. */
@@ -53,6 +54,13 @@ interface ProfilesState {
   parseYaml: (source: string) => Promise<{ data?: JsonValue; error?: string }>;
   setPhoto: (ref: string, base64: string) => Promise<void>;
   removePhoto: (ref: string) => Promise<void>;
+  /** How each of your other computers stands with this one's profiles; null until read. */
+  sync: ProfileSyncStatus | null;
+  loadSync: () => Promise<void>;
+  /** Sync now: sends every profile to every computer again. */
+  syncNow: () => Promise<ProfileSyncStatus>;
+  /** Follows sync and changes that arrive from other computers while the tab is open; returns the stop. */
+  follow: () => () => void;
 }
 
 const EMPTY_PHOTOS: ProfilePhotos = { profiles: {}, plugins: {} };
@@ -102,6 +110,8 @@ const nothing: BoundarySchema<null> = { decode: () => null };
 
 /** One refresh at a time: a slow read is never overtaken by the next poll. */
 let refreshing = false;
+/** Counts the tab's own changes, so a list read that started before one never undoes it (a new profile vanishing, QA round 2). */
+let changes = 0;
 
 /** The open file's place in `state`, as one record (profileDiskSync.ts's FileCopy). */
 function copyOf(state: Pick<ProfilesState, 'saved' | 'drafts' | 'onDisk'>, key: string): FileCopy {
@@ -140,6 +150,7 @@ function withoutPlugin<Value>(record: Record<string, Value>, plugin: string): Re
 export const useProfilesStore = create<ProfilesState>((set, get) => {
   /** Applies a save's result: the plugin's new state, and its files read again when next opened. */
   const applied = (result: ProfileSaveResult): ProfileSaveResult => {
+    changes += 1;
     set(state => ({ overview: replacePlugin(state.overview, result.plugin) }));
     return result;
   };
@@ -187,8 +198,10 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
       if (refreshing || !window.electronAPI?.profiles) return;
       refreshing = true;
       try {
+        const before = changes;
         const overview = await answer(api().list(), profilesOverviewSchema).catch(() => undefined);
-        if (overview && JSON.stringify(overview) !== JSON.stringify(get().overview)) set({ overview, error: null });
+        // A save or new profile that landed while this read was under way is newer than what it read.
+        if (overview && before === changes && JSON.stringify(overview) !== JSON.stringify(get().overview)) set({ overview, error: null });
         const place = get().place;
         const shown = place.level === 'profile' ? shownFile(get().overview, place.plugin, place.profile, place.file) : undefined;
         const openKey = place.level === 'profile' && shown ? fileKey(place.plugin, shown) : null;
@@ -288,6 +301,31 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
     removePhoto: async (ref) => {
       await answer(api().removePhoto(ref), nothing);
       await get().loadPhotos();
+    },
+    sync: null,
+    loadSync: async () => {
+      try { set({ sync: await answer(api().syncStatus(), profileSyncStatusSchema) }); }
+      catch { /* The footer says nothing about other computers until it can read them. */ }
+    },
+    syncNow: async () => {
+      const sync = await answer(api().syncNow(), profileSyncStatusSchema);
+      set({ sync });
+      return sync;
+    },
+    follow: () => {
+      const profiles = window.electronAPI?.profiles;
+      if (!profiles?.onSyncStatus) return () => undefined;
+      const stopStatus = profiles.onSyncStatus(status => {
+        const sync = decodeOptionalBoundary(status, profileSyncStatusSchema);
+        if (sync) set({ sync });
+      });
+      // A save that arrived from another computer shows at once, the way a change outside the tab does:
+      // an unedited open file reloads, and one with unsaved edits asks whether to reload or keep yours.
+      const stopChanged = profiles.onChanged(() => {
+        void get().refresh();
+        void get().loadPhotos();
+      });
+      return () => { stopStatus(); stopChanged(); };
     },
   };
 });

@@ -181,9 +181,3 @@ export const profileFileChangesSchema: BoundarySchema<ProfileFileChange[]> = bou
 
 /** A plugin, profile, subagent, skill or reference name, as Agent Farm accepts it. */
 export const PROFILE_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
-
-/**
- * Sync across computers arrives in PR 6 (T-63). Until then the tab's Sync button and footer say so;
- * PR 6 turns this on.
- */
-export const PROFILE_SYNC_AVAILABLE = false;
