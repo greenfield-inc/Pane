@@ -14,7 +14,7 @@ import { panelManager } from './panelManager';
 import { getChatTabManager } from './chatTabs';
 import { sessionChatLaunch } from './chatTabs/launch';
 import { agentFarmConfigRoot, createPaneSessionSnapshot, listPaneAgentFarmProfiles, paneAgentFarmHarness } from './agentFarm/bundledAgentFarm';
-import { snapshotLocation, snapshotPluginHashes, type SessionSnapshot } from './agentFarm/sessionSnapshot';
+import { receiptFilesHash, snapshotLocation, snapshotPluginHashes, type SessionSnapshot } from './agentFarm/sessionSnapshot';
 import { installedPluginHash, profilePlugin } from './agentFarm/agentFarmProfiles';
 import { plainProfileAgent, plainProfileRef, profileDisplayName, profileSwitchEffect } from '../../../shared/agentProfiles';
 import { profilesEnabled } from './agentFarm/profilesFeature';
@@ -49,8 +49,10 @@ export interface SessionAgentFarm {
   harness(ref: string): Promise<string | undefined>;
   /** Saves a snapshot of every installed plugin in a Session folder (T-110), with its path relative to that folder. */
   snapshot(sessionFolder: string): Promise<SessionSnapshot>;
-  /** The content hash of each plugin folder in a snapshot folder (absolute), by plugin name. */
+  /** The receipt-listed files' hash of each plugin in a snapshot folder (absolute), by plugin name. */
   snapshotHashes(snapshotFolder: string): Promise<Record<string, string>>;
+  /** The same hash of an installed plugin (its receipt-listed files as they are now), or undefined when it isn't installed. */
+  receiptHash(plugin: string): Promise<string | undefined>;
 }
 import { terminalPanelManager } from './terminalPanelManager';
 import { databaseService } from './database';
@@ -846,6 +848,8 @@ export class OrchestrationSessionManager extends EventEmitter {
   private readonly snapshotHashes = new Map<string, Record<string, string>>();
   /** Sessions with a snapshot in which some plugin differs from the installed one, for the changed mark (T-110). */
   private readonly snapshotChanged = new Set<string>();
+  /** Each installed plugin's receipt-listed files' hash, which a snapshot's plugins compare with (review r2). */
+  private readonly receiptHashes = new Map<string, string>();
   private pluginHashesCheckedAt = 0;
   private pluginHashesChecking?: Promise<void>;
 
@@ -866,7 +870,12 @@ export class OrchestrationSessionManager extends EventEmitter {
       const snapshotted = live.filter(session => session.agentFarmSnapshot);
       const held = new Map<string, Record<string, string>>();
       for (const session of snapshotted) held.set(session.id, await this.snapshotHashesOf(session));
-      const plugins = [...new Set([...sessions.map(session => profilePlugin(session.agentProfile!.ref)), ...[...held.values()].flatMap(hashes => Object.keys(hashes))])];
+      const plugins = [...new Set(sessions.map(session => profilePlugin(session.agentProfile!.ref)))];
+      // Only what a snapshot would copy counts: a cache or .DS_Store beside the plugin's files never marks a Session.
+      for (const plugin of new Set([...held.values()].flatMap(hashes => Object.keys(hashes)))) {
+        const hash = await this.agentFarm().receiptHash(plugin).catch(() => undefined);
+        if (hash === undefined) this.receiptHashes.delete(plugin); else this.receiptHashes.set(plugin, hash);
+      }
       const changed = new Set<string>();
       for (const plugin of plugins) {
         const hash = await this.agentFarm().pluginHash(plugin).catch(() => undefined);
@@ -877,7 +886,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       const flipped = new Set<string>();
       for (const session of snapshotted) {
         // A plugin no longer installed here doesn't count: Reload couldn't take it either.
-        const differs = Object.entries(held.get(session.id) ?? {}).some(([plugin, hash]) => { const installed = this.pluginHashes.get(plugin); return installed !== undefined && installed !== hash; });
+        const differs = Object.entries(held.get(session.id) ?? {}).some(([plugin, hash]) => { const installed = this.receiptHashes.get(plugin); return installed !== undefined && installed !== hash; });
         if (differs === this.snapshotChanged.has(session.id)) continue;
         if (differs) this.snapshotChanged.add(session.id); else this.snapshotChanged.delete(session.id);
         flipped.add(session.id);
@@ -1772,6 +1781,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       harness: ref => paneAgentFarmHarness(getAppDirectory(), ref),
       snapshot: folder => createPaneSessionSnapshot(getAppDirectory(), folder),
       snapshotHashes: snapshotPluginHashes,
+      receiptHash: plugin => receiptFilesHash(agentFarmConfigRoot(getAppDirectory()), plugin),
     };
   }
 

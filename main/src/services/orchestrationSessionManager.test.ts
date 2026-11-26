@@ -316,7 +316,9 @@ describe('OrchestrationSessionManager', () => {
       pluginHash: vi.fn(async (plugin: string) => installed.includes(plugin) ? `hash-${plugin}` : undefined),
       // T-110: each snapshot is numbered; its plugins hash as the installed ones did when it was taken.
       snapshot: vi.fn(async (_folder: string) => ({ path: `.agent-farm/snapshots/d${++snapshots}`, digest: `d${snapshots}`, plugins: Object.fromEntries(installed.map(plugin => [plugin, '1.0.0'])) })),
-      snapshotHashes: vi.fn(async (_folder: string): Promise<Record<string, string>> => Object.fromEntries(installed.map(plugin => [plugin, `hash-${plugin}`]))),
+      snapshotHashes: vi.fn(async (_folder: string): Promise<Record<string, string>> => Object.fromEntries(installed.map(plugin => [plugin, `receipt-${plugin}`]))),
+      // The installed plugin's receipt-listed files, as a snapshot copies them (review r2).
+      receiptHash: vi.fn(async (plugin: string) => installed.includes(plugin) ? `receipt-${plugin}` : undefined),
       profiles: vi.fn(async () => ({ profiles: [
         { ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false, defaultVariant: 'claude', variants: [{ name: 'claude', model: 'claude-opus-5-5' }, { name: 'codex', model: 'gpt-6-astra' }, { name: 'fast', model: 'claude-haiku-5-5' }] },
         { ref: 'greenfield/product-researcher', plugin: 'greenfield', version: '0.0.46', harness: 'codex', hidden: false },
@@ -613,6 +615,8 @@ describe('OrchestrationSessionManager', () => {
         fixture.manager.attachChatTabs(port);
         const created = await fixture.manager.create({ name: 'Reloads', agentProfile: 'greenfield/orchestrator' });
         farm.pluginHash.mockImplementation(async (plugin: string) => plugin === 'greenfield' ? 'hash-greenfield-2' : `hash-${plugin}`);
+        // The Session has a snapshot (T-110), so its mark follows the installed receipt-listed files.
+        farm.receiptHash.mockImplementation(async (plugin: string) => plugin === 'greenfield' ? 'receipt-greenfield-2' : `receipt-${plugin}`);
         await fixture.manager.refreshPluginHashes(true);
         const marked = (await fixture.manager.list()).sessions.find(session => session.id === created.session.id);
         expect(marked?.agentProfileChanged).toBe(true);
@@ -631,12 +635,16 @@ describe('OrchestrationSessionManager', () => {
         const folder = sessionWorkspacePath(created.session.id);
         await fixture.manager.refreshPluginHashes(true);
         expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBeUndefined();
+        // Review r2: a file the receipt doesn't list (a cache, .DS_Store) changes the folder's hash but not what a snapshot holds.
+        farm.pluginHash.mockImplementation(async (plugin: string) => `cluttered-${plugin}`);
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBeUndefined();
         // Only pane changed, not the profile's own plugin: workers may run any plugin, so it shows.
-        farm.pluginHash.mockImplementation(async (plugin: string) => plugin === 'pane' ? 'hash-pane-2' : `hash-${plugin}`);
+        farm.receiptHash.mockImplementation(async (plugin: string) => plugin === 'pane' ? 'receipt-pane-2' : `receipt-${plugin}`);
         await fixture.manager.refreshPluginHashes(true);
         expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBe(true);
         expect(farm.snapshotHashes).toHaveBeenCalledWith(path.join(folder, ...String(first).split('/')));
-        farm.snapshotHashes.mockImplementation(async () => ({ greenfield: 'hash-greenfield', pane: 'hash-pane-2' }));
+        farm.snapshotHashes.mockImplementation(async () => ({ greenfield: 'receipt-greenfield', pane: 'receipt-pane-2' }));
         const reloaded = await fixture.manager.reloadProfile({ sessionId: created.session.id });
         expect(reloaded.agentFarmSnapshot).not.toBe(first);
         expect(reloaded.agentProfileChanged).toBeUndefined();
