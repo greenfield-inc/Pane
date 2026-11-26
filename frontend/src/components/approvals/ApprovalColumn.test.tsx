@@ -5,6 +5,7 @@ import { DEFAULT_NOTIFY_SETTINGS } from '../../../../shared/types/notify';
 import { useNotifyStore } from '../../stores/notifyStore';
 import { useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { useConfigStore } from '../../stores/configStore';
+import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { ApprovalCaughtUp, ApprovalColumn, ApprovalSentBefore, LinkTab } from './ApprovalColumn';
 
 const q20: NotifyItem = {
@@ -67,6 +68,16 @@ describe('ApprovalColumn', () => {
     const markup = show(q20);
     expect(markup).toContain('aria-keyshortcuts="1"');
     expect(markup).toContain('aria-keyshortcuts="2"');
+  });
+
+  it('T-88: the Recommended chip names ⇧↩ only when it would send', () => {
+    const merge: NotifyItem = { ...q20, questions: undefined, choices: [{ label: 'Merge it', recommended: true }, { label: 'Wait' }] };
+    // ⇧↩ on macOS, Shift+Enter elsewhere.
+    expect(text(show(merge))).toContain(`Recommended · ${formatKeyDisplay('shift+Enter')} sends`);
+    // Question 1 has no recommendation, so ⇧↩ can't answer both.
+    expect(text(show(q20))).toContain('Recommended');
+    expect(text(show(q20))).not.toContain(`${formatKeyDisplay('shift+Enter')} sends`);
+    // A pick of the person's own hides it: tests/renderer/approval-keys.renderer.ts (a static render has no store state).
   });
 
   it('T-88: says all caught up when nothing else waits, with Undo and the way back', () => {

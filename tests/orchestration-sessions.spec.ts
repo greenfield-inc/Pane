@@ -3744,6 +3744,35 @@ function sessionApprovalsSnapshot(): NotifySnapshot {
   };
 }
 
+test('T-88: ⇧↩ in a Session\'s column sends the recommended option and moves on to the next', async ({ page }) => {
+  const approvals = sessionApprovalsSnapshot();
+  const [realUse, q20] = approvals.items;
+  const q21: NotifyItem = { ...realUse, id: 'q21', title: 'Q-21: Rename the org setting?', choices: [{ label: 'Rename it', recommended: true }, { label: 'Keep the name' }], createdAt: Date.now() - 60_000 };
+  const waiting = { ...approvals, items: [realUse, q20, q21], queue: ['q21', 'q20', 'real-use'] };
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())], [], { notifySnapshot: waiting, initialLayout: overviewFoldedIntoChat('plans') });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await page.getByTestId('orchestration-session-plans').click();
+  await expect(page.locator('.xterm-helper-textarea').first()).toBeAttached();
+  await page.waitForTimeout(1_000);
+  // SAFETY: installElectronApiMock adds these controls before the app loads.
+  const emit = (next: NotifySnapshot) => page.evaluate(([snapshot]) => (window as typeof window & { __paneTestElectronMock: { emitNotifySnapshot: (value: NotifySnapshot) => void } }).__paneTestElectronMock.emitNotifySnapshot(snapshot), [next] as const);
+  // SAFETY: installElectronApiMock adds these controls before the app loads.
+  const answers = () => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getNotifyCommands: () => unknown[] } }).__paneTestElectronMock.getNotifyCommands());
+
+  await page.getByTestId('session-approvals-button').click();
+  const split = page.getByTestId('session-approval-split');
+  await expect(split.getByTestId('approval-title')).toHaveText(q21.title);
+  await expect(split.getByTestId('approval-recommended')).toHaveText(/^Recommended · (⇧↩|Shift\+Enter) sends$/);
+  await split.getByRole('radio', { name: /Rename it/ }).focus();
+  await page.keyboard.press('Shift+Enter');
+  await expect.poll(answers).toEqual([{ type: 'answer', id: 'q21', answer: { picks: ['Rename it'] } }]);
+  await emit({ ...waiting, items: [realUse, q20, { ...q21, state: 'sent', answerSummary: 'Rename it' }], queue: ['q20', 'real-use'] });
+  await expect(split.getByTestId('approval-title')).toHaveText(q20.title);
+  await expect(split.getByTestId('approval-sent-before')).toContainText('Sent “Rename it” to Plan demo');
+  await expect.poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('[data-testid="approval-column"]')))).toBe(true);
+});
+
 test('T-88: a Session\'s approvals open newest first, and the column moves on to the next after each Send until all caught up', async ({ page }, testInfo) => {
   const approvals = sessionApprovalsSnapshot();
   const [realUse, q20] = approvals.items;

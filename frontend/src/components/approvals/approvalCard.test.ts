@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { todoKey } from '../../../../shared/todoKey';
-import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dockKey, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals, sessionColumnNext } from './approvalCard';
+import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dockKey, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, recommendedAnswer, replyLine, sessionApprovals, sessionColumnNext } from './approvalCard';
 
 const q20: NotifyItem = {
   id: 'q20',
@@ -108,6 +108,20 @@ describe('the approval card', () => {
     expect(canSend(q20, ['Yes, turn it on', 'One train'], '')).toBe(true);
     expect(canSend(q20, [], 'why?')).toBe(true);
     expect(canSend({ ...q20, agentPrompt: { yes: 'Yes', no: 'No' } }, [], 'why?')).toBe(false);
+  });
+
+  it('T-88: ⇧↩ answers with the recommended option of each question, only when nothing is picked or typed (D-385)', () => {
+    const single: NotifyItem = { ...q20, questions: undefined, choices: [{ label: 'Merge it', recommended: true }, { label: 'Wait' }] };
+    expect(recommendedAnswer(single, [], '')).toEqual({ send: ['Merge it'] });
+    const both: NotifyItem = { ...q20, questions: [q20.questions![1], { title: 'Tag it?', choices: [{ label: 'No' }, { label: 'Yes', recommended: true }] }] };
+    expect(recommendedAnswer(both, ['', ''], '')).toEqual({ send: ['One train', 'Yes'] });
+    // The person's own pick or words: ⇧↩ does nothing special, ⌘↩ sends theirs.
+    expect(recommendedAnswer(both, ['', 'No'], '')).toBeNull();
+    expect(recommendedAnswer(single, [], 'only after QA')).toBeNull();
+    // A question with no recommendation: nothing goes, and it says which.
+    expect(recommendedAnswer(q20, [], '')).toEqual({ missing: [0] });
+    expect(recommendedAnswer({ ...q20, ui: 'approve', questions: undefined }, [], '')).toEqual({ missing: [0] });
+    expect(recommendedAnswer({ ...single, state: 'sent' }, [], '')).toBeNull();
   });
 
   it('J13: tabs are Q&A, Summary, each reference, then the origin unless you are in it', () => {

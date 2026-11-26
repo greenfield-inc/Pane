@@ -40,11 +40,13 @@ const nothingWaiting = new URLSearchParams(location.search).get('waiting') === '
 const source = surface === 'session' && !nothingWaiting
   ? { name: 'plan-keyboard-approvals', agent: 'Claude', session: { id: SESSION_ID, name: 'Pane UI/UX improvements', paneId: 'plans-pane' } }
   : { name: 'plan-keyboard-approvals', agent: 'Claude' };
+// &unrecommended: Q-12's second question has no recommended option, so ⇧↩ can't answer it.
+const unrecommended = new URLSearchParams(location.search).has('unrecommended');
 const twoQuestions: NotifyItem = {
   id: 'q12', ui: 'options', title: 'Q-12: Which key opens the keyboard shortcut sheet?', context: '⌘/ follows VS Code-style apps.',
   questions: [
     { title: 'Which key opens the sheet?', choices: [{ label: '⌘/ everywhere', recommended: true }, { label: '? outside text fields only' }, { label: 'Both' }] },
-    { title: 'Show keys you have changed with a marker?', choices: [{ label: 'Yes, a small dot', recommended: true }, { label: 'No marker' }] },
+    { title: 'Show keys you have changed with a marker?', choices: [{ label: 'Yes, a small dot', recommended: !unrecommended }, { label: 'No marker' }] },
   ],
   source, state: 'waiting', createdAt: Date.now() - 180_000,
 };

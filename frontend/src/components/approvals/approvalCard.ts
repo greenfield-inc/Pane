@@ -156,6 +156,21 @@ export function canReplyAlone(item: NotifyItem): boolean {
   return item.state === 'waiting' && !item.agentPrompt && !item.optionsOnly && !replyBeingRead(item);
 }
 
+/**
+ * What ⇧↩ does on a waiting card (T-88): with nothing picked or typed, it answers with each
+ * question's recommended option. Nothing starts picked (D-385), so this is the person's own key
+ * press. `missing`: the questions (by index) with no recommendation, so nothing goes. Null: the
+ * person has started an answer of their own, which ⌘↩ sends.
+ */
+export function recommendedAnswer(item: NotifyItem, picks: readonly string[], text: string): { send: string[] } | { missing: number[] } | null {
+  if (item.state !== 'waiting' || text.trim() || picks.some(Boolean)) return null;
+  const questions = questionsOf(item);
+  if (questions.length === 0) return null;
+  const send = questions.map((question) => question.choices.find((choice) => choice.recommended)?.label ?? '');
+  const missing = send.flatMap((label, at) => (label ? [] : [at]));
+  return missing.length ? { missing } : { send };
+}
+
 function picksAnswer(item: NotifyItem, picks: readonly string[]): boolean {
   const questions = questionsOf(item);
   return questions.length > 0 && picks.length >= questions.length && questions.every((_, index) => Boolean(picks[index]));

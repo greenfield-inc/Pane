@@ -4,6 +4,8 @@ declare global {
   interface Window { approvalKeysTest: { commands: () => Array<{ type: string; id?: string; answer?: { picks?: string[]; text?: string } }>; run: (id: string) => void; view: () => string } }
 }
 
+// The chip names the key as the platform writes it: ⇧↩ on macOS, Shift+Enter elsewhere.
+const RECOMMENDED_SENDS = /^Recommended · (⇧↩|Shift\+Enter) sends$/;
 const commands = (page: Page) => page.evaluate(() => window.approvalKeysTest.commands());
 const question = (page: Page, at: number) => page.getByTestId('approval-question').nth(at);
 const option = (page: Page, at: number, label: string) => question(page, at).getByRole('radio', { name: label });
@@ -90,6 +92,73 @@ test.describe('the approval column (D-381)', () => {
     await expect(composer).toHaveValue('j k 1 r g');
     await expect(page.getByTestId('approval-pager')).toHaveText('1 of 2');
     expect(await commands(page)).toEqual([]);
+  });
+
+  test('⇧↩ sends the recommended option of each question when nothing is picked, and the chip names it (T-88)', async ({ page }) => {
+    await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText(RECOMMENDED_SENDS);
+    // Nothing is preselected (D-385): the key is the person's choice.
+    await expect(page.getByRole('radio', { checked: true })).toHaveCount(0);
+    await option(page, 1, 'No marker').focus();
+    await page.keyboard.press('Shift+Enter');
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q12', answer: { picks: ['⌘/ everywhere', 'Yes, a small dot'] } }]);
+  });
+
+  test('⇧↩ does nothing special once the person picked: ⌘↩ sends their pick (T-88)', async ({ page }) => {
+    await option(page, 0, 'Both').focus();
+    await page.keyboard.press('Space');
+    await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText('Recommended');
+    await page.keyboard.press('Shift+Enter');
+    // Not clicked by it either: the pick stays.
+    await expect(option(page, 0, 'Both')).toHaveAttribute('aria-checked', 'true');
+    await page.waitForTimeout(200);
+    expect(await commands(page)).toEqual([]);
+  });
+
+  test('⇧↩ never fires while typing, in the reply box or the chat composer, nor with words saved in the box (T-88)', async ({ page }) => {
+    const box = page.getByTestId('approval-reply-box');
+    await box.click();
+    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.type('x');
+    await expect(box).toHaveValue('\nx');
+    await page.getByLabel('Chat composer').click();
+    await page.keyboard.press('Shift+Enter');
+    // Back on an option, the words in the box are the person's own answer: ⇧↩ leaves them be.
+    await option(page, 0, 'Both').focus();
+    await page.keyboard.press('Shift+Enter');
+    await expect(box).toHaveValue('\nx');
+    await page.waitForTimeout(200);
+    expect(await commands(page)).toEqual([]);
+  });
+
+  test('⇧↩ during an input method\'s composition sends nothing (T-88)', async ({ page }) => {
+    await option(page, 0, 'Both').focus();
+    await page.evaluate(() => document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, isComposing: true, bubbles: true, cancelable: true })));
+    await page.waitForTimeout(200);
+    expect(await commands(page)).toEqual([]);
+  });
+
+  test('⇧↩ from the card itself, its Decide tab or its pager sends as the chip says (T-88)', async ({ page }) => {
+    await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText(RECOMMENDED_SENDS);
+    await page.getByRole('tab', { name: 'Decide' }).focus();
+    await page.keyboard.press('Shift+Enter');
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q12', answer: { picks: ['⌘/ everywhere', 'Yes, a small dot'] } }]);
+  });
+
+  test('⇧↩ from the card region itself sends (T-88)', async ({ page }) => {
+    await page.getByTestId('approval-column').focus();
+    await page.keyboard.press('Shift+Enter');
+    await expect.poll(() => commands(page)).toHaveLength(1);
+  });
+
+  test('⇧↩ does nothing while the Close form is open, from its reason or its buttons; the chip drops the key (T-88)', async ({ page }) => {
+    await page.getByTestId('approval-close-item').click();
+    await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText('Recommended');
+    await page.keyboard.type('superseded');
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Cancel' })).toBeFocused();
+    await page.keyboard.press('Shift+Enter');
+    await page.waitForTimeout(200);
+    expect((await commands(page)).filter((command) => command.type === 'answer')).toEqual([]);
   });
 
   test('the palette\'s Next and Previous Approval page the approval shown', async ({ page }) => {
@@ -233,5 +302,22 @@ test.describe('a Session chat\'s approval key (D-381)', () => {
     await expect(page.getByTestId('approval-column')).toHaveCount(0);
     await expect(composer).toBeFocused();
     await expect(composer).toHaveValue('draft');
+  });
+});
+
+test.describe('⇧↩ with a question that has no recommendation (T-88)', () => {
+  test('sends nothing and says which question to pick', async ({ page }) => {
+    await page.goto('/renderer-tests/approval-keys.html?surface=column&unrecommended');
+    await expect(page.getByTestId('approval-pager')).toHaveText('1 of 2');
+    await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText('Recommended');
+    // The live region is there before the key, so the hint is announced.
+    await expect(page.getByTestId('approval-reply-hint')).toHaveAttribute('role', 'status');
+    await option(page, 0, '⌘/ everywhere Recommended').focus();
+    await page.keyboard.press('Shift+Enter');
+    await expect(page.getByTestId('approval-reply-hint')).toHaveText(/^Question 2 has no recommended option: pick an option for each question, then .+ sends\.$/);
+    expect(await commands(page)).toEqual([]);
+    // Picking clears the hint.
+    await page.keyboard.press('Space');
+    await expect(page.getByTestId('approval-reply-hint')).toHaveText(/^Pick an option/);
   });
 });
