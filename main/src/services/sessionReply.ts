@@ -4,31 +4,25 @@
  * `[From Pane …]`, watcher or Autopilot line. Chat tabs answer this themselves at the turn's end
  * (ChatTranscript.endTurn); this probe is for terminal tabs.
  *
- * - Claude and Codex: when the turn starts, the probe marks where the agent's transcript ends; when
- *   it ends, it reads the turn's rows from there (agentTranscripts.turnEndedWithText), by row order,
+ * - Claude and Codex: the agent's own transcript, split into turns at its own prompt rows
+ *   (agentTranscripts.readFinishedTurns). The probe keeps, per tab, where its last judgment stopped,
+ *   and judges the turns finished since: never a turn still working, never one already judged, and
  *   never by the clock. A transcript written just after the tab went idle is read again, and a
- *   positive read is believed only when a read a second later agrees (the turn's last tool call
- *   can land after its progress text). Without evidence the turn does not count.
+ *   positive read is believed only when the next read agrees (a turn's last tool call can land
+ *   after its progress text). Without evidence the turn does not count.
  * - Any other terminal agent has no transcript Pane can read, so each finished turn counts. That
  *   is a known limit (D-2, docs/SESSIONS.md).
  */
 
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
-import { agentTranscripts, isTranscriptAgent, type TranscriptLocator, type TranscriptMark, type TurnStart } from './agentTranscript';
+import { agentTranscripts, isTranscriptAgent, type FinishedTurns, type TranscriptCursor, type TranscriptLocator } from './agentTranscript';
 import { panelTranscriptLocator } from './agentTranscript/panelLocator';
 import { panelManager } from './panelManager';
 import { terminalPanelManager } from './terminalPanelManager';
 
-interface TurnWindow {
-  startedAtMs: number;
-  endedAtMs: number;
-}
-
 export interface ReplyProbe {
-  /** The Session agent's tab started a turn: mark where its transcript ends now. */
-  turnStarted(panelId: string): void;
-  /** Whether the tab's turn in `turn` ended with text the person can read. */
-  turnEnded(panelId: string, turn: TurnWindow): Promise<boolean>;
+  /** Whether the tab's turn that just ended (with any others finished since the last judgment) ended with text the person can read. */
+  turnEnded(panelId: string): Promise<boolean>;
 }
 
 export interface ReplyProbeSources {
@@ -36,8 +30,9 @@ export interface ReplyProbeSources {
   agentTypeOf(panelId: string): string | undefined;
   /** Where the tab's transcript is; undefined when Pane cannot tell. */
   locatorOf(panelId: string): TranscriptLocator | undefined;
-  mark(locator: TranscriptLocator): Promise<TranscriptMark | undefined>;
-  readTurn(locator: TranscriptLocator, since: TurnStart): Promise<boolean | undefined>;
+  /** The tab's agent is idle now, so its last turn has finished. */
+  isIdle(panelId: string): boolean;
+  readTurns(locator: TranscriptLocator, cursor: TranscriptCursor | undefined, idleNow: boolean): Promise<FinishedTurns>;
   wait(ms: number): Promise<void>;
 }
 
@@ -45,37 +40,31 @@ export interface ReplyProbeSources {
 const TRANSCRIPT_READ_WAITS_MS = [1_000, 1_000, 2_000];
 
 export function createReplyProbe(sources: ReplyProbeSources): ReplyProbe {
-  const starts = new Map<string, Promise<TranscriptMark | undefined>>();
+  const cursors = new Map<string, TranscriptCursor>();
   return {
-    turnStarted(panelId) {
-      const locator = isTranscriptAgent(sources.agentTypeOf(panelId)) ? sources.locatorOf(panelId) : undefined;
-      if (!locator) {
-        starts.delete(panelId);
-        return;
-      }
-      starts.set(panelId, sources.mark(locator).catch(() => undefined));
-    },
-    async turnEnded(panelId, turn) {
-      const started = starts.get(panelId);
-      starts.delete(panelId);
+    async turnEnded(panelId) {
       if (!isTranscriptAgent(sources.agentTypeOf(panelId))) return true;
       const locator = sources.locatorOf(panelId);
       if (!locator) return false;
-      const since: TurnStart = (await started) ?? { startedAtMs: turn.startedAtMs };
+      const from = cursors.get(panelId);
       let previous: boolean | undefined;
+      let last: FinishedTurns | undefined;
+      let settled = false;
       for (const delay of [0, ...TRANSCRIPT_READ_WAITS_MS]) {
         if (delay > 0) await sources.wait(delay);
-        let read: boolean | undefined;
         try {
-          read = await sources.readTurn(locator, since);
+          last = await sources.readTurns(locator, from, sources.isIdle(panelId));
         } catch (error) {
           console.warn(`[Sessions] Could not read panel ${panelId}'s transcript, so its turn does not mark the Session unread:`, error);
           return false;
         }
-        if (read === true && previous === true) return true;
-        previous = read;
+        settled = last.endedWithText === true && previous === true;
+        if (settled) break;
+        previous = last.endedWithText;
       }
-      return false;
+      // Judged: the next turn is read from where this judgment stopped. Nothing found leaves the cursor.
+      if (last?.endedWithText !== undefined && last.cursor) cursors.set(panelId, last.cursor);
+      return settled;
     },
   };
 }
@@ -96,8 +85,8 @@ export function hostReplyProbeSources(worktreeOf: (paneId: string) => string | u
       const panel = panelManager.getPanel(panelId);
       return panel ? panelTranscriptLocator(panel, worktreeOf(panel.sessionId), terminalAgentType(panelId)) : undefined;
     },
-    mark: agentTranscripts.mark,
-    readTurn: agentTranscripts.turnEndedWithText,
+    isIdle: panelId => terminalPanelManager.getAgentStatus(panelId) === 'idle',
+    readTurns: agentTranscripts.readFinishedTurns,
     wait: ms => new Promise<void>(resolve => { setTimeout(resolve, ms).unref?.(); }),
   };
 }

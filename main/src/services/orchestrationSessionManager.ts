@@ -1080,7 +1080,7 @@ export class OrchestrationSessionManager extends EventEmitter {
    * with the time the turn ended, so the sidebar bolds the Session until it is opened.
    */
   async notifyLiveActivity(panelId: string, state: AgentState, evidence: { turnEndedWithText?: boolean } = {}): Promise<void> {
-    const endedTurns: Array<{ sessionId: string; turn: number; startedAtMs: number; endedAt: string }> = [];
+    const endedTurns: Array<{ sessionId: string; turn: number; endedAt: string }> = [];
     await withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
@@ -1107,8 +1107,6 @@ export class OrchestrationSessionManager extends EventEmitter {
           updatedAt: now,
           activity: [...current.activity, this.activity(state, `Agent state changed to ${state}.`, 'agent', association?.paneId, panelId)],
         };
-        // The Session's own agent started a turn: a terminal tab's transcript is read from here when it ends.
-        if (isOrchestratorPanel && state === 'working') this.replyProbe.turnStarted(panelId);
         // The Session's own agent finished a turn: it takes its place in the read order now, so a
         // view while its text is still being checked wins. A chat tab says at once how it ended.
         if (isOrchestratorPanel && state === 'idle' && lastForPanel?.kind === 'working') {
@@ -1118,7 +1116,7 @@ export class OrchestrationSessionManager extends EventEmitter {
             nextRecord.readState.replied = turn;
             nextRecord.agentRepliedAt = now;
           } else if (evidence.turnEndedWithText === undefined) {
-            endedTurns.push({ sessionId: current.id, turn, startedAtMs: Date.parse(lastForPanel.at), endedAt: now });
+            endedTurns.push({ sessionId: current.id, turn, endedAt: now });
           }
         }
         this.trimActivity(nextRecord);
@@ -1134,7 +1132,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
     // A terminal tab's transcript is read outside the lock.
     for (const ended of endedTurns) {
-      if (await this.replyProbe.turnEnded(panelId, { startedAtMs: ended.startedAtMs, endedAtMs: Date.parse(ended.endedAt) })) {
+      if (await this.replyProbe.turnEnded(panelId)) {
         await this.stampAgentReply(ended.sessionId, ended.turn, ended.endedAt);
       }
     }

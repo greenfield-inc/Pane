@@ -40,6 +40,10 @@ describe('the reply probe for a terminal Session agent', () => {
     const wait = vi.fn(async () => undefined);
     await expect(createReplyProbe(sources({ readTurns: async () => reads.shift()!, wait })).turnEnded('panel')).resolves.toBe(false);
     expect(wait).toHaveBeenCalled();
+
+    // A positive read on the last try, with no read after it to agree, is not believed either.
+    const lastOnly = [false, false, false, true].map(value => finished(value));
+    await expect(createReplyProbe(sources({ readTurns: async () => lastOnly.shift()! })).turnEnded('panel')).resolves.toBe(false);
   });
 
   it('waits for a transcript written just after the tab went idle, and gives up without evidence', async () => {
