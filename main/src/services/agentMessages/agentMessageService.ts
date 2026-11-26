@@ -234,7 +234,48 @@ export class AgentMessageService extends EventEmitter {
     if (!this.store.get(number)) {
       throw new PaneError('ERR_MESSAGE_NOT_FOUND', `There is no message ${messageRef(number)} on this computer, so there is no reply to wait for.`, 'See recent messages with `runpane messages list`.');
     }
-    const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
+    // Listen first, then look: the waiter is registered before any scan, and every await is followed by a fresh
+    // scan, so a reply can never arrive between "looked" and "listening" (reply() hands new ones to the waiter).
+    return new Promise(resolve => {
+      const waiting = this.waiters.get(number) ?? new Set<Waiter>();
+      this.waiters.set(number, waiting);
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (reply: StoredMessage | undefined) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        waiting.delete(waiter);
+        if (waiting.size === 0 && this.waiters.get(number) === waiting) this.waiters.delete(number);
+        resolve(reply ? this.record(reply.number) : undefined);
+      };
+      const waiter: Waiter = { panelId: callerPanelId, settle: reply => finish(reply) };
+      const abort = () => finish(undefined);
+      waiting.add(waiter);
+      if (signal?.aborted) {
+        abort();
+        return;
+      }
+      if (timeoutMs !== undefined) timer = setTimeout(abort, timeoutMs);
+      signal?.addEventListener('abort', abort, { once: true });
+      const scan = (): void => {
+        if (settled) return;
+        const found = this.claimFor(number, callerPanelId);
+        if (found && 'reply' in found) finish(found.reply);
+        // Only replies being typed are left: wait for that attempt, then look again (still listening meanwhile).
+        else if (found) void found.typing.then(scan);
+      };
+      scan();
+    });
+  }
+
+  /**
+   * One synchronous look for a reply a wait from `callerPanelId` may take now: a held one routed to it,
+   * a queued one routed to it (claimed for the call here), or one already typed. `typing` when the only
+   * candidates are being typed. Ends the reservation when the caller owns it.
+   */
+  private claimFor(number: number, callerPanelId: string | undefined): { reply: StoredMessage } | { typing: Promise<void> } | undefined {
     const reservation = this.reservations.get(number);
     if (reservation) {
       // Only the reservation's owner (the tab that sent with --await-reply), or a call outside any tab, ends it.
@@ -252,62 +293,28 @@ export class AgentMessageService extends EventEmitter {
       }
       if (claimed !== undefined) {
         this.handToCall(this.mustGet(claimed));
-        return this.record(claimed);
+        return { reply: this.mustGet(claimed) };
       }
     }
     const held = new Set(this.reservations.get(number)?.held ?? []);
-    for (const earlier of this.store.replies(number)) {
-      if (earlier.state === 'undelivered' || held.has(earlier.number)) continue;
-      const typing = this.typing.get(earlier.number);
-      if (typing) {
-        // This exact reply is being typed: wait for that attempt (within this call's time), then read what it came to.
-        if (!await this.within(typing, deadline, signal)) return undefined;
+    let typing: Promise<void> | undefined;
+    for (const reply of this.store.replies(number)) {
+      if (reply.state === 'undelivered' || held.has(reply.number)) continue;
+      const attempt = this.typing.get(reply.number);
+      if (attempt) {
+        // Being typed: its outcome decides (typed, busy, or undelivered); look again when it ends.
+        typing ??= attempt;
+        continue;
       }
-      const now = this.mustGet(earlier.number);
-      if (now.state === 'undelivered') continue;
-      if (now.state === 'queued') {
-        // Still queued (never typed, or the tab was busy): a call takes it only from its route, and only while nothing types it.
-        if (this.typing.has(now.number) || !this.isRoute(callerPanelId, this.targetOf(now))) continue;
-        this.handToCall(now);
+      if (reply.state === 'queued') {
+        // A call takes a queued reply only from its route.
+        if (!this.isRoute(callerPanelId, this.targetOf(reply))) continue;
+        this.handToCall(reply);
+        return { reply: this.mustGet(reply.number) };
       }
-      return this.record(now.number);
+      return { reply };
     }
-    if (deadline !== undefined && deadline <= Date.now()) return undefined;
-    const remaining = deadline === undefined ? undefined : deadline - Date.now();
-    return new Promise(resolve => {
-      const waiting = this.waiters.get(number) ?? new Set<Waiter>();
-      this.waiters.set(number, waiting);
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const done = (reply: StoredMessage | undefined) => {
-        if (timer) clearTimeout(timer);
-        signal?.removeEventListener('abort', abort);
-        waiting.delete(waiter);
-        if (waiting.size === 0 && this.waiters.get(number) === waiting) this.waiters.delete(number);
-        resolve(reply ? this.record(reply.number) : undefined);
-      };
-      const waiter: Waiter = { panelId: callerPanelId, settle: reply => done(reply) };
-      const abort = () => done(undefined);
-      waiting.add(waiter);
-      if (remaining !== undefined) timer = setTimeout(abort, remaining);
-      signal?.addEventListener('abort', abort, { once: true });
-    });
-  }
-
-  /** Waits for `work` until `deadline` or `signal`: true when it finished in time. */
-  private within(work: Promise<void>, deadline: number | undefined, signal: AbortSignal | undefined): Promise<boolean> {
-    if (signal?.aborted) return Promise.resolve(false);
-    return new Promise(resolve => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const finish = (inTime: boolean) => {
-        if (timer) clearTimeout(timer);
-        signal?.removeEventListener('abort', stop);
-        resolve(inTime);
-      };
-      const stop = () => finish(false);
-      if (deadline !== undefined) timer = setTimeout(stop, Math.max(0, deadline - Date.now()));
-      signal?.addEventListener('abort', stop, { once: true });
-      void work.then(() => finish(true));
-    });
+    return typing ? { typing } : undefined;
   }
 
   /** A call from `panelId` may take a reply whose route is `route`: the same tab, or a call made outside any tab. */

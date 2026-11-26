@@ -374,4 +374,42 @@ describe('AgentMessageService', () => {
     await expect(service.waitForReply(1, 30, undefined, 'a')).resolves.toBeUndefined();
     expect(Date.now() - started).toBeLessThan(1_000);
   });
+  // Review 4: listen, then look. A reply that arrives while the wait sits on another reply's typing attempt is still its answer.
+  it('gives a wait the second reply that arrived while the first was being typed and then failed', async () => {
+    let open: () => void = () => undefined;
+    host.typingGate = new Promise<void>(resolve => { open = resolve; });
+    host.typeResult = 'unsupported';
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+    const first = service.reply({ to: 1, body: 'A1', callerPanelId: 'b' });
+    await vi.waitFor(() => expect(host.attempts).toBe(1));
+    const waited = service.waitForReply(1, 500, undefined, 'a');
+    // M-3 arrives during M-2's attempt; then that attempt fails (the tab takes no typed messages).
+    const second = service.reply({ to: 1, body: 'A2', callerPanelId: 'b' });
+    open();
+    await first;
+    await second;
+    await expect(waited).resolves.toMatchObject({ ref: 'M-3', text: 'A2', deliveredVia: 'call' });
+    expect(service.show(1).replies.map(reply => [reply.ref, reply.state])).toEqual([['M-2', 'undelivered'], ['M-3', 'delivered']]);
+    host.typingGate = undefined;
+    host.typeResult = 'delivered';
+    await service.flush();
+    expect(host.typed).toEqual([]);
+  });
+
+  it('a wait that is already listening takes a reply that comes after its first look', async () => {
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+    const waited = service.waitForReply(1, 500, undefined, 'a');
+    await service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
+    await expect(waited).resolves.toMatchObject({ ref: 'M-2', deliveredVia: 'call' });
+    expect(host.typed).toEqual([]);
+  });
+
+  it('a wait that is aborted before it starts returns nothing and leaves no listener', async () => {
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(service.waitForReply(1, 500, controller.signal, 'a')).resolves.toBeUndefined();
+    await service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
+    expect(host.typed.map(entry => entry.panelId)).toEqual(['a']);
+  });
 });
