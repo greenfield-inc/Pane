@@ -642,7 +642,9 @@ Pane then packs, sends and rebuilds the Session:
   The check before the move therefore accepts a tab's Agent Farm profile that the
   snapshot holds even when that machine hasn't installed its plugin, and blocks only
   a profile that neither the snapshot nor that machine's plugins hold (with
-  Profiles off there, only the installed plugins count);
+  Profiles off there, only the installed plugins count). A tab started from a launch
+  link's command keeps its `--snapshot`, which a restore replays before Agent Farm's own
+  record, so the move points it at the moved folder, quoted as one word for that machine;
 - a browser tab previewing a file (`runpane panels open --file`) moves when
   the file moved with the Session: in one of its worktrees or its Session
   folder, and there on the other machine. It opens the file at its new path

@@ -623,6 +623,22 @@ describe('MoveImporter after a restart (F-10, J9)', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  // T-110 review F-11: a restore replays the stored command with --resume, and its --snapshot wins over Agent Farm's record.
+  it('points a link-line tab\'s stored --snapshot at the moved Session folder, so its restore there reads the moved snapshot', async () => {
+    // A target whose Session folders sit under a path with a space: the moved folder must stay one word.
+    process.env.PANE_DIR = path.join(root, 'pane dir');
+    const machine = targetMachine(path.join(root, 'target'));
+    const owner = ownerWithAgent();
+    const command = 'agent-farm run greenfield/planner --parent greenfield/orchestrator@af-1 --snapshot /a/.pane/sessions/sess-1/.agent-farm/snapshots/d1';
+    owner.tabs[0].state = { agentType: 'claude', launchCommand: command, initialCommand: command };
+    await builtOn(machine, [owner]);
+    const arrived = decodeBoundary(machine.tabs.panels.get('t-agent')?.state.customState, boundary.object({ launchCommand: boundary.string, initialCommand: boundary.string }));
+    const moved = path.join(sessionWorkspacePath('sess-1'), '.agent-farm', 'snapshots', 'd1');
+    expect(moved).toContain(' ');
+    expect(arrived.launchCommand).toBe(`agent-farm run greenfield/planner --parent greenfield/orchestrator@af-1 --snapshot '${moved}'`);
+    expect(arrived.initialCommand).toBe(arrived.launchCommand);
+  });
+
   it('restarted after the build, before the start arrived: it still says built, and a resent start launches the agent once', async () => {
     const machine = targetMachine(path.join(root, 'target'));
     const { moveId } = await builtOn(machine, [ownerWithAgent()]);

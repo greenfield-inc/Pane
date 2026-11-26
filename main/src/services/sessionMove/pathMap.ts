@@ -1,6 +1,7 @@
 import { claudeProjectDirName } from '../agentTranscript/claude';
 import type { SessionMovePathEntry } from '../../../../shared/types/sessionMove';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
+import { quoteShellWord } from '../agents/shellWord';
 
 /**
  * Turns any source path into the target's: each worktree, each repository, the Pane folder, and
@@ -83,4 +84,25 @@ export function rewriteJsonText(map: PathMap, text: string): string {
     return rewriteText(map, text);
   }
   return JSON.stringify(rewriteJson(map, parsed));
+}
+
+/** A launch command's `--snapshot <folder>` (T-110): the flag with its separator, then the folder, quoted or bare. */
+const SNAPSHOT_ARGUMENT = /(\s--snapshot(?:=|\s+))(?:'([^']*)'|"([^"]*)"|([^\s'"]+))/g;
+
+/**
+ * A stored launch command with this machine's paths (rewriteText), and its `--snapshot` folder moved
+ * as one word, quoted when the new path needs it: a restore replays the command with `--resume`, and
+ * Agent Farm reads that flag before its own record (T-110 review F-11). Moves run between macOS and
+ * Linux, so the quoting is POSIX.
+ */
+export function rewriteLaunchCommand(map: PathMap, command: string): string {
+  const moved: string[] = [];
+  const held = command.replace(SNAPSHOT_ARGUMENT, (whole: string, flag: string, single?: string, double?: string, bare?: string) => {
+    const folder = single ?? double ?? bare ?? '';
+    const target = mapPath(map, folder);
+    if (target === null) return whole;
+    moved.push(`${flag}${/^[\w./:@%+=,-]+$/.test(target) ? target : quoteShellWord(target, undefined)}`);
+    return `\uE000${moved.length - 1}\uE001`;
+  });
+  return rewriteText(map, held).replace(/\uE000(\d+)\uE001/g, (_match: string, index: string) => moved[Number(index)] ?? '');
 }
