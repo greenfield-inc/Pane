@@ -77,7 +77,8 @@ A computer without Xcode runs iOS on a linked Mac. Link one once: on the Mac, op
 else the first online Mac with Xcode, and its result says which Mac and why. A pinned Mac is
 always used: when it is offline the call fails with `ERR_DEVICE_MAC_OFFLINE` and doesn't
 fall back. Every call goes over the routes saved computers already use (same network,
-Tailscale or the Pane relay); the Mac accepts device calls only from your linked computers.
+Tailscale or the Pane relay); the Mac accepts device calls only from computers linked
+with full access.
 
 `device_run` builds on the Mac without a clone or credentials there: it snapshots the
 worktree (uncommitted and untracked files included, ignored files left out), sends what

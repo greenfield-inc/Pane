@@ -1,3 +1,4 @@
+import { isReadOnlyHost, useReadOnlyHost } from '../stores/readOnlyHostStore';
 import { ResourcesView } from './machineHealth/ResourcesView';
 import { AutopilotView } from './autopilot/AutopilotView';
 import { useRef, useEffect, useState, memo, useMemo, useCallback } from 'react';
@@ -149,6 +150,7 @@ export const SessionView = memo(() => {
   const [panelLoad, setPanelLoad] = useState<{ id: string; revision: number; hostId: typeof hostId; error: string | null } | null>(null);
   const [panelRetry, setPanelRetry] = useState(0);
   const isRemoteMode = config?.remoteDaemon?.client.mode === 'remote';
+  const readOnly = useReadOnlyHost();
 
   // Get active session by subscribing directly to store state
   // This ensures the component re-renders when git status or other session properties update
@@ -567,7 +569,7 @@ export const SessionView = memo(() => {
   }, [activeSession?.id, activeSessionPanelsLoaded]);
 
   // Keyed by Pane so an open that failed stays with the Pane it failed in.
-  const livePreviewPrompt = activeSession?.projectId !== undefined && activeSessionPanelsLoaded ? (
+  const livePreviewPrompt = !readOnly && activeSession?.projectId !== undefined && activeSessionPanelsLoaded ? (
     <LivePreviewPrompt key={activeSession.id} paneId={activeSession.id} projectId={activeSession.projectId} panels={sessionPanels} />
   ) : null;
 
@@ -761,7 +763,8 @@ export const SessionView = memo(() => {
   useEffect(() => {
     localStorage.setItem('pane-loop-run-detail-panel-visible', String(loopRunDetailVisible));
   }, [loopRunDetailVisible]);
-  const detailVisible = loopRun ? loopRunDetailVisible : paneDetailVisible;
+  // Git, files and changes are all the inspector holds, and a read-only computer shows none of them.
+  const detailVisible = !readOnly && (loopRun ? loopRunDetailVisible : paneDetailVisible);
   // Maximized (P4), the right panel covers the splits and terminal, which keep their size.
   const setMaximizedRegion = useNavigationStore(state => state.setMaximizedRegion);
   const rightPanelMaximized = useNavigationStore(state => state.maximizedRegion === 'right-panel') && detailVisible;
@@ -1027,7 +1030,7 @@ export const SessionView = memo(() => {
 
   const handlePanelClose = useCallback(
     async (panel: ToolPanel) => {
-      if (!activeSession) return;
+      if (!activeSession || isReadOnlyHost()) return;
       const sid = activeSession.id;
 
       // Remove from store first for immediate UI update
@@ -1086,7 +1089,7 @@ export const SessionView = memo(() => {
 
   const handlePanelCreate = useCallback(
     async (type: ToolPanelType, options?: PanelCreateOptions) => {
-      if (!activeSession) return;
+      if (!activeSession || isReadOnlyHost()) return;
       const sid = activeSession.id;
 
       // For terminal panels with initialCommand (e.g., Terminal (Claude))
@@ -1308,7 +1311,9 @@ export const SessionView = memo(() => {
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   // The empty stage is the "+" menu laid out inline: one click (or the
   // shortcut beside it) from a running tool, instead of a placeholder.
-  const emptyStage = useMemo(() => (
+  const emptyStage = useMemo(() => readOnly ? (
+    <div className="flex h-full flex-1 items-center justify-center text-sm text-text-tertiary">This Pane has no terminal or chat tab to watch.</div>
+  ) : (
     <div className="flex h-full flex-1 items-center justify-center">
       <div className="w-64">
         <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Open</div>
@@ -1361,7 +1366,7 @@ export const SessionView = memo(() => {
         />
       )}
     </div>
-  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen]);
+  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen, readOnly]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
@@ -1593,7 +1598,7 @@ export const SessionView = memo(() => {
   const [layoutSwapped, setLayoutSwapped] = useState(() => {
     return localStorage.getItem('pane-layout-swapped') === 'true';
   });
-  const swappedLayoutRendered = layoutSwapped && Boolean(defaultTerminalPanel);
+  const swappedLayoutRendered = layoutSwapped && Boolean(defaultTerminalPanel) && !readOnly;
 
   useEffect(() => {
     localStorage.setItem('pane-layout-swapped', String(layoutSwapped));
@@ -1685,7 +1690,7 @@ export const SessionView = memo(() => {
 
   // Layout-aware detail panel toggle that also handles immersive mode override
   const handleToggleDetailPanel = useCallback(() => {
-    if (immersiveMode) {
+    if (immersiveMode || readOnly) {
       return;
     }
     if (swappedLayoutRendered) {
@@ -1693,7 +1698,7 @@ export const SessionView = memo(() => {
     } else {
       setDetailVisible(v => !v);
     }
-  }, [immersiveMode, setDetailVisible, swappedLayoutRendered, toggleDetailCollapse]);
+  }, [immersiveMode, readOnly, setDetailVisible, swappedLayoutRendered, toggleDetailCollapse]);
 
   const toggleTerminalCollapse = useCallback(() => {
     setIsTerminalCollapsed(prev => !prev);
@@ -2002,7 +2007,7 @@ export const SessionView = memo(() => {
       <div className="flex min-h-0 min-w-0 flex-1 flex-row">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* SINGLE SessionProvider wraps everything */}
-      <SessionProvider session={activeSession} gitBranchActions={branchActions} isMerging={hook.isMerging} gitCommands={hook.gitCommands} onOpenIDEWithCommand={handleOpenIDEWithCommand} onOpenUrlInBrowser={handleOpenUrlInBrowser} onConfigureIDE={() => setShowProjectSettings(true)} onSetTracking={handleOpenSetTracking} trackingBranch={currentUpstream} configuredIDE={configuredIde(sessionProject?.open_ide_command, config?.defaultIdeCommand)} isRemoteMode={isRemoteMode}>
+      <SessionProvider session={activeSession} gitBranchActions={readOnly ? [] : branchActions} isMerging={hook.isMerging} gitCommands={hook.gitCommands} onOpenIDEWithCommand={handleOpenIDEWithCommand} onOpenUrlInBrowser={handleOpenUrlInBrowser} onConfigureIDE={() => setShowProjectSettings(true)} onSetTracking={handleOpenSetTracking} trackingBranch={currentUpstream} configuredIDE={configuredIde(sessionProject?.open_ide_command, config?.defaultIdeCommand)} isRemoteMode={isRemoteMode}>
 
         {/* Tab bar at top */}
         <PanelTabBar
@@ -2015,8 +2020,8 @@ export const SessionView = memo(() => {
           projectEnvironment={activeProjectEnvironment}
           onToggleDetailPanel={handleToggleDetailPanel}
           detailPanelVisible={detailVisible}
-          detailPanelToggleDisabled={immersiveMode}
-          detailPanelToggleDisabledReason="Hidden in Explorer and Diff views"
+          detailPanelToggleDisabled={immersiveMode || readOnly}
+          detailPanelToggleDisabledReason={readOnly ? 'Not shown on a read-only computer' : 'Hidden in Explorer and Diff views'}
           primaryGroupPanels={topBarPanels}
           primaryGroupActivePanelId={isSplitLayout ? (currentActivePanel?.id ?? null) : primaryGroupNode?.activePanelId}
           primaryGroupFocused={!primaryGroupNode || primaryGroupNode.id === focusedGroupId}

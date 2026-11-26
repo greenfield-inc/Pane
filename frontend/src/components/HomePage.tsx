@@ -330,7 +330,7 @@ export function HomePage() {
               <button
                 type="button"
                 onClick={requestOpenNewDialog}
-                className={actionCardClassName}
+                className={`needs-full-access ${actionCardClassName}`}
               >
                 <MessageSquare className="w-8 h-8 text-interactive" strokeWidth={1.5} aria-hidden="true" />
                 <span className="text-sm font-medium text-text-primary">New</span>
@@ -342,7 +342,7 @@ export function HomePage() {
               <button
                 type="button"
                 onClick={() => setShowCloneDialog(true)}
-                className={actionCardClassName}
+                className={`needs-full-access ${actionCardClassName}`}
               >
                 <GitHubIcon className="w-8 h-8 text-text-secondary" />
                 <span className="text-sm font-medium text-text-primary">GitHub</span>

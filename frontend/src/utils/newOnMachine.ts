@@ -53,7 +53,8 @@ interface MachineReply {
  */
 export function newMachines(states: readonly MachineState[], entries: readonly MachineEntry[], currentId: string): NewMachine[] {
   const known = states.length > 0 ? states : [{ id: currentId, label: 'This computer', kind: 'local', status: 'online', offlineSince: null } satisfies MachineState];
-  return known.map((state) => {
+  // Nothing can be created on a machine this computer only watches.
+  return known.filter((state) => state.access !== 'read').map((state) => {
     const entry = entries.find((candidate) => candidate.id === state.id);
     const name = entry?.name ?? state.label;
     const current = state.id === currentId;

@@ -32,6 +32,7 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { commandOnMachine, openOnMachine, runOnMachine } from '../../utils/machineRowActions';
 import { confirmMachineArchive } from '../archiveConfirm';
+import { ReadOnlyPill } from './ReadOnlyPill';
 import { savedOrderAfterMove, type AllMachinesPane, type AllMachinesSession, type MachineRef } from '../../utils/allMachinesTree';
 import { DropLine, useRowReorder, type ReorderList, type RowReorder } from '../../hooks/useRowReorder';
 import { cn } from '../../utils/cn';
@@ -169,6 +170,12 @@ function PinnedMark() {
  * so neither shifts the row. Hovering or focusing the box names the machine and its OS.
  */
 function MarkSlot({ machine, label, onMenu }: { machine: MachineRef; label: string; onMenu: (x: number, y: number) => void }) {
+  if (machine.readOnly) return (
+    <>
+      <ReadOnlyPill className="relative z-10" />
+      <span className="relative z-10 flex h-[18px] w-[18px] flex-none items-center"><MachineRowMark machine={machine} /></span>
+    </>
+  );
   return (
     <span data-testid="all-machines-mark-slot" className="group/slot relative z-10 flex h-[18px] w-[18px] flex-none items-center">
       <MachineRowMark machine={machine} className="group-hover/row:invisible group-has-[:focus-visible]/slot:invisible" />
@@ -190,7 +197,7 @@ function MarkSlot({ machine, label, onMenu }: { machine: MachineRef; label: stri
 function PaneRow({ row, active, nested, onMenu, reorder }: { row: AllMachinesPane; active: boolean; nested: boolean; onMenu: (menu: RowMenu) => void; reorder?: RowReorder }) {
   const { pane, machine } = row;
   const label = pane.gitStatus?.prTitle || pane.name || 'Untitled';
-  const openMenu = (x: number, y: number) => onMenu({ x, y, machine, target: { kind: 'pane', row } });
+  const openMenu = (x: number, y: number) => { if (!machine.readOnly) onMenu({ x, y, machine, target: { kind: 'pane', row } }); };
   return (
     <div
       data-testid="all-machines-pane-row"
@@ -249,7 +256,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
   renderPane: (row: AllMachinesPane) => React.ReactNode;
 }) {
   const { session, machine } = row;
-  const openMenu = (x: number, y: number) => onMenu({ x, y, machine, target: { kind: 'session', row } });
+  const openMenu = (x: number, y: number) => { if (!machine.readOnly) onMenu({ x, y, machine, target: { kind: 'session', row } }); };
   // Moving and arriving Sessions say so in place of their counts; an arriving one opens once it has arrived.
   const moveLabel = session.move && session.move.state !== 'moved' ? moveMarkLabel(session.move) : null;
   const arriving = session.move?.state === 'arriving';

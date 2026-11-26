@@ -42,8 +42,54 @@ if (textarea) {
 // Focus and mouse reports and replies to terminal queries still go to the host.
 terminal.onData(data => post({ type: 'input', data }));
 
+/** The font the phone asked for, and the smallest one a fixed grid shrinks to before it pans. */
+let baseFontSize = 12;
+const MIN_GRID_FONT_SIZE = 8;
+/** The owner's size while watching a terminal this phone may not resize; null fits the terminal to the phone. */
+let grid: { cols: number; rows: number } | null = null;
+
+/** Draws the fixed grid in the largest font that fits its width, panning what doesn't fit at the smallest. */
+function layoutGrid({ cols, rows }: { cols: number; rows: number }): void {
+  const element = terminal.element;
+  const screen = element?.querySelector<HTMLElement>('.xterm-screen');
+  if (!element || !screen || container.clientWidth <= 0) return;
+  const atEnd = container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
+  if (terminal.cols !== cols || terminal.rows !== rows) terminal.resize(cols, rows);
+  for (let size = baseFontSize; size >= MIN_GRID_FONT_SIZE; size -= 0.5) {
+    if (terminal.options.fontSize !== size) terminal.options.fontSize = size;
+    if (screen.offsetWidth <= container.clientWidth) break;
+  }
+  container.style.overflow = 'hidden';
+  element.style.width = `${screen.offsetWidth}px`;
+  element.style.height = `${screen.offsetHeight}px`;
+  // The prompt sits at the end, so a grid taller than the phone opens there and stays there.
+  if (atEnd) container.scrollTop = container.scrollHeight;
+}
+
+let panRemainder = 0;
+function pan(dx: number, dy: number): void {
+  container.scrollLeft += dx;
+  const before = container.scrollTop;
+  container.scrollTop += dy;
+  // scrollTop rounds; only what an edge stopped scrolls the scrollback.
+  const stopped = dy < 0 ? container.scrollTop <= 0 : container.scrollTop + container.clientHeight >= container.scrollHeight - 1;
+  const rowHeight = (terminal.element?.offsetHeight ?? 0) / terminal.rows;
+  if (!stopped || rowHeight <= 0) {
+    panRemainder = 0;
+    return;
+  }
+  panRemainder += dy - (container.scrollTop - before);
+  const lines = Math.trunc(panRemainder / rowHeight);
+  panRemainder -= lines * rowHeight;
+  if (lines !== 0) terminal.scrollLines(lines);
+}
+
 let lastSize = { cols: 0, rows: 0 };
 function refit(): void {
+  if (grid) {
+    layoutGrid(grid);
+    return;
+  }
   if (container.clientWidth <= 0 || container.clientHeight <= 0) return;
   fit.fit();
   if (terminal.cols === lastSize.cols && terminal.rows === lastSize.rows) return;
@@ -129,11 +175,20 @@ window.paneTerminal = {
         break;
       case 'scrollToBottom':
         terminal.scrollToBottom();
+        if (grid) container.scrollTop = container.scrollHeight;
+        break;
+      case 'grid':
+        grid = { cols: command.cols, rows: command.rows };
+        layoutGrid(grid);
+        break;
+      case 'pan':
+        pan(command.dx, command.dy);
         break;
       case 'theme':
         document.body.style.backgroundColor = command.theme.background ?? '';
         terminal.options.theme = command.theme;
-        if (terminal.options.fontSize !== command.fontSize) {
+        if (baseFontSize !== command.fontSize) {
+          baseFontSize = command.fontSize;
           terminal.options.fontSize = command.fontSize;
           refit();
         }

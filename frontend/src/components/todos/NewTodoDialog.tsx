@@ -243,7 +243,7 @@ export function NewTodoDialog({ onClose, onCreated }: NewTodoDialogProps) {
   ];
   const machineItems: DropdownItem[] = [
     { id: LOCAL_MACHINE_ID, label: thisMachine, onClick: () => setMachineId(LOCAL_MACHINE_ID) },
-    ...machines.map(machine => ({
+    ...machines.filter(machine => machine.access !== 'read').map(machine => ({
       id: machine.id,
       label: machine.label,
       disabled: machine.status !== 'online',

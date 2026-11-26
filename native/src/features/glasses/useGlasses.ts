@@ -6,6 +6,7 @@ import { revokeGlassesOnComputers } from '@shared/glassesRevoke';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import { boundary, decodeOptionalBoundary } from '@shared/validation/boundaryDecoder';
 
+import { isReadOnlyProfile } from '@/auth/access';
 import { useActiveHost, useHostsStore } from '@/auth/hostsStore';
 import { secureStore } from '@/auth/secureStore';
 import { createDaemonClient, DEVICE_LABEL, getRuntimeId } from '@/daemon/createClient';
@@ -68,7 +69,8 @@ async function readPending(): Promise<string[]> {
 export function useGlasses() {
   const queryClient = useQueryClient();
   const active = useActiveHost();
-  const profiles = useHostsStore(state => state.profiles);
+  // A computer this phone is paired Read only with never pairs its glasses.
+  const profiles = useHostsStore(state => state.profiles).filter(profile => !isReadOnlyProfile(profile));
   const directory: RemotePaneConnectionProfile | null = active?.tailnetMachine
     ? active
     : profiles.find(profile => profile.tailnetMachine) ?? null;

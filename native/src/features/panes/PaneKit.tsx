@@ -11,11 +11,13 @@ import { Icon, Skeleton, Text } from '@/ui';
  */
 
 /** `rounded-md p-2` icon button; `size` is its square footprint. */
-export function IconButton({ label, onPress, testID, disabled, size = 32, children }: {
+export function IconButton({ label, onPress, testID, disabled, expanded, size = 32, children }: {
   label: string;
   onPress: () => void;
   testID?: string;
   disabled?: boolean;
+  /** Set on a button that shows or hides rows. */
+  expanded?: boolean;
   size?: number;
   children: ReactNode;
 }) {
@@ -25,7 +27,7 @@ export function IconButton({ label, onPress, testID, disabled, size = 32, childr
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled }}
+      accessibilityState={{ disabled, expanded }}
       disabled={disabled}
       hitSlop={Math.max(0, (44 - size) / 2)}
       onPress={onPress}

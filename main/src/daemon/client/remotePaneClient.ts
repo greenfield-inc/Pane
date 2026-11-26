@@ -1,3 +1,5 @@
+import { tokenAccess } from '../../../../shared/types/accessLevel';
+import { READ_ONLY_HOST_ANSWERS } from '../../../../shared/remoteClient/readOnlyHost';
 import { decodeUpdateIntent } from '../../../../shared/remoteClient/updateIntent';
 import { pinnedServerIdentity } from '../relay/keyPinning';
 import { DirectPath } from '../relay/directPath';
@@ -1460,6 +1462,10 @@ export class RemotePaneClientController extends EventEmitter {
     }
 
     const client = this.activeClient;
+    if (this.state.access === 'read') {
+      const answer = READ_ONLY_HOST_ANSWERS.get(channel);
+      if (answer !== undefined) return answer;
+    }
     // A host that de-duplicates writes lets one issued while reconnecting wait for the connection.
     const waits = this.state.status === 'reconnecting' && client.resendsWrites;
     if (this.state.status !== 'connected' && !waits && !REMOTE_READ_CHANNELS.has(channel)
@@ -1800,6 +1806,8 @@ export class RemotePaneClientController extends EventEmitter {
     });
 
     let hostChanged = options.resolveOnReady === true;
+    // The credential's own level: nothing the host says changes it.
+    const access = [savedProfile, ...routes.map((route) => route.profile)].some((route) => tokenAccess(route.token) === 'read') ? 'read' as const : undefined;
     const client = new RemotePaneClient(profile, {
       dnsLookup: this.dnsLookup,
       routes: routes.length === 1 ? [{ ...routes[0], profile }] : routes,
@@ -1851,6 +1859,7 @@ export class RemotePaneClientController extends EventEmitter {
           activeBaseUrl: client.profile.baseUrl,
           activeRouteId: metadata?.routeId ?? null,
           updateIntent: status === 'connected' ? null : this.state.updateIntent,
+          access,
           lastError: errorMessage ?? null,
           lastSeenAt: metadata?.lastSeenAt ?? this.getLastSeenAtForProfile(profile.id, status),
         });
@@ -1889,6 +1898,7 @@ export class RemotePaneClientController extends EventEmitter {
           activeProfileId: profile.id,
           activeProfileLabel: profile.label,
           activeBaseUrl: profile.baseUrl,
+          access,
           lastError: getErrorMessage(error, `Failed to connect to "${profile.label}"`),
           lastSeenAt: null,
         });
@@ -1916,6 +1926,7 @@ export class RemotePaneClientController extends EventEmitter {
         activeProfileId: profile.id,
         activeProfileLabel: profile.label,
         activeBaseUrl: profile.baseUrl,
+        access,
         lastError: getErrorMessage(error, `Failed to connect to "${profile.label}"`),
         lastSeenAt: null,
       });
@@ -1957,6 +1968,8 @@ export class RemotePaneClientController extends EventEmitter {
    * ports, tabs keep the last list, or an empty one until a retry succeeds; the tunnel is untouched.
    */
   private async listTunnelledPorts(client: RemotePaneClient): Promise<JsonValue | ListeningPortsSnapshot | undefined> {
+    // A read-only host lists no ports and forwards none.
+    if (this.state.access === 'read') return { host: client.profile.label, ports: [] };
     let listed: JsonValue | undefined;
     try {
       listed = await client.invoke(PORTS_LIST_CHANNEL, []);

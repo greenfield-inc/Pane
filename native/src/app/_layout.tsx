@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useActiveHost, useHostsStore } from '@/auth/hostsStore';
 import { DaemonProvider, queryClient } from '@/daemon';
+import { ReopenLastScreen } from '@/features/app/ReopenLastScreen';
 import { RelayComputerSync } from '@/features/hosts/RelayComputerSync';
 import { SharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
 import { NotificationTapRouter, NotifyAlertCleanup } from '@/features/notifications/NotificationRouting';
@@ -56,6 +57,7 @@ export default function RootLayout() {
                 <NotifyAlertCleanup />
                 <RelayComputerSync />
               </DaemonProvider>
+              <ReopenLastScreen hostId={activeHost.id} />
               <SharedCredentialSync />
               <PushRegistrationSync />
             </>

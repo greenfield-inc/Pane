@@ -105,7 +105,11 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
     <View style={[styles.bar, { borderBottomColor: colors.border, backgroundColor: colors.surfaceRaised }]}>
       <ScrollView
         ref={strip}
-        onLayout={event => { view.current.width = event.nativeEvent.layout.width; }}
+        onLayout={event => {
+          view.current.width = event.nativeEvent.layout.width;
+          // A narrower window (a fold, a turn) can push the open tab out of view.
+          revealSelected();
+        }}
         onScroll={event => { view.current.offset = event.nativeEvent.contentOffset.x; }}
         scrollEventThrottle={64}
         horizontal

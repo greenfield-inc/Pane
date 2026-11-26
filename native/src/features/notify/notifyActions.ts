@@ -1,5 +1,6 @@
 import type { NotificationAction } from 'expo-notifications';
 
+import { paneErrorText } from '@shared/paneError';
 import { createFetchEventStreamTransport, type RemoteFetch } from '@shared/remoteClient';
 import type { NotifyRemoteCommand } from '@shared/types/notify';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
@@ -97,7 +98,7 @@ const SEND_TIMEOUT_MS = 15_000;
 const responseSchema = boundary.object({
   ok: boundary.boolean,
   result: boundary.optional(boundary.json),
-  error: boundary.optional(boundary.object({ message: boundary.optional(boundary.string) })),
+  error: boundary.optional(boundary.object({ message: boundary.optional(boundary.string), next: boundary.optional(boundary.string) })),
 });
 
 /**
@@ -154,7 +155,7 @@ export async function sendDirect(
     if (!payload) return unconfirmed;
     if (payload.ok) return { status: 'sent', result: payload.result };
     // The host's own words, such as "Already answered on Parsa's MacBook. Nothing was sent."
-    return { status: 'refused', message: payload.error?.message ?? options.refused };
+    return { status: 'refused', message: payload.error?.message ? paneErrorText({ message: payload.error.message, next: payload.error.next }) : options.refused };
   } finally {
     clearTimeout(timer);
   }

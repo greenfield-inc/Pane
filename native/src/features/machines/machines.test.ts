@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { readOnlyToken } from '@shared/types/accessLevel';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { TailnetMachine, TailnetMachineList } from '@shared/types/workspaceAccess';
 
-import { listMachines, shortMachineName } from './machines';
+import { listMachines } from './machines';
 
 const DOMAIN = 'tail1234.ts.net';
 
@@ -76,6 +77,14 @@ describe('listMachines', () => {
     ]);
   });
 
+  it('marks a machine this phone only watches, by its token', () => {
+    const tyler = saved('tyler', { id: 'relay:tyler', token: readOnlyToken('a') });
+    const machines = listMachines({
+      profiles: [studio, devbox, tyler], current: studio, connection: 'connected', presence: 'connected', tailnet: undefined,
+    });
+    expect(machines.filter(machine => machine.readOnly).map(machine => machine.name)).toEqual(['tyler']);
+  });
+
   it('dims a saved machine that Tailscale reports offline, and does not let it be picked', () => {
     const machines = listMachines({
       profiles: [studio, devbox],
@@ -146,16 +155,5 @@ describe('listMachines', () => {
       tailnet: list([tailnet('build-box', 'Linux', 'available')]),
     });
     expect(machines.map(machine => [machine.name, machine.slot])).toEqual([['studio-mac', 4], ['build-box', 3]]);
-  });
-});
-
-describe('shortMachineName', () => {
-  it('keeps the first characters and adds an ellipsis', () => {
-    expect(shortMachineName('parsa-4090m-workstation-win11pro', 10)).toBe('parsa-4090…');
-    expect(shortMachineName('parsas-macbook-pro', 5)).toBe('parsa…');
-  });
-
-  it('leaves a name that fits', () => {
-    expect(shortMachineName('studio-mac', 10)).toBe('studio-mac');
   });
 });

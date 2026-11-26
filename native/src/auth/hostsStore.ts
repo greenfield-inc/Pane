@@ -7,6 +7,7 @@ import { queryClient } from '@/daemon/queryClient';
 import { createSavedState } from '@/daemon/savedState';
 import { savedStateFiles } from '@/daemon/savedStateFiles';
 import { DEMO_PROFILE, resetDemoHost } from '@/features/demo/demoHost';
+import { useOpenSessions } from '@/features/panes/useOpenSessions';
 import { forgetKeptScreens } from '@/features/terminal/keptScreens';
 
 import { addHost, addHosts, EMPTY_HOSTS, loadHosts, removeHost, saveHosts, type SavedHosts } from './hosts';
@@ -37,10 +38,11 @@ export const useHostsStore = create<HostsState>((set, get) => {
   });
   const commit = async (next: SavedHosts) => {
     const { profiles, activeId } = get();
-    // A computer removed, signed out or paired again under a new id leaves no saved lists or terminal screens behind.
+    // A computer removed, signed out or paired again under a new id leaves no saved lists, open Sessions or terminal screens behind.
     for (const profile of profiles) {
       if (next.profiles.some(kept => kept.id === profile.id)) continue;
       savedState.forget(profile.id);
+      useOpenSessions.getState().forget(profile.id);
       forgetKeptScreens(profile.id);
     }
     // Pairing or picking a real computer ends the demo.
@@ -58,6 +60,7 @@ export const useHostsStore = create<HostsState>((set, get) => {
       // Files of computers no longer saved (a backup restored, an older sign-out) are deleted.
       savedState.keepOnly(hosts.profiles.map(profile => profile.id));
       for (const profile of hosts.profiles) savedState.restore(profile.id);
+      useOpenSessions.getState().restore(hosts.profiles.map(profile => profile.id));
       set({ ...hosts, hydrated: true });
     },
     add: profile => commit(addHost(get(), profile)),
@@ -71,6 +74,7 @@ export const useHostsStore = create<HostsState>((set, get) => {
     startDemo: () => {
       // Every demo starts from the same sample data, with nothing cached from the last one.
       resetDemoHost();
+      useOpenSessions.getState().forget(DEMO_PROFILE.id);
       queryClient.removeQueries({ queryKey: [DEMO_PROFILE.id] });
       set({ demo: true });
     },

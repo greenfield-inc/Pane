@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../../../stores/readOnlyHostStore';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { BarChart3, ExternalLink, Image as ImageIcon, ListTodo, MessageSquareMore, MoreHorizontal, Plus, X, type LucideIcon } from 'lucide-react';
 import { leadingQn } from '../../../../../shared/autopilotDecision';
@@ -235,7 +236,7 @@ function AttachButton({ detail, onAttached }: { detail: TodoDetail; onAttached: 
   return attaching
     ? <AttachField number={detail.todo.number} onAttached={onAttached} onClose={() => setAttaching(false)} className="my-auto ml-1" />
     : (
-      <button type="button" onClick={() => setAttaching(true)} aria-label="Attach a file or link" title="Attach a file or link" className="my-auto ml-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-tertiary hover:bg-surface-hover hover:text-text-primary" data-testid="todo-split-attach">
+      <button type="button" onClick={() => setAttaching(true)} aria-label="Attach a file or link" title="Attach a file or link" className="needs-full-access my-auto ml-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-tertiary hover:bg-surface-hover hover:text-text-primary" data-testid="todo-split-attach">
         <Plus className="h-3.5 w-3.5" aria-hidden="true" />
       </button>
     );
@@ -331,6 +332,7 @@ function StripTab({ icon: Icon, label, title, active, id, controls, onPick, onCl
 /** A file or page attached to the to-do: the file bar, then a URL as a page, or a file from the to-do's machine. */
 function SplitAttachment({ detail, attachment, from }: { detail: TodoDetail; attachment: TodoAttachment; from?: number }) {
   const now = useNow();
+  const readOnly = useReadOnlyHost();
   const act = useTodosStore((state) => state.act);
   const activeMachineId = useAllMachinesStore((state) => state.entries.find((entry) => entry.active)?.id ?? LOCAL_MACHINE_ID);
   const machineId = detail.machineId ?? LOCAL_MACHINE_ID;
@@ -340,7 +342,7 @@ function SplitAttachment({ detail, attachment, from }: { detail: TodoDetail; att
   const revealLabel = isMac() ? 'Reveal in Finder' : isWindows() ? 'Show in Explorer' : 'Show in folder';
   const menu = [
     { id: 'reveal', label: revealLabel, disabled: web || !here, onClick: () => revealAttachment(attachment) },
-    { id: 'detach', label: 'Detach', variant: 'danger' as const, disabled: from !== undefined, description: from !== undefined ? `Attached to T-${from}` : undefined, onClick: () => void act({ kind: 'detach', number: detail.todo.number, attachmentId: attachment.id }) },
+    ...(readOnly ? [] : [{ id: 'detach', label: 'Detach', variant: 'danger' as const, disabled: from !== undefined, description: from !== undefined ? `Attached to T-${from}` : undefined, onClick: () => void act({ kind: 'detach', number: detail.todo.number, attachmentId: attachment.id }) }]),
   ];
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="todo-split-attachment" data-attachment={attachment.id}>

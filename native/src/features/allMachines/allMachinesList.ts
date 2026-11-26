@@ -4,7 +4,7 @@ import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSess
 import type { TerminalPausedMark } from '@shared/types/panels';
 import type { PanePermissionRequest } from '@shared/types/permissions';
 
-import { answeredItems, approvalAt, approvalItems, isWithAgent, sessionKey, staleItems, waitingCounts, type OfflineMachine } from '@/features/approvals/approvals';
+import { answeredItems, approvalAt, approvalItems, isWithAgent, staleItems, type OfflineMachine } from '@/features/approvals/approvals';
 import { paneAgent, paneDisplayStatus, type AgentStatusSnapshot } from '@/features/panes/agentStatus';
 import type { ProjectWithPanes } from '@/features/panes/paneList';
 
@@ -81,7 +81,7 @@ export interface AllPane {
   name: string;
   repository: string;
   /** The Session this Pane works for, when one does. */
-  session?: string;
+  session?: { id: string; name: string };
   pinned: boolean;
   status: AgentDisplayStatus;
   agent?: string;
@@ -97,8 +97,6 @@ export type RecentRow =
     session: OrchestrationSessionRecord;
     paneCount: number;
     activeAt: number;
-    /** The approvals waiting from this Session on its machine: the row's amber count. */
-    waiting: number;
   };
 
 export interface AllMachinesList {
@@ -149,8 +147,8 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
         paneNames.set(pane.id, pane.name);
         projectOfPane.set(pane.id, project.name);
         if (pane.archived || pane.isHidden) continue;
-        const session = sessionOf.get(pane.id)?.name;
-        if (!matches(pane.name, project.name, session, machine.name)) continue;
+        const session = sessionOf.get(pane.id);
+        if (!matches(pane.name, project.name, session?.name, machine.name)) continue;
         recent.push({
           ...base('pane', pane.id),
           type: 'pane',
@@ -171,7 +169,7 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
     for (const session of sessions) {
       if (!matches(session.name, machine.name)) continue;
       const paneCount = session.associations.filter(association => paneNames.has(association.paneId)).length;
-      recent.push({ ...base('session', session.id), type: 'session', session, paneCount, activeAt: timeOf(session.updatedAt) ?? 0, waiting: 0 });
+      recent.push({ ...base('session', session.id), type: 'session', session, paneCount, activeAt: timeOf(session.updatedAt) ?? 0 });
     }
     // A machine that isn't online shows one row with its count, never cards you can't act on.
     if (machine.offlineSince !== undefined) {
@@ -205,16 +203,12 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
 
   const questionTime = (row: WaitingRow) => (row.type === 'question' ? row.item.createdAt : 0);
   const recentTime = (row: RecentRow) => (row.type === 'pane' ? row.pane.activeAt : row.activeAt);
-  const waiting = [...questions.sort((a, b) => questionTime(a) - questionTime(b)), ...permissions];
-  const counts = waitingCounts(waiting).bySession;
   return {
-    waiting,
+    waiting: [...questions.sort((a, b) => questionTime(a) - questionTime(b)), ...permissions],
     staleQuestions: staleQuestions.sort((a, b) => a.item.createdAt - b.item.createdAt),
     answered: answered.sort((a, b) => (b.item.resolvedAt ?? b.item.createdAt) - (a.item.resolvedAt ?? a.item.createdAt)),
     offline,
-    recent: recent
-      .map(row => (row.type === 'session' ? { ...row, waiting: counts.get(sessionKey(row.machineKey, row.session.id)) ?? 0 } : row))
-      .sort((a, b) => recentTime(b) - recentTime(a)),
+    recent: recent.sort((a, b) => recentTime(b) - recentTime(a)),
   };
 }
 

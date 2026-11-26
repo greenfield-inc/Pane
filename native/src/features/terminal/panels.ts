@@ -40,9 +40,12 @@ const STRIP_GROUP: Record<ToolPanelType, number> = {
   device: 1,
 };
 
-/** Every tab of a pane, in strip order; each group keeps the pane's tab order. */
-export function stripPanels(panels: readonly ToolPanel[]): ToolPanel[] {
-  return [...panels].sort((a, b) => STRIP_GROUP[a.type] - STRIP_GROUP[b.type] || a.metadata.position - b.metadata.position);
+/**
+ * Every tab of a pane, in strip order; each group keeps the pane's tab order. A phone paired Read
+ * only gets terminals and chats, also from a list saved before.
+ */
+export function stripPanels(panels: readonly ToolPanel[], readOnly = false): ToolPanel[] {
+  return panels.filter(panel => !readOnly || panel.type === 'terminal' || panel.type === 'chat').sort((a, b) => STRIP_GROUP[a.type] - STRIP_GROUP[b.type] || a.metadata.position - b.metadata.position);
 }
 
 /**

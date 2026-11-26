@@ -6,7 +6,7 @@ import type { ChatPanelState } from '@shared/types/chatTab';
 import type { OrchestrationSessionOverview } from '@shared/types/orchestrationSession';
 import type { ToolPanel } from '@shared/types/panels';
 
-import { useDaemonEvent, useInvokeQuery } from '@/daemon';
+import { useDaemonEvent, useInvokeQuery, useReadOnlyHost } from '@/daemon';
 
 import { ChatTabScreen } from './ChatTabScreen';
 
@@ -33,12 +33,13 @@ export function ChatTabBody({ panel, panels }: { panel: ToolPanel; panels: reado
   // SAFETY: the panel type 'chat' carries ChatPanelState as its custom state.
   const state = panel.state.customState as ChatPanelState | undefined;
   const sessionId = state?.orchestrationSessionId;
+  const readOnly = useReadOnlyHost();
   const workers = useSessionWorkers(sessionId);
   const diffId = panels.find(candidate => candidate.type === 'diff')?.id;
   const viewDiff = useCallback(() => router.setParams({ panelId: diffId }), [diffId]);
   return <ChatTabScreen key={panel.id} panelId={panel.id} workers={workers}
     placeholder={sessionId ? 'Ask the Session anything' : undefined}
     onOpenWorker={openWorker}
-    onOpenDevice={openDevice}
+    onOpenDevice={readOnly ? undefined : openDevice}
     onViewDiff={diffId ? viewDiff : undefined} />;
 }

@@ -363,7 +363,10 @@ export function machineViews(state: Pick<AllMachinesState, 'machines' | 'snapsho
   const menuPlace = new Map(state.entries.map((entry, index) => [entry.id, index]));
   const place = (id: string) => menuPlace.get(id) ?? state.entries.length;
   return [...state.machines].sort((a, b) => place(a.id) - place(b.id)).map((machine) => ({
-    machine: entries.get(machine.id) ?? { id: machine.id, name: machine.label, os: null, slot: 0, letters: machineLetter(machine.label) },
+    machine: {
+      ...(entries.get(machine.id) ?? { id: machine.id, name: machine.label, os: null, slot: 0, letters: machineLetter(machine.label) }),
+      ...(machine.access === 'read' && { readOnly: true }),
+    },
     snapshot: state.snapshots[machine.id] ?? null,
     offline: isMachineDimmed(machine, now),
   }));

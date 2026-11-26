@@ -16,10 +16,11 @@ import {
 import { createComputerTlsServer, type ComputerTlsServer, type ForwardedClient } from './computerTlsServer';
 import { trackCertificateIssued } from '../../services/pairingAnalytics';
 import { computerHost, localAddressHost } from './computerNames';
-import { PairingExchange, type PairingExchangeRequest, type PairingExchangeResult, type PairingRefusal } from './pairingExchange';
+import { PairingExchange, type PairingCheck, type PairingExchangeRequest, type PairingExchangeResult } from './pairingExchange';
 import { RelayAgent, RelayRequestError, type RelayAgentState, type RelayAlert, type RelayGrantRequest } from './relayAgent';
 import { findPaneDirect, PaneDirectProcess } from './paneDirect';
 import { DEFAULT_RELAY_DOMAIN } from '../../../../shared/remoteClient/relay';
+import type { ReadOnlyMark } from '../../../../shared/types/accessLevel';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 
 const PANE_RELAYS = ['us', 'eu', 'asia', 'west'].map((region) => `${region}.relay.${DEFAULT_RELAY_DOMAIN}`);
@@ -215,7 +216,7 @@ export class RelayService {
   }
 
   /** A one-time QR code or link, 10 minutes unless the link asks for longer. Throws while the relay is not ready. */
-  createPairingCode(lifetime: RelayLinkLifetime = '10m'): RelayPairingInfo {
+  createPairingCode(lifetime: RelayLinkLifetime = '10m', access?: ReadOnlyMark): RelayPairingInfo {
     const status = this.getStatus();
     if (status.phase !== 'ready' || !status.id || !status.domain) {
       throw new PaneError(
@@ -224,13 +225,13 @@ export class RelayService {
         'Try again in a moment; Settings › Remote Access shows when phone access is ready.',
       );
     }
-    const { secret, expiresAt } = this.exchange.createSecret(lifetime);
+    const { secret, expiresAt } = this.exchange.createSecret(lifetime, access);
     const fragment = new URLSearchParams({ s: secret, c: status.id, n: this.deps.displayName().slice(0, 60) });
     return { url: `https://${status.domain}/pair#${fragment.toString()}`, expiresAt };
   }
 
   /** The pairing listener's `POST /pair/preview`: whether a secret would trade, without spending it. */
-  checkSecret(secret: string, source: string): { ok: true; expiresAt: string } | PairingRefusal {
+  checkSecret(secret: string, source: string): PairingCheck {
     return this.exchange.check(secret, source);
   }
 

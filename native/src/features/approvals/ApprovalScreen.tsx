@@ -252,7 +252,7 @@ function ApprovalTopBar({ position, onNext }: { position: string | null; onNext?
             <Text variant="headline" numberOfLines={1}>Approvals</Text>
             {position ? <Text testID="approval-position" variant="subhead" tone="muted" numberOfLines={1}>{position}</Text> : null}
           </View>
-          {current ? <MachineBadge machine={current} /> : null}
+          {current ? <MachineBadge machine={current} full /> : null}
           <Pressable
             testID="approval-next"
             accessibilityRole="button"

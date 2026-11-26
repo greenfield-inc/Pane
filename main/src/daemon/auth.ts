@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
+import { readOnlyToken, tokenAccess, type ReadOnlyMark } from '../../../shared/types/accessLevel';
 import type { RemoteDaemonClientRecord } from '../../../shared/types/remoteDaemon';
 
 interface RemoteDaemonAuthSuccess {
@@ -25,6 +26,23 @@ export function hashRemoteDaemonToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+/**
+ * The hash a device's record keeps. A read-only device's is half of a SHA-512, as long as a SHA-256.
+ * A Pane from before access levels ignores `access` and compares a SHA-256 of what it is sent, and
+ * nothing anyone can send has that SHA-256, so it refuses the device.
+ */
+export function hashDeviceToken(token: string, access?: ReadOnlyMark): string {
+  return access === 'read'
+    ? createHash('sha512').update(token).digest().subarray(0, 32).toString('hex')
+    : hashRemoteDaemonToken(token);
+}
+
+/** A new token for a device paired at this level. */
+export function newDeviceToken(access?: ReadOnlyMark): string {
+  const random = randomBytes(32).toString('base64url');
+  return access === 'read' ? readOnlyToken(random) : random;
+}
+
 export function authenticateRemoteDaemonBearerToken(
   authorizationHeader: string | string[] | undefined,
   clients: readonly RemoteDaemonClientRecord[],
@@ -41,8 +59,10 @@ export function authenticateRemoteDaemonBearerToken(
     };
   }
 
-  const tokenHash = hashRemoteDaemonToken(token);
-  const client = clients.find((candidate) => safeTokenHashEquals(candidate.tokenHash, tokenHash));
+  // The token and its record must agree on the level; a record whose level went missing matches no token.
+  const access = tokenAccess(token);
+  const tokenHash = hashDeviceToken(token, access);
+  const client = clients.find((candidate) => candidate.access === access && safeTokenHashEquals(candidate.tokenHash, tokenHash));
   if (!client) {
     return {
       ok: false,

@@ -1,3 +1,4 @@
+import type { ReadOnlyMark } from './accessLevel';
 import type { ComputerRoutesReport } from './remoteComputers';
 
 /** Phone access through a relay (QR pairing), as Remote Access shows it. */
@@ -67,11 +68,11 @@ export interface RelayComputerGrant {
   token: string;
 }
 
-/** A computer redeeming a link: who it is, its routes, and a token it made for the link's maker to call it. */
+/** A computer redeeming a link: who it is, its routes, and a token it made for the link's maker to call it. A read-only link takes only who it is. */
 export interface RelayComputerOffer {
   computer: RelayComputer;
   routes?: ComputerRoutesReport;
-  token: string;
+  token?: string;
 }
 
 /** `POST /pair/exchange` body. `phoneId` is the app's stable install id, so "Remove from all your computers" finds the phone everywhere. */
@@ -107,19 +108,25 @@ export interface LinkPreview {
   /** This computer doesn't reach the maker yet, so the person confirms before it can run agents here. */
   needsConfirm: boolean;
   expiresAt: string;
+  /** "read" when the link shares its computers read-only: this computer watches them, and they can't reach it. */
+  access?: ReadOnlyMark;
 }
 
 /** `relay:redeem-link` result: the computers this one is now linked with. */
 export interface LinkRedeemResult {
   linked: string[];
+  /** "read" when the link was read-only. */
+  access?: ReadOnlyMark;
 }
 
 /** `relay:paired`: a phone or computer used this computer's link or QR code. */
 export interface RelayPairedEvent {
   kind: 'phone' | 'computer';
   label: string;
-  /** Computers only: its id in `client.computers`, for "Not you? Unlink". */
+  /** Computers linked both ways only: its id in `client.computers`, for "Not you? Unlink". */
   computerId?: string;
+  /** "read" when it paired Read only. */
+  access?: ReadOnlyMark;
 }
 
 /** `relay:link-opened`: a `pane://pair#…` link reached desktop Pane. */
@@ -151,6 +158,8 @@ export interface RelayDevice {
   linkedBy?: string;
   /** Computers only: its relay id. */
   computerId?: string;
+  /** "read" for a device paired Read only; remove it with `removePhoneEverywhere`, phone or computer. */
+  access?: ReadOnlyMark;
   connected: boolean;
   createdAt: string;
 }

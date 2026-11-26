@@ -6,7 +6,7 @@ import { Renderer } from 'react-native-marked';
 
 import type { RunpanePanelOpenRequest, RunpanePanelOpenResult } from '@shared/types/runpaneOrchestration';
 
-import { useInvokeMutation } from '@/daemon';
+import { useInvokeMutation, useReadOnlyHost } from '@/daemon';
 
 import { LINK_ACTION_LABELS, linkActions, type LinkAction } from './linkActions';
 
@@ -32,7 +32,9 @@ class LinkMenuRenderer extends Renderer {
  * beside the person's tab; the phone follows the host to it.
  */
 export function useLinkRenderer(): Renderer {
-  const paneId = use(LinkPane);
+  const pane = use(LinkPane);
+  // Opening a tab there would change it.
+  const paneId = useReadOnlyHost() ? undefined : pane;
   const open = useInvokeMutation<[RunpanePanelOpenRequest], RunpanePanelOpenResult>('runpane:panels:open', { invalidates: ['panels:list'] });
   const run = (action: LinkAction, url: string) => {
     if (action === 'pane' && paneId) {

@@ -1,4 +1,6 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'crypto';
+import { hashDeviceToken, newDeviceToken } from '../auth';
+import { readOnlyMarkSchema, type ReadOnlyMark } from '../../../../shared/types/accessLevel';
 import type { RemoteDaemonClientRecord } from '../../../../shared/types/remoteDaemon';
 import type { RelayLinkLifetime } from '../../../../shared/types/relay';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
@@ -24,6 +26,9 @@ export type PairingExchangeResult =
   | { ok: true; token: string; client: RemoteDaemonClientRecord }
   | PairingRefusal;
 
+/** Whether a secret would trade, and the access it gives. */
+export type PairingCheck = { ok: true; expiresAt: string; access?: ReadOnlyMark } | PairingRefusal;
+
 export interface PairingExchangeRequest {
   secret: string;
   label: string;
@@ -40,10 +45,13 @@ interface SourceFailures {
 }
 
 interface Pending {
+  /** Of the secret, as a token of its level is kept (`hashDeviceToken`), so an older Pane refuses a read-only link. */
   hash: Buffer;
   lifetime: RelayLinkLifetime;
   expiresAt: number;
   spentAt: number | null;
+  /** "read" for a read-only link; absent for full access. */
+  access?: ReadOnlyMark;
 }
 
 /** Where waiting links are kept across restarts: only their hashes, lifetimes and times. */
@@ -57,6 +65,7 @@ const savedSchema = boundary.array(boundary.object({
   lifetime: boundary.enumeration('10m', '1h', '24h'),
   expiresAt: boundary.number,
   spentAt: boundary.nullable(boundary.number),
+  access: boundary.optional(readOnlyMarkSchema),
 }));
 
 interface PairingExchangeDeps {
@@ -67,8 +76,8 @@ interface PairingExchangeDeps {
   log?: (line: string) => void;
 }
 
-function sha256(value: string): Buffer {
-  return createHash('sha256').update(value).digest();
+function hashOf(secret: string, access?: ReadOnlyMark): Buffer {
+  return Buffer.from(hashDeviceToken(secret, access), 'hex');
 }
 
 function cleanLabel(label: string, fallback: string): string {
@@ -90,7 +99,7 @@ export class PairingExchange {
 
   constructor(private readonly deps: PairingExchangeDeps) {
     this.now = deps.now ?? Date.now;
-    let saved: Array<{ hash: string; lifetime: RelayLinkLifetime; expiresAt: number; spentAt: number | null }> = [];
+    let saved: ReturnType<typeof savedSchema.decode> = [];
     try {
       const text = deps.store?.read() ?? null;
       saved = (text === null ? undefined : decodeOptionalBoundary(JSON.parse(text), savedSchema)) ?? [];
@@ -110,25 +119,30 @@ export class PairingExchange {
     }
   }
 
-  /** A new secret. At most 16 wait at once: a 17th spends the oldest 10-minute one, else the oldest. */
-  createSecret(lifetime: RelayLinkLifetime = '10m') {
+  /** A new secret; what it pairs gets `access`. At most 16 wait at once: a 17th spends the oldest 10-minute one, else the oldest. */
+  createSecret(lifetime: RelayLinkLifetime = '10m', access?: ReadOnlyMark) {
     const now = this.now();
     this.prune(now);
     const waiting = this.pending.filter((entry) => entry.spentAt === null && now <= entry.expiresAt);
     if (waiting.length >= MAX_PENDING) (waiting.find((entry) => entry.lifetime === '10m') ?? waiting[0]).spentAt = now;
     const secret = randomBytes(32).toString('base64url');
     const expiresAt = now + LINK_LIFETIME_MS[lifetime];
-    this.pending.push({ hash: sha256(secret), lifetime, expiresAt, spentAt: null });
+    const entry: Pending = { hash: hashOf(secret, access), lifetime, expiresAt, spentAt: null };
+    if (access) entry.access = access;
+    this.pending.push(entry);
     this.save();
     return { secret, expiresAt: new Date(expiresAt).toISOString() };
   }
 
   /** Whether a secret would trade now, without spending it. Wrong secrets count toward the lockout. */
-  check(secret: string, source: string): { ok: true; expiresAt: string } | PairingRefusal {
+  check(secret: string, source: string): PairingCheck {
     const now = this.now();
     this.prune(now);
     const found = this.find(secret, source, now);
-    return found.ok ? { ok: true, expiresAt: new Date(found.entry.expiresAt).toISOString() } : found;
+    if (!found.ok) return found;
+    const checked: PairingCheck = { ok: true, expiresAt: new Date(found.entry.expiresAt).toISOString() };
+    if (found.entry.access) checked.access = found.entry.access;
+    return checked;
   }
 
   async exchange({ secret, label, phoneId, computerId, source }: PairingExchangeRequest): Promise<PairingExchangeResult> {
@@ -138,13 +152,14 @@ export class PairingExchange {
     if (!found.ok) return found;
     found.entry.spentAt = now;
     this.save();
-    const token = randomBytes(32).toString('base64url');
+    const token = newDeviceToken(found.entry.access);
     const client: RemoteDaemonClientRecord = {
       id: randomUUID(),
       label: cleanLabel(label, computerId ? 'Computer' : 'Phone'),
       createdAt: new Date(now).toISOString(),
-      tokenHash: sha256(token).toString('hex'),
+      tokenHash: hashDeviceToken(token, found.entry.access),
     };
+    if (found.entry.access) client.access = found.entry.access;
     if (computerId) {
       client.kind = 'computer';
       client.computerId = computerId;
@@ -159,8 +174,9 @@ export class PairingExchange {
     if (now < (this.sources.get(source)?.lockedUntil ?? 0)) {
       return { ok: false, status: 429, code: 'ERR_PAIRING_LOCKED', message: 'Too many wrong pairing codes from this network. Try again in 15 minutes.' };
     }
-    const presented = sha256(secret);
-    const entry = this.pending.find((candidate) => timingSafeEqual(candidate.hash, presented));
+    const presented = hashOf(secret);
+    const presentedRead = hashOf(secret, 'read');
+    const entry = this.pending.find((candidate) => timingSafeEqual(candidate.hash, candidate.access === 'read' ? presentedRead : presented));
     if (!entry) {
       this.recordFailure(source, now);
       return { ok: false, status: 403, code: 'ERR_PAIRING_CODE_INVALID', message: 'This computer has no such link or code waiting, so nothing was paired. Ask for a new link, or scan the code it shows now.' };

@@ -14,6 +14,10 @@ export type TerminalCommand =
   | { type: 'write'; data: string }
   | { type: 'scroll'; lines: number }
   | { type: 'scrollToBottom' }
+  /** Watching: draw at exactly the owner's size, in a smaller font where that fits, with `pan` for the rest. */
+  | { type: 'grid'; cols: number; rows: number }
+  /** Moves the view over a fixed grid by pixels; past its top or bottom edge, the scrollback scrolls. */
+  | { type: 'pan'; dx: number; dy: number }
   | { type: 'theme'; theme: TerminalTheme; fontSize: number };
 
 /** Page → native. */

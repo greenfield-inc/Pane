@@ -1,3 +1,4 @@
+import { isReadOnlyHost } from '../stores/readOnlyHostStore';
 import type { TerminalPausedMark } from '../../../shared/types/panels';
 import { DEFAULT_AUTO_PAUSE_HOURS } from '../../../shared/types/autoPause';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -70,6 +71,6 @@ export async function runPauseAction(target: PauseTarget, paused: boolean): Prom
  * mounts, retries and remote reads never count as opening.
  */
 export function resumeIfOpenResumes(target: PauseTarget, paused: boolean): void {
-  if (!paused || useConfigStore.getState().config?.resumePausedOnOpen !== true) return;
+  if (!paused || isReadOnlyHost() || useConfigStore.getState().config?.resumePausedOnOpen !== true) return;
   void runPauseAction(target, false);
 }

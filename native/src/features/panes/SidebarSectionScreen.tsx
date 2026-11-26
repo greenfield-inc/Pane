@@ -5,7 +5,8 @@ import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { buildAllMachinesList } from '@/features/allMachines/allMachinesList';
-import { sessionKey, waitingCounts } from '@/features/approvals/approvals';
+import { sessionKey } from '@/features/approvals/approvals';
+import { sessionWaiting } from '@/features/home/statusBoard';
 import { useCurrentMachine } from '@/features/home/useHomeData';
 import { ConnectionBar, Dimmed } from '@/features/hosts/ConnectionStatus';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
@@ -15,7 +16,8 @@ import { SkeletonSwap } from '@/ui';
 import { useArchivedProjects } from './hooks';
 import { LoadingRows, Notice } from './PaneKit';
 import { buildSidebar, type SidebarSection } from './paneList';
-import { SidebarItemView, toggleMember } from './SidebarItemView';
+import { SidebarItemView } from './SidebarItemView';
+import { useOpenSessions } from './useOpenSessions';
 import { usePaneActions } from './usePaneActions';
 
 const TITLES: Record<Exclude<SidebarSection, 'pinned'>, string> = { sessions: 'Sessions', repositories: 'Repositories', archived: 'Archived' };
@@ -38,11 +40,12 @@ export function SidebarSectionScreen() {
   const here = useCurrentMachine({ unreachable: presence === 'unreachable', retry });
   const actions = usePaneActions();
   const archived = useArchivedProjects(section === 'archived');
-  const [collapsedSessions, setCollapsedSessions] = useState<ReadonlySet<string>>(new Set());
+  const openSessions = useOpenSessions(state => state.open[here.profile.id]) ?? [];
+  const toggleSession = useOpenSessions(state => state.toggle);
   const [refreshing, setRefreshing] = useState(false);
   const board = buildAllMachinesList([here.feed], '');
   const statusOf = new Map(board.recent.flatMap(row => (row.type === 'pane' ? [[row.pane.id, row.pane] as const] : [])));
-  const waitingBySession = waitingCounts(board.waiting).bySession;
+  const waitingBySession = sessionWaiting(board);
   const items = buildSidebar({
     projects: here.projects.data ?? [],
     sessions: here.sessions.unavailable ? 'unavailable' : here.sessions.data?.sessions ?? (here.sessions.isError ? [] : undefined),
@@ -50,7 +53,7 @@ export function SidebarSectionScreen() {
     archivedProjects: archived.data,
     archivedError: archived.isError ? archived.error.message : undefined,
     expanded: { pinned: false, sessions: false, repositories: false, archived: false, [section]: true },
-    collapsedSessions,
+    openSessions,
     query: '',
     lookup: {
       status: paneId => statusOf.get(paneId)?.status ?? 'unknown',
@@ -101,7 +104,7 @@ export function SidebarSectionScreen() {
                   actions,
                   waitingFor: sessionId => waitingBySession.get(sessionKey(here.profile.id, sessionId)) ?? 0,
                   onToggleSection: () => undefined,
-                  onToggleNested: nestedKey => setCollapsedSessions(current => toggleMember(current, nestedKey)),
+                  onToggleSession: sessionId => toggleSession(here.profile.id, sessionId),
                   retry: what => void (what === 'archived' ? archived.refetch() : here.sessions.refetch()),
                 }}
               />

@@ -13,7 +13,7 @@ import type { Machine } from '@/features/machines/machines';
 import { Notice } from '@/features/panes/PaneKit';
 import { describePermission } from '@/features/panes/permissions';
 import { PausedBadge, StatusBadge, statusPresentation } from '@/features/panes/StatusBadge';
-import { SwipeRow, swipeRowAccessibility } from '@/features/panes/SwipeRow';
+import { SwipeRow, useSwipeRowAccessibility } from '@/features/panes/SwipeRow';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
@@ -87,8 +87,10 @@ export function waitingRowText(row: WaitingRow): { title: string; detail: string
 }
 
 /** One row of All machines' every Pane and Session, newest first, with its machine's badge. */
-export function RecentRowView({ row, machine, currentKey, actions, onOpen }: {
+export function RecentRowView({ row, waiting, machine, currentKey, actions, onOpen }: {
   row: RecentRow;
+  /** What waits on the person in a Session's row. */
+  waiting: number;
   machine: Machine | undefined;
   currentKey: string;
   actions: CurrentMachineActions;
@@ -100,7 +102,7 @@ export function RecentRowView({ row, machine, currentKey, actions, onOpen }: {
     <AllRow
       testID={`all-pane-row-${row.key}`}
       title={row.pane.name}
-      detail={[row.pane.repository, row.pane.session, time].filter(Boolean).join(' · ')}
+      detail={[row.pane.repository, row.pane.session?.name, time].filter(Boolean).join(' · ')}
       label={paneLabel(row.pane, machine?.name)}
       machine={machine}
       stale={row.stale}
@@ -121,10 +123,10 @@ export function RecentRowView({ row, machine, currentKey, actions, onOpen }: {
       detail={['Session', row.paneCount === 1 ? '1 Pane' : row.paneCount > 1 ? `${row.paneCount} Panes` : undefined, time].filter(Boolean).join(' · ')}
       machine={machine}
       stale={row.stale}
-      label={[row.session.name || 'Untitled', 'Session', row.waiting > 0 ? `${row.waiting} waiting` : undefined, machine?.name].filter(Boolean).join(', ')}
+      label={[row.session.name || 'Untitled', 'Session', waiting > 0 ? `${waiting} waiting` : undefined, machine?.name].filter(Boolean).join(', ')}
       paused={Boolean(row.session.paused)}
       leading={row.session.paused ? <PausedBadge /> : <Icon ios="bubble.left" android="chat_bubble" size={12} />}
-      trailing={<WaitingCount testID={`all-session-waiting-${row.key}`} count={row.waiting} />}
+      trailing={<WaitingCount testID={`all-session-waiting-${row.key}`} count={waiting} />}
       onPress={onOpen}
       swipe={swipes ? {
         pinned: Boolean(row.session.isPinned),
@@ -175,7 +177,7 @@ export function allOffline(feeds: readonly AllMachinesFeed[]): boolean {
 }
 
 function paneLabel(pane: AllPane, machine: string | undefined): string {
-  return [pane.name, pane.repository, pane.session, pane.paused ? 'Paused' : statusPresentation[pane.status].label, machine].filter(Boolean).join(', ');
+  return [pane.name, pane.repository, pane.session?.name, pane.paused ? 'Paused' : statusPresentation[pane.status].label, machine].filter(Boolean).join(', ');
 }
 
 /** "9:14 AM" in the phone's own clock format. */
@@ -237,13 +239,14 @@ function AllRow({ title, detail, below, spoken = [], label, machine, stale, paus
   testID: string;
 }) {
   const theme = useTheme();
+  const accessibility = useSwipeRowAccessibility(swipe);
   const row = (
     <Pressable
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label ?? [title, paused ? 'Paused' : undefined, detail, ...spoken, machine?.name].filter(Boolean).join(', ')}
       accessibilityHint={stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
-      {...(swipe ? swipeRowAccessibility(swipe) : {})}
+      {...accessibility}
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,

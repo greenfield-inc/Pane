@@ -38,7 +38,7 @@ export function PhoneSessionTodos({ session, onOpen, onNew, onBack }: PhoneSessi
       <PhoneHeader
         title={entries && entries.length > 0 ? `To-dos · ${sessionOpenCount(entries)} open` : 'To-dos'}
         back={{ label: session.name, onBack }}
-        right={<button type="button" onClick={onNew} aria-label="New to-do" className={PHONE_ICON_BUTTON} data-testid="phone-todos-new"><Plus className="h-5 w-5" aria-hidden="true" /></button>}
+        right={<button type="button" onClick={onNew} aria-label="New to-do" className={`needs-full-access ${PHONE_ICON_BUTTON}`} data-testid="phone-todos-new"><Plus className="h-5 w-5" aria-hidden="true" /></button>}
       />
       <div className={PHONE_SCROLL} role="list" aria-label={`${session.name} to-dos`} data-testid="phone-session-todos-scroll">
         <SkeletonSwap loading={entries === null} skeleton={<PhoneTodoListSkeleton />}>

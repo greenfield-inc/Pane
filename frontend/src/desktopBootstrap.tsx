@@ -5,7 +5,9 @@ import App from './App';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { BrowserFallback } from './components/BrowserFallback';
-import { stripIpcWrapper } from './utils/ipcErrorMessage';
+import { ipcErrorCode, stripIpcWrapper } from './utils/ipcErrorMessage';
+import { READ_ONLY_ACCESS_CODE } from '../../shared/types/accessLevel';
+import { showActionError } from './stores/errorStore';
 import { startCaretRest } from './services/caretRest';
 import { startLaunchOutlineFallback } from './utils/launchOutline';
 import './styles/markdown-preview.css';
@@ -63,6 +65,13 @@ export function mountDesktopRenderer(): void {
       // The remote host dropped (sleep, a network change). The connection
       // status reports it and the client reconnects; this is not a crash.
       console.warn('Remote host unreachable:', event.reason);
+      event.preventDefault();
+      return;
+    }
+    if (ipcErrorCode(event.reason) === READ_ONLY_ACCESS_CODE) {
+      // Right after a click or key the person asked for it, so the host's reason shows; a background call nobody asked for doesn't.
+      if (navigator.userActivation?.isActive) showActionError('Read only', event.reason);
+      else console.warn('Refused by a read-only computer:', event.reason);
       event.preventDefault();
       return;
     }
