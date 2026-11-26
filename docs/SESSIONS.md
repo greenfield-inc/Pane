@@ -95,15 +95,20 @@ PowerShell or cmd, which can't take it on the launch line (turn on Chat tabs,
 or create without a message). Nothing in the draft is cleared. A Session that
 resumes with a custom command can't take a first message either: with launch
 settings left alone, a default custom resume is left out when there is a
-message; one you set in More options holds Create. Launch settings left alone
+message; a launch command you set in More options whose Settings resume template
+resumes holds Create. Launch settings left alone
 are the chosen agent's defaults; a profile sends none.
 
 **Create session** has a menu that switches it to **Create pane** (the project,
 base branch and Pane name), and Create New opens in that mode next time.
-**More options** holds every setting the old dialogs had: for a Session, what
-it's for, Start pinned, Run agent in (the Run on machine's WSL distributions),
-and the launch command and behavior; for a Pane, Start pinned, Use worktree and
-the number of Panes. Create is only on the main screen: **Back** returns there.
+**More options** holds the old dialogs' settings: for a Session, what it's for,
+Start pinned, Run agent in (the Run on machine's WSL distributions), and the
+launch command and behavior; for a Pane, Start pinned, Use worktree and the
+number of Panes. Create is only on the main screen: **Back** returns there.
+Create New has no resume options: Pane reconnects a chat Session itself, and
+Agent Farm resumes a profile or plain Claude or Codex. A custom launch command
+takes its resume template from Settings (a saved custom command's own, or
+**Settings › AI Agents › Session defaults** for the default command).
 A project's `+` opens Create New as a Pane in that project, on this computer.
 
 Session rows show the profile's avatar at the row's left padding (a profile's
@@ -298,8 +303,9 @@ not stored.
 
 ## Resuming custom launchers
 
-Use **Enable custom command resume** in Session launch settings or a saved custom
-command's editor. This is an explicit contract, independent of executable names.
+Use **Enable custom command resume** in Session launch settings (Settings › AI
+Agents › Session defaults, or the Create Session dialog with Profiles off) or a
+saved custom command's editor. This is an explicit contract, independent of executable names.
 Agent Farm is the one exception, described in [Agent Farm](#agent-farm) below.
 Choose a session ID source and provide first-launch and resume templates:
 
