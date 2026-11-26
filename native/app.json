@@ -2,7 +2,7 @@
   "expo": {
     "name": "Pane",
     "slug": "pane",
-    "version": "1.2",
+    "version": "1.3",
     "runtimeVersion": "1.6",
     "updates": {
       "url": "https://pane-native-updates-297294606300.us-central1.run.app/manifest",
@@ -30,7 +30,7 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocalNetworkUsageDescription": "Pane connects to Pane on computers on your local network."
       },
-      "buildNumber": "20",
+      "buildNumber": "21",
       "appleTeamId": "FBM5YSF467"
     },
     "android": {
@@ -40,7 +40,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 7,
+      "versionCode": 8,
       "intentFilters": [
         {
           "action": "VIEW",
