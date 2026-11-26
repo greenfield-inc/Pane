@@ -198,10 +198,9 @@ const SCROLL_ENTRIES: readonly ShortcutCatalogEntry[] = [
 /**
  * The controller scheme's commands (shared/controller/bindings.ts). They have
  * no default key; a keyboard user can bind any of them in Settings › Shortcuts.
- * They don't release from a terminal, so binding one never takes a key from it.
  */
 function controllerCommand(id: KeyboardShortcutId, label: string): ShortcutCatalogEntry {
-  return entry({ id, label, category: 'controller', scope: 'app', defaultChord: null, releaseFromTerminal: false, forwardFromWebview: false });
+  return entry({ id, label, category: 'controller', scope: 'app', defaultChord: null });
 }
 
 const CONTROLLER_ENTRIES: readonly ShortcutCatalogEntry[] = [
