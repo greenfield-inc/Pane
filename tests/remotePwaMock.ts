@@ -378,6 +378,14 @@ export function setRemoteHostPorts(page: Page, ports: ListeningPortsSnapshot): v
   fixtures.ports = ports;
 }
 
+/** Changes the custom commands `remote:pwa-affordances` answers with from now on, without sending an event. */
+export function setRemoteHostCustomCommands(page: Page, customCommands: Array<{ name: string; command: string }>): void {
+  const host = pageHosts.get(page);
+  const fixtures = host ? hostFixtures.get(host) : undefined;
+  if (!fixtures) throw new Error('Open the host with openConnectedRemotePwa first.');
+  fixtures.affordances.customCommands = customCommands;
+}
+
 /**
  * Drops the host's event stream, the way a phone leaving wifi does, and holds it
  * down. The client's own backoff walks the status to `reconnecting` and stays
