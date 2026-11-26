@@ -15,7 +15,7 @@ import { getAppDirectory } from '../../utils/appDirectory';
 import { getShellPath } from '../../utils/shellPath';
 import { paneAgentFarmProcess } from '../agentFarm/bundledAgentFarm';
 import { profilesOn } from '../agentFarm/profilesFeature';
-import { parseProfileList } from '../agentFarm/agentFarmProfiles';
+import { parseProfileListJson } from '../agentFarm/agentFarmProfiles';
 import { panelManager } from '../panelManager';
 import { terminalPanelManager } from '../terminalPanelManager';
 import { getChatTabManager } from '../chatTabs';
@@ -211,13 +211,16 @@ async function runAgentFarm(args: string[], options: { cwd?: string; timeout: nu
 
 /**
  * Agent Farm profile versions from `agent-farm profiles list`, by qualified name. `shellPath` is the
- * PATH it runs with. With Profiles on, the parser Pane's profile list uses; off, the person's own
+ * PATH it runs with. With Profiles on, Pane's own Agent Farm's `profiles list --json`; off, the person's own
  * agent-farm answers and is read as before T-63.
  */
 export async function agentFarmProfiles(shellPath: () => string = getShellPath): Promise<Record<string, string>> {
   try {
+    if (profilesOn()) {
+      const { stdout } = await runAgentFarm(['profiles', 'list', '--json'], { timeout: 20_000, shellPath });
+      return Object.fromEntries(parseProfileListJson(stdout).map(entry => [entry.ref, entry.version]));
+    }
     const { stdout } = await runAgentFarm(['profiles', 'list'], { timeout: 20_000, shellPath });
-    if (profilesOn()) return Object.fromEntries(parseProfileList(stdout).map(entry => [entry.ref, entry.version]));
     const profiles: Record<string, string> = {};
     for (const line of stdout.split('\n')) {
       const match = /^(\S+)\s.*\|\s*plugin\s+\S+\s+(\d[\w.-]*)/.exec(line.trim());

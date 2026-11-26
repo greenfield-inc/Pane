@@ -19,12 +19,10 @@ export interface AgentFarmProfileEntry {
   defaultVariant?: string;
   /** Pane's own plain profiles (`pane/claude`, `pane/codex`), which lists show as the agent itself. */
   hidden: boolean;
-  /**
-   * False when the profile's Agent Farm plugin marks it unlisted (`listed: false`, such as a
-   * subagent's own profile): it runs, but isn't offered when you start a Session. Absent from an
-   * Agent Farm too old to say, which counts as listed.
-   */
-  listed?: boolean;
+  /** Agent Farm's title, with your edit merged in; absent shows the name Pane makes from the ref. */
+  title?: string;
+  /** Agent Farm's description, with your edit merged in. */
+  description?: string;
 }
 
 export interface AgentFarmProfileVariant {
@@ -64,7 +62,8 @@ const profileEntrySchema: BoundarySchema<AgentFarmProfileEntry> = boundary.objec
   variants: boundary.optional(boundary.array(boundary.object({ name: boundary.nonEmptyString, model: boundary.string, effort: boundary.optional(boundary.string) }))),
   defaultVariant: boundary.optional(boundary.string),
   hidden: boundary.boolean,
-  listed: boundary.optional(boundary.boolean),
+  title: boundary.optional(boundary.string),
+  description: boundary.optional(boundary.string),
 });
 
 export const agentFarmProfileListSchema: BoundarySchema<AgentFarmProfileList> = boundary.object({
