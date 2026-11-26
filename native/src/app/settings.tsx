@@ -209,6 +209,8 @@ function DisplayRows() {
     <>
       <ListRow
         title="UI scale"
+        // Wraps instead of truncating beside the stepper on a narrow phone at a large UI scale.
+        titleLines={2}
         leading={<RowIcon ios="textformat.size" android="format_size" />}
         trailing={(
           <Stepper
@@ -223,6 +225,7 @@ function DisplayRows() {
       />
       <ListRow
         title="Terminal font"
+        titleLines={2}
         leading={<RowIcon ios="terminal" android="terminal" />}
         trailing={(
           <Stepper
@@ -249,7 +252,7 @@ function Stepper({ testID, label, value, canDecrease, canIncrease, onStep }: {
   onStep: (steps: number) => void;
 }) {
   return (
-    <View style={styles.rowEnd}>
+    <View style={styles.stepper}>
       <StepButton testID={`${testID}-decrease`} label={`Decrease ${label.toLowerCase()}`} ios="minus" android="remove" enabled={canDecrease} onPress={() => onStep(-1)} />
       <Text testID={`${testID}-value`} variant="rowValue" tone="secondary" style={styles.stepValue}>{value}</Text>
       <StepButton testID={`${testID}-increase`} label={`Increase ${label.toLowerCase()}`} ios="plus" android="add" enabled={canIncrease} onPress={() => onStep(1)} />
@@ -295,6 +298,7 @@ const styles = StyleSheet.create({
   retry: { fontWeight: '600' },
   rowEnd: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   // Wide enough for "1.5x" and "24px" at any scale, so stepping never moves the buttons.
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   stepValue: { minWidth: 48, textAlign: 'center', fontVariant: ['tabular-nums'] },
   stepButton: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   addTile: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
