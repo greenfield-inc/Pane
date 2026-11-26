@@ -18,11 +18,17 @@ export interface ChatSender {
   system?: 'todos' | 'autopilot';
 }
 
+/**
+ * What a line with an id carries for checking it against its record: `sent`, the text before Pane's
+ * reply line (what the sender wrote, as the record keeps it), and `claimed`, a `[From …]` it opens with.
+ */
+interface Routed { ref?: string; sent?: string; claimed?: string }
+
 export type ChatAgentLine =
   /** A message from another agent, Pane's To-dos or Autopilot: a sender card. `ref` when it can be replied to. */
-  | { type: 'message'; sender: ChatSender; body: string; ref?: string; claimed?: string }
+  | ({ type: 'message'; sender: ChatSender; body: string } & Routed)
   /** The person's own words, delivered by Autopilot or To-dos: stays the 'You' bubble, with "You, via …". */
-  | { type: 'relayed'; via: string; body: string; ref?: string }
+  | ({ type: 'relayed'; via: string; body: string } & Routed)
   /** A reply to a message this tab sent (`reply: M-12 → "…"`). */
   | { type: 'reply'; replyTo: string; ref: string; body: string; sender: ChatSender };
 
@@ -68,11 +74,12 @@ export function classifyChatLine(text: string): ChatAgentLine | undefined {
   const prefix = FROM_PREFIX.exec(rest);
   const from = prefix ? fromPrefix(prefix[1].trim()) : undefined;
   const body = (from && prefix ? rest.slice(prefix[0].length) : rest).trim();
-  if (from && 'via' in from) return { type: 'relayed', via: from.via, body, ref };
-  if (from) return { type: 'message', sender: from.sender, body, ref, claimed: route && prefix ? prefix[0].trim() : undefined };
+  const routed: Routed = route ? { ref, sent: rest.trim(), claimed: prefix ? prefix[0].trim() : undefined } : {};
+  if (from && 'via' in from) return { type: 'relayed', via: from.via, body, ...routed };
+  if (from) return { type: 'message', sender: from.sender, body, ...routed };
   // A prefix Pane doesn't write (an agent's own "[From the "Omni Chat" Session orchestrator]") counts only on a message with an id.
-  if (route && prefix) return { type: 'message', sender: senderOfName(prefix[1].trim()), body: rest.slice(prefix[0].length).trim(), ref, claimed: prefix[0].trim() };
-  if (route) return { type: 'message', sender: senderOfName(route[2]), body, ref };
+  if (route && prefix) return { type: 'message', sender: senderOfName(prefix[1].trim()), body: rest.slice(prefix[0].length).trim(), ...routed };
+  if (route) return { type: 'message', sender: senderOfName(route[2]), body, ...routed };
   return undefined;
 }
 
@@ -86,9 +93,10 @@ export interface ChatMessageRecords {
 /**
  * The text alone doesn't prove who sent a message: the person can paste an agent's message, reply
  * line and all, or type `[From Autopilot]`. Where the app has the records, a line that names an id
- * counts only when that message really reached this tab, and its recorded sender wins over any
- * `[From …]` in the body. Autopilot's lines always carry an id, so one without is the person's.
- * Pane's own To-dos lines have no record (Pane types them as is) and stay read from their text.
+ * counts only when that message reached this tab with this text, and its recorded sender wins over
+ * any `[From …]` in the body: only Autopilot relays the person's words. Autopilot's lines always
+ * carry an id, so one without is the person's. Pane's own To-dos lines have no record (Pane types
+ * them as is) and stay read from their text.
  */
 export function checkedChatLine(line: ChatAgentLine | undefined, records: ChatMessageRecords): ChatAgentLine | undefined {
   if (!line || !records.available) return line;
@@ -99,13 +107,19 @@ export function checkedChatLine(line: ChatAgentLine | undefined, records: ChatMe
   if (!line.ref) return line.type === 'message' && line.sender.system === 'autopilot' ? undefined : line;
   const message = records.byRef.get(line.ref);
   if (message?.kind !== 'message' || message.receiver.panelId !== records.panelId) return undefined;
-  if (line.type === 'relayed') return line;
-  const autopilot = line.sender.system === 'autopilot' && /autopilot/iu.test(message.sender.name);
-  const recorded = autopilot ? line.sender : senderOfName(message.sender.name);
+  // A real reply line pasted under other words is the person's message, not M-n.
+  if (squash(line.sent ?? '') !== squash(message.text)) return undefined;
+  const byAutopilot = /autopilot/iu.test(message.sender.name);
+  if (line.type === 'relayed' && byAutopilot) return line;
+  const claimedSender = line.type === 'message' ? line.sender : undefined;
+  const recorded = claimedSender?.system === 'autopilot' && byAutopilot ? claimedSender : senderOfName(message.sender.name);
   // An agent's own "[From …]" stays hidden when it names the recorded sender, and stays in the text when it doesn't.
-  const body = line.claimed && line.sender.name !== recorded.name ? `${line.claimed} ${line.body}` : line.body;
+  const truthful = claimedSender !== undefined && claimedSender.name === recorded.name;
+  const body = line.claimed && !truthful ? `${line.claimed} ${line.body}` : line.body;
   return { type: 'message', sender: recorded, body, ref: line.ref };
 }
+
+const squash = (text: string) => text.replace(/\s+/gu, ' ').trim();
 
 /** The message a reply thread starts from: M-3 answers M-2, which answers M-1, gives M-1. */
 export function threadRoot(ref: string, byRef: ReadonlyMap<string, AgentMessageRecord>): string {
@@ -116,6 +130,25 @@ export function threadRoot(ref: string, byRef: ReadonlyMap<string, AgentMessageR
     current = parent;
   }
   return current;
+}
+
+/** Every reply in a thread under its first message, depth first in the order they came (M-2, its reply M-3, …), each once. */
+export function threadReplies(replies: readonly AgentMessageRecord[], byRef: ReadonlyMap<string, AgentMessageRecord>): AgentMessageRecord[] {
+  const out: AgentMessageRecord[] = [];
+  const seen = new Set<string>();
+  const visit = (reply: AgentMessageRecord) => {
+    if (seen.has(reply.ref)) return;
+    seen.add(reply.ref);
+    out.push(reply);
+    for (const ref of reply.replies) { const child = byRef.get(ref); if (child) visit(child); }
+  };
+  replies.forEach(visit);
+  return out;
+}
+
+/** The messages this tab received whose cards the loaded chat shows: the ids on its reply lines. */
+export function receivedRefs(texts: readonly string[]): ReadonlySet<string> {
+  return new Set(texts.flatMap(text => { const ref = REPLY_ROUTE.exec(text)?.[1]; return ref ? [ref] : []; }));
 }
 
 /** Up to two letters for an avatar: "Omni Chat" → "OC", "T-104 worker" → "TW", "Billing" → "BI". */
@@ -151,11 +184,12 @@ interface TurnSpan { id: string; startedAt?: string; endedAt?: string }
  * The result never decreases, so a message's turn is found by binary search.
  */
 function turnStarts(turns: readonly TurnSpan[]): number[] {
+  const time = (iso: string | undefined) => { const at = iso ? Date.parse(iso) : NaN; return Number.isNaN(at) ? undefined : at; };
   let known = Number.NEGATIVE_INFINITY;
   return turns.map(turn => {
-    const start = turn.startedAt ? Date.parse(turn.startedAt) : known;
-    known = Math.max(known, turn.endedAt ? Date.parse(turn.endedAt) : start);
-    return Number.isNaN(start) ? known : start;
+    const start = Math.max(known, time(turn.startedAt) ?? known);
+    known = Math.max(start, time(turn.endedAt) ?? start);
+    return start;
   });
 }
 

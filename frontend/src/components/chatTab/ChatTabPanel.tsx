@@ -45,7 +45,7 @@ import { useSurfaceFind } from '../find/surfaceFind';
 import { takeLaunchDraft } from '../../utils/launchOutline';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { AgentMessagesContext, useAgentMessageRecords, useAgentMessagesView } from './agentMessagesContext';
-import { sentMessagesByTurn } from '../../../../shared/agentMessagePresentation';
+import { receivedRefs, sentMessagesByTurn } from '../../../../shared/agentMessagePresentation';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 import { noteSendConfirmed, useControllerTarget } from '../../controller/controllerTargets';
@@ -260,7 +260,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   // T-105: messages this tab sent and received (M-n), for their senders, state and replies.
   const agentMessageRecords = useAgentMessageRecords(panelId);
   const sentByTurn = useMemo(() => sentMessagesByTurn(turns, agentMessageRecords.records, panelId), [turns, agentMessageRecords, panelId]);
-  const agentMessages = useAgentMessagesView(panelId, agentMessageRecords, sentByTurn);
+  const shownHere = useMemo(() => receivedRefs(turns.flatMap(turn => [turn.user, ...turn.items.flatMap(item => item.type === 'user' ? [item.message] : [])]
+    .flatMap(message => message ? [message.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')] : []))), [turns]);
+  const agentMessages = useAgentMessagesView(panelId, agentMessageRecords, sentByTurn, shownHere);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);
   const [copies, setCopies] = useState<ReadonlyMap<string, UploadProgress>>(new Map());

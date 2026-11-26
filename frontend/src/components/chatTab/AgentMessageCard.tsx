@@ -1,7 +1,7 @@
 import { useContext, type ReactNode } from 'react';
 import { Check, Clock, CornerUpLeft, ListChecks, ArrowUp, Zap, AlertCircle } from 'lucide-react';
 import type { AgentMessageRecord } from '../../../../shared/types/agentMessages';
-import { messageStatus, senderInitials, senderOfName, threadRoot, type ChatAgentLine, type ChatSender, type MessageStatus } from '../../../../shared/agentMessagePresentation';
+import { messageStatus, senderInitials, senderOfName, threadReplies, threadRoot, type ChatAgentLine, type ChatSender, type MessageStatus } from '../../../../shared/agentMessagePresentation';
 import { messageTime } from '../../../../shared/chatTabPresentation';
 import { ChatCopyButton } from './ChatCopyButton';
 import { AgentMessagesContext } from './agentMessagesContext';
@@ -41,25 +41,21 @@ function ReplyPill({ reply }: { reply: AgentMessageRecord }) {
   return <StatusPill status={{ state: 'answered', replies: [] }} />;
 }
 
-/** One reply in a card's lower half, then any replies to it (M-3 answering M-2), up to a few deep. */
-function ReplySection({ reply, depth = 0, renderText }: { reply: AgentMessageRecord; depth?: number; renderText: (text: string) => ReactNode }) {
-  const { byRef, panelId } = useContext(AgentMessagesContext);
+/** One reply in a card's lower half. */
+function ReplySection({ reply, renderText }: { reply: AgentMessageRecord; renderText: (text: string) => ReactNode }) {
+  const { panelId } = useContext(AgentMessagesContext);
   const who = reply.sender.panelId !== null && reply.sender.panelId === panelId ? 'This agent' : senderOfName(reply.sender.name).name;
   const time = messageTime(reply.createdAt);
-  const children = depth < 4 ? reply.replies.flatMap(ref => byRef.get(ref) ?? []) : [];
-  return <>
-    <div className="chat-agent-reply" data-testid="agent-message-reply" data-ref={reply.ref}>
-      <div className="chat-agent-head">
-        <CornerUpLeft className="chat-agent-reply-icon" aria-hidden="true" />
-        <span className="chat-agent-name">{who}</span>
-        <span className="chat-agent-kind">replied{time ? ` · ${time.short}` : ''}</span>
-        <span className="chat-agent-spacer" />
-        <ReplyPill reply={reply} />
-      </div>
-      <div className="chat-agent-body">{renderText(reply.text)}</div>
+  return <div className="chat-agent-reply" data-testid="agent-message-reply" data-ref={reply.ref}>
+    <div className="chat-agent-head">
+      <CornerUpLeft className="chat-agent-reply-icon" aria-hidden="true" />
+      <span className="chat-agent-name">{who}</span>
+      <span className="chat-agent-kind">replied{time ? ` · ${time.short}` : ''}</span>
+      <span className="chat-agent-spacer" />
+      <ReplyPill reply={reply} />
     </div>
-    {children.map(child => <ReplySection key={child.ref} reply={child} depth={depth + 1} renderText={renderText} />)}
-  </>;
+    <div className="chat-agent-body">{renderText(reply.text)}</div>
+  </div>;
 }
 
 /** The card itself: header, body, then a footer (waiting) or the replies (answered). */
@@ -76,7 +72,7 @@ function Card({ anchorId, head, body, record, hint, copyText, renderText, outgoi
       <div className="chat-agent-head">{head}</div>
       <div className="chat-agent-body">{renderText(body)}</div>
       {((status && status.state !== 'answered') || footHint) && <div className="chat-agent-foot">{status && status.state !== 'answered' && <StatusPill status={status} />}{footHint}</div>}
-      {status?.state === 'answered' && status.replies.map(reply => <ReplySection key={reply.ref} reply={reply} renderText={renderText} />)}
+      {status?.state === 'answered' && threadReplies(status.replies, byRef).map(reply => <ReplySection key={reply.ref} reply={reply} renderText={renderText} />)}
     </div>
     <div className="chat-message-actions"><ChatCopyButton label="Copy message" text={() => copyText} /></div>
   </div>;
@@ -121,12 +117,10 @@ export function SentMessageCards({ turnId, renderText }: { turnId: string; rende
 
 /** A reply arriving here: when its message's card is in this chat the reply shows there, so this is one line that jumps to it. */
 function ReplyArrival({ line, anchorId, startedAt, text, renderText }: { line: Extract<ChatAgentLine, { type: 'reply' }>; anchorId: string; startedAt?: string; text: string; renderText: (text: string) => ReactNode }) {
-  const { byRef, sentByTurn, panelId } = useContext(AgentMessagesContext);
-  // The card that holds this reply: the thread's first message, sent from here or received here.
+  const { byRef, sentByTurn, shownHere } = useContext(AgentMessagesContext);
+  // The card that holds this reply: the thread's first message, when its card is loaded in this chat.
   const root = threadRoot(line.replyTo, byRef);
-  const first = byRef.get(root);
-  const shown = [...sentByTurn.values()].some(sent => sent.some(record => record.ref === root))
-    || (first?.kind === 'message' && first.receiver.panelId === panelId);
+  const shown = [...sentByTurn.values()].some(sent => sent.some(record => record.ref === root)) || shownHere.has(root);
   if (shown) {
     const jump = () => {
       const card = document.querySelector<HTMLElement>(`[data-testid="agent-message-card"][data-ref="${CSS.escape(root)}"]`);
