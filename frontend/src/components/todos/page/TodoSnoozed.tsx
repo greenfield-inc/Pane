@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../../../stores/readOnlyHostStore';
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Moon } from 'lucide-react';
 import type { TodoAction, TodoDetail, TodoRecord, TodoSnooze } from '../../../../../shared/types/todos';
@@ -57,11 +58,13 @@ export function useSnoozeWords(snooze: TodoSnooze | undefined) {
 /** "Snoozed · Wed 9:00 AM ▾": the header's state button while snoozed; it opens the menu (Change). */
 export const SnoozeHeaderButton = forwardRef<HTMLButtonElement, { snooze: TodoSnooze; onOpen: () => void }>(function SnoozeHeaderButton({ snooze, onOpen }, ref) {
   const words = useSnoozeWords(snooze);
+  const readOnly = useReadOnlyHost();
   return (
     <button
       ref={ref}
       type="button"
       onClick={onOpen}
+      disabled={readOnly}
       aria-haspopup="dialog"
       title={words?.tooltip}
       className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-border-primary bg-surface-primary px-2.5 text-[12.5px] text-text-primary hover:border-border-hover"
@@ -69,7 +72,7 @@ export const SnoozeHeaderButton = forwardRef<HTMLButtonElement, { snooze: TodoSn
     >
       <Moon className="h-3.5 w-3.5 text-status-snoozed" aria-hidden="true" />
       Snoozed · {words?.when}
-      <ChevronDown className="h-3.5 w-3.5 text-text-tertiary" aria-hidden="true" />
+      <ChevronDown className="needs-full-access h-3.5 w-3.5 text-text-tertiary" aria-hidden="true" />
     </button>
   );
 });
@@ -125,7 +128,7 @@ export function SnoozeBanner({ detail, onChange, onWake, stacked = false }: { de
 function BannerButtons({ onChange, onWake, className, large = false }: { onChange: () => void; onWake: () => void; className?: string; large?: boolean }) {
   const button = cn('inline-flex items-center rounded-[7px] border border-border-primary bg-surface-primary text-text-primary hover:border-border-hover', large ? 'h-10 px-3.5 text-[15px]' : 'h-7 px-2.5 text-[12.5px]');
   return (
-    <div className={cn('flex gap-1.5', className)}>
+    <div className={cn('needs-full-access flex gap-1.5', className)}>
       <button type="button" onClick={onChange} className={button} data-testid="todo-snooze-change">Change</button>
       <button type="button" onClick={onWake} className={button} data-testid="todo-snooze-wake">Wake now</button>
     </div>
@@ -141,7 +144,8 @@ export function usePageSnooze(detail: TodoDetail, anchorOf: () => DOMRect | null
   const act = useTodosStore((state) => state.act);
   const request = useTodosStore((state) => state.snoozeRequest);
   const number = detail.todo.number;
-  const can = canSnoozeTodo(detail.todo);
+  const readOnly = useReadOnlyHost();
+  const can = canSnoozeTodo(detail.todo) && !readOnly;
   const open = useCallback(() => {
     if (!can) return;
     setAnchor(anchorOf() ?? new DOMRect(window.innerWidth - 24, 52, 0, 0));

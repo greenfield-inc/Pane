@@ -663,6 +663,11 @@ body.understory {
   to { opacity: 1; }
 }
 
+/* Controls that change the shown computer, while it gives read-only access (readOnlyHostStore). */
+html[data-host-access='read'] .needs-full-access {
+  display: none !important;
+}
+
 /* A skeleton laid over painted content (a terminal's mask) fades out instead. */
 .skeleton-fade-out {
   animation: pane-skeleton-fade-out 120ms ease-out forwards;

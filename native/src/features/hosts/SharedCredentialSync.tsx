@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 
 import { syncSharedCredentials, type SharedCredentialHost, type SharedCredentials } from '@shared/types/sharedCredentials';
 
+import { isReadOnlyProfile } from '@/auth/access';
 import { useHostsStore } from '@/auth/hostsStore';
 import { createDaemonClient } from '@/daemon/createClient';
 import { requestPushRegistration } from '@/features/notifications/usePushSetup';
@@ -35,8 +36,9 @@ async function run(): Promise<void> {
   }
   running = true;
   try {
-    // A computer reached over Tailscale shares keys only with its owner and refuses everyone else.
-    const profiles = useHostsStore.getState().profiles;
+    // A computer reached over Tailscale shares keys only with its owner and refuses everyone else;
+    // one this phone is paired Read only with neither gives nor takes any.
+    const profiles = useHostsStore.getState().profiles.filter(profile => !isReadOnlyProfile(profile));
     if (profiles.length < 2) return;
     const hosts = profiles.map((profile): SharedCredentialHost => {
       const client = createDaemonClient(profile);

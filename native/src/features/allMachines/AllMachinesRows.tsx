@@ -5,7 +5,6 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { originLine } from '@shared/approvalReceipts';
 
 import { askerLine, questionDetail, type ApprovalList } from '@/features/approvals/approvals';
-import { openApproval } from '@/features/approvals/ApprovalScreen';
 import { WaitingCount } from '@/features/approvals/WaitingCount';
 import { MachineBadge } from '@/features/machines/MachineBadge';
 import { MachineMark } from '@/features/machines/MachineMark';
@@ -13,7 +12,7 @@ import type { Machine } from '@/features/machines/machines';
 import { Notice } from '@/features/panes/PaneKit';
 import { describePermission } from '@/features/panes/permissions';
 import { PausedBadge, StatusBadge, statusPresentation } from '@/features/panes/StatusBadge';
-import { SwipeRow, swipeRowAccessibility } from '@/features/panes/SwipeRow';
+import { SwipeRow, useSwipeRowAccessibility } from '@/features/panes/SwipeRow';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
@@ -30,6 +29,7 @@ export interface AllMachinesFeed extends MachineFeed {
 /** Pin, pause and archive on the machine the phone is on; other machines' rows don't swipe. */
 export interface CurrentMachineActions {
   openPane(paneId: string): void;
+  openSession(sessionId: string): void;
   togglePanePinned(paneId: string): void;
   archivePane(pane: { id: string; name: string }): void;
   toggleSessionPinned(sessionId: string, pinned: boolean): void;
@@ -39,25 +39,27 @@ export interface CurrentMachineActions {
 }
 
 /** Opens a Pane or Session row: here, or on its machine after switching there, like a notification tap. */
-export function openRecentRow(row: RecentRow, currentKey: string, actions: Pick<CurrentMachineActions, 'openPane'>, sayOffline: (machineKey: string, what: string) => void) {
+export function openRecentRow(row: RecentRow, currentKey: string, actions: Pick<CurrentMachineActions, 'openPane' | 'openSession'>, sayOffline: (machineKey: string, what: string) => void) {
   if (row.stale) return sayOffline(row.machineKey, row.type === 'pane' ? 'Pane' : 'Session');
   const here = row.machineKey === currentKey;
   if (row.type === 'pane') {
     if (here) actions.openPane(row.pane.id);
     else router.push({ pathname: '/open', params: { host: row.machineKey, paneId: row.pane.id } });
   } else if (here) {
-    router.push({ pathname: '/session/[sessionId]', params: { sessionId: row.session.id } });
+    actions.openSession(row.session.id);
   } else {
     router.push({ pathname: '/open', params: { host: row.machineKey, sessionId: row.session.id } });
   }
 }
 
+type ApprovalHref = { pathname: '/approval/[notifyId]'; params: { notifyId: string; list?: string } };
+
 /** Opens a question or permission request: here, or switching to its machine first. */
-export function openWaitingRow(row: WaitingRow, list: ApprovalList, currentKey: string) {
+export function openWaitingRow(row: WaitingRow, list: ApprovalList, currentKey: string, open: (href: ApprovalHref) => void = href => router.push(href)) {
   const here = row.machineKey === currentKey;
   if (row.type === 'question') {
     // The approval screen shows its machine's Session below the card, so another machine's switches first.
-    if (here) openApproval(row.item.id, list);
+    if (here) open({ pathname: '/approval/[notifyId]', params: list === 'waiting' ? { notifyId: row.item.id } : { notifyId: row.item.id, list } });
     else router.push({ pathname: '/open', params: { host: row.machineKey, notifyId: row.item.id, ...(list === 'waiting' ? {} : { list }) } });
   } else if (here) {
     router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: row.request.sessionId, requestId: row.request.id } });
@@ -87,8 +89,10 @@ export function waitingRowText(row: WaitingRow): { title: string; detail: string
 }
 
 /** One row of All machines' every Pane and Session, newest first, with its machine's badge. */
-export function RecentRowView({ row, machine, currentKey, actions, onOpen }: {
+export function RecentRowView({ row, waiting, machine, currentKey, actions, onOpen }: {
   row: RecentRow;
+  /** What waits on the person in a Session's row. */
+  waiting: number;
   machine: Machine | undefined;
   currentKey: string;
   actions: CurrentMachineActions;
@@ -100,7 +104,7 @@ export function RecentRowView({ row, machine, currentKey, actions, onOpen }: {
     <AllRow
       testID={`all-pane-row-${row.key}`}
       title={row.pane.name}
-      detail={[row.pane.repository, row.pane.session, time].filter(Boolean).join(' · ')}
+      detail={[row.pane.repository, row.pane.session?.name, time].filter(Boolean).join(' · ')}
       label={paneLabel(row.pane, machine?.name)}
       machine={machine}
       stale={row.stale}
@@ -121,10 +125,10 @@ export function RecentRowView({ row, machine, currentKey, actions, onOpen }: {
       detail={['Session', row.paneCount === 1 ? '1 Pane' : row.paneCount > 1 ? `${row.paneCount} Panes` : undefined, time].filter(Boolean).join(' · ')}
       machine={machine}
       stale={row.stale}
-      label={[row.session.name || 'Untitled', 'Session', row.waiting > 0 ? `${row.waiting} waiting` : undefined, machine?.name].filter(Boolean).join(', ')}
+      label={[row.session.name || 'Untitled', 'Session', waiting > 0 ? `${waiting} waiting` : undefined, machine?.name].filter(Boolean).join(', ')}
       paused={Boolean(row.session.paused)}
       leading={row.session.paused ? <PausedBadge /> : <Icon ios="bubble.left" android="chat_bubble" size={12} />}
-      trailing={<WaitingCount testID={`all-session-waiting-${row.key}`} count={row.waiting} />}
+      trailing={<WaitingCount testID={`all-session-waiting-${row.key}`} count={waiting} />}
       onPress={onOpen}
       swipe={swipes ? {
         pinned: Boolean(row.session.isPinned),
@@ -175,7 +179,7 @@ export function allOffline(feeds: readonly AllMachinesFeed[]): boolean {
 }
 
 function paneLabel(pane: AllPane, machine: string | undefined): string {
-  return [pane.name, pane.repository, pane.session, pane.paused ? 'Paused' : statusPresentation[pane.status].label, machine].filter(Boolean).join(', ');
+  return [pane.name, pane.repository, pane.session?.name, pane.paused ? 'Paused' : statusPresentation[pane.status].label, machine].filter(Boolean).join(', ');
 }
 
 /** "9:14 AM" in the phone's own clock format. */
@@ -237,13 +241,14 @@ function AllRow({ title, detail, below, spoken = [], label, machine, stale, paus
   testID: string;
 }) {
   const theme = useTheme();
+  const accessibility = useSwipeRowAccessibility(swipe);
   const row = (
     <Pressable
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label ?? [title, paused ? 'Paused' : undefined, detail, ...spoken, machine?.name].filter(Boolean).join(', ')}
       accessibilityHint={stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
-      {...(swipe ? swipeRowAccessibility(swipe) : {})}
+      {...accessibility}
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,

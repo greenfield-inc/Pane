@@ -8,7 +8,7 @@ import { Text } from '@/ui';
 
 import type { PaneListEntry } from './paneList';
 import { PausedBadge, StatusBadge, statusPresentation } from './StatusBadge';
-import { SwipeRow, swipeRowAccessibility } from './SwipeRow';
+import { SwipeRow, useSwipeRowAccessibility } from './SwipeRow';
 
 export interface PaneRowProps {
   pane: PaneListEntry;
@@ -35,6 +35,7 @@ export function PaneRow({ pane, label, onOpen, onTogglePinned, onArchive, onTogg
   const agent = AGENT_LAUNCH_PRESETS.find(preset => preset.id === pane.agent)?.title;
   const status = [paused ? 'Paused' : statusPresentation[pane.status].label, agent].filter(Boolean).join(' · ');
   const actions = { pinned: pane.isFavorite, onTogglePinned, onArchive, pause: { paused, onToggle: onTogglePaused } };
+  const accessibility = useSwipeRowAccessibility(actions);
 
   return (
     <SwipeRow testIDPrefix="pane" id={pane.id} {...actions}>
@@ -42,7 +43,7 @@ export function PaneRow({ pane, label, onOpen, onTogglePinned, onArchive, onTogg
         testID={`pane-row-${pane.id}`}
         accessibilityRole="button"
         accessibilityLabel={[label, status, detail].filter(Boolean).join(', ')}
-        {...swipeRowAccessibility(actions)}
+        {...accessibility}
         onPress={onOpen}
         onPressIn={() => setPressed(true)}
         onPressOut={() => setPressed(false)}

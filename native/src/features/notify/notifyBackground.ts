@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import { AppState, Platform } from 'react-native';
 
+import { isReadOnlyProfile } from '@/auth/access';
 import { loadHosts } from '@/auth/hosts';
 import { secureStore } from '@/auth/secureStore';
 import { CLIENT_LABEL, createDaemonClient, DEVICE_LABEL, getRuntimeId, streamingFetch } from '@/daemon/createClient';
@@ -115,7 +116,7 @@ async function handBackGrant(payload: unknown): Promise<boolean> {
   const push = parseGrantPush(payload);
   if (!push) return false;
   const profile = (await loadHosts(secureStore).catch(() => null))?.profiles.find(candidate => candidate.id === push.host);
-  if (!profile) return true;
+  if (!profile || isReadOnlyProfile(profile)) return true;
   const request = { platform: devicePush.platform, installationId: await getInstallationId(), grant: push.grant };
   // Best effort: a grant that doesn't arrive is asked for again the next time the phone connects.
   const kept = await invokeChannel<{ ok: boolean }>(createDaemonClient(profile), 'mobile:push-grant', [request]).catch(() => null);

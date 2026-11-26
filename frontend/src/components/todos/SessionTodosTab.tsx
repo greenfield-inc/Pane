@@ -224,7 +224,7 @@ function TodosList({ entries, groups, folded, memory, narrow, now, onSelect, onF
         <span className="flex-1" />
         {entries.length > 0 && (
           <>
-            <button type="button" onClick={onNew} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary" data-testid="session-todos-new">
+            <button type="button" onClick={onNew} className="needs-full-access inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary" data-testid="session-todos-new">
               <Plus className="h-3.5 w-3.5" aria-hidden="true" />New
             </button>
             <button type="button" onClick={openTodosByRequester} aria-label="Open in To-dos" title="Open in To-dos, grouped by Requested by" className={ICON_BUTTON} data-testid="session-todos-open-screen">
@@ -381,7 +381,7 @@ function EmptyState({ onNew }: { onNew: () => void }) {
       </span>
       <p className="text-[14px] font-semibold text-text-primary">No to-dos in this Session yet</p>
       <p className="mt-1 max-w-[440px] text-[13px] text-text-secondary">When the orchestrator plans work, its to-dos show here with their status and approvals.</p>
-      <button type="button" onClick={onNew} className={cn(TODOS_BUTTON, 'mt-3.5')} data-testid="session-todos-empty-new">
+      <button type="button" onClick={onNew} className={cn('needs-full-access', TODOS_BUTTON, 'mt-3.5')} data-testid="session-todos-empty-new">
         <Plus className="h-3.5 w-3.5" aria-hidden="true" />New to-do
       </button>
     </div>

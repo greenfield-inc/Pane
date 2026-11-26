@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { fetchNewRelayProfiles, linkRelayComputers, relayProfile, RemoteRequestError, type RelayLinkPeer } from '@shared/remoteClient';
+import { readOnlyToken } from '@shared/types/accessLevel';
 import type { RelayComputer } from '@shared/types/relay';
 
 /** Real computer ids and their keys' fingerprints: an id is the first 80 bits of its fingerprint, in base32. */
@@ -75,6 +76,22 @@ describe('linking a newly paired computer with the phone’s others', () => {
 });
 
 describe('"Your computers"', () => {
+  it('tells a computer it only watches nothing of the others it reaches, but the ones that computer shared', async () => {
+    const tyler = relayProfile({ computer: { ...computer('tyler'), name: 'Tyler' }, token: readOnlyToken('t') });
+    const saved = [
+      tyler,
+      relayProfile({ computer: computer('tyler2'), token: readOnlyToken('t2') }, { name: 'Tyler', id: tyler.relay.computerId }),
+      relayProfile({ computer: computer('mine'), token: 't' }),
+      // A computer of this phone's own that happens to be linked by the same name.
+      relayProfile({ computer: computer('mine2'), token: 't' }, { name: 'Tyler', id: tyler.relay.computerId }),
+    ];
+    const asked: unknown[] = [];
+    const client = { invoke: async <T>(_channel: string, args?: unknown[]) => { asked.push(args?.[0]); return [] as T; } };
+    await fetchNewRelayProfiles(client, tyler, saved);
+    await fetchNewRelayProfiles(client, { ...tyler, token: 'full' }, saved);
+    expect(asked).toEqual([{ known: ['tyler2'] }, { known: ['mine', 'mine2'] }]);
+  });
+
   it('adds only computers at <id>.<domain> on the asking computer’s domain, with the key their id names', async () => {
     const from = relayProfile({ computer: computer('dohp3zsqmo4uk2kn'), token: 'tok-studio' });
     const grants = [

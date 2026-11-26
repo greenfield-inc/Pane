@@ -34,6 +34,11 @@ describe('stripPanels', () => {
   });
 });
 
+it('a read-only computer’s strip holds only terminals and chats, also from a list saved before', () => {
+  const saved = [panel('page', 'browser', 0), panel('diff', 'diff', 1), panel('shell', 'terminal', 2), panel('file', 'editor', 3), panel('chat', 'chat', 4)];
+  expect(stripPanels(saved, true).map(p => p.id)).toEqual(['shell', 'chat']);
+});
+
 describe('tabView', () => {
   it('draws terminals, pages, Explorer, Diff, open files and script output on the phone', () => {
     expect(tabView(panel('t', 'terminal', 0))).toBe('terminal');

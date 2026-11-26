@@ -431,7 +431,7 @@ function ReplyBox({ ctx, replyTo, placeholder }: { ctx: ThreadContext; replyTo: 
       onDragOver={drop.onDragOver}
       onDragLeave={drop.onDragLeave}
       onDrop={drop.onDrop}
-      className={cn('border-t', drop.dragging ? 'border-interactive bg-interactive/5' : 'border-border-secondary')}
+      className={cn('needs-full-access border-t', drop.dragging ? 'border-interactive bg-interactive/5' : 'border-border-secondary')}
       data-testid="todo-thread-reply-box"
       data-reply-to={replyTo}
       data-dragging={drop.dragging || undefined}

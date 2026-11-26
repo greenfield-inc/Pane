@@ -23,7 +23,7 @@ import { runThemeRead, runThemeReset, runThemeSet } from './theme';
 import { runMachineCleanup, runMachineHealth } from './machine';
 import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
-import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo, routedOtherMachine } from './daemonClient';
+import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo, routedOtherMachine, withRoutedMachine } from './daemonClient';
 import { paneIntro, renderPaneIntro } from './paneIntro';
 import { describeFailure, printFailure, RunpaneError } from './errors';
 import { boundary, decodeBoundary } from './boundaryDecoder';
@@ -168,7 +168,7 @@ export async function main(argv: string[]): Promise<number> {
 /** Commands that run on this machine only; everything else is a daemon call another machine can answer. */
 const THIS_MACHINE_ONLY = new Set<string>([
   'help', 'setup', 'install', 'update', 'version', 'doctor', 'daemon repair', 'agent-context', 'mcp',
-  'docs search', 'docs read', 'agents start', 'agents status', 'agents send', 'handoff', 'relay',
+  'docs search', 'docs read', 'agents start', 'agents send', 'handoff', 'relay',
   // These pick their own machine with --machine (or --all).
   'ask', 'models',
   // Workspace commands pick their own machine; `workspace state` is a daemon call and passes through.
@@ -189,9 +189,13 @@ async function runOnMachine(machineQuery: string, command: string[]): Promise<nu
   }
   const tailnet = await requireTailnet(parsed.paneDir);
   const machine = resolveMachine(machineQuery, [tailnet.self, ...tailnet.machines]);
-  routeDaemonCallsTo(workspaceTarget(machine), machine.self);
+  routeDaemonCallsTo(workspaceTarget(machine), machine.self, machineQuery);
   try {
     return await main(command);
+  } catch (error) {
+    if (!(error instanceof Error) || machine.self) throw error;
+    const failure = describeFailure(error);
+    throw new RunpaneError(failure.code, withRoutedMachine(failure.message), failure.next && withRoutedMachine(failure.next));
   } finally {
     routeDaemonCallsTo(null);
   }

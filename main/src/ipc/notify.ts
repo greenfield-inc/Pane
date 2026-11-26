@@ -818,7 +818,13 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
     queue.setRemote(machineId, { machine: machine.label, online: machine.status !== 'offline', state: withOwnTodoLinks(state, machine.installId) });
   };
   const read = async (machineId: string) => {
-    if (!known.has(machineId)) return;
+    const machine = known.get(machineId);
+    if (!machine) return;
+    // A machine this computer only watches shares no questions with it.
+    if (machine.access === 'read') {
+      queue.setRemote(machineId, null);
+      return;
+    }
     try {
       show(machineId, decodeOptionalBoundary((await machines.read(machineId, 'notify:remote-snapshot')).data, notifySharedStateSchema));
     } catch (error) {
@@ -833,7 +839,8 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
       listed.add(machine.id);
       const before = known.get(machine.id);
       known.set(machine.id, { ...machine });
-      if (machine.status === 'offline') queue.setRemote(machine.id, { machine: machine.label, online: false });
+      if (machine.access === 'read') queue.setRemote(machine.id, null);
+      else if (machine.status === 'offline') queue.setRemote(machine.id, { machine: machine.label, online: false });
       // A stream can recover without a resync here yet: read the machine again.
       else if (!before || (machine.status === 'online' && before.status !== 'online')) void read(machine.id);
       else if (before.label !== machine.label) queue.setRemote(machine.id, { machine: machine.label, online: true });

@@ -1,3 +1,4 @@
+import { useReadOnlyHost } from '../../stores/readOnlyHostStore';
 import { pausedMarkOf, type ToolPanel } from '../../../../shared/types/panels';
 import type {
   RemotePaneConnectionStatus,
@@ -56,12 +57,13 @@ function NativeRemoteTerminalPanel({
     connectionStatus,
   });
 
+  const readOnly = useReadOnlyHost();
   const skeleton = useSkeletonHold(loading);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#010409]">
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        <div ref={containerRef} className="absolute inset-x-2 bottom-0 top-2 overflow-hidden" />
+        <div ref={containerRef} className={`absolute inset-x-2 bottom-0 top-2 ${readOnly ? 'overflow-auto' : 'overflow-hidden'}`} />
         {skeleton.holding && <div className="absolute inset-0 bg-[#010409]">
           <LoadingStatus label="Opening the terminal" />
           <TerminalSkeleton />
@@ -77,7 +79,7 @@ function NativeRemoteTerminalPanel({
           onScrollToBottom={scrollToBottom}
         />
       </div>
-      <RemoteTerminalInputBar
+      {!readOnly && <RemoteTerminalInputBar
         shortcuts={shortcuts}
         shortcutsLoading={shortcutsLoading}
         voiceTranscription={voiceTranscription}
@@ -92,7 +94,7 @@ function NativeRemoteTerminalPanel({
           await sendInput(data);
           window.requestAnimationFrame(focusTerminal);
         }}
-      />
+      />}
     </div>
   );
 }

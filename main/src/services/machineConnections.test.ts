@@ -15,7 +15,7 @@ interface FakeClient extends MachineClient {
 }
 
 function profile(id: string): RemotePaneConnectionProfile {
-  return { id, label: id, baseUrl: `http://${id}.tail1234.ts.net:4800/`, token: `token-${id}`, transport: 'http+sse' };
+  return { id, label: id, baseUrl: `http://${id}.tail1234.ts.net:4800/`, token: id === 'tyler' ? 'pane_read_tyler' : `token-${id}`, transport: 'http+sse' };
 }
 
 const started: MachineConnections[] = [];
@@ -204,6 +204,18 @@ describe('MachineConnections', () => {
     expect(machines.list().find(machine => machine.id === 'build-box')).toMatchObject({ installId: 'c3d4-book', status: 'online', onlineSince: '2026-11-12T20:00:00.000Z' });
   });
 
+  it('offers nothing to share with a machine it only watches, and sends it no actions', async () => {
+    const { machines, client, connect } = setup(['tyler', 'build-box']);
+    client('tyler').options.onConnectionStateChange?.('restoring', null, { hostMachineId: 'tyler-install' });
+    connect('tyler');
+    connect('build-box');
+
+    expect(machines.machineState('tyler')?.access).toBe('read');
+    expect(machines.remotes().map(machine => machine.id)).toEqual(['build-box']);
+    await expect(machines.run('tyler', { type: 'pin', target: { kind: 'pane', id: 'pane-1' }, pinned: true })).rejects.toMatchObject({ code: 'ERR_READ_ONLY_ACCESS' });
+    expect(client('tyler').invoke).not.toHaveBeenCalled();
+  });
+
   it('retries its offline machines at once when another Pane starts reading this computer, as a computer back from sleep does', () => {
     const { client, connect } = setup(['devbox', 'mini']);
     connect('mini');
@@ -280,6 +292,18 @@ describe('SharedCredentialSync over MachineConnections', () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(client('build-box').invoke).toHaveBeenCalledWith('credentials:shared:get', []);
+    await sync.stop();
+  });
+
+  it('leaves out a machine this computer only watches: no keys, no Approvals switch', async () => {
+    const { configManager, machines, client } = setup(['tyler', 'build-box']);
+    client('tyler').options.onConnectionStateChange?.('restoring', null, { hostMachineId: 'tyler-install' });
+    const sync = new SharedCredentialSync(configManager, machines);
+    sync.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(client('build-box').invoke).toHaveBeenCalledWith('credentials:shared:get', []);
+    expect(client('tyler').invoke).not.toHaveBeenCalled();
     await sync.stop();
   });
 });

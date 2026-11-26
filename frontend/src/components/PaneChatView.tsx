@@ -774,7 +774,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
     {chrome.isFocused && <SwitchToChatPaletteEntry key={view.panel.id} panel={view.panel} view="session" />}
     <Tooltip content="Session settings" side="bottom">
       <button type="button" aria-label="Session settings" onClick={() => setShowSettings(true)}
-        className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary">
+        className="needs-full-access inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary">
         <Settings className="h-4 w-4" aria-hidden="true" />
       </button>
     </Tooltip>

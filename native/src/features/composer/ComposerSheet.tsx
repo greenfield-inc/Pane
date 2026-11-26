@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, View } fr
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/theme';
+import { SHEET_MAX_WIDTH } from '@/ui/Sheet';
 
 export interface ComposerSheetProps {
   visible: boolean;
@@ -76,6 +77,6 @@ export function useAfterSheetCloses() {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  sheet: { borderTopWidth: 1, paddingTop: 8, maxHeight: '85%' },
+  sheet: { borderTopWidth: 1, paddingTop: 8, maxHeight: '85%', width: '100%', maxWidth: SHEET_MAX_WIDTH, alignSelf: 'center' },
   grabber: { alignSelf: 'center', width: 36, height: 5, borderRadius: 3, marginBottom: 8 },
 });

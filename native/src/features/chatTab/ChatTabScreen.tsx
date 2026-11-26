@@ -10,9 +10,10 @@ import { chatTurns, waitingToolIds, type ChatWorkerLine } from '@shared/chatTabP
 import { rejectOption } from '@shared/chatTabPermissions';
 import type { ChatTabSend } from '@shared/types/chatTab';
 
+import { useDaemon, useReadOnlyHost } from '@/daemon';
 import { useJourneyMark, useLiveMarks, useScreenJourney } from '@/features/perf/usePerfMarks';
 import { useTheme } from '@/theme';
-import { SkeletonSwap, Text } from '@/ui';
+import { EmptyState, SkeletonSwap, Text } from '@/ui';
 
 import { ComposerSheet } from '../composer/ComposerSheet';
 import { Dimmed } from '../hosts/ConnectionStatus';
@@ -71,6 +72,8 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   useScreenJourney('chat');
   const { chat, viewer, snapshot, whenConnected } = useChatTab(panelId);
   const { live } = useConnectionPresence();
+  const { profile } = useDaemon();
+  const readOnly = useReadOnlyHost();
   const catalog = useChatAgents();
   const view = snapshot.view;
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
@@ -99,6 +102,8 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   }), [onViewDiff, onOpenWorker, onOpenDevice, skills, openFile, blocks]);
   const agent = view ? chatAgentLabel(catalog, view.agent) : 'the agent';
   const starting = view?.status === 'starting';
+  // The computer starts no agent for a phone that only watches, so a chat nobody opened there has nothing to show.
+  const notRunning = readOnly && !snapshot.transcript && (view?.status === 'idle' || view?.status === 'stopped');
   // Full strength and typing while the connection comes back; a send waits for it.
   const disabled = !live || !view || view.status === 'stopped';
   useJourneyMark('chat', 'messages', messages.length > 0);
@@ -232,28 +237,28 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
     : view?.notice ? <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>{view.notice}</Text> : null;
   return <AssistantRuntimeProvider runtime={runtime}>
     <ThreadPrimitive.Root testID="chat-tab" style={[styles.fill, { backgroundColor: theme.chat.background }]}>
-      {view?.problem && <View style={styles.pad}><ProblemBanner problem={view.problem} agent={agent} busy={busy || !live}
+      {view?.problem && <View style={styles.pad}><ProblemBanner problem={view.problem} agent={agent} busy={busy || !live} readOnly={readOnly}
         onRestart={() => void act(() => chat.restart(panelId))} onSignIn={() => void act(() => chat.signIn(panelId))} /></View>}
       {error && <View accessibilityLiveRegion="polite" testID="chat-error" style={[styles.error, { backgroundColor: theme.chat.dangerSoft, borderColor: theme.chat.danger }]}>
         <Text selectable variant="subhead" style={{ color: theme.chat.danger }}>{error}</Text>
       </View>}
       <Dimmed dimmed={!live} style={styles.fill}>
-        <SkeletonSwap loading={!snapshot.transcript && !view?.problem} style={styles.fill} skeleton={
+        <SkeletonSwap loading={!snapshot.transcript && !view?.problem && !notRunning && !(readOnly && error)} style={styles.fill} skeleton={
           <View testID="chat-skeleton" accessible accessibilityLabel={starting ? `Starting ${agent}` : 'Loading conversation'} style={[styles.fill, styles.rows, styles.bones]}>
             <ChatRowsSkeleton />
             {/* The host is launching the agent and replaying its history: a real state, which can take seconds. */}
             {starting && <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>Starting {agent}…</Text>}
           </View>}>
-          <LegendList testID="chat-rows" data={rows} keyExtractor={row => row.key} estimatedItemSize={60} recycleItems={false}
+          {notRunning ? <EmptyState testID="chat-not-running" title="Not running" message={`This chat isn’t running on ${profile.label}. Its messages show here once someone opens it there.`} /> : <LegendList testID="chat-rows" data={rows} keyExtractor={row => row.key} estimatedItemSize={60} recycleItems={false}
             contentContainerStyle={styles.rows} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition initialScrollAtEnd
             // A window that stops short of the newest message must not chase the end.
             maintainScrollAtEnd={snapshot.hasNewer ? false : { animated: false }} maintainScrollAtEndThreshold={0.05}
             ListHeaderComponent={(snapshot.transcript?.start ?? 0) > 0 ? <DockButton testID="chat-earlier" title={`Earlier messages (${snapshot.transcript?.start})`} busy={snapshot.loadingEarlier} onPress={() => void viewer.loadEarlier()} style={styles.earlier} /> : null}
             ListFooterComponent={footer}
-            renderItem={({ item }) => <View style={styles.row}><ChatRowView row={item} actions={rowActions} /></View>} />
+            renderItem={({ item }) => <View style={styles.row}><ChatRowView row={item} actions={rowActions} /></View>} />}
         </SkeletonSwap>
       </Dimmed>
-      <View style={styles.dock}>
+      {readOnly ? null : <View style={styles.dock}>
         {snapshot.pendingDelivery && <View style={styles.inline}>
           <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>Delivery is unconfirmed.</Text>
           <DockButton testID="chat-check-delivery" title="Check delivery" disabled={!live} onPress={() => void deliver(snapshot.pendingDelivery!, false)} />
@@ -269,7 +274,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
           riskyMode={riskyMode} canConfigure={!!view?.controls.length} settings={showSettings}
           marks={marksOf(snapshot.draft)} caret={caret}
           onDraft={draftChanged} onCaret={caretMoved} onAttach={() => void attach()} onSettings={() => setSettings(true)} onStop={() => void act(() => chat.cancel(panelId))} />
-      </View>
+      </View>}
       <ComposerSheet visible={settings} onClose={() => setSettings(false)} testID="chat-settings-sheet">
         <ChatTabSettings arranged={arranged} disabled={disabled || busy || view?.status !== 'idle'} configure={(id, value) => void act(() => chat.configure(panelId, id, value))} />
       </ComposerSheet>

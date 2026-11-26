@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { readOnlyToken } from '@shared/types/accessLevel';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { addHost, addHosts, EMPTY_HOSTS, loadHosts, removeHost, saveHosts, type KeyValueStore } from './hosts';
@@ -22,6 +23,17 @@ function memoryStore(): KeyValueStore & { keys(): string[] } {
 }
 
 describe('saved hosts', () => {
+  it('never replaces full access with a read-only pairing, scanned or linked, and does upgrade the other way', () => {
+    const full = { id: 'relay:a', label: 'A', baseUrl: 'https://a.runpane.net', token: 'full', transport: 'http+sse' as const };
+    const read = { ...full, token: readOnlyToken('a') };
+    const hosts = { profiles: [full], activeId: full.id };
+    expect(addHosts(hosts, [], read).profiles).toEqual([full]);
+    expect(addHosts(hosts, [read]).profiles).toEqual([full]);
+    const fresh = { ...read, token: 'fresh' };
+    expect(addHosts({ profiles: [read], activeId: read.id }, [fresh]).profiles).toEqual([fresh]);
+    expect(addHosts({ profiles: [read], activeId: read.id }, [], full).profiles).toEqual([full]);
+  });
+
   it('never saves the demo computer as a host, whatever code names it', () => {
     expect(() => addHost(EMPTY_HOSTS, profile('studio-mac', 'https://studio-mac.demo.invalid', 'invented-token'))).toThrow(/demo/);
   });

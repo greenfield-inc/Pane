@@ -1,9 +1,10 @@
+import { readOnlyMarkSchema, tokenAccess, type ReadOnlyMark } from '../types/accessLevel';
 import type { RemotePaneConnectionProfile } from '../types/remoteDaemon';
 import { boundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
-import { fetchWithin, isRelayProfile, relayComputerAddress, type RelayPairingLink } from './relay';
+import { fetchWithin, isRelayProfile, relayComputerAddress, RelayPairingError, type RelayPairingLink } from './relay';
 import type { RemoteFetch } from './remoteDaemonClient';
 
-/** Both sides of a pairing link that would join two groups of computers, as the confirm names them. */
+/** Both sides of a pairing link opened where other computers are reached already, as the confirm names them. */
 export interface RelayLinkJoin {
   /** The computer whose link this is. */
   maker: string;
@@ -11,17 +12,41 @@ export interface RelayLinkJoin {
   makerGroup: string[];
   /** The computers this device already reaches through a relay. */
   here: string[];
+  /**
+   * "read" when the maker says the link is read-only: this device watches the maker's group and joins nothing.
+   * It is the maker's claim, so whoever confirms it must also link nothing when the exchange answers otherwise.
+   */
+  access?: ReadOnlyMark;
 }
 
 /** `/pair/preview`'s answer: the maker first, then every computer linked with it. */
 const previewSchema = boundary.object({
   group: boundary.array(boundary.object({ id: boundary.nonEmptyString, name: boundary.nonEmptyString })),
+  access: boundary.optional(readOnlyMarkSchema),
 });
+
+export type LinkPreviewAnswer = Awaited<ReturnType<typeof readLinkPreview>>;
+
+/**
+ * Why a read-only link is refused where the device already has full access to its computer, or to
+ * any computer the preview names with it (they would keep the full tokens their owner revokes, and
+ * hand out no read-only ones); null when it isn't.
+ */
+export function fullAccessRefusal(
+  device: 'phone' | 'browser',
+  computerIds: readonly string[],
+  access: ReadOnlyMark | undefined,
+  saved: readonly RemotePaneConnectionProfile[],
+): RelayPairingError | null {
+  if (access !== 'read') return null;
+  const full = saved.find(profile => profile.relay !== undefined && computerIds.includes(profile.relay.computerId) && tokenAccess(profile.token) !== 'read');
+  return full ? new RelayPairingError(`This ${device} already has full access to ${full.label}`, `Remove it first to watch it read-only.`, 'ERR_PAIRING_FULL_ACCESS', false) : null;
+}
 
 /**
  * Whether opening a pairing link links this device's computers with the link's computer, which the
  * device confirms first (D-16 changed). Null when it pairs without asking: it reaches no relay
- * computer yet, or it reaches the link's computer already. Reads the maker's group from
+ * computer with full access yet, or it has full access to the link's computer already. Reads the maker's group from
  * `POST https://<id>.<domain>/pair/preview`, which doesn't spend the secret, only to name it: the
  * maker writes that answer, so it never skips the confirm. When the preview can't be read (an older
  * Pane, or no answer), it asks, naming only the link's computer.
@@ -31,15 +56,27 @@ export async function relayLinkJoin(
   link: Pick<RelayPairingLink, 'secret' | 'computerId' | 'domain' | 'name'>,
   saved: readonly RemotePaneConnectionProfile[],
 ): Promise<RelayLinkJoin | null> {
-  const mine = saved.filter(isRelayProfile);
-  if (mine.length === 0 || mine.some(profile => profile.relay.computerId === link.computerId)) return null;
-  const here = mine.map(profile => profile.label);
-  const preview = await readPreview(fetch, link);
-  if (!preview?.group.length) return { maker: link.name, makerGroup: [link.name], here };
-  return { maker: preview.group[0].name, makerGroup: preview.group.map(computer => computer.name), here };
+  return linkJoin(link, null, saved) && linkJoin(link, await readLinkPreview(fetch, link), saved);
 }
 
-async function readPreview(fetch: RemoteFetch, link: Pick<RelayPairingLink, 'secret' | 'computerId' | 'domain'>) {
+/** `relayLinkJoin` with a preview read already; null when it could not be. */
+export function linkJoin(
+  link: Pick<RelayPairingLink, 'computerId' | 'name'>,
+  preview: LinkPreviewAnswer,
+  saved: readonly RemotePaneConnectionProfile[],
+): RelayLinkJoin | null {
+  // A computer this device only watches joins nothing, so it counts on neither side.
+  const mine = saved.filter(isRelayProfile).filter(profile => tokenAccess(profile.token) !== 'read');
+  if (mine.length === 0 || mine.some(profile => profile.relay.computerId === link.computerId)) return null;
+  const here = mine.map(profile => profile.label);
+  if (!preview?.group.length) return { maker: link.name, makerGroup: [link.name], here };
+  const join: RelayLinkJoin = { maker: preview.group[0].name, makerGroup: preview.group.map(computer => computer.name), here };
+  if (preview.access) join.access = preview.access;
+  return join;
+}
+
+/** What a link pairs, read without spending it; null when the computer can't say. */
+export async function readLinkPreview(fetch: RemoteFetch, link: Pick<RelayPairingLink, 'secret' | 'computerId' | 'domain'>) {
   try {
     const response = await fetchWithin(fetch, `${relayComputerAddress(link)}/pair/preview`, {
       method: 'POST',

@@ -399,6 +399,10 @@
           "description": "The command can reach services outside the local Pane app (MCP openWorldHint).",
           "type": "boolean"
         },
+        "otherMachines": {
+          "description": "The MCP tool takes a `machine` input and runs as `runpane workspace <machine> <command>`: a read that a computer with read-only access answers too.",
+          "type": "boolean"
+        },
         "cliOnlyFlags": {
           "description": "Flags the CLI accepts that the command's MCP tool leaves out, such as a mode that changes state on a command otherwise read-only.",
           "$ref": "#/$defs/stringList"

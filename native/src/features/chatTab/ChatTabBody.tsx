@@ -8,7 +8,7 @@ import type { ChatPanelState } from '@shared/types/chatTab';
 import type { OrchestrationSessionOverview } from '@shared/types/orchestrationSession';
 import type { ToolPanel } from '@shared/types/panels';
 
-import { invokeChannel, useDaemon, useDaemonEvent, useInvokeQuery } from '@/daemon';
+import { invokeChannel, useDaemon, useDaemonEvent, useInvokeQuery, useReadOnlyHost } from '@/daemon';
 import { useTheme } from '@/theme';
 
 import { decodeFolder, parentOf, posixPath } from '../files/files';
@@ -38,6 +38,7 @@ export function ChatTabBody({ panel, panels }: { panel: ToolPanel; panels: reado
   // SAFETY: the panel type 'chat' carries ChatPanelState as its custom state.
   const state = panel.state.customState as ChatPanelState | undefined;
   const sessionId = state?.orchestrationSessionId;
+  const readOnly = useReadOnlyHost();
   const workers = useSessionWorkers(sessionId);
   const diffId = panels.find(candidate => candidate.type === 'diff')?.id;
   const viewDiff = useCallback(() => router.setParams({ panelId: diffId }), [diffId]);
@@ -70,9 +71,9 @@ export function ChatTabBody({ panel, panels }: { panel: ToolPanel; panels: reado
     <View style={styles.fill} accessibilityElementsHidden={!!file} importantForAccessibility={file ? 'no-hide-descendants' : 'auto'}>
       <ChatTabScreen key={panel.id} panelId={panel.id} workers={workers}
         session={!!sessionId}
-        onOpenFile={openFile}
+        onOpenFile={readOnly ? undefined : openFile}
         onOpenWorker={openWorker}
-        onOpenDevice={openDevice}
+        onOpenDevice={readOnly ? undefined : openDevice}
         onViewDiff={diffId ? viewDiff : undefined} />
     </View>
     {file && <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.background }]}>

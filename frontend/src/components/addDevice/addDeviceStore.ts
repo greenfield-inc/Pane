@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { LinkPreview, LinkRedeemResult, RelayLinkOpenedEvent, RelayPairedEvent, RelayPairingInfo } from '../../../../shared/types/relay';
 import { RELAY_DEVICE_COMMANDS } from '../../../../shared/types/relay';
 import type { ComputerRoutesReport } from '../../../../shared/types/remoteComputers';
+import type { DeviceAccess, ReadOnlyMark } from '../../../../shared/types/accessLevel';
 import { parseRelayPairingLink } from '../../../../shared/remoteClient/relay';
 import { ipcErrorCode, ipcErrorMessage } from '../../utils/ipcErrorMessage';
 
@@ -21,13 +22,15 @@ export type LinkFlow =
   | { step: 'checking'; source: LinkSource }
   | { step: 'confirm'; source: LinkSource; link: string; preview: LinkPreview; here: string }
   | { step: 'linking'; source: LinkSource; maker: string }
-  | { step: 'linked'; source: LinkSource; maker: string; linked: string[] }
+  | { step: 'linked'; source: LinkSource; maker: string; linked: string[]; access?: ReadOnlyMark }
   | { step: 'failed'; source: LinkSource; message: string };
 
 /** The computer that used this dialog's link, and what came of "Not you? Unlink". */
 export interface MakerResult {
   label: string;
   computerId?: string;
+  /** "read" when it paired Read only: it isn't linked, so there is nothing to unlink. */
+  access?: ReadOnlyMark;
   unlink: 'idle' | 'busy' | 'done';
   /** What "Not you? Unlink" did. */
   outcome?: string;
@@ -44,8 +47,11 @@ interface AddDeviceState {
 
   expiresIn: LinkExpiry;
   setExpiresIn: (expiresIn: LinkExpiry) => void;
-  /** The last link copied from the Computer tab. */
-  copied: RelayPairingInfo | null;
+  /** What the Phone tab's code and the Computer tab's link give; Full access each time the dialog opens. */
+  access: DeviceAccess;
+  setAccess: (access: DeviceAccess) => void;
+  /** The last link copied from the Computer tab, and what it gives. */
+  copied: (RelayPairingInfo & { access: DeviceAccess }) | null;
   copyError: string | null;
   copyLink: () => Promise<void>;
 
@@ -63,6 +69,8 @@ interface AddDeviceState {
 
 // Bumped for every new link and on cancel, so a late answer never lands on a newer flow.
 let flowGeneration = 0;
+// Bumped when the level changes or the dialog closes, so a link asked for at another level is never copied.
+let copyGeneration = 0;
 /** Set once this app has copied a link; only then is a computer's `relay:paired` this dialog's result. */
 let copiedALink = false;
 
@@ -86,11 +94,12 @@ async function thisComputerName(): Promise<string> {
 }
 
 export const useAddDeviceStore = create<AddDeviceState>((set, get) => {
-  const redeem = async (link: string, source: LinkSource, maker: string, generation: number) => {
+  // `access` is the level the person saw: an answer at another level links nothing.
+  const redeem = async (link: string, source: LinkSource, { maker, access = 'full' }: Pick<LinkPreview, 'maker'> & { access?: DeviceAccess }, generation: number) => {
     set({ flow: { step: 'linking', source, maker } });
     try {
-      const result: LinkRedeemResult = await window.electronAPI.invoke('relay:redeem-link', { link });
-      if (generation === flowGeneration) set({ flow: { step: 'linked', source, maker, linked: result.linked } });
+      const result: LinkRedeemResult = await window.electronAPI.invoke('relay:redeem-link', { link, access });
+      if (generation === flowGeneration) set({ flow: { step: 'linked', source, maker, linked: result.linked, access: result.access } });
     } catch (cause) {
       if (generation === flowGeneration) set({ flow: { step: 'failed', source, message: refusal(cause, `Pane couldn't link with ${maker}`) } });
     }
@@ -100,26 +109,37 @@ export const useAddDeviceStore = create<AddDeviceState>((set, get) => {
     isOpen: false,
     tab: 'phone',
     computerId: null,
-    open: (tab, options) => set({ isOpen: true, tab, computerId: options?.computerId ?? null }),
+    open: (tab, options) => set((state) => ({ isOpen: true, tab, computerId: options?.computerId ?? null, access: state.isOpen ? state.access : 'full' })),
     close: () => {
       const { flow } = get();
+      copyGeneration += 1;
       // A pasted link's state belongs to the dialog; the full-page confirm outlives it.
-      set({ isOpen: false, computerId: null, maker: null, copied: null, copyError: null, flow: flow.step !== 'idle' && flow.source === 'paste' ? IDLE : flow });
+      set({ isOpen: false, computerId: null, access: 'full', maker: null, copied: null, copyError: null, flow: flow.step !== 'idle' && flow.source === 'paste' ? IDLE : flow });
     },
     setTab: (tab) => set({ tab }),
 
     expiresIn: '1h',
     setExpiresIn: (expiresIn) => set({ expiresIn }),
+    access: 'full',
+    setAccess: (access) => {
+      if (access === get().access) return;
+      copyGeneration += 1;
+      set({ access, copyError: null });
+    },
     copied: null,
     copyError: null,
     copyLink: async () => {
+      const { expiresIn, access } = get();
+      const generation = ++copyGeneration;
       set({ copyError: null });
       try {
-        const info: RelayPairingInfo = await window.electronAPI.invoke('relay:pairing-code', { expiresIn: get().expiresIn });
+        const info: RelayPairingInfo = await window.electronAPI.invoke('relay:pairing-code', { expiresIn, access });
+        if (generation !== copyGeneration) return;
         await navigator.clipboard.writeText(info.url);
         copiedALink = true;
-        set({ copied: info });
+        if (generation === copyGeneration) set({ copied: { ...info, access } });
       } catch (cause) {
+        if (generation !== copyGeneration) return;
         set({ copied: null, copyError: ipcErrorMessage(cause, "Pane couldn't make a link") });
       }
     },
@@ -143,16 +163,16 @@ export const useAddDeviceStore = create<AddDeviceState>((set, get) => {
         return;
       }
       if (generation !== flowGeneration) return;
-      if (preview.needsConfirm) {
+      if (preview.needsConfirm || preview.access === 'read') {
         set({ flow: { step: 'confirm', source, link, preview, here } });
         return;
       }
-      await redeem(link, source, preview.maker, generation);
+      await redeem(link, source, { maker: preview.maker }, generation);
     },
     confirmLink: async () => {
       const { flow } = get();
       if (flow.step !== 'confirm') return;
-      await redeem(flow.link, flow.source, flow.preview.maker, flowGeneration);
+      await redeem(flow.link, flow.source, flow.preview, flowGeneration);
     },
     cancelLink: () => {
       flowGeneration += 1;
@@ -197,7 +217,7 @@ export function startAddDeviceListeners(): () => void {
     // The dialog reopens on the result even when it was closed, so "Not you?" is always seen.
     if (event.kind !== 'computer' || !copiedALink) return;
     useAddDeviceStore.setState({
-      maker: { label: event.label, computerId: event.computerId, unlink: 'idle' },
+      maker: { label: event.label, computerId: event.computerId, access: event.access, unlink: 'idle' },
       isOpen: true,
       tab: 'computer',
     });

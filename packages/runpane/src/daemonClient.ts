@@ -190,7 +190,12 @@ export interface RemoteRoute {
   token?: string;
   /** Relay and same-network routes: base64url SHA-256 of the computer's SubjectPublicKeyInfo. Any other key is refused before the token is sent. */
   fingerprint?: string;
+  /** "read" when its token is a read-only device's. */
+  access?: 'read';
 }
+
+/** A computer refuses a read-only device with this code; nothing was run or changed. The CLI's copy of `READ_ONLY_ACCESS_CODE` in shared/types/accessLevel.ts. */
+export const READ_ONLY_ACCESS_CODE = 'ERR_READ_ONLY_ACCESS';
 
 /** Another machine's Pane (see `runpane workspace`), with its routes in the order they are tried. */
 export interface RemoteDaemonTarget {
@@ -280,16 +285,50 @@ const remoteInvokeResponseSchema = boundary.union(
 
 let routedTarget: RemoteDaemonTarget | null = null;
 let routedToSelf = false;
+let routedName: string | undefined;
 
-/** Sends every later daemon call in this process to another machine (`runpane workspace <machine> <command>`). */
-export function routeDaemonCallsTo(target: RemoteDaemonTarget | null, self = false): void {
+/**
+ * Sends every later daemon call in this process to another machine (`runpane workspace <machine> <command>`).
+ * `name` is how the caller named it, for the follow-up commands it answers with.
+ */
+export function routeDaemonCallsTo(target: RemoteDaemonTarget | null, self = false, name = target?.machine): void {
   routedTarget = target;
+  routedName = name;
   routedToSelf = self;
 }
 
 /** The other machine daemon calls go to, or null when they stay on this one (this machine named by its own name included). */
 export function routedOtherMachine(): string | null {
   return routedTarget && !routedToSelf ? routedTarget.machine : null;
+}
+
+/** A command that stays on the machine runpane runs on. */
+const HERE = '(?!(?:workspace (?!state\\b)|doctor\\b|update\\b|link\\b))';
+const SPOKEN_COMMAND = new RegExp(`\`runpane ${HERE}`, 'g');
+const BARE_COMMAND = new RegExp(`\\brunpane ${HERE}`, 'g');
+
+/** Text another machine answered with, its `runpane` commands naming that machine. */
+export function withRoutedMachine(text: string): string {
+  return routedOtherMachine() ? text.replace(SPOKEN_COMMAND, `\`runpane workspace ${routedName} `) : text;
+}
+
+const textSchema = boundary.string;
+
+/** Another machine's follow-ups (`nextCommand`, `next`, the result's own `message`) name that machine; what its agents wrote stays as written. */
+function withRoutedMachineHints(result: JsonValue | undefined): JsonValue | undefined {
+  if (result === undefined || !routedOtherMachine()) return result;
+  const root = decodeBoundary(result, boundary.json);
+  const text = JSON.stringify(root, function hint(this: JsonValue, key: string, value: JsonValue) {
+    if (key !== 'nextCommand' && key !== 'next' && !(key === 'message' && this === root)) return value;
+    let said: string;
+    try {
+      said = decodeBoundary(value, textSchema);
+    } catch {
+      return value;
+    }
+    return key === 'nextCommand' ? said.replace(BARE_COMMAND, `runpane workspace ${routedName} `) : withRoutedMachine(said);
+  });
+  return decodeBoundary(JSON.parse(text), boundary.json);
 }
 
 /** The route that last answered for each target, tried first on its next call. */
@@ -341,8 +380,9 @@ export async function invokeRemoteDaemon<T>(
     const last = index === routes.length - 1;
     const outcome = await postRoute(route, target.machine, headers, text, timeoutMs, last ? undefined : route.kind === 'lan' ? LAN_ROUTE_CONNECT_TIMEOUT_MS : ROUTE_CONNECT_TIMEOUT_MS);
     const answer = readRouteOutcome(target.machine, route, channel, timeoutMs, outcome);
-    if ('result' in answer) {
+    if (!('missed' in answer)) {
       answeredRoutes.set(target, route);
+      if ('failure' in answer) throw answer.failure;
       return decodeResult(channel, answer.result, resultSchema);
     }
     missed.push(routes.length > 1 ? `${routeName(route)}: ${answer.missed}` : answer.missed);
@@ -360,8 +400,8 @@ export async function invokeRemoteDaemon<T>(
 }
 
 /**
- * What one route's attempt means: Pane's result, a miss the next route may retry (the request
- * never reached a Pane, or was refused before it ran), or a failure after the request was sent.
+ * What one route's attempt means: Pane's result, Pane's own error, a miss the next route may retry
+ * (the request never reached a Pane, or its sign-in was rejected), or a throw when the reply was lost.
  */
 function readRouteOutcome(
   machine: string,
@@ -369,7 +409,7 @@ function readRouteOutcome(
   channel: string,
   timeoutMs: number,
   outcome: RouteOutcome,
-): { result: JsonValue | undefined } | { missed: string; refusal?: PaneDaemonClientError } {
+): { result: JsonValue | undefined } | { failure: PaneDaemonClientError } | { missed: string; refusal?: PaneDaemonClientError } {
   const lost = (detail: string) => new PaneDaemonClientError(
     `Lost the reply from Pane on ${machine} (${route.baseUrl}): ${detail}. The request was sent, so Pane there may have finished ${channel}.`,
     'ERR_WORKSPACE_UNREACHABLE',
@@ -407,7 +447,7 @@ function readRouteOutcome(
   const failure = new PaneDaemonClientError(`${machine}: ${payload.error.message}${fix}`, payload.error.code, false, payload.error.next);
   // A refused credential ran nothing, so another route (with its own credential) may still answer.
   if (status === 401 || status === 403) return { missed: payload.error.message, refusal: failure };
-  throw failure;
+  return { failure };
 }
 
 /** The underlying reason; a refusal on every address of a name (an AggregateError) has no message, only a code. */
@@ -424,7 +464,8 @@ export async function invokeDaemon<T>(
   options: InvokeOptions = {},
 ): Promise<T> {
   if (routedTarget && !options.thisMachine) {
-    return invokeRemoteDaemon(routedTarget, channel, args, resultSchema, options.timeoutMs);
+    const result = await invokeRemoteDaemon(routedTarget, channel, args, boundary.optional(boundary.json), options.timeoutMs);
+    return decodeResult(channel, withRoutedMachineHints(result), resultSchema);
   }
   const appDirectory = resolvePaneDirectory(options.paneDir);
   const endpoint = getPaneDaemonEndpoint(appDirectory);

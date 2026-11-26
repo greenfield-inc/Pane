@@ -211,6 +211,8 @@ export type ElectronApiMockOptions = {
     /** Turning it on meets the CA's certificate limit until this time (ISO), as `RelayStatus.certificateLimit`. */
     certificateLimitUntil?: string;
     /** How long each pairing code lasts. */
+    /** How long making a code takes. */
+    codeDelayMs?: number;
     codeTtlMs?: number;
     /** What the "everywhere" commands report. */
     everywhere?: { removed: string[]; notReached: string[] };
@@ -927,10 +929,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (relayStatus.phase !== 'ready') return Promise.reject(new Error("Error invoking remote method 'relay:pairing-code': Error [ERR_RELAY_NOT_READY]: This computer isn't ready to pair yet."));
         relayCodes += 1;
         const code: RelayPairingInfo = {
-          url: `https://pane.example/pair#s=secret-${relayCodes}&c=k7q2m9&n=devbox`,
+          // The level is in the address, so a spec can tell which code is on screen.
+          url: `https://pane.example/pair#s=${JSON.stringify(args[0] ?? null).includes('"read"') ? 'read-' : ''}secret-${relayCodes}&c=k7q2m9&n=devbox`,
           expiresAt: new Date(Date.now() + (relayOptions.codeTtlMs ?? 10 * 60_000)).toISOString(),
         };
-        return Promise.resolve(code);
+        return new Promise((resolve) => { window.setTimeout(() => resolve(code), relayOptions.codeDelayMs ?? 0); });
       }
       if (channel === 'relay:set-address') {
         const address = args[0] == null ? '' : String(args[0]).trim();
@@ -2434,6 +2437,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           emit('pane:focus-requested', { paneId });
         },
         // Names the host that host-keyed ui state reads and writes, as main's active profile does.
+        /** The connected computer, as main reports it. */
+        setConnectionState(updates: Partial<RemotePaneConnectionState>) {
+          setRemoteConnectionState(updates);
+        },
         setActiveRemoteProfileId(profileId: string | null) {
           remoteConnectionState.activeProfileId = profileId;
         },
