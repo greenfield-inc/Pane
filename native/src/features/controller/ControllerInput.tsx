@@ -138,16 +138,17 @@ export function ControllerInput() {
         useControllerState.setState({ active: devices.size > 0, ringShown: false, cheatSheet: null });
       },
       onButton(event) {
-        use(event.deviceId);
         // The cheat sheet that opened on its own, or from Settings, closes on the next press, which does nothing else.
-        if (event.pressed && useControllerState.getState().cheatSheet === 'open') {
+        const sheetOpen = useControllerState.getState().cheatSheet === 'open';
+        use(event.deviceId);
+        if (event.pressed && sheetOpen) {
           useControllerState.setState({ cheatSheet: null });
           return;
         }
         const position = toPosition(event.button, namesByLabel(platform, devices.get(event.deviceId)));
         if (event.pressed) held.add(position);
         else held.delete(position);
-        if (event.pressed) useControllerState.setState({ ringShown: true });
+        if (event.pressed && !useControllerState.getState().ringShown) useControllerState.setState({ ringShown: true });
         step();
       },
       onAxes(event) {
@@ -157,6 +158,7 @@ export function ControllerInput() {
           use(event.deviceId);
         }
         axes = event.axes;
+        if (Math.max(Math.abs(axes.leftX), Math.abs(axes.leftY)) > 0.5 && !useControllerState.getState().ringShown) useControllerState.setState({ ringShown: true });
         step();
       },
     });

@@ -108,8 +108,8 @@ mode.
 ## On the phone
 
 The Android and iPhone apps follow the same scheme, with a phone's screens in
-place of the sidebar. They need app version 1.6 or later (runtime 1.6): older
-builds ignore the pad.
+place of the sidebar. They need a store build or APK with runtime 1.6 or
+later; older builds ignore the pad, and over-the-air updates don't add it.
 
 1. Pair the pad with the phone in its Bluetooth settings.
 2. Open Pane and press any button. The cheat sheet shows once, with the pad's
