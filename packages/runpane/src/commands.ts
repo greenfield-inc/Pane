@@ -221,6 +221,8 @@ export interface ParsedArgs {
   notifyTook?: string;
   notifyTookAs?: string;
   notifyStatus?: string;
+  /** `notify --close <id|Q-n>`: the asker withdraws its own waiting card. */
+  notifyClose?: string;
   /** `notify --update <id|Q-n> --asked <text> --what-changed <text>` */
   notifyUpdate?: string;
   notifyAsked?: string;
@@ -324,6 +326,7 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--questions', ['notify', 'report']],
   ['--took', ['notify']],
   ['--took-as', ['notify']],
+  ['--close', ['notify']],
   ['--status', ['notify', 'update', 'todos list']],
   ['--update', ['notify']],
   ['--asked', ['notify']],
@@ -1661,6 +1664,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--took-as') {
     setNotifyTookAs(parsed, value);
+    return;
+  }
+  if (flag === '--close') {
+    parsed.notifyClose = value;
     return;
   }
   if (flag === '--status') {

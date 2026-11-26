@@ -70,6 +70,8 @@ export interface NotifyRequest extends Partial<Omit<NotifyQuestion, 'ui'>> {
   took?: string;
   tookAs?: NotifyTookAs;
   status?: string;
+  /** `--close`: a waiting card the calling tab asked, withdrawn. */
+  close?: string;
   /** `--update`: the approval to save a new version of, the person's question, and what changed. */
   update?: string;
   asked?: string;
@@ -92,6 +94,8 @@ type NotifyResultBody =
   /** The person typed a reply: an answer or a question. Say which with `--took`. */
   | { reply: string; picks?: string[]; id: string; replyId: string; next: string }
   | { took: NotifyTookAs; id: string; next?: string }
+  /** `--close`: the card closed, and nothing was sent. */
+  | { closed: true; id: string }
   | { approved: boolean; note?: string }
   | { delivered: 'screen' | 'inbox' }
   | { status: 'saved'; project: string; name: string }
@@ -140,6 +144,7 @@ const notifyResultBodySchema: BoundarySchema<NotifyResultBody> = boundary.union(
   boundary.object({ waiting: boundary.literal(true), id: boundary.nonEmptyString, next: boundary.string }),
   boundary.object({ unavailable: boundary.string, next: boundary.string }),
   boundary.object({ took: boundary.enumeration('answer', 'question'), id: boundary.nonEmptyString, next: boundary.optional(boundary.string) }),
+  boundary.object({ closed: boundary.literal(true), id: boundary.nonEmptyString }),
   boundary.object({ reply: boundary.string, picks: boundary.optional(boundary.array(boundary.string)), id: boundary.nonEmptyString, replyId: boundary.nonEmptyString, next: boundary.string }),
   boundary.object({ approved: boundary.boolean, note }),
   boundary.object({ answer: boundary.string, note, answers: boundary.optional(boundary.array(boundary.string)) }),
@@ -195,6 +200,7 @@ function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: str
     update: parsed.notifyUpdate,
     asked: parsed.notifyAsked,
     whatChanged: parsed.notifyWhatChanged,
+    close: parsed.notifyClose,
   };
   const { caller, timing } = notifyCallerFields(env, cwd);
 
@@ -205,6 +211,12 @@ function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: str
       throw invalid('resume', `resume keeps waiting on an earlier question, so it takes no other fields; remove ${extra.join(', ')}.`, 'Call notify again with only resume.');
     }
     return { resume: parsed.resume, ...timing, caller };
+  }
+  if (others.close !== undefined) {
+    if (!others.close.trim()) throw invalid('close', "close must be the approval's id or Q-n, such as --close Q-20.");
+    const extra = givenFields({ ...given, ...others }, (field) => field === 'close');
+    if (extra.length > 0) throw invalid('close', `close withdraws a card you asked, so it takes no other fields; remove ${extra.join(', ')}.`);
+    return { close: others.close, caller };
   }
   if (others.took !== undefined || others.tookAs !== undefined) return buildTookRequest(given, others, caller);
   if (others.status !== undefined) throw invalid('status', 'status goes with --took <id|Q-n> question.');
@@ -235,6 +247,7 @@ interface NotifyOtherFlags {
   update?: string;
   asked?: string;
   whatChanged?: string;
+  close?: string;
 }
 
 /** The fields given, in order, leaving out those `keep` accepts. */
@@ -458,6 +471,7 @@ function describeNotifyOutcome(result: NotifyResult): string {
     const picked = picks.some(Boolean) ? ` (picked: ${picks.map(pick => pick || '—').join(' · ')})` : '';
     return `Reply ${result.replyId} on ${result.id}: "${result.reply}"${picked}. ${result.next}`;
   }
+  if ('closed' in result) return `Closed ${result.id}. Nothing was sent.`;
   if ('took' in result) return `Taken as ${result.took === 'answer' ? 'the answer' : 'a question'} (id ${result.id}).${result.next ? ` ${result.next}` : ''}`;
   if ('unavailable' in result) return `Unavailable: ${result.unavailable} ${result.next}`;
   if ('approved' in result) return withNote(result.approved ? 'Approved' : 'Denied', result.note);

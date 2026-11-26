@@ -815,6 +815,26 @@ describe('Approvals items, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
+  it('--close withdraws the calling tab\'s own card, refuses another field, and leaves the card open when its call ends', async () => {
+    const pane = await startWithSessions();
+    const caller = { paneId: 'loose', panelId: 'loose-tab' };
+    // The caller's tab is a tab of its Pane, so Pane can type a late answer into it.
+    vi.spyOn(panelManager, 'getPanel').mockImplementation(panelId => ({
+      id: panelId, sessionId: panelId.replace(/-tab$/u, ''), type: 'terminal', title: panelId,
+      state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+    }));
+    const controller = new AbortController();
+    void pane.registry.invokeConnected('runpane:notify', [{ ui: 'ask', title: 'Q-8: Which branch?', caller }], controller.signal).catch(() => undefined);
+    await flush();
+    controller.abort();
+    await flush();
+    expect(pane.notify.snapshot().items).toMatchObject([{ title: 'Q-8: Which branch?', state: 'waiting' }]);
+    await expect(pane.registry.invoke('runpane:notify', [{ close: 'Q-8', title: 'x', caller }])).rejects.toThrow(/close goes on its own/);
+    expect(await pane.registry.invoke('runpane:notify', [{ close: 'Q-8', caller }])).toEqual({ closed: true, id: pane.notify.snapshot().items[0].id });
+    expect(pane.notify.snapshot().items).toMatchObject([{ state: 'expired', closed: { by: 'pane', reason: 'its asker withdrew it' } }]);
+    pane.notify.dispose();
+  });
+
   it('keeps a notify context that is prose starting with a bracket, and reads a status-JSON context on --update too', async () => {
     const pane = await startWithSessions();
     const caller = { paneId: 'loose', panelId: 'loose-panel' };
