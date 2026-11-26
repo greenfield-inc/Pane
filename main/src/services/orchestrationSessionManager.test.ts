@@ -662,6 +662,60 @@ describe('OrchestrationSessionManager', () => {
     expect(activity.every(entry => entry.kind === 'updated')).toBe(true);
   });
 
+  describe('the Session list (T-127)', () => {
+    async function busySession() {
+      const fixture = createFixture();
+      const created = await fixture.manager.create({ name: 'Busy', profile: 'Answer in French.' });
+      const selector = { sessionId: created.session.id };
+      for (const goal of ['one', 'two']) await fixture.manager.update(selector, { goal });
+      return { fixture, selector };
+    }
+
+    it('leaves out each Session\'s activity log and profile when a reader asks for the summary', async () => {
+      const { fixture, selector } = await busySession();
+
+      const { sessions, selectedSessionId } = await fixture.manager.list({ summary: true });
+
+      const listed = sessions.find(session => session.id === selector.sessionId);
+      expect(listed).toMatchObject({ name: 'Busy', goal: 'two', revision: expect.any(Number) });
+      expect(listed).not.toHaveProperty('activity');
+      expect(listed).not.toHaveProperty('profile');
+      expect(selectedSessionId).toBe(selector.sessionId);
+    });
+
+    it('still gives full records to a reader that does not ask for the summary', async () => {
+      const { fixture, selector } = await busySession();
+
+      const listed = (await fixture.manager.list()).sessions.find(session => session.id === selector.sessionId);
+
+      expect(listed?.profile).toBe('Answer in French.');
+      expect(listed?.activity.length).toBeGreaterThanOrEqual(3);
+      expect((await fixture.manager.get(selector)).profile).toBe('Answer in French.');
+    });
+
+    it('answers a select with the summary list when asked, and with full records otherwise', async () => {
+      const { fixture, selector } = await busySession();
+
+      const summary = (await fixture.manager.select(selector, { summary: true })).sessions.find(session => session.id === selector.sessionId);
+      const full = (await fixture.manager.select(selector)).sessions.find(session => session.id === selector.sessionId);
+
+      expect(summary).not.toHaveProperty('activity');
+      expect(summary).not.toHaveProperty('profile');
+      expect(full?.profile).toBe('Answer in French.');
+      expect(full?.activity.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('never changes the saved record when it leaves fields out of the summary', async () => {
+      const { fixture, selector } = await busySession();
+
+      await fixture.manager.list({ summary: true });
+
+      const saved = await fixture.manager.get(selector);
+      expect(saved.profile).toBe('Answer in French.');
+      expect(saved.activity.length).toBeGreaterThanOrEqual(3);
+    });
+  });
+
   it('creates a pinned Session and persists declarative pin updates', async () => {
     const fixture = createFixture();
     const input = { name: 'Pinned coordinator', isPinned: true };
