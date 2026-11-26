@@ -2,7 +2,8 @@ import type { SessionMoveMark } from './sessionMove';
 import type { CustomCommandResume } from './customCommandResume';
 import type { AgentState } from './agentStatus';
 import type { PaneChatAgent } from './paneChat';
-import type { TerminalAgentReport, TerminalPausedMark, ToolPanel, ToolPanelType } from './panels';
+import type { SessionPanelLayout, TerminalAgentReport, TerminalPausedMark, ToolPanel, ToolPanelType } from './panels';
+import type { ChatTabView } from './chatTab';
 import type { RunpanePaneArchiveBlockCode } from './runpaneOrchestration';
 import { boundary, decodeOptionalBoundary, type JsonObject } from '../validation/boundaryDecoder';
 
@@ -187,6 +188,34 @@ export interface OrchestrationSessionView<TSession = unknown> {
   cwd: string;
   guidePath: string;
   started: boolean;
+}
+
+/**
+ * Everything a desktop needs to show a Session, in one call (T-87): what `get`,
+ * `panels:list`, `panels:get-layout` and `chat-tab:get` returned one after another.
+ *
+ * - `orchestration-sessions:peek` (the sidebar cursor passing over a Session) only reads:
+ *   it saves nothing, creates nothing and starts no agent. `view` is null when the
+ *   Session's tab has not been created yet; opening it creates it.
+ * - `orchestration-sessions:open` (the cursor settled, Enter, a click) is `get` plus the
+ *   rest, starts the chat's agent as `chat-tab:get` does, and with `select` saves the
+ *   selection and returns the list `select` returns.
+ */
+export interface OrchestrationSessionOpenResult<TSession = unknown> {
+  view: OrchestrationSessionView<TSession> | null;
+  /** The Session's tabs, as `panels:list` returns them for this client. */
+  panels: ToolPanel[];
+  /** The host's last-used tab layout, as `panels:get-layout` returns it. */
+  layout: SessionPanelLayout | null;
+  /** The agent's chat with its newest messages, when the agent tab is a chat. */
+  chat?: ChatTabView;
+  /** With `select`: the Session list after saving the selection. */
+  list?: OrchestrationSessionListResult;
+}
+
+export interface OrchestrationSessionOpenOptions {
+  /** Save this Session as the selected one, as `select` does. */
+  select?: boolean;
 }
 
 export interface OrchestrationGitSummary {

@@ -119,6 +119,7 @@ export type SettingsSettingId =
   | 'devices-max-booted'
   | 'devices-ios-machine'
   | 'keyboard-shortcuts'
+  | 'arrow-keys-open-sessions'
   | 'keyboard-shortcut-map'
   | 'command-palette-shortcut'
   | 'kitty-keyboard'

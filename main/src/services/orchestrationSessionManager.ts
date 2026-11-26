@@ -339,6 +339,34 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
+  /**
+   * The Session's view without changing anything (the sidebar cursor's peek, T-87): no
+   * internal session or agent tab is created, no tab is remembered as active, nothing
+   * starts. Null while its internal session or agent tab does not exist yet.
+   */
+  async peekView(selector: OrchestrationSessionSelector): Promise<OrchestrationSessionView<Session> | null> {
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const record = this.findSession(this.store.read(), selector);
+      if (record.archived === true) {
+        throw new Error(`Session ${record.name} is archived; restore it before opening it`);
+      }
+      if (record.move?.state === 'arriving') return null;
+      const internalSession = this.sessionManager.getSession(record.internalSessionId);
+      const panel = panelManager.getPanel(record.panelIds[record.agent]);
+      if (!internalSession || !panel || panel.sessionId !== internalSession.id) return null;
+      return {
+        session: clone(record),
+        internalSession,
+        panel,
+        agent: record.agent,
+        cwd: sessionRuntimePath(sessionWorkspacePath(record.id), record),
+        guidePath: sessionRuntimePath(await this.ensureGuidePath(), record),
+        started: this.agentStarted(panel.id),
+      };
+    });
+  }
+
   /** `terminal`: start the orchestrator in a terminal even with chat tabs on, for a client that can't show a chat (D-203). */
   async create(input: OrchestrationSessionCreateInput, sourcePanelId?: string, { terminal = () => false }: { terminal?: (agent: PaneChatAgent) => boolean } = {}): Promise<OrchestrationSessionView<Session>> {
     return withLock('orchestration-sessions', async () => {

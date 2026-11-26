@@ -275,9 +275,12 @@ export interface ChatTabCreate {
   activate?: boolean;
 }
 
+export interface ChatTabReadOptions { start?: boolean }
+
 export interface ChatTabClient {
   onReconnect?(callback: () => void): () => void;
-  get(panelId: string, limit?: number): Promise<ChatTabView>;
+  /** `start: false` reads a stopped tab without starting its agent (it shows the newest messages it saved). */
+  get(panelId: string, limit?: number, options?: ChatTabReadOptions): Promise<ChatTabView>;
   history(panelId: string, before: number, limit: number): Promise<AgentChatMessage[]>;
   send(panelId: string, request: ChatTabSend): Promise<AgentChatReceipt>;
   receipt(panelId: string, operationId: string): Promise<AgentChatReceipt | undefined>;

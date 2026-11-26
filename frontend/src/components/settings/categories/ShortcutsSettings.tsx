@@ -103,6 +103,18 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
           />
         </SettingRow>
         <SettingRow
+          settingId="arrow-keys-open-sessions"
+          label="Arrow keys open chat Sessions"
+          description="Moving through the Sessions sidebar with ↑ and ↓ shows each chat Session at once, while the cursor stays in the sidebar. Its agent starts only once the cursor rests on it for a second, or you press Enter or start typing. When off, the arrows only move the cursor and Enter opens."
+          saveState={persistence.saveStates['arrow-keys-open-sessions']}
+        >
+          <ImmediateToggle
+            label="Arrow keys open chat Sessions"
+            value={config.arrowKeysOpenSessions !== false}
+            onSave={(value) => persistence.saveConfig('arrow-keys-open-sessions', { arrowKeysOpenSessions: value })}
+          />
+        </SettingRow>
+        <SettingRow
           settingId="command-palette-shortcut"
           label="Keep Search shortcut enabled"
           description="Keep the Search key (Ctrl/Cmd+Shift+P unless you changed it) available when other Pane keyboard shortcuts are disabled."

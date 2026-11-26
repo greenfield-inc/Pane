@@ -98,6 +98,7 @@ export interface SetupPreferenceConfig {
   notifications?: { playSound: boolean; enabled: boolean };
   keyboardShortcutsEnabled?: boolean;
   commandPaletteShortcutEnabled?: boolean;
+  arrowKeysOpenSessions?: boolean;
   /** Changed key bindings by command id; null unassigns (shared/utils/keyboardBindings.ts). */
   keyboardShortcutOverrides?: Record<string, string | null>;
   kittyKeyboardEnabled?: boolean;

@@ -6,12 +6,16 @@ import type { AppServices } from './types';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionArchiveResult,
+  OrchestrationSessionOpenResult,
   OrchestrationSessionSelector,
+  OrchestrationSessionView,
 } from '../../../shared/types/orchestrationSession';
+import type { Session } from '../types/session';
+import { getChatTabManager } from '../services/chatTabs';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { previewOrchestrationSessionArchive, updateOrchestrationSession } from './runpane';
-import { clientShowsChatTab } from './panels';
+import { clientShowsChatTab, panelsForClient, storedPanelLayout } from './panels';
 import {
   decodeOrchestrationSessionPayload,
   orchestrationExpectedRevisionSchema,
@@ -21,6 +25,10 @@ import {
   orchestrationTextSchema,
 } from '../services/orchestrationSessionPayload';
 import { configuredAgentSchema } from '../../../shared/agents';
+
+const openOptionsSchema = boundary.object({ select: boundary.optional(boundary.boolean) });
+/** Newest chat messages an open or peek returns, as the desktop's chat viewer reads them. */
+const OPEN_CHAT_LIMIT = 200;
 
 const selectorSchema = boundary.object({
   sessionId: boundary.optional(boundary.nonEmptyString),
@@ -140,6 +148,48 @@ export function registerOrchestrationSessionHandlers(
     });
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:get');
+
+  /**
+   * One call per Session shown (T-87), for the desktop's sidebar cursor. Each returns
+   * the view, the tabs, the stored layout and the chat, which a client read one after
+   * another before. `peek` only reads: it never creates a tab, saves anything or starts
+   * an agent. `open` is `get` plus the same, starting the chat's agent as `chat-tab:get`
+   * does, and saving the selection when `select` is set.
+   */
+  const openResult = (
+    view: OrchestrationSessionView<Session> | null,
+    options: PaneCommandValue | undefined,
+    start: boolean,
+  ): OrchestrationSessionOpenResult<Session> => {
+    if (!view) return { view: null, panels: [], layout: null };
+    if (view.panel.type === 'chat' && !clientShowsChatTab(options, view.agent)) {
+      throw new PaneError('CHAT_TAB_CLIENT_OUTDATED', 'This Session runs as a chat, which this version of Pane on your phone can\'t open.', 'Update Pane on your phone, then open the Session again.');
+    }
+    const internalId = view.internalSession.id;
+    const result: OrchestrationSessionOpenResult<Session> = {
+      view,
+      panels: panelsForClient(internalId, options),
+      layout: storedPanelLayout(internalId),
+    };
+    if (view.panel.type === 'chat') result.chat = getChatTabManager().view(view.panel.id, OPEN_CHAT_LIMIT, start);
+    return result;
+  };
+
+  commandRegistry.register('orchestration-sessions:peek', async (value: PaneCommandValue, options?: PaneCommandValue) => {
+    return invokeSafely(async () => openResult(await requireManager().peekView(decodeSelector(value)), options, false));
+  });
+  commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:peek');
+
+  commandRegistry.register('orchestration-sessions:open', async (value: PaneCommandValue, options?: PaneCommandValue, openOptions?: PaneCommandValue) => {
+    return invokeSafely(async () => {
+      const selector = decodeSelector(value);
+      const list = decodeBoundary(openOptions ?? {}, openOptionsSchema).select === true ? await requireManager().select(selector) : undefined;
+      const result = openResult(await requireManager().getView(selector), options, true);
+      if (list) result.list = list;
+      return result;
+    });
+  });
+  commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:open');
 
   commandRegistry.register('orchestration-sessions:update', async (value: PaneCommandValue, update?: PaneCommandValue) => {
     return invokeSafely(async () => {

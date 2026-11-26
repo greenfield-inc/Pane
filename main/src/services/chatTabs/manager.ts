@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdir, rename, writeFile } from 'fs/promises';
 import path from 'path';
 import type { ContentBlock, InitializeResponse, McpServer, NewSessionRequest, SessionInfo, SessionUpdate } from '@agentclientprotocol/sdk';
 import type { AgentState, PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
@@ -14,7 +15,7 @@ import { ChatTranscript, type TurnMarker } from './transcript';
 import type { PauseOutcome } from '../terminalPanelManager';
 import { QueuedBodies } from './queuedBodies';
 import { agentConfig, agentLabel } from '../../../../shared/agents';
-import { chatPausedViewSchema } from '../../../../shared/types/chatTabDecoders';
+import { chatPausedViewSchema, type ChatPausedView } from '../../../../shared/types/chatTabDecoders';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 import { sessionMovingError } from '../../../../shared/types/sessionMove';
 import { CHAT_STALL_MS, chatMidTurn, isRunpaneWait } from '../agentStatus/midTurn';
@@ -116,9 +117,15 @@ interface Tab {
   activeAt?: number;
   /** Tool calls of the current turn that are pending or in progress, each true when it is a runpane wait, for the Session's test. */
   toolsRunning?: Map<string, boolean>;
+  /** A save of the newest window to `recent.json` is due (F-lite). */
+  recentTimer?: ReturnType<typeof setTimeout>;
+  /** `recent.json` was read for this tab already (found or not). */
+  recentRead?: boolean;
 }
 
 const DEFAULT_VIEW_LIMIT = 200;
+/** How long after a tab goes idle its newest window is saved (F-lite). */
+const RECENT_SAVE_DELAY_MS = 1000;
 /** Time rows kept per conversation; older turns lose theirs after a restart. */
 const TURN_TIMES_LIMIT = 200;
 const RECEIPT_LIMIT = 256;
@@ -153,6 +160,8 @@ export class ChatTabManager {
     const state = this.required(panelId);
     const tab = this.tab(panelId);
     if (start && !tab.runtime && !tab.starting && state.status !== 'stopped') void this.ensure(panelId).catch(() => undefined);
+    // A tab whose agent is not running shows the newest messages it saved (F-lite), without starting it.
+    if (!tab.transcript && !tab.held) this.loadRecent(panelId, tab);
     return this.snapshot(panelId, state, tab, limit);
   }
 
@@ -653,7 +662,11 @@ export class ChatTabManager {
     await this.end(tab);
     tab.transcript?.dispose();
     this.bodies.clear(panelId);
-    try { rmSync(this.pausedFile(panelId), { force: true }); } catch (error) { console.warn(`[ChatTabs] ${panelId}: could not remove its paused view:`, error); }
+    clearTimeout(tab.recentTimer);
+    tab.recentTimer = undefined;
+    for (const file of [this.pausedFile(panelId), this.recentFile(panelId)]) {
+      try { rmSync(file, { force: true }); } catch (error) { console.warn(`[ChatTabs] ${panelId}: could not remove ${path.basename(file)}:`, error); }
+    }
     this.tabs.delete(panelId);
     this.options.onClosed?.(panelId);
   }
@@ -684,6 +697,7 @@ export class ChatTabManager {
     tab.generation = tab.run = this.lastGeneration = Math.max(Date.now(), this.lastGeneration + 1);
     // Viewers keep seeing the conversation while the restart replays it.
     if (tab.transcript && tab.transcript.count() > 0) tab.held = tab.transcript.snapshot(DEFAULT_VIEW_LIMIT);
+    else if (!tab.held) this.loadRecent(panelId, tab);
     tab.transcript?.dispose();
     tab.transcript = undefined;
     tab.notice = undefined;
@@ -951,6 +965,58 @@ export class ChatTabManager {
     }
   }
 
+  private recentFile(panelId: string): string { return path.join(this.options.spoolDirectory, safeName(panelId), 'recent.json'); }
+
+  /**
+   * F-lite (T-87): the newest window of a replayed conversation, saved beside the tab's
+   * spool each time it goes idle, so a reader can show a tab whose agent is not running
+   * (a Session the sidebar cursor passes over) without starting it. Read-only for every
+   * reader; the agent's own session store stays authoritative and replaces it on start.
+   */
+  private saveRecentSoon(panelId: string, tab: Tab): void {
+    if (tab.recentTimer) return;
+    tab.recentTimer = setTimeout(() => {
+      tab.recentTimer = undefined;
+      void this.saveRecent(panelId, tab);
+    }, RECENT_SAVE_DELAY_MS);
+    tab.recentTimer.unref?.();
+  }
+
+  private async saveRecent(panelId: string, tab: Tab): Promise<void> {
+    const sessionId = this.options.store.state(panelId)?.acpSessionId;
+    const transcript = tab.transcript;
+    if (!sessionId || !transcript || !replayed(tab) || transcript.count() === 0) return;
+    const file = this.recentFile(panelId);
+    const saved: ChatPausedView = { sessionId, held: boundedWindow(transcript.snapshot(DEFAULT_VIEW_LIMIT)) };
+    if (tab.shown) saved.shown = tab.shown;
+    try {
+      await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+      // Written whole, then renamed: a reader never sees half a file.
+      const temporary = `${file}.${process.pid}.tmp`;
+      await writeFile(temporary, JSON.stringify(saved), { mode: 0o600 });
+      await rename(temporary, file);
+    } catch (error) {
+      // Only a peek at a stopped tab reads it; the conversation itself is unaffected.
+      console.warn(`[ChatTabs] ${panelId}'s recent messages were not saved: ${reasonOf(error)}`);
+    }
+  }
+
+  private loadRecent(panelId: string, tab: Tab): void {
+    if (tab.recentRead) return;
+    tab.recentRead = true;
+    const state = this.options.store.state(panelId);
+    if (!state?.acpSessionId) return;
+    try {
+      const saved = decodeOptionalBoundary(JSON.parse(readFileSync(this.recentFile(panelId), 'utf8')), chatPausedViewSchema);
+      // Saved for another conversation (Switch, /clear): not this one's messages.
+      if (!saved || saved.sessionId !== state.acpSessionId) return;
+      tab.held = { ...saved.held, panelId, generation: 0 };
+      if (saved.shown && !tab.shown) tab.shown = saved.shown;
+    } catch {
+      // Nothing saved yet: the tab shows its messages once its agent starts.
+    }
+  }
+
   private loadPaused(panelId: string, tab: Tab): void {
     const state = this.options.store.state(panelId);
     if (!state?.paused || !state.acpSessionId) return;
@@ -1072,6 +1138,7 @@ export class ChatTabManager {
     if (tab.published === agentState) return;
     const previous = tab.published;
     tab.published = agentState;
+    if (agentState === 'idle') this.saveRecentSoon(panelId, tab);
     const panel = this.options.store.panel(panelId);
     if (!panel) return;
     const event: PanelAgentStatusEvent = {

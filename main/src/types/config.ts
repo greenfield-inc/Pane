@@ -242,6 +242,8 @@ export interface AppConfig {
   keymapNotice?: 'pending' | 'seen';
   // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
+  // ↑/↓ on a chat Session row in the sidebar shows that Session at once (default on, T-87)
+  arrowKeysOpenSessions?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;
   // Whether selecting terminal text copies it at once instead of offering the selection popover (off when absent)
@@ -362,6 +364,8 @@ export interface UpdateConfigRequest {
   keymapNotice?: 'pending' | 'seen';
   // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
+  // ↑/↓ on a chat Session row in the sidebar shows that Session at once (default on, T-87)
+  arrowKeysOpenSessions?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;
   terminalCopyOnSelect?: boolean;
