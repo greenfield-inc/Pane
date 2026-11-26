@@ -17,25 +17,51 @@ export interface PanelMessageRecords {
   records: AgentMessageRecord[];
 }
 const NONE: PanelMessageRecords = { available: false, records: [] };
+/** forPanel's page size, and how far back one read goes (2,000 messages). */
+const PAGE = 200;
+const MAX_PAGES = 10;
 
-export function useAgentMessageRecords(panelId: string): PanelMessageRecords {
-  const [state, setState] = useState<PanelMessageRecords>(NONE);
+/**
+ * Newest first, page by page (`before` the oldest ref so far) until the pages reach `since`, the
+ * oldest loaded turn's start, so a chat paged back still finds the messages its turns sent.
+ */
+export async function readRecords(forPanel: NonNullable<NonNullable<Window['electronAPI']>['agentMessages']>['forPanel'], panelId: string, since: number | undefined): Promise<AgentMessageRecord[] | undefined> {
+  const records: AgentMessageRecord[] = [];
+  let before: string | undefined;
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const response = await forPanel(panelId, before ? { before } : undefined);
+    if (!response.success || !response.data) return page === 0 ? undefined : records;
+    records.push(...response.data);
+    const oldest = response.data.at(-1);
+    if (!oldest || response.data.length < PAGE || since === undefined || Date.parse(oldest.createdAt) <= since) break;
+    before = oldest.ref;
+  }
+  return records;
+}
+
+/** A tab's message records, read again whenever any message changes, or the chat pages back to older turns (`since`). */
+export function useAgentMessageRecords(panelId: string, since?: string): PanelMessageRecords {
+  const [state, setState] = useState<PanelMessageRecords & { panelId?: string }>(NONE);
+  const sinceAt = since ? Date.parse(since) : undefined;
   useEffect(() => {
-    setState(NONE);
     const api = window.electronAPI;
     const forPanel = api?.agentMessages?.forPanel;
     if (!forPanel) return;
     let live = true;
+    let latest = 0;
     const load = () => {
-      void forPanel(panelId).then(response => {
-        if (live && response.success && response.data) setState({ available: true, records: response.data });
+      // Reads can overlap when messages change quickly: only the last one started is kept.
+      const read = ++latest;
+      void readRecords(forPanel, panelId, Number.isNaN(sinceAt) ? undefined : sinceAt).then(records => {
+        if (live && read === latest && records) setState({ panelId, available: true, records });
       }, () => undefined);
     };
     load();
     const stop = api.events?.onAgentMessagesChanged?.(load);
     return () => { live = false; stop?.(); };
-  }, [panelId]);
-  return state;
+  }, [panelId, sinceAt]);
+  // A new tab starts empty rather than showing the last tab's records while its own load.
+  return state.panelId === panelId ? state : NONE;
 }
 
 /** Which turn each sent message sits in, as one string: equal while the placement is. */

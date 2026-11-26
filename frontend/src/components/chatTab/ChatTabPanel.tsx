@@ -258,7 +258,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
   const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
   // T-105: messages this tab sent and received (M-n), for their senders, state and replies.
-  const agentMessageRecords = useAgentMessageRecords(panelId);
+  // Read far enough back to cover the oldest turn loaded, which moves when the reader pages back.
+  const oldestTurnStart = turns.find(turn => turn.startedAt)?.startedAt;
+  const agentMessageRecords = useAgentMessageRecords(panelId, oldestTurnStart);
   const sentByTurn = useMemo(() => sentMessagesByTurn(turns, agentMessageRecords.records, panelId), [turns, agentMessageRecords, panelId]);
   const routed = useMemo(() => routedTexts(turns.flatMap(turn => [turn.user, ...turn.items.flatMap(item => item.type === 'user' ? [item.message] : [])]
     .flatMap(message => message ? [message.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')] : []))), [turns]);

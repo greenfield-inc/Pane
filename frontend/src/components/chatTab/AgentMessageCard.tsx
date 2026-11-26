@@ -5,6 +5,7 @@ import { messageStatus, senderInitials, senderOfName, threadReplies, threadRoot,
 import { messageTime } from '../../../../shared/chatTabPresentation';
 import { ChatCopyButton } from './ChatCopyButton';
 import { AgentMessagesContext } from './agentMessagesContext';
+import { ReferencedText } from './ReferencedText';
 
 /**
  * Agent-sent messages and their replies in a chat (T-105, D-1 "cards, reply inside the card"):
@@ -59,6 +60,10 @@ function ReplySection({ reply, renderText }: { reply: AgentMessageRecord; render
 }
 
 /** The card itself: header, body, then a footer (waiting) or the replies (answered). */
+/** A file-pointer message's body (`Read and follow <file>`, T-104) is a path, not markdown: `__x__` in it stays as typed. */
+const POINTER = /^Read and follow \S+/u;
+const plainBody = (text: string) => <span className="whitespace-pre-wrap"><ReferencedText text={text} /></span>;
+
 function Card({ anchorId, head, body, record, hint, copyText, renderText, outgoing = false }: {
   anchorId: string; head: ReactNode; body: string; record?: AgentMessageRecord; hint?: ReactNode; copyText: string;
   renderText: (text: string) => ReactNode; outgoing?: boolean;
@@ -70,7 +75,7 @@ function Card({ anchorId, head, body, record, hint, copyText, renderText, outgoi
   return <div className="chat-agent-row" data-outgoing={outgoing}>
     <div className="chat-agent-card" tabIndex={-1} data-pane-part="chat-message" data-anchor-id={anchorId} data-testid="agent-message-card" data-ref={record?.ref} data-state={status?.state}>
       <div className="chat-agent-head">{head}</div>
-      <div className="chat-agent-body">{renderText(body)}</div>
+      <div className="chat-agent-body">{POINTER.test(body) ? plainBody(body) : renderText(body)}</div>
       {((status && status.state !== 'answered') || footHint) && <div className="chat-agent-foot">{status && status.state !== 'answered' && <StatusPill status={status} />}{footHint}</div>}
       {status?.state === 'answered' && threadReplies(status.replies, byRef).map(reply => <ReplySection key={reply.ref} reply={reply} renderText={renderText} />)}
     </div>

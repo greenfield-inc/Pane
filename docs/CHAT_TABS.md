@@ -333,11 +333,18 @@ composer marks it in amber like a mode that never asks.
   sent it ("Sent to Billing"), and the reply fills in there too; the `reply:
   M-n →` line that brought it shows as one line that jumps up to the card.
   The person's words passed on by Autopilot or To-dos (`[From the person, via
-  Autopilot]`) stay the 'You' bubble, captioned *You, via Autopilot*. The
-  state and replies come from `agentMessages.forPanel`; where the app has no
-  records (the PWA and phone today) the cards show without them. A message
-  sent as a `Read and follow <file>` pointer shows as typed. Terminal tabs show
-  the lines as typed.
+  Autopilot]`) stay the 'You' bubble, captioned *You, via Autopilot*. A
+  message sent as a file pointer is a card whose text is its
+  `Read and follow <file>` line. A reply shows its own delivery (*Reply
+  queued*, *Not delivered: its tab closed*), and a reply to a reply sits under
+  the reply it answers. The state and replies come from
+  `agentMessages.forPanel`, read back page by page as far as the oldest turn
+  loaded. Where the app has the records, a line counts as a message only when
+  that message reached this tab with this exact text, and the recorded sender
+  wins over any `[From …]` in it, so a pasted message stays the person's own.
+  Where the app has no records (the PWA and phone today) the cards come from
+  the text alone, without state or replies. Terminal tabs show the lines as
+  typed.
 - **Approvals** dock above the composer with exactly the choices the agent
   sent; keys 1 to 9 answer while the composer is empty. Typing a message
   instead sends it and, once Pane has it, declines the request. ExitPlanMode shows the

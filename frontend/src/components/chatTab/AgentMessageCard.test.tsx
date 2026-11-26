@@ -147,4 +147,12 @@ describe('agent-sent messages in a chat', () => {
     expect(markup).toContain('agent-message-card');
     expect(text(markup)).toMatch(/^AU Autopilot agent M-123 .* \[From the person, via Autopilot\] Is the API frozen\?/);
   });
+
+  it('shows a file-pointer message\'s path as typed, not as markdown', () => {
+    const pointer = 'Read and follow /x/prompts/orchestration_session_1__terminal/p.md';
+    const markup = render(view('worker', [record(123, { text: pointer })]), turn('t', `${pointer}${ROUTE}`));
+    expect(markup).toContain('agent-message-card');
+    expect(text(markup)).toContain('orchestration_session_1__terminal/p.md');
+    expect(markup).not.toContain('<strong>');
+  });
 });
