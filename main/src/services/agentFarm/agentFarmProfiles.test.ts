@@ -3,7 +3,7 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { configuredAgent } from '../../../../shared/agents';
 import { PROFILE_REF_PATTERN } from '../../../../shared/types/agentFarmProfiles';
-import { panePluginFiles, parseProfileListJson, profileListEntries } from './agentFarmProfiles';
+import { linkedAgentRefs, panePluginFiles, parseProfileListJson, profileListEntries } from './agentFarmProfiles';
 import { plainProfileAgent, plainProfileAgents, plainProfileRef } from '../../../../shared/agentProfiles';
 
 // `agent-farm profiles list --json` as Agent Farm 0.3.0 prints it (CONFIGURATION.md), trimmed.
@@ -31,6 +31,16 @@ const LIST = JSON.stringify({
     { ref: 'pane/claude', name: 'claude', plugin: 'pane', version: '1.0.0', variants: null, default: null, agent: 'pane/claude', harness: 'claude', model: { name: 'claude-opus-5-5' }, tree: [] },
     { ref: 'mine/broken', name: 'broken', plugin: 'mine', version: '0.1.0', error: 'agents/broken.md does not parse' },
   ],
+});
+
+// T-83 P3: a Session started from a launch link's command runs a linked agent, not a profile.
+describe('linkedAgentRefs', () => {
+  it('names each linked agent as it starts by name, its alias when that differs, and plugin/* for an any link', () => {
+    expect(linkedAgentRefs(parseProfileListJson(LIST))).toEqual(['greenfield/planner']);
+    const tree = [{ alias: 'explorer', agent: 'greenfield/codebase-explorer', mode: 'launch', children: [{ alias: 'helper', agent: 'helper', mode: 'process', children: [] }] }, { alias: 'anyone', mode: 'launch', any: true, plugin: 'other', children: [] }];
+    const listing = JSON.stringify({ schema: 1, profiles: [{ ref: 'greenfield/orchestrator', name: 'orchestrator', plugin: 'greenfield', version: '0.1.0', agent: 'greenfield/orchestrator', harness: 'claude', tree }] });
+    expect(linkedAgentRefs(parseProfileListJson(listing)).sort()).toEqual(['greenfield/codebase-explorer', 'greenfield/explorer', 'greenfield/helper', 'other/*']);
+  });
 });
 
 describe('profileListEntries', () => {

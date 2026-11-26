@@ -10,7 +10,7 @@ import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } fro
 import { hashDirectory } from '../skillCacheManager';
 import { syncedPluginEdits } from './profileSyncFile';
 import { writeRecoveryNote } from './agentFarmRecovery';
-import { panePluginFiles, panePluginInstalled, parseProfileListJson, profileListEntries, writePanePluginSource } from './agentFarmProfiles';
+import { linkedAgentRefs, panePluginFiles, panePluginInstalled, parseProfileListJson, profileListEntries, writePanePluginSource } from './agentFarmProfiles';
 import { PANE_PROFILE_PLUGIN } from '../../../../shared/agentProfiles';
 import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
 
@@ -140,7 +140,8 @@ export async function listPaneAgentFarmProfiles(paneDir: string, env: NodeJS.Pro
   const agentFarm = paneAgentFarmProcess(paneDir, ['profiles', 'list', '--json'], { env, profiles: true });
   if (!agentFarm) return { profiles: [], error: `This Pane build does not include ${AGENT_FARM_PACKAGE}, so it has no Agent Farm profiles. Reinstall Pane from runpane.com.` };
   try {
-    return { profiles: profileListEntries(parseProfileListJson(await run(agentFarm))) };
+    const listed = parseProfileListJson(await run(agentFarm));
+    return { profiles: profileListEntries(listed), linked: linkedAgentRefs(listed) };
   } catch (error) {
     const reason = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1) || reasonOf(error);
     return { profiles: [], error: `Pane couldn't list its Agent Farm profiles: ${reason}. Restart Pane, then try again.` };

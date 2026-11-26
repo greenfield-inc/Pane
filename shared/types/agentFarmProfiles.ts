@@ -33,6 +33,12 @@ export interface AgentFarmProfileVariant {
 
 export interface AgentFarmProfileList {
   profiles: AgentFarmProfileEntry[];
+  /**
+   * Agents the listed profiles link to (`plugin/agent`, and a link's alias when it differs), which
+   * start by name as linked agents though they aren't profiles; `plugin/*` when a link may start any
+   * agent in that plugin (T-83 P3). A Session started from a link's command runs one of these.
+   */
+  linked?: string[];
   /** Why the list is empty or may be incomplete, and what to do; absent when it was read. */
   error?: string;
 }

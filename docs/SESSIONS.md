@@ -153,7 +153,8 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   every 10 seconds. A Session whose agent runs in a terminal, or one from before
   profiles (Reload only), refuses with why.
 - When this computer's Agent Farm no longer lists a Session's profile (greenfield
-  0.1.0 removed most of them), the row shows a red dot, Reload profile reads
+  0.1.0 removed most of them), neither as a profile nor as an agent a profile
+  links to (a Session started from a launch link's command runs one), the row shows a red dot, Reload profile reads
   *profile gone* and refuses (`SESSION_PROFILE_GONE`), and Switch profile reads
   *pick again*: the person picks a profile again. A list Pane can't read marks
   nothing.
