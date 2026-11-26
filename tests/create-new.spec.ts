@@ -17,7 +17,9 @@ const PROFILES = { profiles: [
   profile('greenfield/orchestrator'),
   // A subagent's own profile, which its plugin unlists: it runs, but isn't offered.
   profile('greenfield/planner', 'claude', { listed: false }),
-  profile('greenfield/reviewer', 'codex'),
+  profile('greenfield/seo', 'codex'),
+  // Installed but off the TEMPORARY short list (T-83): not offered.
+  profile('dcouple/business'),
 ] };
 
 const createInputs = (page: Page) => page.evaluate(() => {
@@ -65,7 +67,7 @@ test('Create New by keyboard: To filters to listed profiles, Return picks and mo
   await expect(dialog(page)).not.toContainText('↵');
   await page.keyboard.type('green');
   const options = dialog(page).getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option');
-  await expect(options).toHaveText([/Greenfield orchestrator/, /Greenfield reviewer/]);
+  await expect(options).toHaveText([/Greenfield orchestrator/, /Greenfield seo/]);
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
@@ -91,7 +93,7 @@ test('Create New by keyboard: To filters to listed profiles, Return picks and mo
 test('Create New skips the optional name and message: the Session is named from its first message, and Esc closes the To list before the dialog', async ({ page }) => {
   await openApp(page);
   await page.getByTestId('new-orchestration-session').click();
-  await page.keyboard.type('rev');
+  await page.keyboard.type('seo');
   await expect(dialog(page).getByRole('listbox', { name: 'Agents and profiles' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog(page).getByRole('listbox', { name: 'Agents and profiles' })).toBeHidden();
@@ -139,7 +141,7 @@ test('Run on has a default, lists the other machines, and Create names no machin
         { id: 'travel', label: 'travel-laptop', kind: 'remote', status: 'offline', offlineSince: '2026-10-30T09:14:00' },
       ],
       reads: { build: {
-        'chat-tab:profiles': { success: true, data: { profiles: [profile('pane/claude'), profile('labtest/runner')] } },
+        'chat-tab:profiles': { success: true, data: { profiles: [profile('pane/claude'), profile('greenfield/business')] } },
         'orchestration-sessions:list': { success: true, data: { sessions: [{ name: 'New chat' }] } },
       } },
     },
@@ -156,9 +158,9 @@ test('Run on has a default, lists the other machines, and Create names no machin
   await expect(dialog(page)).not.toContainText('Runs on');
   // build-box's own profiles.
   await to(page).focus();
-  await page.keyboard.type('runner');
+  await page.keyboard.type('business');
   await page.keyboard.press('Enter');
-  await expect(to(page)).toHaveValue('Labtest runner');
+  await expect(to(page)).toHaveValue('Greenfield business');
   // Attaching images needs the Session on this computer.
   await expect(dialog(page).getByRole('button', { name: 'Attach' })).toBeDisabled();
   await runOn.focus();
@@ -169,7 +171,7 @@ test('Run on has a default, lists the other machines, and Create names no machin
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getMachineRuns: () => Array<{ machineId: string; command: JsonObject }> } };
     return mockWindow.__paneTestElectronMock.getMachineRuns();
   });
-  expect(runs).toContainEqual({ machineId: 'build', command: { type: 'create-session', input: expect.objectContaining({ agent: 'claude', agentProfile: 'labtest/runner', name: 'New chat 2', nameFromFirstMessage: true }) } });
+  expect(runs).toContainEqual({ machineId: 'build', command: { type: 'create-session', input: expect.objectContaining({ agent: 'claude', agentProfile: 'greenfield/business', name: 'New chat 2', nameFromFirstMessage: true }) } });
   expect(await createInputs(page)).toEqual([]);
 });
 

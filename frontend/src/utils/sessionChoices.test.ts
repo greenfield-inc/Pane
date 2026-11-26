@@ -8,7 +8,7 @@ const profile = (ref: string, harness = 'claude', extra: Partial<AgentFarmProfil
 
 const PROFILES = [
   profile('pane/claude'), profile('pane/codex', 'codex'),
-  profile('greenfield/orchestrator'), profile('greenfield/reviewer', 'codex'), profile('dcouple/business'),
+  profile('greenfield/orchestrator'), profile('greenfield/seo', 'codex'), profile('greenfield/business'),
 ];
 
 describe('sessionChoices', () => {
@@ -16,7 +16,7 @@ describe('sessionChoices', () => {
     const choices = sessionChoices({ agents: ['claude', 'codex', 'cursor', 'opencode', 'pi'], profiles: PROFILES });
     expect(choices.map(choice => [choice.group, choice.label])).toEqual([
       ['agents', 'Claude'], ['agents', 'Codex'],
-      ['profiles', 'Greenfield orchestrator'], ['profiles', 'Greenfield reviewer'], ['profiles', 'Dcouple business'],
+      ['profiles', 'Greenfield orchestrator'], ['profiles', 'Greenfield seo'], ['profiles', 'Greenfield business'],
       ['other', 'Cursor'], ['other', 'OpenCode'], ['other', 'Pi'],
     ]);
   });
@@ -24,18 +24,23 @@ describe('sessionChoices', () => {
   it('says what each choice runs', () => {
     const choices = sessionChoices({ agents: ['claude', 'codex', 'cursor'], profiles: PROFILES });
     expect(choices.find(choice => choice.label === 'Claude')?.detail).toBe('Opus 5.5 · nothing added');
-    expect(choices.find(choice => choice.label === 'Greenfield reviewer')?.detail).toBe('greenfield/reviewer · Codex');
+    expect(choices.find(choice => choice.label === 'Greenfield seo')?.detail).toBe('greenfield/seo · Codex');
     expect(choices.find(choice => choice.label === 'Cursor')?.detail).toBe('Starts directly · no profiles or Agent Farm');
   });
 
   it('leaves out agents the machine cannot run, and profiles whose agent it cannot run', () => {
     const choices = sessionChoices({ agents: ['claude', 'opencode'], profiles: PROFILES });
-    expect(choices.map(choice => choice.label)).toEqual(['Claude', 'Greenfield orchestrator', 'Dcouple business', 'OpenCode']);
+    expect(choices.map(choice => choice.label)).toEqual(['Claude', 'Greenfield orchestrator', 'Greenfield business', 'OpenCode']);
   });
 
   it('leaves out a profile Agent Farm marks unlisted, and offers one when Agent Farm says nothing', () => {
-    const choices = sessionChoices({ agents: ['claude'], profiles: [profile('greenfield/planner', 'claude', { listed: false }), profile('greenfield/orchestrator', 'claude', { listed: true }), profile('dcouple/business')] });
-    expect(choices.filter(choice => choice.group === 'profiles').map(choice => choice.profileRef)).toEqual(['greenfield/orchestrator', 'dcouple/business']);
+    const choices = sessionChoices({ agents: ['claude'], profiles: [profile('greenfield/seo', 'claude', { listed: false }), profile('greenfield/orchestrator', 'claude', { listed: true }), profile('greenfield/business')] });
+    expect(choices.filter(choice => choice.group === 'profiles').map(choice => choice.profileRef)).toEqual(['greenfield/orchestrator', 'greenfield/business']);
+  });
+
+  it('shows only the TEMPORARY short list of named profiles (T-83)', () => {
+    const choices = sessionChoices({ agents: ['claude'], profiles: [profile('greenfield/planner'), profile('greenfield/orchestrator:codex'), profile('dcouple/business'), profile('greenfield/business')] });
+    expect(choices.filter(choice => choice.group === 'profiles').map(choice => choice.profileRef)).toEqual(['greenfield/orchestrator:codex', 'greenfield/business']);
   });
 
   it('keeps profiles listed but unavailable, with the reason, when they cannot start', () => {
@@ -48,7 +53,7 @@ describe('sessionChoices', () => {
 describe('filterSessionChoices', () => {
   const choices = sessionChoices({ agents: ['claude', 'codex', 'cursor'], profiles: PROFILES });
   it('matches the name or the profile ref, ignoring case', () => {
-    expect(filterSessionChoices(choices, 'REV').map(choice => choice.label)).toEqual(['Greenfield reviewer']);
+    expect(filterSessionChoices(choices, 'SEO').map(choice => choice.label)).toEqual(['Greenfield seo']);
     expect(filterSessionChoices(choices, 'greenfield/orch').map(choice => choice.label)).toEqual(['Greenfield orchestrator']);
     expect(filterSessionChoices(choices, 'cur').map(choice => choice.label)).toEqual(['Cursor']);
     expect(filterSessionChoices(choices, '  ')).toEqual(choices);
