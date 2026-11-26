@@ -103,6 +103,10 @@ import { LoopManager } from '../services/loops/loopManager';
 import { TodoService } from '../services/todos/todoService';
 import { TodoStore } from '../services/todos/todoStore';
 import { createTodoHost } from '../services/todos/todoHost';
+import { AgentMessageService } from '../services/agentMessages/agentMessageService';
+import { AgentMessageStore } from '../services/agentMessages/agentMessageStore';
+import { createAgentMessageHost } from '../services/agentMessages/agentMessageHost';
+import { AGENT_MESSAGES_CHANGED_EVENT } from '../../../shared/types/agentMessages';
 import { readTodosSwitchFrom, todosEnabled } from '../services/todos/todosFeature';
 import type { GitStatus } from '../types/session';
 import { AutoPauser } from '../services/autoPause';
@@ -643,6 +647,26 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     lastCommits.set(paneId, commits);
     if (before !== undefined && commits > before && todosOn()) todoService.noteProgressForPane(paneId);
   });
+  // T-104: agent-to-agent messages. Every instance records and answers them; the housekeeping one also
+  // types replies that wait for a tab (after a restart, or a tab that was mid-turn), on idle and every few seconds.
+  const agentMessageService = new AgentMessageService(new AgentMessageStore(databaseService.getDb()), createAgentMessageHost(services, commandRegistry));
+  services.agentMessageService = agentMessageService;
+  daemonServices.agentMessageService = agentMessageService;
+  let agentMessagesChangedTimer: ReturnType<typeof setTimeout> | undefined;
+  agentMessageService.on('changed', () => {
+    if (agentMessagesChangedTimer) return;
+    agentMessagesChangedTimer = setTimeout(() => {
+      agentMessagesChangedTimer = undefined;
+      getPaneEventSink().send(AGENT_MESSAGES_CHANGED_EVENT);
+    }, 150);
+  });
+  let agentMessageTimer: ReturnType<typeof setInterval> | undefined;
+  if (duties.housekeeping) {
+    agentMessageService.start();
+    const flushMessages = () => { void agentMessageService.flush().catch(error => logger.warn('[Messages] reply delivery failed', error instanceof Error ? error : undefined)); };
+    agentMessageTimer = setInterval(flushMessages, 3_000);
+    terminalPanelManager.on('agent-status', (change: { state: string }) => { if (change.state === 'idle') flushMessages(); });
+  }
   let todoTimer: ReturnType<typeof setInterval> | undefined;
   let todoLaunchTimer: ReturnType<typeof setTimeout> | undefined;
   if (duties.housekeeping) {
@@ -1102,6 +1126,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       loopManager.stop();
       clearInterval(todoTimer);
       clearTimeout(todoLaunchTimer);
+      clearInterval(agentMessageTimer);
       machineHealth.stop();
       finishedPanes.stop();
       autoPauser.stop();

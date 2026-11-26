@@ -329,6 +329,21 @@ to a menu.
 Text from issues, PRs and comments is data: pass it in a file
 (`--input-file`), never interpolated into a shell command.
 
+### Messages between agents
+
+A message one agent's tab sends another's through Pane (`panels submit`,
+`agents send`, a message to another Session's orchestrator, Autopilot) gets an
+id and ends with a reply line, `Reply with runpane reply M-12 "…"`. Answer it
+with `runpane reply M-12 "…"` (`--input-file` for long text), never only in
+your own chat: the sender never sees your chat. The reply reaches the sender's
+tab as `reply: M-12 → "…" (from <you>)`, wherever that tab is now; Pane resumes
+it when it is down and follows a Session's orchestrator to its current tab.
+Your own sends carry `messageId` in their result. To wait for the answer, add
+`--await-reply --timeout 30m` to the submit, or run
+`runpane messages wait M-12 --timeout 30m`; `runpane messages list` and
+`messages show M-12` say what was answered. Text the person sends (Pane's UI, a
+shell tab, `--source user`) gets no reply line.
+
 <!-- approvals-rules:start: Pane's approvals text (main/src/services/approvalsRules.ts); approvalsRules.test.ts fails if it differs -->
 ## Asking the person in Pane
 

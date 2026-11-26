@@ -1738,38 +1738,18 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'panels:submit', {}, async () => {
       const normalized = parsePanelSubmitRequest(request);
       const panel = resolveAgentPanel(normalized.panelId);
-      if (panel.type === 'chat') {
-        if (normalized.source === 'user') getMobilePushSender(configManager).arm(panel.id);
-        const pointer = normalized.asFilePointer ? await writeAgentPromptFile(panel.sessionId, normalized.input, {
-          worktreePath: localWorktreePath(services, panel.sessionId, sessionWslContext(services, panel.sessionId)), attachments: normalized.attachments,
-        }) : undefined;
-        const expected = shouldExpectReport(normalized, true) ? services.expectedReportTracker?.arm(panel.id, new Date().toISOString(), true) : undefined;
-        try {
-          const text = pointer ? pointerLine(pointer, sessionWslContext(services, panel.sessionId)) : normalized.input;
-          const result = await submitChatTab(getChatTabManager(), panel, text, { interrupt: normalized.interrupt ?? false, operationId: normalized.operationId });
-          if (expected) { services.expectedReportTracker?.delivered(panel.id); result.expectedReport = { since: expected.since }; }
-          return { ...result, ...pointerResultFields(pointer) };
-        } catch (error) { if (expected) services.expectedReportTracker?.cancelPending(panel.id, expected); throw error; }
-      }
-      // A tab its Session's move stopped says so, rather than that it isn't running.
-      const moving = pausedMarkOf(panel);
-      if (moving?.by === 'move') throw sessionMovingError(moving);
-      if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
-        throw new Error(`Terminal panel ${panel.id} is not initialized`);
-      }
-      if (normalized.source === 'user') getMobilePushSender(configManager).arm(panel.id);
-      const since = new Date().toISOString();
-      let expectedReport: TerminalExpectedReport | undefined;
+      // T-104: one agent's tab writing to another gets an id (M-n) and a reply line; the person's text goes as typed.
+      const messages = services.agentMessageService;
+      const outgoing = normalized.fromPane ? undefined : messages?.beginMessage({
+        callerPanelId: paneCommandCaller()?.panelId, receiverPanelId: panel.id, body: normalized.input, source: normalized.source,
+      });
+      if (!outgoing) return submitResolvedPanel(normalized, panel);
       try {
-        const result = await submitToPanel(normalized, panel, screen => {
-          const toAgent = screen.state.agentType !== undefined || panelLaunchCommand(panel) !== undefined;
-          if (shouldExpectReport(normalized, toAgent)) expectedReport = services.expectedReportTracker?.arm(panel.id, since, true);
-        }, () => { if (expectedReport) services.expectedReportTracker?.delivered(panel.id); });
-        if (result.inputBytes === 0 && expectedReport) services.expectedReportTracker?.cancelPending(panel.id, expectedReport);
-        else if (expectedReport) result.expectedReport = { since: expectedReport.since };
-        return result;
+        const result = await submitResolvedPanel({ ...normalized, input: outgoing.text }, panel);
+        messages?.finishMessage(outgoing.number, result.ok ? { ok: true } : { ok: false, reason: result.blocked?.message ?? 'Pane could not verify it was sent' });
+        return { ...result, messageId: outgoing.ref };
       } catch (error) {
-        if (expectedReport) services.expectedReportTracker?.cancelPending(panel.id, expectedReport);
+        messages?.finishMessage(outgoing.number, { ok: false, reason: error instanceof Error ? error.message : String(error) });
         throw error;
       }
     }, result => ({
@@ -1778,6 +1758,43 @@ export function registerRunpaneHandlers(
       inputBytes: result.inputBytes,
     }));
   });
+
+  async function submitResolvedPanel(normalized: RunpanePanelSubmitRequest, panel: ToolPanel): Promise<RunpanePanelSubmitResult> {
+    if (panel.type === 'chat') {
+      if (normalized.source === 'user') getMobilePushSender(configManager).arm(panel.id);
+      const pointer = normalized.asFilePointer ? await writeAgentPromptFile(panel.sessionId, normalized.input, {
+        worktreePath: localWorktreePath(services, panel.sessionId, sessionWslContext(services, panel.sessionId)), attachments: normalized.attachments,
+      }) : undefined;
+      const expected = shouldExpectReport(normalized, true) ? services.expectedReportTracker?.arm(panel.id, new Date().toISOString(), true) : undefined;
+      try {
+        const text = pointer ? pointerLine(pointer, sessionWslContext(services, panel.sessionId)) : normalized.input;
+        const result = await submitChatTab(getChatTabManager(), panel, text, { interrupt: normalized.interrupt ?? false, operationId: normalized.operationId });
+        if (expected) { services.expectedReportTracker?.delivered(panel.id); result.expectedReport = { since: expected.since }; }
+        return { ...result, ...pointerResultFields(pointer) };
+      } catch (error) { if (expected) services.expectedReportTracker?.cancelPending(panel.id, expected); throw error; }
+    }
+    // A tab its Session's move stopped says so, rather than that it isn't running.
+    const moving = pausedMarkOf(panel);
+    if (moving?.by === 'move') throw sessionMovingError(moving);
+    if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
+      throw new Error(`Terminal panel ${panel.id} is not initialized`);
+    }
+    if (normalized.source === 'user') getMobilePushSender(configManager).arm(panel.id);
+    const since = new Date().toISOString();
+    let expectedReport: TerminalExpectedReport | undefined;
+    try {
+      const result = await submitToPanel(normalized, panel, screen => {
+        const toAgent = screen.state.agentType !== undefined || panelLaunchCommand(panel) !== undefined;
+        if (shouldExpectReport(normalized, toAgent)) expectedReport = services.expectedReportTracker?.arm(panel.id, since, true);
+      }, () => { if (expectedReport) services.expectedReportTracker?.delivered(panel.id); });
+      if (result.inputBytes === 0 && expectedReport) services.expectedReportTracker?.cancelPending(panel.id, expectedReport);
+      else if (expectedReport) result.expectedReport = { since: expectedReport.since };
+      return result;
+    } catch (error) {
+      if (expectedReport) services.expectedReportTracker?.cancelPending(panel.id, expectedReport);
+      throw error;
+    }
+  }
 
   async function submitToPanel(normalized: RunpanePanelSubmitRequest, panel: ToolPanel, reserve: (screen: RunpanePanelScreenResult) => void, deliver: () => void): Promise<RunpanePanelSubmitResult> {
     const moving = pausedMarkOf(panel);
@@ -5701,6 +5718,7 @@ function parsePanelSubmitRequest(value: PaneCommandValue): RunpanePanelSubmitReq
     attachments: parseAttachments(value.attachments, optionalBoolean(value.asFilePointer), 'Panel submit request'),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
     expectReport: optionalBoolean(value.expectReport),
+    fromPane: optionalBoolean(value.fromPane),
   };
 }
 

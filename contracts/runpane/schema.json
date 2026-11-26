@@ -1023,6 +1023,10 @@
         "panels input",
         "panels screen",
         "panels submit",
+        "reply",
+        "messages list",
+        "messages show",
+        "messages wait",
         "panels submit-composer",
         "panels wait",
         "panels resume",
@@ -1367,6 +1371,18 @@
           "$ref": "#/$defs/helpLines"
         },
         "panels submit": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "reply": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "messages list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "messages show": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "messages wait": {
           "$ref": "#/$defs/helpLines"
         },
         "panels submit-composer": {

@@ -21,7 +21,7 @@ const callerInvocation = new AsyncLocalStorage<PaneDaemonCaller>();
  * Calls that hold the caller until something else happens (`runpane watch`, `panels wait`,
  * `notify`): while one is open, its tab is waiting, not mid-turn (agentStatus/midTurn.ts).
  */
-const RUNPANE_WAITING_CHANNELS = new Set(['runpane:workspace:wait', 'runpane:panels:wait', 'runpane:notify']);
+const RUNPANE_WAITING_CHANNELS = new Set(['runpane:workspace:wait', 'runpane:panels:wait', 'runpane:notify', 'runpane:messages:wait']);
 
 /** The agent's Pane and tab that sent the current request over the control socket; undefined for Pane's own UI. */
 export function paneCommandCaller(): PaneDaemonCaller | undefined {
@@ -133,7 +133,7 @@ export class PaneCommandRegistry {
     for (const guard of this.guards) guard(channel, args, callerInvocation.getStore());
 
     // A notify call waits for a person for hours; an update ends it like any other disconnect.
-    const mutation = !REMOTE_READ_CHANNELS.has(channel) && !channel.startsWith('runpane:update:') && channel !== 'runpane:notify';
+    const mutation = !REMOTE_READ_CHANNELS.has(channel) && !channel.startsWith('runpane:update:') && channel !== 'runpane:notify' && channel !== 'runpane:messages:wait';
     if (mutation && this.updateQuiescing) throw new PaneError('ERR_UPDATE_QUIESCING', 'Pane is saving this workspace for an update. The action was not sent.', 'Wait for the update to reconnect before submitting it.');
     const result = Promise.resolve(handler(...args));
     if (mutation) this.mutations.add(result);

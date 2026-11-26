@@ -1549,7 +1549,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false, closed: false,
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false, stackTabs: [], stackNext: false,
-  todoArgs: [], noStart: false, escalate: false, remindMe: false,
+  todoArgs: [], messageArgs: [], awaitReply: false, noStart: false, escalate: false, remindMe: false,
   answerApprove: false, answerDeny: false, hook: false, web: false, yaml: false,
 };
 
@@ -5254,6 +5254,154 @@ print(json.dumps({"calls": calls, "codes": codes, "errors": errors, "stdout": st
   assert.match(python.errors[3], /takes either --repo or --session, not both/);
 }
 
+/** `runpane reply` and `runpane messages` (T-104): both CLIs send the same daemon requests, print the same bytes, and refuse the same mistakes. */
+async function checkMessagesParity() {
+  const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { runMessages } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'messages.js'));
+  const party = (panelId, name, orchestrator) => ({ panelId, paneId: `pane-${panelId}`, sessionId: `session-${panelId}`, name, orchestrator });
+  const sender = party('panel-a', 'the "Omni Chat" Session orchestrator', true);
+  const receiver = party('panel-caller', 'the "Billing" Session orchestrator', true);
+  const original = {
+    ref: 'M-12', number: 12, kind: 'message', replyTo: null, sender, receiver, text: 'Is the API frozen?\nAsk Tyler if unsure.', state: 'answered',
+    deliveredVia: 'tab', undeliveredReason: null, replies: ['M-13'], createdAt: '2026-11-25T10:00:00.000Z', deliveredAt: '2026-11-25T10:00:01.000Z', answeredAt: '2026-11-25T10:05:00.000Z',
+  };
+  const reply = { ...original, ref: 'M-13', number: 13, kind: 'reply', replyTo: 'M-12', sender: receiver, receiver: sender, text: 'Yes, until Friday.', state: 'delivered', replies: [], answeredAt: null };
+  const queued = { ...reply, state: 'queued', deliveredVia: null, deliveredAt: null };
+  const scripted = [
+    { ok: true, reply, delivery: 'delivered' },
+    { ok: true, reply: queued, delivery: 'queued', next: 'Pane types it at its next prompt.' },
+    { ok: true, messages: [reply, original] },
+    { ok: true, messages: [] },
+    { ok: true, message: original, replies: [reply] },
+    { ok: true, message: 'M-12', outcome: 'reply', reply },
+    { ok: false, message: 'M-12', outcome: 'timeout', next: 'Wait again.' },
+    { ok: true, reply, delivery: 'delivered' },
+  ];
+  const argvs = [
+    ['reply', 'M-12', 'Yes,', 'until', 'Friday.'],
+    ['reply', 'm12', 'Yes, until Friday.'],
+    ['messages', 'list'],
+    ['messages', 'list', '--all', '--limit', '5'],
+    ['messages', 'show', '12'],
+    ['messages', 'wait', 'M-12', '--timeout', '30m'],
+    ['messages', 'wait', 'M-12', '--timeout', '1s'],
+    ['reply', 'M-12', 'Yes, until Friday.', '--json'],
+  ];
+  const invalidArgvs = [
+    ['reply'],
+    ['reply', 'M-12'],
+    ['reply', 'twelve', 'hi'],
+    ['messages', 'show', 'M-12', 'extra'],
+  ];
+  const parseErrors = [
+    ['messages', 'show', 'M-12', '--await-reply'],
+    ['panels', 'submit', '--panel', 'p', '--text', 'x', '--wait', '--await-reply', '--yes'],
+    ['messages', 'list', '--timeout', '5m'],
+  ];
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const originalPanel = process.env.PANE_PANEL_ID;
+  const calls = [];
+  const codes = [];
+  const errors = [];
+  const lines = [];
+  process.env.PANE_PANEL_ID = 'panel-caller';
+  daemonClient.invokeDaemon = async (channel, args, schema) => {
+    calls.push({ channel, args });
+    return decodeBoundary(scripted[calls.length - 1], schema);
+  };
+  console.log = (line) => { lines.push(line); };
+  try {
+    for (const argv of argvs) codes.push(await runMessages(parseRunpaneArgs(argv)));
+    for (const argv of invalidArgvs) {
+      try {
+        await runMessages(parseRunpaneArgs(argv));
+        errors.push(null);
+      } catch (error) {
+        errors.push(error.message);
+      }
+    }
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+  const nodeParseErrors = parseErrors.map((argv) => {
+    try {
+      parseRunpaneArgs(argv);
+      return null;
+    } catch (error) {
+      return error.message;
+    }
+  });
+  assert.deepStrictEqual(codes, [0, 0, 0, 0, 0, 0, 124, 0]);
+  assert.deepStrictEqual(calls.slice(0, 7), [
+    { channel: 'runpane:reply', args: [{ message: 'M-12', text: 'Yes, until Friday.', callerPanelId: 'panel-caller' }] },
+    { channel: 'runpane:reply', args: [{ message: 'M-12', text: 'Yes, until Friday.', callerPanelId: 'panel-caller' }] },
+    { channel: 'runpane:messages:list', args: [{ callerPanelId: 'panel-caller' }] },
+    { channel: 'runpane:messages:list', args: [{ callerPanelId: 'panel-caller', all: true, limit: 5 }] },
+    { channel: 'runpane:messages:show', args: [{ message: 'M-12' }] },
+    { channel: 'runpane:messages:wait', args: [{ message: 'M-12', timeoutMs: 1_800_000 }] },
+    { channel: 'runpane:messages:wait', args: [{ message: 'M-12', timeoutMs: 1000 }] },
+  ]);
+  assert.strictEqual(calls.length, argvs.length, 'every mistake is refused before any call');
+  assert.ok(errors.every((message) => message?.endsWith('Nothing was sent.')), errors.join('\n'));
+  assert.ok(lines.includes('Delivered M-13, the reply to M-12, to the "Omni Chat" Session orchestrator.'), lines.join('\n'));
+  assert.ok(lines.includes('reply: M-12 → "Yes, until Friday." (from the "Billing" Session orchestrator) [M-13]'), lines.join('\n'));
+  assert.ok(lines.includes('No messages.'));
+  assert.match(nodeParseErrors[0], /--await-reply/);
+  assert.match(nodeParseErrors[1], /either --wait .* or --await-reply/);
+  assert.match(nodeParseErrors[2], /--timeout only applies/);
+
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import sys
+import runpane.messages as messages
+from runpane.cli import COMMAND_HANDLERS, parse_args
+
+data = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+scripted = data["scripted"]
+calls = []
+def fake_invoke(channel, args=None, **kwargs):
+    calls.append({"channel": channel, "args": args or []})
+    return scripted[len(calls) - 1]
+
+messages.invoke_daemon = fake_invoke
+codes = []
+errors = []
+parse_errors = []
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    for argv in data["argvs"]:
+        parsed = parse_args(argv)
+        codes.append(COMMAND_HANDLERS[parsed.command](parsed, {}))
+    for argv in data["invalidArgvs"]:
+        try:
+            parsed = parse_args(argv)
+            COMMAND_HANDLERS[parsed.command](parsed, {})
+            errors.append(None)
+        except Exception as error:
+            errors.append(str(error))
+for argv in data["parseErrors"]:
+    try:
+        parse_args(argv)
+        parse_errors.append(None)
+    except Exception as error:
+        parse_errors.append(str(error))
+sys.stdout.buffer.write(json.dumps({"calls": calls, "codes": codes, "errors": errors, "parseErrors": parse_errors, "stdout": stdout.getvalue()}).encode("utf-8"))
+`, JSON.stringify({ scripted, argvs, invalidArgvs, parseErrors })));
+  if (originalPanel === undefined) delete process.env.PANE_PANEL_ID;
+  else process.env.PANE_PANEL_ID = originalPanel;
+  assert.deepStrictEqual(python.calls, calls);
+  assert.deepStrictEqual(python.codes, codes);
+  assert.deepStrictEqual(python.errors, errors);
+  assert.deepStrictEqual(python.parseErrors.map((message) => message !== null), nodeParseErrors.map((message) => message !== null));
+  assert.strictEqual(python.stdout, lines.map((line) => `${line}\n`).join(''));
+}
+
 /** `runpane todos`: both CLIs send the same daemon requests, print the same bytes, and refuse the same mistakes. */
 async function checkTodosParity() {
   const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
@@ -7705,6 +7853,7 @@ const checks = [
   checkMachineParity,
   checkLoopsParity,
   checkTodosParity,
+  checkMessagesParity,
   function checkTodoSnoozeTimes() { require('./test-runpane-todo-times.js').checkTodoSnoozeTimes(); },
   checkInstallerFailures,
   compareArtifactSelectionParity,

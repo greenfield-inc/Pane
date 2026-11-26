@@ -11,6 +11,8 @@ import { getRemoteDaemonExecutableCandidates } from '../daemon/remoteDaemonServi
 import { pathToFileURL } from 'url';
 import { describe, expect, it, vi, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
+import { AgentMessageService, type MessagePanelInfo } from '../services/agentMessages/agentMessageService';
+import { AgentMessageStore } from '../services/agentMessages/agentMessageStore';
 import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import type { Project } from '../database/models';
@@ -3457,6 +3459,42 @@ describe('runpane IPC handlers', () => {
       enter: 'cr',
       nextCommand: `runpane panels wait --panel ${terminalPanel.id} --for ready --timeout-ms 30000 --json`,
     });
+  });
+
+  it("ends an agent tab's message to another tab with its M-n reply line, and leaves the person's and Pane's own lines as typed (T-104)", async () => {
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+    const db = new Database(':memory:');
+    const tabs = new Map<string, MessagePanelInfo>([
+      ['agent-tab', { panelId: 'agent-tab', paneId: 'pane-a', sessionId: 's1', name: 'the "Omni Chat" Session orchestrator', orchestrator: true, agent: true }],
+      [terminalPanel.id, { panelId: terminalPanel.id, paneId: session.id, sessionId: null, name: 'Worker', orchestrator: false, agent: true }],
+    ]);
+    const messages = new AgentMessageService(new AgentMessageStore(db), {
+      panel: id => tabs.get(id) ?? null, orchestratorPanel: () => null, isPanelDown: async () => false, resumePanel: async () => true,
+      isMidTurn: () => false, hasUnsentText: async () => false, typeIntoTab: async () => 'delivered', log: () => undefined,
+    });
+    try {
+      const registry = createRegistry(createServices({ agentMessageService: messages }));
+      const fromAgent = (input: PaneCommandValue) => registry.invokeConnected('runpane:panels:submit', [input], new AbortController().signal, { panelId: 'agent-tab' });
+
+      const sent = await fromAgent({ panelId: terminalPanel.id, input: 'Is the API frozen?', expectReport: false });
+      expect(sent).toMatchObject({ ok: true, messageId: 'M-1' });
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenLastCalledWith(terminalPanel.id,
+        'Is the API frozen?\n\nReply with runpane reply M-1 "…": it reaches the "Omni Chat" Session orchestrator, who never sees your own chat.\r');
+      expect(messages.show(1).message).toMatchObject({ state: 'delivered', text: 'Is the API frozen?', sender: { panelId: 'agent-tab' } });
+
+      for (const input of [
+        { panelId: terminalPanel.id, input: 'owed answer', fromPane: true, expectReport: false },
+        { panelId: terminalPanel.id, input: 'typed by the person', source: 'user', expectReport: false },
+      ]) {
+        expect(await fromAgent(input)).not.toHaveProperty('messageId');
+        expect(terminalPanelManager.writeToTerminal).toHaveBeenLastCalledWith(terminalPanel.id, `${input.input}\r`);
+      }
+      // Pane's own UI sends with no calling tab.
+      expect(await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'from the app', expectReport: false }])).not.toHaveProperty('messageId');
+      expect(messages.list({ limit: 10 }).map(message => message.ref)).toEqual(['M-1']);
+    } finally {
+      db.close();
+    }
   });
 
   it('types nothing into a Pi selector, and submits once Pi\'s input box is back', async () => {

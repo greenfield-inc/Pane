@@ -1905,7 +1905,7 @@ const CONTRACT_SECTION_11 = [
     "name": "panels submit",
     "summary": "Send and submit text to a terminal panel, including idle agent composers.",
     "usage": [
-      "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--source user|agent] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]"
+      "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--source user|agent] [--expect-report|--no-expect-report] [--wait|--await-reply] [--timeout <duration>] --yes [--json] [--pane-dir <path>]"
     ],
     "mutates": true,
     "toolsets": [
@@ -1914,7 +1914,8 @@ const CONTRACT_SECTION_11 = [
     "jsonSchemas": [
       "panelSubmitRequest",
       "panelSubmitResult",
-      "dispatchWaitResult"
+      "dispatchWaitResult",
+      "messageWaitResult"
     ],
     "localControl": true
   },
@@ -1980,6 +1981,66 @@ const CONTRACT_SECTION_11 = [
     ],
     "jsonSchemas": [
       "pauseResult"
+    ],
+    "localControl": true
+  },
+  {
+    "name": "reply",
+    "summary": "Answer a message another agent sent you: Pane types the reply into the sender's tab.",
+    "usage": [
+      "runpane reply <message> <text> [--input-file <path|->] [--json] [--pane-dir <path>]"
+    ],
+    "mutates": true,
+    "additive": true,
+    "toolsets": [
+      "core",
+      "panels",
+      "plugin"
+    ],
+    "jsonSchemas": [
+      "replyResult"
+    ],
+    "localControl": true
+  },
+  {
+    "name": "messages list",
+    "summary": "List the agent-to-agent messages this tab sent or received, newest first.",
+    "usage": [
+      "runpane messages list [--panel <panel-id>] [--all] [--limit <count>] [--json] [--pane-dir <path>]"
+    ],
+    "toolsets": [
+      "panels"
+    ],
+    "jsonSchemas": [
+      "messageListResult"
+    ],
+    "localControl": true
+  },
+  {
+    "name": "messages show",
+    "summary": "Show one agent-to-agent message and its replies.",
+    "usage": [
+      "runpane messages show <message> [--json] [--pane-dir <path>]"
+    ],
+    "toolsets": [
+      "panels"
+    ],
+    "jsonSchemas": [
+      "messageShowResult"
+    ],
+    "localControl": true
+  },
+  {
+    "name": "messages wait",
+    "summary": "Wait for the reply to a message you sent, and print it.",
+    "usage": [
+      "runpane messages wait <message> [--timeout <duration>] [--json] [--pane-dir <path>]"
+    ],
+    "toolsets": [
+      "panels"
+    ],
+    "jsonSchemas": [
+      "messageWaitResult"
     ],
     "localControl": true
   },
@@ -3777,7 +3838,7 @@ const CONTRACT_SECTION_12 = {
     {
       "name": "--timeout",
       "value": "<duration>",
-      "description": "With --wait: give up after this long (30m, 2h; 0 waits without limit) and exit 124."
+      "description": "With --wait or --await-reply (or messages wait): give up after this long (30m, 2h; 0 waits without limit with --wait) and exit 124."
     },
     {
       "name": "--note",
@@ -4291,7 +4352,7 @@ const CONTRACT_SECTION_12 = {
     },
     {
       "name": "--all",
-      "description": "inbox ack only: clear every item of the --session."
+      "description": "inbox ack: clear every item of the --session; messages list: every message on this computer."
     },
     {
       "name": "--paused",
@@ -4340,6 +4401,10 @@ const CONTRACT_SECTION_12 = {
     {
       "name": "--web",
       "description": "runpane links create: print a start link in its https://runpane.com/open form, for web pages."
+    },
+    {
+      "name": "--await-reply",
+      "description": "panels submit only: wait for the receiving agent's `runpane reply` and print it."
     }
   ]
 } as const;
@@ -4444,6 +4509,8 @@ const CONTRACT_SECTION_13 = {
       "  runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) --yes [--json]",
       "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
       "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
+      "  runpane reply <message> (<text>|--input-file <path|->) [--json]",
+      "  runpane messages list [--panel <panel-id>] [--all] | show <message> | wait <message> [--timeout <duration>] [--json]",
       "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
       "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
       "  runpane panels pause --panel <panel-id> --yes [--json]",
@@ -5238,7 +5305,7 @@ const CONTRACT_SECTION_13 = {
     ],
     "panels submit": [
       "Usage:",
-      "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
+      "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--expect-report|--no-expect-report] [--wait|--await-reply] [--timeout <duration>] --yes [--json]",
       "",
       "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
       "",
@@ -5264,7 +5331,9 @@ const CONTRACT_SECTION_13 = {
       "  --no-expect-report             Fire-and-forget: no agent.report.missing if the agent ends without reporting",
       "  --wait                         Block until this panel reports, misses its report, waits on a prompt, or exits;",
       "                                 print one JSON line (exit 0 report, 3 missing, 4 blocked, 5 exited, 124 timeout)",
-      "  --timeout <duration>           With --wait: give up after this long (30m, 2h)",
+      "  --await-reply                  From an agent's tab: block until the receiver answers with `runpane reply`, then",
+      "                                 print the reply (exit 0, or 124 after --timeout). Not with --wait.",
+      "  --timeout <duration>           With --wait or --await-reply: give up after this long (30m, 2h)",
       "  --pane-dir <path>              Connect to a specific Pane data directory",
       "  --json                         Print machine-readable output",
       "  --yes                          Skip confirmation for this mutating command",
@@ -7284,6 +7353,73 @@ const CONTRACT_SECTION_13 = {
       "",
       "Example:",
       "  runpane todos wake T-12 --json"
+    ],
+    "reply": [
+      "Usage:",
+      "  runpane reply <message> (<text>|--input-file <path|->) [--json] [--pane-dir <path>]",
+      "",
+      "Answer a message another agent sent you: Pane types the reply into the sender's tab.",
+      "Its tab shows `reply: M-12 → \"<text>\" (from <you>)`. Pane resumes a tab that is down, waits for a busy one, and",
+      "follows a Session's orchestrator to its current tab; a sender waiting with --await-reply gets it as its result.",
+      "",
+      "Rules:",
+      "  - A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees.",
+      "",
+      "Options:",
+      "  <message>                      The message id from its reply line, such as M-12.",
+      "  <text>                         The reply; at most 8,000 characters.",
+      "  --input-file <path|->          Read the reply from a file or stdin.",
+      "  --json                         Print machine-readable output.",
+      "  --pane-dir <path>              Connect to a specific Pane data directory.",
+      "",
+      "Example:",
+      "  runpane reply M-12 \"Yes: the API is frozen until Friday.\" --json"
+    ],
+    "messages list": [
+      "Usage:",
+      "  runpane messages list [--panel <panel-id>] [--all] [--limit <count>] [--json] [--pane-dir <path>]",
+      "",
+      "List the agent-to-agent messages this tab sent or received, newest first, with their state and replies.",
+      "",
+      "Options:",
+      "  --panel <panel-id>             The tab whose messages to list (default: this tab).",
+      "  --all                          List every message on this computer.",
+      "  --limit <count>                At most this many (default 50).",
+      "  --json                         Print machine-readable output.",
+      "  --pane-dir <path>              Connect to a specific Pane data directory.",
+      "",
+      "Example:",
+      "  runpane messages list --json"
+    ],
+    "messages show": [
+      "Usage:",
+      "  runpane messages show <message> [--json] [--pane-dir <path>]",
+      "",
+      "Show one agent-to-agent message, its state, and its replies.",
+      "",
+      "Options:",
+      "  <message>                      The message id, such as M-12.",
+      "  --json                         Print machine-readable output.",
+      "  --pane-dir <path>              Connect to a specific Pane data directory.",
+      "",
+      "Example:",
+      "  runpane messages show M-12 --json"
+    ],
+    "messages wait": [
+      "Usage:",
+      "  runpane messages wait <message> [--timeout <duration>] [--json] [--pane-dir <path>]",
+      "",
+      "Wait for the reply to a message you sent, and print it (exit 0), or exit 124 after --timeout.",
+      "A reply this call returns is not typed into your tab as well; one that comes after a timeout is.",
+      "",
+      "Options:",
+      "  <message>                      The id `panels submit` returned as messageId, such as M-12.",
+      "  --timeout <duration>           Give up after this long (30m, 2h); default a day.",
+      "  --json                         Print machine-readable output.",
+      "  --pane-dir <path>              Connect to a specific Pane data directory.",
+      "",
+      "Example:",
+      "  runpane messages wait M-12 --timeout 30m --json"
     ]
   },
   "pip": {
@@ -7330,6 +7466,8 @@ const CONTRACT_SECTION_13 = {
       "  runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) --yes [--json]",
       "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) --yes [--json]",
       "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
+      "  python -m runpane reply <message> (<text>|--input-file <path|->) [--json]",
+      "  python -m runpane messages list [--panel <panel-id>] [--all] | show <message> | wait <message> [--timeout <duration>] [--json]",
       "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
       "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
       "  runpane panels pause --panel <panel-id> --yes [--json]",
@@ -8110,7 +8248,7 @@ const CONTRACT_SECTION_13 = {
     ],
     "panels submit": [
       "Usage:",
-      "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
+      "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--expect-report|--no-expect-report] [--wait|--await-reply] [--timeout <duration>] --yes [--json]",
       "",
       "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
       "",
@@ -8136,7 +8274,9 @@ const CONTRACT_SECTION_13 = {
       "  --no-expect-report             Fire-and-forget: no agent.report.missing if the agent ends without reporting",
       "  --wait                         Block until this panel reports, misses its report, waits on a prompt, or exits;",
       "                                 print one JSON line (exit 0 report, 3 missing, 4 blocked, 5 exited, 124 timeout)",
-      "  --timeout <duration>           With --wait: give up after this long (30m, 2h)",
+      "  --await-reply                  From an agent's tab: block until the receiver answers with `runpane reply`, then",
+      "                                 print the reply (exit 0, or 124 after --timeout). Not with --wait.",
+      "  --timeout <duration>           With --wait or --await-reply: give up after this long (30m, 2h)",
       "  --pane-dir <path>              Connect to a specific Pane data directory",
       "  --json                         Print machine-readable output",
       "  --yes                          Skip confirmation for this mutating command",
@@ -9905,6 +10045,73 @@ const CONTRACT_SECTION_13 = {
       "",
       "Example:",
       "  python -m runpane todos wake T-12 --json"
+    ],
+    "reply": [
+      "Usage:",
+      "  python -m runpane reply <message> (<text>|--input-file <path|->) [--json] [--pane-dir <path>]",
+      "",
+      "Answer a message another agent sent you: Pane types the reply into the sender's tab.",
+      "Its tab shows `reply: M-12 → \"<text>\" (from <you>)`. Pane resumes a tab that is down, waits for a busy one, and",
+      "follows a Session's orchestrator to its current tab; a sender waiting with --await-reply gets it as its result.",
+      "",
+      "Rules:",
+      "  - A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees.",
+      "",
+      "Options:",
+      "  <message>                      The message id from its reply line, such as M-12.",
+      "  <text>                         The reply; at most 8,000 characters.",
+      "  --input-file <path|->          Read the reply from a file or stdin.",
+      "  --json                         Print machine-readable output.",
+      "  --pane-dir <path>              Connect to a specific Pane data directory.",
+      "",
+      "Example:",
+      "  python -m runpane reply M-12 \"Yes: the API is frozen until Friday.\" --json"
+    ],
+    "messages list": [
+      "Usage:",
+      "  python -m runpane messages list [--panel <panel-id>] [--all] [--limit <count>] [--json] [--pane-dir <path>]",
+      "",
+      "List the agent-to-agent messages this tab sent or received, newest first, with their state and replies.",
+      "",
+      "Options:",
+      "  --panel <panel-id>             The tab whose messages to list (default: this tab).",
+      "  --all                          List every message on this computer.",
+      "  --limit <count>                At most this many (default 50).",
+      "  --json                         Print machine-readable output.",
+      "  --pane-dir <path>              Connect to a specific Pane data directory.",
+      "",
+      "Example:",
+      "  python -m runpane messages list --json"
+    ],
+    "messages show": [
+      "Usage:",
+      "  python -m runpane messages show <message> [--json] [--pane-dir <path>]",
+      "",
+      "Show one agent-to-agent message, its state, and its replies.",
+      "",
+      "Options:",
+      "  <message>                      The message id, such as M-12.",
+      "  --json                         Print machine-readable output.",
+      "  --pane-dir <path>              Connect to a specific Pane data directory.",
+      "",
+      "Example:",
+      "  python -m runpane messages show M-12 --json"
+    ],
+    "messages wait": [
+      "Usage:",
+      "  python -m runpane messages wait <message> [--timeout <duration>] [--json] [--pane-dir <path>]",
+      "",
+      "Wait for the reply to a message you sent, and print it (exit 0), or exit 124 after --timeout.",
+      "A reply this call returns is not typed into your tab as well; one that comes after a timeout is.",
+      "",
+      "Options:",
+      "  <message>                      The id `panels submit` returned as messageId, such as M-12.",
+      "  --timeout <duration>           Give up after this long (30m, 2h); default a day.",
+      "  --json                         Print machine-readable output.",
+      "  --pane-dir <path>              Connect to a specific Pane data directory.",
+      "",
+      "Example:",
+      "  python -m runpane messages wait M-12 --timeout 30m --json"
     ]
   }
 } as const;
@@ -16449,6 +16656,9 @@ const CONTRACT_SECTION_16 = {
       "operationId": {
         "type": "string",
         "description": "Durable host operation ID for Chat delivery reconciliation."
+      },
+      "messageId": {
+        "type": "string"
       }
     },
     "additionalProperties": false
@@ -23415,6 +23625,264 @@ const CONTRACT_SECTION_16 = {
       }
     },
     "additionalProperties": false
+  },
+  "agentMessage": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "ref",
+      "number",
+      "kind",
+      "replyTo",
+      "sender",
+      "receiver",
+      "text",
+      "state",
+      "deliveredVia",
+      "undeliveredReason",
+      "replies",
+      "createdAt",
+      "deliveredAt",
+      "answeredAt"
+    ],
+    "properties": {
+      "ref": {
+        "type": "string"
+      },
+      "number": {
+        "type": "number"
+      },
+      "kind": {
+        "enum": [
+          "message",
+          "reply"
+        ]
+      },
+      "replyTo": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "sender": {
+        "type": "object",
+        "required": [
+          "panelId",
+          "paneId",
+          "sessionId",
+          "name",
+          "orchestrator"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "panelId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paneId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "orchestrator": {
+            "type": "boolean"
+          }
+        }
+      },
+      "receiver": {
+        "type": "object",
+        "required": [
+          "panelId",
+          "paneId",
+          "sessionId",
+          "name",
+          "orchestrator"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "panelId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paneId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "orchestrator": {
+            "type": "boolean"
+          }
+        }
+      },
+      "text": {
+        "type": "string"
+      },
+      "state": {
+        "enum": [
+          "sending",
+          "queued",
+          "delivered",
+          "answered",
+          "undelivered"
+        ]
+      },
+      "deliveredVia": {
+        "enum": [
+          "tab",
+          "call",
+          null
+        ]
+      },
+      "undeliveredReason": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "replies": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "createdAt": {
+        "type": "string"
+      },
+      "deliveredAt": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "answeredAt": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    }
+  },
+  "replyResult": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "ok",
+      "reply",
+      "delivery"
+    ],
+    "properties": {
+      "ok": {
+        "const": true
+      },
+      "reply": {
+        "$ref": "#/jsonSchemas/agentMessage"
+      },
+      "delivery": {
+        "enum": [
+          "delivered",
+          "queued",
+          "undelivered"
+        ]
+      },
+      "next": {
+        "type": "string"
+      }
+    }
+  },
+  "messageListResult": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "ok",
+      "messages"
+    ],
+    "properties": {
+      "ok": {
+        "const": true
+      },
+      "messages": {
+        "type": "array",
+        "items": {
+          "$ref": "#/jsonSchemas/agentMessage"
+        }
+      }
+    }
+  },
+  "messageShowResult": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "ok",
+      "message",
+      "replies"
+    ],
+    "properties": {
+      "ok": {
+        "const": true
+      },
+      "message": {
+        "$ref": "#/jsonSchemas/agentMessage"
+      },
+      "replies": {
+        "type": "array",
+        "items": {
+          "$ref": "#/jsonSchemas/agentMessage"
+        }
+      }
+    }
+  },
+  "messageWaitResult": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "ok",
+      "message",
+      "outcome"
+    ],
+    "properties": {
+      "ok": {
+        "type": "boolean"
+      },
+      "message": {
+        "type": "string"
+      },
+      "outcome": {
+        "enum": [
+          "reply",
+          "timeout"
+        ]
+      },
+      "reply": {
+        "$ref": "#/jsonSchemas/agentMessage"
+      },
+      "next": {
+        "type": "string"
+      }
+    }
   }
 } as const;
 
@@ -23454,7 +23922,8 @@ const CONTRACT_SECTION_17 = {
     "Session: where a workstream lives, and the default home for orchestrated work. Its folder ($PANE_SESSION_DIR) holds plans, notes and reports.",
     "Pane: one per feature (one worktree, one branch). Before creating one, find the feature's Pane (`runpane panes list --json`, match the branch) and create one only when none exists.",
     "Tab: reviews, review reruns, QA, fixes and follow-ups for a feature go in new tabs in its Pane (`runpane panels create --pane <id>`), never a new Pane or a plain `git worktree`.",
-    "Scratch: in Pane, put temporary files, clones, captures, downloads, logs and test instances (an isolated PANE_DIR and HOME for QA) in `$PANE_SCRATCH_DIR`, not /tmp or your tool's own scratchpad. When the feature is done, archive the Pane and Pane cleans it up."
+    "Scratch: in Pane, put temporary files, clones, captures, downloads, logs and test instances (an isolated PANE_DIR and HOME for QA) in `$PANE_SCRATCH_DIR`, not /tmp or your tool's own scratchpad. When the feature is done, archive the Pane and Pane cleans it up.",
+    "Messages: a message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply M-12 \"…\"`, never only in your own chat, which the sender never sees."
   ],
   "brief": {
     "title": "Pane agent context",
@@ -26022,6 +26491,11 @@ const CONTRACT_SECTION_17 = {
           "value": "<duration>",
           "required": false,
           "description": "With --wait: give up after this long and exit 124 (outcome timeout)."
+        },
+        {
+          "name": "--await-reply",
+          "required": false,
+          "description": "From an agent's tab: block until the receiving agent answers with `runpane reply`, then print its reply (`messageWaitResult`; exit 0, or 124 after --timeout). Not with --wait."
         }
       ],
       "examples": [
@@ -26033,7 +26507,8 @@ const CONTRACT_SECTION_17 = {
       ],
       "jsonSchemas": [
         "panelSubmitRequest",
-        "panelSubmitResult"
+        "panelSubmitResult",
+        "messageWaitResult"
       ],
       "notes": [
         "The response includes sequenceName, verifiedSubmitted, delivery and nextCommand. For Claude and Codex, `delivery.state` is `taken` (the agent started a turn with the text), `queued` (it holds the text until its current turn ends), `in-composer` (the text is still in the composer) or `unknown`, and `delivery.evidence` is `transcript` (the agent's own transcript) or `screen`. verifiedSubmitted is true for `taken` or `queued`; never resend those. If ok is false, inspect blocked and do not assume the turn started.",
@@ -26044,7 +26519,8 @@ const CONTRACT_SECTION_17 = {
         "`--as-file-pointer` writes the text to a prompt file readable only by you, inside the Pane's git worktree at `.pane/prompts/` (hidden by the repository's `.git/info/exclude`, never committed) when it has one, otherwise under `<pane-dir>/prompts/<pane-id>/`, so an agent limited to its working directories reads it without a permission prompt, and sends the one line `Read and follow <path>`, with the path relative to the worktree (where the agent starts) when the file is inside it; the result's `promptFile` is always absolute. Prefer it for long prompts.",
         "`--attach <file>` (repeatable, with `--as-file-pointer`) copies each file into a folder beside the prompt file and sends `Read and follow <path> (attached: <copy>, ...)`; the result lists the copies in `attachments`.",
         "With --interrupt, Pane sends the stop key only while the agent is active, waits for an empty idle composer, then submits. If readiness times out, replacement text is not sent. A queued result is not read yet: delivery.message explains the delay; never resend queued text. Interrupt success requires delivery.state: taken. Unknown agents and occupied composers are rejected without typing.",
-        "On a chat tab, submit sends an ACP prompt and returns sequenceName=acp, enter=none, operationId and acp-receipt delivery evidence; a prompt sent while the agent works is queued and sent next. Do not blindly resend after a lost response."
+        "On a chat tab, submit sends an ACP prompt and returns sequenceName=acp, enter=none, operationId and acp-receipt delivery evidence; a prompt sent while the agent works is queued and sent next. Do not blindly resend after a lost response.",
+        "From an agent's tab, a message to another agent's tab gets an id (`messageId`, M-n) and ends with `Reply with runpane reply M-n \"…\"`; the receiver's reply reaches your tab as `reply: M-n → \"…\"`. What the person sends (Pane's UI, a shell tab, `--source user`) goes as typed."
       ]
     },
     "panels resume": {
@@ -32277,6 +32753,171 @@ const CONTRACT_SECTION_17 = {
         "todoResult"
       ],
       "notes": []
+    },
+    "reply": {
+      "name": "reply",
+      "summary": "Answer a message another agent sent you: Pane types the reply into the sender's tab.",
+      "details": "A message one agent sends another through Pane (`panels submit`, `agents send`, a Session-to-Session message, Autopilot) ends with `Reply with runpane reply M-12 \"…\"`. The reply reaches the sender's tab as `reply: M-12 → \"<text>\" (from <you>) [M-13; …]`, wherever that tab is now: Pane resumes it when it is down, waits for its prompt when it is busy, and follows a Session's orchestrator to its current tab. A sender waiting with `--await-reply` gets it as that call's result instead. The original is marked answered.",
+      "requiresPaneDaemon": true,
+      "mutates": true,
+      "arguments": [
+        {
+          "name": "<message>",
+          "required": true,
+          "description": "The message id from its reply line, such as M-12."
+        },
+        {
+          "name": "<text>",
+          "required": false,
+          "description": "The reply; at most 8,000 characters. Put long detail in a file and reply with its path."
+        },
+        {
+          "name": "--input-file",
+          "value": "<path|->",
+          "required": false,
+          "description": "Read the reply from a file or stdin."
+        },
+        {
+          "name": "--json",
+          "required": false,
+          "description": "Print machine-readable output."
+        },
+        {
+          "name": "--pane-dir",
+          "value": "<path>",
+          "required": false,
+          "description": "Connect to a specific Pane data directory."
+        }
+      ],
+      "examples": [
+        "runpane reply M-12 \"Yes: the API is frozen until Friday.\" --json"
+      ],
+      "jsonSchemas": [
+        "replyResult"
+      ],
+      "notes": [
+        "A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees."
+      ]
+    },
+    "messages list": {
+      "name": "messages list",
+      "summary": "List the agent-to-agent messages this tab sent or received, newest first.",
+      "details": "Each message has its id (M-n), sender, receiver, text, state (sending, delivered, answered, queued, undelivered) and replies. From a Pane tab it lists that tab's messages; --panel picks another tab and --all lists every one on this computer.",
+      "requiresPaneDaemon": true,
+      "mutates": false,
+      "arguments": [
+        {
+          "name": "--panel",
+          "value": "<panel-id>",
+          "required": false,
+          "description": "The tab whose messages to list (default: this tab)."
+        },
+        {
+          "name": "--all",
+          "required": false,
+          "description": "List every message on this computer."
+        },
+        {
+          "name": "--limit",
+          "value": "<count>",
+          "required": false,
+          "description": "At most this many (default 50)."
+        },
+        {
+          "name": "--json",
+          "required": false,
+          "description": "Print machine-readable output."
+        },
+        {
+          "name": "--pane-dir",
+          "value": "<path>",
+          "required": false,
+          "description": "Connect to a specific Pane data directory."
+        }
+      ],
+      "examples": [
+        "runpane messages list --json"
+      ],
+      "jsonSchemas": [
+        "messageListResult"
+      ],
+      "notes": [
+        "A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees."
+      ]
+    },
+    "messages show": {
+      "name": "messages show",
+      "summary": "Show one agent-to-agent message and its replies.",
+      "details": "Shows who sent it to whom, its text and state, and each reply with how it was delivered (typed into the tab, or returned to an --await-reply call) or why it could not be.",
+      "requiresPaneDaemon": true,
+      "mutates": false,
+      "arguments": [
+        {
+          "name": "<message>",
+          "required": true,
+          "description": "The message id, such as M-12."
+        },
+        {
+          "name": "--json",
+          "required": false,
+          "description": "Print machine-readable output."
+        },
+        {
+          "name": "--pane-dir",
+          "value": "<path>",
+          "required": false,
+          "description": "Connect to a specific Pane data directory."
+        }
+      ],
+      "examples": [
+        "runpane messages show M-12 --json"
+      ],
+      "jsonSchemas": [
+        "messageShowResult"
+      ],
+      "notes": [
+        "A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees."
+      ]
+    },
+    "messages wait": {
+      "name": "messages wait",
+      "summary": "Wait for the reply to a message you sent, and print it.",
+      "details": "Blocks until the first reply to the message arrives and prints it (exit 0), or until --timeout passes (exit 124). A reply this call returns is not typed into your tab as well; one that comes after a timeout is.",
+      "requiresPaneDaemon": true,
+      "mutates": false,
+      "arguments": [
+        {
+          "name": "<message>",
+          "required": true,
+          "description": "The id `panels submit` returned as messageId, such as M-12."
+        },
+        {
+          "name": "--timeout",
+          "value": "<duration>",
+          "required": false,
+          "description": "Give up after this long (30m, 2h); default a day."
+        },
+        {
+          "name": "--json",
+          "required": false,
+          "description": "Print machine-readable output."
+        },
+        {
+          "name": "--pane-dir",
+          "value": "<path>",
+          "required": false,
+          "description": "Connect to a specific Pane data directory."
+        }
+      ],
+      "examples": [
+        "runpane messages wait M-12 --timeout 30m --json"
+      ],
+      "jsonSchemas": [
+        "messageWaitResult"
+      ],
+      "notes": [
+        "A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees."
+      ]
     }
   },
   "managedBlock": [
