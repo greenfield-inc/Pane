@@ -1,5 +1,6 @@
 import { showActionError } from '../stores/errorStore';
 import { ipcErrorMessage } from './ipcErrorMessage';
+import { beginMachineSwitch } from '../services/switchCursorHold';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
@@ -100,6 +101,8 @@ export async function openOnMachine(machineId: string, target: MachineTarget): P
   // The switch's restore clears this host's Sessions; the landing then picks the pressed one
   // over the host's own last-used Session, whatever else selects meanwhile (#1767's rig).
   sessions.landOn(target.kind === 'session' ? target.id : undefined);
+  // Enter's cursor hold watches this switch, so arrow keys keep working while it runs (D-6).
+  const switchEnded = beginMachineSwitch();
   const failed = (reason: string | undefined) => {
     if (press !== openPresses) return;
     useOrchestrationSessionStore.getState().landOn(undefined);
@@ -112,6 +115,8 @@ export async function openOnMachine(machineId: string, target: MachineTarget): P
     if (!outcome.ok) failed(outcome.needsPassword ? `${name} needs its password. Enter it in Remote Access settings, then try again.` : outcome.error);
   } catch (error) {
     failed(ipcErrorMessage(error, 'Pane did not say why.'));
+  } finally {
+    switchEnded();
   }
 }
 

@@ -14,6 +14,7 @@ async function setup(switchMachine: (machineId: string) => Promise<MachineSelect
   const { useOrchestrationSessionStore } = await import('../stores/orchestrationSessionStore');
   const { openOnMachine } = await import('./machineRowActions');
   const { useErrorStore } = await import('../stores/errorStore');
+  const { machineSwitchInFlight } = await import('../services/switchCursorHold');
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   useAllMachinesStore.setState({
     entries: [
@@ -26,7 +27,7 @@ async function setup(switchMachine: (machineId: string) => Promise<MachineSelect
   });
   const landOn = vi.spyOn(useOrchestrationSessionStore.getState(), 'landOn');
   const shownError = () => useErrorStore.getState().currentError;
-  return { openOnMachine, landOn, shownError };
+  return { openOnMachine, landOn, shownError, machineSwitchInFlight };
 }
 
 afterEach(() => {
@@ -64,5 +65,16 @@ describe('openOnMachine (T-128)', () => {
 
     expect(landOn).toHaveBeenLastCalledWith('notes');
     expect(shownError()).toBeNull();
+  });
+
+  it('marks its switch in flight from the press, before any await, until the switch ends, so Enter can keep the cursor in the list', async () => {
+    const switched = deferred<MachineSelectOutcome>();
+    const { openOnMachine, machineSwitchInFlight } = await setup(() => switched.promise);
+
+    const opening = openOnMachine('build', { kind: 'session', id: 'release', name: 'Release' });
+    expect(machineSwitchInFlight()).not.toBeNull();
+    switched.resolve({ ok: true });
+    await opening;
+    expect(machineSwitchInFlight()).toBeNull();
   });
 });

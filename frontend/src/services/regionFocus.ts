@@ -12,6 +12,7 @@
  */
 import { create } from 'zustand';
 import { useNavigationStore } from '../stores/navigationStore';
+import { holdCursorThroughSwitch, machineSwitchInFlight, releaseSwitchCursorHold } from './switchCursorHold';
 import {
   sidebarListKey,
   stepStop,
@@ -528,19 +529,33 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
       if (parent) moveTo(parent);
       return;
     }
-    case 'Enter':
+    case 'Enter': {
       event.preventDefault();
       releaseCursorHold?.();
+      releaseSwitchCursorHold();
       item.click();
-      // A toggle (a project or section) stays in the list; a row opens its work.
-      if (item.hasAttribute('aria-expanded')) refocus(item);
-      else requestAnimationFrame(() => requestAnimationFrame(() => {
+      const intoWork = () => {
         focusMainArea();
         // A chat that is still loading takes focus into its message box once it shows (D-328).
         const chat = chatShownInFocusedSplit();
         if (chat !== null) focusChatSoon(chat);
-      }));
+      };
+      // A toggle (a project or section) stays in the list; a row opens its work.
+      if (item.hasAttribute('aria-expanded')) { refocus(item); return; }
+      // A row on another machine: the cursor stays in the list until the switch lands (D-6).
+      const switching = machineSwitchInFlight();
+      if (switching) {
+        holdCursorThroughSwitch({
+          switching,
+          cursor: () => sidebarCursor,
+          findByKey: key => document.querySelector<HTMLElement>(`[data-sidebar-key="${CSS.escape(key)}"]`),
+          onLanded: () => requestAnimationFrame(() => requestAnimationFrame(intoWork)),
+        });
+        return;
+      }
+      requestAnimationFrame(() => requestAnimationFrame(intoWork));
       return;
+    }
     case ' ':
       event.preventDefault();
       holdSidebarCursor();
@@ -552,6 +567,7 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
       if (useNavigationStore.getState().activeView === 'notify') return;
       event.preventDefault();
       releaseCursorHold?.();
+      releaseSwitchCursorHold();
       const back = returnTarget;
       if (back?.isConnected && regionOf(back) !== 'sidebar') back.focus({ preventScroll: true });
       else focusMainArea();
