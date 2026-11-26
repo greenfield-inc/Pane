@@ -404,10 +404,12 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
     // The client resends through a drop, so a failure here is final. Say whether it may have landed.
     // An agent reads text and Enter arriving together as a paste and keeps the Enter as a newline,
     // so the Enter is a write of its own: the client sends a bare Enter alone, after the text.
+    // Text that landed without its Enter sits in the agent's input box, so it may have reached the terminal.
+    let textLanded = false;
     void composer.send(async text => {
-      await Promise.all([text ? terminal.sendInput(text) : undefined, terminal.sendInput(KEYS.enter)]);
+      await Promise.all([text ? terminal.sendInput(text).then(() => { textLanded = true; }) : undefined, terminal.sendInput(KEYS.enter)]);
     }).catch((error: unknown) => {
-      const mayHaveLanded = error instanceof RemoteUnconfirmedResultError || (error instanceof PaneError && error.code === 'ERR_REMOTE_DELIVERY_UNKNOWN');
+      const mayHaveLanded = textLanded || error instanceof RemoteUnconfirmedResultError || (error instanceof PaneError && error.code === 'ERR_REMOTE_DELIVERY_UNKNOWN');
       setSendError(mayHaveLanded
         ? 'Not confirmed: this may have reached the terminal. Check it before sending again.'
         : 'Not sent. Your text is still in the box; send it again when connected.');
