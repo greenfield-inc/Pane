@@ -341,6 +341,7 @@ export function HomeScreen() {
         row={row}
         at={row.openedAt}
         waiting={row.type === 'session' ? waitingBySession.get(sessionKey(row.machineKey, row.session.id)) ?? 0 : 0}
+        fresh={row.type === 'session' ? fresh.bySession.get(sessionKey(row.machineKey, row.session.id)) ?? 0 : freshPane(row.machineKey, row.pane.id)}
         machine={markOf(row.machineKey)}
         currentKey={profile.id}
         actions={actions}
