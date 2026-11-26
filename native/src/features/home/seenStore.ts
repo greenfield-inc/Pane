@@ -63,12 +63,10 @@ export const useSeenWaiting = create<SeenState>((set, get) => {
 });
 
 /** While this screen is in view, what it shows (a Pane, Session or approval on the current machine) stops being new. */
-export function useShowsWaiting(target: SeenTarget | null) {
-  const signature = target === null ? null : JSON.stringify(target);
-  useFocusEffect(() => {
-    if (signature === null) return undefined;
-    return useSeenWaiting.getState().show(JSON.parse(signature) as SeenTarget);
-  });
+export function useShowsWaiting(target: SeenTarget) {
+  // By value: a target object made in render is new every time.
+  const signature = JSON.stringify(target);
+  useFocusEffect(() => useSeenWaiting.getState().show(JSON.parse(signature) as SeenTarget));
 }
 
 /** The "+N" counts for what Home last listed. */
