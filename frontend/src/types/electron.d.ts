@@ -55,6 +55,7 @@ import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
+  OrchestrationSessionSummary,
   OrchestrationSessionArchivePreview,
   OrchestrationSessionArchiveResult,
   OrchestrationSessionArchiveSelection,
@@ -109,7 +110,7 @@ interface RendererDiagnosticPayload {
 /** What the `machines:read` channels All machines uses answer, as each machine's own handler returns it. */
 interface MachineReadAnswers {
   'sessions:get-all-with-projects': IPCResponse<Array<Project & { sessions: Session[] }>>;
-  'orchestration-sessions:list': IPCResponse<OrchestrationSessionListResult>;
+  'orchestration-sessions:list': IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>;
   'panels:agent-statuses': IPCResponse<PanelAgentStatusEvent[]>;
   'orchestration-sessions:activity-list': IPCResponse<SessionActivity[]>;
   'permission:getPending': IPCResponse<PanePermissionRequest[]>;
@@ -288,13 +289,14 @@ interface ElectronAPI {
 
   orchestrationSessions: {
     runtimes: () => Promise<IPCResponse<{ distributions: string[] }>>;
-    list: () => Promise<IPCResponse<OrchestrationSessionListResult>>;
-    select: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionListResult>>;
+    /** Summary records (T-127): read a Session's activity log and profile with `get`. */
+    list: () => Promise<IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>>;
+    select: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>>;
     create: (input: OrchestrationSessionCreateInput) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
     get: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
     update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     /** Saves the order of the listed Sessions among the places they hold; leaves every Session record unchanged. */
-    reorder: (sessionIds: string[]) => Promise<IPCResponse<OrchestrationSessionListResult>>;
+    reorder: (sessionIds: string[]) => Promise<IPCResponse<OrchestrationSessionListResult<OrchestrationSessionSummary>>>;
     setAgent: (selector: OrchestrationSessionSelector, agent: PaneChatAgent) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     detach: (selector: OrchestrationSessionSelector, paneId?: string) => Promise<IPCResponse<OrchestrationSessionRecord>>;

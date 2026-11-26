@@ -10,6 +10,7 @@ import type { Session } from '../types/session';
 import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent, type PaneChatState } from '../../../shared/types/paneChat';
 import type {
   OrchestrationSessionRecord,
+  OrchestrationSessionSummary,
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
 } from '../../../shared/types/orchestrationSession';
@@ -29,6 +30,7 @@ import { SessionWorkspaceSkeleton } from './SessionWorkspaceSkeleton';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { SessionLaunchFields } from './SessionLaunchFields';
 import { SessionChangesPanel, SessionOverviewPanel, useSessionOverview } from './SessionOverviewPanel';
+import { newestFullRecord, withNewerSummary } from '../utils/sessionRecords';
 import { useConfigStore } from '../stores/configStore';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import { cn } from '../utils/cn';
@@ -494,7 +496,8 @@ function SessionTile({
     }
     agentReloadKey.current = null;
     if (view.session.revision === record.revision) return;
-    setView(current => current ? { ...current, session: record } : current);
+    // The list sends summaries (T-127): keep the view's profile and activity log while folding the rest in.
+    setView(current => current ? { ...current, session: withNewerSummary(current.session, record) } : current);
   }, [load, record, view]);
 
   const handleOverviewUpdate = useCallback(async (input: OrchestrationSessionUpdateInput): Promise<OrchestrationSessionRecord> => {
@@ -593,7 +596,7 @@ function SessionTile({
 }
 
 function SessionTileFallback({ record, error, isLoading, chrome, onRetry }: {
-  record?: OrchestrationSessionRecord;
+  record?: OrchestrationSessionSummary;
   error: string | null;
   isLoading: boolean;
   chrome: SessionTileChrome;
@@ -619,12 +622,12 @@ function SessionTileFallback({ record, error, isLoading, chrome, onRetry }: {
 }
 
 /** The agent tab's title, as the host names it, for a Session not open yet. */
-function agentTabTitle(record: OrchestrationSessionRecord | undefined): string {
+function agentTabTitle(record: OrchestrationSessionSummary | undefined): string {
   return record ? `${record.name} · ${configuredAgent(record.agent).title}` : 'Session';
 }
 
 /** A Session's workspace skeleton, in the layout this window last showed it with. */
-function SavedSessionSkeleton({ record, name, chromeInline }: { record?: OrchestrationSessionRecord; name: string; chromeInline: boolean }) {
+function SavedSessionSkeleton({ record, name, chromeInline }: { record?: OrchestrationSessionSummary; name: string; chromeInline: boolean }) {
   const internalId = record?.internalSessionId;
   const layout = usePanelStore(state => (internalId ? state.layouts[internalId] : undefined));
   const panels = usePanelStore(state => (internalId ? state.panels[internalId] : undefined));
@@ -795,7 +798,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
       <LiveRegion>{statusAnnouncement}</LiveRegion>
       <SessionTileHeader name={view.session.name} chrome={chrome} error={error} />
       <TodoBreadcrumb session={view.session} />
-      {showSettings && <SessionSettingsDialog record={view.session} onClose={() => setShowSettings(false)} onSave={saveOverview} />}
+      {showSettings && <SessionSettingsDialog record={newestFullRecord(view.session, overview?.session)} onClose={() => setShowSettings(false)} onSave={saveOverview} />}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <SessionProvider session={view.internalSession}>
           <SessionWorkspacePanels agentPanel={view.panel} agentPanelIds={Object.values(view.session.panelIds)}

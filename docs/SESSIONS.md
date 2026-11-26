@@ -1026,7 +1026,16 @@ show chat tabs pass `{ chatTabs: true }` as a second argument to
 (desktop, the PWA and current phone apps do). For any other client, `create`
 starts the orchestrator in a terminal, `get` of a Session whose orchestrator is a
 chat tab fails with `CHAT_TAB_CLIENT_OUTDATED`, which says to update Pane on the
-phone, and `panels:list` leaves chat tabs out. The existing
+phone, and `panels:list` leaves chat tabs out.
+
+`orchestration-sessions:list`, `:select` and `:reorder` take `{ summary: true }`
+as their last argument. The answer then leaves each Session's `activity` log and
+`profile` out, which are most of a record's size: on one machine with 123
+Sessions the list fell from 4.5 MB to 262 KB. The sidebar, the All machines feed,
+a host switch and the phone ask for it; `get` and `overview` still carry the
+full record. A host older than this ignores the argument and sends full records.
+Desktop requests to another machine also ask for gzip, and the host compresses
+answers of 1 KB or more. The existing
 `pane-chat:*` channels remain compatibility endpoints for the imported legacy
 conversation.
 

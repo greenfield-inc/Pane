@@ -1,4 +1,4 @@
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionRecord, OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 
 /**
  * A to-do's own Session (D-409, T-7). The record says so from its first write (`todoNumber`), so it
@@ -24,7 +24,7 @@ export interface SessionListFilter {
  * waiting: the to-do, search and Approvals reach it (J17). A loop's joins while a card from it
  * waits or while it is open.
  */
-export function visibleOrchestrationSessions<Session extends OrchestrationSessionRecord>(
+export function visibleOrchestrationSessions<Session extends OrchestrationSessionSummary>(
   sessions: readonly Session[],
   { todoSessionIds, openSessionId, loopSessionIds, waitingCount }: SessionListFilter,
 ): Session[] {

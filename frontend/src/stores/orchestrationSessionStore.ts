@@ -5,6 +5,7 @@ import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
   OrchestrationSessionRecord,
+  OrchestrationSessionSummary,
   OrchestrationSessionSelector,
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
@@ -12,14 +13,14 @@ import type {
 import type { Session } from '../types/session';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 
-export function isArchivedOrchestrationSession(session: OrchestrationSessionRecord): boolean {
+export function isArchivedOrchestrationSession(session: Pick<OrchestrationSessionSummary, 'archived'>): boolean {
   return session.archived === true;
 }
 
 export type OrchestrationSessionAvailability = 'idle' | 'loading' | 'ready' | 'unavailable' | 'error';
 
 interface OrchestrationSessionState {
-  sessions: OrchestrationSessionRecord[];
+  sessions: OrchestrationSessionSummary[];
   selectedSessionId?: string;
   availability: OrchestrationSessionAvailability;
   error: string | null;
@@ -70,7 +71,7 @@ function ensureSuccess<T>(response: { success: boolean; data?: T; error?: string
 }
 
 function activeSessionIdFromList(
-  sessions: OrchestrationSessionRecord[],
+  sessions: OrchestrationSessionSummary[],
   selectedSessionId: string | undefined,
 ): string | undefined {
   if (!selectedSessionId) return undefined;
@@ -90,7 +91,7 @@ function revisionAfter(state: OrchestrationSessionState, selectedSessionId: stri
   return adoptsRemembered ? state.selectionRevision + 1 : state.selectionRevision;
 }
 
-function applyList(data: OrchestrationSessionListResult, ownSelectionId?: string): void {
+function applyList(data: OrchestrationSessionListResult<OrchestrationSessionSummary>, ownSelectionId?: string): void {
   useOrchestrationSessionStore.setState((state) => {
     const selectedSessionId = activeSessionIdFromList(data.sessions, ownSelectionId)
       ?? activeSessionIdFromList(data.sessions, data.selectedSessionId);

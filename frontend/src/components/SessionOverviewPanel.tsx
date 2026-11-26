@@ -6,6 +6,7 @@ import type {
   OrchestrationActivityKind,
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
+  OrchestrationSessionSummary,
   OrchestrationSessionUpdateInput,
 } from '../../../shared/types/orchestrationSession';
 import type { ToolPanelType } from '../../../shared/types/panels';
@@ -186,7 +187,8 @@ const AGENT_STATE_ACTIVITY_KINDS = new Set<OrchestrationActivityKind>(['working'
 const OVERVIEW_HEADING = 'mb-1 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary';
 
 export interface SessionOverviewPanelProps {
-  record: OrchestrationSessionRecord;
+  /** A list summary has no activity log (T-127); the overview's is shown once it loads. */
+  record: OrchestrationSessionSummary & Partial<Pick<OrchestrationSessionRecord, 'activity'>>;
   /** The Pane session whose worktree is the Session folder, where the status page lives. */
   folderSessionId: string;
   overview: OrchestrationSessionOverview | null;
@@ -311,7 +313,7 @@ export function SessionOverviewPanel({ record, folderSessionId, overview, error,
         <div className="border-t border-border-primary pt-3">
           <h3 className={OVERVIEW_HEADING}>Activity</h3>
           <div className="select-text space-y-2">
-            {(overview?.activity ?? record.activity).filter(activity => !AGENT_STATE_ACTIVITY_KINDS.has(activity.kind)).slice(0, 12).map(activity => (
+            {(overview?.activity ?? record.activity ?? []).filter(activity => !AGENT_STATE_ACTIVITY_KINDS.has(activity.kind)).slice(0, 12).map(activity => (
               <div key={activity.id} className="border-l-2 border-border-primary pl-2">
                 <p className="text-text-secondary">{activity.message}</p>
                 <p className="mt-0.5 text-[10px] text-text-muted">{formatActivityTime(activity.at)} · {activity.source}</p>

@@ -1,6 +1,6 @@
 import { useId, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import type { SessionMoveMark } from '../../../shared/types/sessionMove';
 import { moveMarkLabel, movedBannerLine, restoreHereWarning } from '../utils/sessionMoveView';
 import { machineIdNamed, openSessionOnMachineNamed } from '../utils/sessionMoveOpen';
@@ -12,7 +12,7 @@ import { Button } from './ui/Button';
  * which restores the Session as any archived one, after saying when that is safe.
  */
 export function MovedSessionRow({ session, mark, onRestore }: {
-  session: OrchestrationSessionRecord;
+  session: OrchestrationSessionSummary;
   mark: SessionMoveMark;
   onRestore: (sessionId: string) => Promise<void>;
 }) {

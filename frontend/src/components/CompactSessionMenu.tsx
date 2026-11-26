@@ -11,7 +11,7 @@ import { Archive, Pin, ArrowUpRight, Pencil, FolderPlus, FolderMinus, ChevronLef
 import { runPauseAction } from '../utils/pause';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import type { Session } from '../types/session';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary } from '../../../shared/types/orchestrationSession';
 import { useTodoSessionIds } from '../stores/todosStore';
 import { isTodoSession } from './orchestrationSessionVisibility';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
@@ -40,8 +40,8 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
   const todoSessionIds = useTodoSessionIds();
   const readOnly = useReadOnlyHost();
   const paneId = menu?.session.id;
-  const memberOf: OrchestrationSessionRecord[] = [];
-  const addableTo: OrchestrationSessionRecord[] = [];
+  const memberOf: OrchestrationSessionSummary[] = [];
+  const addableTo: OrchestrationSessionSummary[] = [];
   for (const session of orchestrationSessions) {
     if (isArchivedOrchestrationSession(session)) continue;
     const member = session.associations.some(association => association.paneId === paneId);

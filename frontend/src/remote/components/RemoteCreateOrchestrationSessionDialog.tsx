@@ -3,7 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { useState, type FormEvent, type RefObject } from 'react';
 import {
   nextOrchestrationSessionName,
-  type OrchestrationSessionRecord,
+  type OrchestrationSessionSummary,
   type OrchestrationSessionView,
 } from '../../../../shared/types/orchestrationSession';
 import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../../shared/types/paneChat';
@@ -21,7 +21,7 @@ interface RemoteCreateOrchestrationSessionDialogProps {
   adapter: RemoteRuntimeAdapter;
   /** Older hosts do not report their agents; the host still rejects one it cannot run. */
   sessionAgents: RemotePwaSessionAgents | undefined;
-  sessions: readonly OrchestrationSessionRecord[];
+  sessions: readonly OrchestrationSessionSummary[];
   restoreFocusRef: RefObject<HTMLElement | null>;
   fallbackFocusRef: RefObject<HTMLElement | null>;
   onClose: () => void;

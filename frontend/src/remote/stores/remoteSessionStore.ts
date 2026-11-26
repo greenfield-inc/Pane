@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { OrchestrationSessionRecord, OrchestrationSessionView } from '../../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionSummary, OrchestrationSessionView } from '../../../../shared/types/orchestrationSession';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { Session } from '../../types/session';
 import type { RemoteProjectWithSessions } from '../runtime/remoteRuntimeAdapter';
@@ -25,7 +25,7 @@ interface RemoteHostState {
   selectedSessionId: string | null;
   selectedPanelId: string | null;
   panelsBySessionId: Record<string, ToolPanel[]>;
-  orchestrationSessions: OrchestrationSessionRecord[];
+  orchestrationSessions: OrchestrationSessionSummary[];
   orchestrationAvailability: RemoteOrchestrationAvailability;
   orchestrationError: string | null;
   /** The open Session, set while its workspace Pane is selected. */
@@ -43,7 +43,7 @@ interface RemoteSessionState extends RemoteHostState {
   selectSession: (sessionId: string | null) => void;
   /** Opens a Session on this client's remembered tab there, or on its chat with `showChat`. */
   openSession: (view: OrchestrationSessionView<Session>, options?: { showChat?: boolean }) => void;
-  setOrchestrationSessions: (sessions: OrchestrationSessionRecord[]) => void;
+  setOrchestrationSessions: (sessions: OrchestrationSessionSummary[]) => void;
   setOrchestrationFailure: (availability: 'unavailable' | 'error', error: string | null) => void;
   setArchivedProjects: (projects: RemoteProjectWithSessions[]) => void;
   setPanels: (sessionId: string, panels: ToolPanel[]) => void;
