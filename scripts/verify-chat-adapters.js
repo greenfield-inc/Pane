@@ -11,7 +11,8 @@
  * Step 3 runs only for apps this machine can execute (same OS and arch).
  *
  * It checks the bundled Agent Farm the same way (main/src/services/agentFarm/bundledAgentFarm.ts):
- * inside app.asar, with no native binaries, and answering `--version` under Electron as Node.
+ * inside app.asar, with no native binaries, answering `--version` under Electron as Node, and
+ * installing its bundled greenfield plugin into a scratch config root (its checksums must survive packing).
  * scripts/after-pack.js runs it for every packed app, before signing or
  * publishing; run it by hand on a dist-electron folder too.
  *
@@ -82,10 +83,10 @@ function initialize(app, adapter, entry, cli) {
   });
 }
 
-/** Runs the bundled Agent Farm's CLI as Pane does (Electron as Node, entry inside app.asar) and reads `--version`. */
-function agentFarmVersion(app, entry) {
+/** Runs the bundled Agent Farm's CLI as Pane does (Electron as Node, entry inside app.asar) and returns its stdout. */
+function runAgentFarm(app, entry, args, env = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(app.executable, [entry, '--version'], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(app.executable, [entry, ...args], { env: { ...process.env, ...env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => { child.kill(); reject(new Error(`no answer within ${INITIALIZE_TIMEOUT_MS / 1000}s`)); }, INITIALIZE_TIMEOUT_MS);
@@ -110,10 +111,16 @@ async function verifyAgentFarm(app, files, runnable) {
   if (!runnable) return `${AGENT_FARM}@${version} present (not started: built for another platform)`;
   const entry = path.join(app.asar, 'node_modules', ...AGENT_FARM.split('/'), 'dist', 'cli.js');
   let answered;
-  try { answered = await agentFarmVersion(app, entry); }
+  try { answered = await runAgentFarm(app, entry, ['--version']); }
   catch (error) { throw new Error(`${AGENT_FARM}@${version} did not start from ${app.asar}: ${error.message}`); }
   if (answered !== version) throw new Error(`${AGENT_FARM} in ${app.asar} answered --version with "${answered}", expected ${version}.`);
-  return `${AGENT_FARM}@${version} answered --version under Electron as Node`;
+  // Packing must leave the bundled plugins byte for byte, or Agent Farm's checksum check refuses
+  // them and Pane sets up no profiles (electron-builder once stripped a plugin package.json's scripts).
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-verify-agent-farm-'));
+  try { await runAgentFarm(app, entry, ['plugin', 'install', '--config-root', path.join(scratch, 'agent-farm')], { HOME: scratch, USERPROFILE: scratch, AGENT_FARM_TELEMETRY: 'off' }); }
+  catch (error) { throw new Error(`${AGENT_FARM}@${version} in ${app.asar} could not install its bundled greenfield plugin, so Pane would set up no profiles: ${error.message} Check that package.json build.removePackageScripts is false and nothing else rewrites files under node_modules/${AGENT_FARM}/plugins.`); }
+  finally { fs.rmSync(scratch, { recursive: true, force: true }); }
+  return `${AGENT_FARM}@${version} answered --version and installed greenfield under Electron as Node`;
 }
 
 /** The packed app in an electron-builder appOutDir: its app.asar and the Electron executable beside it. */

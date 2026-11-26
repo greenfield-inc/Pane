@@ -662,8 +662,8 @@ and Settings says to remove it there to let the switch decide. Agent Farm still 
 small state of its own (workspace trust, launch records, MCP logins) under
 `~/.local/state/agent-farm` and `~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
 `scripts/after-pack.js`) fails a packaged build unless Agent Farm is inside
-`app.asar`, carries no native binaries, and answers `--version` under Electron
-as Node.
+`app.asar`, carries no native binaries, answers `--version` under Electron
+as Node, and installs its bundled greenfield plugin into a scratch config root.
 
 ### Profile sync across your computers
 

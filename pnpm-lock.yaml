@@ -50,8 +50,8 @@ importers:
         specifier: ^0.60.0
         version: 0.60.0
       '@greenfieldco/agent-farm':
-        specifier: 0.2.34
-        version: 0.2.34
+        specifier: 0.3.0
+        version: 0.3.0
       '@lydell/node-pty':
         specifier: 1.2.0-beta.18
         version: 1.2.0-beta.18
@@ -353,8 +353,8 @@ importers:
         specifier: ^0.60.0
         version: 0.60.0
       '@greenfieldco/agent-farm':
-        specifier: 0.2.34
-        version: 0.2.34
+        specifier: 0.3.0
+        version: 0.3.0
       '@lydell/node-pty':
         specifier: 1.2.0-beta.18
         version: 1.2.0-beta.18
@@ -1969,8 +1969,8 @@ packages:
   '@git-diff-view/shiki@0.0.40':
     resolution: {integrity: sha512-cJH+VBPhwCJdy60CD3OC9FVCypMOhE00j0tG0Bt5AOAjuNukXsG/HkeK4cm84H6qqMoHKDrFqwmgvgljtRhrSw==}
 
-  '@greenfieldco/agent-farm@0.2.34':
-    resolution: {integrity: sha512-SlYTohaNGzaC0Y7zi9bgiQwVqt90bRR6Oju40171xNTRvnnDCU8p25KXR5MNOtDKzascL0j/bJYOtyYdh1eziQ==}
+  '@greenfieldco/agent-farm@0.3.0':
+    resolution: {integrity: sha512-Sw3/0LS1Z8lA8Bl9C659tymFT/8phKNBkQV6XrlvfUYNcEkvV0SAxzXs0RmXcGNJr8JmL7sDPTJGcxhzMgURlA==}
     engines: {node: '>=22.15.0', pnpm: '>=11 <12'}
     hasBin: true
 
@@ -12942,7 +12942,7 @@ snapshots:
       '@types/hast': 3.0.4
       shiki: 3.23.0
 
-  '@greenfieldco/agent-farm@0.2.34':
+  '@greenfieldco/agent-farm@0.3.0':
     dependencies:
       '@clack/prompts': 1.9.0
       smol-toml: 1.8.0

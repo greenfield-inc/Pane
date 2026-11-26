@@ -99,7 +99,7 @@
     "@agentclientprotocol/claude-agent-acp": "0.100.0",
     "@agentclientprotocol/codex-acp": "2.5.0",
     "@agentclientprotocol/sdk": "2.0.1",
-    "@greenfieldco/agent-farm": "0.2.34",
+    "@greenfieldco/agent-farm": "0.3.0",
     "@anthropic-ai/sdk": "^0.60.0",
     "@lydell/node-pty": "1.2.0-beta.18",
     "@modelcontextprotocol/sdk": "^1.12.1",
@@ -263,7 +263,8 @@
       "provider": "github",
       "owner": "greenfield-inc",
       "repo": "Pane"
-    }
+    },
+    "removePackageScripts": false
   },
   "packageManager": "pnpm@10.19.0+sha512.c9fc7236e92adf5c8af42fd5bf1612df99c2ceb62f27047032f4720b33f8eacdde311865e91c411f2774f618d82f320808ecb51718bfa82c060c4ba7c76a32b8"
 }
