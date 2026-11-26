@@ -40,6 +40,13 @@ export interface OutgoingMessage {
   pointer: MessagePointer | null;
 }
 
+/** An `--await-reply` send's hold on its replies: the tab that sent it, the replies held for its call, and its grace timer. */
+interface Reservation {
+  panelId: string | undefined;
+  held: number[];
+  timer: ReturnType<typeof setTimeout>;
+}
+
 /** A call waiting for a reply, and the tab it was made from. */
 interface Waiter {
   panelId: string | undefined;
@@ -83,7 +90,7 @@ export class AgentMessageService extends EventEmitter {
    * comes before that tab's wait call is held for the call (`held`), never typed. Released to the
    * reply's route after AWAIT_REPLY_GRACE_MS without a wait call.
    */
-  private readonly reservations = new Map<number, { panelId: string | undefined; held: number[]; timer: ReturnType<typeof setTimeout> }>();
+  private readonly reservations = new Map<number, Reservation>();
   private flushing: Promise<void> | null = null;
 
   constructor(private readonly store: AgentMessageStore, private readonly host: AgentMessageHost, private readonly now: () => number = Date.now) {
@@ -227,35 +234,46 @@ export class AgentMessageService extends EventEmitter {
     if (!this.store.get(number)) {
       throw new PaneError('ERR_MESSAGE_NOT_FOUND', `There is no message ${messageRef(number)} on this computer, so there is no reply to wait for.`, 'See recent messages with `runpane messages list`.');
     }
+    const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
     const reservation = this.reservations.get(number);
     if (reservation) {
-      clearTimeout(reservation.timer);
-      this.reservations.delete(number);
+      // Only the reservation's owner (the tab that sent with --await-reply), or a call outside any tab, ends it.
+      // Another tab's wait takes only a held reply whose route it is now (a Session's new orchestrator), and leaves the rest held.
+      const owner = callerPanelId === undefined || callerPanelId === reservation.panelId;
       const claimed = reservation.held.find(held => this.isRoute(callerPanelId, this.targetOf(this.mustGet(held))));
-      const rest = reservation.held.filter(held => held !== claimed);
-      if (rest.length > 0) {
-        this.outbox.push(...rest);
-        void this.flush();
+      if (claimed !== undefined) reservation.held = reservation.held.filter(held => held !== claimed);
+      if (owner) {
+        clearTimeout(reservation.timer);
+        this.reservations.delete(number);
+        if (reservation.held.length > 0) {
+          this.outbox.push(...reservation.held);
+          void this.flush();
+        }
       }
       if (claimed !== undefined) {
         this.handToCall(this.mustGet(claimed));
         return this.record(claimed);
       }
     }
+    const held = new Set(this.reservations.get(number)?.held ?? []);
     for (const earlier of this.store.replies(number)) {
-      if (earlier.state === 'undelivered') continue;
+      if (earlier.state === 'undelivered' || held.has(earlier.number)) continue;
       const typing = this.typing.get(earlier.number);
       if (typing) {
-        // This exact reply is being typed: its outcome is the answer, never a second copy.
-        await typing;
-        return this.record(earlier.number);
+        // This exact reply is being typed: wait for that attempt (within this call's time), then read what it came to.
+        if (!await this.within(typing, deadline, signal)) return undefined;
       }
-      if (earlier.state === 'queued') {
-        if (!this.isRoute(callerPanelId, this.targetOf(earlier))) continue;
-        this.handToCall(earlier);
+      const now = this.mustGet(earlier.number);
+      if (now.state === 'undelivered') continue;
+      if (now.state === 'queued') {
+        // Still queued (never typed, or the tab was busy): a call takes it only from its route, and only while nothing types it.
+        if (this.typing.has(now.number) || !this.isRoute(callerPanelId, this.targetOf(now))) continue;
+        this.handToCall(now);
       }
-      return this.record(earlier.number);
+      return this.record(now.number);
     }
+    if (deadline !== undefined && deadline <= Date.now()) return undefined;
+    const remaining = deadline === undefined ? undefined : deadline - Date.now();
     return new Promise(resolve => {
       const waiting = this.waiters.get(number) ?? new Set<Waiter>();
       this.waiters.set(number, waiting);
@@ -270,8 +288,25 @@ export class AgentMessageService extends EventEmitter {
       const waiter: Waiter = { panelId: callerPanelId, settle: reply => done(reply) };
       const abort = () => done(undefined);
       waiting.add(waiter);
-      if (timeoutMs !== undefined) timer = setTimeout(abort, timeoutMs);
+      if (remaining !== undefined) timer = setTimeout(abort, remaining);
       signal?.addEventListener('abort', abort, { once: true });
+    });
+  }
+
+  /** Waits for `work` until `deadline` or `signal`: true when it finished in time. */
+  private within(work: Promise<void>, deadline: number | undefined, signal: AbortSignal | undefined): Promise<boolean> {
+    if (signal?.aborted) return Promise.resolve(false);
+    return new Promise(resolve => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (inTime: boolean) => {
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener('abort', stop);
+        resolve(inTime);
+      };
+      const stop = () => finish(false);
+      if (deadline !== undefined) timer = setTimeout(stop, Math.max(0, deadline - Date.now()));
+      signal?.addEventListener('abort', stop, { once: true });
+      void work.then(() => finish(true));
     });
   }
 

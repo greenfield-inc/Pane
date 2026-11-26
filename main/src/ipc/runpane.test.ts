@@ -3644,6 +3644,47 @@ describe('runpane IPC handlers', () => {
     }
   });
 
+  // Codex review 3 of #1736, Must-Fix 1: overlapping retries of one file-pointer send write one file and return it.
+  it('answers two overlapping identical file-pointer submits with the one recorded prompt file (T-104)', async () => {
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-message-pointer-overlap-'));
+    const worktree = path.join(root, 'worktree');
+    fs.mkdirSync(worktree);
+    execFileSync('git', ['init', '-q'], { cwd: worktree });
+    const plan = path.join(root, 'plan.md');
+    fs.writeFileSync(plan, '# Plan');
+    const db = new Database(':memory:');
+    const tabs = new Map<string, MessagePanelInfo>([
+      ['agent-tab', { panelId: 'agent-tab', paneId: 'pane-a', sessionId: null, name: 'Omni Chat', orchestrator: false, agent: true }],
+      [terminalPanel.id, { panelId: terminalPanel.id, paneId: session.id, sessionId: null, name: 'Worker', orchestrator: false, agent: true }],
+    ]);
+    const messages = new AgentMessageService(new AgentMessageStore(db), {
+      panel: id => tabs.get(id) ?? null, orchestratorPanel: () => null, isPanelDown: async () => false, resumePanel: async () => true,
+      isMidTurn: () => false, hasUnsentText: async () => false, typeIntoTab: async () => 'delivered', log: () => undefined,
+    });
+    try {
+      const base = createServices();
+      const registry = createRegistry(createServices({
+        agentMessageService: messages,
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        sessionManager: { ...base.sessionManager, getSession: vi.fn(() => ({ ...session, worktreePath: worktree })) } as never,
+      }));
+      const request = { panelId: terminalPanel.id, input: 'Build it', asFilePointer: true, attachments: [plan], operationId: 'op-o', expectReport: false };
+      const submit = () => registry.invokeConnected('runpane:panels:submit', [request], new AbortController().signal, { panelId: 'agent-tab' });
+      // SAFETY: The panels:submit handler resolves to a RunpanePanelSubmitResult.
+      const [first, second] = await Promise.all([submit(), submit()]) as Array<{ messageId?: string; promptFile?: string; attachments?: string[] }>;
+      expect(second).toMatchObject({ messageId: first.messageId, promptFile: first.promptFile, attachments: first.attachments });
+      const prompts = fs.readdirSync(path.dirname(first.promptFile ?? '')).filter(name => name.endsWith('.md'));
+      expect(prompts).toEqual([path.basename(first.promptFile ?? '')]);
+      const lines = vi.mocked(terminalPanelManager.writeToTerminal).mock.calls.map(([, text]) => text).filter(text => text.startsWith('Read and follow'));
+      expect(new Set(lines).size).toBe(1);
+      expect(messages.list().map(message => message.ref)).toEqual(['M-1']);
+    } finally {
+      db.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('types nothing into a Pi selector, and submits once Pi\'s input box is back', async () => {
     const rule = '─'.repeat(40);
     // An extension's confirm in place of the input box, footer kept; Enter would choose Yes.

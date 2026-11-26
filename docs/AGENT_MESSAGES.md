@@ -94,7 +94,13 @@ Delivery reuses the path that to-do messages and owed answers take
   that sent it.
 - Each reply is delivered once: Pane either types it, or hands it to a waiting
   call, never both. A wait for a reply that is being typed at that moment
-  returns it once the typing is done.
+  waits for that attempt, within its own time limit. If the tab turned out to
+  be busy, the wait takes the reply only when it comes from the reply's route.
+- Only the tab that sent with `--await-reply` ends its own hold on early
+  replies. A wait from another tab takes only a held reply whose route it is
+  now, and leaves the rest held.
+- Overlapping retries of one operation take turns, so only the first writes a
+  prompt file. Every retry returns the recorded file.
 - A sender whose tab is gone for good (a closed worker tab) gets nothing, and
   the reply is `undelivered` (`its tab closed`). `runpane reply` exits 1 and
   says so. Pass the answer on some other way.

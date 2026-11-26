@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import type { OutgoingMessage } from '../services/agentMessages/agentMessageService';
 import { RUNPANE_TODO_VERBS } from '../../../shared/types/todos';
 import { getChatTabManager } from '../services/chatTabs';
 import { computerTailnetName } from '../../../shared/types/remoteComputers';
@@ -1751,23 +1752,34 @@ export function registerRunpaneHandlers(
       let pointerFields: PointerResultFields = {};
       // A replay (same operation id and the same request) sends what the first send did and returns its paths: no new file.
       const requestKey = createHash('sha256').update(JSON.stringify({ input: normalized.input, asFilePointer: normalized.asFilePointer === true, attachments: normalized.attachments ?? [] })).digest('hex');
-      const prior = isMessage ? messages?.priorSend({ operationId: normalized.operationId, callerPanelId, receiverPanelId: panel.id, requestKey }) : undefined;
-      if (prior) {
-        toSend = { ...normalized, input: prior.body, asFilePointer: false, attachments: undefined };
-        pointerFields = prior.pointer ? pointerResultFields({ file: prior.pointer.promptFile, attachments: prior.pointer.attachments }) : {};
-      } else if (isMessage && normalized.asFilePointer) {
-        const wslContext = sessionWslContext(services, panel.sessionId);
-        const pointer = await writeAgentPromptFile(panel.sessionId, panel.type === 'chat' ? normalized.input : stripTrailingNewlines(normalizePromptNewlines(normalized.input)), {
-          worktreePath: localWorktreePath(services, panel.sessionId, wslContext), attachments: normalized.attachments,
-        });
-        toSend = { ...normalized, input: pointerLine(pointer, wslContext), asFilePointer: false, attachments: undefined };
-        pointerFields = pointerResultFields(pointer);
+      // Overlapping retries of one operation take turns from the lookup to the record, so only the first writes a file.
+      const unlock = isMessage && normalized.operationId ? await lockOperation(`${callerPanelId ?? ''}\0${panel.id}\0${normalized.operationId}`) : () => undefined;
+      let outgoing: OutgoingMessage | undefined;
+      try {
+        const prior = isMessage ? messages?.priorSend({ operationId: normalized.operationId, callerPanelId, receiverPanelId: panel.id, requestKey }) : undefined;
+        if (prior) {
+          toSend = { ...normalized, input: prior.body, asFilePointer: false, attachments: undefined };
+          pointerFields = prior.pointer ? pointerResultFields({ file: prior.pointer.promptFile, attachments: prior.pointer.attachments }) : {};
+        } else if (isMessage && normalized.asFilePointer) {
+          const wslContext = sessionWslContext(services, panel.sessionId);
+          const pointer = await writeAgentPromptFile(panel.sessionId, panel.type === 'chat' ? normalized.input : stripTrailingNewlines(normalizePromptNewlines(normalized.input)), {
+            worktreePath: localWorktreePath(services, panel.sessionId, wslContext), attachments: normalized.attachments,
+          });
+          toSend = { ...normalized, input: pointerLine(pointer, wslContext), asFilePointer: false, attachments: undefined };
+          pointerFields = pointerResultFields(pointer);
+        }
+        outgoing = isMessage ? messages?.beginMessage({
+          callerPanelId, receiverPanelId: panel.id, body: toSend.input, source: normalized.source,
+          personWords: normalized.personWords, operationId: normalized.operationId, awaitReply: normalized.awaitReply, requestKey,
+          pointer: pointerFields.promptFile ? { promptFile: pointerFields.promptFile, attachments: pointerFields.attachments ?? [] } : undefined,
+        }) : undefined;
+      } finally {
+        unlock();
       }
-      const outgoing = isMessage ? messages?.beginMessage({
-        callerPanelId, receiverPanelId: panel.id, body: toSend.input, source: normalized.source,
-        personWords: normalized.personWords, operationId: normalized.operationId, awaitReply: normalized.awaitReply, requestKey,
-        pointer: pointerFields.promptFile ? { promptFile: pointerFields.promptFile, attachments: pointerFields.attachments ?? [] } : undefined,
-      }) : undefined;
+      // The recorded prompt file is the one the receiver is told to read: return it, whatever this call wrote.
+      if (outgoing?.pointer) {
+        pointerFields = pointerResultFields({ file: outgoing.pointer.promptFile, attachments: outgoing.pointer.attachments });
+      }
       if (!outgoing) return { ...await submitResolvedPanel(toSend, panel), ...pointerFields };
       try {
         const result = { ...await submitResolvedPanel({ ...toSend, input: outgoing.text }, panel), ...pointerFields };
@@ -1783,6 +1795,21 @@ export function registerRunpaneHandlers(
       inputBytes: result.inputBytes,
     }));
   });
+
+  /** Per-operation turns for agent-message submits: resolves with the function that ends this turn. */
+  const operationTurns = new Map<string, Promise<void>>();
+  async function lockOperation(key: string): Promise<() => void> {
+    const before = operationTurns.get(key) ?? Promise.resolve();
+    let end: () => void = () => undefined;
+    const turn = new Promise<void>(resolve => { end = resolve; });
+    const chained = before.then(() => turn);
+    operationTurns.set(key, chained);
+    await before;
+    return () => {
+      end();
+      if (operationTurns.get(key) === chained) operationTurns.delete(key);
+    };
+  }
 
   async function submitResolvedPanel(normalized: RunpanePanelSubmitRequest, panel: ToolPanel): Promise<RunpanePanelSubmitResult> {
     if (panel.type === 'chat') {

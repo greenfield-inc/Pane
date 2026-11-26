@@ -30,7 +30,10 @@ class FakeHost implements AgentMessageHost {
   }
   isMidTurn(panelId: string): boolean { return this.busy.has(panelId); }
   hasUnsentText(): Promise<boolean> { return Promise.resolve(false); }
+  /** Every typing attempt, delivered or not. */
+  attempts = 0;
   async typeIntoTab(panelId: string, text: string): Promise<MessageTypeResult> {
+    this.attempts += 1;
     if (this.typeResult === 'delivered') this.typed.push({ panelId, text });
     if (this.typingGate) await this.typingGate;
     return this.typeResult;
@@ -311,5 +314,64 @@ describe('AgentMessageService', () => {
     await service.flush();
     await service.flush();
     expect(host.typed.map(entry => entry.text)).toEqual([expect.stringContaining('"A1"')]);
+  });
+  // Review 3, Must-Fix 2: another tab's wait never ends the owner's reservation.
+  it("keeps the --await-reply reservation when another tab waits on the message during the early-reply gap", async () => {
+    host.add('x', 'Other agent');
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q', awaitReply: true });
+    await expect(service.waitForReply(1, 5, undefined, 'x')).resolves.toBeUndefined();
+    expect((await service.reply({ to: 1, body: 'A', callerPanelId: 'b' })).delivery).toBe('queued');
+    await expect(service.waitForReply(1, 5, undefined, 'x')).resolves.toBeUndefined();
+    await service.flush();
+    expect(host.typed).toEqual([]);
+    await expect(service.waitForReply(1, 5, undefined, 'a')).resolves.toMatchObject({ ref: 'M-2', deliveredVia: 'call' });
+    await service.flush();
+    expect(host.typed).toEqual([]);
+  });
+
+  // Review 3, Must-Fix 3: a typing attempt that comes back busy leaves the reply queued, and the wait re-reads it.
+  it('after a busy typing attempt, hands the still-queued reply to a wait from its route, and it is never typed as well', async () => {
+    let open: () => void = () => undefined;
+    host.typingGate = new Promise<void>(resolve => { open = resolve; });
+    host.typeResult = 'busy';
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+    const replied = service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
+    await vi.waitFor(() => expect(host.attempts).toBe(1));
+    const waited = service.waitForReply(1, 1_000, undefined, 'a');
+    open();
+    await replied;
+    await expect(waited).resolves.toMatchObject({ ref: 'M-2', state: 'delivered', deliveredVia: 'call' });
+    host.typingGate = undefined;
+    host.typeResult = 'delivered';
+    await service.flush();
+    expect(host.typed).toEqual([]);
+  });
+
+  it('after a busy typing attempt, leaves the reply for the tab when the wait is not from its route', async () => {
+    let open: () => void = () => undefined;
+    host.typingGate = new Promise<void>(resolve => { open = resolve; });
+    host.typeResult = 'busy';
+    host.add('x', 'Other agent');
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+    const replied = service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
+    await vi.waitFor(() => expect(host.attempts).toBe(1));
+    const waited = service.waitForReply(1, 50, undefined, 'x');
+    open();
+    await replied;
+    await expect(waited).resolves.toBeUndefined();
+    host.typingGate = undefined;
+    host.typeResult = 'delivered';
+    await service.flush();
+    expect(host.typed.map(entry => entry.panelId)).toEqual(['a']);
+  });
+
+  it('gives up a wait on a reply being typed when its time runs out', async () => {
+    host.typingGate = new Promise<void>(() => undefined);
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+    void service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
+    await vi.waitFor(() => expect(host.attempts).toBe(1));
+    const started = Date.now();
+    await expect(service.waitForReply(1, 30, undefined, 'a')).resolves.toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(1_000);
   });
 });
