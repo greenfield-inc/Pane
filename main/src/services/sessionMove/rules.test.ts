@@ -1,3 +1,4 @@
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { agentFarmProfileOf, movedLine, heldBackChecks, profileChecks, sessionApprovals, tabSnapshotFolder } from './rules';
@@ -112,13 +113,14 @@ describe('profileChecks', () => {
 });
 
 describe('tabSnapshotFolder', () => {
-  const folder = '/pane/sessions/s1';
+  const folder = path.resolve('/pane/sessions/s1');
+  const snap = (digest: string) => path.join(folder, '.agent-farm', 'snapshots', digest);
   it('takes the command\'s --snapshot, else the tab\'s pinned one, else the Session\'s, inside the Session folder only', () => {
-    expect(tabSnapshotFolder("agent-farm run greenfield/planner --snapshot '/pane/sessions/s1/.agent-farm/snapshots/d1'", { agentFarmSnapshot: '/pane/sessions/s1/.agent-farm/snapshots/d2' }, folder, '.agent-farm/snapshots/d3')).toBe('/pane/sessions/s1/.agent-farm/snapshots/d1');
-    expect(tabSnapshotFolder('agent-farm run greenfield/planner', { agentFarmSnapshot: '/pane/sessions/s1/.agent-farm/snapshots/d2' }, folder, '.agent-farm/snapshots/d3')).toBe('/pane/sessions/s1/.agent-farm/snapshots/d2');
-    expect(tabSnapshotFolder('agent-farm run greenfield/planner', {}, folder, '.agent-farm/snapshots/d3')).toBe('/pane/sessions/s1/.agent-farm/snapshots/d3');
+    expect(tabSnapshotFolder(`agent-farm run greenfield/planner --snapshot '${snap('d1')}'`, { agentFarmSnapshot: snap('d2') }, folder, '.agent-farm/snapshots/d3')).toBe(snap('d1'));
+    expect(tabSnapshotFolder('agent-farm run greenfield/planner', { agentFarmSnapshot: snap('d2') }, folder, '.agent-farm/snapshots/d3')).toBe(snap('d2'));
+    expect(tabSnapshotFolder('agent-farm run greenfield/planner', {}, folder, '.agent-farm/snapshots/d3')).toBe(snap('d3'));
     // A snapshot outside the Session folder doesn't travel, so it holds nothing there.
-    expect(tabSnapshotFolder('agent-farm run greenfield/planner --snapshot /repo/.agent-farm/snapshots/d9', {}, folder, '.agent-farm/snapshots/d3')).toBeUndefined();
+    expect(tabSnapshotFolder(`agent-farm run greenfield/planner --snapshot '${path.resolve('/repo/.agent-farm/snapshots/d9')}'`, {}, folder, '.agent-farm/snapshots/d3')).toBeUndefined();
     expect(tabSnapshotFolder('agent-farm run greenfield/planner', {}, folder, undefined)).toBeUndefined();
   });
 });
