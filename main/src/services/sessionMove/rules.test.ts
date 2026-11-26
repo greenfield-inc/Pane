@@ -122,5 +122,8 @@ describe('tabSnapshotFolder', () => {
     // A snapshot outside the Session folder doesn't travel, so it holds nothing there.
     expect(tabSnapshotFolder(`agent-farm run greenfield/planner --snapshot '${path.resolve('/repo/.agent-farm/snapshots/d9')}'`, {}, folder, '.agent-farm/snapshots/d3')).toBeUndefined();
     expect(tabSnapshotFolder('agent-farm run greenfield/planner', {}, folder, undefined)).toBeUndefined();
+    // Review F-6: a folder with an apostrophe, quoted the POSIX way, reads back whole.
+    const odd = path.join(folder, '.agent-farm', 'snapshots', "o'd");
+    expect(tabSnapshotFolder(`agent-farm run greenfield/planner --snapshot '${odd.replace(/'/g, "'\\''")}'`, {}, folder, undefined)).toBe(odd);
   });
 });

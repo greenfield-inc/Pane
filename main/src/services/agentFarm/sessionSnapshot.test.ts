@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseSnapshotCreated, receiptFilesHash, snapshotHoldsProfile, sessionSnapshotForTab, snapshotPluginHashes, snapshotProblem, snapshotRefused, unreadableSnapshots, withSnapshotEnv, type SnapshotHolder } from './sessionSnapshot';
+import { parseSnapshotCreated, ReceiptHashes, receiptFilesHash, terminalSnapshot, snapshotHoldsProfile, sessionSnapshotForTab, snapshotPluginHashes, snapshotProblem, snapshotRefused, unreadableSnapshots, withSnapshotEnv, type SnapshotHolder } from './sessionSnapshot';
 
 const folders: string[] = [];
 function tempFolder(): string {
@@ -182,5 +182,45 @@ describe('snapshotHoldsProfile', () => {
     fs.writeFileSync(path.join(folder, 'plugins', 'team', 'profiles', 'lead.yaml'), 'agent: other\n');
     expect(await snapshotHoldsProfile(folder, 'team/lead')).toBe(false);
     expect(await snapshotHoldsProfile(path.join(session, 'nowhere'), 'team/lead')).toBe(false);
+  });
+});
+
+// Review F-5: which snapshot a terminal tab exports; a WSL or SSH shell can't read this machine's path.
+describe('terminalSnapshot', () => {
+  it.each([
+    ['a local tab with a pinned snapshot', { agentFarmSnapshot: '/s/d1' }, false, '/s/d1'],
+    ['a WSL tab', { agentFarmSnapshot: '/s/d1' }, true, undefined],
+    ['an SSH tab', { agentFarmSnapshot: '/s/d1', sshHost: 'box' }, false, undefined],
+    ['a tab with none', {}, false, undefined],
+  ])('%s', (_name, state, isWSL, expected) => {
+    expect(terminalSnapshot(state, isWSL)).toBe(expected);
+  });
+});
+
+// Review F-4: the 10 s check rehashes a plugin's files only when one of them, or its receipt, changed on disk.
+describe('ReceiptHashes', () => {
+  it('reuses a plugin\'s hash while its files keep their size and mtime, and rehashes when one changes', async () => {
+    const root = tempFolder();
+    const file = path.join(root, 'plugins', 'team', 'agents', 'lead.md');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'Lead.');
+    fs.mkdirSync(path.join(root, '.plugins'));
+    fs.writeFileSync(path.join(root, '.plugins', 'team.json'), JSON.stringify({ checksums: { 'agents/lead.md': 'x' } }));
+    // A whole-second mtime, which utimes can set back exactly.
+    const mtime = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
+    fs.utimesSync(file, mtime, mtime);
+    const hashes = new ReceiptHashes(root);
+    const first = await hashes.hash('team');
+    expect(first).toBe(await receiptFilesHash(root, 'team'));
+    // Same size and mtime: nothing is read again, so the old hash comes back.
+    fs.writeFileSync(file, 'Lean.');
+    fs.utimesSync(file, mtime, mtime);
+    expect(await hashes.hash('team')).toBe(first);
+    // A real edit moves the mtime.
+    fs.writeFileSync(file, 'Lead, edited.');
+    fs.utimesSync(file, new Date(mtime.getTime() + 5000), new Date(mtime.getTime() + 5000));
+    expect(await hashes.hash('team')).toBe(await receiptFilesHash(root, 'team'));
+    expect(await hashes.hash('team')).not.toBe(first);
+    expect(await hashes.hash('missing')).toBeUndefined();
   });
 });

@@ -52,8 +52,10 @@ export function SessionProfileMenuItems({ session, onSwitch, onReload, onClose }
   const back = () => { setSubmenu(null); itemRef.current?.focus(); };
   // A profile Agent Farm no longer has can't be reloaded: the person picks one again (T-83 P3).
   const gone = session?.agentProfileGone === true;
-  const canReload = !!session?.agentProfile && !gone;
-  const reloadNote = !session?.agentProfile ? 'no profile' : gone ? 'profile gone' : session.agentProfileChanged ? null : 'up to date';
+  // A Session with a snapshot can always reload it, even one whose lead runs in a terminal (D-9).
+  const reloadable = !!session?.agentProfile || !!session?.agentFarmSnapshot;
+  const canReload = reloadable && !gone;
+  const reloadNote = !reloadable ? 'no profile' : gone ? 'profile gone' : session?.agentProfileChanged ? null : 'up to date';
   return (<>
     <div role="separator" className="my-1 border-t border-border-primary" />
     <PopoverButton

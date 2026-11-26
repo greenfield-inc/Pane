@@ -1,7 +1,7 @@
 import { isOpenForSession } from '../../../../shared/approvalOpen';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import type { SessionMoveCheck } from '../../../../shared/types/sessionMove';
-import type { PathMap } from './pathMap';
+import { snapshotArguments, type PathMap } from './pathMap';
 import path from 'path';
 
 /**
@@ -123,8 +123,8 @@ export function profileChecks(wanted: Record<string, string | null>, here: Recor
  * with a move, so any other gives undefined.
  */
 export function tabSnapshotFolder(command: string | undefined, state: { agentFarmSnapshot?: string }, sessionFolder: string, recordSnapshot: string | undefined): string | undefined {
-  const flag = /\s--snapshot(?:=|\s+)(?:'([^']+)'|"([^"]+)"|(\S+))/.exec(command ?? '');
-  const chosen = flag ? flag[1] ?? flag[2] ?? flag[3] : state.agentFarmSnapshot ?? (recordSnapshot ? path.join(sessionFolder, ...recordSnapshot.split('/')) : undefined);
+  const flag = snapshotArguments(command ?? '')[0]?.folder;
+  const chosen = flag !== undefined ? flag : state.agentFarmSnapshot ?? (recordSnapshot ? path.join(sessionFolder, ...recordSnapshot.split('/')) : undefined);
   if (!chosen) return undefined;
   const resolved = path.resolve(sessionFolder, chosen);
   const relative = path.relative(sessionFolder, resolved);

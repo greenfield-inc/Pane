@@ -189,3 +189,40 @@ export async function snapshotHoldsProfile(folder: string, name: string): Promis
   }
   return false;
 }
+
+/**
+ * The snapshot a terminal tab exports as AGENT_FARM_SNAPSHOT: the one it was pinned when it opened,
+ * except in WSL or over SSH, where this machine's path means nothing to the shell.
+ */
+export function terminalSnapshot(state: { agentFarmSnapshot?: string; sshHost?: string }, isWSL: boolean): string | undefined {
+  return isWSL || state.sshHost ? undefined : state.agentFarmSnapshot;
+}
+
+/**
+ * receiptFilesHash for the plugins installed in one config root, read again only when the receipt or
+ * one of the files it lists changed size or mtime (review F-4): the 10 s check stats a few hundred
+ * files instead of reading a few MB. An edit in place moves its file's mtime, so it still counts.
+ */
+export class ReceiptHashes {
+  private readonly cached = new Map<string, { signature: string; hash: string | undefined }>();
+
+  constructor(private readonly configRoot: string) {}
+
+  async hash(plugin: string): Promise<string | undefined> {
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(plugin)) return undefined;
+    const receipt = path.join(this.configRoot, '.plugins', `${plugin}.json`);
+    let listed: string[];
+    try { listed = Object.keys(decodeBoundary(JSON.parse(await fs.readFile(receipt, 'utf8')), receiptSchema).checksums).sort(); }
+    catch { this.cached.delete(plugin); return undefined; }
+    const folder = path.join(this.configRoot, 'plugins', plugin);
+    const stamp = async (file: string) => fs.stat(file).then(stat => `${stat.size}:${stat.mtimeMs}`, () => 'missing');
+    const parts = [await stamp(receipt)];
+    for (const relative of listed) parts.push(`${relative}=${await stamp(path.join(folder, ...relative.split('/')))}`);
+    const signature = parts.join('\n');
+    const known = this.cached.get(plugin);
+    if (known?.signature === signature) return known.hash;
+    const hash = await receiptFilesHash(this.configRoot, plugin);
+    this.cached.set(plugin, { signature, hash });
+    return hash;
+  }
+}
