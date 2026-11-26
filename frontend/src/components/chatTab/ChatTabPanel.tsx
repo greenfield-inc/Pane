@@ -37,6 +37,8 @@ import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
 import { useSurfaceFind } from '../find/surfaceFind';
+import { useFindBarOpen } from '../find/findController';
+import { leftAway, useTurnWindow } from './turnWindow';
 import { takeLaunchDraft } from '../../utils/launchOutline';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
@@ -126,6 +128,18 @@ function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number 
   newer.current = hasNewer;
   const record = useCallback(() => { if (viewport.current) anchor.current = readAnchor(viewport.current, newer.current); }, [viewport]);
   const previous = useRef({ start, length });
+  /** The row just placed, held there for about 10 frames: assistant-ui sees the same prepend a commit later and moves the scroll by the height change, which is wrong when the window also trimmed its newest end. */
+  const held = useRef<{ id: string; offset: number; frames: number } | undefined>(undefined);
+  const hold = useCallback(() => {
+    const element = viewport.current;
+    const row = held.current;
+    if (!element || !row) return false;
+    const target = element.querySelector<HTMLElement>(`[data-anchor-id="${CSS.escape(row.id)}"]`);
+    if (!target) return false;
+    const drift = target.getBoundingClientRect().top - element.getBoundingClientRect().top - row.offset;
+    if (Math.abs(drift) >= 1) element.scrollTop += drift;
+    return true;
+  }, [viewport]);
   useLayoutEffect(() => {
     const element = viewport.current;
     const moved = previous.current.start !== start || (previous.current.length > length);
@@ -135,6 +149,7 @@ function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number 
         const target = element.querySelector<HTMLElement>(`[data-anchor-id="${CSS.escape(row.id)}"]`);
         if (!target) continue;
         element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top - row.offset;
+        held.current = { id: row.id, offset: row.offset, frames: 10 };
         break;
       }
       record();
@@ -142,6 +157,32 @@ function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number 
     // Not re-read otherwise: right after new content renders, a chat that follows the
     // live end has not scrolled yet, and reading then would mistake it for a reader.
   }, [viewport, start, length, record]);
+  // Every commit while held, and each frame until the hold ends: put the row back. A gesture ends the hold.
+  useLayoutEffect(() => { if (held.current) hold(); });
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element) return;
+    let frame = 0;
+    const tick = () => {
+      const row = held.current;
+      if (!row) return;
+      hold();
+      row.frames -= 1;
+      if (row.frames <= 0) { held.current = undefined; record(); return; }
+      frame = requestAnimationFrame(tick);
+    };
+    const onScroll = () => { if (held.current && !hold()) held.current = undefined; };
+    const release = () => { held.current = undefined; };
+    // Capture: on the viewport itself it runs before the turn window's own listener, which would otherwise render the wrong turns for the moved position first.
+    element.addEventListener('scroll', onScroll, { passive: true, capture: true });
+    for (const gesture of ['wheel', 'pointerdown', 'touchstart', 'keydown'] as const) element.addEventListener(gesture, release, { passive: true });
+    frame = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(frame);
+      element.removeEventListener('scroll', onScroll, { capture: true });
+      for (const gesture of ['wheel', 'pointerdown', 'touchstart', 'keydown'] as const) element.removeEventListener(gesture, release);
+    };
+  }, [viewport, hold, record, start, length]);
   return record;
 }
 
@@ -215,7 +256,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const view = snapshot.view;
   const [busy, setBusy] = useState(false);
   /** Paged with Earlier or Newer messages: stay put until the reader scrolls back to the live end, even once the window reaches it. */
-  const [paged, setPaged] = useState(false);
+  const [paged, setPaged] = useState(() => leftAway(panelId));
   const [commandIndex, setCommandIndex] = useState(0);
   /** "Continue a past conversation", from /resume or the Switch to chat banner's "Pick another" (D-277). */
   const [picking, setPicking] = useState(false);
@@ -245,6 +286,10 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   };
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
+  // Only the turns on screen render (T-87 Phase 2); every turn while find is open, since it searches the page.
+  const listRef = useRef<HTMLDivElement>(null);
+  const findOpen = useFindBarOpen(panelId);
+  const turnWindow = useTurnWindow({ chatId: panelId, turns, viewportRef, listRef, all: findOpen, follows: !snapshot.hasNewer && !paged });
   const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);
@@ -565,7 +610,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         </button>}
         <ChatCopyButton label="Copy conversation" className="chat-copy chat-copy-all" showLabel text={copyConversation} />
       </div>}
-      <ThreadPrimitive.Viewport ref={viewportRef} onScroll={onViewportScroll} aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false} autoScroll={!snapshot.hasNewer && !paged}>
+      <ThreadPrimitive.Viewport ref={viewportRef} onScroll={onViewportScroll} aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false} scrollToBottomOnInitialize={!turnWindow.restoredAway} autoScroll={!snapshot.hasNewer && !paged}>
         <div className="chat-column">
           {(snapshot.transcript?.start ?? 0) > 0 && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingEarlier} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadEarlier(); }}>
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
@@ -574,7 +619,16 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           {!snapshot.transcript && !view?.problem && (view?.status === 'starting' || !view) && <p role="status" className="chat-notice">Starting {agentName}…</p>}
           <SkeletonSwap loading={!snapshot.transcript && !view?.problem && !!view && view.status !== 'starting'} skeleton={<TurnsSkeleton />}>
             <ChatBlocksContext.Provider value={rendering}>
-              {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
+              {turns.length > 0 && <div ref={listRef} className="chat-turns">
+                {turnWindow.before > 0 && <div key="before" aria-hidden style={{ height: turnWindow.before }} />}
+                {turns.slice(turnWindow.range.start, turnWindow.range.end).map((turn, offset) => {
+                  const index = turnWindow.range.start + offset;
+                  return <div key={turn.id} className="chat-turn-row" data-turn-key={turn.id} data-turn-index={index} data-gap={index > 0 || undefined}>
+                    <ChatTurnView turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />
+                  </div>;
+                })}
+                {turnWindow.after > 0 && <div key="after" aria-hidden style={{ height: turnWindow.after }} />}
+              </div>}
             </ChatBlocksContext.Provider>
           </SkeletonSwap>
           {notes.map(note => <WorkerNoteLine key={note.worker.paneId} note={note} onOpen={actions.onOpenWorker} />)}

@@ -344,6 +344,32 @@ test('chat: Cmd+F from the composer searches the whole conversation', async ({ p
   await expect(composer).toHaveText('draft');
 });
 
+test('chat: Cmd+F finds a message far above the turns on screen in a long chat, and shows it', async ({ page }) => {
+  const chat = panel('find-chat', 'chat', 'Claude', 0, true, { agent: 'claude', launch: { kind: 'new' }, cwd: project.path, status: 'idle' });
+  // 150 turns: only the newest render until find opens (T-87 Phase 2).
+  const messages = Array.from({ length: 150 }, (_, turn) => [
+    { id: `u${turn}`, role: 'user' as const, text: `Request ${turn}: check module ${turn % 7}.` },
+    { id: `a${turn}`, role: 'assistant' as const, text: `Reply ${turn}: the module is fine.\n\n- one\n- two\n\nShort.` },
+  ]).flat();
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialSessions: [session], initialPanels: [chat], activeProjectId: project.id,
+    chatMessages: { [chat.id]: messages },
+  });
+  await openPane(page);
+  await expect(page.getByText('Reply 149:', { exact: false })).toBeVisible();
+  await expect(page.getByText('Request 3:', { exact: false })).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Message Claude' }).click();
+  await page.keyboard.press('ControlOrMeta+f');
+  const input = findBar(page).getByRole('textbox', { name: 'Find' });
+  await expect(input).toBeFocused();
+  await input.fill('Request 3:');
+  await expect(findBar(page)).toContainText('1 of 1');
+  await expect(page.getByText('Request 3:', { exact: false })).toBeInViewport();
+  await page.keyboard.press('Escape');
+  await expect(findBar(page)).toHaveCount(0);
+  await expect(async () => expect(await page.locator('.chat-turn-row').count()).toBeLessThan(60)).toPass();
+});
+
 test('chat: the count keeps up while the conversation streams, not only once it pauses', async ({ page }) => {
   const chat = panel('find-chat', 'chat', 'Claude', 0, true, { agent: 'claude', launch: { kind: 'new' }, cwd: project.path, status: 'idle' });
   await installElectronApiMock(page, {
