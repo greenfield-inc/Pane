@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { RUNPANE_TODO_VERBS } from '../../../shared/types/todos';
 import { getChatTabManager } from '../services/chatTabs';
 import { computerTailnetName } from '../../../shared/types/remoteComputers';
@@ -1748,7 +1749,13 @@ export function registerRunpaneHandlers(
       // is the message, and carries its id and reply route like any other.
       let toSend = normalized;
       let pointerFields: PointerResultFields = {};
-      if (isMessage && normalized.asFilePointer) {
+      // A replay (same operation id and the same request) sends what the first send did and returns its paths: no new file.
+      const requestKey = createHash('sha256').update(JSON.stringify({ input: normalized.input, asFilePointer: normalized.asFilePointer === true, attachments: normalized.attachments ?? [] })).digest('hex');
+      const prior = isMessage ? messages?.priorSend({ operationId: normalized.operationId, callerPanelId, receiverPanelId: panel.id, requestKey }) : undefined;
+      if (prior) {
+        toSend = { ...normalized, input: prior.body, asFilePointer: false, attachments: undefined };
+        pointerFields = prior.pointer ? pointerResultFields({ file: prior.pointer.promptFile, attachments: prior.pointer.attachments }) : {};
+      } else if (isMessage && normalized.asFilePointer) {
         const wslContext = sessionWslContext(services, panel.sessionId);
         const pointer = await writeAgentPromptFile(panel.sessionId, panel.type === 'chat' ? normalized.input : stripTrailingNewlines(normalizePromptNewlines(normalized.input)), {
           worktreePath: localWorktreePath(services, panel.sessionId, wslContext), attachments: normalized.attachments,
@@ -1758,7 +1765,8 @@ export function registerRunpaneHandlers(
       }
       const outgoing = isMessage ? messages?.beginMessage({
         callerPanelId, receiverPanelId: panel.id, body: toSend.input, source: normalized.source,
-        personWords: normalized.personWords, operationId: normalized.operationId, awaitReply: normalized.awaitReply,
+        personWords: normalized.personWords, operationId: normalized.operationId, awaitReply: normalized.awaitReply, requestKey,
+        pointer: pointerFields.promptFile ? { promptFile: pointerFields.promptFile, attachments: pointerFields.attachments ?? [] } : undefined,
       }) : undefined;
       if (!outgoing) return { ...await submitResolvedPanel(toSend, panel), ...pointerFields };
       try {

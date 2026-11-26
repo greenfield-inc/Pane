@@ -29,9 +29,13 @@ of these hold:
   in its chat, where Autopilot reads it. Autopilot's own lines
   (`[From Autopilot] …`) do get a reply line.
 
-A replayed submit (the same `operationId`, after a lost response) gets the
-same message id and the same text, so a chat tab's receipt for the first send
-still matches.
+A replayed submit, one with the same `operationId` and the same request
+(text, `--as-file-pointer` and attachments) sent after a lost response, gets
+the same message id and the same typed text. A chat tab's receipt for the
+first send still matches. A file-pointer replay returns the first send's
+`promptFile` and `attachments` and writes no new files. The same operation id
+with different content is a new message, and a chat tab refuses it with
+`CHAT_OPERATION_CONFLICT`, as it refuses any reused operation id.
 
 When those hold, Pane adds one line to the end of the text:
 
@@ -83,8 +87,14 @@ Delivery reuses the path that to-do messages and owed answers take
   (`it would not restart: <why>`) and Pane stops trying.
 - A message sent as a Session's orchestrator is answered to the Session's
   orchestrator tab as it is now, even when the tab that sent it still exists
-  (Switch to chat, a new agent). Any other message is answered to the tab that
-  sent it.
+  (Switch to chat, a new agent). This also holds while the old tab is still
+  waiting in `--await-reply` or `messages wait`: a waiting call gets a reply
+  only when the tab it was made from is that reply's route now. The old tab's
+  call gets nothing and times out. Any other message is answered to the tab
+  that sent it.
+- Each reply is delivered once: Pane either types it, or hands it to a waiting
+  call, never both. A wait for a reply that is being typed at that moment
+  returns it once the typing is done.
 - A sender whose tab is gone for good (a closed worker tab) gets nothing, and
   the reply is `undelivered` (`its tab closed`). `runpane reply` exits 1 and
   says so. Pass the answer on some other way.
@@ -152,6 +162,16 @@ the message is on a later (older) page. `onAgentMessagesChanged` fires
 or terminal history shows a message's text with its reply line at the end. To
 draw a message as a message, match the line `Reply with runpane reply M-n` (or a
 `reply: M-n →` line) to its record by `ref`.
+
+`forPanel` indexes a record under the tabs it names: the sender's and the
+receiver's `panelId` as recorded. A reply sent to a Session's orchestrator
+names the tab that sent the original. When the Session has switched
+orchestrator tabs since then, Pane types the reply into the new tab, but the
+record still names the old one. To show those replies in the new tab's
+history, also read the old orchestrator tab's messages
+(`forPanel(oldPanelId)`). Then keep the replies whose `receiver.orchestrator`
+is true and whose `receiver.sessionId` is this Session. A tab's transcript
+line (`reply: M-n → …`) is the ground truth for where a reply was typed.
 
 Messages live in the `agent_messages` table in `sessions.db`
 (`main/src/database/agentMessagesSchema.ts`) and are kept for 30 days. The code

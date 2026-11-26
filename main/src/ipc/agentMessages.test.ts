@@ -40,8 +40,10 @@ describe('agent-messages:for-panel (T-105 reads a tab\'s messages)', () => {
     expect(await page(registry, 'a', { before: 3, limit: 1 })).toEqual(['M-2']);
   });
 
-  it('refuses a cursor that is not a message id', async () => {
+  it('refuses a cursor that is not a message id, and a page size that is not a whole number', async () => {
     const registry = setup(1);
     await expect(page(registry, 'a', { before: 'yesterday' })).rejects.toThrow(/not a message id/);
+    await expect(page(registry, 'a', { limit: 1.5 })).rejects.toThrow(/not a whole number/);
+    await expect(page(registry, 'a', { limit: 0 })).rejects.toThrow(/not a whole number/);
   });
 });

@@ -69,7 +69,8 @@ export function registerAgentMessageHandlers(ipcMain: IpcMainHandleLike, service
   commandRegistry.register('runpane:messages:wait', async (value: PaneCommandValue): Promise<RunpaneMessageWaitResult> => {
     const request = decodeBoundary(value, boundary.object({ message: boundary.string, timeoutMs: boundary.optional(boundary.number) }));
     const number = requireRef(request.message);
-    const reply: AgentMessageRecord | undefined = await service().waitForReply(number, request.timeoutMs ?? DEFAULT_WAIT_MS, paneCommandSignal());
+    // The calling tab: a reply goes to the call only while that tab is its route (a Session's current orchestrator, say).
+    const reply: AgentMessageRecord | undefined = await service().waitForReply(number, request.timeoutMs ?? DEFAULT_WAIT_MS, paneCommandSignal(), paneCommandCaller()?.panelId);
     if (reply) return { ok: true, message: messageRef(number), outcome: 'reply', reply };
     return {
       ok: false, message: messageRef(number), outcome: 'timeout',
@@ -84,7 +85,10 @@ export function registerAgentMessageHandlers(ipcMain: IpcMainHandleLike, service
       const panelId = decodeBoundary(value, boundary.string);
       const page = decodeBoundary(options ?? {}, boundary.object({ before: boundary.optional(boundary.union(boundary.string, boundary.number)), limit: boundary.optional(boundary.number) }));
       const before = page.before === undefined ? undefined : requireRef(String(page.before));
-      const limit = Math.max(1, Math.min(page.limit ?? FOR_PANEL_PAGE, FOR_PANEL_PAGE));
+      if (page.limit !== undefined && (!Number.isInteger(page.limit) || page.limit < 1)) {
+        throw new PaneError('ERR_RUNPANE_INVALID_ARGUMENT', `limit ${page.limit} is not a whole number of messages.`, `Pass a whole number from 1 to ${FOR_PANEL_PAGE}, or leave it out.`);
+      }
+      const limit = Math.min(page.limit ?? FOR_PANEL_PAGE, FOR_PANEL_PAGE);
       return { success: true, data: service().list({ panelId, limit, before }) };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };

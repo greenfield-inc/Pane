@@ -13,6 +13,8 @@ class FakeHost implements AgentMessageHost {
   resumes: string[] = [];
   resumeError: Error | undefined;
   typeResult: MessageTypeResult = 'delivered';
+  /** When set, typing waits for this before it finishes (a slow agent prompt). */
+  typingGate: Promise<void> | undefined;
 
   add(panelId: string, name: string, extra: Partial<MessagePanelInfo> = {}): void {
     this.panels.set(panelId, { panelId, paneId: `pane-${panelId}`, sessionId: null, name, orchestrator: false, agent: true, ...extra });
@@ -28,9 +30,10 @@ class FakeHost implements AgentMessageHost {
   }
   isMidTurn(panelId: string): boolean { return this.busy.has(panelId); }
   hasUnsentText(): Promise<boolean> { return Promise.resolve(false); }
-  typeIntoTab(panelId: string, text: string): Promise<MessageTypeResult> {
+  async typeIntoTab(panelId: string, text: string): Promise<MessageTypeResult> {
     if (this.typeResult === 'delivered') this.typed.push({ panelId, text });
-    return Promise.resolve(this.typeResult);
+    if (this.typingGate) await this.typingGate;
+    return this.typeResult;
   }
   log(): void { /* quiet */ }
 }
@@ -253,5 +256,60 @@ describe('AgentMessageService', () => {
     expect(service.list({ panelId: 'a', limit: 2, before: 4 }).map(message => message.ref)).toEqual(['M-3', 'M-2']);
     expect(service.list({ panelId: 'a', limit: 2, before: 2 }).map(message => message.ref)).toEqual(['M-1']);
     expect(service.list({ panelId: 'a', before: 1 })).toEqual([]);
+  });
+  // Review 2, Must-Fix 3: a call from the tab the Session left doesn't take the reply; the current orchestrator gets it.
+  it("types a reply into the Session's current orchestrator even while the old tab's --await-reply wait is active", async () => {
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q', awaitReply: true });
+    const oldWait = service.waitForReply(1, 20, undefined, 'a');
+    host.add('a2', 'the "Omni Chat" Session orchestrator', { sessionId: 's1', orchestrator: true });
+    host.orchestrators.set('s1', 'a2');
+    const result = await service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
+    expect(result.reply).toMatchObject({ state: 'delivered', deliveredVia: 'tab' });
+    expect(host.typed.map(entry => entry.panelId)).toEqual(['a2']);
+    // The old tab's call gets nothing: the answer went to the conversation the Session moved to.
+    await expect(oldWait).resolves.toBeUndefined();
+  });
+
+  it("doesn't hold a reply for the old tab's --await-reply call once the Session has a new orchestrator", async () => {
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q', awaitReply: true });
+    host.add('a2', 'the "Omni Chat" Session orchestrator', { sessionId: 's1', orchestrator: true });
+    host.orchestrators.set('s1', 'a2');
+    expect((await service.reply({ to: 1, body: 'A', callerPanelId: 'b' })).delivery).toBe('delivered');
+    expect(host.typed.map(entry => entry.panelId)).toEqual(['a2']);
+    expect(service.show(1).replies[0]).toMatchObject({ deliveredVia: 'tab' });
+  });
+
+  it('hands a held reply only to a call from its current route', async () => {
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q', awaitReply: true });
+    await service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
+    host.add('a2', 'the "Omni Chat" Session orchestrator', { sessionId: 's1', orchestrator: true });
+    host.orchestrators.set('s1', 'a2');
+    await expect(service.waitForReply(1, 10, undefined, 'a')).resolves.toBeUndefined();
+    await service.flush();
+    expect(host.typed.map(entry => entry.panelId)).toEqual(['a2']);
+  });
+
+  // Review 2, Must-Fix 4: a reply is claimed once: typed, or handed to a call, never both.
+  it('never types a reply twice when a wait claims it while another reply to the same tab is being typed', async () => {
+    let open: () => void = () => undefined;
+    host.typingGate = new Promise<void>(resolve => { open = resolve; });
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q1' });
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q2' });
+    const first = service.reply({ to: 1, body: 'A1', callerPanelId: 'b' });
+    await vi.waitFor(() => expect(host.typed).toHaveLength(1));
+    // M-4 answers M-2 while M-3, the reply to M-1, is still being typed into the same tab.
+    const second = service.reply({ to: 2, body: 'A2', callerPanelId: 'b' });
+    await vi.waitFor(() => expect(service.show(2).replies).toHaveLength(1));
+    await expect(service.waitForReply(2, 10, undefined, 'a')).resolves.toMatchObject({ text: 'A2', deliveredVia: 'call' });
+    // A wait for the reply being typed waits for that typing, and gets it as typed.
+    const typedOne = service.waitForReply(1, 1_000, undefined, 'a');
+    open();
+    await first;
+    await second;
+    await expect(typedOne).resolves.toMatchObject({ text: 'A1', deliveredVia: 'tab' });
+    host.typingGate = undefined;
+    await service.flush();
+    await service.flush();
+    expect(host.typed.map(entry => entry.text)).toEqual([expect.stringContaining('"A1"')]);
   });
 });

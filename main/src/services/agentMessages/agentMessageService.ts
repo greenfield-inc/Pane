@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { PaneError } from '../../../../shared/paneError';
 import { messageRef, type AgentMessageParty, type AgentMessageRecord } from '../../../../shared/types/agentMessages';
-import { AGENT_MESSAGE_RETENTION_MS, messageRecord, type AgentMessageStore, type StoredMessage } from './agentMessageStore';
+import { AGENT_MESSAGE_RETENTION_MS, messageRecord, type AgentMessageStore, type MessagePointer, type StoredMessage } from './agentMessageStore';
 import { replyLine, withReplyRoute } from './agentMessageText';
 
 export type MessageTypeResult = 'delivered' | 'busy' | 'gone' | 'unsupported' | 'outdated';
@@ -32,11 +32,18 @@ export interface MessageThread {
   replies: AgentMessageRecord[];
 }
 
-/** A message `panels submit` is about to type: its id and the text with the reply line. */
+/** A message `panels submit` is about to type: its id, the text with the reply line, and its prompt file (a file-pointer send). */
 export interface OutgoingMessage {
   number: number;
   ref: string;
   text: string;
+  pointer: MessagePointer | null;
+}
+
+/** A call waiting for a reply, and the tab it was made from. */
+interface Waiter {
+  panelId: string | undefined;
+  settle: (reply: StoredMessage) => void;
 }
 
 const RESUME_TRIES = 3;
@@ -66,15 +73,17 @@ function party(info: MessagePanelInfo): AgentMessageParty {
  */
 export class AgentMessageService extends EventEmitter {
   private readonly outbox: number[] = [];
-  private readonly typing = new Set<string>();
+  /** Replies being typed now, by reply number, with the typing's end: a wait for one of them waits for that. */
+  private readonly typing = new Map<number, Promise<void>>();
   private readonly resumeFailures = new Map<number, number>();
-  private readonly waiters = new Map<number, Set<(reply: StoredMessage) => void>>();
+  /** Calls waiting for a reply to a message, each with the tab that called (undefined outside a tab). */
+  private readonly waiters = new Map<number, Set<Waiter>>();
   /**
-   * `--await-reply` sends: reserved before the message is typed, so a reply that comes before the
-   * sender's wait call is held for that call (`held`), never typed. Released to the tab after
-   * AWAIT_REPLY_GRACE_MS without a wait call.
+   * `--await-reply` sends: reserved for the calling tab before the message is typed, so a reply that
+   * comes before that tab's wait call is held for the call (`held`), never typed. Released to the
+   * reply's route after AWAIT_REPLY_GRACE_MS without a wait call.
    */
-  private readonly reservations = new Map<number, { held: number[]; timer: ReturnType<typeof setTimeout> }>();
+  private readonly reservations = new Map<number, { panelId: string | undefined; held: number[]; timer: ReturnType<typeof setTimeout> }>();
   private flushing: Promise<void> | null = null;
 
   constructor(private readonly store: AgentMessageStore, private readonly host: AgentMessageHost, private readonly now: () => number = Date.now) {
@@ -97,8 +106,12 @@ export class AgentMessageService extends EventEmitter {
     callerPanelId: string | undefined; receiverPanelId: string; body: string; source?: 'user' | 'agent';
     /** The text is the person's own words an agent passes on (Autopilot's relay, `--for-person`). */
     personWords?: boolean;
-    /** The submit's operation id: a replay of it gets the same message and text. */
+    /** The submit's operation id: a replay of the same request gets the same message and text. */
     operationId?: string;
+    /** What the submit asked for (text, file pointer, attachments); a replay must match it. Defaults to `body`. */
+    requestKey?: string;
+    /** The prompt file a file-pointer send wrote, kept so a replay returns the same paths. */
+    pointer?: MessagePointer;
     /** `--await-reply`: hold a reply for the sender's wait call from before the message is typed. */
     awaitReply?: boolean;
   }): OutgoingMessage | undefined {
@@ -106,13 +119,26 @@ export class AgentMessageService extends EventEmitter {
     const sender = this.host.panel(input.callerPanelId);
     const receiver = this.host.panel(input.receiverPanelId);
     if (!sender?.agent || !receiver) return undefined;
-    const replayed = input.operationId ? this.store.byOperation(input.operationId, input.callerPanelId, input.receiverPanelId) : undefined;
+    const requestKey = input.requestKey ?? input.body;
+    // Only the same request replays: the same operation id with other content is a new message, which a chat tab refuses (CHAT_OPERATION_CONFLICT).
+    const replayed = input.operationId ? this.store.byOperation(input.operationId, input.callerPanelId, input.receiverPanelId, requestKey) : undefined;
     const message = replayed ?? this.store.create({
-      kind: 'message', sender: party(sender), receiver: party(receiver), body: input.body, state: 'sending', now: this.now(), operationId: input.operationId,
+      kind: 'message', sender: party(sender), receiver: party(receiver), body: input.body, state: 'sending', now: this.now(),
+      operationId: input.operationId, requestKey, pointer: input.pointer,
     });
-    if (input.awaitReply && !this.reservations.has(message.number) && this.store.replies(message.number).length === 0) this.reserve(message.number);
+    if (input.awaitReply && !this.reservations.has(message.number) && this.store.replies(message.number).length === 0) this.reserve(message.number, input.callerPanelId);
     if (!replayed) this.changed();
-    return { number: message.number, ref: messageRef(message.number), text: withReplyRoute(message.body, message.number, message.sender.name) };
+    return { number: message.number, ref: messageRef(message.number), text: withReplyRoute(message.body, message.number, message.sender.name), pointer: message.pointer };
+  }
+
+  /**
+   * The earlier send a replayed submit repeats: the same operation id, tabs and request. Its body and
+   * prompt file are what the replay sends and returns, so no new file is written.
+   */
+  priorSend(input: { operationId: string | undefined; callerPanelId: string | undefined; receiverPanelId: string; requestKey: string }): { body: string; pointer: MessagePointer | null } | undefined {
+    if (!input.operationId || !input.callerPanelId) return undefined;
+    const prior = this.store.byOperation(input.operationId, input.callerPanelId, input.receiverPanelId, input.requestKey);
+    return prior ? { body: prior.body, pointer: prior.pointer } : undefined;
   }
 
   /**
@@ -125,13 +151,13 @@ export class AgentMessageService extends EventEmitter {
     return this.host.panel(input.callerPanelId)?.agent === true && this.host.panel(input.receiverPanelId) !== null;
   }
 
-  private reserve(number: number): void {
+  private reserve(number: number, panelId: string | undefined): void {
     const timer = setTimeout(() => this.release(number), AWAIT_REPLY_GRACE_MS);
     timer.unref?.();
-    this.reservations.set(number, { held: [], timer });
+    this.reservations.set(number, { panelId, held: [], timer });
   }
 
-  /** The sender never came to wait (it disconnected): what was held goes to its tab. */
+  /** The sender never came to wait (it disconnected): what was held goes to its route. */
   private release(number: number): void {
     const reservation = this.reservations.get(number);
     if (!reservation) return;
@@ -168,15 +194,16 @@ export class AgentMessageService extends EventEmitter {
     const replier = caller ? party(caller) : input.callerPanelId ? original.receiver : PERSON;
     const reply = this.store.create({ kind: 'reply', replyTo: original.number, sender: replier, receiver: original.sender, body, state: 'queued', now: this.now() });
     this.store.setState(original.number, 'answered', { at: this.now() });
-    const waiting = this.waiters.get(original.number);
-    if (waiting && waiting.size > 0) {
+    // A waiting call takes it only when its tab is the reply's route now (not an orchestrator tab the Session left).
+    const route = this.targetOf(reply);
+    const waiter = [...this.waiters.get(original.number) ?? []].find(candidate => this.isRoute(candidate.panelId, route));
+    if (waiter) {
       this.handToCall(reply);
-      for (const resolve of [...waiting]) resolve(this.mustGet(reply.number));
-      this.waiters.delete(original.number);
+      waiter.settle(this.mustGet(reply.number));
       return { reply: this.record(reply.number), delivery: 'delivered' };
     }
     const reservation = this.reservations.get(original.number);
-    if (reservation) {
+    if (reservation && this.isRoute(reservation.panelId, route)) {
       // The sender's --await-reply call is on its way: it takes this reply, so nothing is typed.
       reservation.held.push(reply.number);
       this.changed();
@@ -192,49 +219,65 @@ export class AgentMessageService extends EventEmitter {
   /**
    * `--await-reply` and `messages wait`: resolves with the first reply to `number`, or undefined
    * after `timeoutMs` or when `signal` aborts (a later reply is then typed into the tab). A reply
-   * held for this call, or still queued, is handed to it and not typed; one already typed (or being
-   * typed) is returned too.
+   * held for this call, or still queued, is handed to it and not typed, but only when the calling
+   * tab (`callerPanelId`) is that reply's route now; one already typed, or being typed, is returned
+   * once its typing ends.
    */
-  waitForReply(number: number, timeoutMs: number | undefined, signal?: AbortSignal): Promise<AgentMessageRecord | undefined> {
+  async waitForReply(number: number, timeoutMs: number | undefined, signal?: AbortSignal, callerPanelId?: string): Promise<AgentMessageRecord | undefined> {
     if (!this.store.get(number)) {
-      return Promise.reject(new PaneError('ERR_MESSAGE_NOT_FOUND', `There is no message ${messageRef(number)} on this computer, so there is no reply to wait for.`, 'See recent messages with `runpane messages list`.'));
+      throw new PaneError('ERR_MESSAGE_NOT_FOUND', `There is no message ${messageRef(number)} on this computer, so there is no reply to wait for.`, 'See recent messages with `runpane messages list`.');
     }
     const reservation = this.reservations.get(number);
     if (reservation) {
       clearTimeout(reservation.timer);
       this.reservations.delete(number);
-      const [first, ...rest] = reservation.held;
+      const claimed = reservation.held.find(held => this.isRoute(callerPanelId, this.targetOf(this.mustGet(held))));
+      const rest = reservation.held.filter(held => held !== claimed);
       if (rest.length > 0) {
         this.outbox.push(...rest);
         void this.flush();
       }
-      if (first !== undefined) {
-        this.handToCall(this.mustGet(first));
-        return Promise.resolve(this.record(first));
+      if (claimed !== undefined) {
+        this.handToCall(this.mustGet(claimed));
+        return this.record(claimed);
       }
     }
-    const earlier = this.store.replies(number).find(reply => reply.state !== 'undelivered');
-    if (earlier) {
-      if (earlier.state === 'queued' && !this.typing.has(this.targetOf(earlier) ?? '')) this.handToCall(earlier);
-      return Promise.resolve(this.record(earlier.number));
+    for (const earlier of this.store.replies(number)) {
+      if (earlier.state === 'undelivered') continue;
+      const typing = this.typing.get(earlier.number);
+      if (typing) {
+        // This exact reply is being typed: its outcome is the answer, never a second copy.
+        await typing;
+        return this.record(earlier.number);
+      }
+      if (earlier.state === 'queued') {
+        if (!this.isRoute(callerPanelId, this.targetOf(earlier))) continue;
+        this.handToCall(earlier);
+      }
+      return this.record(earlier.number);
     }
     return new Promise(resolve => {
-      const waiting = this.waiters.get(number) ?? new Set();
+      const waiting = this.waiters.get(number) ?? new Set<Waiter>();
       this.waiters.set(number, waiting);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const done = (reply: StoredMessage | undefined) => {
         if (timer) clearTimeout(timer);
         signal?.removeEventListener('abort', abort);
-        waiting.delete(settle);
+        waiting.delete(waiter);
         if (waiting.size === 0 && this.waiters.get(number) === waiting) this.waiters.delete(number);
         resolve(reply ? this.record(reply.number) : undefined);
       };
-      const settle = (reply: StoredMessage) => done(reply);
+      const waiter: Waiter = { panelId: callerPanelId, settle: reply => done(reply) };
       const abort = () => done(undefined);
-      waiting.add(settle);
+      waiting.add(waiter);
       if (timeoutMs !== undefined) timer = setTimeout(abort, timeoutMs);
       signal?.addEventListener('abort', abort, { once: true });
     });
+  }
+
+  /** A call from `panelId` may take a reply whose route is `route`: the same tab, or a call made outside any tab. */
+  private isRoute(panelId: string | undefined, route: string | null): boolean {
+    return panelId === undefined || panelId === route;
   }
 
   /** Newest first; `before` (a message number) pages further back, older than that message. */
@@ -298,24 +341,25 @@ export class AgentMessageService extends EventEmitter {
       return;
     }
     if (this.host.isMidTurn(panelId) || await this.host.hasUnsentText(panelId)) return;
+    // Claim it: checked and marked with no await between, so a waiting call can't take it while it is typed.
+    if (this.mustGet(reply.number).state !== 'queued' || this.typing.has(reply.number)) return;
     const original = reply.replyTo === null ? undefined : this.store.get(reply.replyTo);
-    this.typing.add(panelId);
-    let result: MessageTypeResult;
+    let finished: () => void = () => undefined;
+    this.typing.set(reply.number, new Promise<void>(resolve => { finished = resolve; }));
     try {
-      // A waiting call may have taken it while this tab got ready.
-      if (this.mustGet(reply.number).state !== 'queued') return;
-      result = await this.host.typeIntoTab(panelId, replyLine(original?.number ?? reply.number, reply.number, reply.body, reply.sender.name));
+      const result = await this.host.typeIntoTab(panelId, replyLine(original?.number ?? reply.number, reply.number, reply.body, reply.sender.name));
+      if (result === 'busy') return;
+      if (result !== 'delivered') {
+        this.settleUndelivered(reply, UNDELIVERED[result]);
+        return;
+      }
+      this.dropFromOutbox(reply.number);
+      this.store.setState(reply.number, 'delivered', { via: 'tab', at: this.now() });
+      this.changed();
     } finally {
-      this.typing.delete(panelId);
+      this.typing.delete(reply.number);
+      finished();
     }
-    if (result === 'busy') return;
-    if (result !== 'delivered') {
-      this.settleUndelivered(reply, UNDELIVERED[result]);
-      return;
-    }
-    this.dropFromOutbox(reply.number);
-    this.store.setState(reply.number, 'delivered', { via: 'tab', at: this.now() });
-    this.changed();
   }
 
   /**
