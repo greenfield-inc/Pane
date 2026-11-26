@@ -313,6 +313,8 @@ export function SessionOverviewPanel({ record, folderSessionId, overview, error,
         <div className="border-t border-border-primary pt-3">
           <h3 className={OVERVIEW_HEADING}>Activity</h3>
           <div className="select-text space-y-2">
+            {/* A list summary has no activity log (T-127): say where it comes from instead of showing nothing. */}
+            {!overview && !record.activity && <p className="text-text-muted" data-testid="overview-activity-pending">Activity shows once the overview loads.</p>}
             {(overview?.activity ?? record.activity ?? []).filter(activity => !AGENT_STATE_ACTIVITY_KINDS.has(activity.kind)).slice(0, 12).map(activity => (
               <div key={activity.id} className="border-l-2 border-border-primary pl-2">
                 <p className="text-text-secondary">{activity.message}</p>

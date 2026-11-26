@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
-import { newestFullRecord, withNewerSummary } from './sessionRecords';
+import { newestFullRecord, settingsSave, withNewerSummary } from './sessionRecords';
 
 function record(revision: number, overrides: Partial<OrchestrationSessionRecord> = {}): OrchestrationSessionRecord {
   return {
@@ -38,5 +38,38 @@ describe('newestFullRecord (T-127)', () => {
     expect(newestFullRecord(record(3), record(5, { profile: 'Newer.' })).profile).toBe('Newer.');
     expect(newestFullRecord(record(5, { profile: 'Open.' }), record(3)).profile).toBe('Open.');
     expect(newestFullRecord(record(5, { profile: 'Open.' }), undefined).profile).toBe('Open.');
+  });
+});
+
+describe('Session settings after another client changed the profile (T-127 review F-1)', () => {
+  it('prefill the overview\'s profile when the folded summary reached the same revision', () => {
+    const { activity: _activity, profile: _profile, ...summary } = record(5);
+    const open = withNewerSummary(record(4, { profile: 'Old profile.' }), summary);
+    const overview = record(5, { profile: 'New profile.' });
+
+    expect(newestFullRecord(open, overview).profile).toBe('New profile.');
+  });
+
+  it('save with the revision of the record they prefilled from, so a stale prefill is refused rather than saved over a newer profile', () => {
+    const prefill = record(4, { profile: 'Old profile.' });
+
+    expect(settingsSave(prefill, { launchCommand: 'claude --verbose', profile: 'Old profile.' }))
+      .toEqual({ launchCommand: 'claude --verbose', profile: 'Old profile.', expectedRevision: 4 });
+  });
+
+  it('send the revision the profile was read at when the overview has not caught up, so the host refuses the stale save', () => {
+    const { activity: _activity, profile: _profile, ...summary } = record(5);
+    const folded = withNewerSummary(record(4, { profile: 'Old profile.' }), summary);
+    const prefill = newestFullRecord(folded, record(4, { profile: 'Old profile.' }));
+
+    expect(prefill.revision).toBe(5);
+    expect(settingsSave(prefill, { profile: 'Old profile.' }).expectedRevision).toBe(4);
+  });
+
+  it('send the record\'s own revision once a full record replaced the folded one', () => {
+    const { activity: _activity, profile: _profile, ...summary } = record(5);
+    const folded = withNewerSummary(record(4), summary);
+
+    expect(settingsSave(withNewerSummary(folded, record(6)), {}).expectedRevision).toBe(6);
   });
 });

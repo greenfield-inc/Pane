@@ -30,7 +30,7 @@ import { SessionWorkspaceSkeleton } from './SessionWorkspaceSkeleton';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { SessionLaunchFields } from './SessionLaunchFields';
 import { SessionChangesPanel, SessionOverviewPanel, useSessionOverview } from './SessionOverviewPanel';
-import { newestFullRecord, withNewerSummary } from '../utils/sessionRecords';
+import { newestFullRecord, settingsSave, withNewerSummary } from '../utils/sessionRecords';
 import { useConfigStore } from '../stores/configStore';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import { cn } from '../utils/cn';
@@ -504,7 +504,8 @@ function SessionTile({
     if (!view) throw new Error('This Session is not open');
     const next = await useOrchestrationSessionStore.getState().update(
       { sessionId },
-      { ...input, expectedRevision: view.session.revision },
+      // A form filled from an older record sends that record's revision (settingsSave).
+      { ...input, expectedRevision: input.expectedRevision ?? view.session.revision },
     );
     setView(current => current ? { ...current, session: next } : current);
     return next;
@@ -903,7 +904,7 @@ function SessionSettingsDialog({ record, onClose, onSave }: {
     setSaving(true);
     setSaveError(null);
     try {
-      await onSave({ launchCommand: command, profile, customResume });
+      await onSave(settingsSave(record, { launchCommand: command, profile, customResume }));
       onClose();
     } catch (cause) {
       setSaveError(cause instanceof Error ? cause.message : 'Failed to save Session settings');
