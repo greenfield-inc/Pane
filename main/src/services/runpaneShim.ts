@@ -257,14 +257,21 @@ function windowsNodeShim(execPath: string): string {
  * as typed. The bare menu, init and doctor only ever use ~/.config/agent-farm, which Pane leaves
  * alone, so they are refused. Unless Pane's saved telemetry switch and settings.json both say on,
  * it sets AGENT_FARM_TELEMETRY=off, as bundledAgentFarmProcess does.
+ *
+ * Agent Farm prints the command lines of a profile's launch links with `process.argv[1]` as the CLI
+ * when its name is `agent-farm`, otherwise as `<runtime> <cli.js>` (T-83 P3). Inside Pane that
+ * would be the Electron binary, which starts another Pane when run without ELECTRON_RUN_AS_NODE, so
+ * the launcher names `launchAs` instead: the `agent-farm` shim next to it, or on Windows a folder
+ * holding only `agent-farm.cmd`, which PowerShell and cmd find for the bare name.
  */
-function agentFarmLauncher(target: AgentFarmShimTarget): string {
+function agentFarmLauncher(target: AgentFarmShimTarget, launchAs: string): string {
   return [
     `// ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup; edits are lost.`,
     "// Runs the Agent Farm bundled with this Pane build against Pane's own config root.",
     "'use strict';",
     `const entry = ${JSON.stringify(target.entry)};`,
     `const configRoot = ${JSON.stringify(target.configRoot)};`,
+    `const launchAs = ${JSON.stringify(launchAs)};`,
     `const paneConfig = ${JSON.stringify(path.join(path.dirname(target.configRoot), 'config.json'))};`,
     'const args = process.argv.slice(2);',
     "const end = args.includes('--') ? args.indexOf('--') : args.length;",
@@ -286,7 +293,8 @@ function agentFarmLauncher(target: AgentFarmShimTarget): string {
     "    const on = !!saved && saved.agentFarmTelemetry === true && !!settings && !!settings.telemetry && settings.telemetry.enabled === true;",
     "    if (!on) process.env.AGENT_FARM_TELEMETRY = 'off';",
     '  }',
-    "  process.argv = [process.argv[0], entry, ...(asTyped ? args : [...options, '--config-root', configRoot, ...args.slice(end)])];",
+    "  // Agent Farm prints child launches with argv[1] as the CLI; the shim runs without ELECTRON_RUN_AS_NODE set.",
+    "  process.argv = [process.argv[0], launchAs, ...(asTyped ? args : [...options, '--config-root', configRoot, ...args.slice(end)])];",
     "  import(require('url').pathToFileURL(entry).href).catch(error => {",
     "    process.stderr.write(`agent-farm: Pane couldn't start its bundled Agent Farm (${error && error.message ? error.message : error}). Nothing was run. Restart Pane, or reinstall it from https://runpane.com.\\n`);",
     '    process.exitCode = 1;',
@@ -333,13 +341,43 @@ function windowsAgentFarmShim(execPath: string, launcher: string): string {
  * update, whose Node runtime can't read app.asar.
  */
 function writeAgentFarmShim(binDir: string, execPath: string, target: AgentFarmShimTarget, platform: NodeJS.Platform): void {
-  const launcher = path.join(binDir, 'agent-farm.cjs');
-  if (!writeManagedFile(launcher, agentFarmLauncher(target), PANE_MANAGED_SHIM_MARKER, 0o644)) return;
+  const launcher = path.join(binDir, AGENT_FARM_LAUNCHER);
+  if (!writeManagedFile(launcher, agentFarmLauncher(target, agentFarmLaunchAs(binDir, platform)), PANE_MANAGED_SHIM_MARKER, 0o644)) return;
   writeManagedFile(path.join(binDir, 'agent-farm'), posixAgentFarmShim(execPath, launcher, platform), PANE_MANAGED_SHIM_MARKER, 0o755);
-  if (platform === 'win32') writeManagedFile(path.join(binDir, 'agent-farm.cmd'), windowsAgentFarmShim(execPath, launcher), PANE_MANAGED_SHIM_MARKER, 0o755);
+  if (platform === 'win32') {
+    writeManagedFile(path.join(binDir, 'agent-farm.cmd'), windowsAgentFarmShim(execPath, launcher), PANE_MANAGED_SHIM_MARKER, 0o755);
+    const folder = path.join(binDir, AGENT_FARM_WINDOWS_FOLDER);
+    if (!isSymlink(folder)) {
+      fs.mkdirSync(folder, { recursive: true });
+      writeManagedFile(path.join(folder, 'agent-farm.cmd'), windowsAgentFarmShim(execPath, launcher), PANE_MANAGED_SHIM_MARKER, 0o755);
+    }
+  }
 }
 
-const AGENT_FARM_SHIM_FILES = ['agent-farm', 'agent-farm.cmd', 'agent-farm.cjs'];
+const AGENT_FARM_LAUNCHER = 'agent-farm.cjs';
+/** On Windows, the folder whose only command is agent-farm.cmd, which Agent Farm's printed child launches name (agentFarmLauncher). */
+const AGENT_FARM_WINDOWS_FOLDER = 'agent-farm-launch';
+const AGENT_FARM_SHIM_FILES = ['agent-farm', 'agent-farm.cmd', AGENT_FARM_LAUNCHER, path.join(AGENT_FARM_WINDOWS_FOLDER, 'agent-farm.cmd')];
+
+/** The CLI path Agent Farm prints in child launches (agentFarmLauncher): the shim on POSIX, the .cmd-only folder's name on Windows. */
+function agentFarmLaunchAs(binDir: string, platform: NodeJS.Platform): string {
+  return platform === 'win32' ? path.join(binDir, AGENT_FARM_WINDOWS_FOLDER, 'agent-farm') : path.join(binDir, 'agent-farm');
+}
+
+/**
+ * Pane's agent-farm launcher (`<PANE_DIR>/bin/agent-farm.cjs`) while the shim is installed, for chat
+ * tabs to run Agent Farm through, so the child launches it prints name the shim (T-83 P3). Undefined
+ * when Profiles is off, the shim isn't written, or the file there isn't Pane's.
+ */
+export function agentFarmLauncherPath(state: RunpaneShimState | null = currentState): string | undefined {
+  if (!state) return undefined;
+  const launcher = path.join(state.binDir, AGENT_FARM_LAUNCHER);
+  try {
+    return !isSymlink(launcher) && fs.readFileSync(launcher, 'utf8').includes(PANE_MANAGED_SHIM_MARKER) ? launcher : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Removes Pane's agent-farm shim files; a user's own file of that name (no marker) or a link stays. */
 function removeAgentFarmShim(binDir: string): void {
@@ -348,6 +386,8 @@ function removeAgentFarmShim(binDir: string): void {
     if (isSymlink(file) || !fs.existsSync(file)) continue;
     if (fs.readFileSync(file, 'utf8').includes(PANE_MANAGED_SHIM_MARKER)) fs.rmSync(file, { force: true });
   }
+  const folder = path.join(binDir, AGENT_FARM_WINDOWS_FOLDER);
+  if (!isSymlink(folder) && fs.existsSync(folder) && fs.readdirSync(folder).length === 0) fs.rmdirSync(folder);
 }
 
 /**
