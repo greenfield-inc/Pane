@@ -22,7 +22,7 @@ const AGENT_MESSAGES_SCHEMA_SQL = [
     receiver_orchestrator INTEGER NOT NULL DEFAULT 0,
     body TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('sending', 'queued', 'delivered', 'answered', 'undelivered')),
-    delivered_via TEXT CHECK (delivered_via IS NULL OR delivered_via IN ('tab', 'call')),
+    delivered_via TEXT CHECK (delivered_via IS NULL OR delivered_via = 'tab'),
     undelivered_reason TEXT,
     created_at INTEGER NOT NULL,
     delivered_at INTEGER,
