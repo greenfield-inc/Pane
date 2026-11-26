@@ -50,7 +50,10 @@ export function SessionProfileMenuItems({ session, onSwitch, onReload, onClose }
     setSubmenu({ x: bounds.right + 4, y: bounds.top - 6, focus });
   };
   const back = () => { setSubmenu(null); itemRef.current?.focus(); };
-  const reloadNote = !session?.agentProfile ? 'no profile' : session.agentProfileChanged ? null : 'up to date';
+  // A profile Agent Farm no longer has can't be reloaded: the person picks one again (T-83 P3).
+  const gone = session?.agentProfileGone === true;
+  const canReload = !!session?.agentProfile && !gone;
+  const reloadNote = !session?.agentProfile ? 'no profile' : gone ? 'profile gone' : session.agentProfileChanged ? null : 'up to date';
   return (<>
     <div role="separator" className="my-1 border-t border-border-primary" />
     <PopoverButton
@@ -69,18 +72,19 @@ export function SessionProfileMenuItems({ session, onSwitch, onReload, onClose }
           {session && <ProfileAvatar profileRef={session.agentProfile?.ref} agent={session.agent} size={16} />}
         </span>
         <span className="flex-1">Switch profile</span>
+        {gone && <span className="text-[11px] text-status-warning" data-testid="session-switch-profile-pick-again">pick again</span>}
         <ChevronRight className="h-3.5 w-3.5 text-text-tertiary" aria-hidden="true" />
       </span>
     </PopoverButton>
     <PopoverButton
       role="menuitem"
       // Focusable while unavailable, so arrow keys reach it and its reason is announced.
-      aria-disabled={!session?.agentProfile}
+      aria-disabled={!canReload}
       data-testid="session-reload-profile"
-      className={cn(!session?.agentProfile && 'cursor-not-allowed')}
-      onClick={() => { if (session?.agentProfile) { onReload(session); onClose(); } }}
+      className={cn(!canReload && 'cursor-not-allowed')}
+      onClick={() => { if (session && canReload) { onReload(session); onClose(); } }}
     >
-      <span className={cn('flex items-center gap-2', !session?.agentProfile && 'opacity-50')}>
+      <span className={cn('flex items-center gap-2', !canReload && 'opacity-50')}>
         <RotateCw className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span className="flex-1">Reload profile</span>
         {session?.agentProfileChanged
@@ -214,8 +218,19 @@ export function ProfileSwitchConfirm({ pending, onCancel, onConfirm }: {
   );
 }
 
-/** The amber dot on a Session row whose profile changed since it took it: Reload profile takes the new one. */
-export function ProfileChangedDot({ session }: { session: Pick<OrchestrationSessionRecord, 'agentProfileChanged'> }) {
+/**
+ * The amber dot on a Session row whose profile changed since it took it: Reload profile takes the new
+ * one. A profile Agent Farm no longer has gets a red dot that asks the person to pick one again (T-83 P3).
+ */
+export function ProfileChangedDot({ session }: { session: Pick<OrchestrationSessionRecord, 'agentProfileChanged' | 'agentProfileGone'> }) {
+  if (session.agentProfileGone) {
+    return (
+      <span className="pointer-events-none flex h-3 w-3 flex-shrink-0 items-center justify-center" data-testid="session-profile-gone" title="Profile gone from Agent Farm: right-click › Switch profile to pick one again">
+        <span className="h-1.5 w-1.5 rounded-full bg-status-error" aria-hidden="true" />
+        <span className="sr-only">Profile gone: pick one again</span>
+      </span>
+    );
+  }
   if (!session.agentProfileChanged) return null;
   return (
     <span className="pointer-events-none flex h-3 w-3 flex-shrink-0 items-center justify-center" data-testid="session-profile-changed" title="Profile changed: right-click › Reload profile">

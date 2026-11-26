@@ -326,7 +326,7 @@ describe('A Session\'s Agent Farm profile in its folder (T-63)', () => {
     const agents = await fs.readFile(path.join(folder, 'AGENTS.md'), 'utf8');
     expect(agents).toContain('# Pane Session');
     expect(agents).toContain('My own note.');
-    expect(agents).toMatch(/<!-- pane-session-profile:start -->\n## Agent Farm profile\nThis Session runs the Agent Farm profile greenfield\/orchestrator\.[^\n]*\n\nYou are the orchestrator\./);
+    expect(agents).toMatch(/<!-- pane-session-profile:start -->\n## Agent Farm profile\nThis Session runs the Agent Farm profile greenfield\/orchestrator\.[^\n]*\nStart a linked agent with the exact command its Launch links list[^\n]*--parent[^\n]*\n\nYou are the orchestrator\./);
     // A reload or switch rewrites both; the Pane section and the person's own lines stay.
     writeSessionProfile(folder, 'greenfield/planner', 'Marker: KUMQUAT');
     prepareSessionWorkspace('profiled');
@@ -338,6 +338,14 @@ describe('A Session\'s Agent Farm profile in its folder (T-63)', () => {
     expect(await fs.readFile(path.join(folder, 'PROFILE.md'), 'utf8')).toContain('Marker: KUMQUAT');
     // CLAUDE.md still imports AGENTS.md, so Claude reads the profile section too.
     expect(await fs.readFile(path.join(folder, 'CLAUDE.md'), 'utf8')).toContain('@AGENTS.md');
+  });
+
+  // T-83 P3: by Agent Farm's title and its ref.
+  it('names the profile by its title and ref when the title is known', async () => {
+    const folder = prepareSessionWorkspace('titled');
+    writeSessionProfile(folder, 'greenfield/orchestrator', 'Text.', 'Orchestrator');
+    expect(await fs.readFile(path.join(folder, 'PROFILE.md'), 'utf8')).toContain('# Agent Farm profile: Orchestrator (greenfield/orchestrator)');
+    expect(await fs.readFile(path.join(folder, 'AGENTS.md'), 'utf8')).toContain('This Session runs the Agent Farm profile Orchestrator (greenfield/orchestrator).');
   });
 
   it('keeps profile text from closing Pane\'s sections early', async () => {

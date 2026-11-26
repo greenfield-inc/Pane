@@ -506,6 +506,26 @@ describe('OrchestrationSessionManager', () => {
         expect(port.relaunch).toHaveBeenCalledWith(created.panel.id, { launch: expect.objectContaining({ profile: 'greenfield/orchestrator' }), divider: 'Reloaded Greenfield orchestrator · conversation kept' });
       }));
 
+      // T-83 P3: greenfield 0.1.0 removed most profiles; a Session that ran one asks the person to pick again.
+      it('marks a Session whose profile Agent Farm no longer lists, and Reload asks to pick a profile again', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const created = await fixture.manager.create({ name: 'Ran a removed profile', agentProfile: 'greenfield/product-researcher' });
+        farm.profiles.mockResolvedValue({ profiles: [{ ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false }] });
+        await fixture.manager.refreshPluginHashes(true);
+        const marked = (await fixture.manager.list()).sessions.find(session => session.id === created.session.id);
+        expect(marked).toMatchObject({ agentProfileGone: true });
+        expect(marked?.agentProfileChanged).toBeUndefined();
+        await expect(fixture.manager.reloadProfile({ sessionId: created.session.id })).rejects.toMatchObject({ code: 'SESSION_PROFILE_GONE', next: expect.stringContaining('Switch profile') });
+        expect(port.relaunch).not.toHaveBeenCalled();
+        // A list Pane couldn't read changes nothing; picking a listed profile clears the mark.
+        farm.profiles.mockResolvedValue({ profiles: [], error: 'Pane couldn\'t list its Agent Farm profiles.' });
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileGone).toBe(true);
+        const switched = await fixture.manager.switchProfile({ sessionId: created.session.id }, 'pane/codex');
+        expect(switched.session.agentProfileGone).toBeUndefined();
+      }));
+
       it('with Profiles off, refuses Switch and Reload, reads no plugin and shows no changed mark, as on main', async () => withChatTabs(async (fixture, farm) => {
         const port = chatTabs();
         fixture.manager.attachChatTabs(port);

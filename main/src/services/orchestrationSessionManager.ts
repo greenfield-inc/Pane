@@ -721,6 +721,15 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (!profile) throw new PaneError('SESSION_PROFILE_NONE', `${current.name} started before Sessions had profiles, so it has none to reload. ${outcome}`, 'Use Switch profile to give it one.');
       const hash = await this.agentFarm().pluginHash(profilePlugin(profile.ref));
       if (hash === undefined) throw new PaneError('SESSION_PROFILE_UNKNOWN', `The plugin of ${profile.ref} isn't installed in this computer's Pane. ${outcome}`, 'Restart Pane so it sets up its Agent Farm, or switch the Session to another profile.');
+      // A ref Agent Farm no longer lists (T-83 P3): the person picks a profile again.
+      const qualified = profile.ref.split(':')[0];
+      if (!plainProfileAgent(qualified)) {
+        const list = await this.agentFarm().profiles();
+        if (!list.error && !list.profiles.some(entry => entry.ref === qualified)) {
+          if (!this.goneProfiles.has(qualified)) { this.goneProfiles.add(qualified); this.emitChanged(current, 'updated'); }
+          throw new PaneError('SESSION_PROFILE_GONE', `${current.name} runs the profile ${profile.ref}, which this computer's Agent Farm no longer has. ${outcome}`, 'Pick a profile again: right-click the Session, then Switch profile.');
+        }
+      }
       const name = profileDisplayName(profile.ref);
       const next: OrchestrationSessionRecord = {
         ...current, agentProfile: { ref: profile.ref, hash },
@@ -759,6 +768,8 @@ export class OrchestrationSessionManager extends EventEmitter {
 
   /** Each profile plugin's newest hash, for the changed mark; refreshed when Sessions are listed (see refreshPluginHashes). */
   private readonly pluginHashes = new Map<string, string>();
+  /** Profiles (refs without a variant) live Sessions run that Agent Farm's list no longer has, for the gone mark (T-83 P3). */
+  private readonly goneProfiles = new Set<string>();
   private pluginHashesCheckedAt = 0;
   private pluginHashesChecking?: Promise<void>;
 
@@ -782,9 +793,33 @@ export class OrchestrationSessionManager extends EventEmitter {
         this.pluginHashes.set(plugin, hash);
         changed.add(plugin);
       }
-      for (const session of sessions) if (changed.has(profilePlugin(session.agentProfile!.ref))) this.emitChanged(session, 'updated');
+      const goneChanged = await this.refreshGoneProfiles(sessions.map(session => session.agentProfile!.ref));
+      for (const session of sessions) {
+        const qualified = session.agentProfile!.ref.split(':')[0];
+        if (changed.has(profilePlugin(session.agentProfile!.ref)) || goneChanged.has(qualified)) this.emitChanged(session, 'updated');
+      }
     })().finally(() => { this.pluginHashesChecking = undefined; });
     return this.pluginHashesChecking;
+  }
+
+  /**
+   * Marks the profiles among `refs` that Agent Farm's list no longer has, and returns those whose mark
+   * changed. Pane's plain profiles are never gone, and a list that couldn't be read changes nothing.
+   */
+  private async refreshGoneProfiles(refs: readonly string[]): Promise<Set<string>> {
+    const named = [...new Set(refs.map(ref => ref.split(':')[0]).filter(ref => !plainProfileAgent(ref)))];
+    const changed = new Set<string>();
+    if (!named.length) return changed;
+    const list = await this.agentFarm().profiles().catch(() => undefined);
+    if (!list || list.error) return changed;
+    const listed = new Set(list.profiles.map(entry => entry.ref));
+    for (const ref of named) {
+      const gone = !listed.has(ref);
+      if (gone === this.goneProfiles.has(ref)) continue;
+      if (gone) this.goneProfiles.add(ref); else this.goneProfiles.delete(ref);
+      changed.add(ref);
+    }
+    return changed;
   }
 
   /**
@@ -1140,7 +1175,8 @@ export class OrchestrationSessionManager extends EventEmitter {
   private withPaused(record: OrchestrationSessionRecord): OrchestrationSessionRecord {
     const profile = record.agentProfile;
     const newest = profile && this.profilesOn() ? this.pluginHashes.get(profilePlugin(profile.ref)) : undefined;
-    const marked: OrchestrationSessionRecord = { ...record, agentProfileChanged: newest !== undefined && newest !== profile?.hash ? true : undefined };
+    const gone = !!profile && this.profilesOn() && this.goneProfiles.has(profile.ref.split(':')[0]);
+    const marked: OrchestrationSessionRecord = { ...record, agentProfileChanged: !gone && newest !== undefined && newest !== profile?.hash ? true : undefined, agentProfileGone: gone ? true : undefined };
     let latest: TerminalPausedMark | undefined;
     for (const paneId of this.pausablePaneIdsOf(record)) {
       const mark = this.sessionManager.getSession(paneId)?.paused;

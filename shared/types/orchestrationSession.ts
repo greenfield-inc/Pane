@@ -129,6 +129,12 @@ export interface OrchestrationSessionRecord {
    * the new one. Computed when read, never stored.
    */
   agentProfileChanged?: true;
+  /**
+   * The Session's profile is no longer in this computer's Agent Farm (T-83 P3: greenfield 0.1.0 removed
+   * most profiles): Reload can't take it, and the person picks a profile again with Switch profile.
+   * Computed when read, never stored.
+   */
+  agentProfileGone?: true;
   agent: PaneChatAgent;
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;

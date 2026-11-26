@@ -4264,4 +4264,30 @@ for (const theme of ['light', 'night-owl']) {
     await page.screenshot({ path: testInfo.outputPath(`menu-profiles-off-${theme}.png`) });
     expect(await profileCalls(page)).toEqual([]);
   });
+
+  // T-83 P3: greenfield 0.1.0 removed most profiles; a Session that ran one asks the person to pick again.
+  test(`A Session whose profile is gone shows a red dot, can't Reload, and asks to pick a profile again (T-83 P3, ${theme})`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await installSessionsFixture(page, [
+      { ...sessionFixture('old', 'Ran a removed profile', '', '', '2026-09-16T12:00:00.000Z'), agentProfile: { ref: 'greenfield/implementer', hash: 'h' }, agentProfileGone: true },
+    ], [], {
+      initialConfig: { theme, chatTabsEnabled: true, sessionProfilesEnabled: true },
+      agentFarmProfiles: { profiles: [{ ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false, title: 'Orchestrator' }] },
+    });
+    await gotoApp(page);
+    await dismissStartupDialogs(page);
+    const row = page.getByTestId('orchestration-session-old');
+    await expect(row.getByTestId('session-profile-gone')).toHaveAttribute('title', /Switch profile to pick one again/);
+    await expect(row.getByTestId('session-profile-changed')).toHaveCount(0);
+    await row.screenshot({ path: testInfo.outputPath(`row-profile-gone-${theme}.png`) });
+    await row.click({ button: 'right' });
+    await expect(page.getByTestId('session-switch-profile-pick-again')).toHaveText('pick again');
+    const reload = page.getByTestId('session-reload-profile');
+    await expect(reload).toContainText('profile gone');
+    await expect(reload).toHaveAttribute('aria-disabled', 'true');
+    await page.screenshot({ path: testInfo.outputPath(`menu-profile-gone-${theme}.png`) });
+    // aria-disabled keeps it focusable; a click does nothing.
+    await reload.dispatchEvent('click');
+    expect(await profileCalls(page)).toEqual([]);
+  });
 }

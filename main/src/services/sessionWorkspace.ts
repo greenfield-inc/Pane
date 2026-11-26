@@ -101,19 +101,22 @@ const SESSION_PROFILE_FILE = 'PROFILE.md';
  * its own marked section of AGENTS.md (which CLAUDE.md imports), because a resumed conversation
  * reads instruction files again but not a launch's system prompt. Both are rewritten at every
  * start, so a reload or switch reaches the agent. Only a folder under Pane's sessions folder is written.
+ * `title` is the profile's title in Agent Farm's list (T-83 P3), shown with its ref when known.
  */
-export function writeSessionProfile(sessionFolder: string, profile: string, instructions: string): void {
+export function writeSessionProfile(sessionFolder: string, profile: string, instructions: string, title?: string): void {
   const root = path.resolve(sessionGitCeiling());
   const cwd = path.resolve(sessionFolder);
   if (path.dirname(cwd) !== root || fs.lstatSync(cwd).isSymbolicLink()) {
     throw new PaneError('SESSION_PROFILE_FOLDER', `Pane writes a Session's profile only into its own Session folder, not ${sessionFolder}.`, 'Start the Session again from its row in the sidebar.');
   }
   const text = instructions.trim();
+  const named = title?.trim() && title.trim() !== profile ? `${title.trim()} (${profile})` : profile;
   const file = path.join(cwd, SESSION_PROFILE_FILE);
-  writeFileWithoutFollowingLinks(file, `# Agent Farm profile: ${profile}\n\nPane writes this file from the profile at every start of this Session's agent; edit the profile instead.\n\n${text}\n`);
+  writeFileWithoutFollowingLinks(file, `# Agent Farm profile: ${named}\n\nPane writes this file from the profile at every start of this Session's agent; edit the profile instead.\n\n${text}\n`);
   const section = [
     '## Agent Farm profile',
-    `This Session runs the Agent Farm profile ${profile}. Its instructions follow (Pane keeps the same text in ${SESSION_PROFILE_FILE}). Where they disagree with the Pane Session rules above, the Pane rules win.`,
+    `This Session runs the Agent Farm profile ${named}. Its instructions follow (Pane keeps the same text in ${SESSION_PROFILE_FILE}). Where they disagree with the Pane Session rules above, the Pane rules win.`,
+    `Start a linked agent with the exact command its Launch links list: it names Pane's agent-farm and carries --parent, and Agent Farm refuses a name that isn't listed.`,
     '',
     text,
   ].join('\n');
