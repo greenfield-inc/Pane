@@ -378,6 +378,14 @@ describe('OrchestrationSessionManager', () => {
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('disk full'));
         // Review F-2: the Session's own activity says it isn't pinned.
         expect(created.session.activity.at(-1)?.message).toContain('No Agent Farm snapshot');
+        expect(created.session.activity.at(-1)?.message).toContain('until Reload profile');
+        // QA r3: a terminal lead with no snapshot has nothing Reload can act on, so the line points elsewhere.
+        port.snapshot.mockRejectedValueOnce(new Error('disk full'));
+        const terminal = await fixture.manager.create({ name: 'Terminal, no snapshot', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+        expect(terminal.session.agentFarmSnapshot).toBeUndefined();
+        expect(terminal.session.activity.at(-1)?.message).toContain('No Agent Farm snapshot');
+        expect(terminal.session.activity.at(-1)?.message).not.toContain('Reload profile');
+        expect(terminal.session.activity.at(-1)?.message).toContain('Start a new Session');
       } finally { warn.mockRestore(); }
     }));
 

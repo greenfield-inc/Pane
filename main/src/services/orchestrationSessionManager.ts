@@ -513,7 +513,9 @@ export class OrchestrationSessionManager extends EventEmitter {
         catch (error) {
           console.warn(`[Sessions] ${record.name} has no Agent Farm snapshot, so its agents read the installed plugins as before: ${reasonOf(error)}`);
           // Review F-2: the Session says it isn't pinned, so a greenfield update reaching it is no surprise.
-          record.activity.push(this.activity('updated', `No Agent Farm snapshot: Agent Farm couldn't save one (${reasonOf(error)}), so this Session's agents read the installed plugins until Reload profile.`, 'user'));
+          // Only a Session with a profile has a Reload profile that can act; any other one starts over (QA r3).
+          const way = record.agentProfile ? 'until Reload profile' : 'for as long as it runs. Start a new Session to get one';
+          record.activity.push(this.activity('updated', `No Agent Farm snapshot: Agent Farm couldn't save one (${reasonOf(error)}), so this Session's agents read the installed plugins ${way}.`, 'user'));
         }
       }
       const next: OrchestrationSessionStoreData = {
