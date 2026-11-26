@@ -155,7 +155,7 @@ import {
   promptFileShellWord,
   stripTrailingNewlines,
 } from './agents/promptDelivery';
-import { getPaneChatPanelId, ONBOARDING_HANDOFF_PREFERENCE, PANE_ONE_TIME_PROMPT_OPENING } from '../../../shared/types/paneChat';
+import { getPaneChatPanelId, ONBOARDING_HANDOFF_PREFERENCE, PANE_ONE_TIME_PROMPT_OPENING, promptForAgent } from '../../../shared/types/paneChat';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -498,7 +498,7 @@ export class TerminalPanelManager extends EventEmitter {
   private initialPromptWord(customState: TerminalPanelState, shellType: string | undefined): string | undefined {
     const fileWord = customState.initialInputFile ? promptFileShellWord(customState.initialInputFile) : undefined;
     if (fileWord) return fileWord;
-    return isPosixShell(shellType) ? this.quoteCommandArgument(customState.initialInput ?? '') : undefined;
+    return isPosixShell(shellType) ? this.quoteCommandArgument(promptForAgent(customState.initialInput ?? '')) : undefined;
   }
 
   private hasUnsentArgumentPrompt(customState: TerminalPanelState): boolean {
@@ -862,7 +862,7 @@ export class TerminalPanelManager extends EventEmitter {
     if (!/--resume\b|--continue\b/.test(initialCommand)) {
       const promptArgument =
         customState.initialInputMode === 'argument' && customState.initialInput?.trim() && !customState.initialInputSentAt
-          ? customState.initialInput
+          ? promptForAgent(customState.initialInput)
           : undefined;
       if (promptArgument) {
         nextState.initialInputSentAt = new Date().toISOString();
@@ -894,7 +894,7 @@ export class TerminalPanelManager extends EventEmitter {
       return null;
     }
 
-    const input = customState.initialInput;
+    const input = promptForAgent(customState.initialInput);
     const submitStrategy = customState.initialInputSubmitStrategy ?? 'enter';
     customState.initialInputSentAt = new Date().toISOString();
     customState.initialInputError = undefined;

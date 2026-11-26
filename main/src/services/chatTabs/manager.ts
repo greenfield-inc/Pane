@@ -17,6 +17,7 @@ import { agentConfig, agentLabel } from '../../../../shared/agents';
 import { chatPausedViewSchema } from '../../../../shared/types/chatTabDecoders';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 import { sessionMovingError } from '../../../../shared/types/sessionMove';
+import { promptForAgent } from '../../../../shared/types/paneChat';
 import { CHAT_STALL_MS, chatMidTurn, isRunpaneWait } from '../agentStatus/midTurn';
 import { transcriptMarkdown, transcriptPrompt, writeTranscriptFile } from './transcriptFile';
 
@@ -965,7 +966,7 @@ export class ChatTabManager {
     const operationId = `initial:${panelId}`;
     // Marked only once the prompt is accepted. A start that dies in between sends it
     // again with the same ID, which returns the first receipt instead of a second prompt.
-    try { this.send(panelId, { operationId, text: state.initialInput }); }
+    try { this.send(panelId, { operationId, text: promptForAgent(state.initialInput) }); }
     catch (error) {
       console.warn(`[ChatTabs] The first message for ${panelId} was not sent: ${reasonOf(error)}.`);
       this.tab(panelId).notice = `The opening message was not sent: ${error instanceof PaneError ? `${error.message} ${error.next ?? ''}`.trim() : reasonOf(error)} Press Restart to try it again.`;
