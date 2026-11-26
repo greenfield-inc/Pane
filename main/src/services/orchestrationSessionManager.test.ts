@@ -2329,11 +2329,11 @@ describe('OrchestrationSessionManager', () => {
       const held = new Promise<void>(resolve => { release = resolve; });
       const at = (offset: number): TranscriptCursor => ({ file: '/t/s.jsonl', id: '1:1', offset });
       // Turn A's rows end at 100 with a reply; turn B's rows, after 100, end on a tool call.
-      const readTurns = vi.fn(async (_locator: TranscriptLocator, cursor: TranscriptCursor | undefined) =>
-        cursor?.offset === 100 ? { endedWithText: false, cursor: at(200) } : { endedWithText: true, cursor: at(100) });
+      const readTurns = vi.fn(async (_locator: TranscriptLocator, known: readonly TranscriptCursor[]) =>
+        known[0]?.offset === 100 ? { endedWithText: false, cursor: at(200) } : { endedWithText: true, cursor: at(100) });
       fixture.manager.setReplyProbe(createReplyProbe({
         agentTypeOf: () => 'claude', locatorOf: () => ({ agent: 'claude', cwd: '/work' }), isIdle: () => true,
-        readTurns, wait: () => held, loadCursor: async () => at(0), saveCursor: async () => undefined,
+        readTurns, wait: () => held, loadCursors: async () => [at(0)], saveCursors: async () => undefined,
       }));
 
       // A ends with a reply; its check waits for its second read.
