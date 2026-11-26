@@ -169,6 +169,9 @@ describe('snapshotHoldsProfile', () => {
     // A bare name resolves through the snapshot's default_plugin, as Agent Farm does.
     expect(await snapshotHoldsProfile(folder, 'lead')).toBe(true);
     expect(await snapshotHoldsProfile(folder, 'team/missing')).toBe(false);
+    // QA F2: greenfield 0.1 makes planner a variant set (agents/planner.yaml with planner-claude.md, planner-codex.md).
+    const sets = writeSnapshot(tempFolder(), 'def', { 'plugins/greenfield/agents/planner.yaml': 'variants: {}\n', 'plugins/greenfield/agents/planner-claude.md': 'Planner.' });
+    expect(await snapshotHoldsProfile(sets, 'greenfield/planner')).toBe(true);
     expect(await snapshotHoldsProfile(folder, 'other/lead')).toBe(false);
     expect(await snapshotHoldsProfile(folder, '../team/lead')).toBe(false);
   });

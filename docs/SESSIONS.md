@@ -168,9 +168,10 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   that some plugin in the snapshot differs from the installed copy (a worker may
   run any plugin), not only the profile's own. Only the files the plugin's Agent
   Farm receipt lists count, as a snapshot copies only those: a cache, `.venv` or
-  `.DS_Store` beside them never marks a Session, and an edit in place does. Listing Sessions re-checks the
-  plugins at most every 10 seconds. A Session whose agent runs in a terminal, or
-  one from before profiles, refuses Reload and says why.
+  `.DS_Store` beside them never marks a Session, and an edit in place does. Pane
+  re-checks the plugins every 10 seconds, whether or not anything lists Sessions.
+  A Session whose agent runs in a terminal, or one from before profiles, refuses
+  Reload and says why.
 - When Agent Farm refuses the Session's snapshot because it was deleted, a file
   in it changed, or a newer Agent Farm wrote it, it never falls back to the
   installed plugins. The lead's chat stops with **Reload profile**, which takes a

@@ -169,7 +169,7 @@ export function withSnapshotEnv(env: Readonly<Record<string, string>>, snapshot:
 
 /**
  * Whether a snapshot can run `name` (`plugin/name`, or a bare name through its `default_plugin`):
- * its plugin folder has that profile or agent, and the snapshot passes its checksums, as Agent Farm
+ * its plugin folder has that profile, agent or agent variant set, and the snapshot passes its checksums, as Agent Farm
  * needs before it reads one. A Session move counts a profile it holds as present (T-110, D-3).
  */
 export async function snapshotHoldsProfile(folder: string, name: string): Promise<boolean> {
@@ -183,7 +183,8 @@ export async function snapshotHoldsProfile(folder: string, name: string): Promis
   const safe = /^[a-z0-9][a-z0-9_-]*$/i;
   if (!plugin || !safe.test(plugin) || !safe.test(profile)) return false;
   const root = path.join(folder, 'plugins', plugin);
-  for (const file of [path.join(root, 'profiles', `${profile}.yaml`), path.join(root, 'agents', `${profile}.md`)]) {
+  // A profile, an agent, or an agent's variant set (`agents/<name>.yaml`, as greenfield 0.1's planner).
+  for (const file of [path.join(root, 'profiles', `${profile}.yaml`), path.join(root, 'agents', `${profile}.md`), path.join(root, 'agents', `${profile}.yaml`)]) {
     if (await fs.stat(file).then(stat => stat.isFile(), () => false)) return true;
   }
   return false;
