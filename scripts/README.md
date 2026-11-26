@@ -177,7 +177,8 @@ scripts/ci-background.sh wait typecheck
 
 A TCP proxy that drops the link on a schedule shaped like a flapping cellular
 or Tailscale path. Put it between a remote client and a dev host to test
-reconnects. See [Testing remote clients on a flapping link](../CONTRIBUTING.md#testing-remote-clients-on-a-flapping-link).
+reconnects, or add latency with `--latency MS`. See [Testing remote clients on a flapping link](../CONTRIBUTING.md#testing-remote-clients-on-a-flapping-link).
+`tests/remoteRig.ts` uses it to link two isolated Panes ([Measuring another machine's Sessions on one computer](../CONTRIBUTING.md#measuring-another-machines-sessions-on-one-computer)).
 
 ```bash
 node scripts/flapping-link-proxy.mjs --target 127.0.0.1:PORT --seed 1

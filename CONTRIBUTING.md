@@ -261,9 +261,31 @@ It prints its port, its seed, and each phase with a timestamp:
 
 `--seed` repeats a schedule. `--scale 0.1` runs every duration ten times faster.
 `--up`, `--down` (ranges in seconds), `--long-drop` and `--refuse` change the
-defaults. Tests import `start()` from the script and drive the phases with
-`forceDown()` and `forceUp()`; see `scripts/flapping-link-proxy.test.mjs`, run
-by `pnpm test:flapping-proxy`.
+defaults. `--latency 50` adds a 50 ms round trip in every phase, in order and
+across drops, plus one more before a new connection's first bytes (its TCP
+handshake). It doesn't model TLS, which a Tailscale or HTTPS route pays 1-2
+more round trips for, nor jitter or bandwidth. Tests import `start()` from the
+script and drive the phases with `forceDown()` and `forceUp()`, and read the
+bytes it carried with `bytes()` and when it last delivered with
+`lastDelivered()`; see
+`scripts/flapping-link-proxy.test.mjs`, run by `pnpm test:flapping-proxy`.
+
+### Measuring another machine's Sessions on one computer
+
+`pnpm test:remote-switch` runs two isolated Panes from `pnpm build:main` (each
+with its own data folder, Electron profile and HOME; Workspaces off, and
+Tailscale off through `PANE_DISABLE_TAILSCALE=1`, so neither probes your real
+machines) and links them through the proxy: the host serves its remote API on
+`127.0.0.1` with a paired token, and the desktop saves it as a computer whose
+only route is the proxy (`tests/remoteRig.ts`). Chats run the scripted agent.
+It reports how long Enter on the host's Session takes to move the window and
+show the chat, the bytes over the link per open and per idle minute, arrow-key
+cursor moves at 30 key repeats a second (idle, and while a switch is in
+flight), and when a cut link shows as offline.
+Run `pnpm build:frontend` first. `REMOTE_SWITCH_RTT_MS` sets the latency
+(default 50), `REMOTE_SWITCH_OPENS` and `REMOTE_SWITCH_IDLE_MS` the samples.
+From a Pane terminal, unset `BROWSER` first: it points into your real `~/.pane`,
+and the isolation check refuses to start.
 
 ### Testing a Session move on one computer
 
@@ -477,4 +499,4 @@ The rebuild targets the host architecture. Use `npm rebuild
 better-sqlite3-multiple-ciphers` for Node tests, then `pnpm electron:rebuild`
 before running Electron again; only one ABI can be installed at a time.
 
-For native update/reconnect QA, set `PANE_DISABLE_OS_INTEGRATION=1` as well as an isolated `PANE_DIR` and `--user-data-dir`. This disables login-item, URL-protocol, MCP-registration, and managed home-skill writes (including removal when the setting is off). Use an isolated app/install target; it does not make a real user installation a safe test target. Close every test app and supervisor after collecting evidence.
+For native update/reconnect QA, set `PANE_DISABLE_OS_INTEGRATION=1` as well as an isolated `PANE_DIR` and `--user-data-dir`. This disables login-item, URL-protocol, MCP-registration, and managed home-skill writes (including removal when the setting is off). It does not stop Tailscale discovery: a test build on a Mac with Tailscale still lists and probes your real machines unless `PANE_DISABLE_TAILSCALE=1` is set too, which makes the app and both `runpane` CLIs (npm and Python) find no Tailscale (`tests/isolatedPane.ts` sets both). Use an isolated app/install target; it does not make a real user installation a safe test target. Close every test app and supervisor after collecting evidence.

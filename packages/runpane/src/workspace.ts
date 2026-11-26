@@ -179,6 +179,8 @@ function toMachine(peer: ReturnType<typeof peerSchema.decode>, self: boolean, ow
 }
 
 function runTailscale(args: string[]): Promise<string | null> {
+  // Isolated test Panes (tests/isolatedPane.ts, D-288) see no Tailscale, as the app does (tailscaleSetup.ts).
+  if (process.env.PANE_DISABLE_TAILSCALE === '1') return Promise.resolve(null);
   const candidates: Array<{ command: string; env?: NodeJS.ProcessEnv }> = [{ command: 'tailscale' }];
   if (process.platform === 'darwin') {
     for (const app of ['/Applications/Tailscale.app', path.join(os.homedir(), 'Applications', 'Tailscale.app')]) {

@@ -595,3 +595,26 @@ test('the Python runpane link refuses and links the same way', posixOnly, async 
     }
   });
 });
+
+// An isolated test Pane (tests/isolatedPane.ts) sets PANE_DISABLE_TAILSCALE=1: neither CLI may run
+// Tailscale there, or it would list and reach the person's real machines (D-288).
+test('with PANE_DISABLE_TAILSCALE=1 neither CLI runs Tailscale, so no machine is found', posixOnly, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-no-tailscale-'));
+  const ran = path.join(home, 'tailscale-ran');
+  fs.writeFileSync(path.join(home, 'tailscale'), `#!/bin/sh\ntouch '${ran}'\ncat <<'EOF'\n${JSON.stringify(status)}\nEOF\n`, { mode: 0o755 });
+  const env = { ...process.env, PATH: `${home}${path.delimiter}${process.env.PATH}`, PANE_DIR: home, RUNPANE_TELEMETRY_DISABLED: '1', PANE_DISABLE_TAILSCALE: '1' };
+
+  const npm = spawnSync(process.execPath, [cli, 'workspace', 'parsa-devbox', 'read', '/x'], { cwd: home, encoding: 'utf8', timeout: 20_000, env });
+  const npmOutput = `${npm.stdout}${npm.stderr}`;
+  assert.doesNotMatch(npmOutput, /Could not reach Pane on parsa-devbox/, npmOutput);
+  assert.equal(fs.existsSync(ran), false, `the npm CLI ran tailscale: ${npmOutput}`);
+
+  const python = process.env.PYTHON || 'python3';
+  const py = spawnSync(python, ['-c', 'import json\nfrom runpane.workspaces import read_tailnet\nprint(json.dumps(read_tailnet()))'], {
+    cwd: home, encoding: 'utf8', timeout: 20_000,
+    env: { ...env, PYTHONPATH: path.join(__dirname, '..', 'packages', 'runpane-py', 'src'), PYTHONDONTWRITEBYTECODE: '1' },
+  });
+  assert.equal(py.status, 0, py.stderr);
+  assert.deepEqual(JSON.parse(py.stdout), { ok: false, reason: 'Tailscale is not installed', fix: 'Install Tailscale from https://tailscale.com/download and sign in.' });
+  assert.equal(fs.existsSync(ran), false, 'the Python CLI ran tailscale');
+});
