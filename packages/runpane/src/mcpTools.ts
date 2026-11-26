@@ -218,7 +218,8 @@ function buildTool(
     const parameter = {
       flag,
       property: toProperty(flag),
-      takesValue: placeholder !== undefined || schema !== undefined,
+      // A boolean schema makes a switch even where another command's flag of that name takes a value.
+      takesValue: schema?.type === 'boolean' ? false : placeholder !== undefined || schema !== undefined,
       json: schema?.type === 'array' || schema?.type === 'object',
     };
     parameters.push(parameter);

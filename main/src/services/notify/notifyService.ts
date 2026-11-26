@@ -30,6 +30,7 @@ import {
   type NotifyWindowSize,
   type NotifyTodoLink,
 } from '../../../../shared/types/notify';
+import type { CardFields } from './cardCheck';
 import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed, type MoveStayed } from './notifyQueue';
 import { PaneError, paneErrorText, reasonOf } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
@@ -493,6 +494,15 @@ export class NotifyService {
       source,
       connected: source.autopilot ? this.aboutSession(aboutSession) : undefined,
     }, signal);
+  }
+
+  /** The card an --update or --relays request changes, as it stands; undefined for a new card. */
+  storedCard(request: NotifyRequest): CardFields | undefined {
+    if (request.update !== undefined) {
+      const source = this.describeSource(request.caller);
+      return this.queue.storedCard({ update: request.update, reader: { paneId: source.paneId, panelId: source.panelId } });
+    }
+    return request.relays ? this.queue.storedCard({ relays: request.relays }) : undefined;
   }
 
   /** Autopilot's own item links to the Session it's about, or to its chat (D-168). */

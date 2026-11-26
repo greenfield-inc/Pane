@@ -97,8 +97,6 @@ export function checkCard(card: CardFields): CardCheck {
   if (questions.some(question => !question.choices.some(choice => choice.recommended))) warnings.push('No option is recommended: mark the one you would pick with "recommended": true.');
   if (questions.some(question => question.choices.length > CARD_OPTIONS_WARN)) warnings.push(`A question has more than ${CARD_OPTIONS_WARN} options; offer 2 to ${CARD_OPTIONS_WARN}.`);
   if (questions.some(question => question.choices.some(choice => !choice.detail?.trim()))) warnings.push('Some options have no consequence: give each a "detail" saying what happens if it is picked.');
-  const paths = unlinkedPaths([title, context, ...questions.map(question => question.title)].join('\n'), card.links);
-  if (paths.length) warnings.push(`These paths aren’t linked: ${paths.join(', ')}. Pass them in --links so they open beside the card.`);
   return { warnings };
 }
 

@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { spawn } = require('node:child_process');
 const { test } = require('./runpane-test-shard');
 const { after } = require('node:test');
@@ -122,6 +123,11 @@ async function withStubDaemon(paneDir, results, action) {
         // the command traffic, so keep that handshake off the recorded list.
         if (answer === undefined && frame.channel === 'daemon:events') {
           socket.write(`${JSON.stringify({ type: 'response', id: frame.id, ok: true, result: { included: frame.args?.[0]?.include ?? [] } })}\n`);
+          continue;
+        }
+        // notify checks each card before it waits; unless a test answers it, Pane passes it unchanged.
+        if (answer === undefined && frame.channel === 'runpane:notify:check') {
+          socket.write(`${JSON.stringify({ type: 'response', id: frame.id, ok: true, result: { check: true, card: frame.args?.[0] ?? {}, warnings: [] } })}\n`);
           continue;
         }
         requests.push({ channel: frame.channel, args: frame.args, socket });
@@ -1637,6 +1643,33 @@ test('with To-dos off, notify --todo still asks the person, without the to-do', 
       assert.equal(asked.length, 1);
       assert.equal(asked[0].args[0].title, 'Which way?');
       assert.equal(asked[0].args[0].todo, undefined);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('the notify tool\'s check is a switch: it returns the card as Pane would post it and posts nothing', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-notify-check-'));
+  const warning = 'Attached /tmp/mock/index.html as a link: the card names it but --links didn\'t.';
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:notify:check': (args) => ({ check: true, card: { ui: args[0].ui, title: args[0].title, links: args[0].links }, warnings: [warning] }),
+      'runpane:notify': { approved: true },
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const notify = (await client.listTools()).tools.find((tool) => tool.name === 'notify');
+        assert.equal(notify.inputSchema.properties.check.type, 'boolean');
+        const checked = await client.callTool({ name: 'notify', arguments: {
+          ui: 'approve', title: 'Ship the mock-ups?', check: true, paneDir,
+          links: [{ label: 'Mock-ups', url: pathToFileURL(path.resolve('/tmp/mock/index.html')).href }],
+        } });
+        assert.notEqual(checked.isError, true, checked.content[0].text);
+        assert.deepEqual(checked.structuredContent, {
+          check: true, card: { ui: 'approve', title: 'Ship the mock-ups?', links: [{ label: 'Mock-ups', path: path.resolve('/tmp/mock/index.html') }] }, warnings: [warning],
+        });
+      });
+      assert.deepEqual(requests.map((request) => request.channel), ['runpane:notify:check']);
     });
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });

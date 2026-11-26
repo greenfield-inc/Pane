@@ -6,7 +6,9 @@ import json
 import math
 import os
 import re
+import sys
 from typing import Any, Dict, List, Mapping, Optional, Tuple
+from urllib.parse import unquote
 
 from .daemon_client import PaneDaemonClientError, invoke_daemon
 
@@ -72,6 +74,8 @@ def build_notify_request(parsed: Any, env: Mapping[str, str], cwd: str) -> Dict[
         "close": parsed.notify_close,
     }
     caller, timing = notify_caller_fields(env, cwd)
+    if getattr(parsed, "notify_check", False) and (parsed.resume is not None or others["took"] is not None or others["tookAs"] is not None or others.get("close") is not None):
+        raise invalid("check", "check shows a new card or an --update without posting it, so it does not go with --resume, --took or --close.")
 
     if parsed.resume is not None:
         if not parsed.resume.strip():
@@ -349,10 +353,49 @@ def parse_links(text: str) -> List[Dict[str, str]]:
             continue
         if url is _MISSING:
             raise invalid("links", f'links[{index}] needs one of "path" (a file), "url" (a web page) or "approval" (another approval\'s id or Q-n).')
+        local = local_file_url(url)
+        if local is _MISSING:
+            raise invalid("links", f"links[{index}] url is a file:// URL that names no file on this computer (it needs file:///abs/path or file://localhost/abs/path); {PATH_FORM}.")
+        if local is not None:
+            links.append({"label": label, "path": local})
+            continue
         if not LINK_URL.fullmatch(url):
-            raise invalid("links", f"links[{index}] url must start with http:// or https://.")
+            raise invalid("links", f"links[{index}] url must start with http:// or https://; {PATH_FORM}; url is only for http(s) pages.")
         links.append({"label": label, "url": url})
     return links
+
+
+PATH_FORM = 'for a local file use {"label":…,"path":"/abs/path"}'
+
+
+# file:///abs/path or file://localhost/abs/path: the only file URLs that name a file on this computer.
+LOCAL_FILE_URL = re.compile(r"^file://(?:localhost)?(/[^?#]*)(?:[?#].*)?$", re.IGNORECASE)
+
+
+def local_file_url(url: str) -> Any:
+    """A link url naming a local file (file://, an absolute path, ~/ or a Windows drive path) as its path, as npm runpane and Pane read it.
+
+    None for any other url; _MISSING for a file: URL that names no file here: another host (never a
+    network share), a relative one, a bad escape, or on Windows no drive.
+    """
+    if url[:5].lower() == "file:":
+        match = LOCAL_FILE_URL.match(url)
+        if not match or re.search(r"%(?:2f|5c)", match.group(1), re.IGNORECASE) or re.search(r"%(?![0-9A-Fa-f]{2})", match.group(1)):
+            return _MISSING
+        try:
+            decoded = unquote(match.group(1), errors="strict")
+        except UnicodeDecodeError:
+            return _MISSING
+        if os.name != "nt":
+            return decoded
+        return decoded[1:].replace("/", "\\") if re.match(r"^/[A-Za-z]:/", decoded) else _MISSING
+    if url.startswith("~/"):
+        return os.path.join(os.path.expanduser("~"), url[2:])
+    if re.match(r"^[A-Za-z]:[\\/]", url):
+        return url
+    if url.startswith("/") and not url.startswith("//"):
+        return url
+    return None
 
 
 def parse_json(text: str) -> Any:
@@ -414,6 +457,23 @@ def run_notify(parsed: Any, env: Optional[Mapping[str, str]] = None) -> int:
     request = build_notify_request(parsed, os.environ if env is None else env, os.getcwd())
     if parsed.todo is not None:
         request["todo"] = parsed.todo
+    asks = "resume" not in request and "took" not in request and "close" not in request
+    if parsed.notify_check:
+        checked = check_notify_card(request, parsed.pane_dir)
+        if checked is None:
+            raise RunpaneError(
+                "ERR_NOTIFY_CHECK_UNAVAILABLE",
+                "This Pane can't check a card without posting it (it is not running, or is older than this runpane). Nothing was shown to the person.",
+                "Start or update Pane (runpane update), then run runpane notify --check again.",
+            )
+        print(json.dumps(checked, indent=2) if parsed.json else describe_notify_check(checked))
+        return 0
+    if asks:
+        # The call waits on the person, often in the background: say what Pane changed or would
+        # warn about now, on stderr, rather than after they answer.
+        for warning in (check_notify_card(request, parsed.pane_dir) or {}).get("warnings") or []:
+            sys.stderr.write(f"Warning: {warning}\n")
+            sys.stderr.flush()
     try:
         result = invoke_daemon("runpane:notify", [request], pane_dir=parsed.pane_dir, timeout_ms=math.inf)
     except PaneDaemonClientError as error:
@@ -427,3 +487,34 @@ def run_notify(parsed: Any, env: Optional[Mapping[str, str]] = None) -> int:
         result = {"unavailable": reason, "next": UNAVAILABLE_NEXT}
     print(json.dumps(result, indent=2) if parsed.json else describe_notify_result(result))
     return 0
+
+
+def check_notify_card(request: Dict[str, Any], pane_dir: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Pane's card check without posting; None when no Pane is listening or it is older than the check."""
+    try:
+        result = invoke_daemon("runpane:notify:check", [request], pane_dir=pane_dir)
+    except PaneDaemonClientError as error:
+        if error.connection_failure or error.code == "ERR_UNKNOWN_CHANNEL":
+            return None
+        raise
+    if not isinstance(result, dict) or result.get("check") is not True or not isinstance(result.get("card"), dict) or not isinstance(result.get("warnings"), list):
+        raise PaneDaemonClientError(
+            "Pane answered runpane:notify:check, but this runpane could not read the result. Nothing was shown to the person. This usually means runpane and Pane are different versions.",
+            "ERR_RUNPANE_RESULT_UNREADABLE",
+            "Compare the versions with `runpane doctor` and update the older one.",
+        )
+    return result
+
+
+def describe_notify_check(checked: Dict[str, Any]) -> str:
+    card = checked["card"]
+    lines = [f"Checked, not posted: {card.get('title') or card.get('update') or ''}"]
+    if card.get("context"):
+        lines.append(f"Context: {card['context']}")
+    links = card.get("links") or []
+    if links:
+        lines.append("Links:")
+        lines.extend(f"  {link.get('label')}: {link.get('path') or link.get('url') or link.get('approval') or ''}" for link in links)
+    warnings = checked["warnings"]
+    lines.extend([f"Warning: {warning}" for warning in warnings] if warnings else ["No warnings."])
+    return "\n".join(lines)

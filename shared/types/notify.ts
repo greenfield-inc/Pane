@@ -225,6 +225,16 @@ export interface NotifyCaller {
 /** Each notify result may carry the card check's warnings (a long title, no subtitle, …): the card was posted anyway. */
 export type NotifyResult = NotifyResultBody & { warnings?: string[] };
 
+/**
+ * `runpane:notify:check` (`runpane notify --check`, and the CLIs' own check before a card waits):
+ * the card as Pane would post it, and its warnings. Nothing is posted.
+ */
+export interface NotifyCheckResult {
+  check: true;
+  card: Omit<NotifyRequest, 'caller' | 'returnAfterMs'>;
+  warnings: string[];
+}
+
 export type NotifyResultBody =
   /** `answers`: one pick per question, when the approval asks several (`answer` joins them with " · "). */
   | { answer: string; note?: string; answers?: string[] }
