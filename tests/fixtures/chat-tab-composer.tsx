@@ -2,8 +2,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import ChatTabPanel from '../../frontend/src/components/chatTab/ChatTabPanel';
 import { LinkPopoverHost } from '../../frontend/src/components/links/LinkPopover';
-import type { AgentChatConfigOption } from '../../shared/types/agentChat';
-import type { ChatTabAnswer, ChatTabClient, ChatTabConversation, ChatTabSend, ChatTabSwitchBanner, ChatTabView } from '../../shared/types/chatTab';
+import type { AgentChatConfigOption, AgentChatMessage } from '../../shared/types/agentChat';
+import type { ChatTabAnswer, ChatTabClient, ChatTabConversation, ChatTabEvent, ChatTabSend, ChatTabSwitchBanner, ChatTabView } from '../../shared/types/chatTab';
 import '../../frontend/src/index.css';
 
 // A chat tab's composer in a column of a chosen width (?width=360), with Claude's settings.
@@ -44,6 +44,18 @@ if (params.has('long')) {
   const messages = view.transcript!.messages;
   view.transcript!.messages = [...Array.from({ length: 4 }, (_, round) => messages.map(message => ({ ...message, id: `${message.id}:${round}` }))).flat(), ...messages];
 }
+// ?turns=N: a long conversation of N turns (a request, then a markdown reply naming "Reply n"); ?window=M
+// mounts only its newest M messages, the rest paged in with Earlier messages (chat-tab:history).
+const turnCount = Number(params.get('turns') ?? 0);
+const everyMessage: AgentChatMessage[] = Array.from({ length: turnCount }, (_, turn) => [
+  { id: `user:t${turn}`, role: 'user' as const, parts: [{ type: 'text' as const, text: `Request ${turn}: look at module ${turn % 7}.` }] },
+  { id: `a:t${turn}`, role: 'assistant' as const, parts: [{ type: 'text' as const, text: `Reply ${turn}: the **module** is fine.\n\n- one\n- two\n\n\`\`\`ts\nconst value${turn} = ${turn};\n\`\`\`\n\n${turn % 3 === 0 ? 'A longer paragraph that wraps across a couple of lines in a narrow column, so turns differ in height. '.repeat(3) : 'Short.'}` }] },
+]).flat();
+if (turnCount) {
+  const windowSize = Number(params.get('window') ?? everyMessage.length);
+  view.transcript = { panelId: 'composer', generation: 1, revision: 0, start: everyMessage.length - windowSize, messages: everyMessage.slice(-windowSize) };
+  view.messageCount = everyMessage.length;
+}
 // ?permission=1: an approval docked above the composer.
 if (params.has('permission')) {
   view.permissions = [{ id: 'perm', generation: 1, title: 'Run pnpm test', toolCall: { kind: 'execute', title: 'pnpm test', rawInput: { command: 'pnpm test' } }, options: [option('allow', 'Allow once'), option('always', 'Always allow'), option('reject', 'Reject')].map(({ value, name }) => ({ optionId: value, name, kind: value === 'reject' ? 'reject_once' : value === 'always' ? 'allow_always' : 'allow_once' })) }];
@@ -66,6 +78,24 @@ declare global { interface Window { qaResumed: string[]; qaDismissed: number } }
 window.qaResumed = [];
 window.qaDismissed = 0;
 const stateListeners = new Set<(next: ChatTabView) => void>();
+const eventListeners = new Set<(event: ChatTabEvent) => void>();
+// window.qaStream(text): the agent writes `text` at the end of the conversation, as a new reply or onto the one it is writing.
+declare global { interface Window { qaStream: (text: string, fresh?: boolean) => void } }
+let revision = 0;
+window.qaStream = (text, fresh = false) => {
+  const transcript = view.transcript!;
+  if (fresh) {
+    const id = `stream:${revision}`;
+    everyMessage.push({ id, role: 'assistant', parts: [] });
+  }
+  const message = everyMessage.at(-1)!;
+  message.parts = [{ type: 'text', text: (message.parts[0]?.type === 'text' ? message.parts[0].text : '') + text }];
+  transcript.messages = everyMessage.slice(transcript.start);
+  revision += 1;
+  transcript.revision = revision;
+  const event: ChatTabEvent = { panelId: 'composer', generation: 1, revision, index: everyMessage.length - 1, change: { type: 'append', id: message.id, role: 'assistant', part: { type: 'text', text } } };
+  eventListeners.forEach(listener => listener(event));
+};
 // ?queue=2: messages waiting behind a running turn (D-211); ?cleared=1: the conversation started fresh with /clear.
 const queued = Number(params.get('queue') ?? 0);
 view.queue = Array.from({ length: queued }, (_, index) => ({ operationId: `q${index + 1}`, text: ['Also run the linter before you push', 'Then open a draft PR'][index] ?? `Queued ${index + 1}`, queuedAt: '2026-11-08T10:00:00.000Z', stored: true }));
@@ -122,10 +152,10 @@ const saveFile = params.has('files') ? async ({ name }: File) => {
   return `/repo/.pane/files/${name}`;
 } : undefined;
 const client: ChatTabClient = {
-  get: async () => structuredClone(view), history: async () => [], send: async (_panel, request) => { window.qaSent.push(request); return { operationId: request.operationId, state: 'accepted' }; }, receipt: async () => undefined,
+  get: async () => structuredClone(view), history: async (_panel, before, limit) => structuredClone(everyMessage.slice(Math.max(0, before - limit), before)), send: async (_panel, request) => { window.qaSent.push(request); return { operationId: request.operationId, state: 'accepted' }; }, receipt: async () => undefined,
   unqueue: async (_panel, id) => { window.qaCalls.push(`unqueue:${id}`); }, sendNow: async (_panel, id) => { window.qaCalls.push(`sendNow:${id}`); },
   editQueued: async (_panel, id, text) => { window.qaCalls.push(`edit:${id}:${text}`); }, clear: async () => { window.qaCalls.push('clear'); }, stopTask: async (_panel, id) => { window.qaCalls.push(`stopTask:${id}`); }, cancel: async () => {}, permission: async () => {}, answer: async (_panel, _id, response) => { window.qaAnswers.push(response); }, restart: async () => {}, signIn: async () => ({ panelId: 'composer' }),
-  configure: async (_panel, id, value) => { window.qaCalls.push(`configure:${id}:${value}`); }, onEvent: () => () => {},
+  configure: async (_panel, id, value) => { window.qaCalls.push(`configure:${id}:${value}`); }, onEvent: callback => { eventListeners.add(callback); return () => eventListeners.delete(callback); },
   onState: callback => { stateListeners.add(callback); return () => stateListeners.delete(callback); },
   conversations: async () => structuredClone(conversations),
   resume: async (_panel, sessionId) => {

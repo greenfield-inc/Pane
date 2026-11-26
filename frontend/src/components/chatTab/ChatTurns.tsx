@@ -1,7 +1,8 @@
-import { memo, useContext, useMemo, useRef, useState, type ComponentProps } from 'react';
+import { memo, useContext, useRef, useState, type ComponentProps, type ReactElement } from 'react';
 import { ChatBlocksContext } from './chatRendering';
 import { AlertCircle, Brain, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Smartphone, Terminal, Wrench, XCircle } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
+import type { ChatRendering } from './chatRendering';
 import { markdownBlocks } from './markdownBlocks';
 import remarkGfm from 'remark-gfm';
 import { describeChatContent } from '../../../../shared/agentChatPresentation';
@@ -42,30 +43,68 @@ function blockLanguage(node: HastNode | undefined): string | undefined {
   return language?.slice('language-'.length);
 }
 
+/** One set of markdown components per set of custom blocks, so a parse cached for them stays valid across mounts. */
+const componentsByBlocks = new WeakMap<object, Components>();
+const NO_BLOCKS = {};
+function markdownComponents(blocks: ChatRendering['blocks']): Components {
+  const key = blocks ?? NO_BLOCKS;
+  let components = componentsByBlocks.get(key);
+  if (!components) {
+    components = {
+      a: ({ children, href, ...props }: ComponentProps<'a'>) => <a {...props} href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
+      pre: ({ node, children, ...props }: ComponentProps<'pre'> & { node?: HastNode }) => {
+        const language = blockLanguage(node);
+        const render = language ? blocks?.[language] : undefined;
+        return render ? <>{render(hastText(node).replace(/\n$/, ''))}</> : <CodeBlock {...props}>{children}</CodeBlock>;
+      },
+    };
+    componentsByBlocks.set(key, components);
+  }
+  return components;
+}
+
+/**
+ * Parsed markdown, kept across mounts (T-87 Phase 2): a chat shown again, or a turn
+ * scrolled back into the window, reuses the elements instead of parsing again. Keyed by
+ * the text, per components set; the least recently used goes first.
+ */
+const PARSED_LIMIT = 4000;
+const parsed = new WeakMap<Components, Map<string, ReactElement>>();
+const REMARK_PLUGINS = [remarkGfm];
+function parsedMarkdown(text: string, components: Components): ReactElement {
+  let cache = parsed.get(components);
+  if (!cache) { cache = new Map(); parsed.set(components, cache); }
+  const hit = cache.get(text);
+  if (hit) {
+    cache.delete(text);
+    cache.set(text, hit);
+    return hit;
+  }
+  // react-markdown's sync Markdown is a plain function of its options (no hooks): its result is the tree it would render.
+  const tree = ReactMarkdown({ children: text, remarkPlugins: REMARK_PLUGINS, components });
+  cache.set(text, tree);
+  while (cache.size > PARSED_LIMIT) cache.delete(cache.keys().next().value!);
+  return tree;
+}
+
 /**
  * `live`: the turn is still writing. Text that mounts while its turn writes parses block by block,
  * so each token re-parses only the block being written; text that mounts finished parses whole,
  * which mounts faster. The choice holds for the text's lifetime, so a turn ending never remounts
- * its blocks and the state inside them (a half-typed form) survives.
+ * its blocks and the state inside them (a half-typed form) survives. The block still being
+ * written is never cached: each token would add an entry.
  */
 const Markdown = memo(({ text, live }: { text: string; live: boolean }) => {
   const { blocks } = useContext(ChatBlocksContext);
-  const components = useMemo<Components>(() => ({
-    a: ({ children, href, ...props }: ComponentProps<'a'>) => <a {...props} href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
-    pre: ({ node, children, ...props }: ComponentProps<'pre'> & { node?: HastNode }) => {
-      const language = blockLanguage(node);
-      const render = language ? blocks?.[language] : undefined;
-      return render ? <>{render(hastText(node).replace(/\n$/, ''))}</> : <CodeBlock {...props}>{children}</CodeBlock>;
-    },
-  }), [blocks]);
+  const components = markdownComponents(blocks);
   const split = useRef(live).current;
   const parts = split ? markdownBlocks(text) : [text];
-  return <div className="chat-markdown">{parts.map((block, index) => <MarkdownBlock key={index} text={block} components={components} />)}</div>;
+  return <div className="chat-markdown">{parts.map((block, index) => <MarkdownBlock key={index} text={block} components={components} cache={!live || index < parts.length - 1} />)}</div>;
 });
 Markdown.displayName = 'Markdown';
 
-const MarkdownBlock = memo(({ text, components }: { text: string; components: Components }) =>
-  <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown>);
+const MarkdownBlock = memo(({ text, components, cache }: { text: string; components: Components; cache: boolean }) =>
+  cache ? parsedMarkdown(text, components) : <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>{text}</ReactMarkdown>);
 MarkdownBlock.displayName = 'MarkdownBlock';
 
 const VERBS = { explore: ['Exploring', 'Explored'], edit: ['Edit', 'Edited'], run: ['Run', 'Ran'], think: ['Thinking', 'Thought'], other: ['Using', 'Used'] } satisfies Record<ChatStep['kind'], [string, string]>;
