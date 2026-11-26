@@ -69,6 +69,8 @@ export function ControllerLayer() {
   const adapterRef = useRef<GamepadAdapter | null>(null);
   const scrollStop = useRef<number | null>(null);
   const swallowFrame = useRef(false);
+  /** Unrecognised pads that have shown their note since they connected. */
+  const explained = useRef(new Set<string>());
   const dictation = useControllerDictation();
   const dictationRef = useRef(dictation);
   useEffect(() => { dictationRef.current = dictation; });
@@ -119,18 +121,22 @@ export function ControllerLayer() {
         setControllerMode(true);
         const state = useControllerStore.getState();
         if (state.device?.id !== device.id || state.family !== family) useControllerStore.setState({ device, family });
-        // The first press after install shows the cheat sheet once, and an unrecognised pad always explains itself.
-        if ((state.preferencesLoaded && !state.cheatSheetSeen) || family === 'unrecognised') {
+        // The first press after install shows the cheat sheet once, and an unrecognised pad explains itself once per connection.
+        const unexplained = family === 'unrecognised' && !explained.current.has(device.id);
+        if ((state.preferencesLoaded && !state.cheatSheetSeen) || unexplained) {
+          if (unexplained) explained.current.add(device.id);
           if (state.cheatSheet === 'closed') {
             setCheatSheetOpener(document.activeElement instanceof HTMLElement ? document.activeElement : null);
             useControllerStore.setState({ cheatSheet: 'open' });
           }
-          markCheatSheetSeen();
+          // The note isn't the sheet: a pad switched to a readable mode still gets the sheet once.
+          if (family !== 'unrecognised') markCheatSheetSeen();
           swallowFrame.current = true;
         }
       },
       onEvents,
       onDisconnect: device => {
+        explained.current.delete(device.id);
         if (useControllerStore.getState().device?.id === device.id) useControllerStore.setState({ device: null });
         setControllerMode(false);
       },
