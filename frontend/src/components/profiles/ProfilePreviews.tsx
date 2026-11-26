@@ -6,6 +6,9 @@ import { fileKey, useProfilesStore } from '../../stores/profilesStore';
 import { profileDisplayName } from '../../utils/profileAvatar';
 import { MarkdownPreview } from '../MarkdownPreview';
 import { ProfileAvatar } from './ProfileAvatar';
+import { SquareTerminal } from 'lucide-react';
+import { TODOS_HEADER_BUTTON } from '../todos/todoStyles';
+import { tabActionLabel, tabCommand, useTabPane } from './subagentTab';
 import { LINK_MODE_TEXT, coverFacts, sandboxedHtml, splitFrontMatter, subagentLabel, subagentState, variantsText } from './profilePreview';
 
 /**
@@ -153,13 +156,16 @@ function CoverSection({ title, children }: { title: string; children: ReactNode 
  * The cover Pane makes when a profile or subagent has no cover file: its title, description,
  * agent and model, what its identity says, and its subagents, skills and references.
  */
-export function GeneratedCover({ plugin, profile, subagent, onOpenSubagent }: {
+export function GeneratedCover({ plugin, profile, subagent, onOpenSubagent, onOpenTab }: {
   plugin: string;
   profile: ProfileSummary;
   /** The subagent this cover is for; absent for the profile itself. */
   subagent?: ProfileSubagentNode;
   onOpenSubagent: (id: string) => void;
+  /** Opens a launch or process subagent in a tab (T-83 P4). */
+  onOpenTab: (node: ProfileSubagentNode) => void;
 }) {
+  const pane = useTabPane();
   const identity = subagent ? subagent.identity : profile.entry || undefined;
   const text = useFileText(plugin, identity);
   const body = text === undefined ? '' : splitFrontMatter(text).body.trim();
@@ -201,6 +207,16 @@ export function GeneratedCover({ plugin, profile, subagent, onOpenSubagent }: {
       {subagent?.command && (
         <CoverSection title="Run it on its own">
           <code className="block whitespace-pre-wrap break-all rounded-md border border-border-primary bg-surface-primary px-3 py-2 font-mono text-[12.5px] text-text-primary" data-testid="profiles-cover-command">{subagent.command}</code>
+          {tabCommand(subagent) && (
+            <div className="mt-2 flex items-center gap-2">
+              <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-cover-open-tab" title={tabActionLabel(subagent, pane)} onClick={() => onOpenTab(subagent)}>
+                <SquareTerminal className="h-3.5 w-3.5" aria-hidden="true" />Open in a tab
+              </button>
+              <span className="truncate text-[12px] text-text-tertiary" data-testid="profiles-cover-tab-pane">
+                {pane ? `in ${pane.name}` : 'Open a Pane first: the tab opens in the Pane you came from'}
+              </span>
+            </div>
+          )}
         </CoverSection>
       )}
       {state === 'agent' && (

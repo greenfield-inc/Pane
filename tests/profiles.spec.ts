@@ -1,6 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 import { gotoApp } from './electronApiMock';
-import { dismissStartupDialogs, installSessionsFixture, sessionFixture } from './orchestrationSessionsFixture';
+import { dismissStartupDialogs, installSessionsFixture, paneFixture, sessionFixture } from './orchestrationSessionsFixture';
+import type { JsonObject } from '../shared/validation/boundaryDecoder';
+
+/** The Pane a tree's tab opens in (T-83 P4). */
+const TAB_PANE = 'pane-onboarding';
 import { expectNoAxeViolations } from './axeTest';
 import type { AgentFarmProfileEntry } from '../shared/types/agentFarmProfiles';
 import type { ProfileLinkMode, ProfilePhotos, ProfilePlugin, ProfileSubagentNode, ProfileSummary, ProfileTreeNode, ProfilesOverview } from '../shared/types/profileEditor';
@@ -130,14 +134,16 @@ const PALETTE_PROFILES: AgentFarmProfileEntry[] = [
   { ref: 'greenfield/seo', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false, title: 'SEO' },
 ];
 
-async function installProfiles(page: Page, options: { theme?: string; saveError?: string; pins?: string[]; on?: boolean; sync?: ProfileSyncStatus } = {}): Promise<void> {
+async function installProfiles(page: Page, options: { theme?: string; saveError?: string; pins?: string[]; on?: boolean; sync?: ProfileSyncStatus; pane?: boolean } = {}): Promise<void> {
   await page.setViewportSize({ width: 1440, height: 900 });
   const data = fixture();
+  // With `pane`, Session s1 holds one Pane, for opening an agent in a tab from the tree (T-83 P4).
+  const associations = options.pane ? [{ paneId: TAB_PANE, panelIds: [], attachedAt: '2026-11-25T08:00:00.000Z' }] : [];
   await installSessionsFixture(page, [
-    { ...sessionFixture('s1', 'Session profiles plan', '', '', '2026-11-25T08:00:00.000Z'), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h1' } },
+    { ...sessionFixture('s1', 'Session profiles plan', '', '', '2026-11-25T08:00:00.000Z', associations), agentProfile: { ref: 'greenfield/orchestrator', hash: 'h1' } },
     { ...sessionFixture('s2', 'Weekend blog post', '', '', '2026-11-25T08:01:00.000Z'), agentProfile: { ref: 'pane/claude', hash: 'h' } },
     { ...sessionFixture('s3', 'Sprint tracker upkeep', '', '', '2026-11-25T08:02:00.000Z'), agentProfile: { ref: 'greenfield/business', hash: 'h2' } },
-  ], [], {
+  ], options.pane ? [paneFixture(TAB_PANE, 'feature/onboarding')] : [], {
     initialConfig: { theme: options.theme ?? 'light', chatTabsEnabled: true, pinnedProfiles: options.pins ?? [], sessionProfilesEnabled: options.on ?? true },
     profileEditor: { ...data, saveError: options.saveError, sync: options.sync },
     agentFarmProfiles: { profiles: PALETTE_PROFILES },
@@ -593,5 +599,101 @@ for (const theme of ['light', 'dark']) {
     await writeOnDisk(page, 'greenfield', 'agents/business.md', '# Support\n\nAn agent changed this.\n');
     await expect(page.getByTestId('profiles-disk-changed')).toBeVisible({ timeout: 8000 });
     await shot(page, `page-disk-changed-${theme}`);
+  });
+}
+
+/** Every panel the renderer created, in order. */
+async function panelCreates(page: Page): Promise<JsonObject[]> {
+  // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+  return page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getPanelCreates: () => JsonObject[] } }).__paneTestElectronMock.getPanelCreates());
+}
+
+/** Opens the Pane in Session s1, then Profiles from there, so a tree's tab has a Pane to open in. */
+async function openProfilesFromPane(page: Page, theme = 'light'): Promise<void> {
+  await installProfiles(page, { theme, pane: true });
+  await page.getByRole('button', { name: 'Expand Session profiles plan Panes', exact: true }).click();
+  await page.getByRole('button', { name: 'feature/onboarding', exact: true }).first().click();
+  await expect(page.getByTestId('profiles-nav')).toBeVisible();
+  await page.getByTestId('profiles-nav').click();
+  await expect(page.getByTestId('profiles-view')).toBeVisible();
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+}
+
+test('a launch or process agent opens in a tab of the Pane you came from, with its listed command (T-83 P4)', async ({ page }) => {
+  await openProfilesFromPane(page);
+  const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+  // Launch and process rows carry the action; an agent inside its parent doesn't.
+  await expect(tree.getByTestId('profiles-tree-tab-orchestrator/sub:planner')).toHaveAttribute('title', 'Open Planner in a tab in feature/onboarding (⌘↩)');
+  await expect(tree.getByTestId('profiles-tree-tab-orchestrator/sub:advisor')).toHaveCount(1);
+  await expect(tree.getByTestId('profiles-tree-tab-orchestrator/sub:explorer')).toHaveCount(0);
+  await expect(tree.getByTestId('profiles-tree-tab-orchestrator/sub:designer')).toHaveCount(0);
+  // Hidden until the row is hovered or chosen.
+  await expect(tree.getByTestId('profiles-tree-tab-orchestrator/sub:planner')).toHaveCSS('opacity', '0');
+  await tree.getByTestId('profiles-tree-orchestrator/sub:planner').hover();
+  await expect(tree.getByTestId('profiles-tree-tab-orchestrator/sub:planner')).toHaveCSS('opacity', '1');
+  await expectNoAxeViolations(page, { include: '[data-testid="profiles-tree"]' });
+
+  const before = (await panelCreates(page)).length;
+  await tree.getByTestId('profiles-tree-tab-orchestrator/sub:planner').click();
+  await expect.poll(async () => (await panelCreates(page)).length).toBe(before + 1);
+  const created = (await panelCreates(page)).at(-1);
+  expect(created).toMatchObject({ sessionId: TAB_PANE, type: 'terminal', title: 'Planner', state: { customState: { initialCommand: 'agent-farm run greenfield/planner --agent-only' } } });
+  // Pane shows that Pane with the new tab in front; the row's own click didn't also open the cover.
+  await expect(page.getByTestId('profiles-view')).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: /Planner/ })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('the cover and ⌘↩ open the agent in a tab too (T-83 P4)', async ({ page }) => {
+  await openProfilesFromPane(page);
+  const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+  await tree.getByTestId('profiles-tree-orchestrator/sub:qa-and-fix').click();
+  await expect(page.getByTestId('profiles-cover-tab-pane')).toHaveText('in feature/onboarding');
+  await page.getByTestId('profiles-cover-open-tab').click();
+  await expect.poll(async () => (await panelCreates(page)).at(-1)?.title).toBe('QA and fix');
+  await expect(page.getByRole('tab', { name: /QA and fix/ })).toHaveAttribute('aria-selected', 'true');
+
+  // ⌘↩ (Ctrl+Enter) on a row: from the tree's keyboard.
+  await page.getByTestId('profiles-nav').click();
+  await tree.getByTestId('profiles-tree-orchestrator/sub:advisor').focus();
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await expect.poll(async () => (await panelCreates(page)).at(-1)?.title).toBe('Advisor');
+  expect((await panelCreates(page)).at(-1)).toMatchObject({ state: { customState: { initialCommand: 'agent-farm run greenfield/advisor' } } });
+});
+
+test('with no Pane to open in, the tab action says so and starts nothing (T-83 P4)', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+  await tree.getByTestId('profiles-tree-orchestrator/sub:planner').click();
+  await expect(page.getByTestId('profiles-cover-tab-pane')).toHaveText('Open a Pane first: the tab opens in the Pane you came from');
+  const before = (await panelCreates(page)).length;
+  await tree.getByTestId('profiles-tree-tab-orchestrator/sub:planner').click();
+  await expect(page.getByTestId('profiles-notice')).toHaveText('Pane didn’t open Planner: no Pane is open to put its tab in. Open a Pane, then come back to Profiles and try again.');
+  expect((await panelCreates(page)).length).toBe(before);
+  await expect(page.getByTestId('profiles-view')).toBeVisible();
+});
+
+// PANE_PROFILES_SHOTS=<dir> saves the tab action, the opened tab and the no-Pane notice, light and dark (T-83 P4).
+for (const theme of ['light', 'dark']) {
+  test(`tab action screenshots, ${theme}`, async ({ page }) => {
+    test.skip(!shotsDir, 'set PANE_PROFILES_SHOTS to save screenshots');
+    await openProfilesFromPane(page, theme);
+    const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+    await tree.getByTestId('profiles-tree-orchestrator/sub:planner').click();
+    await tree.getByTestId('profiles-tree-orchestrator/sub:qa-and-fix').hover();
+    await shot(page, `tab-action-tree-${theme}`);
+    await page.getByTestId('profiles-cover-open-tab').click();
+    await expect(page.getByRole('tab', { name: /Planner/ })).toHaveAttribute('aria-selected', 'true');
+    await shot(page, `tab-opened-${theme}`);
+  });
+
+  test(`tab action no-Pane notice screenshot, ${theme}`, async ({ page }) => {
+    test.skip(!shotsDir, 'set PANE_PROFILES_SHOTS to save screenshots');
+    await openProfilesTab(page, { theme });
+    await page.getByTestId('profile-row-greenfield-orchestrator').click();
+    await page.getByTestId('profiles-tree-orchestrator/sub:planner').click();
+    await page.getByTestId('profiles-tree-tab-orchestrator/sub:planner').click();
+    await expect(page.getByTestId('profiles-notice')).toBeVisible();
+    await shot(page, `tab-no-pane-${theme}`);
   });
 }
