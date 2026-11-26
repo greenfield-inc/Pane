@@ -525,6 +525,27 @@ jobs:
         retention-days: 30
         if-no-files-found: ignore
 
+    # Another machine's Sessions over a 50 ms link (T-116): two isolated Panes and
+    # scripts/flapping-link-proxy.mjs, on the renderer built above. Timing is
+    # reported only; its hard checks (the link works, Enter moves the window to the
+    # row's machine, a cut link shows as offline) fail the job.
+    - name: Run remote Session switch rig
+      id: remote-switch
+      if: ${{ !cancelled() && matrix.shard == 2 && steps.session-switch-build.outcome == 'success' }}
+      run: xvfb-run -a pnpm test:remote-switch --output=test-results/remote-switch-playwright
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-remote-switch
+        REMOTE_SWITCH_OUT: test-results/remote-session-switch
+
+    - name: Upload remote Session switch samples
+      if: ${{ !cancelled() && matrix.shard == 2 }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: remote-session-switch
+        path: test-results/remote-session-switch/
+        retention-days: 30
+        if-no-files-found: ignore
+
     # Traces and screenshots of failed Electron journeys, to diagnose a failure
     # without rerunning it.
     - name: Upload Electron test results

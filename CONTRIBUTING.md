@@ -261,9 +261,25 @@ It prints its port, its seed, and each phase with a timestamp:
 
 `--seed` repeats a schedule. `--scale 0.1` runs every duration ten times faster.
 `--up`, `--down` (ranges in seconds), `--long-drop` and `--refuse` change the
-defaults. Tests import `start()` from the script and drive the phases with
-`forceDown()` and `forceUp()`; see `scripts/flapping-link-proxy.test.mjs`, run
-by `pnpm test:flapping-proxy`.
+defaults. `--latency 50` adds a 50 ms round trip in every phase, in order and
+across drops. Tests import `start()` from the script and drive the phases with
+`forceDown()` and `forceUp()`, and read the bytes it carried with `bytes()`; see
+`scripts/flapping-link-proxy.test.mjs`, run by `pnpm test:flapping-proxy`.
+
+### Measuring another machine's Sessions on one computer
+
+`pnpm test:remote-switch` runs two isolated Panes from `pnpm build:main` (each
+with its own data folder, Electron profile and HOME; Workspaces and Tailscale
+off) and links them through the proxy: the host serves its remote API on
+`127.0.0.1` with a paired token, and the desktop saves it as a computer whose
+only route is the proxy (`tests/remoteRig.ts`). Chats run the scripted agent.
+It reports how long Enter on the host's Session takes to move the window and
+show the chat, the bytes over the link per open and per idle minute, arrow-key
+cursor moves at 30 presses a second, and when a cut link shows as offline.
+Run `pnpm build:frontend` first. `REMOTE_SWITCH_RTT_MS` sets the latency
+(default 50), `REMOTE_SWITCH_OPENS` and `REMOTE_SWITCH_IDLE_MS` the samples.
+From a Pane terminal, unset `BROWSER` first: it points into your real `~/.pane`,
+and the isolation check refuses to start.
 
 ### Testing a Session move on one computer
 
