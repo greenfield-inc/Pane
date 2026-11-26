@@ -6,6 +6,11 @@ import path from 'node:path';
 import { dismissDialogs, isolatedPane, launchIsolated, type IsolatedPane } from './isolatedPane';
 import type { SwitchMark } from '../shared/switchMarks';
 
+declare global {
+  /** The rAF probe's result for the switch in flight (switchTo below). */
+  var __paneSwitchProbe: ProbeResult | undefined;
+}
+
 /**
  * Session switch latency and retained memory (T-87 Phase 0). Runs under
  * playwright.session-switch.config.ts only: real Electron, an isolated Pane (D-288), the
@@ -136,7 +141,7 @@ function fixture(baseURL: string | undefined): Promise<Fixture> {
     }
     for (const session of sessions) {
       const file = path.join(store, `${session.acp}.json`);
-      const saved = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      const saved: { updates?: unknown[] } = JSON.parse(readFileSync(file, 'utf8'));
       saved.updates = conversation(session.turns, endMark(session));
       writeFileSync(file, JSON.stringify(saved));
     }
@@ -150,11 +155,12 @@ function fixture(baseURL: string | undefined): Promise<Fixture> {
 
 /** How a switch starts. t0 is the trigger's first input event (click or keydown, capture phase). */
 type Trigger = 'click' | 'enter';
-const TRIGGERS: Record<Trigger, { focuses: boolean; run: (page: Page, row: ReturnType<Page['getByTestId']>) => Promise<void> }> = {
+interface TriggerSpec { focuses: boolean; run: (page: Page, row: ReturnType<Page['getByTestId']>) => Promise<void> }
+const TRIGGERS = {
   click: { focuses: false, run: async (_page, row) => { await row.click(); } },
   // Enter on a focused row (regionFocus.ts): opens the Session and moves focus into its composer.
   enter: { focuses: true, run: async (page, row) => { await row.focus(); await page.keyboard.press('Enter'); } },
-};
+} satisfies Record<Trigger, TriggerSpec>;
 
 interface Sample {
   scenario: string;
@@ -187,7 +193,7 @@ async function switchTo(page: Page, session: Seeded, trigger: Trigger, scenario:
   await page.evaluate(({ panelId, mark, focuses }) => {
     globalThis.__paneSwitchMarks = [];
     const done: ProbeResult = {};
-    (globalThis as { __paneSwitchProbe?: ProbeResult }).__paneSwitchProbe = done;
+    globalThis.__paneSwitchProbe = done;
     const started = performance.now();
     const input = (event: Event) => { done.input ??= event.timeStamp; };
     window.addEventListener('click', input, { capture: true, once: true });
@@ -213,23 +219,15 @@ async function switchTo(page: Page, session: Seeded, trigger: Trigger, scenario:
     requestAnimationFrame(tick);
   }, { panelId: session.panelId, mark: endMark(session), focuses: TRIGGERS[trigger].focuses });
   await TRIGGERS[trigger].run(page, row);
-  await page.waitForFunction(() => {
-    const done = (globalThis as { __paneSwitchProbe?: ProbeResult }).__paneSwitchProbe;
-    return !!done && (done.timedOut !== undefined);
-  }, undefined, { timeout: 90_000, polling: 50 });
-  const { done, marks } = await page.evaluate(() => ({
-    // SAFETY: the probe above installed it.
-    done: (globalThis as { __paneSwitchProbe?: ProbeResult }).__paneSwitchProbe as ProbeResult,
-    marks: globalThis.__paneSwitchMarks ?? [],
-  }));
+  await page.waitForFunction(() => globalThis.__paneSwitchProbe?.timedOut !== undefined, undefined, { timeout: 90_000, polling: 50 });
+  const { done, marks } = await page.evaluate(() => ({ done: globalThis.__paneSwitchProbe ?? {}, marks: globalThis.__paneSwitchMarks ?? [] }));
   const t0 = done.input ?? marks.find(mark => mark.name === 'open')?.t ?? NaN;
   const since = (t: number | undefined) => (t === undefined || Number.isNaN(t0) ? null : +(t - t0).toFixed(1));
-  const ownPanel = (mark: SwitchMark) => typeof mark.detail === 'object' && mark.detail.panelId === session.panelId;
-  const ownSession = (mark: SwitchMark) => mark.detail === session.id;
+  const ownPanel = (mark: SwitchMark) => mark.detail.panelId === session.panelId;
+  const ownSession = (mark: SwitchMark) => mark.detail.sessionId === session.id;
   const find = (name: string, own: (mark: SwitchMark) => boolean) => marks.find(mark => mark.name === name && own(mark));
   const chatGetEnd = find('chat:get:end', ownPanel);
-  const commit = marks.find(mark => mark.name === 'chat:commit' && ownPanel(mark) && typeof mark.detail === 'object' && Number(mark.detail.n) > 0);
-  const status = typeof chatGetEnd?.detail === 'object' ? chatGetEnd.detail.status : undefined;
+  const commit = marks.find(mark => mark.name === 'chat:commit' && ownPanel(mark) && (mark.detail.n ?? 0) > 0);
   return {
     scenario,
     session: session.name,
@@ -243,7 +241,7 @@ async function switchTo(page: Page, session: Seeded, trigger: Trigger, scenario:
     chatMount: since(find('chat:mount', ownPanel)?.t),
     chatGetStart: since(find('chat:get:start', ownPanel)?.t),
     chatGetEnd: since(chatGetEnd?.t),
-    chatGetStatus: typeof status === 'string' ? status : null,
+    chatGetStatus: chatGetEnd?.detail.status ?? null,
     chatReady: since(find('chat:ready', ownPanel)?.t),
     firstCommit: since(commit?.t),
     cacheHit: !!commit && !!chatGetEnd && commit.t <= chatGetEnd.t,
@@ -319,8 +317,9 @@ function markdown(summary: Summary[], retention: Retention | undefined): string 
   return `${lines.join('\n')}\n`;
 }
 
-interface Report { meta: Record<string, string>; summary: Summary[]; samples: Sample[]; retention?: Retention }
-const report: Report = { meta: {}, summary: [], samples: [] };
+interface Meta { commit: string; branch: string; platform: string; renderer: string; at: string }
+interface Report { meta?: Meta; summary: Summary[]; samples: Sample[]; retention?: Retention }
+const report: Report = { summary: [], samples: [] };
 
 /** Writes session-switch.json (every sample) and session-switch.md (the table); returns the table. */
 function writeReport(): string {
@@ -332,7 +331,7 @@ function writeReport(): string {
   return table;
 }
 
-function meta(): Record<string, string> {
+function meta(): Meta {
   const git = (args: string[]) => { try { return execFileSync('git', args, { encoding: 'utf8' }).trim(); } catch { return ''; } };
   return { commit: git(['rev-parse', 'HEAD']), branch: git(['rev-parse', '--abbrev-ref', 'HEAD']), platform: `${process.platform}-${process.arch}`, renderer: 'production (frontend/dist via vite preview)', at: new Date().toISOString() };
 }
@@ -353,7 +352,7 @@ async function countersAfterGc(app: ElectronApplication): Promise<Counters> {
     await debug.sendCommand('HeapProfiler.collectGarbage');
     await debug.sendCommand('HeapProfiler.collectGarbage');
     await debug.sendCommand('Performance.enable');
-    const { metrics } = await debug.sendCommand('Performance.getMetrics') as { metrics: Array<{ name: string; value: number }> };
+    const { metrics }: { metrics: Array<{ name: string; value: number }> } = await debug.sendCommand('Performance.getMetrics');
     const value = (name: string) => metrics.find(metric => metric.name === name)?.value ?? NaN;
     return { heapMB: +(value('JSHeapUsedSize') / 1048576).toFixed(2), nodes: value('Nodes'), listeners: value('JSEventListeners') };
   });

@@ -10,10 +10,18 @@
  * layout), `chat:mount`, `chat:get:start` and `chat:get:end` (the chat's newest window),
  * `chat:ready` (a starting agent finished replaying) and `chat:commit` (messages on screen).
  */
+/** Which Session or chat the step belongs to, and what a chat read returned. */
+export interface SwitchMarkDetail {
+  sessionId?: string;
+  panelId?: string;
+  status?: string;
+  start?: number;
+  n?: number;
+}
+
 export interface SwitchMark {
   name: string;
-  /** A Session id, or the chat's panel id with what the step returned. */
-  detail?: string | { panelId: string; [key: string]: string | number | boolean | undefined };
+  detail: SwitchMarkDetail;
   t: number;
 }
 
@@ -21,7 +29,7 @@ declare global {
   var __paneSwitchMarks: SwitchMark[] | undefined;
 }
 
-export function switchMark(name: string, detail?: SwitchMark['detail']): void {
+export function switchMark(name: string, detail: SwitchMarkDetail): void {
   const sink = globalThis.__paneSwitchMarks;
   if (!Array.isArray(sink)) return;
   const t = performance.now();

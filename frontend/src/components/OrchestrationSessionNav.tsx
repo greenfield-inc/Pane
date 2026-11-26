@@ -229,7 +229,7 @@ export function OrchestrationSessionNav({
   }, []);
 
   const openSession = useCallback(async (sessionId: string) => {
-    switchMark('open', sessionId);
+    switchMark('open', { sessionId });
     // Navigation belongs to the click, never to the order of remote replies.
     void setActiveSession(null);
     navigateToPaneChat();

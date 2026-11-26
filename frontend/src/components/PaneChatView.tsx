@@ -450,9 +450,9 @@ function SessionTile({
     setIsLoading(true);
     setError(null);
     try {
-      switchMark('session:get:start', sessionId);
+      switchMark('session:get:start', { sessionId });
       const response = await API.orchestrationSessions.get({ sessionId });
-      switchMark('session:get:end', sessionId);
+      switchMark('session:get:end', { sessionId });
       if (generation !== requestGeneration.current) return;
       const responseFailure = responseError(response, 'Failed to open Session');
       if (responseFailure || !response.data) throw responseFailure ?? new Error('Failed to open Session');

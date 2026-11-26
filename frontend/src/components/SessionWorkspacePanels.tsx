@@ -340,7 +340,7 @@ export function SessionWorkspacePanels({
     let cancelled = false;
     setLoaded(false);
     setError(null);
-    switchMark('panels:start', sessionId);
+    switchMark('panels:start', { sessionId });
     void panelApi.loadPanelsForSession(sessionId).then(async saved => {
       if (cancelled) return;
       usePanelStore.getState().setPanels(sessionId, saved);
@@ -366,7 +366,7 @@ export function SessionWorkspacePanels({
       for (const panel of stage) if (panel.metadata?.openPlacement === 'split') splitIds.add(panel.id);
       applyLayout(reconcile(withOverview, [agentPanelId, overviewId, ...(todosId ? [todosId] : []), ...stage.map(panel => panel.id)], splitIds).layout);
       setLoaded(true);
-      switchMark('panels:loaded', sessionId);
+      switchMark('panels:loaded', { sessionId });
     }).catch(error => {
       if (!cancelled) setError(error instanceof Error ? error.message : 'Could not load Session tools');
     });
