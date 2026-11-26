@@ -813,6 +813,25 @@ export class OrchestrationSessionManager extends EventEmitter {
   private pluginHashesCheckedAt = 0;
   private pluginHashesChecking?: Promise<void>;
 
+  private profileWatch: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Re-checks the plugins every 10 s on the host, so a Session's Changed dot lights while nothing
+   * lists Sessions (an idle sidebar, QA F1). Started once at startup; reads nothing with Profiles off.
+   */
+  watchProfileChanges(): void {
+    if (this.profileWatch) return;
+    this.profileWatch = setInterval(() => {
+      void this.refreshPluginHashes().catch(error => console.warn(`[Sessions] Could not check Sessions' profiles for changes: ${reasonOf(error)}`));
+    }, PLUGIN_HASH_INTERVAL_MS);
+    this.profileWatch.unref?.();
+  }
+
+  stopWatchingProfileChanges(): void {
+    if (this.profileWatch) clearInterval(this.profileWatch);
+    this.profileWatch = null;
+  }
+
   /**
    * Hashes the plugins live Sessions run, at most every few seconds, and announces the Sessions whose
    * profile changed since (T-63). PR 5's Save calls it after a save, with `force`.

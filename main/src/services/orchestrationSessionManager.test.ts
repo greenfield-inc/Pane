@@ -571,6 +571,27 @@ describe('OrchestrationSessionManager', () => {
         expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBeUndefined();
       }));
 
+      // QA F1: with the sidebar idle nothing lists Sessions, so the host re-checks on its own every 10 s.
+      it('lights the dot on its own within one 10 s check while nothing lists Sessions', async () => withChatTabs(async (fixture, farm) => {
+        fixture.manager.attachChatTabs(chatTabs());
+        const created = await fixture.manager.create({ name: 'Watched', agentProfile: 'greenfield/orchestrator' });
+        await fixture.manager.refreshPluginHashes(true);
+        const changed = vi.fn();
+        fixture.manager.on('changed', changed);
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+        try {
+          fixture.manager.watchProfileChanges();
+          farm.receiptHash.mockImplementation(async (plugin: string) => plugin === 'greenfield' ? 'receipt-greenfield-2' : `receipt-${plugin}`);
+          await vi.advanceTimersByTimeAsync(10_000);
+          await vi.waitFor(() => expect(changed).toHaveBeenCalledWith(expect.objectContaining({ sessionId: created.session.id, kind: 'updated' })));
+          fixture.manager.stopWatchingProfileChanges();
+        } finally {
+          fixture.manager.stopWatchingProfileChanges();
+          vi.useRealTimers();
+        }
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBe(true);
+      }));
+
       it('reloads nothing when the new snapshot can\'t be saved', async () => withChatTabs(async (fixture, farm) => {
         const port = chatTabs();
         fixture.manager.attachChatTabs(port);
