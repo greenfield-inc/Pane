@@ -1,5 +1,5 @@
 import type { LegendListRef } from '@legendapp/list/react-native';
-import { useRef, type RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 
 import type { FocusListHandle } from './focusContext';
 import type { Direction, Rect } from './focusRegistry';
@@ -14,14 +14,19 @@ const EDGE_STEP = 0.6;
  * `<FocusListContext value={handle}>`. A focused row scrolls into view, and a
  * move past the last mounted row scrolls a step so the next rows mount.
  */
-export function useFocusList(list: RefObject<LegendListRef | null>): FocusListHandle {
+export function useFocusList(list: RefObject<LegendListRef | null>, bottomInset = 0): FocusListHandle {
+  const inset = useRef(bottomInset);
+  useEffect(() => {
+    inset.current = bottomInset;
+  }, [bottomInset]);
   const handle = useRef<FocusListHandle>(null);
   handle.current ??= {
     reveal(rect: Rect) {
       const view = viewport(list.current);
       if (!view || !list.current) return;
       const above = view.y + MARGIN - rect.y;
-      const below = rect.y + rect.height - (view.y + view.height - MARGIN);
+      // A bar drawn over the list's bottom (Home's search) hides rows behind it.
+      const below = rect.y + rect.height - (view.y + view.height - inset.current - MARGIN);
       const delta = above > 0 ? -above : below > 0 ? below : 0;
       if (delta !== 0) void list.current.scrollToOffset({ offset: Math.max(0, list.current.getState().scroll + delta), animated: true });
     },

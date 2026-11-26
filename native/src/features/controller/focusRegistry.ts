@@ -129,7 +129,7 @@ export function createFocusRegistry(): FocusRegistry {
     },
     activate() {
       const item = valid();
-      if (!item) return false;
+      if (!item?.measure()) return false;
       item.activate();
       return true;
     },

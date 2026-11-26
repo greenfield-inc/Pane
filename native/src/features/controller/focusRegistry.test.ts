@@ -61,6 +61,17 @@ describe('focus registry', () => {
     expect(open.activated).toEqual(['open']);
   });
 
+  it('ignores A while the focused control is off screen (below a half-height sheet)', () => {
+    const focus = createFocusRegistry();
+    let onScreen = true;
+    const activated: string[] = [];
+    focus.add({ id: 'allow', scope: '', measure: () => (onScreen ? row(500) : null), activate: () => void activated.push('allow') });
+    focus.move('down');
+    onScreen = false;
+    expect(focus.activate()).toBe(false);
+    expect(activated).toEqual([]);
+  });
+
   it('drops focus when the focused control unmounts', () => {
     const focus = createFocusRegistry();
     const remove = focus.add(control('gone', row(100)).item);

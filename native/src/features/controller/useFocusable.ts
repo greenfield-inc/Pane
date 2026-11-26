@@ -1,5 +1,5 @@
 import { use, useContext, useEffect, useEffectEvent, useId, useRef, useSyncExternalStore } from 'react';
-import type { View } from 'react-native';
+import { Dimensions, type View } from 'react-native';
 
 import type { ControllerContext } from '@shared/controller/bindings';
 
@@ -44,9 +44,13 @@ export function useFocusable({ onActivate, preferred, context, enabled: wanted =
       preferred,
       context,
       activate: () => activate(),
+      // A control off the window (below a half-height sheet, past a list's mounted rows) can't take focus or A.
       measure: () => {
         const box = ref.current?.getBoundingClientRect?.();
-        return box ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
+        if (!box) return null;
+        const window = Dimensions.get('window');
+        const middle = box.y + box.height / 2;
+        return middle < 0 || middle > window.height ? null : { x: box.x, y: box.y, width: box.width, height: box.height };
       },
       reveal: list?.reveal,
       onEdge: list?.onEdge,

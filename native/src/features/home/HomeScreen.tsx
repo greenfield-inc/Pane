@@ -277,7 +277,7 @@ export function HomeScreen() {
     next.open();
   };
   const listRef = useRef<LegendListRef>(null);
-  const focusList = useFocusList(listRef);
+  const focusList = useFocusList(listRef, bottomBarHeight(insets.bottom));
   useControllerActions('home', {
     'next-needs-you': () => openNextNeedsYou(),
     'open-recent': () => router.push('/recent'),
