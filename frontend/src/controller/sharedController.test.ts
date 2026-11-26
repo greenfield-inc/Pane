@@ -43,6 +43,9 @@ describe('controller interpreter', () => {
       [300, frame(['r1'])],
       [350, frame()],
     ])).toEqual([[50, { type: 'action', action: 'controller-switch-column' }]]);
+    // Both let go in the same frame.
+    expect(play([[0, frame(['l1'])], [50, frame(['l1', 'r1'])], [300, frame()]]))
+      .toEqual([[50, { type: 'action', action: 'controller-switch-column' }]]);
   });
 
   it('holds R2 from press to release', () => {

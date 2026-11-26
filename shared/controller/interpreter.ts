@@ -105,7 +105,6 @@ export function createControllerInterpreter(options: { family: ControllerFamily 
         downAt.delete(key);
         if (key === 'L1' || key === 'R1') {
           if (!shoulderChord) action(RELEASE_ACTIONS[key]);
-          if (!held.has('L1') && !held.has('R1')) shoulderChord = false;
         } else if (key === 'minus') {
           if (minusHolding) events.push({ type: 'hold-end', action: MINUS_HOLD_ACTION });
           else action(MINUS_TAP_ACTION);
@@ -130,6 +129,9 @@ export function createControllerInterpreter(options: { family: ControllerFamily 
           if (id) action(id);
         }
       }
+
+      // The chord ends once both shoulders are up, after every release in this frame has been read.
+      if (!held.has('L1') && !held.has('R1')) shoulderChord = false;
 
       const minusDown = downAt.get('minus');
       if (minusDown !== undefined && !minusHolding && now - minusDown >= HOLD_MS) {
