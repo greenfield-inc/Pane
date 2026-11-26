@@ -40,10 +40,12 @@ export function SidebarSectionHeader({ item, first, onToggle }: {
  * then the name, pane count and the amber count of what waits on you in it; a paused Session is
  * grayed out behind a pause glyph. Swipe right pins; swipe left pauses or resumes, and archives.
  */
-export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinned, onArchive, onTogglePaused, background }: {
+export function SessionRow({ item, waiting, fresh = 0, onOpen, onToggleNested, onTogglePinned, onArchive, onTogglePaused, background }: {
   item: Extract<SidebarItem, { type: 'session' }>;
   /** What waits on you in this Session (`sessionWaiting`); none at zero. */
   waiting: number;
+  /** Of those, how many the phone hasn't shown you yet. */
+  fresh?: number;
   onOpen: () => void;
   onToggleNested: () => void;
   onTogglePinned: () => void;
@@ -78,7 +80,7 @@ export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinn
         <Pressable
           testID={`session-row-${nestedKey}`}
           accessibilityRole="button"
-          accessibilityLabel={`Open Session ${label}${paused ? ', Paused' : ''}${waiting > 0 ? `, ${waiting} waiting` : ''}`}
+          accessibilityLabel={`Open Session ${label}${paused ? ', Paused' : ''}${waiting > 0 ? `, ${waiting} waiting` : ''}${fresh > 0 ? `, ${fresh} new` : ''}`}
           {...accessibility}
           onPress={onOpen}
           onPressIn={() => setPressed(true)}
@@ -88,7 +90,7 @@ export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinn
           {paused ? <PausedBadge /> : null}
           <Text variant="rowValue" numberOfLines={1} style={[styles.name, { color: pressed ? theme.colors.text : paused ? theme.colors.textMuted : theme.colors.textSecondary }]}>{label}</Text>
           {paneCount > 0 ? <Text variant="caption" tone="muted" style={styles.count}>{paneCount}</Text> : null}
-          <WaitingCount testID={`session-waiting-${nestedKey}`} count={waiting} />
+          <WaitingCount testID={`session-waiting-${nestedKey}`} count={waiting} fresh={fresh} />
         </Pressable>
       </View>
     </SwipeRow>

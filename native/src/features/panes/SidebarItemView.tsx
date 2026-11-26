@@ -15,6 +15,8 @@ export interface SidebarItemContext {
   actions: PaneActions;
   /** What waits on the person in a Session on this machine. */
   waitingFor: (sessionId: string) => number;
+  /** What waits on the person in a Session or Pane on this machine that the phone hasn't shown yet. */
+  freshFor?: (row: { sessionId: string } | { paneId: string }) => number;
   onToggleSection: (section: SidebarSection) => void;
   /** Shows or hides a Session's panes. */
   onToggleSession: (sessionId: string) => void;
@@ -57,6 +59,7 @@ export function SidebarItemView({ item, previous, first, context }: {
           <PaneRow
             pane={item.pane}
             label={item.label}
+            fresh={context.freshFor?.({ paneId: item.pane.id })}
             background={background}
             onOpen={() => actions.openPane(item.pane.id)}
             onTogglePinned={() => actions.togglePanePinned(item.pane.id)}
@@ -71,6 +74,7 @@ export function SidebarItemView({ item, previous, first, context }: {
           item={item}
           background={background}
           waiting={context.waitingFor(item.session.id)}
+          fresh={context.freshFor?.({ sessionId: item.session.id })}
           onOpen={() => actions.openSession(item.session.id)}
           onToggleNested={() => context.onToggleSession(item.session.id)}
           onTogglePinned={() => actions.toggleSessionPinned(item.session.id, !item.session.isPinned)}
