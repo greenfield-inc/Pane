@@ -9,7 +9,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { pathToFileURL } from 'url';
 import { rejectWithPaneErrorText, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
-import { getPaneWebviewContextMap } from '../core/runtime';
+import { getPaneEventSink, getPaneWebviewContextMap } from '../core/runtime';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { getMobilePushSender } from '../daemon/mobilePushSender';
@@ -717,10 +717,17 @@ export function registerPanelHandlers(
     }
   });
 
+  // A phone showing the Pane follows the desktop's split (`panel:layoutChanged`); it reads the layout itself.
+  const saveLayout = (sessionId: string, layoutJson: string | null) => {
+    if (databaseService.getSessionPanelLayout(sessionId) === layoutJson) return;
+    databaseService.setSessionPanelLayout(sessionId, layoutJson);
+    getPaneEventSink().send('panel:layoutChanged', { sessionId });
+  };
+
   commandRegistry.register('panels:set-layout', async (sessionId: string, layout: SessionPanelLayout | null) => {
     try {
       if (layout === null) {
-        databaseService.setSessionPanelLayout(sessionId, null);
+        saveLayout(sessionId, null);
         return { success: true };
       }
 
@@ -755,7 +762,7 @@ export function registerPanelHandlers(
 
       const cleanedRoot = stripUnknownIds(layout.root);
       if (!cleanedRoot) {
-        databaseService.setSessionPanelLayout(sessionId, null);
+        saveLayout(sessionId, null);
         return { success: true };
       }
 
@@ -763,7 +770,7 @@ export function registerPanelHandlers(
         ...layout,
         root: cleanedRoot,
       };
-      databaseService.setSessionPanelLayout(sessionId, JSON.stringify(cleanedLayout));
+      saveLayout(sessionId, JSON.stringify(cleanedLayout));
       return { success: true };
     } catch (error) {
       console.error('[IPC] Failed to set panel layout:', error);

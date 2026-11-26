@@ -113,6 +113,8 @@ const READ_EVENT_CHANNELS: ReadonlySet<string> = new Set([
   'panel:updated',
   'panel:deleted',
   'panel:event',
+  // The desktop's split changed; the phone reads it again (`panels:get-layout`).
+  'panel:layoutChanged',
   // Conversations.
   'panel:prompt-added',
   'panel:response-added',

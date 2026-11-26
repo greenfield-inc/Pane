@@ -28,24 +28,35 @@ export const TAB_TYPES: Record<ToolPanelType, { ios: SFSymbol; android: AndroidS
 const CHAT = { ios: 'bubble.left', android: 'chat_bubble', label: 'chat' } as const;
 
 /** A long press's menu for tab `title`: View live (a page tab an agent used), Close or Cancel. */
-export function offerClose(title: string, close: () => void, viewLive?: () => void) {
+export function offerClose(title: string, close: () => void, viewLive?: () => void, extra?: TabMenuAction) {
+  const actions = [
+    ...(extra ? [extra] : []),
+    ...(viewLive ? [{ label: 'View live', onPress: viewLive }] : []),
+  ];
   if (Platform.OS === 'ios') {
-    const options = viewLive ? ['View live', 'Close', 'Cancel'] : ['Close', 'Cancel'];
-    const closeIndex = viewLive ? 1 : 0;
+    const options = [...actions.map(action => action.label), 'Close', 'Cancel'];
+    const closeIndex = actions.length;
     ActionSheetIOS.showActionSheetWithOptions(
       { title, options, destructiveButtonIndex: closeIndex, cancelButtonIndex: closeIndex + 1 },
       index => {
         if (index === closeIndex) close();
-        else if (viewLive && index === 0) viewLive();
+        else actions[index]?.onPress();
       },
     );
   } else {
+    // Android shows three buttons at most; with two actions, a tap outside the dialog cancels.
     Alert.alert(title, undefined, [
-      { text: 'Cancel', style: 'cancel' },
-      ...(viewLive ? [{ text: 'View live', onPress: viewLive }] : []),
+      ...(actions.length < 2 ? [{ text: 'Cancel', style: 'cancel' as const }] : []),
+      ...actions.map(action => ({ text: action.label, onPress: action.onPress })),
       { text: 'Close', style: 'destructive', onPress: close },
-    ]);
+    ], { cancelable: true });
   }
+}
+
+/** A tab menu's action beside Close, such as Open beside. */
+export interface TabMenuAction {
+  label: string;
+  onPress: () => void;
 }
 
 /** A tab the screen draws itself, ahead of the Pane's tabs (an approval and what it links). */
