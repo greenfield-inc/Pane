@@ -79,6 +79,7 @@ import type { SessionMoveMark } from '../../../shared/types/sessionMove';
 import { releaseMoveHolds } from './sessionMove/restore';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import type { MobileAlertSubject } from '../daemon/mobilePushSender';
+import { createReplyProbe, type ReplyProbe } from './sessionReply';
 
 /** The desktop's saved machines, as the Session manager reads remote members through them. */
 export interface RemoteMachineAccess {
@@ -118,6 +119,8 @@ export class OrchestrationSessionManager extends EventEmitter {
     },
   });
   private remoteMachines: RemoteMachineAccess | undefined;
+  /** Whether a Session agent's finished turn ended with a message the person can read (sessionReply.ts). */
+  private replyProbe: ReplyProbe = createReplyProbe(paneId => this.sessionManager.getSession(paneId)?.worktreePath);
 
   constructor(
     private readonly configManager: ConfigManager,
@@ -1040,8 +1043,18 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
-  /** Persist meaningful live state transitions and notify visible overviews. */
+  /** Replaces how a finished turn is checked for a readable message; tests pass a stub. */
+  setReplyProbe(probe: ReplyProbe): void {
+    this.replyProbe = probe;
+  }
+
+  /**
+   * Persist meaningful live state transitions and notify visible overviews. When a Session's own
+   * agent finishes a turn that ended with a message the person can read, stamps `agentRepliedAt`
+   * with the time the turn ended, so the sidebar bolds the Session until it is opened.
+   */
   async notifyLiveActivity(panelId: string, state: AgentState): Promise<void> {
+    const endedTurns: Array<{ sessionId: string; startedAtMs: number; endedAt: string }> = [];
     await withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
@@ -1062,16 +1075,15 @@ export class OrchestrationSessionManager extends EventEmitter {
           continue;
         }
         const now = new Date().toISOString();
-        // The Session's own agent ending a turn is a new message from it: the sidebar bolds the
-        // Session until the person opens it (sessionIsUnread in the renderer).
-        const replied = isOrchestratorPanel && state === 'idle' && lastForPanel?.kind === 'working';
+        if (isOrchestratorPanel && state === 'idle' && lastForPanel?.kind === 'working') {
+          endedTurns.push({ sessionId: current.id, startedAtMs: Date.parse(lastForPanel.at), endedAt: now });
+        }
         const nextRecord: OrchestrationSessionRecord = {
           ...current,
           revision: current.revision + 1,
           updatedAt: now,
           activity: [...current.activity, this.activity(state, `Agent state changed to ${state}.`, 'agent', association?.paneId, panelId)],
         };
-        if (replied) nextRecord.agentRepliedAt = now;
         this.trimActivity(nextRecord);
         nextData = replaceSession(nextData, nextRecord);
         changed.push(nextRecord);
@@ -1082,6 +1094,21 @@ export class OrchestrationSessionManager extends EventEmitter {
         for (const item of changed) this.emitChanged(item, item.activity.at(-1)?.kind ?? state);
       }
       for (const item of refreshed) this.emit('overview-updated', item);
+    });
+    // Reading the transcript happens outside the lock; the stamp keeps the time the turn ended.
+    for (const turn of endedTurns) {
+      if (await this.replyProbe(panelId, turn.startedAtMs)) await this.stampAgentReply(turn.sessionId, turn.endedAt);
+    }
+  }
+
+  private async stampAgentReply(sessionId: string, at: string): Promise<void> {
+    await withLock('orchestration-sessions', async () => {
+      const data = this.store.read();
+      const current = data.sessions.find(session => session.id === sessionId);
+      if (!current || (current.agentRepliedAt !== undefined && current.agentRepliedAt >= at)) return;
+      const nextRecord: OrchestrationSessionRecord = { ...current, revision: current.revision + 1, agentRepliedAt: at };
+      this.store.write(replaceSession(data, nextRecord));
+      this.emit('changed', { sessionId, kind: 'replied' });
     });
   }
 

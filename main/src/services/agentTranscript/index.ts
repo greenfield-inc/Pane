@@ -138,8 +138,27 @@ async function lastAssistantMessage(locator: TranscriptLocator): Promise<string 
   return parts.join('\n');
 }
 
+/**
+ * Whether the agent wrote text the person can read at or after `sinceMs` (a turn's start).
+ * Transcript entries carry only text: tool calls, thinking and empty replies are never entries,
+ * so a turn of tool calls alone finds nothing. Undefined when no transcript was found.
+ */
+async function assistantTextSince(locator: TranscriptLocator, sinceMs: number): Promise<boolean | undefined> {
+  const earliest = sinceMs - SINCE_SLACK_MS;
+  const files = await transcriptFiles(locator, Math.max(earliest, locator.notBeforeMs ?? 0));
+  let found: boolean | undefined;
+  for (const file of files) {
+    const entries = await readEntries(locator, file);
+    if (!entries) continue;
+    found = false;
+    if (entries.some(entry => entry.kind === 'assistant' && entry.text.trim() !== '' && entry.timestampMs !== undefined && entry.timestampMs >= earliest)) return true;
+  }
+  return found;
+}
+
 /** The transcript reader, as one object so callers' tests can stub its reads. */
 export const agentTranscripts = {
+  assistantTextSince,
   findUserTurnSince,
   lastAssistantMessage,
 };
