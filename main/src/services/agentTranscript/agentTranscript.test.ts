@@ -355,6 +355,32 @@ describe('readFinishedTurns', () => {
     await expect(readFinishedTurns(claudeLocator(), cursor, true)).resolves.toMatchObject({ endedWithText: true });
   });
 
+  it('reads a transcript new to this Pane run from its start: a new Session\'s first reply bolds', async () => {
+    const runStartedAt = Date.now() - 60_000;
+    writeClaude(sessionId, [prompt('hello', '2026-09-27T18:40:00.000Z'), say('msg_1', 'Hi, on it.', '2026-09-27T18:40:01.000Z')]);
+
+    await expect(readFinishedTurns(claudeLocator(), undefined, true, runStartedAt)).resolves.toMatchObject({ endedWithText: true });
+  });
+
+  it('after a restart that starts a new transcript, reads the new one from its start: its first reply bolds', async () => {
+    const runStartedAt = Date.now() - 60_000;
+    // The cursor saved before the restart names the old transcript.
+    const before = { file: path.join(home, 'old-session.jsonl'), id: '1:1', offset: 4096 };
+    writeClaude(sessionId, [prompt('[From Pane] resumed work', '2026-09-27T18:40:00.000Z'), say('msg_1', 'Back on it.', '2026-09-27T18:40:01.000Z')]);
+
+    await expect(readFinishedTurns(claudeLocator(), before, true, runStartedAt)).resolves.toMatchObject({ endedWithText: true });
+  });
+
+  it('a resumed transcript that existed before this Pane run credits nothing until a fresh prompt', async () => {
+    const file = writeClaude(sessionId, [prompt('old', '2026-09-27T18:29:00.000Z'), say('msg_0', 'An old reply the person read.', '2026-09-27T18:30:00.000Z')]);
+    // Pane started after the file was made.
+    const runStartedAt = Date.now() + 60_000;
+    const first = await readFinishedTurns(claudeLocator(), undefined, true, runStartedAt);
+    expect(first).toMatchObject({ missed: true, endedWithText: undefined });
+    append(file, [prompt('next', '2026-09-27T18:41:00.000Z'), say('msg_2', 'A new reply.', '2026-09-27T18:41:05.000Z')]);
+    await expect(readFinishedTurns(claudeLocator(), first.cursor, true, runStartedAt)).resolves.toMatchObject({ endedWithText: true });
+  });
+
   it('with no cursor (a restart, a new transcript), credits nothing: a resumed transcript\'s history never bolds, nor rows before the next prompt', async () => {
     // Pane restarts; the resumed transcript already holds a reply the person read.
     const file = writeClaude(sessionId, [prompt('old', '2026-09-27T18:29:00.000Z'), say('msg_0', 'An old reply the person read long ago.', '2026-09-27T18:30:00.000Z')]);

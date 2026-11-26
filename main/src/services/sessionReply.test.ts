@@ -71,6 +71,12 @@ describe('the reply probe for a terminal Session agent', () => {
     expect(readTurns.mock.calls.map(call => call[1]?.offset)).toEqual([0, 0, 100, 100, 100, 100]);
   });
 
+  it('tells the reader when this Pane run started, so a transcript made since is read from its start', async () => {
+    const readTurns = vi.fn(async () => finished(true));
+    await createReplyProbe(sources({ readTurns, runStartedAtMs: 1_700_000_000_000 })).turnEnded('panel');
+    expect(readTurns.mock.calls[0][3]).toBe(1_700_000_000_000);
+  });
+
   it('tells the reader whether the tab is idle at each read, so a turn still working never counts', async () => {
     const readTurns = vi.fn(async () => finished(false));
     await createReplyProbe(sources({ readTurns, isIdle: () => false })).turnEnded('panel');
