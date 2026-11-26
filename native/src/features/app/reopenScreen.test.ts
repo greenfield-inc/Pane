@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { forgetScreen, rememberScreen, screenCount, takeScreenToReopen } from './reopenScreen';
+import { closedAny, forgetScreen, rememberScreen, screenCount, takeScreenToReopen } from './reopenScreen';
 
 // The root state the navigation container reports: Expo Router's root route holds the stack.
-const root = (...routes: { name: string; params?: Record<string, string> }[]) => ({
+const root = (...routes: { name: string; key?: string; params?: Record<string, string> }[]) => ({
   index: 0,
   routes: [{ name: '__root', state: { index: routes.length - 1, routes } }],
 });
@@ -72,5 +72,22 @@ describe('counting the screens in the stack', () => {
     expect(screenCount(root(home, pane))).toBe(2);
     expect(screenCount(root(home, pane, { name: 'pane/[paneId]/permission', params: { paneId: 'p1' } }))).toBe(2);
     expect(screenCount(root(home, pane, { name: 'settings' }))).toBe(3);
+  });
+});
+
+describe('telling whether a screen closed', () => {
+  const keyed = (key: string) => ({ name: 'pane/[paneId]/index', key });
+
+  it('is true when Back closes the top screen or a sheet over it', () => {
+    expect(closedAny(root({ ...home, key: 'h' }, keyed('a')), root({ ...home, key: 'h' }))).toBe(true);
+    expect(closedAny(root({ ...home, key: 'h' }, keyed('a'), { name: 'pane/[paneId]/notify', key: 's' }), root({ ...home, key: 'h' }, keyed('a')))).toBe(true);
+  });
+
+  it('is true when Home replaces the open screen with another', () => {
+    expect(closedAny(root({ ...home, key: 'h' }, keyed('a')), root({ ...home, key: 'h' }, keyed('b')))).toBe(true);
+  });
+
+  it('is false when a screen opens over the others', () => {
+    expect(closedAny(root({ ...home, key: 'h' }, keyed('a')), root({ ...home, key: 'h' }, keyed('a'), keyed('b')))).toBe(false);
   });
 });

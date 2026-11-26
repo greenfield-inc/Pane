@@ -5,7 +5,7 @@ import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-re
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
-import { InColumn, useWideLayout } from '@/features/layout/wideLayout';
+import { InColumn, screenJustClosed, useWideLayout } from '@/features/layout/wideLayout';
 import { IconButton } from '@/features/panes/PaneKit';
 import { useTheme } from '@/theme';
 import { Icon } from '@/ui';
@@ -40,9 +40,20 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
   }, [inColumn, setSearching]);
   // Search on the rail expands Home with the keyboard up.
   const input = useRef<TextInput>(null);
+  const asked = useRef(false);
   useEffect(() => {
-    if (inColumn && useWideLayout.getState().takeSearchRequest()) input.current?.focus();
+    if (inColumn && useWideLayout.getState().takeSearchRequest()) {
+      asked.current = true;
+      input.current?.focus();
+    }
   }, [inColumn]);
+  const onFocus = () => {
+    const wanted = asked.current;
+    asked.current = false;
+    // Android's handoff from a screen that just closed beside the column: give the focus back.
+    if (inColumn && !wanted && screenJustClosed()) return input.current?.blur();
+    onFocusChange(true);
+  };
   const onFocusChange = (focused: boolean) => {
     setTyping(focused);
     if (inColumn) setSearching(focused);
@@ -77,7 +88,8 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
           returnKeyType="search"
           value={query}
           onChangeText={onQuery}
-          onFocus={() => onFocusChange(true)}
+          onPressIn={() => { asked.current = true; }}
+          onFocus={onFocus}
           onBlur={() => onFocusChange(false)}
           style={[theme.typography.body, styles.input, { color: theme.colors.text }]}
         />

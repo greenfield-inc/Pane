@@ -4,11 +4,12 @@ import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ScreenFocus } from '@/daemon';
+import { closedAny } from '@/features/app/reopenScreen';
 import { ArchiveHoldProvider } from '@/features/approvals/ArchiveUndo';
 import { HomeScreen } from '@/features/home/HomeScreen';
 import { useTheme } from '@/theme';
 
-import { InColumn, useRail, useWideLayout } from './wideLayout';
+import { InColumn, noteScreenClosed, useRail, useWideLayout } from './wideLayout';
 import { columnWidth, RAIL_WIDTH } from './windowRule';
 
 /**
@@ -26,7 +27,13 @@ export function WideFrame({ children }: { children: ReactNode }) {
   const setStack = useWideLayout(state => state.setStack);
   const navigation = useNavigationContainerRef();
   useEffect(() => {
-    const note = () => setStack(navigation.getRootState());
+    let before = navigation.getRootState();
+    const note = () => {
+      const root = navigation.getRootState();
+      setStack(root);
+      if (useWideLayout.getState().wide && closedAny(before, root)) noteScreenClosed();
+      before = root;
+    };
     note();
     return navigation.addListener('state', note);
   }, [navigation, setStack]);

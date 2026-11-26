@@ -82,6 +82,22 @@ export function useShowsBack(): boolean {
   return useWideLayout(state => !state.wide || state.depth > 2);
 }
 
+let closedAt = 0;
+
+/** A screen or sheet beside the column closed. */
+export function noteScreenClosed(): void {
+  closedAt = Date.now();
+}
+
+/**
+ * When a screen closes with its text box focused, Android hands focus to the first box it finds:
+ * the column's search, with a caret and no keyboard. Focus the search didn't ask for, this soon
+ * after a close, is that handoff.
+ */
+export function screenJustClosed(): boolean {
+  return Date.now() - closedAt < 1_000;
+}
+
 /** Rendered around Home when it is the docked column. */
 export const InColumn = createContext(false);
 
