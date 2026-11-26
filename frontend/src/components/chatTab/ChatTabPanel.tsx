@@ -46,6 +46,7 @@ import { takeLaunchDraft } from '../../utils/launchOutline';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
+import { noteSendConfirmed, useControllerTarget } from '../../controller/controllerTargets';
 
 /** A small preview of an attached image, read from the dropped or pasted file itself. */
 function ImagePreview() {
@@ -315,6 +316,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     if (receipt.state === 'failed') return false;
     viewer.setDraft('');
     runtime.thread.composer.setText('');
+    noteSendConfirmed(panelId);
     return true;
   };
   const deliver = async (request: ChatTabSend, retry: boolean): Promise<boolean> => {
@@ -429,6 +431,22 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       if (shownComposers.get(viewer) === composer) shownComposers.delete(viewer);
     };
   }, [runtime, viewer]);
+  // A game controller's dictation (added to the draft), Send (Y) and jump to bottom (frontend/src/controller).
+  useControllerTarget(findRootRef, {
+    panelId,
+    kind: 'chat',
+    insertText: text => {
+      const current = runtime.thread.composer.getState().text.trimEnd();
+      const next = current ? `${current} ${text}` : text;
+      viewer.setDraft(next);
+      runtime.thread.composer.setText(next);
+    },
+    send: () => {
+      if (sendDisabled || !runtime.thread.composer.getState().text.trim()) return;
+      void runtime.thread.composer.send();
+    },
+    jumpToBottom: () => followLiveEnd.current?.(),
+  });
   // The launch outline's message box (index.html) hands over as this tab first paints: its text and
   // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends that text
   // once (D-62) if the chat can send it soon after; an edit or a chat that stays unable drops it.

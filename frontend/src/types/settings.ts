@@ -122,6 +122,7 @@ export type SettingsSettingId =
   | 'keyboard-shortcut-map'
   | 'command-palette-shortcut'
   | 'kitty-keyboard'
+  | 'controller'
   | 'terminal-shortcuts'
   | 'analytics'
   | 'browser-data'

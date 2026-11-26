@@ -85,6 +85,16 @@ code,
   outline-offset: 2px;
 }
 
+/* A game controller's focus ring (frontend/src/controller): :focus-visible
+   doesn't follow gamepad input, so the root's data-controller-mode draws it.
+   The doubled attribute outranks the "keyboard focus only" rule below; a
+   terminal is ringed as a whole, not its hidden input. */
+html[data-controller-mode][data-controller-mode] :focus:not(.xterm-helper-textarea),
+html[data-controller-mode][data-controller-mode] .xterm:focus-within {
+  outline: 2px solid var(--color-focus-ring) !important;
+  outline-offset: -2px;
+}
+
 /* Rings on buttons and menu items appear for keyboard focus only. */
 :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary):focus:not(:focus-visible) {
   outline: none !important;

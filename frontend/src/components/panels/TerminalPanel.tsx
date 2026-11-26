@@ -28,6 +28,7 @@ import {
 import { isMac } from '../../utils/platformUtils';
 import { copyTerminalText, decodeOsc52Write, isTerminalCopyShortcut } from '../../utils/terminalClipboard';
 import { sendTerminalInput } from '../../utils/terminalInput';
+import { noteSendConfirmed, terminalKeyBytes, useControllerTarget } from '../../controller/controllerTargets';
 import { isReadOnlyHost, useReadOnlyHost } from '../../stores/readOnlyHostStore';
 import { adoptOwnerGrid, OWNER_GRID_CHECK_MS, ownerGridChanged } from '../../utils/ownerTerminalGrid';
 import { registerRemoteTerminalRestore } from '../../utils/remoteRestoration';
@@ -342,6 +343,18 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   /** A watched tab that isn't running shows one line saying so. */
   const notRunningRef = useRef(false);
   const isCliPanelRef = useRef(isCliPanel);
+  // A game controller's dictation, Send (Y), key pad and jump to bottom (frontend/src/controller).
+  useControllerTarget(terminalRef, {
+    panelId: panel.id,
+    kind: 'terminal',
+    insertText: text => xtermRef.current?.paste(text),
+    send: () => {
+      sendTerminalInput(panel.id, '\r');
+      noteSendConfirmed(panel.id);
+    },
+    jumpToBottom: () => xtermRef.current?.scrollToBottom(),
+    pressKey: key => sendTerminalInput(panel.id, terminalKeyBytes(key, xtermRef.current?.modes.applicationCursorKeysMode ?? false)),
+  });
 
   // ptyId for the current PTY behind this panel, delivered via
   // `terminal:ptyReady` when spawned through the ptyHost UtilityProcess.
