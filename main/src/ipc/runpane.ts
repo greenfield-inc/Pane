@@ -1742,6 +1742,7 @@ export function registerRunpaneHandlers(
       const messages = services.agentMessageService;
       const outgoing = normalized.fromPane ? undefined : messages?.beginMessage({
         callerPanelId: paneCommandCaller()?.panelId, receiverPanelId: panel.id, body: normalized.input, source: normalized.source,
+        personWords: normalized.personWords, operationId: normalized.operationId, awaitReply: normalized.awaitReply,
       });
       if (!outgoing) return submitResolvedPanel(normalized, panel);
       try {
@@ -5719,6 +5720,8 @@ function parsePanelSubmitRequest(value: PaneCommandValue): RunpanePanelSubmitReq
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
     expectReport: optionalBoolean(value.expectReport),
     fromPane: optionalBoolean(value.fromPane),
+    personWords: optionalBoolean(value.personWords),
+    awaitReply: optionalBoolean(value.awaitReply),
   };
 }
 

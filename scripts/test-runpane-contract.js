@@ -1549,7 +1549,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false, closed: false,
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false, stackTabs: [], stackNext: false,
-  todoArgs: [], messageArgs: [], awaitReply: false, noStart: false, escalate: false, remindMe: false,
+  todoArgs: [], messageArgs: [], awaitReply: false, forPerson: false, noStart: false, escalate: false, remindMe: false,
   answerApprove: false, answerDeny: false, hook: false, web: false, yaml: false,
 };
 
@@ -3212,6 +3212,28 @@ print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines(), "ref
   assert.ok(python.stdout.includes(`Prompt file: ${promptFile}`), python.stdout.join('\n'));
   assert.ok(python.stdout.includes('Warning (leading-bang-runs-shell): The text starts with `!`.'), python.stdout.join('\n'));
   assert.strictEqual(python.refused, true);
+}
+
+/** T-104 review: --await-reply and --for-person ride on the submit request itself in both CLIs, so the daemon reserves the wait before it types. */
+function checkAwaitReplyRequestParity() {
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { buildPanelInputRequest } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const samples = [
+    ['panels', 'submit', '--panel', 'panel-1', '--text', 'Ship Friday?', '--await-reply', '--timeout', '30m', '--yes'],
+    ['panels', 'submit', '--panel', 'panel-1', '--text', '[From the person, via Autopilot] Ship it', '--source', 'agent', '--for-person', '--yes'],
+    ['panels', 'submit', '--panel', 'panel-1', '--text', 'Plain', '--yes'],
+  ];
+  const node = samples.map((args) => JSON.parse(JSON.stringify(buildPanelInputRequest(parseRunpaneArgs(args), 'submit'))));
+  assert.strictEqual(node[0].awaitReply, true);
+  assert.strictEqual(node[1].personWords, true);
+  assert.ok(!('awaitReply' in node[2]) && !('personWords' in node[2]));
+  const python = JSON.parse(runPythonSnippet(`
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+print(json.dumps([local_control.build_panel_input_request(parse_args(args), "submit") for args in ${JSON.stringify(samples)}]))
+`));
+  assert.deepStrictEqual(python, node);
 }
 
 function checkAttachParity() {
@@ -7854,6 +7876,7 @@ const checks = [
   checkLoopsParity,
   checkTodosParity,
   checkMessagesParity,
+  checkAwaitReplyRequestParity,
   function checkTodoSnoozeTimes() { require('./test-runpane-todo-times.js').checkTodoSnoozeTimes(); },
   checkInstallerFailures,
   compareArtifactSelectionParity,

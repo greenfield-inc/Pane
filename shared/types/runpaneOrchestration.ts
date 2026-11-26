@@ -1517,6 +1517,10 @@ export interface RunpanePanelSubmitRequest {
   expectReport?: boolean;
   /** Pane's own line (an owed answer, a to-do message, a reply): never an agent-to-agent message, so it gets no M-n reply line. */
   fromPane?: boolean;
+  /** `--for-person`: the person's own words an agent passes on (Autopilot's relay); sent as the person's, with no reply line. */
+  personWords?: boolean;
+  /** `--await-reply`: Pane holds the reply for the sender's wait call from before the message is typed. */
+  awaitReply?: boolean;
 }
 
 export type RunpanePanelVerification = 'observed' | 'unverifiable';

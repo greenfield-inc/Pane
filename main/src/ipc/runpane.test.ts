@@ -3492,6 +3492,30 @@ describe('runpane IPC handlers', () => {
       // Pane's own UI sends with no calling tab.
       expect(await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'from the app', expectReport: false }])).not.toHaveProperty('messageId');
       expect(messages.list({ limit: 10 }).map(message => message.ref)).toEqual(['M-1']);
+
+      // Autopilot's relay of the person's words stays the person's (--for-person, or its relay prefix); its own lines get an id.
+      for (const input of [
+        { panelId: terminalPanel.id, input: 'Ship it', personWords: true, source: 'agent', expectReport: false },
+        { panelId: terminalPanel.id, input: '[From the person, via Autopilot] Ship it', source: 'agent', expectReport: false },
+      ]) {
+        expect(await fromAgent(input)).not.toHaveProperty('messageId');
+        expect(terminalPanelManager.writeToTerminal).toHaveBeenLastCalledWith(terminalPanel.id, `${input.input}\r`);
+      }
+      expect(await fromAgent({ panelId: terminalPanel.id, input: '[From Autopilot] Where does T-3 stand?', source: 'agent', expectReport: false })).toMatchObject({ messageId: 'M-2' });
+
+      // A replayed submit (same operation id) types the same message with the same reply line.
+      const first = await fromAgent({ panelId: terminalPanel.id, input: 'Retry me', operationId: 'op-1', expectReport: false });
+      const firstText = vi.mocked(terminalPanelManager.writeToTerminal).mock.lastCall?.[1];
+      const replayed = await fromAgent({ panelId: terminalPanel.id, input: 'Retry me', operationId: 'op-1', expectReport: false });
+      expect(first).toMatchObject({ messageId: 'M-3' });
+      expect(replayed).toMatchObject({ messageId: 'M-3' });
+      expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.lastCall?.[1]).toBe(firstText);
+
+      // --await-reply reserves the waiter in the same submit: a reply before the wait call is held for it, not typed.
+      const awaited = await fromAgent({ panelId: terminalPanel.id, input: 'Ship Friday?', awaitReply: true, expectReport: false });
+      expect(awaited).toMatchObject({ messageId: 'M-4' });
+      await messages.reply({ to: 4, body: 'Yes', callerPanelId: terminalPanel.id });
+      await expect(messages.waitForReply(4, 10)).resolves.toMatchObject({ text: 'Yes', deliveredVia: 'call' });
     } finally {
       db.close();
     }

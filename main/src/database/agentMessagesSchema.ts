@@ -26,7 +26,8 @@ const AGENT_MESSAGES_SCHEMA_SQL = [
     undelivered_reason TEXT,
     created_at INTEGER NOT NULL,
     delivered_at INTEGER,
-    answered_at INTEGER
+    answered_at INTEGER,
+    operation_id TEXT
   )`,
   'CREATE INDEX IF NOT EXISTS idx_agent_messages_reply_to ON agent_messages(reply_to)',
   'CREATE INDEX IF NOT EXISTS idx_agent_messages_sender ON agent_messages(sender_panel_id)',
@@ -34,7 +35,15 @@ const AGENT_MESSAGES_SCHEMA_SQL = [
   'CREATE INDEX IF NOT EXISTS idx_agent_messages_state ON agent_messages(state)',
 ] as const;
 
+function columnsOf(db: Database.Database): string[] {
+  // SAFETY: PRAGMA table_info rows always carry a name.
+  return db.prepare('PRAGMA table_info(agent_messages)').all().map(column => (column as { name: string }).name);
+}
+
 /** Creates the messages table. Guarded: safe on fresh and upgraded databases. */
 export function ensureAgentMessagesSchema(db: Database.Database): void {
   for (const sql of AGENT_MESSAGES_SCHEMA_SQL) db.prepare(sql).run();
+  // A database made by an earlier build of this branch lacks operation_id.
+  if (!columnsOf(db).includes('operation_id')) db.prepare('ALTER TABLE agent_messages ADD COLUMN operation_id TEXT').run();
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_agent_messages_operation ON agent_messages(operation_id)').run();
 }

@@ -21,7 +21,17 @@ of these hold:
   Someone typing `runpane panels submit` in a plain shell tab is the person;
 - it isn't `--source user`, and it isn't a tab writing to itself;
 - it isn't one of Pane's own lines. Owed answers, to-do messages and replies set
-  `fromPane` on the submit and go as typed.
+  `fromPane` on the submit and go as typed;
+- it isn't the person's own words passed on by an agent. Autopilot relays the
+  person's question or instruction with `--for-person` (request field
+  `personWords`), and any text that starts with
+  `[From the person, via Autopilot]` counts the same, so the receiver answers
+  in its chat, where Autopilot reads it. Autopilot's own lines
+  (`[From Autopilot] …`) do get a reply line.
+
+A replayed submit (the same `operationId`, after a lost response) gets the
+same message id and the same text, so a chat tab's receipt for the first send
+still matches.
 
 When those hold, Pane adds one line to the end of the text:
 
@@ -54,11 +64,13 @@ Delivery reuses the path that to-do messages and owed answers take
 - Pane types the reply only at a live agent's prompt. A tab that is mid-turn,
   or that has unsent text in its composer, keeps the reply `queued`. Pane tries
   again when any tab goes idle, and every 3 seconds.
-- A tab that is down (after a restart, say) is resumed first. After 3 failed
-  resumes the reply is `undelivered` (`it would not restart`).
-- A reply to a Session orchestrator follows the Session. If the orchestrator's
-  tab was replaced (Switch to chat, a new agent), the reply goes to the
-  Session's orchestrator tab as it is now.
+- A tab that is down (after a restart, say) is resumed first. A resume that
+  fails or throws counts as a try; after 3, the reply is `undelivered`
+  (`it would not restart: <why>`) and Pane stops trying.
+- A message sent as a Session's orchestrator is answered to the Session's
+  orchestrator tab as it is now, even when the tab that sent it still exists
+  (Switch to chat, a new agent). Any other message is answered to the tab that
+  sent it.
 - A sender whose tab is gone for good (a closed worker tab) gets nothing, and
   the reply is `undelivered` (`its tab closed`). `runpane reply` exits 1 and
   says so. Pass the answer on some other way.
@@ -77,7 +89,12 @@ runpane messages wait M-12 --timeout 30m --json
 Both block until the first reply comes and print it (`messageWaitResult`, exit
 0). After `--timeout` they exit 124, and a later reply is typed into the tab as
 usual. A reply that a waiting call returns is not typed as well: it is
-`delivered` with `deliveredVia: call`. Without `--timeout`, the wait gives up
+`delivered` with `deliveredVia: call`. `--await-reply` is sent with the submit
+itself, so Pane reserves the wait before it types the message: a reply that
+comes before the CLI's wait call reaches the daemon is held for that call,
+never typed. If no wait call comes within a minute (the CLI died), the held
+reply is typed into the tab instead. `messages wait` on a message whose reply
+was already typed returns that reply rather than waiting. Without `--timeout`, the wait gives up
 after a day. While a tab waits, Pane counts it as waiting rather than working,
 as it does for `runpane notify`. `--await-reply` can't be combined with
 `--wait`.

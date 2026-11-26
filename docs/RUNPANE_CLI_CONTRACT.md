@@ -407,14 +407,14 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panels screen`: Read a compact current-screen view from a terminal panel.
 - `panels input`: Send input bytes to a terminal panel.
 - `panels submit`: Send and submit text to a terminal panel, including idle agent composers.
-- `panels submit-composer`: Submit an agent composer using the panel-appropriate key sequence.
-- `panels wait`: Wait for a terminal panel to initialize, become ready/idle, or contain text.
-- `panels resume`: Restart a stopped terminal panel in place, resuming its agent's conversation.
-- `panels pause`: Pause a terminal tab: stop its process and keep its agent's conversation until it is resumed.
 - `reply`: Answer a message another agent sent you: Pane types the reply into the sender's tab.
 - `messages list`: List the agent-to-agent messages this tab sent or received, newest first.
 - `messages show`: Show one agent-to-agent message and its replies.
 - `messages wait`: Wait for the reply to a message you sent, and print it.
+- `panels submit-composer`: Submit an agent composer using the panel-appropriate key sequence.
+- `panels wait`: Wait for a terminal panel to initialize, become ready/idle, or contain text.
+- `panels resume`: Restart a stopped terminal panel in place, resuming its agent's conversation.
+- `panels pause`: Pause a terminal tab: stop its process and keep its agent's conversation until it is resumed.
 - `panels last-message`: Read an agent's last reply from its transcript, without scraping the screen.
 - `panels conversation`: Record which conversation a terminal panel's agent is on, so Switch to chat and restarts open that one. A Claude Code SessionStart hook runs it with --hook.
 - `panes git-status`: Read the git status of a Pane worktree: uncommitted, unpushed, and behind-main counts.
@@ -590,16 +590,16 @@ runpane panels list --pane <pane-id> [--json] [--pane-dir <path>]
 runpane panels output --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panels screen --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) [--source user|agent] --yes [--json] [--pane-dir <path>]
-runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--source user|agent] [--expect-report|--no-expect-report] [--wait|--await-reply] [--timeout <duration>] --yes [--json] [--pane-dir <path>]
+runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--source user|agent] [--expect-report|--no-expect-report] [--for-person] [--wait|--await-reply] [--timeout <duration>] --yes [--json] [--pane-dir <path>]
+runpane reply <message> <text> [--input-file <path|->] [--json] [--pane-dir <path>]
+runpane messages list [--panel <panel-id>] [--all] [--limit <count>] [--json] [--pane-dir <path>]
+runpane messages show <message> [--json] [--pane-dir <path>]
+runpane messages wait <message> [--timeout <duration>] [--json] [--pane-dir <path>]
 runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json] [--pane-dir <path>]
 runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--contains <text>] [--timeout-ms <ms>] [--interval-ms <ms>] [--json] [--pane-dir <path>]
 runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json] [--pane-dir <path>]
 runpane panels resume (--session <id|name>|--all-stopped) [--wait-ready] [--ready-timeout-ms <ms>] [--concurrency <count>] --yes [--json] [--pane-dir <path>]
 runpane panels pause --panel <panel-id> --yes [--json] [--pane-dir <path>]
-runpane reply <message> <text> [--input-file <path|->] [--json] [--pane-dir <path>]
-runpane messages list [--panel <panel-id>] [--all] [--limit <count>] [--json] [--pane-dir <path>]
-runpane messages show <message> [--json] [--pane-dir <path>]
-runpane messages wait <message> [--timeout <duration>] [--json] [--pane-dir <path>]
 runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panels conversation --conversation <id> [--source startup|resume|clear|compact] [--panel <panel-id>] [--pane <pane-id>] [--json] [--pane-dir <path>]
 runpane panels conversation --hook [--pane-dir <path>]
@@ -966,6 +966,7 @@ These flags are consumed by local daemon-control commands:
 --remind-me
 --web
 --await-reply
+--for-person
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, use Pane's own `runpane` (on PATH in Pane's WSL terminals, or `/mnt/c/Users/<you>/.pane/bin/runpane`), which reaches the Windows named-pipe daemon through WSL interop; older Pane builds need `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'`.

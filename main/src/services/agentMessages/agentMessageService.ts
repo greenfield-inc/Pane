@@ -40,6 +40,10 @@ export interface OutgoingMessage {
 }
 
 const RESUME_TRIES = 3;
+/** How long a reply held for `--await-reply` waits for the sender's wait call before Pane types it into the tab instead. */
+export const AWAIT_REPLY_GRACE_MS = 60_000;
+/** The prefix Autopilot's relay of the person's own words starts with: those words are the person's, not Autopilot's. */
+const PERSON_RELAY_PREFIX = '[From the person, via Autopilot]';
 const MAX_REPLY_CHARS = 8000;
 const PERSON: AgentMessageParty = { panelId: null, paneId: null, sessionId: null, name: 'the person', orchestrator: false };
 
@@ -65,6 +69,12 @@ export class AgentMessageService extends EventEmitter {
   private readonly typing = new Set<string>();
   private readonly resumeFailures = new Map<number, number>();
   private readonly waiters = new Map<number, Set<(reply: StoredMessage) => void>>();
+  /**
+   * `--await-reply` sends: reserved before the message is typed, so a reply that comes before the
+   * sender's wait call is held for that call (`held`), never typed. Released to the tab after
+   * AWAIT_REPLY_GRACE_MS without a wait call.
+   */
+  private readonly reservations = new Map<number, { held: number[]; timer: ReturnType<typeof setTimeout> }>();
   private flushing: Promise<void> | null = null;
 
   constructor(private readonly store: AgentMessageStore, private readonly host: AgentMessageHost, private readonly now: () => number = Date.now) {
@@ -83,20 +93,51 @@ export class AgentMessageService extends EventEmitter {
    * a reply line; the person (the app, a phone, a shell tab, `--source user`) and a tab writing to
    * itself get nothing, and their text goes as typed.
    */
-  beginMessage(input: { callerPanelId: string | undefined; receiverPanelId: string; body: string; source?: 'user' | 'agent' }): OutgoingMessage | undefined {
+  beginMessage(input: {
+    callerPanelId: string | undefined; receiverPanelId: string; body: string; source?: 'user' | 'agent';
+    /** The text is the person's own words an agent passes on (Autopilot's relay, `--for-person`). */
+    personWords?: boolean;
+    /** The submit's operation id: a replay of it gets the same message and text. */
+    operationId?: string;
+    /** `--await-reply`: hold a reply for the sender's wait call from before the message is typed. */
+    awaitReply?: boolean;
+  }): OutgoingMessage | undefined {
     if (!input.callerPanelId || input.source === 'user' || input.callerPanelId === input.receiverPanelId || !input.body.trim()) return undefined;
+    if (input.personWords || input.body.trimStart().startsWith(PERSON_RELAY_PREFIX)) return undefined;
     const sender = this.host.panel(input.callerPanelId);
     const receiver = this.host.panel(input.receiverPanelId);
     if (!sender?.agent || !receiver) return undefined;
-    const message = this.store.create({ kind: 'message', sender: party(sender), receiver: party(receiver), body: input.body, state: 'sending', now: this.now() });
-    this.changed();
-    return { number: message.number, ref: messageRef(message.number), text: withReplyRoute(input.body, message.number, sender.name) };
+    const replayed = input.operationId ? this.store.byOperation(input.operationId, input.callerPanelId, input.receiverPanelId) : undefined;
+    const message = replayed ?? this.store.create({
+      kind: 'message', sender: party(sender), receiver: party(receiver), body: input.body, state: 'sending', now: this.now(), operationId: input.operationId,
+    });
+    if (input.awaitReply && !this.reservations.has(message.number) && this.store.replies(message.number).length === 0) this.reserve(message.number);
+    if (!replayed) this.changed();
+    return { number: message.number, ref: messageRef(message.number), text: withReplyRoute(message.body, message.number, message.sender.name) };
+  }
+
+  private reserve(number: number): void {
+    const timer = setTimeout(() => this.release(number), AWAIT_REPLY_GRACE_MS);
+    timer.unref?.();
+    this.reservations.set(number, { held: [], timer });
+  }
+
+  /** The sender never came to wait (it disconnected): what was held goes to its tab. */
+  private release(number: number): void {
+    const reservation = this.reservations.get(number);
+    if (!reservation) return;
+    clearTimeout(reservation.timer);
+    this.reservations.delete(number);
+    if (reservation.held.length === 0) return;
+    this.outbox.push(...reservation.held);
+    void this.flush();
   }
 
   /** After `panels submit`: the message reached the tab, or it didn't and why. */
   finishMessage(number: number, outcome: { ok: true } | { ok: false; reason: string }): void {
     const message = this.store.get(number);
-    if (!message || message.state !== 'sending') return;
+    // A replayed submit (same operation id) may succeed after its first try failed.
+    if (!message || (message.state !== 'sending' && !(outcome.ok && message.state === 'undelivered'))) return;
     if (outcome.ok) this.store.markDelivered(number, this.now());
     else this.store.setState(number, 'undelivered', { reason: outcome.reason, at: this.now() });
     this.changed();
@@ -125,6 +166,13 @@ export class AgentMessageService extends EventEmitter {
       this.waiters.delete(original.number);
       return { reply: this.record(reply.number), delivery: 'delivered' };
     }
+    const reservation = this.reservations.get(original.number);
+    if (reservation) {
+      // The sender's --await-reply call is on its way: it takes this reply, so nothing is typed.
+      reservation.held.push(reply.number);
+      this.changed();
+      return { reply: this.record(reply.number), delivery: 'queued' };
+    }
     this.outbox.push(reply.number);
     this.changed();
     await this.flush();
@@ -133,17 +181,33 @@ export class AgentMessageService extends EventEmitter {
   }
 
   /**
-   * `--await-reply`: resolves with the first reply to `number` (one already queued counts, and is
-   * then not typed as well), or undefined after `timeoutMs` or when `signal` aborts.
+   * `--await-reply` and `messages wait`: resolves with the first reply to `number`, or undefined
+   * after `timeoutMs` or when `signal` aborts (a later reply is then typed into the tab). A reply
+   * held for this call, or still queued, is handed to it and not typed; one already typed (or being
+   * typed) is returned too.
    */
   waitForReply(number: number, timeoutMs: number | undefined, signal?: AbortSignal): Promise<AgentMessageRecord | undefined> {
     if (!this.store.get(number)) {
       return Promise.reject(new PaneError('ERR_MESSAGE_NOT_FOUND', `There is no message ${messageRef(number)} on this computer, so there is no reply to wait for.`, 'See recent messages with `runpane messages list`.'));
     }
-    const queued = this.store.replies(number).find(reply => reply.state === 'queued' && !this.typing.has(this.targetOf(reply) ?? ''));
-    if (queued) {
-      this.handToCall(queued);
-      return Promise.resolve(this.record(queued.number));
+    const reservation = this.reservations.get(number);
+    if (reservation) {
+      clearTimeout(reservation.timer);
+      this.reservations.delete(number);
+      const [first, ...rest] = reservation.held;
+      if (rest.length > 0) {
+        this.outbox.push(...rest);
+        void this.flush();
+      }
+      if (first !== undefined) {
+        this.handToCall(this.mustGet(first));
+        return Promise.resolve(this.record(first));
+      }
+    }
+    const earlier = this.store.replies(number).find(reply => reply.state !== 'undelivered');
+    if (earlier) {
+      if (earlier.state === 'queued' && !this.typing.has(this.targetOf(earlier) ?? '')) this.handToCall(earlier);
+      return Promise.resolve(this.record(earlier.number));
     }
     return new Promise(resolve => {
       const waiting = this.waiters.get(number) ?? new Set();
@@ -211,9 +275,16 @@ export class AgentMessageService extends EventEmitter {
 
   private async deliver(reply: StoredMessage, panelId: string): Promise<void> {
     if (await this.host.isPanelDown(panelId)) {
-      // Resume before delivery: the sender's tab is down after a restart.
-      if (await this.host.resumePanel(panelId)) this.resumeFailures.delete(reply.number);
-      else this.resumeFailed(reply, 'it would not restart');
+      // Resume before delivery: the sender's tab is down after a restart. A resume that throws failed too.
+      let why = 'it would not restart';
+      let resumed = false;
+      try {
+        resumed = await this.host.resumePanel(panelId);
+      } catch (error) {
+        why = `it would not restart: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      if (resumed) this.resumeFailures.delete(reply.number);
+      else this.resumeFailed(reply, why);
       return;
     }
     if (this.host.isMidTurn(panelId) || await this.host.hasUnsentText(panelId)) return;
@@ -237,14 +308,18 @@ export class AgentMessageService extends EventEmitter {
     this.changed();
   }
 
-  /** Where a reply goes now: the sender's tab, or for an orchestrator its Session's orchestrator tab now. */
+  /**
+   * Where a reply goes now. A message sent as a Session's orchestrator goes to the Session's
+   * orchestrator tab now, even when the tab that sent it still exists (the Session switched agent);
+   * any other goes to the tab that sent it.
+   */
   private targetOf(reply: StoredMessage): string | null {
     const to = reply.receiver;
-    if (to.panelId && this.host.panel(to.panelId)) return to.panelId;
     if (to.orchestrator && to.sessionId) {
       const current = this.host.orchestratorPanel(to.sessionId);
       if (current && this.host.panel(current)) return current;
     }
+    if (to.panelId && this.host.panel(to.panelId)) return to.panelId;
     return null;
   }
 

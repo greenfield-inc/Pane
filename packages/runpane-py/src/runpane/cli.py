@@ -212,6 +212,7 @@ FLAG_OWNERS = {
     "--no-start": ("todos create",),
     "--escalate": ("todos comment",),
     "--await-reply": ("panels submit",),
+    "--for-person": ("panels submit",),
     "--no-attachments": ("todos review",),
     "--person-said": ("todos done",),
     "--until": ("todos snooze",),
@@ -411,6 +412,7 @@ class ParsedArgs:
     # `runpane reply` and `runpane messages <verb>`: the message id, then reply's text.
     message_args: List[str] = field(default_factory=list)
     await_reply: bool = False
+    for_person: bool = False
     # todos create|update --done-when, repeatable; a JSON array of lines also works (the MCP tool's input).
     done_when: Optional[List[str]] = None
     todo_parent: Optional[str] = None
@@ -1248,6 +1250,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--await-reply":
         parsed.await_reply = True
+        return
+    if flag == "--for-person":
+        parsed.for_person = True
         return
     if flag == "--remind-me":
         parsed.remind_me = True

@@ -235,6 +235,8 @@ export interface ParsedArgs {
   messageArgs?: string[];
   /** panels submit `--await-reply`: wait for the receiving agent's `runpane reply` and print it. */
   awaitReply?: boolean;
+  /** panels submit `--for-person`: the text is the person's own words this agent passes on (Autopilot's relay). */
+  forPerson?: boolean;
   /** todos create|update `--done-when`, repeatable; a JSON array of lines also works (the MCP tool's input). */
   doneWhen?: string[];
   /** todos create `--parent <T-n>`. */
@@ -361,6 +363,7 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--no-start', ['todos create']],
   ['--escalate', ['todos comment']],
   ['--await-reply', ['panels submit']],
+  ['--for-person', ['panels submit']],
   ['--no-attachments', ['todos review']],
   ['--person-said', ['todos done']],
   ['--until', ['todos snooze']],
@@ -1125,6 +1128,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--await-reply') {
     parsed.awaitReply = true;
+    return;
+  }
+  if (flag === '--for-person') {
+    parsed.forPerson = true;
     return;
   }
   if (flag === '--escalate') {

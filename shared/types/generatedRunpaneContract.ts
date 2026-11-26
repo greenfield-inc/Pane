@@ -1905,7 +1905,7 @@ const CONTRACT_SECTION_11 = [
     "name": "panels submit",
     "summary": "Send and submit text to a terminal panel, including idle agent composers.",
     "usage": [
-      "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--source user|agent] [--expect-report|--no-expect-report] [--wait|--await-reply] [--timeout <duration>] --yes [--json] [--pane-dir <path>]"
+      "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--source user|agent] [--expect-report|--no-expect-report] [--for-person] [--wait|--await-reply] [--timeout <duration>] --yes [--json] [--pane-dir <path>]"
     ],
     "mutates": true,
     "toolsets": [
@@ -1915,6 +1915,66 @@ const CONTRACT_SECTION_11 = [
       "panelSubmitRequest",
       "panelSubmitResult",
       "dispatchWaitResult",
+      "messageWaitResult"
+    ],
+    "localControl": true
+  },
+  {
+    "name": "reply",
+    "summary": "Answer a message another agent sent you: Pane types the reply into the sender's tab.",
+    "usage": [
+      "runpane reply <message> <text> [--input-file <path|->] [--json] [--pane-dir <path>]"
+    ],
+    "mutates": true,
+    "additive": true,
+    "toolsets": [
+      "core",
+      "panels",
+      "plugin"
+    ],
+    "jsonSchemas": [
+      "replyResult"
+    ],
+    "localControl": true
+  },
+  {
+    "name": "messages list",
+    "summary": "List the agent-to-agent messages this tab sent or received, newest first.",
+    "usage": [
+      "runpane messages list [--panel <panel-id>] [--all] [--limit <count>] [--json] [--pane-dir <path>]"
+    ],
+    "toolsets": [
+      "panels"
+    ],
+    "jsonSchemas": [
+      "messageListResult"
+    ],
+    "localControl": true
+  },
+  {
+    "name": "messages show",
+    "summary": "Show one agent-to-agent message and its replies.",
+    "usage": [
+      "runpane messages show <message> [--json] [--pane-dir <path>]"
+    ],
+    "toolsets": [
+      "panels"
+    ],
+    "jsonSchemas": [
+      "messageShowResult"
+    ],
+    "localControl": true
+  },
+  {
+    "name": "messages wait",
+    "summary": "Wait for the reply to a message you sent, and print it.",
+    "usage": [
+      "runpane messages wait <message> [--timeout <duration>] [--json] [--pane-dir <path>]"
+    ],
+    "toolsets": [
+      "panels"
+    ],
+    "jsonSchemas": [
       "messageWaitResult"
     ],
     "localControl": true
@@ -1981,66 +2041,6 @@ const CONTRACT_SECTION_11 = [
     ],
     "jsonSchemas": [
       "pauseResult"
-    ],
-    "localControl": true
-  },
-  {
-    "name": "reply",
-    "summary": "Answer a message another agent sent you: Pane types the reply into the sender's tab.",
-    "usage": [
-      "runpane reply <message> <text> [--input-file <path|->] [--json] [--pane-dir <path>]"
-    ],
-    "mutates": true,
-    "additive": true,
-    "toolsets": [
-      "core",
-      "panels",
-      "plugin"
-    ],
-    "jsonSchemas": [
-      "replyResult"
-    ],
-    "localControl": true
-  },
-  {
-    "name": "messages list",
-    "summary": "List the agent-to-agent messages this tab sent or received, newest first.",
-    "usage": [
-      "runpane messages list [--panel <panel-id>] [--all] [--limit <count>] [--json] [--pane-dir <path>]"
-    ],
-    "toolsets": [
-      "panels"
-    ],
-    "jsonSchemas": [
-      "messageListResult"
-    ],
-    "localControl": true
-  },
-  {
-    "name": "messages show",
-    "summary": "Show one agent-to-agent message and its replies.",
-    "usage": [
-      "runpane messages show <message> [--json] [--pane-dir <path>]"
-    ],
-    "toolsets": [
-      "panels"
-    ],
-    "jsonSchemas": [
-      "messageShowResult"
-    ],
-    "localControl": true
-  },
-  {
-    "name": "messages wait",
-    "summary": "Wait for the reply to a message you sent, and print it.",
-    "usage": [
-      "runpane messages wait <message> [--timeout <duration>] [--json] [--pane-dir <path>]"
-    ],
-    "toolsets": [
-      "panels"
-    ],
-    "jsonSchemas": [
-      "messageWaitResult"
     ],
     "localControl": true
   },
@@ -4405,6 +4405,10 @@ const CONTRACT_SECTION_12 = {
     {
       "name": "--await-reply",
       "description": "panels submit only: wait for the receiving agent's `runpane reply` and print it."
+    },
+    {
+      "name": "--for-person",
+      "description": "panels submit only: the text is the person's own words this agent passes on; no reply line."
     }
   ]
 } as const;
@@ -5305,7 +5309,7 @@ const CONTRACT_SECTION_13 = {
     ],
     "panels submit": [
       "Usage:",
-      "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--expect-report|--no-expect-report] [--wait|--await-reply] [--timeout <duration>] --yes [--json]",
+      "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--expect-report|--no-expect-report] [--for-person] [--wait|--await-reply] [--timeout <duration>] --yes [--json]",
       "",
       "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
       "",
@@ -5331,6 +5335,7 @@ const CONTRACT_SECTION_13 = {
       "  --no-expect-report             Fire-and-forget: no agent.report.missing if the agent ends without reporting",
       "  --wait                         Block until this panel reports, misses its report, waits on a prompt, or exits;",
       "                                 print one JSON line (exit 0 report, 3 missing, 4 blocked, 5 exited, 124 timeout)",
+      "  --for-person                   The person's own words this agent passes on: sent as the person's, no reply line",
       "  --await-reply                  From an agent's tab: block until the receiver answers with `runpane reply`, then",
       "                                 print the reply (exit 0, or 124 after --timeout). Not with --wait.",
       "  --timeout <duration>           With --wait or --await-reply: give up after this long (30m, 2h)",
@@ -8248,7 +8253,7 @@ const CONTRACT_SECTION_13 = {
     ],
     "panels submit": [
       "Usage:",
-      "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--expect-report|--no-expect-report] [--wait|--await-reply] [--timeout <duration>] --yes [--json]",
+      "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--expect-report|--no-expect-report] [--for-person] [--wait|--await-reply] [--timeout <duration>] --yes [--json]",
       "",
       "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
       "",
@@ -8274,6 +8279,7 @@ const CONTRACT_SECTION_13 = {
       "  --no-expect-report             Fire-and-forget: no agent.report.missing if the agent ends without reporting",
       "  --wait                         Block until this panel reports, misses its report, waits on a prompt, or exits;",
       "                                 print one JSON line (exit 0 report, 3 missing, 4 blocked, 5 exited, 124 timeout)",
+      "  --for-person                   The person's own words this agent passes on: sent as the person's, no reply line",
       "  --await-reply                  From an agent's tab: block until the receiver answers with `runpane reply`, then",
       "                                 print the reply (exit 0, or 124 after --timeout). Not with --wait.",
       "  --timeout <duration>           With --wait or --await-reply: give up after this long (30m, 2h)",
@@ -16509,6 +16515,14 @@ const CONTRACT_SECTION_16 = {
       },
       "operationId": {
         "type": "string"
+      },
+      "awaitReply": {
+        "type": "boolean",
+        "description": "Hold the receiving agent's reply for this caller from before the message is typed (--await-reply)."
+      },
+      "personWords": {
+        "type": "boolean",
+        "description": "The person's own words an agent passes on (--for-person): sent as the person's, with no reply line."
       }
     },
     "additionalProperties": false
@@ -26496,6 +26510,11 @@ const CONTRACT_SECTION_17 = {
           "name": "--await-reply",
           "required": false,
           "description": "From an agent's tab: block until the receiving agent answers with `runpane reply`, then print its reply (`messageWaitResult`; exit 0, or 124 after --timeout). Not with --wait."
+        },
+        {
+          "name": "--for-person",
+          "required": false,
+          "description": "The text is the person's own words that this agent passes on (Autopilot's `[From the person, via Autopilot]` relay): Pane sends it as the person's, with no reply line."
         }
       ],
       "examples": [

@@ -15,6 +15,7 @@ const rowSchema = boundary.object({
   receiver_panel_id: str, receiver_pane_id: str, receiver_session_id: str, receiver_name: boundary.string, receiver_orchestrator: boundary.number,
   body: boundary.string, state: boundary.enumeration(...AGENT_MESSAGE_STATES), delivered_via: boundary.nullable(boundary.enumeration('tab', 'call')),
   undelivered_reason: str, created_at: boundary.number, delivered_at: num, answered_at: num,
+  operation_id: boundary.optional(str),
 });
 type MessageRow = ReturnType<typeof rowSchema.decode>;
 
@@ -42,6 +43,8 @@ export interface NewMessage {
   body: string;
   state: AgentMessageState;
   now: number;
+  /** The submit's operation id, so a replay of it finds this message. */
+  operationId?: string;
 }
 
 function party(row: MessageRow, side: 'sender' | 'receiver'): AgentMessageParty {
@@ -85,12 +88,12 @@ export class AgentMessageStore {
     const result = this.db.prepare(`INSERT INTO agent_messages (kind, reply_to,
       sender_panel_id, sender_pane_id, sender_session_id, sender_name, sender_orchestrator,
       receiver_panel_id, receiver_pane_id, receiver_session_id, receiver_name, receiver_orchestrator,
-      body, state, created_at)
-      VALUES (@kind, @reply_to, @sp, @spane, @ss, @sn, @so, @rp, @rpane, @rs, @rn, @ro, @body, @state, @now)`).run({
+      body, state, created_at, operation_id)
+      VALUES (@kind, @reply_to, @sp, @spane, @ss, @sn, @so, @rp, @rpane, @rs, @rn, @ro, @body, @state, @now, @operation_id)`).run({
       kind: input.kind, reply_to: input.replyTo ?? null,
       sp: input.sender.panelId, spane: input.sender.paneId, ss: input.sender.sessionId, sn: input.sender.name, so: input.sender.orchestrator ? 1 : 0,
       rp: input.receiver.panelId, rpane: input.receiver.paneId, rs: input.receiver.sessionId, rn: input.receiver.name, ro: input.receiver.orchestrator ? 1 : 0,
-      body: input.body, state: input.state, now: input.now,
+      body: input.body, state: input.state, now: input.now, operation_id: input.operationId ?? null,
     });
     const created = this.get(Number(result.lastInsertRowid));
     if (!created) throw new Error('The message was written but could not be read back.');
@@ -99,6 +102,13 @@ export class AgentMessageStore {
 
   get(number: number): StoredMessage | undefined {
     const row: unknown = this.db.prepare('SELECT * FROM agent_messages WHERE number = ?').get(number);
+    return row === undefined ? undefined : toStored(decodeBoundary(row, rowSchema));
+  }
+
+  /** The message a submit with this operation id, from this tab to that one, already recorded. */
+  byOperation(operationId: string, senderPanelId: string, receiverPanelId: string): StoredMessage | undefined {
+    const row: unknown = this.db.prepare("SELECT * FROM agent_messages WHERE operation_id = ? AND sender_panel_id = ? AND receiver_panel_id = ? AND kind = 'message' ORDER BY number DESC LIMIT 1")
+      .get(operationId, senderPanelId, receiverPanelId);
     return row === undefined ? undefined : toStored(decodeBoundary(row, rowSchema));
   }
 

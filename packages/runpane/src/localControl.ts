@@ -943,6 +943,10 @@ interface PanelInputRequest {
   source?: 'user' | 'agent';
   /** panels submit only. */
   expectReport?: boolean;
+  /** panels submit `--await-reply`: Pane holds the reply for this call from before the message is typed. */
+  awaitReply?: boolean;
+  /** panels submit `--for-person`: the person's own words, passed on; no reply line. */
+  personWords?: boolean;
 }
 
 interface PanelInputResult {
@@ -4578,6 +4582,8 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
     interrupt: parsed.interrupt || undefined,
     source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
     expectReport: command === 'submit' ? parsed.expectReport : undefined,
+    awaitReply: command === 'submit' && parsed.awaitReply ? true : undefined,
+    personWords: command === 'submit' && parsed.forPerson ? true : undefined,
   };
 }
 

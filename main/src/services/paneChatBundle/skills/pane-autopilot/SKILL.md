@@ -326,13 +326,16 @@ orchestrator tab with `runpane sessions get --session <id> --json` (the
 `panelIds` entry for its `agent`), then:
 
 ```sh
-runpane panels submit --panel <orchestrator panel> --source agent --no-expect-report --yes --json \
+runpane panels submit --panel <orchestrator panel> --source agent --for-person --no-expect-report --yes --json \
   --text "[From the person, via Autopilot] <their question or instruction, in their words>"
 runpane panels wait --panel <orchestrator panel> --for idle --timeout-ms 600000 --json
 runpane panels last-message --panel <orchestrator panel> --json
 ```
 
-Run the wait as a background command. Relay the answer in your chat, short,
+`--for-person` sends the person's words as theirs: no `runpane reply` line,
+so the orchestrator answers in its chat, where you read it. Your own messages
+(`[From Autopilot] …`) go without it and carry a reply line; their answers
+reach your tab as `reply: M-n → "…"`. Run the wait as a background command. Relay the answer in your chat, short,
 and say whose it is ("Pane Fixes' orchestrator says: ..."). Never put words
 in the person's mouth: pass on what they said, not your own instruction.
 
