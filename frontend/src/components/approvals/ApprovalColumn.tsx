@@ -32,7 +32,7 @@ import { approvalFindId, useSurfaceFind } from '../find/surfaceFind';
 import { isTypingTarget } from '../../utils/typingTarget';
 import { ReminderSnoozeLink } from '../todos/ReminderSnoozeLink';
 import {
-  askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, replyLine,
+  askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, recommendedAnswer, replyLine,
   type CardChip, type CardQuestion, type CardTab, type ReplyLine,
 } from './approvalCard';
 import { APPROVAL_COLUMN, APPROVAL_COLUMN_ID, APPROVAL_REPLY_BOX_ID, approvalStepProps } from './approvalDom';
@@ -361,11 +361,12 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
   const ended = item.state === 'answered' || item.state === 'expired';
   const [closing, setClosing] = useState(false);
   const line = replyLine(item);
-  const send = async () => {
+  // `chosen`: what goes, when it isn't the person's picks (⇧↩ sends the recommended options).
+  const send = async (chosen: readonly string[] = picks) => {
     const typed = text.trim();
-    if (sending || !canSend(item, picks, typed)) return;
-    const padded = questionsOf(item).map((_, at) => picks[at] ?? '');
-    const answer: NotifyAnswer = item.agentPrompt && picks[0] ? { choice: picks[0] } : typed ? { picks: padded, text: typed } : { picks };
+    if (sending || !canSend(item, chosen, typed)) return;
+    const padded = questionsOf(item).map((_, at) => chosen[at] ?? '');
+    const answer: NotifyAnswer = item.agentPrompt && chosen[0] ? { choice: chosen[0] } : typed ? { picks: padded, text: typed } : { picks: [...chosen] };
     setSending(true);
     let accepted = false;
     try {
@@ -420,8 +421,26 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
     option.focus();
   };
 
+  // ⇧↩ sends each question's recommended option while nothing is picked or typed (T-88, D-385
+  // holds: nothing is preselected). With a pick of the person's own it does nothing special, and
+  // with a question that has no recommendation it says so instead. Never while typing.
+  const recommended = sendable && !item.relay && !item.unreachable ? recommendedAnswer(item, picks, text) : null;
+  const [noRecommended, setNoRecommended] = useState<number[] | null>(null);
+  useEffect(() => { setNoRecommended(null); }, [picks, text]);
+  const sendRecommended = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' || !event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.defaultPrevented) return;
+    if (!sendable || item.relay || isTypingTarget(event.target)) return;
+    // Taken even when it sends nothing, so a focused option or button isn't clicked by it.
+    event.preventDefault();
+    event.stopPropagation();
+    if (!recommended) return;
+    if ('missing' in recommended) setNoRecommended(recommended.missing);
+    else void send(recommended.send);
+  };
+  const recommendedKey = recommended && 'send' in recommended ? formatKeyDisplay('shift+Enter') : undefined;
+
   return (
-    <div ref={rootRef} className="flex h-full min-h-0 flex-col" onKeyDown={pickByNumber}>
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col" onKeyDown={(event) => { pickByNumber(event); sendRecommended(event); }}>
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5" data-testid="approval-qa">
         <p className="text-[13px] text-text-tertiary">{[...askedBy(item), relativeAge(item.createdAt, now)].join(' · ')}</p>
         <h2 className="mt-1.5 text-[19px] font-semibold leading-snug text-text-primary" data-testid="approval-title">{item.title}</h2>
@@ -481,6 +500,7 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
                 onPick={(label) => setPicks((current) => { const next = [...current]; next[at] = current[at] === label ? '' : label; return next; })}
                 onChoose={(label) => setPicks((current) => { const next = [...current]; next[at] = label; return next; })}
                 onTabOut={at === questions.length - 1 ? toReplyBox : undefined}
+                recommendedKey={recommendedKey}
                 showTitle={questions.length > 1 || question.title !== item.title}
               />
             ))}
@@ -569,8 +589,9 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
           {waiting && closing && <ItemCloseForm item={item} onCommand={(command) => { runNotify(command); setClosing(false); }} onCancel={() => setClosing(false)} className="mt-2" />}
           {waiting && !closing && (
             <div className="mt-2 flex items-center gap-3">
-              <p className="min-w-0 flex-1 text-[12.5px] text-text-tertiary">
-                {item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.'
+              <p className="min-w-0 flex-1 text-[12.5px] text-text-tertiary" role={noRecommended ? 'status' : undefined} data-testid="approval-reply-hint">
+                {noRecommended ? noRecommendedLine(noRecommended, questions.length, sendKeys ? formatKeyDisplay(sendKeys) : 'Send')
+                  : item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.'
                   : replyBeingRead(item) ? `${sentenceStart(item.reply?.reader?.name ?? item.source.name)} is reading your last reply. You can send another once it says how it took it, or pick an option now.`
                     : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
               </p>
@@ -608,6 +629,14 @@ function ReplyNotice({ item }: { item: NotifyItem }) {
       )}
     </div>
   );
+}
+
+/** Why ⇧↩ sent nothing: the questions with no recommended option, by number when there are several. */
+function noRecommendedLine(missing: number[], count: number, sendKey: string): string {
+  if (count === 1) return `Nothing here is recommended: pick an option, then ${sendKey} sends it.`;
+  const names = missing.map((at) => String(at + 1));
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+  return `Question ${list} ${names.length === 1 ? 'has' : 'have'} no recommended option: pick, then ${sendKey} sends.`;
 }
 
 /** A tooltip's words and the key that does the same ("Send ⌘↩"). */
@@ -651,9 +680,11 @@ function radioGroupKey(event: React.KeyboardEvent<HTMLDivElement>, onChoose: (la
   }
 }
 
-function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, onTabOut, showTitle }: {
+function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, onTabOut, showTitle, recommendedKey }: {
   question: CardQuestion; label: string; picked?: string; disabled: boolean; onPick: (label: string) => void;
   onChoose: (label: string) => void; onTabOut?: () => boolean; showTitle: boolean;
+  /** ⇧↩ would send the recommended options now: the chip names the key (T-88). */
+  recommendedKey?: string;
 }) {
   // Roving focus: the picked option is the group's one Tab stop, else the first.
   const stop = question.choices.some((choice) => choice.label === picked) ? picked : question.choices[0]?.label;
@@ -696,7 +727,11 @@ function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, on
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="text-[14.5px] font-semibold text-text-primary">{choice.label}</span>
-                  {choice.recommended && <span className="rounded bg-status-success/10 px-1.5 py-px text-[11.5px] font-medium text-status-success-on-tint">Recommended</span>}
+                  {choice.recommended && (
+                    <span className="rounded bg-status-success/10 px-1.5 py-px text-[11.5px] font-medium text-status-success-on-tint" data-testid="approval-recommended">
+                      Recommended{recommendedKey ? ` · ${recommendedKey} sends` : ''}
+                    </span>
+                  )}
                   {choice.mark === 'new' && <span className="rounded bg-status-success/10 px-1.5 py-px text-[11px] font-semibold uppercase tracking-wide text-status-success-on-tint" data-testid="approval-mark">New</span>}
                   {choice.mark === 'reworded' && <span className="rounded bg-status-info/10 px-1.5 py-px text-[11px] font-semibold uppercase tracking-wide text-status-info-on-tint" data-testid="approval-mark">Reworded</span>}
                 </span>

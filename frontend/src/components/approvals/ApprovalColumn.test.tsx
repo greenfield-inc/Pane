@@ -69,6 +69,15 @@ describe('ApprovalColumn', () => {
     expect(markup).toContain('aria-keyshortcuts="2"');
   });
 
+  it('T-88: the Recommended chip names ⇧↩ only when it would send', () => {
+    const merge: NotifyItem = { ...q20, questions: undefined, choices: [{ label: 'Merge it', recommended: true }, { label: 'Wait' }] };
+    expect(text(show(merge))).toContain('Recommended · ⇧↩ sends');
+    // Question 1 has no recommendation, so ⇧↩ can't answer both.
+    expect(text(show(q20))).toContain('Recommended');
+    expect(text(show(q20))).not.toContain('⇧↩ sends');
+    // A pick of the person's own hides it: tests/renderer/approval-keys.renderer.ts (a static render has no store state).
+  });
+
   it('T-88: says all caught up when nothing else waits, with Undo and the way back', () => {
     const sent: NotifyItem = { ...q20, state: 'sent', answerSummary: 'One train' };
     const visible = text(renderToStaticMarkup(

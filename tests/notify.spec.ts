@@ -460,6 +460,27 @@ test.describe('Approvals newest first, one after another (T-88)', () => {
     await page.screenshot({ path: testInfo.outputPath('t88-03-page-all-caught-up.png') });
   });
 
+  test('⇧↩ sends the recommended option and opens the next approval with focus kept (T-88)', async ({ page }, testInfo) => {
+    const snapshot = await bootWaiting(page);
+    const column = page.getByTestId('approval-column');
+    await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
+    await expect(column.getByTestId('approval-recommended')).toHaveText('Recommended · ⇧↩ sends');
+    await page.screenshot({ path: testInfo.outputPath('t88-shift-01-page-chip.png') });
+    await column.getByRole('radio', { name: /Keep Redis/ }).focus();
+    await page.keyboard.press('Shift+Enter');
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-options', answer: { picks: ['Postgres table'] } }]);
+    const [options, approve, ask] = snapshot.items;
+    await emit(page, { ...snapshot, items: [{ ...options, state: 'sent', answerSummary: 'Postgres table' }, approve, ask], queue: [approve.id, ask.id] });
+    await expect(column.getByTestId('approval-title')).toHaveText('Apply migration 0042 to staging?');
+    await expect(column.getByTestId('approval-sent-before')).toContainText('Sent “Postgres table” to auth-refactor');
+    await expect.poll(() => focusInColumn(page)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('t88-shift-02-page-next.png') });
+    // Approve or Deny recommends neither, so ⇧↩ sends nothing and says so.
+    await page.keyboard.press('Shift+Enter');
+    await expect(column.getByTestId('approval-reply-hint')).toContainText('Nothing here is recommended');
+    expect(await commands(page)).toHaveLength(1);
+  });
+
   /** The fixture's three waiting cards, with Most recent: q-options (2m), q-approve (6m), q-ask (11m). */
   async function bootWaiting(page: Page) {
     const snapshot = notifyFixture();

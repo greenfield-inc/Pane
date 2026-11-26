@@ -92,6 +92,38 @@ test.describe('the approval column (D-381)', () => {
     expect(await commands(page)).toEqual([]);
   });
 
+  test('⇧↩ sends the recommended option of each question when nothing is picked, and the chip names it (T-88)', async ({ page }) => {
+    await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText('Recommended · ⇧↩ sends');
+    // Nothing is preselected (D-385): the key is the person's choice.
+    await expect(page.getByRole('radio', { checked: true })).toHaveCount(0);
+    await option(page, 1, 'No marker').focus();
+    await page.keyboard.press('Shift+Enter');
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q12', answer: { picks: ['⌘/ everywhere', 'Yes, a small dot'] } }]);
+  });
+
+  test('⇧↩ does nothing special once the person picked: ⌘↩ sends their pick (T-88)', async ({ page }) => {
+    await option(page, 0, 'Both').focus();
+    await page.keyboard.press('Space');
+    await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText('Recommended');
+    await page.keyboard.press('Shift+Enter');
+    // Not clicked by it either: the pick stays.
+    await expect(option(page, 0, 'Both')).toHaveAttribute('aria-checked', 'true');
+    await page.waitForTimeout(200);
+    expect(await commands(page)).toEqual([]);
+  });
+
+  test('⇧↩ never fires while typing, in the reply box or the chat composer (T-88)', async ({ page }) => {
+    const box = page.getByTestId('approval-reply-box');
+    await box.click();
+    await page.keyboard.press('Shift+Enter');
+    await page.keyboard.type('x');
+    await expect(box).toHaveValue('\nx');
+    await page.getByLabel('Chat composer').click();
+    await page.keyboard.press('Shift+Enter');
+    await page.waitForTimeout(200);
+    expect(await commands(page)).toEqual([]);
+  });
+
   test('the palette\'s Next and Previous Approval page the approval shown', async ({ page }) => {
     await page.getByLabel('Chat composer').click();
     await page.evaluate(() => window.approvalKeysTest.run('next-approval'));
@@ -233,5 +265,20 @@ test.describe('a Session chat\'s approval key (D-381)', () => {
     await expect(page.getByTestId('approval-column')).toHaveCount(0);
     await expect(composer).toBeFocused();
     await expect(composer).toHaveValue('draft');
+  });
+});
+
+test.describe('⇧↩ with a question that has no recommendation (T-88)', () => {
+  test('sends nothing and says which question to pick', async ({ page }) => {
+    await page.goto('/renderer-tests/approval-keys.html?surface=column&unrecommended');
+    await expect(page.getByTestId('approval-pager')).toHaveText('1 of 2');
+    await expect(question(page, 0).getByTestId('approval-recommended')).toHaveText('Recommended');
+    await option(page, 0, '⌘/ everywhere Recommended').focus();
+    await page.keyboard.press('Shift+Enter');
+    await expect(page.getByTestId('approval-reply-hint')).toHaveText(/^Question 2 has no recommended option: pick, then .+ sends\.$/);
+    expect(await commands(page)).toEqual([]);
+    // Picking clears the hint.
+    await page.keyboard.press('Space');
+    await expect(page.getByTestId('approval-reply-hint')).toHaveText(/^Pick an option/);
   });
 });

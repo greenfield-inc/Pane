@@ -37,6 +37,7 @@ describe('buildShortcutSheet', () => {
       'Pick the focused option',
       'Next / previous question',
       'Send your answer',
+      'Send the recommended options (nothing picked)',
       'Approvals list: move, open, back',
       'Approvals list: archive the focused row (Undo on its toast)',
       'Approvals list: Group by… (set your own key)',
@@ -49,6 +50,7 @@ describe('buildShortcutSheet', () => {
     expect(caps(groups, 'approvals', 'Next / previous approval (from anywhere; set your own key)')).toEqual([]);
     expect(caps(groups, 'approvals', 'Next / previous question')).toEqual(['tab', '⇧tab']);
     expect(caps(groups, 'approvals', 'Send your answer')).toEqual(['⌘↩']);
+    expect(caps(groups, 'approvals', 'Send the recommended options (nothing picked)')).toEqual(['⇧↩']);
     expect(caps(groups, 'approvals', 'Approvals list: archive the focused row (Undo on its toast)')).toEqual(['⌫']);
     expect(caps(groups, 'approvals', 'Answer all, from any app')).toEqual(['⌃⇧Space']);
     expect(row(groups, 'approvals', 'Answer all, from any app')?.link).toBe('answer-all');
