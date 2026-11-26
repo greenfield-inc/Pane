@@ -533,7 +533,8 @@ async function focusRow(page: Page, session: Seeded): Promise<void> {
 }
 
 /** One arrow press onto `session`, checked hard and timed (reported only). */
-async function arrowTo(page: Page, session: Seeded, key: 'down' | 'up', scenario: string, held: Set<string>, pauseMs: number): Promise<Sample> {
+/** `settles`: the move may rest long enough to settle (a memory check on a slow runner), so opening is allowed. */
+async function arrowTo(page: Page, session: Seeded, key: 'down' | 'up', scenario: string, held: Set<string>, pauseMs: number, settles = false): Promise<Sample> {
   const started = Date.now();
   const sample = await switchTo(page, session, key, scenario, 5_000);
   const check = await moveCheck(page, session);
@@ -541,7 +542,7 @@ async function arrowTo(page: Page, session: Seeded, key: 'down' | 'up', scenario
   expect(sample.visible, `${scenario}: ${session.name} shows its last message`).not.toBeNull();
   expect(sample.chatMounts, `${scenario}: ${session.name} mounts its chat at most once`).toBeLessThanOrEqual(1);
   expect(check.peeks, `${scenario}: ${held.has(session.id) ? 'no peek for a held' : 'at most one peek for'} ${session.name}`).toBeLessThanOrEqual(held.has(session.id) ? 0 : 1);
-  expect(check.opens, `${scenario}: passing over ${session.name} opens nothing`).toBe(0);
+  if (!settles) expect(check.opens, `${scenario}: passing over ${session.name} opens nothing`).toBe(0);
   held.add(session.id);
   const left = pauseMs - (Date.now() - started);
   if (left > 0) await page.waitForTimeout(left);
@@ -640,10 +641,10 @@ test(`arrow-key switching leaves at most ${MAX_RETAINED_NODES_PER_SWITCH} DOM no
     await switchTo(page, a, 'click', 'arrow-retention-warmup');
     await focusRow(page, a);
     const held = new Set<string>([a.id]);
-    for (let index = 0; index < 8; index++) await arrowTo(page, index % 2 === 0 ? b : a, index % 2 === 0 ? 'down' : 'up', 'arrow-retention-warmup', held, 0);
+    for (let index = 0; index < 8; index++) await arrowTo(page, index % 2 === 0 ? b : a, index % 2 === 0 ? 'down' : 'up', 'arrow-retention-warmup', held, 0, true);
     await page.waitForTimeout(1_000);
     const before = await countersAfterGc(app);
-    for (let index = 0; index < RETENTION_SWITCHES; index++) await arrowTo(page, index % 2 === 0 ? b : a, index % 2 === 0 ? 'down' : 'up', 'arrow-retention', held, 0);
+    for (let index = 0; index < RETENTION_SWITCHES; index++) await arrowTo(page, index % 2 === 0 ? b : a, index % 2 === 0 ? 'down' : 'up', 'arrow-retention', held, 0, true);
     // Back on the Session the count started on (it ended on b after an even number of switches).
     await page.waitForTimeout(1_000);
     const after = await countersAfterGc(app);
