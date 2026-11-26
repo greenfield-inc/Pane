@@ -26,7 +26,7 @@ import { isBinaryFile } from '../../utils/binaryFile';
 import { placeConversation, undoConversationPlacement, type PlacedConversation } from './conversations';
 import { addWorktree, applySnapshot, deleteRefs, importBundle, MoveGitError, placeBranch, snapshotMatches } from './gitSnapshot';
 import { moveManifestSchema, movedApprovals, panelBuffersSchema, readTabFields, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveRepo, type MoveTab } from './manifest';
-import { buildPathMap, mapPath, rewriteJson, rewriteJsonText, rewriteText, type PathMap } from './pathMap';
+import { buildPathMap, mapPath, rewriteJson, rewriteJsonText, rewriteLaunchCommand, rewriteText, type PathMap } from './pathMap';
 import { arrivingPreview, previewSourcePath, relativeInside, type MovedRoot } from './filePreviews';
 import { bindMovedApprovals } from './approvals';
 import type { MovedApproval } from '../notify/notifyService';
@@ -766,6 +766,11 @@ export class MoveImporter {
         if (tab.type === 'terminal') {
           state.cwd = cwd;
           state.isInitialized = false;
+          // T-110 review F-11: a restore replays the command with --resume, so its --snapshot moves as one word.
+          for (const key of ['launchCommand', 'initialCommand'] as const) {
+            const command = decodeOptionalBoundary(tab.state[key], boundary.string);
+            if (command) state[key] = rewriteLaunchCommand(map, command);
+          }
           delete state.conversationReport;
           const { resumeDirectory } = readTabFields(state);
           if (resumeDirectory) state.resumeDirectory = mapPath(map, resumeDirectory) ?? cwd;
