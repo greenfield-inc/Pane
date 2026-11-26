@@ -12,7 +12,7 @@ export interface SplitState {
 }
 
 /** Each column's narrowest width, in dp. A split shows only when two fit. */
-export const MIN_COLUMN_WIDTH = 320;
+const MIN_COLUMN_WIDTH = 320;
 
 export function splitFits(contentWidth: number): boolean {
   return contentWidth >= MIN_COLUMN_WIDTH * 2;
