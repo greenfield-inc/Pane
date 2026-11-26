@@ -218,7 +218,7 @@ the real CLI's ACP mode.
 ## Agents launched through a wrapper
 
 People often start a supported agent through their own command, such as
-`agent-farm run free-range` or a shell script. The launch command then says
+`agent-farm run greenfield/orchestrator` or a shell script. The launch command then says
 nothing about the agent, but Pane still needs to know it, because composer
 detection, `panels submit` staging, the agent-specific status manifest and the
 agent shown in `panels list` depend on the panel's `agentType`.

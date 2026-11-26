@@ -231,13 +231,21 @@ it runs it for every chat launch, Session move check and `agent-farm` in its
 terminals; with it off, for chat launches on a computer without its own
 agent-farm ([docs/CHAT_TABS.md](docs/CHAT_TABS.md#profiles-switch)). To ship a new one:
 
-1. Set the same exact version in `package.json` and `main/package.json`, then run
-   `pnpm install` and `pnpm run generate-notices`, and commit `NOTICES`.
+1. Set the same exact version in `package.json` and `main/package.json`. A release
+   younger than a week also needs that exact version in `minimumReleaseAgeExclude`
+   in `pnpm-workspace.yaml`. Then run `pnpm install` and `pnpm run generate-notices`,
+   and commit `NOTICES` if it changed.
 2. Update the pinned version in `main/src/services/agentFarm/bundledAgentFarm.test.ts`
    and run `pnpm --filter main exec vitest run src/services/agentFarm src/services/runpaneShim.test.ts src/services/chatTabs`
    with `PANE_DIR` set to a scratch folder.
 3. Check that the bundled greenfield plugin is at least as new as the one the last
    release shipped (`agent-farm plugin list` in a Pane terminal of a dev build).
+4. Package once (`pnpm run build:mac:arm64` or your platform's build). Its after-pack
+   check (`scripts/verify-chat-adapters.js`) installs greenfield from inside
+   `app.asar`, which fails if packing changed a plugin file. That is why
+   `build.removePackageScripts` is `false` in `package.json`: electron-builder
+   otherwise strips `scripts` from every packed `package.json`, and Agent Farm
+   refuses a plugin whose files no longer match its checksums.
 
 On each computer's next start, Pane reinstalls the bundled plugins in
 `<PANE_DIR>/agent-farm`, except any plugin someone edited there: those are kept
