@@ -46,6 +46,11 @@ describe('sessionChoices', () => {
     expect(filterSessionChoices(choices, 'orches').map(choice => choice.profileRef)).toEqual(['greenfield/orchestrator']);
   });
 
+  it('describes a profile with Agent Farm\'s description when it has one (J1)', () => {
+    const choices = sessionChoices({ agents: ['claude'], profiles: [profile('greenfield/orchestrator', 'claude', { title: 'Orchestrator', description: 'Software work.' })] });
+    expect(choices.find(choice => choice.profileRef === 'greenfield/orchestrator')?.detail).toBe('Software work. · Claude');
+  });
+
   it('puts pinned profiles first, in pin order', () => {
     const choices = sessionChoices({ agents: ['claude', 'codex'], profiles: PROFILES, pins: ['greenfield/business', 'greenfield/orchestrator'] });
     expect(choices.map(choice => choice.label)).toEqual(['Greenfield business', 'Greenfield orchestrator', 'Claude', 'Codex', 'Greenfield seo']);

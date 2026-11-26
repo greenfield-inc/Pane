@@ -67,8 +67,8 @@ test('Create New by keyboard: To filters profiles by title or ref, Return picks 
   await expect(dialog(page)).not.toContainText('↵');
   await page.keyboard.type('green');
   const options = dialog(page).getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option');
-  // "green" matches the refs; each shows its Agent Farm title, with the ref beside it.
-  await expect(options).toHaveText([/Orchestrator\s*greenfield\/orchestrator/, /Business\s*greenfield\/business/, /SEO\s*greenfield\/seo/]);
+  // "green" matches the refs; each shows its Agent Farm title, with its description (or its ref) beside it.
+  await expect(options).toHaveText([/Orchestrator\s*Run one workstream/, /Business\s*greenfield\/business/, /SEO\s*greenfield\/seo/]);
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Enter');
@@ -353,4 +353,17 @@ test('a Session with Panes shows its expand chevron in the avatar\'s place on ho
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button', { name: 'Collapse Parent Panes', exact: true })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#orchestration-session-panes-sessions-parent')).toBeVisible();
+});
+
+// PANE_PROFILES_SHOTS=<dir> saves To's profile list, light and dark, for review (T-83 P2).
+test('To lists profiles by title and description, light and dark', async ({ page }) => {
+  const folder = process.env.PANE_PROFILES_SHOTS;
+  test.skip(!folder, 'Set PANE_PROFILES_SHOTS to save the screenshots.');
+  for (const theme of ['light', 'dark']) {
+    await openApp(page, { initialConfig: { theme } });
+    await page.getByTestId('new-orchestration-session').click();
+    await page.keyboard.type('green');
+    await expect(dialog(page).getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option')).toHaveCount(3);
+    await page.screenshot({ path: `${folder}/create-new-to-${theme}.png` });
+  }
 });
