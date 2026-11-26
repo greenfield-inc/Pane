@@ -35,6 +35,7 @@ import {
 } from '../../utils/newOnMachine';
 import { openAfterSwitch, openCreatedSession } from '../../utils/openAfterSwitch';
 import { sessionChoiceInput, sessionChoices, type SessionChoice } from '../../utils/sessionChoices';
+import { profileDisplayName } from '../../utils/profileAvatar';
 import { defaultLaunch } from '../CreateOrchestrationSessionDialog';
 import { CreatePaneForm, type CreatePaneFooterState } from '../CreateSessionDialog';
 import type { NewDialogProps } from '../NewDialog';
@@ -187,7 +188,14 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
   const [toKey, setToKey] = useState<string | null>(() => rememberedTo());
   const startKey = `agent:${config?.defaultOrchestratorAgent ?? ''}`;
   const usable = (choice: SessionChoice | undefined) => choice && !choice.disabledReason ? choice : undefined;
+  // While the profiles are still being read, a remembered profile shows as itself rather than
+  // Claude; its agent comes from the profile when the Session is created.
+  const profilesLoading = profilesRead === null || (!profilesRead.list && !profilesRead.error);
+  const rememberedProfile = profilesLoading && toKey?.startsWith('profile:') && !profilesUnavailable
+    ? { key: toKey, group: 'profiles' as const, label: profileDisplayName(toKey.slice('profile:'.length)), detail: toKey.slice('profile:'.length), agent: '', profileRef: toKey.slice('profile:'.length) }
+    : undefined;
   const to = usable(choices.find(choice => choice.key === toKey))
+    ?? rememberedProfile
     ?? usable(choices.find(choice => choice.key === startKey || (!choice.profileRef && choice.agent === config?.defaultOrchestratorAgent)))
     ?? choices.find(choice => !choice.disabledReason);
   const profilesStatus = profilesRead === null || (!profilesRead.list && !profilesRead.error) ? `Reading ${machine?.current ? 'this computer' : machine?.name ?? 'the machine'}'s profiles…`
@@ -351,14 +359,14 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
 
   const runOn = (
     <label className="flex min-w-0 items-center gap-2 text-sm">
-      <span className="text-text-secondary">Run on</span>
+      <span className="flex-none whitespace-nowrap text-text-secondary">Run on</span>
       <select
         aria-label="Run on"
         value={machine?.id ?? ''}
         disabled={busy}
         onChange={event => { setPickedId(event.target.value); setError(null); }}
         onKeyDown={event => { if (event.key === 'Enter' && mode === 'session') { event.preventDefault(); void createSession(); } }}
-        className="h-8 min-w-0 max-w-[20rem] rounded-md border border-border-primary bg-bg-primary pl-2 pr-7 text-sm text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+        className="h-8 min-w-0 max-w-[16rem] rounded-md border border-border-primary bg-bg-primary pl-2 pr-7 text-sm text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
       >
         {orderedMachines.map(candidate => {
           const note = candidate.current ? ' (this computer)' : candidate.status === 'offline' ? ' (offline)' : candidate.status === 'connecting' ? ' (connecting)' : '';
@@ -371,7 +379,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
   // Create, and its menu that switches between a Session and a Pane.
   const createButton = (submit: { type: 'button'; onClick: () => void } | { type: 'submit'; form: string }, disabled: boolean, loading: boolean, blocked?: string) => (
     <div className="inline-flex">
-      <Button {...submit} disabled={disabled} loading={loading} loadingText="Creating…" title={blocked} data-testid="create-new-submit" className="h-9 rounded-r-none">
+      <Button {...submit} disabled={disabled} loading={loading} loadingText="Creating…" title={blocked} data-testid="create-new-submit" className="h-9 flex-none whitespace-nowrap rounded-r-none">
         {CREATE_LABELS[mode]}
       </Button>
       <Dropdown
