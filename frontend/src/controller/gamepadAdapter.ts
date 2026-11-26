@@ -38,6 +38,8 @@ interface PadState {
   interpreter: ControllerInterpreter;
   timestamp: number;
   pressedCount: number;
+  /** After the window comes back, the first frame only sets what is held: a button held through the switch doesn't fire again. */
+  resuming: boolean;
 }
 
 function frameFromGamepad(pad: Pick<Gamepad, 'buttons' | 'axes'>): ControllerFrame {
@@ -74,7 +76,7 @@ export function startGamepadAdapter(handlers: GamepadAdapterHandlers): GamepadAd
     if (existing && existing.device.id === pad.id) return existing;
     const device = deviceFromGamepadId(pad.id, pad.mapping, Boolean(pad.vibrationActuator));
     const family = resolveFamily(device, handlers.lettersOverride());
-    const state: PadState = { device, family, interpreter: createControllerInterpreter({ family }), timestamp: -1, pressedCount: 0 };
+    const state: PadState = { device, family, interpreter: createControllerInterpreter({ family }), timestamp: -1, pressedCount: 0, resuming: false };
     pads.set(pad.index, state);
     handlers.onDevice(device, family);
     return state;
@@ -92,6 +94,12 @@ export function startGamepadAdapter(handlers: GamepadAdapterHandlers): GamepadAd
       if (pad.timestamp === state.timestamp && !state.interpreter.needsTick()) continue;
       state.timestamp = pad.timestamp;
       const frame = frameFromGamepad(pad);
+      if (state.resuming) {
+        state.resuming = false;
+        state.interpreter.update(frame, now, handlers.context());
+        state.pressedCount = frame.buttons.size;
+        continue;
+      }
       if (frame.buttons.size > state.pressedCount) {
         lastUsed = pad.index;
         handlers.onInput(state.device, state.family);
@@ -117,6 +125,8 @@ export function startGamepadAdapter(handlers: GamepadAdapterHandlers): GamepadAd
     for (const state of pads.values()) {
       const events = state.interpreter.update({ buttons: new Set(), axes: { leftX: 0, leftY: 0, rightX: 0, rightY: 0 } }, now, handlers.context());
       state.pressedCount = 0;
+      state.resuming = true;
+      state.timestamp = -1;
       if (events.length > 0) handlers.onEvents(events.filter(event => event.type === 'hold-end'));
     }
   }

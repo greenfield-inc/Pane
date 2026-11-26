@@ -16,6 +16,7 @@ import {
   activateFocused,
   currentContext,
   goBack,
+  answerGuardActive,
   isTerminalInput,
   moveControllerFocus,
   noteControllerFocusIn,
@@ -56,7 +57,7 @@ function sendDraft(): void {
   // Inside an open approval, Send answers it (⌘↩).
   const approval = useHotkeyStore.getState().hotkeys.get('send-approval');
   if (approval?.enabled?.() && document.activeElement?.closest('[data-focus-region="approvals"], [aria-modal="true"]')) {
-    approval.action();
+    if (!answerGuardActive()) approval.action();
     return;
   }
   const target = focusedControllerTarget();
@@ -151,6 +152,8 @@ export function ControllerLayer() {
 
     // Touch, mouse or keyboard: the ring hides and everything works as before.
     const leaveControllerMode = (event: Event) => {
+      // B's own Esc to a dialog is synthetic; only the person's mouse or keyboard hides the ring.
+      if (!event.isTrusted) return;
       if (event instanceof MouseEvent && event.type === 'mousemove' && event.movementX === 0 && event.movementY === 0) return;
       setControllerMode(false);
     };
@@ -171,13 +174,15 @@ export function ControllerLayer() {
   const buttonLetters = useControllerStore(state => state.buttonLetters);
   useEffect(() => { adapterRef.current?.refreshFamilies(); }, [buttonLetters]);
 
-  // The scheme's commands, also bindable to keys in Settings › Shortcuts.
-  useHotkey({ id: 'controller-focus-up', label: 'Move Focus Up', category: 'controller', allowInModal: true, action: () => moveControllerFocus('up') });
-  useHotkey({ id: 'controller-focus-down', label: 'Move Focus Down', category: 'controller', allowInModal: true, action: () => moveControllerFocus('down') });
-  useHotkey({ id: 'controller-focus-left', label: 'Move Focus Left', category: 'controller', allowInModal: true, action: () => moveControllerFocus('left') });
-  useHotkey({ id: 'controller-focus-right', label: 'Move Focus Right', category: 'controller', allowInModal: true, action: () => moveControllerFocus('right') });
+  // The scheme's commands, also bindable to keys in Settings › Shortcuts. Those that act on focus stay
+  // out of Search, which takes focus itself (as send-approval does).
+  useHotkey({ id: 'controller-focus-up', showInPalette: false, label: 'Move Focus Up', category: 'controller', allowInModal: true, action: () => moveControllerFocus('up') });
+  useHotkey({ id: 'controller-focus-down', showInPalette: false, label: 'Move Focus Down', category: 'controller', allowInModal: true, action: () => moveControllerFocus('down') });
+  useHotkey({ id: 'controller-focus-left', showInPalette: false, label: 'Move Focus Left', category: 'controller', allowInModal: true, action: () => moveControllerFocus('left') });
+  useHotkey({ id: 'controller-focus-right', showInPalette: false, label: 'Move Focus Right', category: 'controller', allowInModal: true, action: () => moveControllerFocus('right') });
   useHotkey({
     id: 'controller-activate',
+    showInPalette: false,
     label: 'Open or Pick Focused Item',
     category: 'controller',
     allowInModal: true,
@@ -186,19 +191,20 @@ export function ControllerLayer() {
       else activateFocused();
     },
   });
-  useHotkey({ id: 'controller-back', label: 'Back', category: 'controller', allowInModal: true, action: goBack });
-  useHotkey({ id: 'controller-switch-column', label: 'Switch Split Column', category: 'controller', action: switchColumn });
-  useHotkey({ id: 'dictate-hold', label: 'Dictate (start or stop)', category: 'controller', allowInModal: true, action: () => dictationRef.current.toggle() });
-  useHotkey({ id: 'send-draft', label: 'Send Draft', category: 'controller', allowInModal: true, action: sendDraft });
+  useHotkey({ id: 'controller-back', showInPalette: false, label: 'Back', category: 'controller', allowInModal: true, action: goBack });
+  useHotkey({ id: 'controller-switch-column', showInPalette: false, label: 'Switch Split Column', category: 'controller', action: switchColumn });
+  useHotkey({ id: 'dictate-hold', showInPalette: false, label: 'Dictate (start or stop)', category: 'controller', allowInModal: true, action: () => dictationRef.current.toggle() });
+  useHotkey({ id: 'send-draft', showInPalette: false, label: 'Send Draft', category: 'controller', allowInModal: true, action: sendDraft });
   useHotkey({
     id: 'open-key-pad',
+    showInPalette: false,
     label: 'Open Key Pad',
     category: 'controller',
     allowInModal: true,
     enabled: () => useControllerStore.getState().keyPadOpen || focusedControllerTarget()?.kind === 'terminal',
     action: () => useControllerStore.setState(state => ({ keyPadOpen: !state.keyPadOpen })),
   });
-  useHotkey({ id: 'jump-to-bottom', label: 'Jump to Bottom', category: 'controller', action: () => focusedControllerTarget()?.jumpToBottom() });
+  useHotkey({ id: 'jump-to-bottom', showInPalette: false, label: 'Jump to Bottom', category: 'controller', action: () => focusedControllerTarget()?.jumpToBottom() });
   useHotkey({ id: 'next-needs-you', label: 'Next Thing That Needs You', category: 'controller', action: () => { openNextNeedsYou(); } });
   // Search opens on its Recent section when the query is empty.
   useHotkey({ id: 'open-recent', label: 'Open Recent', category: 'controller', action: () => runCommand('open-command-palette') });

@@ -83,6 +83,10 @@ export function useControllerDictation(): ControllerDictation {
   const [problem, setProblem] = useState<ControllerDictation['problem']>(null);
   const target = useRef<DictationTarget | null>(null);
   const wantStart = useRef(false);
+  /** Recording is opening (microphone, key, socket); a release now is kept until it has opened. */
+  const starting = useRef(false);
+  const releasedWhileStarting = useRef(false);
+  const [stopOnceOpen, setStopOnceOpen] = useState(false);
   const mode: VoiceTranscriptionMode = affordance?.defaultMode ?? 'streaming';
 
   const voice = useVoiceDictation({
@@ -118,8 +122,21 @@ export function useControllerDictation(): ControllerDictation {
       return;
     }
     setProblem(null);
-    void voiceRef.current.start();
+    starting.current = true;
+    releasedWhileStarting.current = false;
+    void voiceRef.current.start().finally(() => {
+      starting.current = false;
+      if (releasedWhileStarting.current) setStopOnceOpen(true);
+    });
   };
+
+  // R2 came up (or the window lost focus) while the microphone was opening: stop it now it is open.
+  useEffect(() => {
+    if (!stopOnceOpen) return;
+    setStopOnceOpen(false);
+    releasedWhileStarting.current = false;
+    if (voice.isRecording) void voice.stop();
+  }, [stopOnceOpen, voice]);
 
   // Once the voice keys are known (read on the first hold), a hold that was waiting starts.
   useEffect(() => {
@@ -133,16 +150,13 @@ export function useControllerDictation(): ControllerDictation {
   }, [affordance]);
 
   const start = () => {
-    if (voiceRef.current.isRecording) return;
-    if (!affordance) {
+    if (voiceRef.current.isRecording || starting.current) return;
+    // A missing key is read again, so a key added since the last hold is found.
+    if (!affordance || affordance.availableModes.length === 0) {
       wantStart.current = true;
       void invoke<RemotePwaAffordances>('remote:pwa-affordances')
         .then(result => setAffordance({ availableModes: result.voiceTranscription.availableModes, defaultMode: result.voiceTranscription.defaultMode }))
         .catch(() => setAffordance({ availableModes: [], defaultMode: 'streaming' }));
-      return;
-    }
-    if (affordance.availableModes.length === 0) {
-      setProblem({ text: 'Dictation needs a Deepgram or fal key. Add one in Settings › Integrations.', settings: true });
       return;
     }
     begin();
@@ -150,13 +164,14 @@ export function useControllerDictation(): ControllerDictation {
 
   const stop = () => {
     wantStart.current = false;
-    if (voiceRef.current.isRecording) void voiceRef.current.stop();
+    if (starting.current) releasedWhileStarting.current = true;
+    else if (voiceRef.current.isRecording) void voiceRef.current.stop();
   };
 
   return {
     start,
     stop,
-    toggle: () => (voiceRef.current.isRecording ? stop() : start()),
+    toggle: () => (voiceRef.current.isRecording || starting.current ? stop() : start()),
     listening: voice.isRecording,
     finishing: voice.isTranscribing,
     preview: [voice.streamingTranscript, voice.interimTranscript].filter(Boolean).join(' ').trim(),

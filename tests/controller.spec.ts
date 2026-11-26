@@ -11,9 +11,14 @@ interface PadStub {
   reads(): number;
 }
 
+/** What the mock's invoke answers: a channel's reply, whatever its shape. */
+type MockReply = object | string | number | boolean | null | undefined;
+
 declare global {
   interface Window {
     __pad: PadStub;
+    /** The stream the slow microphone stub handed out. */
+    __mic?: MediaStream;
   }
 }
 
@@ -84,9 +89,10 @@ async function press(page: Page, button: Button): Promise<void> {
   await page.waitForTimeout(50);
 }
 
-async function openFixture(page: Page, padId = XBOX, preferences: Record<string, string> = { controller_cheat_sheet_seen: 'true' }, connect = true, mapping = 'standard'): Promise<void> {
+async function openFixture(page: Page, padId = XBOX, preferences: Record<string, string> = { controller_cheat_sheet_seen: 'true' }, connect = true, mapping = 'standard', afterMock?: () => Promise<void>): Promise<void> {
   await installPad(page, padId, mapping);
   await installElectronApiMock(page, { initialProjects: [project], initialSessions: sessions, initialPanels: panels, activeProjectId: project.id, initialPreferences: preferences });
+  await afterMock?.();
   await gotoApp(page);
   await page.getByRole('button', { name: 'Expand project Pad fixture', exact: true }).click();
   await page.getByRole('button', { name: 'pad-pane', exact: true }).click();
@@ -136,6 +142,8 @@ test('in a terminal the D-pad sends arrows, A sends Enter, X opens the key pad, 
   await expect.poll(() => terminalInputs(page, 'agent')).toEqual(['\x1b[A', '\r', '\x03']);
   await press(page, 'east');
   await expect(keyPad).toBeHidden();
+  // B closed the dialog; the ring stays.
+  await expect(page.locator('html')).toHaveAttribute('data-controller-mode', 'true');
 
   await page.locator('.xterm').first().click();
   await press(page, 'north');
@@ -208,4 +216,45 @@ test('a pad with no known layout says so once, and the note stays closed after i
   await press(page, 'south');
   await press(page, 'east');
   await expect(note).toBeHidden();
+});
+
+/**
+ * A recorded-mode voice key, and a microphone that takes `delayMs` to open (as while macOS asks
+ * for permission). The stream it hands out is kept on window.__mic.
+ */
+async function installSlowMicrophone(page: Page, delayMs: number): Promise<void> {
+  await page.addInitScript((delay: number) => {
+    // SAFETY: installElectronApiMock defined window.electronAPI just before, with an invoke function.
+    const api = (window as typeof window & { electronAPI: { invoke(channel: string, ...args: unknown[]): Promise<MockReply> } }).electronAPI;
+    const invoke = api.invoke.bind(api);
+    api.invoke = (channel, ...args) => channel === 'remote:pwa-affordances'
+      ? Promise.resolve({ voiceTranscription: { availableModes: ['recorded'], defaultMode: 'recorded' } })
+      : invoke(channel, ...args);
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+      configurable: true,
+      value: () => new Promise<MediaStream>(resolve => setTimeout(() => {
+        const context = new AudioContext();
+        const oscillator = context.createOscillator();
+        const destination = context.createMediaStreamDestination();
+        oscillator.connect(destination);
+        oscillator.start();
+        window.__mic = destination.stream;
+        resolve(destination.stream);
+      }, delay)),
+    });
+  }, delayMs);
+}
+
+test('letting go of R2 while the microphone is still opening stops the recording', async ({ page }) => {
+  await openFixture(page, XBOX, { controller_cheat_sheet_seen: 'true' }, true, 'standard', () => installSlowMicrophone(page, 400));
+  await page.locator('.xterm').first().click();
+  await page.evaluate(() => window.__pad.set(7, 1));
+  await page.waitForTimeout(100);
+  await page.evaluate(() => window.__pad.set(7, 0));
+  // The microphone opens after the release; it must be closed again, not left recording.
+  await expect.poll(() => page.evaluate(() => {
+    const mic = window.__mic;
+    return mic ? mic.getTracks().map(track => track.readyState) : ['not opened'];
+  }), { timeout: 4000 }).toEqual(['ended']);
+  await expect(page.getByTestId('controller-listening-bar')).not.toContainText('Listening');
 });

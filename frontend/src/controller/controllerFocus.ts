@@ -113,11 +113,17 @@ export function noteControllerFocusIn(target: EventTarget | null): void {
   answerSurfaceSince = performance.now();
 }
 
+/** True just after focus entered a question or approval: A and Y wait out ANSWER_GUARD_MS there. */
+export function answerGuardActive(): boolean {
+  const active = activeElement();
+  return Boolean(active && answerSurface?.contains(active) && performance.now() - answerSurfaceSince < ANSWER_GUARD_MS);
+}
+
 /** A: what a click on the focused control does. */
 export function activateFocused(): boolean {
   const active = activeElement();
   if (!active || isTerminalInput(active)) return false;
-  if (answerSurface && answerSurface.contains(active) && performance.now() - answerSurfaceSince < ANSWER_GUARD_MS) return false;
+  if (answerGuardActive()) return false;
   if (active instanceof HTMLInputElement && (active.type === 'text' || active.type === 'search')) return false;
   if (active instanceof HTMLTextAreaElement) return false;
   active.click();
