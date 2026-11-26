@@ -1,15 +1,11 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { dismissDialogs, isolatedPane, launchIsolated, type IsolatedPane } from './isolatedPane';
+import { isolatedPane, type IsolatedPane } from './isolatedPane';
+import { endMark as sessionEndMark, launchWithScriptedAgent, seedChatSessions, withFakeClaude } from './scriptedChats';
+import { armVisibleProbe, readVisibleProbe } from './switchProbe';
 import type { SwitchMark } from '../shared/switchMarks';
-
-declare global {
-  /** The rAF probe's result for the switch in flight (switchTo below). */
-  var __paneSwitchProbe: ProbeResult | undefined;
-}
 
 /**
  * Session switch latency and retained memory (T-87 Phase 0). Runs under
@@ -25,7 +21,6 @@ declare global {
  * To add a path (P1's arrow keys), add a Trigger; to add a case, add a Scenario.
  */
 
-const AGENT = path.resolve('main/src/services/chatTabs/testing/scriptedAgent.mjs');
 const OUT = path.resolve(process.env.SESSION_SWITCH_OUT ?? 'test-results/session-switch');
 const MAX_RETAINED_NODES_PER_SWITCH = 200;
 const RETENTION_SWITCHES = 50;
@@ -47,57 +42,10 @@ const PLAN: Array<{ size: Size; count: number; turns: number }> = [
   { size: 'xl', count: 2, turns: 500 },
 ];
 
-const endMark = (session: Seeded) => `END-MARK-${session.name}`;
-
-/** ACP updates the scripted agent replays on session/load: a long, realistic conversation. */
-function conversation(turns: number, mark: string): unknown[] {
-  const updates: unknown[] = [];
-  for (let turn = 0; turn < turns; turn++) {
-    const feature = `feature${turn % 11}`;
-    updates.push({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: `Turn ${turn}: please look at module ${turn % 37} and fix the failing test in \`src/${feature}.ts\`. Keep the API stable.` } });
-    for (const [kind, title] of [['read', `Read src/${feature}.ts`], ['execute', `pnpm vitest run src/${feature}.test.ts`]] as const) {
-      const toolCallId = `tool-${randomUUID()}`;
-      const output = Array.from({ length: 12 }, (_, line) => `${line + 1}  const value${line} = compute(${line}, options); // output line ${line}`).join('\n');
-      updates.push({ sessionUpdate: 'tool_call', toolCallId, title, kind, status: 'in_progress', rawInput: kind === 'execute' ? { command: title } : { file_path: title.slice(5) } });
-      updates.push({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: output } }] });
-    }
-    const text = [
-      `I found the problem in **${feature}**. The test failed because \`compute\` returned a stale value after the cache was cleared.`,
-      '',
-      '- The cache key ignored `options.locale`.',
-      '- `reset()` cleared the map but not the pending promise.',
-      '- The test relied on timer order.',
-      '',
-      '```ts',
-      `export function compute${turn}(input: number, options: Options): number {`,
-      '  const key = `${input}:${options.locale}`;',
-      '  const cached = cache.get(key);',
-      '  if (cached !== undefined) return cached;',
-      '  const value = expensive(input, options);',
-      '  cache.set(key, value);',
-      '  return value;',
-      '}',
-      '```',
-      '',
-      `Tests pass now (${(turn % 50) + 3} passed). ${turn === turns - 1 ? mark : ''}`,
-    ].join('\n');
-    updates.push({ sessionUpdate: 'agent_message_chunk', messageId: randomUUID(), content: { type: 'text', text } });
-  }
-  return updates;
-}
-
-/** A `claude` stand-in on PATH, so creating a Claude Session never runs a real one. */
-function withFakeClaude(pane: IsolatedPane): void {
-  const bin = path.join(pane.root, 'fake-bin');
-  mkdirSync(bin, { recursive: true });
-  writeFileSync(path.join(bin, 'claude'), '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.999 (Claude Code)"; exit 0; fi\necho "stand-in claude"\nexit 1\n');
-  chmodSync(path.join(bin, 'claude'), 0o755);
-  pane.env.PATH = `${bin}${path.delimiter}${pane.env.PATH}`;
-}
+const endMark = (session: Seeded) => sessionEndMark(session.name);
 
 async function launch(pane: IsolatedPane, baseURL: string | undefined): Promise<{ app: ElectronApplication; page: Page }> {
-  const launched = await launchIsolated(pane, baseURL, { PANE_CHAT_TEST_AGENT: AGENT });
-  await dismissDialogs(launched.page);
+  const launched = await launchWithScriptedAgent(pane, baseURL);
   await launched.page.evaluate(() => { globalThis.__paneSwitchMarks = []; });
   return launched;
 }
@@ -112,43 +60,9 @@ function fixture(baseURL: string | undefined): Promise<Fixture> {
   seeded ??= (async () => {
     const pane = isolatedPane('session-switch');
     withFakeClaude(pane);
-    const store = path.join(pane.paneDir, 'scripted-agent');
-    const listStore = () => (existsSync(store) ? readdirSync(store) : []);
-    const sessions: Array<Seeded & { acp: string; turns: number }> = [];
-    const { app, page } = await launch(pane, baseURL);
-    try {
-      await page.evaluate(async () => { await window.electronAPI.config.update({ chatTabsEnabled: true }); });
-      for (const { size, count, turns } of PLAN) {
-        for (let index = 1; index <= count; index++) {
-          const name = `${size}-${String(index).padStart(2, '0')}`;
-          const before = new Set(listStore());
-          const view = await page.evaluate(async sessionName => {
-            const result = await window.electronAPI.orchestrationSessions.create({ name: sessionName, agent: 'claude' });
-            // SAFETY: orchestration-sessions:create returns an OrchestrationSessionView in `data` when it succeeds.
-            const data = result.data as { session: { id: string }; panel: { id: string } } | undefined;
-            if (!data) throw new Error(`Creating Session ${sessionName} failed: ${JSON.stringify(result)}`);
-            return { id: data.session.id, panelId: data.panel.id };
-          }, name);
-          const fresh = () => listStore().filter(file => !before.has(file));
-          // The chat's agent starts with the Session, or else once the Session is shown.
-          await expect.poll(() => fresh().length, { timeout: 8_000 }).toBeGreaterThan(0).catch(async () => {
-            await page.getByTestId(`orchestration-session-${view.id}`).click();
-            await expect.poll(() => fresh().length, { timeout: 20_000 }).toBeGreaterThan(0);
-          });
-          expect(fresh(), `one scripted-agent store for ${name}`).toHaveLength(1);
-          sessions.push({ name, ...view, size, messages: turns * 4, acp: fresh()[0].replace(/\.json$/, ''), turns });
-        }
-      }
-    } finally {
-      await app.close().catch(() => undefined);
-    }
-    for (const session of sessions) {
-      const file = path.join(store, `${session.acp}.json`);
-      const saved: { updates?: unknown[] } = JSON.parse(readFileSync(file, 'utf8'));
-      saved.updates = conversation(session.turns, endMark(session));
-      writeFileSync(file, JSON.stringify(saved));
-    }
-    return { pane, sessions: sessions.map(({ name, id, panelId, size, messages }) => ({ name, id, panelId, size, messages })) };
+    const plan = PLAN.flatMap(({ size, count, turns }) => Array.from({ length: count }, (_, index) => ({ name: `${size}-${String(index + 1).padStart(2, '0')}`, size, turns })));
+    const created = await seedChatSessions(pane, baseURL, plan);
+    return { pane, sessions: created.map((session, index) => ({ name: session.name, id: session.id, panelId: session.panelId, size: plan[index].size, messages: session.messages })) };
   })();
   return seeded;
 }
@@ -188,55 +102,12 @@ interface Sample {
   marks: Array<[string, number]>;
 }
 
-interface ProbeResult { input?: number; visible?: number; painted?: number; focused?: number; timedOut?: boolean }
-
 async function switchTo(page: Page, session: Seeded, trigger: Trigger, scenario: string): Promise<Sample> {
   const row = page.getByTestId(`orchestration-session-${session.id}`);
   await row.scrollIntoViewIfNeeded();
-  await page.evaluate(({ panelId, mark, focuses }) => {
-    globalThis.__paneSwitchMarks = [];
-    const done: ProbeResult = {};
-    globalThis.__paneSwitchProbe = done;
-    const started = performance.now();
-    const input = (event: Event) => { done.input ??= event.timeStamp; };
-    window.addEventListener('click', input, { capture: true, once: true });
-    window.addEventListener('keydown', input, { capture: true, once: true });
-    const laidOut = (element: Element | null | undefined) => !!element && element.getClientRects().length > 0;
-    /** The last message's marker is inside the conversation's scroll viewport, not just somewhere in its text. */
-    const markerOnScreen = (region: Element) => {
-      if (!laidOut(region) || !region.textContent?.includes(mark)) return false;
-      const viewport = region.getBoundingClientRect();
-      const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.textContent?.includes(mark)) continue;
-        const range = document.createRange();
-        range.selectNodeContents(node);
-        const text = range.getBoundingClientRect();
-        return text.height > 0 && text.bottom > viewport.top && text.top < viewport.bottom;
-      }
-      return false;
-    };
-    const tick = () => {
-      const now = performance.now();
-      const composer = document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${CSS.escape(panelId)}"]`);
-      if (done.visible === undefined && laidOut(composer)) {
-        if (Array.from(document.querySelectorAll('[aria-label="Conversation messages"]')).some(markerOnScreen)) done.visible = now;
-      } else if (done.visible !== undefined && done.painted === undefined && now > done.visible) done.painted = now;
-      if (focuses && done.focused === undefined && composer && document.activeElement === composer) done.focused = now;
-      const finished = done.painted !== undefined && (!focuses || done.focused !== undefined);
-      if (finished || now - started > 60_000) {
-        done.timedOut = !finished;
-        window.removeEventListener('click', input, { capture: true });
-        window.removeEventListener('keydown', input, { capture: true });
-        return;
-      }
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }, { panelId: session.panelId, mark: endMark(session), focuses: TRIGGERS[trigger].focuses });
+  await armVisibleProbe(page, { panelId: session.panelId, mark: endMark(session), focuses: TRIGGERS[trigger].focuses });
   await TRIGGERS[trigger].run(page, row);
-  await page.waitForFunction(() => globalThis.__paneSwitchProbe?.timedOut !== undefined, undefined, { timeout: 90_000, polling: 50 });
-  const { done, marks } = await page.evaluate(() => ({ done: globalThis.__paneSwitchProbe ?? {}, marks: globalThis.__paneSwitchMarks ?? [] }));
+  const { done, marks } = await readVisibleProbe(page);
   const t0 = done.input ?? marks.find(mark => mark.name === 'open')?.t ?? NaN;
   const since = (t: number | undefined) => (t === undefined || Number.isNaN(t0) ? null : +(t - t0).toFixed(1));
   const ownPanel = (mark: SwitchMark) => mark.detail.panelId === session.panelId;
