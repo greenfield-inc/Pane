@@ -19,6 +19,11 @@ export interface TranscriptLocator {
   notBeforeMs?: number;
 }
 
+/** Whether Pane can read this agent's transcript (it knows these agents' file formats). */
+export function isTranscriptAgent(agent: string | undefined): agent is TranscriptLocator['agent'] {
+  return agent === 'claude' || agent === 'codex';
+}
+
 interface UserTurnLookup {
   /** `taken`: the agent started a turn with the text; `queued`: it holds the text until its current turn ends. */
   state: 'taken' | 'queued' | null;

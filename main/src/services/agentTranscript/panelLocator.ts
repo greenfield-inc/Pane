@@ -1,7 +1,7 @@
 import type { ToolPanel } from '../../../../shared/types/panels';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { panelManager } from '../panelManager';
-import type { TranscriptLocator } from './index';
+import { isTranscriptAgent, type TranscriptLocator } from './index';
 
 const agentSessionState = boundary.object({ agentSessionId: boundary.optional(boundary.string) });
 
@@ -11,7 +11,7 @@ const agentSessionState = boundary.object({ agentSessionId: boundary.optional(bo
  * before the panel existed. Undefined for any other agent, or without a working directory.
  */
 export function panelTranscriptLocator(panel: ToolPanel, cwd: string | undefined, agentType: string | undefined): TranscriptLocator | undefined {
-  if (!cwd || (agentType !== 'claude' && agentType !== 'codex')) return undefined;
+  if (!cwd || !isTranscriptAgent(agentType)) return undefined;
   const current = panelManager.getPanel(panel.id) ?? panel;
   const customState = decodeOptionalBoundary(current.state?.customState ?? {}, agentSessionState);
   const createdAt = Date.parse(panel.metadata?.createdAt ?? '');
