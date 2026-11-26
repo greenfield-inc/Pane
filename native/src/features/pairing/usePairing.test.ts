@@ -118,3 +118,15 @@ it('leaves watched computers out of what a full-access code’s computer is told
   expect(state.exchanged.map(request => request.known)).toEqual([['mine']]);
   expect(state.previews).toBe(1);
 });
+
+it('pairs a link pasted without its scheme and broken across lines, as a scanned QR does', async () => {
+  state.preview = { ok: true, group: [{ id: ID, name: 'Tyler' }] };
+  state.token = 'full-token';
+  await pair({ code: ` runpane.net/pair#s=secret&c=${ID}\n&n=Tyler \n` });
+  expect(state.added.map(profile => profile.token)).toEqual(['full-token']);
+});
+
+it('names both forms it accepts when the text is neither', async () => {
+  await expect(pair({ code: 'https://studio.tailnet.ts.net' })).rejects.toThrow('Paste a pairing link (https://runpane.net/pair#…) or a connection code that starts with pane-remote://');
+  expect(state.exchanged).toEqual([]);
+});
