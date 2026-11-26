@@ -884,10 +884,11 @@ test('Markdown reads at the chat\'s text size in a reading column (build 8 feedb
   });
   // The chat's own tokens, so a change to the chat's text changes this too.
   expect(read.chatSize).toBe('16px');
+  expect(read.chatLine).toBe('1.5');
   expect(read.fontSize).toBe(read.chatSize);
   expect(read.lineHeight).toBeCloseTo(Number(read.chatLine), 2);
-  // At most the chat column's 44rem (about 75 characters a line), on a 1440 px window.
-  expect(read.width).toBeLessThanOrEqual(44 * 16);
+  // A reading column of 36rem, about 75 characters a line, on a 1440 px window.
+  expect(read.width).toBeLessThanOrEqual(36 * 16);
   expect(read.width).toBeGreaterThan(500);
 });
 

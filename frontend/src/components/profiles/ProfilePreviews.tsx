@@ -135,9 +135,9 @@ export function MarkdownWithMeta({ source }: { source: string }) {
   const { frontMatter, body } = useMemo(() => splitFrontMatter(source), [source]);
   const parsed = useParsedYaml(frontMatter);
   return (
-    // The chat's reading column and message text (build 8 feedback 1 and 2): its width, size and line height.
+    // The chat's message text (build 8 feedback 1) in a reading column of about 75 characters (feedback 2).
     <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6" data-testid="profiles-markdown-preview">
-      <div className="mx-auto w-full max-w-[var(--chat-reading-width)] [&_.markdown-preview]:px-0 [&_.markdown-preview]:text-[length:var(--chat-message-font-size)] [&_.markdown-preview]:leading-[var(--chat-message-line-height)]">
+      <div className="mx-auto w-full max-w-[36rem] [&_.markdown-preview]:px-0 [&_.markdown-preview]:text-[length:var(--chat-message-font-size)] [&_.markdown-preview]:leading-[var(--chat-message-line-height)]">
       {frontMatter !== null && (
         <div className="mb-4 rounded-lg border border-border-primary" data-testid="profiles-front-matter">
           <div className="border-b border-border-primary px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">Metadata</div>

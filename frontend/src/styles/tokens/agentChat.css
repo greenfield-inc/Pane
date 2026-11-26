@@ -2,12 +2,11 @@
  * Source: assistant-ui/assistant-ui@a24d074, templates/minimal/app/globals.css.
  * The approved default theme is deliberately independent of the surrounding shell.
  */
-/* A chat message's text and the chat column's width, global so other reading surfaces (the
- * Profiles file viewer) match the chat. Pane's text-size setting zooms the window, so these follow it. */
+/* A chat tab message's text, global so other reading surfaces (the Profiles file viewer) match
+ * the chat. Pane's text-size setting zooms the window, so these follow it. */
 :root {
   --chat-message-font-size: 16px;
-  --chat-message-line-height: 1.625;
-  --chat-reading-width: 44rem;
+  --chat-message-line-height: 1.5;
 }
 .agent-chat {
   --chat-background: oklch(1 0 0);
