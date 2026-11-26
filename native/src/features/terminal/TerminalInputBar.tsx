@@ -10,6 +10,7 @@ import { useAutocorrect } from '../composer/autocorrectPreference';
 import { straightenKeyboardEdit } from '../composer/smartPunctuation';
 import { recordingClock } from '../voice/recordingLimits';
 import type { useVoiceDictation } from '../voice/useVoiceDictation';
+import { Focusable } from '../controller/Focusable';
 
 type Voice = ReturnType<typeof useVoiceDictation>;
 
@@ -125,6 +126,7 @@ function BoxAction({ testID, label, hint, ios, android, tinted: alwaysTinted = f
   const { colors } = theme;
   const tinted = alwaysTinted || selected === true;
   return (
+    <Focusable enabled={!disabled} onActivate={onPress}>
     <Pressable
       testID={testID}
       accessibilityRole="button"
@@ -148,6 +150,7 @@ function BoxAction({ testID, label, hint, ios, android, tinted: alwaysTinted = f
     >
       <Icon ios={ios} android={android} size={17} color={tinted ? colors.accentText : colors.textSecondary} />
     </Pressable>
+    </Focusable>
   );
 }
 
@@ -163,6 +166,7 @@ function SendButton({ hasText, sending, dimmed, onPress }: { hasText: boolean; s
   const send = hasText || dimmed;
   const tint = send ? colors.onAccent : colors.text;
   return (
+    <Focusable enabled={!dimmed} onActivate={() => { if (!sending) onPress(); }}>
     <Pressable
       testID="terminal-send"
       accessibilityRole="button"
@@ -191,6 +195,7 @@ function SendButton({ hasText, sending, dimmed, onPress }: { hasText: boolean; s
       </View>
       <Text variant="callout" style={[styles.sendLabel, { color: tint }]}>{send ? 'Send' : 'Enter'}</Text>
     </Pressable>
+    </Focusable>
   );
 }
 
@@ -205,6 +210,7 @@ function MicButton({ voice, disabled, onSetup }: { voice: Voice; disabled: boole
   return (
     <View style={styles.micRow}>
       {listening ? <RecordingTime startedAt={voice.startedAt} /> : null}
+      <Focusable enabled={!off} onActivate={() => (voice.available || listening ? voice.toggle() : onSetup())}>
       <Pressable
         testID="terminal-mic"
         accessibilityRole="button"
@@ -238,6 +244,7 @@ function MicButton({ voice, disabled, onSetup }: { voice: Voice; disabled: boole
           />
         )}
       </Pressable>
+      </Focusable>
     </View>
   );
 }

@@ -41,12 +41,13 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
   // Search on the rail expands Home with the keyboard up.
   const input = useRef<TextInput>(null);
   const asked = useRef(false);
+  const searchRequested = useWideLayout(state => state.searchRequested);
   useEffect(() => {
-    if (inColumn && useWideLayout.getState().takeSearchRequest()) {
+    if (searchRequested && useWideLayout.getState().takeSearchRequest()) {
       asked.current = true;
       input.current?.focus();
     }
-  }, [inColumn]);
+  }, [inColumn, searchRequested]);
   const onFocus = () => {
     const wanted = asked.current;
     asked.current = false;

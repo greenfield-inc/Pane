@@ -86,7 +86,7 @@ class PaneControllerModule : Module() {
   }
 
   private fun controllers(): List<InputDevice> =
-    InputDevice.getDeviceIds().mapNotNull { InputDevice.getDevice(it) }.filter { PaneControllerInput.isController(it) }
+    InputDevice.getDeviceIds().toList().mapNotNull { InputDevice.getDevice(it) }.filter { PaneControllerInput.isController(it) }
 
   private fun hasRumble(device: InputDevice): Boolean =
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && device.vibratorManager.vibratorIds.isNotEmpty()

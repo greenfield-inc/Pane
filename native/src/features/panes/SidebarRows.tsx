@@ -9,6 +9,7 @@ import type { SidebarItem } from './paneList';
 import { IconButton } from './PaneKit';
 import { PausedBadge } from './StatusBadge';
 import { SwipeRow, useSwipeRowAccessibility } from './SwipeRow';
+import { Focusable } from '@/features/controller/Focusable';
 
 /** The drawer's collapsible section header: chevron, sentence-case label and, for Archived, a count. */
 export function SidebarSectionHeader({ item, first, onToggle }: {
@@ -64,6 +65,7 @@ export function SessionRow({ item, waiting, fresh = 0, onOpen, onToggleNested, o
     <SwipeRow testIDPrefix="session" id={nestedKey} {...actions}>
       <View style={[styles.row, { backgroundColor: pressed ? theme.colors.selected : background ?? theme.colors.background }]}>
         {paneCount > 0 ? (
+          <Focusable onActivate={onToggleNested}>
           <IconButton
             testID={`session-nested-${nestedKey}`}
             label={`${nestedExpanded ? 'Hide' : 'Show'} panes in ${label}`}
@@ -72,11 +74,13 @@ export function SessionRow({ item, waiting, fresh = 0, onOpen, onToggleNested, o
           >
             <Icon ios={nestedExpanded ? 'chevron.down' : 'chevron.right'} android={nestedExpanded ? 'expand_more' : 'chevron_right'} size={14} />
           </IconButton>
+          </Focusable>
         ) : (
           <View style={styles.leadingIcon}>
             <Icon ios="bubble.left" android="chat_bubble" size={14} />
           </View>
         )}
+        <Focusable style={styles.open} onActivate={onOpen}>
         <Pressable
           testID={`session-row-${nestedKey}`}
           accessibilityRole="button"
@@ -92,6 +96,7 @@ export function SessionRow({ item, waiting, fresh = 0, onOpen, onToggleNested, o
           {paneCount > 0 ? <Text variant="caption" tone="muted" style={styles.count}>{paneCount}</Text> : null}
           <WaitingCount testID={`session-waiting-${nestedKey}`} count={waiting} fresh={fresh} />
         </Pressable>
+        </Focusable>
       </View>
     </SwipeRow>
   );

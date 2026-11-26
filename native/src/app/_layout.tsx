@@ -8,6 +8,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useActiveHost, useHostsStore } from '@/auth/hostsStore';
 import { DaemonProvider, queryClient } from '@/daemon';
 import { ReopenLastScreen } from '@/features/app/ReopenLastScreen';
+import { CheatSheet } from '@/features/controller/CheatSheet';
+import { ControllerInput } from '@/features/controller/ControllerInput';
 import { WideFrame } from '@/features/layout/WideFrame';
 import { useShowsBack } from '@/features/layout/wideLayout';
 import { RelayComputerSync } from '@/features/hosts/RelayComputerSync';
@@ -60,6 +62,8 @@ export default function RootLayout() {
                 <TerminalPrewarm />
                 <NotifyAlertCleanup />
                 <RelayComputerSync />
+                <ControllerInput />
+                <CheatSheet />
               </DaemonProvider>
               <ReopenLastScreen hostId={activeHost.id} />
               <SharedCredentialSync />
@@ -96,6 +100,7 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
         <Stack.Screen name="settings/shortcut" options={{ presentation: 'modal', title: 'Edit shortcut' }} />
         <Stack.Screen name="settings/voice" options={{ title: 'Voice', ...grouped }} />
         <Stack.Screen name="settings/glasses" options={{ title: 'Glasses', ...grouped }} />
+        <Stack.Screen name="settings/controller" options={{ title: 'Controller', ...grouped }} />
         <Stack.Screen name="machine/[key]" options={{ title: '', ...grouped }} />
         <Stack.Screen
           name="machine/connect"
@@ -133,6 +138,11 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
         <Stack.Screen
           name="sort-approvals"
           options={{ presentation: 'formSheet', sheetAllowedDetents: 'fitToContents', sheetGrabberVisible: true, headerShown: false }}
+        />
+        {/* A controller's − : the Recent switcher. */}
+        <Stack.Screen
+          name="recent"
+          options={{ presentation: 'formSheet', sheetAllowedDetents: [0.6, 1], sheetGrabberVisible: true, headerShown: false }}
         />
         {/* Home's Stale and Done today. */}
         <Stack.Screen name="history" options={{ title: 'History', headerLargeTitle: true, headerBackTitle: 'Home', headerBackButtonDisplayMode: 'default' }} />

@@ -1,6 +1,6 @@
 import { AssistantRuntimeProvider, ThreadPrimitive, useExternalStoreRuntime, type AppendMessage } from '@assistant-ui/react-native';
-import { LegendList } from '@legendapp/list/react-native';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
+import { use, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Keyboard, StyleSheet, View } from 'react-native';
 
 import { chatAgentLabel } from '@shared/chatAgentMenu';
@@ -16,6 +16,12 @@ import { useTheme } from '@/theme';
 import { EmptyState, SkeletonSwap, Text } from '@/ui';
 
 import { ComposerSheet } from '../composer/ComposerSheet';
+import { ColumnActive } from '../controller/focusContext';
+import { ListeningBar } from '../controller/ListeningBar';
+import { rumbleOnConfirm } from '../controller/rumble';
+import { useControllerActions } from '../controller/useControllerActions';
+import { useVoiceDictation } from '../voice/useVoiceDictation';
+import { VoiceAudio } from '../voice/VoiceAudio';
 import { Dimmed } from '../hosts/ConnectionStatus';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { ChatCommandList, type ChatMenuPick } from './ChatCommandList';
@@ -140,6 +146,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
       viewer.setPendingDelivery(undefined);
       viewer.setError(receipt.state === 'failed' ? receipt.error : undefined);
       if (receipt.state !== 'failed') {
+        rumbleOnConfirm();
         viewer.setDraft('');
         runtime.thread.composer.setText('');
         void runtime.thread.composer.clearAttachments();
@@ -227,6 +234,30 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
     }
   };
 
+  // A controller: Y sends like Send, R2 dictates into the box (the words wait for Y), the right stick scrolls.
+  const list = useRef<LegendListRef>(null);
+  const voice = useVoiceDictation(text => {
+    const draft = viewer.snapshot().draft;
+    const next = draft.trim() ? `${draft}${/\s$/.test(draft) ? '' : ' '}${text}` : text;
+    viewer.setDraft(next);
+    runtime.thread.composer.setText(next);
+  });
+  const scrollBy = (by: number) => {
+    const current = list.current;
+    if (current) void current.scrollToOffset({ offset: Math.max(0, current.getState().scroll + by), animated: false });
+  };
+  useControllerActions('tab', {
+    'send-draft': () => (readOnly ? false : runtime.thread.composer.send()),
+    'dictate-hold': event => {
+      if (readOnly || !voice.available) return false;
+      if (event.phase === 'start') voice.hold();
+      else voice.release();
+    },
+    'scroll-focused-surface-up': () => scrollBy(-SCROLL_STEP),
+    'scroll-focused-surface-down': () => scrollBy(SCROLL_STEP),
+    'jump-to-bottom': () => void list.current?.scrollToEnd({ animated: true }),
+  }, use(ColumnActive));
+
   const error = snapshot.error;
   const arranged = arrangeComposerControls(view?.controls ?? []);
   const labels = triggerLabels(arranged);
@@ -249,7 +280,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
             {/* The host is launching the agent and replaying its history: a real state, which can take seconds. */}
             {starting && <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>Starting {agent}…</Text>}
           </View>}>
-          {notRunning ? <EmptyState testID="chat-not-running" title="Not running" message={`This chat isn’t running on ${profile.label}. Its messages show here once someone opens it there.`} /> : <LegendList testID="chat-rows" data={rows} keyExtractor={row => row.key} estimatedItemSize={60} recycleItems={false}
+          {notRunning ? <EmptyState testID="chat-not-running" title="Not running" message={`This chat isn’t running on ${profile.label}. Its messages show here once someone opens it there.`} /> : <LegendList ref={list} testID="chat-rows" data={rows} keyExtractor={row => row.key} estimatedItemSize={60} recycleItems={false}
             contentContainerStyle={styles.rows} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition initialScrollAtEnd
             // A window that stops short of the newest message must not chase the end.
             maintainScrollAtEnd={snapshot.hasNewer ? false : { animated: false }} maintainScrollAtEndThreshold={0.05}
@@ -267,6 +298,9 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
         {view?.questions.map(question => <QuestionCard key={question.id} question={question} disabled={disabled || busy} onAnswer={answer => void act(() => chat.answer(panelId, question.id, answer))} />)}
         {view?.permissions.map(permission => <ApprovalCard key={permission.id} permission={permission} agent={agent} disabled={disabled || busy} onAnswer={optionId => void act(() => chat.permission(panelId, permission.id, optionId))} />)}
         {!!view?.queue.length && <QueueList queue={view.queue} label={queuedLabel} onRemove={operationId => void act(() => chat.unqueue(panelId, operationId))} />}
+        {voice.audio ? <VoiceAudio {...voice.audio} /> : null}
+        <ListeningBar phase={voice.phase} preview={voice.preview} />
+        {voice.error ? <Text testID="chat-voice-error" variant="footnote" tone="danger" onPress={voice.clearError}>{voice.error}</Text> : null}
         <ChatCommandList chat={chat} panelId={panelId} trigger={pending ? null : menu.open} view={view} onPick={pick} />
         <ChatTabComposer agent={agent} placeholder={placeholder ?? composerPlaceholder(view?.mentions, { session, phone: true })}
           disabled={disabled} pending={pending} working={working} canStop={!busy && live} canAttach={!!view?.canAttachImages}
@@ -281,6 +315,9 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
     </ThreadPrimitive.Root>
   </AssistantRuntimeProvider>;
 }
+
+/** Points the right stick scrolls the conversation per step. */
+const SCROLL_STEP = 40;
 
 const styles = StyleSheet.create({
   fill: { flex: 1, minHeight: 0 },

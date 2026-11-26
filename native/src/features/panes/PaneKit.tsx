@@ -4,6 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/theme';
 import { Icon, Skeleton, Text } from '@/ui';
+import { Focusable } from '@/features/controller/Focusable';
+import { ScopeRing } from '@/features/controller/FocusScope';
 
 /**
  * The PWA's drawer and dialog pieces (frontend/src/remote/components) that the
@@ -126,6 +128,7 @@ export function SheetButton({ title, onPress, variant = 'plain', loading, disabl
   const inactive = disabled || loading;
   const color = variant === 'primary' ? theme.colors.onAccent : variant === 'danger' ? theme.colors.danger : theme.colors.textSecondary;
   return (
+    <Focusable style={style} enabled={!inactive} onActivate={onPress}>
     <Pressable
       testID={testID}
       accessibilityRole="button"
@@ -141,12 +144,12 @@ export function SheetButton({ title, onPress, variant = 'plain', loading, disabl
           borderColor: variant === 'danger' ? theme.colors.border : 'transparent',
           opacity: inactive ? 0.6 : pressed && variant === 'primary' ? 0.85 : 1,
         },
-        style,
       ]}
     >
       {loading ? <ActivityIndicator size="small" color={color} /> : null}
       <Text variant="callout" style={[styles.bold, { color }]}>{title}</Text>
     </Pressable>
+    </Focusable>
   );
 }
 
@@ -182,6 +185,7 @@ export function DialogSheet({ title, onClose, closeDisabled, footer, children, t
       </View>
       {children}
       <View style={[styles.sheetFooter, divider, { paddingBottom: Math.max(insets.bottom, 20) }]}>{footer}</View>
+      <ScopeRing />
     </ScrollView>
   );
 }

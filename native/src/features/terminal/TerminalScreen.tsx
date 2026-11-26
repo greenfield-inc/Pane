@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { router, Stack, useIsFocused, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
+import { use, useEffect, useEffectEvent, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -46,6 +46,11 @@ import { useUploads } from '../upload/useUploads';
 import { useVoiceDictation } from '../voice/useVoiceDictation';
 import { VoiceAudio } from '../voice/VoiceAudio';
 import { VoiceSetupSheet } from '../voice/VoiceSetupSheet';
+import { ColumnActive } from '../controller/focusContext';
+import { Focusable } from '../controller/Focusable';
+import { KeyPad } from '../controller/KeyPad';
+import { rumbleOnConfirm } from '../controller/rumble';
+import { useControllerActions } from '../controller/useControllerActions';
 import { CopySheet } from './CopySheet';
 import { controllerLayout } from './controllerLayout';
 import { useControllerShown } from './controllerPreference';
@@ -278,6 +283,23 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
     const live = tab.type === 'browser' && offersViewLive(streamChoices.all().get(tab.id), page) ? () => { viewLive(tab.id, page); selectPanel(tab); } : undefined;
     offerClose(tab.title, confirm, live, besideAction(tab));
   };
+  // L1 and R1 step through the strip in order, a screen's own tabs (an approval) first; L1+R1 moves to the other column.
+  const stepTab = (by: 1 | -1) => {
+    const ids = [...(leading?.tabs.map(tab => tab.id) ?? []), ...panels.map(tab => tab.id)];
+    const at = ids.indexOf(leadingTab?.id ?? focusedPanel?.id ?? '');
+    const next = ids[(Math.max(at, 0) + by + ids.length) % ids.length];
+    const nextPanel = panels.find(tab => tab.id === next);
+    if (nextPanel) selectPanel(nextPanel);
+    else if (next) navigation.setParams({ panelId: next });
+  };
+  useControllerActions('tab', {
+    'cycle-tab-prev-a': () => stepTab(-1),
+    'cycle-tab-next-d': () => stepTab(1),
+    'controller-switch-column': () => {
+      if (!twoColumns) return false;
+      navigation.setParams({ focus: split.focus === 'left' ? 'right' : 'left' });
+    },
+  }, focused);
   const columnProps = {
     paneId,
     title,
@@ -292,6 +314,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   };
 
   return (
+    <ColumnActive value={focused}>
     <KeyboardAvoidingView
       testID="pane-detail-screen"
       onLayout={({ nativeEvent: { layout } }) => setContentWidth(layout.width)}
@@ -330,6 +353,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
             panel={panel}
             actions={leftActions}
             focused={twoColumns && split.focus === 'left'}
+            controllerActive={focused && (!twoColumns || split.focus === 'left')}
             onFocus={twoColumns ? () => { if (split.focus !== 'left') navigation.setParams({ focus: 'left' }); } : undefined}
             empty={(
               <View style={[styles.fill, { backgroundColor: theme.terminal.background }]}>
@@ -353,6 +377,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
             panel={right}
             actions={rightActions}
             focused={twoColumns && split.focus === 'right'}
+            controllerActive={focused && (!twoColumns || split.focus === 'right')}
             onFocus={twoColumns ? () => { if (split.focus !== 'right') navigation.setParams({ focus: 'right' }); } : undefined}
             beside={twoColumns}
             empty={null}
@@ -364,6 +389,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       {/* The box sits on the bottom safe area (HIG: controls stay out of it), or a hair above the keyboard. */}
       <BottomGap />
     </KeyboardAvoidingView>
+    </ColumnActive>
   );
 }
 
@@ -392,7 +418,7 @@ export function LeadingBodies({ leading, selectedId }: { leading: LeadingTabs; s
  * One column of a Pane's tabs: the open tab's body, with a terminal's composer box under it.
  * The column owns its box, so each side of a split keeps its own draft and dictation.
  */
-function TabColumn({ paneId, panel, title, panels, loading, empty, actions, resuming, onResume, focused, onFocus, beside = false, shortcuts, shortcutsLoading, onOpenShortcuts }: {
+function TabColumn({ paneId, panel, title, panels, loading, empty, actions, resuming, onResume, focused, controllerActive, onFocus, beside = false, shortcuts, shortcutsLoading, onOpenShortcuts }: {
   paneId: string;
   panel: ToolPanel | null;
   title: string;
@@ -405,6 +431,8 @@ function TabColumn({ paneId, panel, title, panels, loading, empty, actions, resu
   onResume?: (panel: ToolPanel) => void;
   /** Marked as the side the tab strip picks into, in a split. */
   focused: boolean;
+  /** The controller drives this column: the only one, or the focused side of a split. */
+  controllerActive: boolean;
   onFocus?: () => void;
   /** The right column of a split. */
   beside?: boolean;
@@ -429,6 +457,7 @@ function TabColumn({ paneId, panel, title, panels, loading, empty, actions, resu
       {onFocus ? <View testID={focused ? 'split-focused-mark' : undefined} style={[styles.focusMark, { backgroundColor: focused ? theme.colors.accent : 'transparent' }]} /> : null}
       {/* Dictation's audio, here so a recording survives switching tabs; mounted on first use. */}
       {voice.audio ? <VoiceAudio {...voice.audio} /> : null}
+      <ColumnActive value={controllerActive}>
       <SkeletonSwap loading={loading && !panel} skeleton={<TerminalSkeleton testID="pane-skeleton" label="Loading the Pane" />} style={styles.fill}>
       {panel && tabView(panel) !== 'terminal' ? (
         <TabBody panel={panel} title={title} panels={panels} />
@@ -450,6 +479,7 @@ function TabColumn({ paneId, panel, title, panels, loading, empty, actions, resu
         />
       ) : empty}
       </SkeletonSwap>
+      </ColumnActive>
     </View>
   );
 }
@@ -568,6 +598,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
     let textLanded = false;
     void composer.send(async text => {
       await Promise.all([text ? terminal.sendInput(text).then(() => { textLanded = true; }) : undefined, terminal.sendInput(KEYS.enter)]);
+      rumbleOnConfirm();
     }).catch((error: unknown) => {
       const mayHaveLanded = textLanded || error instanceof RemoteUnconfirmedResultError || (error instanceof PaneError && error.code === 'ERR_REMOTE_DELIVERY_UNKNOWN');
       setSendError(mayHaveLanded
@@ -575,6 +606,23 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
         : 'Not sent. Your text is still in the box; send it again when connected.');
     });
   };
+  const [keyPad, setKeyPad] = useState(false);
+  useControllerActions('tab', {
+    'terminal-arrow-up': () => sendKey(KEYS.up),
+    'terminal-arrow-down': () => sendKey(KEYS.down),
+    'terminal-arrow-left': () => sendKey(KEYS.left),
+    'terminal-arrow-right': () => sendKey(KEYS.right),
+    'send-draft': () => (readOnly ? false : submit()),
+    'open-key-pad': () => (readOnly ? false : setKeyPad(true)),
+    'scroll-focused-surface-up': () => terminal.scrollLines(-SCROLL_LINES),
+    'scroll-focused-surface-down': () => terminal.scrollLines(SCROLL_LINES),
+    'jump-to-bottom': () => terminal.scrollToBottom(),
+    'dictate-hold': event => {
+      if (readOnly || !voice.available) return false;
+      if (event.phase === 'start') voice.hold();
+      else voice.release();
+    },
+  }, use(ColumnActive));
   const insertText = (text: string) => {
     composer.insert(text);
     setClipboardError(null);
@@ -606,7 +654,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
         }}
       >
         <Dimmed dimmed={disabled} style={styles.fill}>
-          <View style={styles.screen}>
+          <Focusable style={styles.screen} preferred context="terminal" onActivate={() => sendKey(KEYS.enter)}>
             <TerminalTouchSurface rows={terminal.rows} onScrollLines={terminal.scrollLines} onPan={readOnly ? terminal.pan : undefined}>
               <TerminalWebView
                 ref={terminal.webView}
@@ -615,10 +663,11 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
                 onProcessGone={terminal.reload}
               />
             </TerminalTouchSurface>
-          </View>
+          </Focusable>
           {shown && controllerShown && !readOnly ? (
             <FloatingController onKey={sendKey} onScroll={terminal.scrollLines} layout={controllerLayout(terminalHeight, terminal.rows)} />
           ) : null}
+          {keyPad ? <KeyPad onKey={sendKey} onClose={() => setKeyPad(false)} /> : null}
           {shown && !terminal.atBottom ? (
             <Pressable
               testID="terminal-scroll-bottom"
@@ -746,6 +795,9 @@ function useKeyboardVisible(): boolean {
   }, []);
   return visible;
 }
+
+/** Lines the right stick scrolls per step (about 16 a second at its repeat rate). */
+const SCROLL_LINES = 1;
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },

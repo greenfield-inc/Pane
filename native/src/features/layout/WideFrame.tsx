@@ -6,6 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenFocus } from '@/daemon';
 import { closedAny } from '@/features/app/reopenScreen';
 import { ArchiveHoldProvider } from '@/features/approvals/ArchiveUndo';
+import { useControllerState } from '@/features/controller/controllerState';
+import { FocusRing } from '@/features/controller/FocusRing';
 import { HomeScreen } from '@/features/home/HomeScreen';
 import { useTheme } from '@/theme';
 
@@ -42,7 +44,7 @@ export function WideFrame({ children }: { children: ReactNode }) {
     <ArchiveHoldProvider>
       {/* What is really laid out, not the reported window: React Native can report a stale size on a fold. */}
       {/* Side by side, the column and the open screen keep clear of a cutout on either side. */}
-      <View style={[styles.row, wide && { paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: theme.colors.background }]} onLayout={({ nativeEvent: { layout } }) => setWindow({ width: layout.width, height: layout.height })}>
+      <View style={[styles.row, wide && { paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: theme.colors.background }]} onLayout={({ nativeEvent: { layout } }) => setWindow({ width: layout.width, height: layout.height })} onStartShouldSetResponderCapture={hideRing}>
         {wide ? (
           <View key="home" testID="home-column" style={[styles.column, { width: rail ? RAIL_WIDTH : columnWidth(width), backgroundColor: theme.colors.background, borderRightColor: theme.colors.border }]}>
             <InColumn value>
@@ -54,9 +56,16 @@ export function WideFrame({ children }: { children: ReactNode }) {
           </View>
         ) : null}
         <View key="stack" style={styles.fill}>{children}</View>
+        <FocusRing scope="" />
       </View>
     </ArchiveHoldProvider>
   );
+}
+
+/** A touch hides the controller's focus ring until the next controller press; the touch itself goes on as usual. */
+function hideRing(): boolean {
+  if (useControllerState.getState().ringShown) useControllerState.setState({ ringShown: false });
+  return false;
 }
 
 const styles = StyleSheet.create({

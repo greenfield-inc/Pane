@@ -1,10 +1,11 @@
-import { LegendList } from '@legendapp/list/react-native';
+import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import { router } from 'expo-router';
-import { use, useEffect, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { canClose } from '@shared/approvalReceipts';
+import { nextNeedsYou, type NeedsYouItem } from '@shared/controller/needsYou';
 
 import { ScreenFocus } from '@/daemon';
 
@@ -15,6 +16,10 @@ import { sessionKey } from '@/features/approvals/approvals';
 import { ArchiveUndoBar, useArchiveHold } from '@/features/approvals/ArchiveUndo';
 import { approvalRowSpoken, ApprovalRowLines } from '@/features/approvals/ApprovalRowLines';
 import { AutopilotRow } from '@/features/autopilot/AutopilotRow';
+import { FocusListContext } from '@/features/controller/focusContext';
+import { Focusable } from '@/features/controller/Focusable';
+import { useControllerActions } from '@/features/controller/useControllerActions';
+import { useFocusList } from '@/features/controller/useFocusList';
 import { useAutopilot } from '@/features/autopilot/hooks';
 import { DemoBadge } from '@/features/demo/DemoBadge';
 import { ConnectionBar, Dimmed } from '@/features/hosts/ConnectionStatus';
@@ -249,6 +254,38 @@ export function HomeScreen() {
   // Needs you: Autopilot, the approvals in the chosen sort, Panes waiting in their terminal (D-81),
   // then the line that opens History.
   const inTerminal = terminalWaiting(board, held);
+  // + opens what waits on you, in Needs you's order: questions, then permission requests, then terminals, oldest first.
+  const lastNeedsYou = useRef<string | null>(null);
+  const openNextNeedsYou = () => {
+    const items: (NeedsYouItem & { open: () => void })[] = [
+      ...board.waiting.filter(row => !row.stale && (row.type !== 'question' || row.waiting)).map(row => ({
+        id: row.key,
+        kind: row.type === 'question' ? 'question' as const : 'permission' as const,
+        since: row.at,
+        open: () => openWaitingRow(row, 'waiting', profile.id, open),
+      })),
+      ...inTerminal.filter(row => !row.stale).map(row => ({
+        id: row.key,
+        kind: 'terminal' as const,
+        since: row.pane.activeAt ?? 0,
+        open: () => openRecentRow(row, profile.id, actions, sayOffline),
+      })),
+    ];
+    const next = nextNeedsYou(items, lastNeedsYou.current);
+    if (!next) return;
+    lastNeedsYou.current = next.id;
+    next.open();
+  };
+  const listRef = useRef<LegendListRef>(null);
+  const focusList = useFocusList(listRef);
+  useControllerActions('home', {
+    'next-needs-you': () => openNextNeedsYou(),
+    'open-recent': () => router.push('/recent'),
+    'open-command-palette': () => {
+      if (!focused) router.dismissTo('/');
+      useWideLayout.getState().requestSearch();
+    },
+  });
   const nothingWaiting = board.waiting.length + board.offline.length + inTerminal.length === 0;
   // The approvals card's amber: both lists wait on you.
   const needsTint = withAlpha(theme.colors.warning, 0.09);
@@ -357,9 +394,11 @@ export function HomeScreen() {
       <View style={[styles.hairline, { backgroundColor: theme.colors.border }]} />
       {(recentExpanded ? recentRows : recentRows.slice(0, RECENT_PREVIEW)).map(recentRow)}
       {recentRows.length > RECENT_PREVIEW ? (
-        <Pressable testID="home-recent-more" accessibilityRole="button" hitSlop={4} onPress={() => setRecentExpanded(!recentExpanded)} style={styles.more}>
-          <Text variant="subhead" tone="accent">{recentExpanded ? 'Show less' : `Show ${recentRows.length - RECENT_PREVIEW} more`}</Text>
-        </Pressable>
+        <Focusable onActivate={() => setRecentExpanded(!recentExpanded)}>
+          <Pressable testID="home-recent-more" accessibilityRole="button" hitSlop={4} onPress={() => setRecentExpanded(!recentExpanded)} style={styles.more}>
+            <Text variant="subhead" tone="accent">{recentExpanded ? 'Show less' : `Show ${recentRows.length - RECENT_PREVIEW} more`}</Text>
+          </Pressable>
+        </Focusable>
       ) : null}
     </Card>
   ) : null;
@@ -407,9 +446,11 @@ export function HomeScreen() {
             </View>
           )) : null}
           {expanded.pinned && pinnedCount > PINNED_PREVIEW ? (
-            <Pressable testID="home-pinned-more" accessibilityRole="button" hitSlop={4} onPress={togglePinnedExpanded} style={styles.more}>
-              <Text variant="subhead" tone="accent">{pinnedExpanded ? 'Show less' : `Show ${pinnedCount - PINNED_PREVIEW} more`}</Text>
-            </Pressable>
+            <Focusable onActivate={togglePinnedExpanded}>
+              <Pressable testID="home-pinned-more" accessibilityRole="button" hitSlop={4} onPress={togglePinnedExpanded} style={styles.more}>
+                <Text variant="subhead" tone="accent">{pinnedExpanded ? 'Show less' : `Show ${pinnedCount - PINNED_PREVIEW} more`}</Text>
+              </Pressable>
+            </Focusable>
           ) : null}
         </Card>
       ) : null}
@@ -469,7 +510,9 @@ export function HomeScreen() {
   const list = (
     // The skeleton draws the tiles too, so the board doesn't fade them in again.
     <SkeletonSwap loading={loading} skeleton={skeleton} style={styles.fill} fade={false}>
+      <FocusListContext value={focusList}>
       <LegendList
+        ref={listRef}
         // All and each machine keep their own place.
         key={place}
         // Back where it was on this list, header height included, or the offset stops where the rows
@@ -496,6 +539,7 @@ export function HomeScreen() {
         ListEmptyComponent={empty ? <View style={searching ? undefined : styles.below}>{empty}</View> : null}
         renderItem={renderRow}
       />
+      </FocusListContext>
     </SkeletonSwap>
   );
 

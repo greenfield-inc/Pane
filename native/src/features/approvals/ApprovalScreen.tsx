@@ -33,6 +33,8 @@ import { ApprovalActions, ConnectedRow, QuestionActions } from './ApprovalAction
 import { useApprovalSort } from './approvalSortPreference';
 import { approvalKindLabel, approvalLinkTarget, linkIcon, approvalListOrder, approvalParams, approvalPosition, approvalWorkspace, connectedLink, isResolved, nextApproval, OLDER_MACHINE_NOTE, receiptLines, resolveSelection, summaryItemId, type ApprovalList, type ApprovalWorkspace } from './approvals';
 import { SummaryTab } from './SummaryTab';
+import { ACTIVATE_GUARD_MS } from '@/features/controller/FocusScope';
+import { useControllerActions } from '@/features/controller/useControllerActions';
 
 /** The approval's own tab: always first, and it can't be closed. */
 const APPROVAL_TAB = 'approval';
@@ -313,6 +315,9 @@ function ApprovalCard({ item, shared, onNext, onOpenTab }: { item: NotifyItem; s
   const theme = useTheme();
   const { profile } = useDaemon();
   const [answeredHere, setAnsweredHere] = useState<AnsweredHere | null>(null);
+  // The A that opened this item (+ or a row) can't also answer it.
+  const [openedAt] = useState(Date.now);
+  useControllerActions('tab', { 'controller-activate': () => Date.now() - openedAt < ACTIVATE_GUARD_MS });
   const [moreChoices, setMoreChoices] = useState(false);
   const markAnswered = () => setAnsweredHere({ epoch: shared.epoch, revision: shared.revision });
   const command = useNotifyCommand(sent => {

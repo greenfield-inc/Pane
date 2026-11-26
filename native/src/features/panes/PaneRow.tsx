@@ -10,6 +10,7 @@ import { Text } from '@/ui';
 import type { PaneListEntry } from './paneList';
 import { PausedBadge, StatusBadge, statusPresentation } from './StatusBadge';
 import { SwipeRow, useSwipeRowAccessibility } from './SwipeRow';
+import { Focusable } from '@/features/controller/Focusable';
 
 export interface PaneRowProps {
   pane: PaneListEntry;
@@ -41,6 +42,7 @@ export function PaneRow({ pane, label, onOpen, onTogglePinned, onArchive, onTogg
   const accessibility = useSwipeRowAccessibility(actions);
 
   return (
+    <Focusable onActivate={onOpen}>
     <SwipeRow testIDPrefix="pane" id={pane.id} {...actions}>
       <Pressable
         testID={`pane-row-${pane.id}`}
@@ -60,6 +62,7 @@ export function PaneRow({ pane, label, onOpen, onTogglePinned, onArchive, onTogg
         <NewBadge count={fresh} testID={`pane-new-${pane.id}`} />
       </Pressable>
     </SwipeRow>
+    </Focusable>
   );
 }
 

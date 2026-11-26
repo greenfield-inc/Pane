@@ -6,6 +6,7 @@ import { Skeleton, Text } from '@/ui';
 import { NewBadge } from '@/features/approvals/NewBadge';
 
 import type { BoardTile } from './statusBoard';
+import { Focusable } from '@/features/controller/Focusable';
 
 const ROWS: ReadonlyArray<ReadonlyArray<{ id: BoardTile; label: string; color: keyof ThemeColors }>> = [[
   { id: 'all', label: 'All panes', color: 'allPanes' },
@@ -35,8 +36,8 @@ export function StatusTiles({ counts, fresh = 0, selected, onSelect }: {
         const count = counts?.[tile.id];
         const fresher = tile.id === 'needs' && count !== undefined ? fresh : 0;
         return (
+          <Focusable key={tile.id} style={styles.tileBox} onActivate={() => onSelect(tile.id)}>
           <Pressable
-            key={tile.id}
             testID={`home-tile-${tile.id}`}
             accessibilityRole="tab"
             accessibilityLabel={[tile.label, count === undefined ? undefined : String(count), fresher > 0 ? `${fresher} new` : undefined].filter(Boolean).join(', ')}
@@ -62,6 +63,7 @@ export function StatusTiles({ counts, fresh = 0, selected, onSelect }: {
             {/* In the corner, so the count and label never move when it comes and goes. */}
             <NewBadge count={fresher} testID="home-tile-needs-new" style={styles.fresh} />
           </Pressable>
+          </Focusable>
         );
       })}</View>)}
     </View>
@@ -72,6 +74,7 @@ const styles = StyleSheet.create({
   grid: { gap: 8, paddingHorizontal: 12 },
   // Two rows of two, so the tiles follow the window's width as a foldable opens and closes.
   row: { flexDirection: 'row', gap: 8 },
+  tileBox: { flex: 1 },
   tile: { flex: 1, minHeight: 72, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1.5, justifyContent: 'center' },
   count: { fontSize: 26, lineHeight: 30, fontWeight: '700', fontVariant: ['tabular-nums'] },
   countBone: { position: 'absolute', left: 0, top: 4 },

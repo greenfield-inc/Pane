@@ -18,6 +18,7 @@ import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
 import { sinceLabel, type AllPane, type MachineFeed, type RecentRow, type WaitingRow } from './allMachinesList';
+import { Focusable } from '@/features/controller/Focusable';
 
 /** How far an unreachable machine's rows fade: the same as a disconnected home. */
 const STALE_OPACITY = 0.45;
@@ -280,9 +281,12 @@ function AllRow({ title, detail, below, spoken = [], label, machine, stale, paus
       {machine ? <MachineBadge machine={machine} /> : null}
     </Pressable>
   );
-  if (!swipe) return row;
   const rowId = testID.replace(/^all-(pane|session)-row-/, '');
-  return <SwipeRow testIDPrefix={testID.startsWith('all-pane') ? 'pane' : 'session'} id={rowId} {...swipe}>{row}</SwipeRow>;
+  return (
+    <Focusable onActivate={onPress}>
+      {swipe ? <SwipeRow testIDPrefix={testID.startsWith('all-pane') ? 'pane' : 'session'} id={rowId} {...swipe}>{row}</SwipeRow> : row}
+    </Focusable>
+  );
 }
 
 const styles = StyleSheet.create({
