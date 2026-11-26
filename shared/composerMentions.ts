@@ -326,5 +326,3 @@ export const COMPOSER_MENU_TEXT = {
 
 /** The wait after the last key before a file search. */
 export const FILE_SEARCH_DELAY_MS = 120;
-/** Skills the phone lists before you type. */
-export const PHONE_SKILL_LIMIT = 20;

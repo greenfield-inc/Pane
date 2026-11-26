@@ -39,6 +39,8 @@ export interface ChatTabRuntimeOptions {
 
 /** ACP's JSON-RPC code for "authentication required". */
 const AUTH_REQUIRED = RequestError.authRequired().code;
+/** ACP's JSON-RPC code for "resource not found": a load of a conversation the agent doesn't have. */
+const RESOURCE_NOT_FOUND = RequestError.resourceNotFound().code;
 const terminalSignIn = boundary.object({ args: boundary.optional(boundary.array(boundary.string)), env: boundary.optional(boundary.record(boundary.string)) });
 const rpcError = boundary.object({ code: boundary.number, message: boundary.optional(boundary.string), data: boundary.optional(boundary.json) });
 
@@ -257,7 +259,9 @@ export class ChatTabRuntime {
     if (!this.canLoad()) throw new PaneError('CHAT_LOAD_UNSUPPORTED', 'This agent adapter cannot reopen a saved conversation.', 'Start a new chat tab, or update the adapter.');
     this.sessionId = request.sessionId;
     // History replay of a long session can take a while; it is bounded by the process, not a timer.
-    const response = await this.agent().request(methods.agent.session.load, request).catch(error => { throw chatFailure(error); });
+    const response = await this.agent().request(methods.agent.session.load, request).catch(error => {
+      throw chatFailure(error, decodeOptionalBoundary(error, rpcError)?.code === RESOURCE_NOT_FOUND ? { code: 'CHAT_CONVERSATION_NOT_FOUND', next: 'Press Restart.' } : undefined);
+    });
     this.configOptions = response.configOptions ?? [];
     this.options.onState();
     return response;

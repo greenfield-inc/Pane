@@ -49,8 +49,9 @@ export function TerminalTouchSurface({ rows, onScrollLines, onPan, children }: T
     if (previous !== null) scrollByPixels(current - previous);
   });
 
-  const drag = Gesture.Pan().activeOffsetY([-10, 10]);
-  const pan = (onPan ? drag.activeOffsetX([-10, 10]).hitSlop({ left: -24 }) : drag.failOffsetX([-12, 12]))
+  // The chain starts at Gesture.Pan() so the worklets Babel plugin turns its callbacks into worklets.
+  const pan = Gesture.Pan()
+    .activeOffsetY([-10, 10])
     .onStart(() => {
       cancelAnimation(momentum);
       carry.value = 0;
@@ -67,6 +68,8 @@ export function TerminalTouchSurface({ rows, onScrollLines, onPan, children }: T
     .onEnd(event => {
       momentum.value = withDecay({ velocity: -event.velocityY, deceleration: 0.997 });
     });
+  if (onPan) pan.activeOffsetX([-10, 10]).hitSlop({ left: -24 });
+  else pan.failOffsetX([-12, 12]);
 
   const tap = Gesture.Tap()
     .onStart(() => cancelAnimation(momentum))

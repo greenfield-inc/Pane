@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { COMPOSER_MENU_TEXT, commandLabel, commandRows, matchedParts, PHONE_SKILL_LIMIT, type ComposerTrigger } from '@shared/composerMentions';
+import { COMPOSER_MENU_TEXT, commandLabel, commandRows, matchedParts, type ComposerTrigger } from '@shared/composerMentions';
 import type { ChatTabClient, ChatTabCommand, ChatTabFile, ChatTabView } from '@shared/types/chatTab';
 
 import { useTheme } from '@/theme';
@@ -74,8 +74,7 @@ export function ChatCommandList({ chat, panelId, trigger, view, onPick }: {
   } else {
     const commands = commandRows(trigger, view.commands, view.mentions);
     if (!commands) return null;
-    const shown = trigger.query ? commands : commands.slice(0, trigger.kind === 'skill' ? PHONE_SKILL_LIMIT : undefined);
-    rows = shown.map(command => <CommandRow key={command.name} command={command} trigger={trigger} onPick={onPick} />);
+    rows = commands.map(command => <CommandRow key={command.name} command={command} trigger={trigger} onPick={onPick} />);
     if (!rows.length) note = view.status === 'starting' && !view.commands.length ? COMPOSER_MENU_TEXT.loadingSkills : COMPOSER_MENU_TEXT.noSkills;
   }
   return <ScrollView testID="chat-commands" accessibilityLabel={trigger.kind === 'file' ? 'Files and folders' : trigger.kind === 'skill' ? 'Skills' : 'Agent commands'} keyboardShouldPersistTaps="always"

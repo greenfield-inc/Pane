@@ -6,7 +6,7 @@
 
 export interface NavigationState {
   index?: number;
-  routes: { name: string; params?: object; state?: NavigationState }[];
+  routes: { name: string; key?: string; params?: object; state?: NavigationState }[];
 }
 
 export interface ScreenToReopen {
@@ -26,6 +26,12 @@ let remembered: { hostId: string; screen: ScreenToReopen; paneId?: string } | nu
 /** How many screens the stack holds, its root included and sheets left out. */
 export function screenCount(root: NavigationState | undefined): number {
   return stackRoutes(root).filter(route => !SHEETS.has(route.name)).length;
+}
+
+/** Whether a screen or sheet in `before` is gone from `after`. */
+export function closedAny(before: NavigationState | undefined, after: NavigationState | undefined): boolean {
+  const open = new Set(stackRoutes(after).map(route => route.key));
+  return stackRoutes(before).some(route => !open.has(route.key));
 }
 
 /** The screen on top of the stack, under any sheet, unless that is Home. */
