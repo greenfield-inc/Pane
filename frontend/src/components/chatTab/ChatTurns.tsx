@@ -13,6 +13,8 @@ import { ReferencedText } from './ReferencedText';
 import { ChatCopyButton } from './ChatCopyButton';
 import { DeviceCard, type ChatDeviceActions } from './DeviceCard';
 import { deviceMarkerOf } from '../../../../shared/deviceMarker';
+import { classifyChatLine } from '../../../../shared/agentMessagePresentation';
+import { AgentLineView, SentMessageCards } from './AgentMessageCard';
 
 export interface ChatTurnActions {
   /** Opens the file's diff in Pane's diff view. A diff never renders in the thread by itself. */
@@ -193,11 +195,17 @@ function UserParts({ message }: { message: AgentChatMessage }) {
     : part.type === 'content' ? <UserImage key={`${message.id}:${index}`} content={part.content} /> : null)}</>;
 }
 
+const renderAgentText = (text: string) => <Markdown text={text} live={false} />;
+
 function UserMessage({ turn }: { turn: ChatTurn }) {
   const { userMessage } = useContext(ChatBlocksContext);
   if (!turn.user) return null;
-  const custom = userMessage?.(turn.user.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'));
+  const text = turn.user.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
+  const custom = userMessage?.(text);
   if (custom !== undefined) return <>{custom}</>;
+  // T-105: a message Pane or another agent typed here is drawn with its sender, not as the person's own.
+  const line = classifyChatLine(text);
+  if (line) return <AgentLineView line={line} anchorId={turn.user.id} startedAt={turn.startedAt} text={text} renderText={renderAgentText} />;
   return <div className="chat-user-row" title={messageTime(turn.startedAt)?.full}>
     <div className="chat-user" data-pane-part="chat-message" data-anchor-id={turn.user.id}><UserParts message={turn.user} /></div>
     {userMarkdown(turn) && <div className="chat-message-actions"><ChatCopyButton label="Copy message" text={() => userMarkdown(turn)} /></div>}
@@ -245,6 +253,7 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions,
     {fold}
     {!open && actions.device && pinnedMarkers(activity, latest ? actions.device.openedHere : []).map(marker => <PinnedDeviceCard key={marker.panelId} marker={marker} device={actions.device!} />)}
     <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
+    <SentMessageCards turnId={turn.id} renderText={renderAgentText} />
     {!turn.running && (responseText(turn) || (latest && !activity.length && ended)) && <div className="chat-message-actions chat-response-actions">
       {responseText(turn) && <ChatCopyButton label="Copy response" text={() => responseText(turn)} />}
       {latest && !activity.length && ended && <span className="chat-turn-time" title={ended.full}>{ended.short}</span>}

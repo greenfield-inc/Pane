@@ -44,6 +44,8 @@ import { FindBar } from '../find/FindBar';
 import { useSurfaceFind } from '../find/surfaceFind';
 import { takeLaunchDraft } from '../../utils/launchOutline';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
+import { AgentMessagesContext, useAgentMessageRecords, useAgentMessagesView } from './agentMessagesContext';
+import { sentMessagesByTurn } from '../../../../shared/agentMessagePresentation';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 import { noteSendConfirmed, useControllerTarget } from '../../controller/controllerTargets';
@@ -255,6 +257,10 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
   const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
+  // T-105: messages this tab sent and received (M-n), for their senders, state and replies.
+  const agentMessageRecords = useAgentMessageRecords(panelId);
+  const sentByTurn = useMemo(() => sentMessagesByTurn(turns, agentMessageRecords, panelId), [turns, agentMessageRecords, panelId]);
+  const agentMessages = useAgentMessagesView(panelId, agentMessageRecords, sentByTurn);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);
   const [copies, setCopies] = useState<ReadonlyMap<string, UploadProgress>>(new Map());
@@ -612,9 +618,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           {notRunning && <p role="status" className="chat-notice">This chat isn’t running. Its messages show here once its owner opens it.</p>}
           {!snapshot.transcript && !view?.problem && (view?.status === 'starting' || !view) && <p role="status" className="chat-notice">Starting {agentName}…</p>}
           <SkeletonSwap loading={!snapshot.transcript && !view?.problem && !!view && view.status !== 'starting' && !notRunning} skeleton={<TurnsSkeleton />}>
-            <ChatBlocksContext.Provider value={rendering}><ChatReferencesContext.Provider value={references}>
+            <ChatBlocksContext.Provider value={rendering}><ChatReferencesContext.Provider value={references}><AgentMessagesContext.Provider value={agentMessages}>
               {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
-            </ChatReferencesContext.Provider></ChatBlocksContext.Provider>
+            </AgentMessagesContext.Provider></ChatReferencesContext.Provider></ChatBlocksContext.Provider>
           </SkeletonSwap>
           {notes.map(note => <WorkerNoteLine key={note.worker.paneId} note={note} onOpen={actions.onOpenWorker} />)}
           {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadNewer(); }}>
