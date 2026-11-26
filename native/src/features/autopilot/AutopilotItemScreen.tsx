@@ -15,6 +15,7 @@ import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { useNotifyShared } from '@/features/notify/hooks';
 import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
+import { useAvoidsKeyboard } from '@/features/layout/wideLayout';
 
 import { answerBar, cardState, contextSource, itemPosition, relatedDocs, stackEntryFor, type CardState, type RelatedDoc, autopilotItems } from './autopilot';
 import { DecisionCard, DecisionCardSkeleton, useDecisionAnswer } from './DecisionCard';
@@ -37,6 +38,7 @@ function openDoc(notifyId: string, doc: RelatedDoc) {
  * and the answer buttons fixed at the bottom. Answering goes back to the chat where you were.
  */
 export function AutopilotItemScreen({ notifyId }: { notifyId: string }) {
+  const avoidsKeyboard = useAvoidsKeyboard();
   const theme = useTheme();
   const { colors } = theme;
   const insets = useSafeAreaInsets();
@@ -70,7 +72,7 @@ export function AutopilotItemScreen({ notifyId }: { notifyId: string }) {
   }
 
   return (
-    <KeyboardAvoidingView testID="autopilot-item-screen" behavior="padding" style={[styles.fill, { backgroundColor: colors.surface }]}>
+    <KeyboardAvoidingView testID="autopilot-item-screen" behavior="padding" enabled={avoidsKeyboard} style={[styles.fill, { backgroundColor: colors.surface }]}>
       <View style={{ paddingTop: insets.top, borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth }}>
         <View style={styles.bar}>
           <Pressable testID="autopilot-item-back" accessibilityRole="button" accessibilityLabel="Back to the chat" hitSlop={6} onPress={backToChat} style={styles.back}>

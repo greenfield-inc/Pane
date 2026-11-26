@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
-import { router, Stack, useLocalSearchParams, useNavigation } from 'expo-router';
+import { router, Stack, useIsFocused, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,6 +15,7 @@ import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 import { useDaemon, useInvokeMutation, useInvokeQuery, useReadOnlyHost } from '@/daemon';
 import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, SkeletonSwap, Text } from '@/ui';
+import { useAvoidsKeyboard } from '@/features/layout/wideLayout';
 
 import { BrowserTab } from '../browser/BrowserTab';
 import { DeviceTab } from '../device/DeviceTab';
@@ -79,6 +80,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   leading?: LeadingTabs;
 }) {
   const { panelId } = useLocalSearchParams<{ panelId?: string }>();
+  const avoidsKeyboard = useAvoidsKeyboard();
   // This screen's own params: effects below run before the navigator is ready, and while another screen has focus.
   const navigation = useNavigation<{ setParams(params: { panelId: string }): void }>();
   const theme = useTheme();
@@ -126,6 +128,12 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
     markThisPaneSeen();
     return () => markThisPaneSeen();
   }, [paneId]);
+  // An agent that finishes while its Pane is on screen was seen finishing, so Home beside it never marks it Ready.
+  const focused = useIsFocused();
+  const finishedUnseen = focused && Boolean(statuses.data?.unseen[paneId]);
+  useEffect(() => {
+    if (finishedUnseen) markSeen(paneId);
+  }, [finishedUnseen, paneId]);
 
   const strip = stripPanels(panelList.data ?? [], readOnly);
   const panels = session ? sessionWorkspacePanels(session, strip) : strip;
@@ -196,6 +204,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
     <KeyboardAvoidingView
       testID="pane-detail-screen"
       behavior="padding"
+      enabled={avoidsKeyboard}
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
       {/* A watched terminal pans sideways, so swipe-back there starts from the left edge only. */}

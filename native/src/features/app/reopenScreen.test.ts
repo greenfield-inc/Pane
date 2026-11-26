@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { forgetScreen, rememberScreen, takeScreenToReopen } from './reopenScreen';
+import { forgetScreen, rememberScreen, screenCount, takeScreenToReopen } from './reopenScreen';
 
 // The root state the navigation container reports: Expo Router's root route holds the stack.
 const root = (...routes: { name: string; params?: Record<string, string> }[]) => ({
@@ -63,5 +63,14 @@ describe('reopening the screen a restart closed', () => {
     forgetScreen();
 
     expect(takeScreenToReopen('host-a', paneExists)).toBeNull();
+  });
+});
+
+describe('counting the screens in the stack', () => {
+  it('counts the root and every screen, but no sheet', () => {
+    expect(screenCount(root(home))).toBe(1);
+    expect(screenCount(root(home, pane))).toBe(2);
+    expect(screenCount(root(home, pane, { name: 'pane/[paneId]/permission', params: { paneId: 'p1' } }))).toBe(2);
+    expect(screenCount(root(home, pane, { name: 'settings' }))).toBe(3);
   });
 });

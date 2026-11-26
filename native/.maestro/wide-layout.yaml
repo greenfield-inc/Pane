@@ -1,0 +1,47 @@
+# The wide layout in the demo: Home docked beside "Nothing open", a Pane opened from the column
+# with no back arrow, Home collapsed to its rail and expanded from a count. Needs no host.
+# Run it on a window at least 600 x 480 dp: an unfolded foldable emulator, or a phone emulator
+# after `adb shell wm size 2076x2152` with density 390. Maestro cannot fold a device; the fold
+# itself is checked by resizing between flows (`adb shell wm size 1080x2424`, then `reset`).
+appId: com.dcouple.pane.mobile
+name: Wide layout
+---
+- runFlow: subflows/demo.yaml
+- assertVisible:
+    id: home-column
+- assertVisible:
+    id: nothing-open
+# With nothing open there is nothing to widen, so Home can't collapse.
+- assertNotVisible:
+    id: home-collapse
+
+# Open a Pane from the column: it fills the right side, marked in the list, with no back arrow.
+- tapOn:
+    id: home-tile-all
+# Repositories open in place in the column.
+- scrollUntilVisible:
+    element: "fix-checkout-race"
+    timeout: 10000
+- tapOn: "fix-checkout-race"
+- extendedWaitUntil:
+    visible:
+      id: pane-detail-screen
+    timeout: 15000
+- assertVisible:
+    id: home-row-open
+- assertNotVisible:
+    id: terminal-back
+
+# Collapse to the rail, then expand it on Needs you.
+- tapOn:
+    id: home-collapse
+- assertVisible:
+    id: home-rail
+- assertVisible:
+    id: pane-detail-screen
+- tapOn:
+    id: home-rail-needs
+- assertVisible:
+    id: approvals-header
+- assertVisible:
+    id: pane-detail-screen
