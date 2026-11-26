@@ -10,6 +10,7 @@ import { registerUpdateOperationHandlers } from './updateOperation';
 import { registerSessionHandlers } from './session';
 import { registerProjectHandlers } from './project';
 import { registerConfigHandlers } from './config';
+import { registerCustomCommandHandlers } from './customCommands';
 import { registerDialogHandlers } from './dialog';
 import { registerGitHandlers } from './git';
 import { registerScriptHandlers } from './script';
@@ -120,6 +121,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerSessionHandlers(ipcMain, services, commandRegistry);
   registerProjectHandlers(ipcMain, services, commandRegistry);
   registerConfigHandlers(ipcMain, services, commandRegistry);
+  registerCustomCommandHandlers(ipcMain, services.configManager, commandRegistry);
   registerMobilePushHandlers(ipcMain, services, commandRegistry);
   registerSharedCredentialHandlers(services, commandRegistry);
   registerPaneSecretHandlers(ipcMain, commandRegistry);

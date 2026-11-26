@@ -64,6 +64,7 @@ const BROWSER_SPECS = [
   'pane-order.spec.ts',
   'pause.spec.ts',
   'project-dashboard-refresh.spec.ts',
+  'remote-custom-commands.spec.ts',
   'remote-host-switcher.spec.ts',
   'remote-network-rejection.spec.ts',
   'remote-pwa-browser.spec.ts',

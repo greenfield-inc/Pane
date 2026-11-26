@@ -960,6 +960,12 @@
         "secrets request",
         "secrets lease",
         "secrets lease end",
+        "custom-commands",
+        "custom-commands list",
+        "custom-commands add",
+        "custom-commands update",
+        "custom-commands remove",
+        "custom-commands reorder",
         "devices",
         "devices list",
         "devices open",
@@ -1178,6 +1184,24 @@
           "$ref": "#/$defs/helpLines"
         },
         "secrets lease end": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "custom-commands": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "custom-commands list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "custom-commands add": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "custom-commands update": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "custom-commands remove": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "custom-commands reorder": {
           "$ref": "#/$defs/helpLines"
         },
         "devices": {

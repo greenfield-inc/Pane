@@ -285,6 +285,7 @@ import { agentConfig, agentLabel, agentTerminalCommand, configuredAgent, configu
 import { paneScratchUsage } from '../services/paneScratch';
 import { archiveRetentionDays } from '../services/archiveExpiry';
 import { activeTodoService } from '../services/todos/todosFeature';
+import { CUSTOM_COMMAND_CHANNELS } from './customCommands';
 
 const RUNPANE_CHANNELS = [
   'runpane:doctor',
@@ -293,6 +294,7 @@ const RUNPANE_CHANNELS = [
   'runpane:repos:get',
   'runpane:repos:update',
   'runpane:repos:rename',
+  ...CUSTOM_COMMAND_CHANNELS,
   'runpane:sessions:list',
   'runpane:sessions:create',
   'runpane:sessions:get',

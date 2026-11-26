@@ -850,6 +850,91 @@
       "localControl": true
     },
     {
+      "name": "custom-commands list",
+      "summary": "List this machine's custom launch commands in order, with each command and its resume templates (owner only).",
+      "usage": [
+        "runpane custom-commands list [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "admin"
+      ],
+      "jsonSchemas": [
+        "customCommandListResult"
+      ],
+      "localControl": true,
+      "otherMachines": true
+    },
+    {
+      "name": "custom-commands add",
+      "summary": "Save a new custom launch command at the end of this machine's list; the \"+\" menu and New Session show it at once.",
+      "usage": [
+        "runpane custom-commands add --name <name> --command <command> [--resume-mode <mode>] [--initial-template <template>] [--resume-template <template>] --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "toolsets": [
+        "admin"
+      ],
+      "jsonSchemas": [
+        "customCommandAddRequest",
+        "customCommandMutationResult"
+      ],
+      "localControl": true,
+      "otherMachines": true
+    },
+    {
+      "name": "custom-commands update",
+      "summary": "Change a custom launch command, selected by its exact name: rename it, change its command, or change or clear its resume settings.",
+      "usage": [
+        "runpane custom-commands update <name> [--name <new-name>] [--command <command>] [--resume-mode <mode|none>] [--initial-template <template>] [--resume-template <template>] --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "toolsets": [
+        "admin"
+      ],
+      "jsonSchemas": [
+        "customCommandUpdateRequest",
+        "customCommandMutationResult"
+      ],
+      "localControl": true,
+      "otherMachines": true
+    },
+    {
+      "name": "custom-commands remove",
+      "summary": "Remove a custom launch command, selected by its exact name.",
+      "usage": [
+        "runpane custom-commands remove <name> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "toolsets": [
+        "admin"
+      ],
+      "jsonSchemas": [
+        "customCommandRemoveRequest",
+        "customCommandMutationResult"
+      ],
+      "localControl": true,
+      "otherMachines": true
+    },
+    {
+      "name": "custom-commands reorder",
+      "summary": "Move a custom launch command, selected by its exact name, to a 1-based position; keyboard shortcut slots follow the new order.",
+      "usage": [
+        "runpane custom-commands reorder <name> --to <position> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "admin"
+      ],
+      "jsonSchemas": [
+        "customCommandReorderRequest",
+        "customCommandMutationResult"
+      ],
+      "localControl": true,
+      "otherMachines": true
+    },
+    {
       "name": "devices list",
       "mcpName": "device_list",
       "summary": "List the phone simulators and emulators this Pane can open: platform, name, OS, machine, state, and which Pane holds each.",
@@ -4132,6 +4217,31 @@
         "name": "--todo",
         "value": "<T-n>",
         "description": "notify, report and agents start: the to-do this card, report or agent works on."
+      },
+      {
+        "name": "--command",
+        "value": "<command>",
+        "description": "custom-commands add and update: the command line a custom launch command runs."
+      },
+      {
+        "name": "--resume-mode",
+        "value": "<mode>",
+        "description": "custom-commands add and update: how the entry resumes (reported, generated, claude, codex, cursor; none clears it on update)."
+      },
+      {
+        "name": "--initial-template",
+        "value": "<template>",
+        "description": "custom-commands add and update: the first launch template."
+      },
+      {
+        "name": "--resume-template",
+        "value": "<template>",
+        "description": "custom-commands add and update: the resume template; must contain {sessionId}."
+      },
+      {
+        "name": "--to",
+        "value": "<position>",
+        "description": "custom-commands reorder: the 1-based final position."
       }
     ],
     "localBoolean": [
@@ -4346,6 +4456,11 @@
         "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
         "  runpane secrets lease --project <project> <NAME>... [--reason <text>] [--json]",
         "  runpane secrets lease end --id <lease-id> --yes [--json]",
+        "  runpane custom-commands list [--json]",
+        "  runpane custom-commands add --name <name> --command <command> [resume flags] --yes [--json]",
+        "  runpane custom-commands update <name> [--name <new-name>] [--command <command>] [resume flags] --yes [--json]",
+        "  runpane custom-commands remove <name> --yes [--json]",
+        "  runpane custom-commands reorder <name> --to <position> --yes [--json]",
         "  runpane devices list [--json] [--pane-dir <path>]",
         "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
         "  runpane devices screenshot [--json] [--pane-dir <path>]",
@@ -7256,6 +7371,93 @@
         "",
         "Example:",
         "  runpane todos wake T-12 --json"
+      ],
+      "custom-commands": [
+        "Usage:",
+        "  runpane custom-commands <list|add|update|remove|reorder> [options]",
+        "",
+        "Custom commands are the saved launch options in the desktop \"+\" menu and New Session's Launch command list. Each machine keeps its own ordered list, and its running Pane, its desktop and its paired phones pick up a change at once.",
+        "Reach another machine with `runpane workspace <machine> custom-commands ...`; only the owner can read or change a list.",
+        "update, remove and reorder select an entry by its exact, case-sensitive name. Custom command keyboard shortcuts are slots in list order, so reorder and remove change which entry each slot starts.",
+        "Don't put secrets in a command or template: `list` shows them to the owner and Pane stores them in config.json. Use Pane Secrets (`runpane secrets exec`) or environment variables instead.",
+        "",
+        "Commands:",
+        "  runpane custom-commands list [--json]",
+        "  runpane custom-commands add --name <name> --command <command> [resume flags] --yes [--json]",
+        "  runpane custom-commands update <name> [--name <new-name>] [--command <command>] [resume flags] --yes [--json]",
+        "  runpane custom-commands remove <name> --yes [--json]",
+        "  runpane custom-commands reorder <name> --to <position> --yes [--json]",
+        "",
+        "Resume flags: --resume-mode <reported|generated|claude|codex|cursor|none> --initial-template <template> --resume-template <template>.",
+        "Templates use {command} for the command and {sessionId} for the ID; the resume template always needs {sessionId}."
+      ],
+      "custom-commands list": [
+        "Usage:",
+        "  runpane custom-commands list [--json] [--pane-dir <path>]",
+        "",
+        "Lists this machine's custom commands in order: position, name, command and, when set, resume mode and templates. Owner only.",
+        "Don't put secrets in a command or template: `list` shows them to the owner and Pane stores them in config.json. Use Pane Secrets (`runpane secrets exec`) or environment variables instead.",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "custom-commands add": [
+        "Usage:",
+        "  runpane custom-commands add --name <name> --command <command> [--resume-mode <mode>] [--initial-template <template>] [--resume-template <template>] --yes [--json] [--pane-dir <path>]",
+        "",
+        "Appends a custom command. Names are exact and case-sensitive; a name already in use is refused.",
+        "Don't put secrets in a command or template: `list` shows them to the owner and Pane stores them in config.json. Use Pane Secrets (`runpane secrets exec`) or environment variables instead.",
+        "",
+        "Options:",
+        "  --name <name>                  Name shown in the \"+\" menu and New Session",
+        "  --command <command>            Command line the terminal runs",
+        "  --resume-mode <mode>           reported, generated, claude, codex or cursor",
+        "  --initial-template <template>  First launch template (default {command})",
+        "  --resume-template <template>   Resume template (default {command} --resume {sessionId})",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "custom-commands update": [
+        "Usage:",
+        "  runpane custom-commands update <name> [--name <new-name>] [--command <command>] [--resume-mode <mode|none>] [--initial-template <template>] [--resume-template <template>] --yes [--json] [--pane-dir <path>]",
+        "",
+        "Changes the entry with exactly this name; only the fields you pass change. --resume-mode none clears the resume settings. A missing name, or one several entries share, is refused.",
+        "",
+        "Options:",
+        "  --name <new-name>              New name",
+        "  --command <command>            New command line",
+        "  --resume-mode <mode|none>      reported, generated, claude, codex, cursor, or none",
+        "  --initial-template <template>  New first launch template",
+        "  --resume-template <template>   New resume template",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "custom-commands remove": [
+        "Usage:",
+        "  runpane custom-commands remove <name> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Removes the entry with exactly this name. Later entries move up, and their keyboard shortcut slots with them.",
+        "",
+        "Options:",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "custom-commands reorder": [
+        "Usage:",
+        "  runpane custom-commands reorder <name> --to <position> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Moves the entry with exactly this name to a 1-based final position; the entries in between shift by one. Moving to its current position changes nothing.",
+        "Custom command keyboard shortcuts follow list order, overrides included, so a move changes which entry each slot starts.",
+        "",
+        "Options:",
+        "  --to <position>                Final position, from 1 to the number of entries",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
       ]
     },
     "pip": {
@@ -7286,6 +7488,11 @@
         "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
         "  runpane secrets lease --project <project> <NAME>... [--reason <text>] [--json]",
         "  runpane secrets lease end --id <lease-id> --yes [--json]",
+        "  runpane custom-commands list [--json]",
+        "  runpane custom-commands add --name <name> --command <command> [resume flags] --yes [--json]",
+        "  runpane custom-commands update <name> [--name <new-name>] [--command <command>] [resume flags] --yes [--json]",
+        "  runpane custom-commands remove <name> --yes [--json]",
+        "  runpane custom-commands reorder <name> --to <position> --yes [--json]",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -9877,6 +10084,93 @@
         "",
         "Example:",
         "  python -m runpane todos wake T-12 --json"
+      ],
+      "custom-commands": [
+        "Usage:",
+        "  runpane custom-commands <list|add|update|remove|reorder> [options]",
+        "",
+        "Custom commands are the saved launch options in the desktop \"+\" menu and New Session's Launch command list. Each machine keeps its own ordered list, and its running Pane, its desktop and its paired phones pick up a change at once.",
+        "Reach another machine with `runpane workspace <machine> custom-commands ...`; only the owner can read or change a list.",
+        "update, remove and reorder select an entry by its exact, case-sensitive name. Custom command keyboard shortcuts are slots in list order, so reorder and remove change which entry each slot starts.",
+        "Don't put secrets in a command or template: `list` shows them to the owner and Pane stores them in config.json. Use Pane Secrets (`runpane secrets exec`) or environment variables instead.",
+        "",
+        "Commands:",
+        "  runpane custom-commands list [--json]",
+        "  runpane custom-commands add --name <name> --command <command> [resume flags] --yes [--json]",
+        "  runpane custom-commands update <name> [--name <new-name>] [--command <command>] [resume flags] --yes [--json]",
+        "  runpane custom-commands remove <name> --yes [--json]",
+        "  runpane custom-commands reorder <name> --to <position> --yes [--json]",
+        "",
+        "Resume flags: --resume-mode <reported|generated|claude|codex|cursor|none> --initial-template <template> --resume-template <template>.",
+        "Templates use {command} for the command and {sessionId} for the ID; the resume template always needs {sessionId}."
+      ],
+      "custom-commands list": [
+        "Usage:",
+        "  runpane custom-commands list [--json] [--pane-dir <path>]",
+        "",
+        "Lists this machine's custom commands in order: position, name, command and, when set, resume mode and templates. Owner only.",
+        "Don't put secrets in a command or template: `list` shows them to the owner and Pane stores them in config.json. Use Pane Secrets (`runpane secrets exec`) or environment variables instead.",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "custom-commands add": [
+        "Usage:",
+        "  runpane custom-commands add --name <name> --command <command> [--resume-mode <mode>] [--initial-template <template>] [--resume-template <template>] --yes [--json] [--pane-dir <path>]",
+        "",
+        "Appends a custom command. Names are exact and case-sensitive; a name already in use is refused.",
+        "Don't put secrets in a command or template: `list` shows them to the owner and Pane stores them in config.json. Use Pane Secrets (`runpane secrets exec`) or environment variables instead.",
+        "",
+        "Options:",
+        "  --name <name>                  Name shown in the \"+\" menu and New Session",
+        "  --command <command>            Command line the terminal runs",
+        "  --resume-mode <mode>           reported, generated, claude, codex or cursor",
+        "  --initial-template <template>  First launch template (default {command})",
+        "  --resume-template <template>   Resume template (default {command} --resume {sessionId})",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "custom-commands update": [
+        "Usage:",
+        "  runpane custom-commands update <name> [--name <new-name>] [--command <command>] [--resume-mode <mode|none>] [--initial-template <template>] [--resume-template <template>] --yes [--json] [--pane-dir <path>]",
+        "",
+        "Changes the entry with exactly this name; only the fields you pass change. --resume-mode none clears the resume settings. A missing name, or one several entries share, is refused.",
+        "",
+        "Options:",
+        "  --name <new-name>              New name",
+        "  --command <command>            New command line",
+        "  --resume-mode <mode|none>      reported, generated, claude, codex, cursor, or none",
+        "  --initial-template <template>  New first launch template",
+        "  --resume-template <template>   New resume template",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "custom-commands remove": [
+        "Usage:",
+        "  runpane custom-commands remove <name> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Removes the entry with exactly this name. Later entries move up, and their keyboard shortcut slots with them.",
+        "",
+        "Options:",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "custom-commands reorder": [
+        "Usage:",
+        "  runpane custom-commands reorder <name> --to <position> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Moves the entry with exactly this name to a 1-based final position; the entries in between shift by one. Moving to its current position changes nothing.",
+        "Custom command keyboard shortcuts follow list order, overrides included, so a move changes which entry each slot starts.",
+        "",
+        "Options:",
+        "  --to <position>                Final position, from 1 to the number of entries",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
       ]
     }
   },
@@ -11929,6 +12223,60 @@
         "T-12",
         "--yes",
         "--json"
+      ],
+      [
+        "custom-commands",
+        "list",
+        "--json"
+      ],
+      [
+        "custom-commands",
+        "add",
+        "--name",
+        "Build all",
+        "--command",
+        "pnpm build",
+        "--resume-mode",
+        "reported",
+        "--yes",
+        "--json"
+      ],
+      [
+        "custom-commands",
+        "update",
+        "Build all",
+        "--name",
+        "Build",
+        "--command",
+        "make",
+        "--resume-mode",
+        "none",
+        "--yes"
+      ],
+      [
+        "custom-commands",
+        "update",
+        "Farm",
+        "--initial-template",
+        "{command} --id {sessionId}",
+        "--resume-template",
+        "{command} --resume {sessionId}",
+        "--yes"
+      ],
+      [
+        "custom-commands",
+        "remove",
+        "Build",
+        "--yes",
+        "--json"
+      ],
+      [
+        "custom-commands",
+        "reorder",
+        "Build",
+        "--to",
+        "2",
+        "--yes"
       ]
     ],
     "topLevelHelpIncludes": [
@@ -23381,6 +23729,247 @@
         }
       },
       "additionalProperties": false
+    },
+    "customCommandResume": {
+      "type": "object",
+      "required": [
+        "mode",
+        "initialTemplate",
+        "resumeTemplate"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "reported",
+            "generated",
+            "claude",
+            "codex",
+            "cursor"
+          ]
+        },
+        "initialTemplate": {
+          "type": "string"
+        },
+        "resumeTemplate": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "customCommandListResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "commands"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "position",
+              "name",
+              "command",
+              "resume"
+            ],
+            "properties": {
+              "position": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              },
+              "resume": {
+                "anyOf": [
+                  {
+                    "$ref": "#/jsonSchemas/customCommandResume"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "customCommandAddRequest": {
+      "type": "object",
+      "required": [
+        "name",
+        "command"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resume": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "reported",
+                "generated",
+                "claude",
+                "codex",
+                "cursor"
+              ]
+            },
+            "initialTemplate": {
+              "type": "string"
+            },
+            "resumeTemplate": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "customCommandUpdateRequest": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "newName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resume": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "reported",
+                    "generated",
+                    "claude",
+                    "codex",
+                    "cursor"
+                  ]
+                },
+                "initialTemplate": {
+                  "type": "string"
+                },
+                "resumeTemplate": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "customCommandRemoveRequest": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "customCommandReorderRequest": {
+      "type": "object",
+      "required": [
+        "name",
+        "position"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "customCommandMutationResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "action",
+        "name",
+        "position",
+        "previousPosition",
+        "changed",
+        "count"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "action": {
+          "enum": [
+            "added",
+            "updated",
+            "removed",
+            "moved"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "position": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "previousPosition": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "agentContext": {
@@ -32241,6 +32830,262 @@
           "todoResult"
         ],
         "notes": []
+      },
+      "custom-commands list": {
+        "name": "custom-commands list",
+        "summary": "List this machine's custom launch commands in order, with each command and its resume templates (owner only).",
+        "details": "Shows every entry in order, legacy entries with repeated names included, with its 1-based position, name, command and, when set, resume mode and both templates. Only the machine's owner can run it: a teammate on the tailnet and a device paired Read only are refused. A paired phone keeps seeing only names and commands.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane custom-commands list --json",
+          "runpane workspace devbox custom-commands list"
+        ],
+        "jsonSchemas": [
+          "customCommandListResult"
+        ],
+        "notes": [
+          "Don't put secrets in a command or template: `list` shows them to the owner and Pane stores them in config.json. Use Pane Secrets (`runpane secrets exec`) or environment variables instead.",
+          "Runs on any machine you reach: `runpane workspace <machine> custom-commands list` reads that machine's list."
+        ]
+      },
+      "custom-commands add": {
+        "name": "custom-commands add",
+        "summary": "Save a new custom launch command at the end of this machine's list; the \"+\" menu and New Session show it at once.",
+        "details": "Appends the entry; names are exact and case-sensitive, so Build and build are different entries, and an exact name already in use is refused. With --resume-mode the entry also reopens its conversation; the templates are checked with the same rules as the desktop form.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--name",
+            "value": "<name>",
+            "required": true,
+            "description": "Name shown in the \"+\" menu and New Session; surrounding whitespace is trimmed."
+          },
+          {
+            "name": "--command",
+            "value": "<command>",
+            "required": true,
+            "description": "The command line the terminal runs."
+          },
+          {
+            "name": "--resume-mode",
+            "value": "<mode>",
+            "required": false,
+            "description": "Session ID source for resuming: reported, generated, claude, codex, cursor. Omitted, the entry has no resume settings."
+          },
+          {
+            "name": "--initial-template",
+            "value": "<template>",
+            "required": false,
+            "description": "First launch template; {command} is the command and {sessionId} the ID. Defaults to {command} with a new --resume-mode."
+          },
+          {
+            "name": "--resume-template",
+            "value": "<template>",
+            "required": false,
+            "description": "Resume template; must contain {sessionId}. Defaults to {command} --resume {sessionId} with a new --resume-mode."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for mutating commands."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane custom-commands add --name \"Build all\" --command \"pnpm build\" --yes --json",
+          "runpane custom-commands add --name Farm --command \"agent-farm run implementer\" --resume-mode reported --yes"
+        ],
+        "jsonSchemas": [
+          "customCommandAddRequest",
+          "customCommandMutationResult"
+        ],
+        "notes": [
+          "Don't put secrets in a command or template: `list` shows them to the owner and Pane stores them in config.json. Use Pane Secrets (`runpane secrets exec`) or environment variables instead.",
+          "ERR_CUSTOM_COMMAND_EXISTS: the name is in use; pick another or update the existing entry."
+        ]
+      },
+      "custom-commands update": {
+        "name": "custom-commands update",
+        "summary": "Change a custom launch command, selected by its exact name: rename it, change its command, or change or clear its resume settings.",
+        "details": "Selects the entry by its exact, case-sensitive name and changes only the fields given. Omitted resume flags keep their saved values; --resume-mode none clears them. A name that matches no entry, or several (older lists can repeat a name), is refused and nothing changes.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<name>",
+            "required": true,
+            "description": "The current exact name of the entry to change."
+          },
+          {
+            "name": "--name",
+            "value": "<new-name>",
+            "required": false,
+            "description": "New name; refused when another entry already uses it."
+          },
+          {
+            "name": "--command",
+            "value": "<command>",
+            "required": false,
+            "description": "New command line."
+          },
+          {
+            "name": "--resume-mode",
+            "value": "<mode|none>",
+            "required": false,
+            "description": "Session ID source for resuming: reported, generated, claude, codex, cursor; none clears the resume settings. Omitted, the saved value is kept."
+          },
+          {
+            "name": "--initial-template",
+            "value": "<template>",
+            "required": false,
+            "description": "First launch template; {command} is the command and {sessionId} the ID. Defaults to {command} with a new --resume-mode. Omitted, the saved value is kept."
+          },
+          {
+            "name": "--resume-template",
+            "value": "<template>",
+            "required": false,
+            "description": "Resume template; must contain {sessionId}. Defaults to {command} --resume {sessionId} with a new --resume-mode. Omitted, the saved value is kept."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for mutating commands."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane custom-commands update \"Build all\" --name Build --yes",
+          "runpane custom-commands update Farm --resume-mode none --yes --json"
+        ],
+        "jsonSchemas": [
+          "customCommandUpdateRequest",
+          "customCommandMutationResult"
+        ],
+        "notes": [
+          "ERR_CUSTOM_COMMAND_NOT_FOUND: no entry has that exact name. ERR_CUSTOM_COMMAND_AMBIGUOUS: several do; rename the extras in the desktop \"+\" menu first.",
+          "Don't put secrets in a command or template: `list` shows them to the owner and Pane stores them in config.json. Use Pane Secrets (`runpane secrets exec`) or environment variables instead."
+        ]
+      },
+      "custom-commands remove": {
+        "name": "custom-commands remove",
+        "summary": "Remove a custom launch command, selected by its exact name.",
+        "details": "Selects the entry by its exact, case-sensitive name and deletes it. Entries after it move up one position, and their keyboard shortcut slots with them.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<name>",
+            "required": true,
+            "description": "The exact name of the entry to remove."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for mutating commands."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane custom-commands remove Build --yes"
+        ],
+        "jsonSchemas": [
+          "customCommandRemoveRequest",
+          "customCommandMutationResult"
+        ],
+        "notes": [
+          "ERR_CUSTOM_COMMAND_NOT_FOUND or ERR_CUSTOM_COMMAND_AMBIGUOUS: nothing was removed."
+        ]
+      },
+      "custom-commands reorder": {
+        "name": "custom-commands reorder",
+        "summary": "Move a custom launch command, selected by its exact name, to a 1-based position; keyboard shortcut slots follow the new order.",
+        "details": "Moves the entry selected by its exact, case-sensitive name to the given 1-based final position; the entries in between shift by one and keep their order. Moving to the current position succeeds and changes nothing. Custom command keyboard shortcuts are slots in list order (overrides included), so a move changes which entry each slot starts.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<name>",
+            "required": true,
+            "description": "The exact name of the entry to move."
+          },
+          {
+            "name": "--to",
+            "value": "<position>",
+            "required": true,
+            "description": "The 1-based position the entry ends up at, from 1 to the number of entries."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for mutating commands."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane custom-commands reorder Build --to 1 --yes --json"
+        ],
+        "jsonSchemas": [
+          "customCommandReorderRequest",
+          "customCommandMutationResult"
+        ],
+        "notes": [
+          "The result's note says when shortcut slots moved."
+        ]
       }
     },
     "managedBlock": [

@@ -6,8 +6,11 @@ export interface CustomCommandResume {
   resumeTemplate: string;
 }
 
+/** Where a custom command's session ID comes from. */
+export const CUSTOM_COMMAND_RESUME_MODES = ['claude', 'codex', 'cursor', 'generated', 'reported'] as const;
+
 export const customCommandResumeSchema = boundary.object({
-  mode: boundary.enumeration('claude', 'codex', 'cursor', 'generated', 'reported'),
+  mode: boundary.enumeration(...CUSTOM_COMMAND_RESUME_MODES),
   initialTemplate: boundary.string,
   resumeTemplate: boundary.nonEmptyString,
 });

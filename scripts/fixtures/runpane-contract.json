@@ -1816,6 +1816,60 @@
       "T-12",
       "--yes",
       "--json"
+    ],
+    [
+      "custom-commands",
+      "list",
+      "--json"
+    ],
+    [
+      "custom-commands",
+      "add",
+      "--name",
+      "Build all",
+      "--command",
+      "pnpm build",
+      "--resume-mode",
+      "reported",
+      "--yes",
+      "--json"
+    ],
+    [
+      "custom-commands",
+      "update",
+      "Build all",
+      "--name",
+      "Build",
+      "--command",
+      "make",
+      "--resume-mode",
+      "none",
+      "--yes"
+    ],
+    [
+      "custom-commands",
+      "update",
+      "Farm",
+      "--initial-template",
+      "{command} --id {sessionId}",
+      "--resume-template",
+      "{command} --resume {sessionId}",
+      "--yes"
+    ],
+    [
+      "custom-commands",
+      "remove",
+      "Build",
+      "--yes",
+      "--json"
+    ],
+    [
+      "custom-commands",
+      "reorder",
+      "Build",
+      "--to",
+      "2",
+      "--yes"
     ]
   ],
   "help": {

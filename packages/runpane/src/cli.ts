@@ -16,6 +16,7 @@ import { runNotify } from './notify';
 import { runTodos } from './todos';
 import { isTodoCommand, todosDisabledError, todosOn } from './todosFeature';
 import { runLink } from './pairingLink';
+import { runCustomCommandsAdd, runCustomCommandsList, runCustomCommandsRemove, runCustomCommandsReorder, runCustomCommandsUpdate } from './customCommands';
 import { runSecretsDelete, runSecretsExec, runSecretsLease, runSecretsLeaseEnd, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
 import { BROWSER_VERBS, runBrowser } from './browser';
 import { runDevicesAct, runDevicesClose, runDevicesFree, runDevicesList, runDevicesOpen, runDevicesRun, runDevicesScreenshot, runDevicesUsage } from './devices';
@@ -276,6 +277,11 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
     return runReposRename(parsed);
   },
   'secrets list': async (parsed) => runSecretsList(parsed),
+  'custom-commands list': async (parsed) => runCustomCommandsList(parsed),
+  'custom-commands add': async (parsed) => runCustomCommandsAdd(parsed),
+  'custom-commands update': async (parsed) => runCustomCommandsUpdate(parsed),
+  'custom-commands remove': async (parsed) => runCustomCommandsRemove(parsed),
+  'custom-commands reorder': async (parsed) => runCustomCommandsReorder(parsed),
   'secrets set': async (parsed) => runSecretsSet(parsed),
   'secrets delete': async (parsed) => runSecretsDelete(parsed),
   'secrets exec': async (parsed) => runSecretsExec(parsed),

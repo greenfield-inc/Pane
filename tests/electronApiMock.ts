@@ -885,6 +885,20 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           preferredShell: configState.preferredShell ?? 'auto',
         });
       }
+      // The "+" menu's pencil and ×: like main, they change the row only while it still holds the entry the menu showed.
+      if (channel === 'config:custom-commands:edit-row') {
+        // SAFETY: PanelTabBar sends { index, expected, next } (main/src/ipc/customCommands.ts).
+        const request = args[0] as { index: number; expected: JsonValue; next: JsonValue };
+        const list = Array.isArray(configState.customCommands) ? [...configState.customCommands] : [];
+        if (JSON.stringify(list[request.index]) !== JSON.stringify(request.expected)) {
+          return Promise.resolve({ success: false, error: 'The custom command changed or moved on this machine while it was being edited. Nothing was saved.' });
+        }
+        if (request.next === null) list.splice(request.index, 1);
+        else list[request.index] = request.next;
+        configState.customCommands = list;
+        emit('config:updated', clone(configState));
+        return Promise.resolve({ success: true });
+      }
       if (channel === 'terminal:set-preferred-shell') {
         configState.preferredShell = String(args[0]);
         return Promise.resolve(undefined);

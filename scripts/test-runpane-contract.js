@@ -4558,6 +4558,150 @@ print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines(), "ref
   assert.strictEqual(python.emptyRejected, true);
 }
 
+async function checkCustomCommandsParity() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const customCommands = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'customCommands.js'));
+  const runners = {
+    list: customCommands.runCustomCommandsList,
+    add: customCommands.runCustomCommandsAdd,
+    update: customCommands.runCustomCommandsUpdate,
+    remove: customCommands.runCustomCommandsRemove,
+    reorder: customCommands.runCustomCommandsReorder,
+  };
+  // Each run: argv, then the daemon's answer (or 'unknown' for a Pane without the channel).
+  const runs = [
+    [['custom-commands', 'list'], { ok: true, commands: [] }],
+    [['custom-commands', 'list'], { ok: true, commands: [
+      { position: 1, name: 'Build all', command: 'pnpm build', resume: null },
+      { position: 2, name: 'Farm', command: 'agent-farm run x', resume: { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}' } },
+    ] }],
+    [['custom-commands', 'list', '--json'], { ok: true, commands: [{ position: 1, name: 'A', command: 'a', resume: null }] }],
+    [['custom-commands', 'add', '--name', 'Build all', '--command', 'pnpm build', '--resume-mode', 'reported', '--yes'],
+      { ok: true, action: 'added', name: 'Build all', position: 3, previousPosition: null, changed: true, count: 3 }],
+    [['custom-commands', 'update', 'Build all', '--name', 'Build', '--command', 'make', '--resume-mode', 'none', '--yes', '--json'],
+      { ok: true, action: 'updated', name: 'Build', position: 1, previousPosition: 1, changed: true, count: 3 }],
+    [['custom-commands', 'update', 'Farm', '--resume-template', '{command} -r {sessionId}', '--yes'],
+      { ok: true, action: 'updated', name: 'Farm', position: 2, previousPosition: 2, changed: true, count: 3 }],
+    [['custom-commands', 'remove', 'Build', '--yes'], { ok: true, action: 'removed', name: 'Build', position: null, previousPosition: 1, changed: true, count: 2 }],
+    [['custom-commands', 'reorder', 'Farm', '--to', '2', '--yes'], { ok: true, action: 'moved', name: 'Farm', position: 2, previousPosition: 2, changed: false, count: 2 }],
+    [['custom-commands', 'reorder', 'Farm', '--to', '1', '--yes', '--json'], { ok: true, action: 'moved', name: 'Farm', position: 1, previousPosition: 2, changed: true, count: 2 }],
+    [['custom-commands', 'list'], 'unknown'],
+  ];
+  // Refused before anything is sent.
+  const refusals = [
+    ['custom-commands', 'add', '--command', 'x', '--yes'],
+    ['custom-commands', 'add', '--name', 'x', '--command', 'x', '--resume-mode', 'none', '--yes'],
+    ['custom-commands', 'add', '--name', 'x', '--command', 'x', '--resume-mode', 'later', '--yes'],
+    ['custom-commands', 'update', 'x', '--yes'],
+    ['custom-commands', 'update', '--name', 'y', '--yes'],
+    ['custom-commands', 'update', 'x', '--resume-mode', 'none', '--resume-template', 'r {sessionId}', '--yes'],
+    ['custom-commands', 'remove', 'x'],
+    ['custom-commands', 'reorder', 'x', '--yes'],
+    ['custom-commands', 'reorder', 'x', '--to', '0', '--yes'],
+  ];
+
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const node = { calls: [], stdout: [], errors: [] };
+  let answer;
+  daemonClient.invokeDaemon = async (channel, args) => {
+    node.calls.push({ channel, args });
+    if (answer === 'unknown') throw Object.assign(new Error('No Pane daemon command registered'), { code: 'ERR_UNKNOWN_CHANNEL' });
+    return answer;
+  };
+  console.log = (line) => node.stdout.push(String(line));
+  try {
+    for (const [argv, response] of runs) {
+      answer = response;
+      try {
+        await runners[argv[1]](parseRunpaneArgs(argv));
+      } catch (error) {
+        node.errors.push(error.code);
+      }
+    }
+    for (const argv of refusals) {
+      try {
+        await runners[argv[1]](parseRunpaneArgs(argv));
+        node.errors.push('accepted');
+      } catch (error) {
+        node.errors.push(error.code ?? 'parse');
+      }
+    }
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+
+  assert.deepStrictEqual(node.calls.map((call) => call.channel), [
+    'runpane:custom-commands:list', 'runpane:custom-commands:list', 'runpane:custom-commands:list',
+    'runpane:custom-commands:add', 'runpane:custom-commands:update', 'runpane:custom-commands:update',
+    'runpane:custom-commands:remove', 'runpane:custom-commands:reorder', 'runpane:custom-commands:reorder',
+    'runpane:custom-commands:list',
+  ]);
+  assert.deepStrictEqual(node.calls[3].args, [{ name: 'Build all', command: 'pnpm build', resume: { mode: 'reported' } }]);
+  assert.deepStrictEqual(node.calls[4].args, [{ name: 'Build all', newName: 'Build', command: 'make', resume: null }]);
+  assert.deepStrictEqual(node.calls[5].args, [{ name: 'Farm', resume: { resumeTemplate: '{command} -r {sessionId}' } }]);
+  assert.deepStrictEqual(node.calls[8].args, [{ name: 'Farm', position: 1 }]);
+  assert.deepStrictEqual(node.errors, ['ERR_PANE_TOO_OLD', ...refusals.map(() => 'ERR_RUNPANE_INVALID_ARGUMENT').slice(0, 6), 'ERR_RUNPANE_CONFIRMATION_REQUIRED', 'ERR_RUNPANE_INVALID_ARGUMENT', 'ERR_RUNPANE_INVALID_ARGUMENT']);
+  assert.ok(node.stdout.includes('   resume template: {command} --resume {sessionId}'));
+  assert.ok(node.stdout.includes('"Farm" is already at position 2; nothing changed.'));
+  assert.ok(node.stdout.some((line) => line.includes('"note": "Custom command keyboard shortcuts follow list order')));
+
+  const pythonOutput = runPythonSnippet(`
+import contextlib, io, json, sys
+import runpane.custom_commands as custom_commands
+from runpane.cli import parse_args
+from runpane.daemon_client import PaneDaemonClientError
+
+runs = json.loads(sys.stdin.read())
+calls, errors = [], []
+answer = None
+def fake_invoke(channel, args, **kwargs):
+    calls.append({"channel": channel, "args": args})
+    if answer == "unknown":
+        raise PaneDaemonClientError("No Pane daemon command registered", code="ERR_UNKNOWN_CHANNEL")
+    return answer
+custom_commands.invoke_daemon = fake_invoke
+runners = {
+    "list": custom_commands.run_custom_commands_list,
+    "add": custom_commands.run_custom_commands_add,
+    "update": custom_commands.run_custom_commands_update,
+    "remove": custom_commands.run_custom_commands_remove,
+    "reorder": custom_commands.run_custom_commands_reorder,
+}
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    for argv, response in runs["runs"]:
+        answer = response
+        try:
+            runners[argv[1]](parse_args(argv))
+        except Exception as error:
+            errors.append(getattr(error, "code", None))
+    for argv in runs["refusals"]:
+        try:
+            runners[argv[1]](parse_args(argv))
+            errors.append("accepted")
+        except Exception as error:
+            errors.append(getattr(error, "code", None) or "parse")
+delegated = [custom_commands.delegated_workspace_argv(argv) for argv in [
+    ["workspace", "devbox", "custom-commands", "list"],
+    ["--pane-dir", "/tmp/p", "workspace", "devbox", "sessions", "create", "--from-json", "-"],
+    ["workspace", "devbox", "panes", "list"],
+    ["workspace", "list"],
+    ["custom-commands", "list"],
+]]
+print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines(), "errors": errors, "delegated": delegated}))
+`, JSON.stringify({ runs, refusals }));
+  const python = JSON.parse(pythonOutput);
+  assert.deepStrictEqual(python.calls, node.calls);
+  assert.deepStrictEqual(python.errors, node.errors);
+  // --json prints the same objects; text lines match exactly.
+  const parseJsonBlocks = (lines) => lines.join('\n');
+  assert.deepStrictEqual(parseJsonBlocks(python.stdout), parseJsonBlocks(node.stdout));
+  assert.deepStrictEqual(python.delegated, [true, true, false, false, false]);
+}
+
 async function checkRepoSettingsParity() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -7701,6 +7845,7 @@ const checks = [
   checkPanelCloseForceParity,
   checkSessionChildPinDefaults,
   checkPaneRenameParity,
+  checkCustomCommandsParity,
   checkRepoSettingsParity,
   checkMachineParity,
   checkLoopsParity,

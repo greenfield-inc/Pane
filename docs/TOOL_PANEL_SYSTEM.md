@@ -105,5 +105,20 @@ three words of the command. Saved commands are shared through app configuration.
 Use the pencil beside a saved command (**Rename command**) to rename it; the menu and future tabs use
 the new name. Existing tabs keep their titles. Hover a command to see its full
 name and command.
+If the list changed meanwhile (an agent ran `runpane custom-commands`, say), the
+rename or removal is refused instead of landing on another entry; open the menu
+again and repeat it.
+
+Agents and scripts manage the same list with `runpane custom-commands`
+(`list`, `add`, `update`, `remove`, `reorder`), on this machine or on a linked
+one through `runpane workspace <machine> custom-commands ...`. Each machine keeps
+its own ordered list; the "+" menu, New Session, Settings and paired phones pick
+up a change without a restart. `update`, `remove` and `reorder` select an entry
+by its exact, case-sensitive name, and refuse a name that several older entries
+share. The custom command keyboard shortcuts are slots in list order, so moving
+or removing an entry changes which command each slot starts. `list` shows the
+owner each command and its resume templates, so keep secrets out of them: use
+Pane Secrets (`runpane secrets exec`) or environment variables. See
+`runpane help custom-commands`.
 
 Resume commands retain the original shell quoting and environment assignments when removing a launch prompt. Custom Claude launchers may choose a separate configuration directory; Pane trusts their recorded conversation IDs instead of checking the app configuration for their transcripts.

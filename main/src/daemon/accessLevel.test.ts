@@ -139,8 +139,8 @@ describe('a device paired Read only', () => {
 
     expect([...ran].sort()).toEqual([...READABLE].sort());
     expect(channels.filter((channel) => !refused.includes(channel) && !ran.includes(channel)).sort()).toEqual([...ANSWERED].sort());
-    // Links that start agents, terminals, approvals, secrets, files and machine commands are named here so none slips into the list above.
-    expect(refused).toEqual(expect.arrayContaining(['runpane:links:open', 'runpane:panes:create', 'terminal:input', 'permission:respond', 'notify:remote-command', 'credentials:shared:get', 'secrets:lease:push', 'file:read', 'runpane:machine:exec', 'runpane:glasses:pair', 'ports:phone-address', 'relay:client:preview-address', 'runpane:browser:fill-secret', 'chat-tab:files']));
+    // Links that start agents, terminals, approvals, secrets, files, machine commands and launch commands (custom-commands list shows command text) are named here so none slips into the list above.
+    expect(refused).toEqual(expect.arrayContaining(['runpane:links:open', 'runpane:panes:create', 'terminal:input', 'permission:respond', 'notify:remote-command', 'credentials:shared:get', 'secrets:lease:push', 'file:read', 'runpane:machine:exec', 'runpane:glasses:pair', 'ports:phone-address', 'relay:client:preview-address', 'runpane:browser:fill-secret', 'chat-tab:files', 'runpane:custom-commands:list', 'runpane:custom-commands:add']));
   }, 60_000);
 
   it('reaches no media, port, voice or preview route', async () => {
