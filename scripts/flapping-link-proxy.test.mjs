@@ -107,3 +107,43 @@ test('a seeded schedule repeats and cycles UP, DOWN, REFUSING', async () => {
   assert.deepEqual(first.map(([phase]) => phase), ['up', 'down', 'refusing', 'up', 'down']);
   assert.deepEqual(await run(), first);
 });
+
+test('latency holds each direction for half the round trip and keeps byte order', async () => {
+  const proxy = await proxyFor({ latencyMs: 120 });
+  const open = await echoConnection(proxy.port);
+  const sent = Date.now();
+  for (const part of ['a', 'b', 'c', 'd']) open.socket.write(part);
+  await until(() => open.received.endsWith('abcd'));
+  const roundTrip = Date.now() - sent;
+  assert.ok(roundTrip >= 110, `round trip ${roundTrip} ms is at least the 120 ms latency (less timer slack)`);
+  assert.ok(roundTrip < 400, `round trip ${roundTrip} ms stays near the 120 ms latency`);
+  await proxy.close();
+});
+
+test('latency and a short drop together still deliver every byte in order', async () => {
+  const proxy = await proxyFor({ latencyMs: 100 });
+  const open = await echoConnection(proxy.port);
+  open.socket.write('1');
+  await sleep(10);
+  proxy.forceDown();
+  open.socket.write('2');
+  await sleep(150);
+  open.socket.write('3');
+  proxy.forceUp();
+  await until(() => open.received.endsWith('123'));
+  assert.equal(open.closed, false);
+  await proxy.close();
+});
+
+test('counts the bytes that cross the link each way', async () => {
+  const proxy = await proxyFor();
+  const res = await fetch(`http://127.0.0.1:${proxy.port}/echo`, { method: 'POST', body: 'x'.repeat(1000) });
+  assert.equal((await res.text()).length, 1000);
+  await until(() => proxy.bytes().toClient >= 1000);
+  const { toTarget, toClient } = proxy.bytes();
+  assert.ok(toTarget >= 1000 && toTarget < 1400, `toTarget ${toTarget} is the body plus request headers`);
+  assert.ok(toClient >= 1000 && toClient < 1400, `toClient ${toClient} is the body plus response headers`);
+  proxy.resetBytes();
+  assert.deepEqual(proxy.bytes(), { toTarget: 0, toClient: 0 });
+  await proxy.close();
+});

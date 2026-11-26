@@ -2,7 +2,7 @@
 // cellular/Tailscale path, for testing remote Pane clients against a dev host.
 //
 //   node scripts/flapping-link-proxy.mjs --target 127.0.0.1:PORT [--listen 0] [--host 0.0.0.0]
-//     [--seed N] [--scale 0.1] [--up 20-60] [--down 5-80] [--long-drop 15] [--refuse 1]
+//     [--seed N] [--scale 0.1] [--up 20-60] [--down 5-80] [--long-drop 15] [--refuse 1] [--latency 0]
 //
 // Phases cycle UP -> DOWN -> REFUSING -> UP. Times on the command line are in
 // seconds; --scale multiplies every duration (0.1 runs ten times faster).
@@ -16,9 +16,13 @@
 //   longer drop resets them (RST), as if the old path is gone.
 // REFUSING (default 1 s after every DOWN): new connections are reset as soon
 //   as they are accepted; resumed connections flow.
+//
+// --latency MS (any phase): bytes take half of MS to cross each way, so a
+//   request and its answer take MS longer, in order, across drops too. The
+//   proxy also counts the bytes it carries each way (bytes(), resetBytes()).
 import { EventEmitter } from 'node:events';
 import net from 'node:net';
-import { pathToFileURL } from 'node:url';
+import path from 'node:path';
 import { parseArgs } from 'node:util';
 
 /** @typedef {'up' | 'down' | 'refusing'} Phase */
@@ -45,6 +49,7 @@ import { parseArgs } from 'node:util';
  * @property {number} [longDropMs] drops at least this long reset held connections, default 15000
  * @property {number} [refuseMs] REFUSING window after each DOWN, default 1000
  * @property {boolean} [manual] no timer: stay UP until forceDown/forceUp drive the phases
+ * @property {number} [latencyMs] round trip added to every connection: each direction is held for half, default 0
  * @property {(event: PhaseEvent) => void} [onPhase]
  */
 /**
@@ -56,6 +61,8 @@ import { parseArgs } from 'node:util';
  * @property {(ms?: number) => void} forceDown go DOWN now; back UP after ms of wall-clock time, or at forceUp
  * @property {(options?: { resume?: boolean }) => void} forceUp end DOWN now; resume overrides the long-drop rule
  * @property {EventEmitter} events emits 'phase' (PhaseEvent)
+ * @property {() => { toTarget: number, toClient: number }} bytes bytes carried each way since start or resetBytes
+ * @property {() => void} resetBytes
  */
 
 const END = Symbol('end');
@@ -83,6 +90,8 @@ export async function start(options) {
   const longDropMs = (options.longDropMs ?? 15_000) * scale;
   const refuseMs = (options.refuseMs ?? 1_000) * scale;
   const random = mulberry32(seed);
+  const halfTripMs = (options.latencyMs ?? 0) / 2;
+  const carried = { toTarget: 0, toClient: 0 };
   const between = (/** @type {[number, number]} */ [min, max]) => (min + random() * (max - min)) * scale;
   let cycle = 0;
   const nextPair = () => (phases ? phases[cycle++ % phases.length].map((ms) => ms * scale) : [between(up), between(down)]);
@@ -103,6 +112,9 @@ export async function start(options) {
    * @property {net.Socket | null} target
    * @property {boolean} held
    * @property {Array<['toTarget' | 'toClient', Buffer | symbol]>} queue
+   * @property {Array<{ direction: 'toTarget' | 'toClient', item: Buffer | symbol, due: number }>} line
+   *   with latency, items on their way, oldest first; they cross once due and the link isn't held
+   * @property {NodeJS.Timeout | undefined} lineTimer
    */
 
   /** @param {Link} link */
@@ -119,6 +131,26 @@ export async function start(options) {
   const relay = (link, direction, item) => {
     if (!links.has(link)) return;
     if (link.held) return void link.queue.push([direction, item]);
+    if (halfTripMs <= 0) return deliver(link, direction, item);
+    // One line per connection: both directions wait the same, so a later item is never due earlier.
+    const last = link.line.at(-1);
+    link.line.push({ direction, item, due: Math.max(Date.now() + halfTripMs, last?.due ?? 0) });
+    drain(link);
+  };
+
+  /** Delivers the line's due items, stopping while the link is held; then waits for the next. @param {Link} link */
+  const drain = (link) => {
+    clearTimeout(link.lineTimer);
+    link.lineTimer = undefined;
+    while (links.has(link) && !link.held && link.line.length && link.line[0].due <= Date.now()) {
+      const next = /** @type {{ direction: 'toTarget' | 'toClient', item: Buffer | symbol }} */ (link.line.shift());
+      deliver(link, next.direction, next.item);
+    }
+    if (links.has(link) && !link.held && link.line.length) link.lineTimer = setTimeout(() => drain(link), link.line[0].due - Date.now());
+  };
+
+  /** @param {Link} link @param {'toTarget' | 'toClient'} direction @param {Buffer | symbol} item */
+  const deliver = (link, direction, item) => {
     if (item === CLOSE) {
       links.delete(link);
       link.client.destroy();
@@ -127,20 +159,25 @@ export async function start(options) {
     }
     const to = direction === 'toTarget' ? link.target : link.client;
     if (item === END) to?.end();
-    else to?.write(/** @type {Buffer} */ (item));
+    else {
+      carried[direction] += /** @type {Buffer} */ (item).length;
+      to?.write(/** @type {Buffer} */ (item));
+    }
   };
 
   /** @param {Link} link */
   const release = (link) => {
     link.held = false;
     if (!link.target) connectTarget(link);
+    // Items already on the line are older than the queue's, so they go first.
+    drain(link);
     for (const [direction, item] of link.queue.splice(0)) relay(link, direction, item);
   };
 
   const server = net.createServer({ allowHalfOpen: true }, (client) => {
     if (phase === 'refusing') return void client.resetAndDestroy();
     /** @type {Link} */
-    const link = { client, target: null, held: phase === 'down', queue: [] };
+    const link = { client, target: null, held: phase === 'down', queue: [], line: [], lineTimer: undefined };
     links.add(link);
     client.on('data', (chunk) => relay(link, 'toTarget', chunk));
     client.on('end', () => relay(link, 'toTarget', END));
@@ -167,7 +204,10 @@ export async function start(options) {
   const goDown = (ms) => {
     clearTimeout(timer);
     downSince = Date.now();
-    for (const link of links) link.held = true;
+    for (const link of links) {
+      link.held = true;
+      clearTimeout(link.lineTimer);
+    }
     enter({ phase: 'down', durationMs: ms });
     if (ms !== undefined) timer = setTimeout(goUp, ms);
   };
@@ -184,6 +224,7 @@ export async function start(options) {
         release(link);
       } else {
         links.delete(link);
+        clearTimeout(link.lineTimer);
         link.client.resetAndDestroy();
         link.target?.resetAndDestroy();
       }
@@ -208,9 +249,15 @@ export async function start(options) {
     phase: () => phase,
     forceDown: (ms) => goDown(ms),
     forceUp: (opts) => goUp(opts),
+    bytes: () => ({ ...carried }),
+    resetBytes: () => {
+      carried.toTarget = 0;
+      carried.toClient = 0;
+    },
     close: () => {
       clearTimeout(timer);
       for (const link of links) {
+        clearTimeout(link.lineTimer);
         link.client.destroy();
         link.target?.destroy();
       }
@@ -220,7 +267,8 @@ export async function start(options) {
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/** The command line: proxy until SIGINT or SIGTERM, printing each phase. */
+async function main() {
   const { values } = parseArgs({
     options: {
       target: { type: 'string' },
@@ -232,11 +280,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       down: { type: 'string', default: '5-80' },
       'long-drop': { type: 'string', default: '15' },
       refuse: { type: 'string', default: '1' },
+      latency: { type: 'string', default: '0' },
     },
   });
   const match = /^(.+):(\d+)$/.exec(values.target ?? '');
   if (!match) {
-    console.error('Usage: node scripts/flapping-link-proxy.mjs --target HOST:PORT [--listen 0] [--seed N] [--scale 0.1]');
+    console.error('Usage: node scripts/flapping-link-proxy.mjs --target HOST:PORT [--listen 0] [--seed N] [--scale 0.1] [--latency MS]');
     process.exit(2);
   }
   const range = (/** @type {string} */ text) => /** @type {[number, number]} */ (text.split('-').map((s) => Number(s) * 1000));
@@ -251,6 +300,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     down: range(values.down),
     longDropMs: Number(values['long-drop']) * 1000,
     refuseMs: Number(values.refuse) * 1000,
+    latencyMs: Number(values.latency),
     onPhase: (e) => {
       const detail = e.phase === 'refusing' ? ` after ${(e.dropMs / 1000).toFixed(1)}s drop, ${e.connections} held connection(s) ${e.held}` : '';
       const length = e.durationMs === undefined ? '' : ` for ${(e.durationMs / 1000).toFixed(1)}s`;
@@ -262,3 +312,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 }
+
+// Run as a command, not imported. No import.meta or top-level await: Playwright's loader compiles
+// this file as CommonJS when a test imports it (tests/remoteRig.ts).
+if (process.argv[1] && path.basename(process.argv[1]) === 'flapping-link-proxy.mjs') void main();
