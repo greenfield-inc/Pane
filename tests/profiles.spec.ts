@@ -685,7 +685,7 @@ test('a launch or process agent opens in a tab of the Pane you came from, with i
   await openProfilesFromPane(page);
   const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
   // Launch and process rows carry the action; an agent inside its parent doesn't.
-  await expect(tree.getByTestId('profiles-tree-tab-orchestrator/sub:planner')).toHaveAttribute('title', 'Open Planner in a tab in feature/onboarding (⌘↩)');
+  await expect(tree.getByTestId('profiles-tree-tab-orchestrator/sub:planner')).toHaveAttribute('title', /^Open Planner in a tab in feature\/onboarding \((⌘↩|Ctrl\+Enter)\)$/);
   await expect(tree.getByTestId('profiles-tree-tab-orchestrator/sub:advisor')).toHaveCount(1);
   await expect(tree.getByTestId('profiles-tree-tab-orchestrator/sub:explorer')).toHaveCount(0);
   await expect(tree.getByTestId('profiles-tree-tab-orchestrator/sub:designer')).toHaveCount(0);
