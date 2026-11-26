@@ -12,7 +12,8 @@ import { start as startLinkProxy } from '../scripts/flapping-link-proxy.mjs';
  *   desktop (A) ──http+sse, paired token──▶ link proxy (latency, byte counts, cuts) ──▶ host (B)
  *
  * - Each Pane has its own PANE_DIR, Electron profile and HOME (isolatedPane), Workspaces and
- *   Tailscale off. Nothing reaches the real ~/.pane, a real machine or the network.
+ *   Tailscale off (PANE_DISABLE_TAILSCALE, checked at start). Nothing reaches the real ~/.pane,
+ *   a real machine or the network.
  * - B serves its remote API on 127.0.0.1 over plain HTTP (the loopback mode an SSH tunnel uses)
  *   and accepts one paired token. A saves B as a computer whose only route is the proxy, so
  *   every byte between them crosses the proxy and pays its latency.
@@ -27,6 +28,7 @@ interface LinkProxy {
   port: number;
   bytes: () => { toTarget: number; toClient: number };
   resetBytes: () => void;
+  lastDelivered: () => { toTarget: number | null; toClient: number | null };
   forceDown: (ms?: number) => void;
   forceUp: (options?: { resume?: boolean }) => void;
   close: () => Promise<void>;
@@ -62,6 +64,12 @@ async function serveRemote(page: Page, port: number, token: string): Promise<voi
   await expect.poll(() => answers(`http://127.0.0.1:${port}/health`), { message: `the host answers on 127.0.0.1:${port}`, timeout: 20_000 }).toBe(true);
 }
 
+/** Tailscale discovery finds nothing (PANE_DISABLE_TAILSCALE), so neither Pane probes a real machine. */
+async function assertNoTailscale(page: Page, who: string): Promise<void> {
+  const list = await page.evaluate(() => window.electronAPI.remoteDaemon.listTailnetMachines());
+  expect(list.success && list.data, `${who} lists no Tailscale machines`).toMatchObject({ ok: false, reason: 'Tailscale is not installed' });
+}
+
 /** Saves B on A as a computer reached only through the proxy. */
 async function saveHost(page: Page, proxyPort: number, token: string): Promise<void> {
   await page.evaluate(async ({ baseUrl, secret, label }) => {
@@ -91,10 +99,12 @@ export async function startRig(baseURL: string | undefined, options: RigOptions)
   try {
     const host = await launchWithScriptedAgent(hostPane, baseURL);
     opened.push(host.app);
+    await assertNoTailscale(host.page, 'the host');
     await serveRemote(host.page, hostPort, token);
     proxy = await startLinkProxy({ targetHost: '127.0.0.1', targetPort: hostPort, manual: true, latencyMs: options.latencyMs });
     const desktop = await launchWithScriptedAgent(desktopPane, baseURL);
     opened.push(desktop.app);
+    await assertNoTailscale(desktop.page, 'the desktop');
     await saveHost(desktop.page, proxy.port, token);
     const link = proxy;
     return {

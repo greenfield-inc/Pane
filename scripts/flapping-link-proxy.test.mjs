@@ -147,3 +147,26 @@ test('counts the bytes that cross the link each way', async () => {
   assert.deepEqual(proxy.bytes(), { toTarget: 0, toClient: 0 });
   await proxy.close();
 });
+
+test('latency charges a new connection one round trip to open, as a TCP handshake does', async (t) => {
+  const proxy = await proxyFor({ latencyMs: 120 });
+  t.after(() => proxy.close());
+  const sent = Date.now();
+  const res = await fetch(`http://127.0.0.1:${proxy.port}/echo`, { method: 'POST', body: 'hello' });
+  assert.equal(await res.text(), 'hello');
+  const firstAnswer = Date.now() - sent;
+  assert.ok(firstAnswer >= 230, `a fresh connection's first answer took ${firstAnswer} ms: the handshake's round trip plus the request's (240 ms, less timer slack)`);
+  assert.ok(firstAnswer < 600, `a fresh connection's first answer took ${firstAnswer} ms, near two round trips`);
+});
+
+test('says when it last delivered bytes each way', async (t) => {
+  const proxy = await proxyFor();
+  t.after(() => proxy.close());
+  assert.deepEqual(proxy.lastDelivered?.(), { toTarget: null, toClient: null });
+  const before = Date.now();
+  const res = await fetch(`http://127.0.0.1:${proxy.port}/echo`, { method: 'POST', body: 'hi' });
+  await res.text();
+  const { toTarget, toClient } = proxy.lastDelivered();
+  assert.ok(toTarget !== null && toTarget >= before && toTarget <= Date.now(), `toTarget ${toTarget} is during the request`);
+  assert.ok(toClient !== null && toClient >= toTarget && toClient <= Date.now(), `toClient ${toClient} is the answer's, after the request`);
+});

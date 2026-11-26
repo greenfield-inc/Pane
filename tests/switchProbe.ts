@@ -13,8 +13,10 @@ declare global {
  * - visible: the first frame with the chat's composer laid out and the last message (the text
  *   `mark`) inside the conversation's scroll viewport; painted: the frame after.
  * - focused: when `focuses`, the first frame with focus in the composer.
+ * - cancelled: set from outside (the remote rig, once a switch has landed elsewhere) to end the
+ *   probe at its next frame, as a timeout does.
  */
-export interface ProbeResult { input?: number; visible?: number; painted?: number; focused?: number; timedOut?: boolean }
+export interface ProbeResult { input?: number; visible?: number; painted?: number; focused?: number; timedOut?: boolean; cancelled?: boolean }
 
 export async function armVisibleProbe(page: Page, { panelId, mark, focuses, timeoutMs = 60_000 }: { panelId: string; mark: string; focuses: boolean; timeoutMs?: number }): Promise<void> {
   await page.evaluate(({ panelId, mark, focuses, timeoutMs }) => {
@@ -48,7 +50,7 @@ export async function armVisibleProbe(page: Page, { panelId, mark, focuses, time
       } else if (done.visible !== undefined && done.painted === undefined && now > done.visible) done.painted = now;
       if (focuses && done.focused === undefined && composer && document.activeElement === composer) done.focused = now;
       const finished = done.painted !== undefined && (!focuses || done.focused !== undefined);
-      if (finished || now - started > timeoutMs) {
+      if (finished || done.cancelled || now - started > timeoutMs) {
         done.timedOut = !finished;
         window.removeEventListener('click', input, { capture: true });
         window.removeEventListener('keydown', input, { capture: true });

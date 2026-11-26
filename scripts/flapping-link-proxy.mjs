@@ -18,8 +18,12 @@
 //   as they are accepted; resumed connections flow.
 //
 // --latency MS (any phase): bytes take half of MS to cross each way, so a
-//   request and its answer take MS longer, in order, across drops too. The
-//   proxy also counts the bytes it carries each way (bytes(), resetBytes()).
+//   request and its answer take MS longer, in order, across drops too. A new
+//   connection's first bytes also wait one more MS, the TCP handshake's round
+//   trip (the client still sees its connect succeed at once). Not modelled: TLS
+//   (1-2 more round trips on a Tailscale or HTTPS route), jitter, bandwidth.
+//   The proxy also counts the bytes it carries each way (bytes(), resetBytes())
+//   and when it last delivered each way (lastDelivered()).
 import { EventEmitter } from 'node:events';
 import net from 'node:net';
 import path from 'node:path';
@@ -63,6 +67,7 @@ import { parseArgs } from 'node:util';
  * @property {EventEmitter} events emits 'phase' (PhaseEvent)
  * @property {() => { toTarget: number, toClient: number }} bytes bytes carried each way since start or resetBytes
  * @property {() => void} resetBytes
+ * @property {() => { toTarget: number | null, toClient: number | null }} lastDelivered Date.now() of the last bytes delivered each way, null before any
  */
 
 const END = Symbol('end');
@@ -92,6 +97,8 @@ export async function start(options) {
   const random = mulberry32(seed);
   const halfTripMs = (options.latencyMs ?? 0) / 2;
   const carried = { toTarget: 0, toClient: 0 };
+  /** @type {{ toTarget: number | null, toClient: number | null }} */
+  const delivered = { toTarget: null, toClient: null };
   const between = (/** @type {[number, number]} */ [min, max]) => (min + random() * (max - min)) * scale;
   let cycle = 0;
   const nextPair = () => (phases ? phases[cycle++ % phases.length].map((ms) => ms * scale) : [between(up), between(down)]);
@@ -115,6 +122,7 @@ export async function start(options) {
    * @property {Array<{ direction: 'toTarget' | 'toClient', item: Buffer | symbol, due: number }>} line
    *   with latency, items on their way, oldest first; they cross once due and the link isn't held
    * @property {NodeJS.Timeout | undefined} lineTimer
+   * @property {number} openedAt with latency, one round trip after accept: the handshake a real link pays before its first bytes
    */
 
   /** @param {Link} link */
@@ -134,7 +142,7 @@ export async function start(options) {
     if (halfTripMs <= 0) return deliver(link, direction, item);
     // One line per connection: both directions wait the same, so a later item is never due earlier.
     const last = link.line.at(-1);
-    link.line.push({ direction, item, due: Math.max(Date.now() + halfTripMs, last?.due ?? 0) });
+    link.line.push({ direction, item, due: Math.max(Math.max(Date.now(), link.openedAt) + halfTripMs, last?.due ?? 0) });
     drain(link);
   };
 
@@ -161,6 +169,7 @@ export async function start(options) {
     if (item === END) to?.end();
     else {
       carried[direction] += /** @type {Buffer} */ (item).length;
+      delivered[direction] = Date.now();
       to?.write(/** @type {Buffer} */ (item));
     }
   };
@@ -177,7 +186,7 @@ export async function start(options) {
   const server = net.createServer({ allowHalfOpen: true }, (client) => {
     if (phase === 'refusing') return void client.resetAndDestroy();
     /** @type {Link} */
-    const link = { client, target: null, held: phase === 'down', queue: [], line: [], lineTimer: undefined };
+    const link = { client, target: null, held: phase === 'down', queue: [], line: [], lineTimer: undefined, openedAt: Date.now() + halfTripMs * 2 };
     links.add(link);
     client.on('data', (chunk) => relay(link, 'toTarget', chunk));
     client.on('end', () => relay(link, 'toTarget', END));
@@ -250,6 +259,7 @@ export async function start(options) {
     forceDown: (ms) => goDown(ms),
     forceUp: (opts) => goUp(opts),
     bytes: () => ({ ...carried }),
+    lastDelivered: () => ({ ...delivered }),
     resetBytes: () => {
       carried.toTarget = 0;
       carried.toClient = 0;
