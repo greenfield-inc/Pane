@@ -2228,8 +2228,7 @@ describe('OrchestrationSessionManager', () => {
       await seedPanel(worker);
       await fixture.manager.associate({ sessionId: created.session.id }, { paneId: pane.id, panelIds: [worker.id] });
       const probe = vi.fn(async () => true);
-      const turnStarted = vi.fn();
-      fixture.manager.setReplyProbe({ turnStarted, turnEnded: probe });
+      fixture.manager.setReplyProbe({ turnEnded: probe });
 
       await fixture.manager.notifyLiveActivity(worker.id, 'working');
       await fixture.manager.notifyLiveActivity(worker.id, 'idle');
@@ -2247,9 +2246,8 @@ describe('OrchestrationSessionManager', () => {
       expect((await record()).agentRepliedAt).toBe('2026-11-26T10:05:00.000Z');
       expect(changed).toContainEqual({ sessionId: created.session.id, kind: 'replied' });
       // Asked about the Session's own tab only, for the turn's start and end.
-      expect(probe.mock.calls).toEqual([[created.panel.id, { startedAtMs: Date.parse('2026-11-26T10:00:00.000Z'), endedAtMs: Date.parse('2026-11-26T10:05:00.000Z') }]]);
-      // Told where each of its own turns started, so the transcript is read from there.
-      expect(turnStarted.mock.calls).toEqual([[created.panel.id]]);
+      // Asked about the Session's own tab only.
+      expect(probe.mock.calls).toEqual([[created.panel.id]]);
 
       // An idle that follows idle or blocked is not another turn.
       await fixture.manager.notifyViewed(created.internalSession.id);
@@ -2261,8 +2259,7 @@ describe('OrchestrationSessionManager', () => {
     it('takes a chat turn\'s own evidence from its end, without reading anything back', async () => {
       const { fixture, created, record } = await fixtureWithSession('Chat turns');
       const probe = vi.fn(async () => true);
-      const turnStarted = vi.fn();
-      fixture.manager.setReplyProbe({ turnStarted, turnEnded: probe });
+      fixture.manager.setReplyProbe({ turnEnded: probe });
 
       await fixture.manager.notifyLiveActivity(created.panel.id, 'working');
       await fixture.manager.notifyLiveActivity(created.panel.id, 'idle', { turnEndedWithText: false });
@@ -2277,7 +2274,7 @@ describe('OrchestrationSessionManager', () => {
     it('does not stamp a terminal turn that ended without a message, and does stamp the next one that ends with text', async () => {
       const { fixture, created, record } = await fixtureWithSession('Quiet turns');
       let visibleText = false;
-      fixture.manager.setReplyProbe({ turnStarted: () => undefined, turnEnded: async () => visibleText });
+      fixture.manager.setReplyProbe({ turnEnded: async () => visibleText });
 
       await fixture.manager.notifyLiveActivity(created.panel.id, 'working');
       await fixture.manager.notifyLiveActivity(created.panel.id, 'idle');
@@ -2313,7 +2310,7 @@ describe('OrchestrationSessionManager', () => {
     it('lets a view win over a reply still being checked: the person saw the turn end', async () => {
       const { fixture, created, record } = await fixtureWithSession('Seen while checking');
       let answer: ((value: boolean) => void) | undefined;
-      fixture.manager.setReplyProbe({ turnStarted: () => undefined, turnEnded: () => new Promise<boolean>(resolve => { answer = resolve; }) });
+      fixture.manager.setReplyProbe({ turnEnded: () => new Promise<boolean>(resolve => { answer = resolve; }) });
 
       await fixture.manager.notifyLiveActivity(created.panel.id, 'working');
       const ended = fixture.manager.notifyLiveActivity(created.panel.id, 'idle');

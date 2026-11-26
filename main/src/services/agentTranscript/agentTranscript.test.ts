@@ -6,7 +6,7 @@ import { claudeProjectDirName, parseClaudeLine } from './claude';
 import { CLAUDE_API_ENOTFOUND_TRANSCRIPT_LINE } from '../agentStatus/__fixtures__/claudeApiErrorScreens';
 import { agentTranscripts, turnTextMatches, type TranscriptLocator } from './index';
 
-const { findUserTurnSince, lastAssistantMessage, mark, turnEndedWithText } = agentTranscripts;
+const { findUserTurnSince, lastAssistantMessage, readFinishedTurns } = agentTranscripts;
 import { readTranscriptTail } from './tail';
 import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
 
@@ -263,96 +263,136 @@ describe('lastAssistantMessage', () => {
   });
 });
 
-describe('turnEndedWithText', () => {
+describe('readFinishedTurns', () => {
   const sessionId = '11111111-2222-4333-8444-555555555504';
   const tool = (id: string, timestamp: string) => claude.assistant(id, { type: 'tool_use', id: `toolu_${id}`, name: 'Bash', input: {} }, timestamp);
   const say = (id: string, text: string, timestamp: string) => claude.assistant(id, { type: 'text', text }, timestamp);
+  const prompt = (text: string, timestamp: string) => claude.user(text, timestamp);
   // The agent writes more of its transcript; the file stays dated after its rows.
   const append = (file: string, rows: object[]) => {
     fs.appendFileSync(file, jsonl(rows));
     fs.utimesSync(file, writtenAt, writtenAt);
   };
-  /** A transcript with an earlier turn, marked where the next turn starts. */
-  const startTurn = async () => {
-    const file = writeClaude(sessionId, [say('msg_0', 'Earlier turn', '2026-09-27T18:30:00.000Z')]);
-    const start = await mark(claudeLocator());
-    expect(start?.file).toBe(file);
-    return { file, start: start! };
+  /** A transcript with one earlier turn already judged: the cursor is where that judgment stopped. */
+  const afterEarlierTurn = async () => {
+    const file = writeClaude(sessionId, [prompt('start', '2026-09-27T18:29:00.000Z'), say('msg_0', 'Earlier turn', '2026-09-27T18:30:00.000Z')]);
+    const earlier = await readFinishedTurns(claudeLocator(), undefined, true);
+    expect(earlier.endedWithText).toBe(true);
+    return { file, cursor: earlier.cursor };
   };
 
-  it('is true for a turn a Pane line started that ends with a reply', async () => {
-    const { file, start } = await startTurn();
+  it('credits a turn a Pane line started that ends with a reply', async () => {
+    const { file, cursor } = await afterEarlierTurn();
     append(file, [
       claude.user('[From Pane, Workers] T-12 reported ready', '2026-09-27T18:40:00.100Z', { origin: { kind: 'pane' } }),
       tool('msg_1', '2026-09-27T18:40:01.000Z'),
       say('msg_2', 'T-12 is ready: PR 88 is green.', '2026-09-27T18:40:05.000Z'),
     ]);
 
-    await expect(turnEndedWithText(claudeLocator(), start)).resolves.toBe(true);
+    await expect(readFinishedTurns(claudeLocator(), cursor, true)).resolves.toMatchObject({ endedWithText: true });
+  });
+
+  it('credits a short turn whose reply was written before Pane even saw it working', async () => {
+    const { file, cursor } = await afterEarlierTurn();
+    // Prompt and reply both land before anything on the host reacts; the cursor is from the earlier judgment.
+    append(file, [prompt('quick one', '2026-09-27T18:40:00.000Z'), say('msg_1', 'Done.', '2026-09-27T18:40:00.300Z')]);
+
+    await expect(readFinishedTurns(claudeLocator(), cursor, true)).resolves.toMatchObject({ endedWithText: true });
+  });
+
+  it('does not credit an empty turn with the reply of the next turn, which started while it settled and is still working', async () => {
+    const { file, cursor } = await afterEarlierTurn();
+    // Turn A: a watcher wake the agent answered with nothing at all.
+    append(file, [claude.user('<task-notification>watch: 0 events</task-notification>', '2026-09-27T18:40:00.000Z', { isMeta: true, origin: { kind: 'task-notification' } })]);
+    await expect(readFinishedTurns(claudeLocator(), cursor, true)).resolves.toMatchObject({ endedWithText: false });
+    // Turn B starts during A's settle and is still working when A is read again.
+    append(file, [prompt('next', '2026-09-27T18:40:01.000Z'), say('msg_1', 'Starting on the review.', '2026-09-27T18:40:01.200Z')]);
+
+    await expect(readFinishedTurns(claudeLocator(), cursor, false)).resolves.toMatchObject({ endedWithText: false });
   });
 
   it('is false for a turn that ends on a tool call, even after progress text, thinking or a blank reply', async () => {
-    const { file, start } = await startTurn();
+    const { file, cursor } = await afterEarlierTurn();
     append(file, [
+      prompt('check', '2026-09-27T18:40:00.000Z'),
       say('msg_1', 'Checking the workers.', '2026-09-27T18:40:01.000Z'),
       claude.assistant('msg_1', { type: 'thinking', thinking: 'nothing to say' }, '2026-09-27T18:40:01.500Z'),
       say('msg_2', '   ', '2026-09-27T18:40:02.000Z'),
       tool('msg_2', '2026-09-27T18:40:03.000Z'),
     ]);
 
-    await expect(turnEndedWithText(claudeLocator(), start)).resolves.toBe(false);
+    await expect(readFinishedTurns(claudeLocator(), cursor, true)).resolves.toMatchObject({ endedWithText: false });
   });
 
-  it('ends a turn where the next one starts, however soon: a queued prompt 100 ms after idle and its text 200 ms after', async () => {
-    const { file, start } = await startTurn();
-    // Turn 1: a tool-only watcher wake, idle at 18:40:04.000.
-    append(file, [tool('msg_1', '2026-09-27T18:40:02.000Z')]);
-    await expect(turnEndedWithText(claudeLocator(), start)).resolves.toBe(false);
-    // The queued turn starts at once; the earlier turn's check reads again and still sees only its own rows.
-    append(file, [
-      claude.user('next', '2026-09-27T18:40:04.100Z'),
-      say('msg_2', 'Starting on the review.', '2026-09-27T18:40:04.200Z'),
-    ]);
-    await expect(turnEndedWithText(claudeLocator(), start)).resolves.toBe(false);
+  it('ends a turn where the next one starts: a queued prompt 100 ms after idle and its text 200 ms after', async () => {
+    const { file, cursor } = await afterEarlierTurn();
+    append(file, [prompt('wake', '2026-09-27T18:40:00.000Z'), tool('msg_1', '2026-09-27T18:40:02.000Z')]);
+    await expect(readFinishedTurns(claudeLocator(), cursor, true)).resolves.toMatchObject({ endedWithText: false });
+    append(file, [prompt('next', '2026-09-27T18:40:04.100Z'), say('msg_2', 'Starting on the review.', '2026-09-27T18:40:04.200Z')]);
+    await expect(readFinishedTurns(claudeLocator(), cursor, false)).resolves.toMatchObject({ endedWithText: false });
   });
 
   it('ends a turn where the agent starts its own next one, with a task notification it did not type', async () => {
-    const { file, start } = await startTurn();
+    const { file, cursor } = await afterEarlierTurn();
     append(file, [
+      prompt('wake', '2026-09-27T18:40:00.000Z'),
       tool('msg_1', '2026-09-27T18:40:02.000Z'),
       claude.user('<task-notification>Build finished</task-notification>', '2026-09-27T18:40:04.100Z', { isMeta: true, origin: { kind: 'task-notification' } }),
       say('msg_2', 'The build finished.', '2026-09-27T18:40:04.200Z'),
     ]);
 
-    await expect(turnEndedWithText(claudeLocator(), start)).resolves.toBe(false);
+    await expect(readFinishedTurns(claudeLocator(), cursor, false)).resolves.toMatchObject({ endedWithText: false });
   });
 
-  it('reads the turn by where it starts in the file, not by the clock: a clock set back mid-turn still finds the reply', async () => {
-    const { file, start } = await startTurn();
-    // The clock went back an hour after the turn began: its rows are dated before the earlier turn.
+  it('goes by row order, not the clock: a clock set back mid-turn still finds the reply', async () => {
+    const { file, cursor } = await afterEarlierTurn();
     append(file, [
+      prompt('go', '2026-09-27T18:40:00.000Z'),
       tool('msg_1', '2026-09-27T17:40:01.000Z'),
       say('msg_2', 'Done, despite the clock.', '2026-09-27T17:40:02.000Z'),
     ]);
 
-    await expect(turnEndedWithText(claudeLocator(), start)).resolves.toBe(true);
+    await expect(readFinishedTurns(claudeLocator(), cursor, true)).resolves.toMatchObject({ endedWithText: true });
   });
 
-  it('answers undefined with nothing written since the turn began, and without a transcript', async () => {
-    const { start } = await startTurn();
-    await expect(turnEndedWithText(claudeLocator(), start)).resolves.toBeUndefined();
-    await expect(mark(codexLocator())).resolves.toBeUndefined();
+  it('with no earlier judgment, reads only the newest finished turn, never older history', async () => {
+    writeClaude(sessionId, [
+      prompt('old', '2026-09-27T18:29:00.000Z'),
+      say('msg_0', 'An old reply the person read long ago.', '2026-09-27T18:30:00.000Z'),
+      prompt('wake', '2026-09-27T18:40:00.000Z'),
+      tool('msg_1', '2026-09-27T18:40:02.000Z'),
+      prompt('next', '2026-09-27T18:40:04.000Z'),
+      say('msg_2', 'Still working on it.', '2026-09-27T18:40:05.000Z'),
+    ]);
+
+    // Still working: the newest finished turn is the tool-only wake.
+    await expect(readFinishedTurns(claudeLocator(), undefined, false)).resolves.toMatchObject({ endedWithText: false });
+  });
+
+  it('moves the cursor past what it judged, and keeps a turn still working for the next read', async () => {
+    const { file, cursor } = await afterEarlierTurn();
+    append(file, [prompt('wake', '2026-09-27T18:40:00.000Z'), tool('msg_1', '2026-09-27T18:40:02.000Z'), prompt('next', '2026-09-27T18:40:04.000Z')]);
+    const first = await readFinishedTurns(claudeLocator(), cursor, false);
+    expect(first.endedWithText).toBe(false);
+    append(file, [say('msg_2', 'The review is done.', '2026-09-27T18:40:09.000Z')]);
+
+    await expect(readFinishedTurns(claudeLocator(), first.cursor, true)).resolves.toMatchObject({ endedWithText: true });
+  });
+
+  it('answers undefined with nothing finished since the cursor, and without a transcript', async () => {
+    const { cursor } = await afterEarlierTurn();
+    await expect(readFinishedTurns(claudeLocator(), cursor, true)).resolves.toMatchObject({ endedWithText: undefined });
+    await expect(readFinishedTurns(codexLocator(), undefined, true)).resolves.toMatchObject({ endedWithText: undefined });
   });
 
   it('reads Codex replies and tool calls too', async () => {
     const file = writeCodex('01a0e428', [codex.meta(worktree, '2026-09-27T18:37:14.814Z')]);
-    const start = (await mark(codexLocator()))!;
     append(file, [codex.user('check', '2026-09-27T18:40:00.000Z'), codex.assistant('Watching the workers.', '2026-09-27T18:40:02.000Z')]);
-    await expect(turnEndedWithText(codexLocator(), start)).resolves.toBe(true);
+    const first = await readFinishedTurns(codexLocator(), undefined, true);
+    expect(first.endedWithText).toBe(true);
 
-    const next = (await mark(codexLocator()))!;
-    append(file, [{ timestamp: '2026-09-27T18:41:02.000Z', type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{}', call_id: 'c1' } }]);
-    await expect(turnEndedWithText(codexLocator(), next)).resolves.toBe(false);
+    append(file, [codex.user('again', '2026-09-27T18:41:00.000Z'), { timestamp: '2026-09-27T18:41:02.000Z', type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{}', call_id: 'c1' } }]);
+    await expect(readFinishedTurns(codexLocator(), first.cursor, true)).resolves.toMatchObject({ endedWithText: false });
   });
 });
 
