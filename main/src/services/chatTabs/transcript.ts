@@ -27,7 +27,11 @@ export interface ChatTranscriptOptions {
 export interface TurnMarker { type: 'pane_turn'; stopReason: string; startedAt: string; endedAt: string }
 
 /** A live turn's end: the time row to show, and the same row to save when a replay can put it back. */
-export interface TurnEnd { event?: ChatTabEvent; saved?: ChatTurnTime }
+/**
+ * A live turn's end: the time row to show, the same row to save when a replay can put it back, and
+ * whether the turn ended with text the person can read (it bolds an unread Session, T-117).
+ */
+export interface TurnEnd { event?: ChatTabEvent; saved?: ChatTurnTime; endedWithText: boolean }
 
 /**
  * The ACP-to-view mapping for one chat tab generation. There is no cap that
@@ -116,9 +120,26 @@ export class ChatTranscript {
     this.echo = undefined;
     const after = this.anchor;
     this.anchor = undefined;
-    if (!marker) return {};
+    // Read before the marker row goes in: the marker is the turn's own last row.
+    const endedWithText = this.turnEndedWithText();
+    if (!marker) return { endedWithText };
     const event = this.commit({ type: 'replace', message: { id: `turn:${++this.sequence}`, role: 'assistant', parts: [{ type: 'content', content: { ...marker } }] } });
-    return { event, saved: after ? { after, stopReason: marker.stopReason, startedAt: marker.startedAt, endedAt: marker.endedAt } : undefined };
+    return { event, saved: after ? { after, stopReason: marker.stopReason, startedAt: marker.startedAt, endedAt: marker.endedAt } : undefined, endedWithText };
+  }
+
+  /**
+   * Whether the turn ending now ended with text: its newest assistant message (after the last user
+   * message or turn marker) ends, past its thinking and Pane's rows, with non-blank text. Progress
+   * text before a tool call, a tool-only turn and a turn with no reply do not.
+   */
+  private turnEndedWithText(): boolean {
+    for (let index = this.residentMessages.length - 1; index >= 0; index--) {
+      const message = this.residentMessages[index];
+      if (message.role === 'user' || message.id.startsWith('turn:')) return false;
+      const last = [...message.parts].reverse().find(part => part.type !== 'thought' && part.type !== 'content');
+      if (last) return last.type === 'text' && last.text.trim() !== '';
+    }
+    return false;
   }
 
   /** History replay finished: the last replayed turn's time row goes in now. */

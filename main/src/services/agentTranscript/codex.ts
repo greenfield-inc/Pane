@@ -65,6 +65,11 @@ export function parseCodexLine(line: string): TranscriptEntry | undefined {
     return undefined;
   }
 
+  // function_call, custom_tool_call, local_shell_call, web_search_call: never their outputs.
+  if (row.type === 'response_item' && payload.type.endsWith('_call')) {
+    return { kind: 'tool', text: '', timestampMs: at };
+  }
+
   if (row.type === 'event_msg' && payload.type === 'user_message' && 'message' in payload) {
     return { kind: 'user', text: payload.message, timestampMs: at };
   }

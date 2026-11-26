@@ -276,16 +276,29 @@ A Session's name is bold while its agent has a message you haven't read: its
 own agent finished a turn with text you can read, after you last opened the
 Session. That counts whatever started the turn (you, a worker's report, a
 `[From Pane …]`, watcher or Autopilot line). A turn that ends with no message
-(tool calls only, or an empty reply to a watcher wake) does not bold it. Pane
-lines (status, approvals, to-dos, `[From Pane …]` messages), worker tabs and your
-own messages never bold it by themselves. Opening the Session, or coming back
-to the window while it is on screen, clears the bold; a reply that arrives while
-you are looking at it never bolds it. A chat Session checks the turn's last
-reply; a Claude or Codex terminal Session checks the agent's own transcript for
-reply text written since the turn began. Any other terminal agent has no
-transcript Pane can read, so each finished turn counts as a message. Both times
-are kept on the Session's host, so the mark survives a restart and reads the
-same in This Mac and All machines.
+(tool calls only, progress text followed by a tool call, or an empty reply to a
+watcher wake) does not bold it. Pane lines (status, approvals, to-dos,
+`[From Pane …]` messages), worker tabs and your own messages never bold it by
+themselves.
+
+Opening the Session clears the bold, and so does reading it beside its approval
+in Approvals, or coming back to the window while it is on screen. A reply that
+arrives while you are looking at it is read at once. A hover preview doesn't
+count as reading.
+
+How Pane knows a turn ended with text:
+- A chat Session checks the turn's last reply as the turn ends.
+- A Claude or Codex terminal Session reads the agent's own transcript for that
+  turn only. If the transcript lands a moment after the turn ends, Pane reads it
+  again for a few seconds. With no transcript, the turn doesn't bold the
+  Session.
+- Any other terminal agent has no transcript Pane can read, so each of its
+  finished turns counts as a message. That is a known limit.
+
+The Session's host keeps the order of its last reply and your last view, so the
+clock never decides: a reply in the same second as a view, or after the clock
+was set back, still reads right. The mark survives a restart and reads the same
+in This Mac and All machines.
 
 In the sidebar's **All machines** view, Sessions from every machine form one
 list you arrange the same way, by drag or **Alt+↑**/**Alt+↓**. That arrangement

@@ -1,10 +1,10 @@
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import { cn } from '../utils/cn';
-import { sessionIsUnread } from '../utils/sessionUnread';
+import { sessionIsUnread } from '../../../shared/sessionUnread';
 
 interface SessionNameProps {
   name: string;
-  session: Pick<OrchestrationSessionRecord, 'agentRepliedAt' | 'openedAt'>;
+  session: Pick<OrchestrationSessionRecord, 'readState'>;
   className?: string;
 }
 

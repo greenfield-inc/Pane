@@ -98,6 +98,13 @@ export interface OrchestrationActivity {
   panelId?: string;
 }
 
+/** See `OrchestrationSessionRecord.readState`. */
+export interface SessionReadState {
+  clock: number;
+  viewed: number;
+  replied: number;
+}
+
 export interface OrchestrationSessionRecord {
   /** Omitted means the native host. 'windows' is a legacy alias for native and is dropped on read. */
   runtime?: 'windows' | 'wsl';
@@ -126,11 +133,17 @@ export interface OrchestrationSessionRecord {
   /** When someone last opened the Session, on the desktop or a phone (its chat Pane's last view). Computed when read, never stored. */
   openedAt?: string;
   /**
-   * When the Session's own agent last finished a turn (its tab went from working to idle): its
-   * newest message. Stored. A Session is unread while this is newer than `openedAt`; Pane lines,
-   * worker tabs and reports never set it.
+   * When the Session's own agent last finished a turn that ended with a message the person can
+   * read (full precision). Stored; for display only: `readState` decides unread.
    */
   agentRepliedAt?: string;
+  /**
+   * The host's order of the Session's last reply and last view, so no clock decides unread
+   * (sessionIsUnread). `clock` counts every finished turn of the Session's agent and every view
+   * that cleared something; `replied` and `viewed` are the clock values of the last of each.
+   * Stored; older records omit it and read as read.
+   */
+  readState?: SessionReadState;
   agent: PaneChatAgent;
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;

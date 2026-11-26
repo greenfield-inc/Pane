@@ -111,7 +111,7 @@ async function findUserTurnSince(
     if (!entries) continue;
     result.file ??= file;
     for (const entry of entries) {
-      if (entry.kind === 'assistant' || entry.timestampMs === undefined || entry.timestampMs < earliest) continue;
+      if (entry.kind === 'assistant' || entry.kind === 'tool' || entry.timestampMs === undefined || entry.timestampMs < earliest) continue;
       if (text !== undefined && !turnTextMatches(entry.text, text)) continue;
       const state = entry.kind === 'user' ? 'taken' : 'queued';
       if (result.state !== 'taken') {
@@ -144,26 +144,27 @@ async function lastAssistantMessage(locator: TranscriptLocator): Promise<string 
 }
 
 /**
- * Whether the agent wrote text the person can read at or after `sinceMs` (a turn's start).
- * Transcript entries carry only text: tool calls, thinking and empty replies are never entries,
- * so a turn of tool calls alone finds nothing. Undefined when no transcript was found.
+ * Whether the turn the agent ran from `startedAtMs` to `endedAtMs` ended with text the person can
+ * read: of its reply and tool-call rows recorded in that window, the last is non-blank reply text.
+ * Progress text before a tool call, a tool-only turn, and rows of the turns before or after do not
+ * count. Undefined when no transcript, or no row of the turn, was found (yet).
  */
-async function assistantTextSince(locator: TranscriptLocator, sinceMs: number): Promise<boolean | undefined> {
-  const earliest = sinceMs - SINCE_SLACK_MS;
+async function turnEndedWithText(locator: TranscriptLocator, startedAtMs: number, endedAtMs: number): Promise<boolean | undefined> {
+  const earliest = startedAtMs - SINCE_SLACK_MS;
+  const latest = endedAtMs + SINCE_SLACK_MS;
   const files = await transcriptFiles(locator, Math.max(earliest, locator.notBeforeMs ?? 0));
-  let found: boolean | undefined;
   for (const file of files) {
     const entries = await readEntries(locator, file);
-    if (!entries) continue;
-    found = false;
-    if (entries.some(entry => entry.kind === 'assistant' && entry.text.trim() !== '' && entry.timestampMs !== undefined && entry.timestampMs >= earliest)) return true;
+    const last = entries?.filter(entry => (entry.kind === 'assistant' || entry.kind === 'tool')
+      && entry.timestampMs !== undefined && entry.timestampMs >= earliest && entry.timestampMs <= latest).at(-1);
+    if (last) return last.kind === 'assistant' && last.text.trim() !== '';
   }
-  return found;
+  return undefined;
 }
 
 /** The transcript reader, as one object so callers' tests can stub its reads. */
 export const agentTranscripts = {
-  assistantTextSince,
   findUserTurnSince,
   lastAssistantMessage,
+  turnEndedWithText,
 };

@@ -87,6 +87,8 @@ export interface ChatTabManagerOptions {
 interface Tab {
   /** The public generation: viewers drop any state older than the newest they saw, so it only grows. */
   generation: number;
+  /** Whether the last turn that ended ended with text the person can read; sent with the next idle status, then forgotten. */
+  turnEndedWithText?: boolean;
   /** The live runtime's generation; 0 once released, so late callbacks from a stopped runtime are ignored. */
   run: number;
   runtime?: ChatTabRuntime;
@@ -958,6 +960,8 @@ export class ChatTabManager {
   /** Ends a turn in the transcript and saves its time row, so a restart's replay shows it again. */
   private endTurn(panelId: string, tab: Tab, marker: TurnMarker): ChatTabEvent | undefined {
     const ended = tab.transcript?.endTurn(marker);
+    // Taken now, before the marker row and before the next prompt drains: the idle status carries it.
+    if (!tab.loading) tab.turnEndedWithText = ended?.endedWithText ?? false;
     const saved = ended?.saved;
     // A turn that ends while history replays is the agent's own, already saved: its rows come back from the replay.
     if (saved && !tab.loading) {
@@ -1115,6 +1119,9 @@ export class ChatTabManager {
       reason: agentState === 'blocked' ? view.problem?.message ?? (view.questions.length ? 'Agent asked a question' : 'Agent asked for approval') : null,
       workedVisibly: agentState === 'idle' ? previous === 'working' : undefined,
     };
+    // A turn that ended: whether it ended with text the person can read (unread Sessions, T-117).
+    if (agentState === 'idle' && previous === 'working') event.turnEndedWithText = tab.turnEndedWithText ?? false;
+    if (agentState === 'idle') tab.turnEndedWithText = undefined;
     this.options.send('panel:agentStatus', event);
     this.options.onStatus?.(event);
   }

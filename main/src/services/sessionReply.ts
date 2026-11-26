@@ -1,54 +1,77 @@
 /**
- * Did a Session agent's turn end with a message the person can read? (T-117 D-1.) Only such a turn
- * makes its Session unread, whatever started it: the person, a worker report, a `[From Pane …]`,
- * watcher or Autopilot line. A turn of tool calls or thinking alone, or an empty reply, does not.
+ * Did a terminal Session agent's turn end with a message the person can read? (T-117 D-1.) Only
+ * such a turn makes its Session unread, whatever started it: the person, a worker report, a
+ * `[From Pane …]`, watcher or Autopilot line. Chat tabs answer this themselves at the turn's end
+ * (ChatTranscript.endTurn); this probe is for terminal tabs.
  *
- * - Chat tabs: the turn's last assistant message (after the last user message) has non-blank text.
- * - Terminal tabs running Claude or Codex: the agent's own transcript has non-blank reply text
- *   stamped at or after the turn began (transcripts record only text, never tool calls).
- * - Any other terminal agent has no transcript Pane can read, so its turn counts as a reply, as
- *   it did before; so does a Claude or Codex turn whose transcript Pane cannot find.
+ * - Claude and Codex: the agent's own transcript, read for the turn's window only. The turn counts
+ *   when its last reply-or-tool-call row is non-blank reply text. A transcript written just after
+ *   the tab went idle is read again a few times; without evidence the turn does not count.
+ * - Any other terminal agent has no transcript Pane can read, so each finished turn counts. That
+ *   is a documented limit (docs/SESSIONS.md).
  */
 
-import type { AgentChatMessage } from '../../../shared/types/agentChat';
-import { agentTranscripts } from './agentTranscript';
+import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import { agentTranscripts, isTranscriptAgent, type TranscriptLocator } from './agentTranscript';
 import { panelTranscriptLocator } from './agentTranscript/panelLocator';
-import { getChatTabManager } from './chatTabs';
 import { panelManager } from './panelManager';
 import { terminalPanelManager } from './terminalPanelManager';
 
-/** Asks whether `panelId`'s turn, begun at `turnStartedAtMs`, ended with text the person can read. */
-export type ReplyProbe = (panelId: string, turnStartedAtMs: number) => Promise<boolean>;
-
-/** The turn is everything after the last user message; it ended with text when its last assistant message has some. */
-export function chatTurnEndedWithText(messages: Iterable<AgentChatMessage>): boolean {
-  let last: AgentChatMessage | undefined;
-  for (const message of messages) last = message.role === 'user' ? undefined : message;
-  return last?.parts.some(part => part.type === 'text' && part.text.trim() !== '') ?? false;
+interface TurnWindow {
+  startedAtMs: number;
+  endedAtMs: number;
 }
 
-/** A Claude transcript is written as the turn goes; its last line can land just after the tab goes idle. */
-const TRANSCRIPT_SETTLE_MS = 1_500;
+/** Asks whether `panelId`'s turn in `turn` ended with text the person can read. */
+export type ReplyProbe = (panelId: string, turn: TurnWindow) => Promise<boolean>;
 
-const wait = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms).unref?.(); });
+export interface ReplyProbeSources {
+  /** The CLI agent in the tab; undefined when Pane did not recognise one. */
+  agentTypeOf(panelId: string): string | undefined;
+  /** Where the tab's transcript is; undefined when Pane cannot tell. */
+  locatorOf(panelId: string): TranscriptLocator | undefined;
+  readTurn(locator: TranscriptLocator, startedAtMs: number, endedAtMs: number): Promise<boolean | undefined>;
+  wait(ms: number): Promise<void>;
+}
 
-/** The real probe; `worktreeOf` gives a Pane's working directory, where its agent's transcript is kept. */
-export function createReplyProbe(worktreeOf: (paneId: string) => string | undefined): ReplyProbe {
-  return async (panelId, turnStartedAtMs) => {
-    const panel = panelManager.getPanel(panelId);
-    if (!panel) return false;
-    try {
-      if (panel.type === 'chat') return chatTurnEndedWithText(getChatTabManager().messages(panelId));
-      const agentType = terminalPanelManager.getTerminalSnapshot(panelId)?.agentType;
-      const locator = panelTranscriptLocator(panel, worktreeOf(panel.sessionId), agentType);
-      if (!locator) return true;
-      if ((await agentTranscripts.assistantTextSince(locator, turnStartedAtMs)) !== false) return true;
-      await wait(TRANSCRIPT_SETTLE_MS);
-      return (await agentTranscripts.assistantTextSince(locator, turnStartedAtMs)) !== false;
-    } catch (error) {
-      // Unsure reads as a reply: a missed message is worse than an extra bold.
-      console.warn(`[Sessions] Could not tell whether panel ${panelId}'s turn ended with a message:`, error);
-      return true;
+/** The transcript's last lines can land after the tab went idle: read again after these waits. */
+const TRANSCRIPT_RETRY_WAITS_MS = [1_000, 2_000];
+
+export function createReplyProbe(sources: ReplyProbeSources): ReplyProbe {
+  return async (panelId, turn) => {
+    if (!isTranscriptAgent(sources.agentTypeOf(panelId))) return true;
+    const locator = sources.locatorOf(panelId);
+    if (!locator) return false;
+    for (const delay of [0, ...TRANSCRIPT_RETRY_WAITS_MS]) {
+      if (delay > 0) await sources.wait(delay);
+      try {
+        if (await sources.readTurn(locator, turn.startedAtMs, turn.endedAtMs)) return true;
+      } catch (error) {
+        console.warn(`[Sessions] Could not read panel ${panelId}'s transcript, so its turn does not mark the Session unread:`, error);
+        return false;
+      }
     }
+    return false;
+  };
+}
+
+const savedAgentType = boundary.object({ agentType: boundary.optional(boundary.string) });
+
+/** The agent the terminal shows, else the one Pane saved on the tab (as the workspace journal reads it). */
+function terminalAgentType(panelId: string): string | undefined {
+  const saved = decodeOptionalBoundary(panelManager.getPanel(panelId)?.state.customState ?? {}, savedAgentType)?.agentType;
+  return terminalPanelManager.getTerminalSnapshot(panelId)?.agentType ?? saved;
+}
+
+/** The host's sources: `worktreeOf` gives a Pane's working directory, where its agent's transcript is kept. */
+export function hostReplyProbeSources(worktreeOf: (paneId: string) => string | undefined): ReplyProbeSources {
+  return {
+    agentTypeOf: terminalAgentType,
+    locatorOf: panelId => {
+      const panel = panelManager.getPanel(panelId);
+      return panel ? panelTranscriptLocator(panel, worktreeOf(panel.sessionId), terminalAgentType(panelId)) : undefined;
+    },
+    readTurn: agentTranscripts.turnEndedWithText,
+    wait: ms => new Promise<void>(resolve => { setTimeout(resolve, ms).unref?.(); }),
   };
 }

@@ -58,6 +58,11 @@ export interface PanelAgentStatusEvent {
   agentType?: string;
   /** On idle: the agent showed its own working signal (spinner, working chrome) since its last idle. */
   workedVisibly?: boolean;
+  /**
+   * On a chat tab's idle after working: whether the turn that just ended ended with text the person
+   * can read, taken at the turn's end (T-117). Terminal tabs leave it out; the host reads their transcript.
+   */
+  turnEndedWithText?: boolean;
   /** On blocked: the screen lines of the prompt the agent waits on. */
   screenLines?: string[];
 }

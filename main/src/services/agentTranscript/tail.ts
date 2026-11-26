@@ -3,8 +3,11 @@ import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../
 
 /** What a transcript line says about the conversation, reduced to what delivery checks need. */
 export interface TranscriptEntry {
-  /** `user`: a turn the agent took; `queued`: a message waiting for the current turn to end. */
-  kind: 'user' | 'queued' | 'assistant';
+  /**
+   * `user`: a turn the agent took; `queued`: a message waiting for the current turn to end;
+   * `assistant`: reply text; `tool`: a tool call the agent made (its text is empty).
+   */
+  kind: 'user' | 'queued' | 'assistant' | 'tool';
   text: string;
   timestampMs?: number;
   /** Assistant entries of one message share it, so their text blocks can be joined. */

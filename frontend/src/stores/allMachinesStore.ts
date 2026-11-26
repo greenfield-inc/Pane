@@ -1,3 +1,4 @@
+import { isReadStateChange } from '../../../shared/sessionUnread';
 import { create } from 'zustand';
 import { API, type IPCResponse } from '../utils/api';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
@@ -326,6 +327,8 @@ export function startAllMachinesFeed(): () => void {
   const onEvent = (event: MachineConnectionsEvent) => {
     if (event.type === 'machines') setMachines(event.machines);
     else if (event.type === 'resync') schedule(event.machineId, ALL_READS);
+    // A view or a reply changes only a Session's read state: its list, not its activity.
+    else if (isReadStateChange(event)) schedule(event.machineId, ['sessions']);
     else schedule(event.machineId, READS_FOR_EVENT[event.channel] ?? ALL_READS);
   };
 

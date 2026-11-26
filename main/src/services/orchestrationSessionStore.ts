@@ -118,6 +118,7 @@ const sessionSchema = boundary.object({
   archivedAt: boundary.optional(boundary.string),
   isPinned: boundary.optional(boundary.boolean),
   agentRepliedAt: boundary.optional(boundary.string),
+  readState: boundary.optional(boundary.object({ clock: boundary.number, viewed: boundary.number, replied: boundary.number })),
   todoNumber: boundary.optional(boundary.refine(boundary.number, value => Number.isInteger(value) && value > 0, 'expected a to-do number')),
   agent: paneChatAgentSchema,
   launchCommand: boundary.optional(boundary.string),

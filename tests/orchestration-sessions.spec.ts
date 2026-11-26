@@ -3750,23 +3750,33 @@ test('T-117: reading a Session beside its approval clears its bold, and a reply 
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await dismissStartupDialogs(page);
-  type Mock = { __paneTestElectronMock: { getSessionMarkViewedCalls: () => string[]; setOrchestrationReadState: (sessionId: string, readState: { clock: number; viewed: number; replied: number }) => void } };
-  // SAFETY: installElectronApiMock and installSessionsFixture add these controls before the app loads.
-  const marks = () => page.evaluate(() => (window as unknown as Mock).__paneTestElectronMock.getSessionMarkViewedCalls());
+  // SAFETY: installElectronApiMock adds this control before the app loads.
+  const marks = () => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getSessionMarkViewedCalls: () => string[] } }).__paneTestElectronMock.getSessionMarkViewedCalls());
   const chatPane = '__orchestration_session_plansterminal__';
 
   // Home shows no Session: it stays unread, and nothing marked it viewed.
   await expect(page.getByTestId('orchestration-session-plans').locator('[data-unread]')).toHaveCount(1);
   expect(await marks()).toEqual([]);
 
-  // The orchestrator's approval opens with its Session live beside it: reading it there reads it.
+  // Choosing the orchestrator's approval shows its question, not the Session: still unread.
   await page.getByTestId('approvals-nav').click();
+  await page.getByRole('button', { name: /^Real use: how do you want to use the new build/ }).click();
+  await page.waitForTimeout(500);
+  expect(await marks()).toEqual([]);
+  // Its Session live beside it, in the origin tab: reading it there reads it.
+  await page.getByTestId('approval-tab').last().click();
   await expect(page.getByTestId('approvals-origin')).toContainText('Plan demo');
   await expect.poll(marks).toContain(chatPane);
 
+  // SAFETY: installSessionsFixture adds this control before the app loads.
+  const setReadState = (readState: { clock: number; viewed: number; replied: number }) => page.evaluate(next => (window as typeof window & { __paneTestElectronMock: { setOrchestrationReadState: (sessionId: string, value: typeof next) => void } }).__paneTestElectronMock.setOrchestrationReadState('plans', next), readState);
+  // The host records the view: the bold clears.
+  await setReadState({ clock: 3, viewed: 3, replied: 2 });
+  await expect(page.getByTestId('orchestration-session-plans').locator('[data-unread]')).toHaveCount(0);
+
   // A reply arrives while the Session is shown there, with the window in focus: read at once.
   const before = (await marks()).length;
-  await page.evaluate(() => (window as unknown as Mock).__paneTestElectronMock.setOrchestrationReadState('plans', { clock: 4, viewed: 3, replied: 4 }));
+  await setReadState({ clock: 4, viewed: 3, replied: 4 });
   await expect.poll(async () => (await marks()).length).toBeGreaterThan(before);
 });
 
