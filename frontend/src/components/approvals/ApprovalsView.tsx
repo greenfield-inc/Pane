@@ -3,7 +3,7 @@ import { Archive, ArrowUp, ChevronDown, ChevronRight, CircleCheck, CircleHelp, E
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { cn } from '../../utils/cn';
-import { archiveApprovals, countsAsWaiting, runNotify, sendArchived, undoArchive, useNotifyStore } from '../../stores/notifyStore';
+import { archiveApprovals, runNotify, sendArchived, sendNotify, undoArchive, useNotifyStore } from '../../stores/notifyStore';
 import { canClose } from '../../../../shared/approvalReceipts';
 import { Tooltip } from '../ui/Tooltip';
 import { UndoToast } from '../ui/UndoToast';
@@ -21,7 +21,7 @@ import { relativeAge, withMachineLabels } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import { SessionBeside } from '../PaneChatView';
 import { ApprovalCaughtUp, ApprovalColumn, ApprovalChip, ApprovalKeyTip } from './ApprovalColumn';
-import { advanceApproval } from './approvalAdvance';
+import { advanceApproval, canAdvanceTo } from './approvalAdvance';
 import { useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { cardChip } from './approvalCard';
 import { approvalStatus } from '../../../../shared/approvalStatus';
@@ -453,30 +453,49 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   // Send or Dismiss moves on to the next approval down the list, focus in its first question; none
   // left, the column says all caught up (T-88). Only Waiting moves on: Done today has nothing to send.
   const noteAdvanced = useApprovalColumnStore((state) => state.noteAdvanced);
-  // All caught up after this approval was answered (`sent`) or dismissed.
-  const [caughtUp, setCaughtUp] = useState<{ from: string; sent: boolean } | null>(null);
-  const advanceFrom = (id: string, sent: boolean) => {
+  // All caught up after this approval was answered (`sent`) or dismissed. `gone`: it has since been
+  // seen answered or dismissed, so it waiting again means it was undone or changed, not a late snapshot.
+  const [caughtUp, setCaughtUp] = useState<{ from: string; sent: boolean; gone: boolean } | null>(null);
+  // The list as it is now, for a Send or Dismiss that returns after it changed (review S-2).
+  const latestOrder = useRef(order);
+  latestOrder.current = order;
+  /** `before`: the order when it was sent. Nothing moves when the person picked another card meanwhile. */
+  const advanceFrom = (id: string, sent: boolean, before: readonly string[]) => {
     if (tab !== 'waiting') return false;
+    if (useNavigationStore.getState().selectedApprovalId !== id) return true;
     advanceApproval({
       surface: 'approvals',
-      order,
+      order: latestOrder.current,
+      before,
       fromId: id,
       items: useNotifyStore.getState().snapshot?.items ?? [],
       sent,
       open: (next) => { setDismissed(false); setCaughtUp(null); selectApproval(next); },
-      caughtUp: () => { setDismissed(true); setCaughtUp({ from: id, sent }); selectApproval(null); },
+      caughtUp: () => { setDismissed(true); setCaughtUp({ from: id, sent, gone: false }); selectApproval(null); },
     });
     return true;
   };
 
-  // A new approval arriving while all caught up opens at once: there's nothing being typed to keep.
-  const arrived = caughtUp !== null && tab === 'waiting' ? shown.find((item) => countsAsWaiting(item) && item.id !== caughtUp.from)?.id : undefined;
+  // An approval that waits again while all caught up opens at once: a new one, an older one updated
+  // or reopened, or the last one undone from another screen (review S-1). Nothing is being typed.
+  const fromItem = caughtUp ? items.find((item) => item.id === caughtUp.from) : undefined;
+  const fromGone = caughtUp !== null && !caughtUp.gone && (!fromItem || !canAdvanceTo(fromItem));
+  useEffect(() => {
+    if (fromGone) setCaughtUp((current) => (current ? { ...current, gone: true } : current));
+  }, [fromGone]);
+  const arrived = caughtUp !== null && tab === 'waiting'
+    ? shown.find((item) => canAdvanceTo(item) && (item.id !== caughtUp.from || caughtUp.gone))?.id
+    : undefined;
   useEffect(() => {
     if (!arrived) return;
     setCaughtUp(null);
     setDismissed(false);
     selectApproval(arrived);
   }, [arrived, selectApproval]);
+
+  // Narrow, the column beside the list shows only with something in it: an approval, or All
+  // caught up with its Undo and way back (review M-2).
+  const besideShown = Boolean(selected) || (caughtUp !== null && tab === 'waiting');
 
   // The list stays compact rows; the selected approval opens in the column beside it (P4).
   const stopId = selected?.id ?? shown[0]?.id;
@@ -577,7 +596,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
       <section
         aria-label="Approvals"
         // Stacked (a narrow window), the list takes the height when nothing shows beside it.
-        className={cn('flex min-h-0 flex-col border-b border-border-primary bg-bg-secondary min-[1100px]:max-h-none min-[1100px]:w-[400px] min-[1100px]:flex-none min-[1100px]:shrink-0 min-[1100px]:border-b-0 min-[1100px]:border-r', !selected ? 'flex-1' : 'max-h-[45%] shrink-0')}
+        className={cn('flex min-h-0 flex-col border-b border-border-primary bg-bg-secondary min-[1100px]:max-h-none min-[1100px]:w-[400px] min-[1100px]:flex-none min-[1100px]:shrink-0 min-[1100px]:border-b-0 min-[1100px]:border-r', !besideShown ? 'flex-1' : 'max-h-[45%] shrink-0')}
         style={listSized ? { width: listResize.renderedPx } : undefined}
         data-testid="approvals-queue"
       >
@@ -667,7 +686,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
         </div>
       </section>
 
-      <section aria-label="Beside the approval" className={cn('relative min-h-0 min-w-0 flex-1 flex-col', !selected ? 'hidden min-[1100px]:flex' : 'flex')} data-testid={APPROVALS_BESIDE_ID}>
+      <section aria-label="Beside the approval" className={cn('relative min-h-0 min-w-0 flex-1 flex-col', !besideShown ? 'hidden min-[1100px]:flex' : 'flex')} data-testid={APPROVALS_BESIDE_ID}>
         {/* Below the approval's header and tabs, as in a Session's column. */}
         <FindBar panelId={APPROVALS_SCREEN_FIND_ID} className={selected ? 'top-[5.5rem]' : undefined} />
         {/* On the list's edge (this section's left), above the list's own border. */}
@@ -681,7 +700,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             itemId={selected.id}
             order={order}
             onSelect={(id) => { setCaughtUp(null); selectApproval(id); }}
-            onSent={() => { advanceFrom(selected.id, true); }}
+            onSent={() => { advanceFrom(selected.id, true, order); }}
             groupLabel={tab === 'waiting' ? 'Approvals' : 'Done today'}
             // Dismiss answers nothing: the item stays in the list (and leaves the floating strip).
             closeLabel="Dismiss"
@@ -689,9 +708,15 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
               // The column goes, its row stays: a focus inside the column moves to that row.
               const hadFocus = Boolean(document.activeElement?.closest('[data-testid="approvals-beside"]'));
               const id = selected.id;
+              const before = order;
+              // On Waiting, the next approval opens in its place once the dismiss is accepted (T-88);
+              // a refused one (machine offline, say) leaves the card here to try again.
+              if (tab === 'waiting') {
+                void (selected.state === 'waiting' ? sendNotify({ type: 'dismiss', id }) : Promise.resolve(true))
+                  .then((accepted) => { if (accepted) advanceFrom(id, false, before); });
+                return;
+              }
               if (selected.state === 'waiting') runNotify({ type: 'dismiss', id });
-              // On Waiting, the next approval opens in its place (T-88).
-              if (advanceFrom(id, false)) return;
               setDismissed(true);
               selectApproval(null);
               if (hadFocus) whenShown(() => listRef.current?.querySelector<HTMLElement>(`[data-testid="approvals-row"][data-item-id="${CSS.escape(id)}"]`) ?? null, (row) => row.focus());

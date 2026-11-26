@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
-import { approvalListedAt, nextAfterAnswer, newestFirst } from '../../../../shared/approvalOrder';
+import { approvalListedAt, nextAfterAnswer, newestFirst, placeAnswered } from '../../../../shared/approvalOrder';
 
 const item = (id: string, createdAt: number, extra: Partial<NotifyItem> = {}): NotifyItem => ({
   id, title: id, ui: 'options', source: { name: 'agent', agent: 'Claude' }, state: 'waiting', createdAt, ...extra,
@@ -52,5 +52,19 @@ describe('the approval after the one just answered (T-88)', () => {
 
   it('is the top of the list when the answered one already left it', () => {
     expect(nextAfterAnswer(['c', 'b'], 'gone')).toBe('c');
+  });
+});
+
+describe('the answered card\'s place in the current order (review S-2)', () => {
+  it('keeps the current order when the card is still listed', () => {
+    expect(placeAnswered(['c', 'a', 'b'], ['a', 'b'], 'a')).toEqual(['c', 'a', 'b']);
+  });
+
+  it('puts it back after the nearest card that was above it and still is', () => {
+    expect(placeAnswered(['x', 'b', 'd'], ['b', 'a', 'd'], 'a')).toEqual(['x', 'b', 'a', 'd']);
+  });
+
+  it('puts it first when nothing above it is still listed', () => {
+    expect(placeAnswered(['c', 'd'], ['a', 'b'], 'a')).toEqual(['a', 'c', 'd']);
   });
 });

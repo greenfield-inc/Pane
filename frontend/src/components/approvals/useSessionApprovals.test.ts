@@ -104,4 +104,44 @@ describe('openNewSessionApprovals', () => {
 
     expect(opened()).toBeUndefined();
   });
+
+  it('T-88 review S-1: an answer undone on another screen brings the caught-up column back to it', () => {
+    stop = openNewSessionApprovals('s1');
+    const q7 = approval('q7', Date.now());
+    useNotifyStore.setState({ snapshot: snapshotOf([{ ...old, state: 'answered' }, { ...q7, state: 'sent' }]) });
+    useApprovalColumnStore.getState().showCaughtUp('session:s1', 'q7');
+    // A snapshot still showing it waiting (sent before the answer landed) doesn't bring it back.
+    useNotifyStore.setState({ snapshot: snapshotOf([{ ...old, state: 'answered' }, q7]) });
+    expect(useApprovalColumnStore.getState().open['session:s1']?.caughtUp).toBe(true);
+    useNotifyStore.setState({ snapshot: snapshotOf([{ ...old, state: 'answered' }, { ...q7, state: 'sent' }]) });
+
+    // Undo from the phone: the same card, same id and time, waits again.
+    useNotifyStore.setState({ snapshot: snapshotOf([{ ...old, state: 'answered' }, q7]) });
+
+    expect(useApprovalColumnStore.getState().open['session:s1']).toMatchObject({ itemId: 'q7' });
+    expect(useApprovalColumnStore.getState().open['session:s1']?.caughtUp).toBeUndefined();
+  });
+
+  it('T-88 review S-1: an older approval updated while caught up opens in its place', () => {
+    stop = openNewSessionApprovals('s1');
+    useApprovalColumnStore.getState().showCaughtUp('session:s1', 'old');
+    // Main's snapshot with the dismissal.
+    useNotifyStore.setState({ snapshot: snapshotOf([{ ...old, dismissedAt: Date.now() }]) });
+    expect(useApprovalColumnStore.getState().open['session:s1']?.caughtUp).toBe(true);
+
+    // Its asker saved a new version: ready again, and no longer dismissed.
+    useNotifyStore.setState({ snapshot: snapshotOf([{ ...old, version: 2, readyAgain: Date.now() }]) });
+
+    expect(opened()).toBe('old');
+    expect(useApprovalColumnStore.getState().open['session:s1']?.caughtUp).toBeUndefined();
+  });
+
+  it('T-88 review S-1: a reply the agent is reading leaves the column caught up', () => {
+    stop = openNewSessionApprovals('s1');
+    useApprovalColumnStore.getState().showCaughtUp('session:s1', 'old');
+    useNotifyStore.setState({ snapshot: snapshotOf([{ ...old, reply: { id: 'r1', text: 'why?', at: Date.now(), state: 'reading' } }]) });
+
+    expect(useApprovalColumnStore.getState().open['session:s1']?.caughtUp).toBe(true);
+  });
 });
+

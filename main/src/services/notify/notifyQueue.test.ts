@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotifyQueue } from './notifyQueue';
+import { newestFirst } from '../../../../shared/approvalOrder';
 import { DEFAULT_NOTIFY_SETTINGS, type NotifyQuestion, type NotifyResult, type NotifySettings } from '../../../../shared/types/notify';
 
 const claude = { paneId: 'pane-1', panelId: 'panel-1', name: 'auth-refactor', agent: 'Claude' };
@@ -465,6 +466,29 @@ describe('NotifyQueue across machines', () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it('merges two machines\' questions of the same millisecond in the order the Approvals list shows them (T-88)', () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    ask(host, sessionStore, claude);
+    ask(laptop, migration, codex);
+    ask(host, { ui: 'ask', title: 'Which region?' }, claude);
+    const { items, queue } = laptop.snapshot();
+    const listed = [...items].filter(item => item.state === 'waiting').sort(newestFirst).map(item => item.id);
+    expect(queue).toEqual(listed);
+  });
+
+  it('keeps Skip: a skipped question stays behind a newer one of the same millisecond (T-88)', () => {
+    const { queue } = makeQueue();
+    ask(queue, sessionStore, claude);
+    ask(queue, migration, codex);
+    const [first, second] = queue.snapshot().queue;
+    queue.run({ type: 'skip', id: first });
+    expect(queue.snapshot().queue).toEqual([second, first]);
+    ask(queue, { ui: 'ask', title: 'Which region?' }, claude);
+    expect(queue.snapshot().queue.slice(-1)).toEqual([first]);
+  });
+
   it("shows the host's question beside the screen's own, each naming its machine, and each answer reaches only its agent", async () => {
     const { queue: host } = makeQueue({}, 'mac-studio');
     const { queue: laptop } = makeQueue({}, 'parsa-devbox');
@@ -620,6 +644,7 @@ describe('NotifyQueue across machines', () => {
     const { queue: laptop } = makeQueue({}, 'parsa-devbox');
     connect(host, laptop);
     ask(host, migration, codex);
+    vi.advanceTimersByTime(1_000);
     ask(host, sessionStore, claude);
     // Newest first (T-88): the session-store question, asked last, leads.
     const [first, second] = host.snapshot().queue;

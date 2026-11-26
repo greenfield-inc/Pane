@@ -459,6 +459,142 @@ test.describe('Approvals newest first, one after another (T-88)', () => {
     await expect(caughtUp.getByRole('button', { name: 'Back to where you were' })).toBeFocused();
     await page.screenshot({ path: testInfo.outputPath('t88-03-page-all-caught-up.png') });
   });
+
+  /** The fixture's three waiting cards, with Most recent: q-options (2m), q-approve (6m), q-ask (11m). */
+  async function bootWaiting(page: Page) {
+    const snapshot = notifyFixture();
+    snapshot.items = snapshot.items.filter(item => item.state === 'waiting');
+    snapshot.queue = snapshot.items.map(item => item.id);
+    await page.addInitScript(() => localStorage.setItem('pane-approvals-sort', 'recent'));
+    await boot(page, snapshot);
+    await page.getByTestId('approvals-nav').click();
+    return snapshot;
+  }
+
+  /** Main takes the next command and answers only when the test calls `acceptSend`. */
+  const holdNextCommand = (page: Page) => page.evaluate(() => {
+    // SAFETY: test-only fields this test sets on the page's window.
+    const held = window as typeof window & { acceptSend?: () => void };
+    const run = window.electronAPI.notify.run;
+    window.electronAPI.notify.run = async (command) => {
+      window.electronAPI.notify.run = run;
+      await new Promise<void>(resolve => { held.acceptSend = resolve; });
+      return run(command);
+    };
+  });
+  // SAFETY: acceptSend is set by holdNextCommand above.
+  const acceptSend = (page: Page) => page.evaluate(() => (window as typeof window & { acceptSend?: () => void }).acceptSend?.());
+
+  test('review M-1: two Dismisses in a row end all caught up, never back on the first card', async ({ page }) => {
+    const snapshot = notifyFixture();
+    snapshot.items = snapshot.items.filter(item => item.id === 'q-options' || item.id === 'q-approve');
+    snapshot.queue = snapshot.items.map(item => item.id);
+    await page.addInitScript(() => localStorage.setItem('pane-approvals-sort', 'recent'));
+    await boot(page, snapshot);
+    await page.getByTestId('approvals-nav').click();
+    const column = page.getByTestId('approval-column');
+    const [options, approve] = snapshot.items;
+    await expect(column.getByTestId('approval-title')).toHaveText(options.title);
+    await column.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(column.getByTestId('approval-title')).toHaveText(approve.title);
+    // Main stamps the dismissal; the card still waits in Approvals.
+    await emit(page, { ...snapshot, items: [{ ...options, dismissedAt: Date.now() }, approve] });
+    await column.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(page.getByTestId('approval-caught-up')).toContainText('All caught up');
+    await expect.poll(() => commands(page)).toEqual([{ type: 'dismiss', id: 'q-options' }, { type: 'dismiss', id: 'q-approve' }]);
+    // Both still listed, to pick by hand.
+    await expect(page.getByTestId('approvals-queue').getByTestId('approvals-row')).toHaveCount(2);
+  });
+
+  test('review M-1: a refused Dismiss leaves the card open to try again', async ({ page }) => {
+    await bootWaiting(page);
+    const column = page.getByTestId('approval-column');
+    await page.evaluate(() => {
+      const run = window.electronAPI.notify.run;
+      window.electronAPI.notify.run = async (command) => {
+        if (command.type === 'dismiss') throw new Error('The machine went offline.');
+        return run(command);
+      };
+    });
+    await column.getByRole('button', { name: 'Dismiss' }).click();
+    await page.waitForTimeout(500);
+    await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
+    await expect(page.getByTestId('approval-caught-up')).toHaveCount(0);
+  });
+
+  test('review M-2: narrow, the last Send shows All caught up with its Undo and the way back focused', async ({ page }, testInfo) => {
+    const snapshot = notifyFixture();
+    snapshot.items = snapshot.items.filter(item => item.id === 'q-options');
+    snapshot.queue = ['q-options'];
+    await page.setViewportSize({ width: 900, height: 800 });
+    await boot(page, snapshot);
+    await page.getByTestId('approvals-nav').click();
+    const column = page.getByTestId('approval-column');
+    await column.getByRole('radio', { name: /Keep Redis/ }).focus();
+    await page.keyboard.press('2');
+    await page.keyboard.press('ControlOrMeta+Enter');
+    await expect.poll(() => commands(page)).toHaveLength(1);
+    const [options] = snapshot.items;
+    await emit(page, { ...snapshot, items: [{ ...options, state: 'sent', answerSummary: 'Keep Redis' }], queue: [] });
+    const caughtUp = page.getByTestId('approval-caught-up');
+    await expect(caughtUp).toBeVisible();
+    await expect(caughtUp.getByRole('button', { name: 'Back to where you were' })).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath('t88-08-narrow-all-caught-up.png') });
+    await caughtUp.getByTestId('approval-sent-undo').click();
+    await expect.poll(() => commands(page)).toContainEqual({ type: 'undo', id: 'q-options' });
+    await expect(column.getByTestId('approval-title')).toHaveText(options.title);
+  });
+
+  test('review S-1: an answer undone on another screen brings All caught up back to it', async ({ page }) => {
+    const snapshot = notifyFixture();
+    snapshot.items = snapshot.items.filter(item => item.id === 'q-options');
+    snapshot.queue = ['q-options'];
+    await boot(page, snapshot);
+    await page.getByTestId('approvals-nav').click();
+    const column = page.getByTestId('approval-column');
+    await column.getByRole('radio', { name: /Keep Redis/ }).focus();
+    await page.keyboard.press('2');
+    await page.keyboard.press('ControlOrMeta+Enter');
+    const [options] = snapshot.items;
+    await emit(page, { ...snapshot, items: [{ ...options, state: 'sent', answerSummary: 'Keep Redis' }], queue: [] });
+    await expect(page.getByTestId('approval-caught-up')).toBeVisible();
+    // Undo on the phone: the same card waits again.
+    await emit(page, snapshot);
+    await expect(column.getByTestId('approval-title')).toHaveText(options.title);
+  });
+
+  test('review S-2: a Send that returns late moves on through the list as it is then', async ({ page }) => {
+    const snapshot = await bootWaiting(page);
+    const [options, approve, ask] = snapshot.items;
+    const column = page.getByTestId('approval-column');
+    await column.getByRole('radio', { name: /Keep Redis/ }).focus();
+    await page.keyboard.press('2');
+    await holdNextCommand(page);
+    await page.keyboard.press('ControlOrMeta+Enter');
+    // While it sends: the card below is answered on the phone, and a new one arrives on top.
+    const fresh = { ...approve, id: 'q-fresh', title: 'Q-14: Rename the export job?', createdAt: Date.now() };
+    await emit(page, { ...snapshot, items: [fresh, { ...options, state: 'sent', answerSummary: 'Keep Redis' }, { ...approve, state: 'answered', answerSummary: 'Approved' }, ask], queue: ['q-fresh', 'q-ask'] });
+    await acceptSend(page);
+    // Below the sent card, past the one answered elsewhere: the oldest still waiting.
+    await expect(column.getByTestId('approval-title')).toHaveText(ask.title);
+    await expect(column.getByTestId('approval-sent-before')).toContainText('2 left');
+  });
+
+  test('review S-3: a Send that returns after the person moved focus elsewhere leaves it there', async ({ page }) => {
+    await bootWaiting(page);
+    const column = page.getByTestId('approval-column');
+    await column.getByRole('radio', { name: /Keep Redis/ }).focus();
+    await page.keyboard.press('2');
+    await holdNextCommand(page);
+    await page.keyboard.press('ControlOrMeta+Enter');
+    // The person goes on to something else while it sends.
+    const elsewhere = page.getByTestId('approvals-sort');
+    await elsewhere.focus();
+    await acceptSend(page);
+    await expect(column.getByTestId('approval-title')).toHaveText('Apply migration 0042 to staging?');
+    await page.waitForTimeout(300);
+    await expect(elsewhere).toBeFocused();
+  });
 });
 
 test.describe('Notify secret requests', () => {

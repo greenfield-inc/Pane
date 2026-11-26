@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
 import { Inbox } from 'lucide-react';
 import { notifyItem, selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
-import { sessionTodoMachine, useShownHostId } from '../../stores/todosStore';
+import { sessionTodoMachine, sessionTodoScope, useShownHostId } from '../../stores/todosStore';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { ApprovalColumn } from './ApprovalColumn';
 import { ApprovalOrigin } from './ApprovalOrigin';
-import { firstToOpen, readyCount, sessionColumnNext } from './approvalCard';
+import { firstToOpen, readyCount, sessionApprovals, sessionColumnNext } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
 import { advanceApproval } from './approvalAdvance';
 
@@ -94,11 +94,16 @@ export function SessionApprovalColumn({ sessionId, sessionName, inChat, closeLab
       // status line still names who reads the reply (P7).
       onSent={() => {
         const fromId = open.itemId;
+        // The person opened another card while it was sending: leave their pick alone.
+        if (useApprovalColumnStore.getState().open[surface]?.itemId !== fromId) return;
+        // The Session's list as it is now (review S-2), with this card's place from when it was sent.
+        const items = selectNotifyItems(useNotifyStore.getState());
         advanceApproval({
           surface,
-          order: waiting.map((item) => item.id),
+          order: sessionApprovals(items, sessionId, sessionTodoScope(sessionId)).map((item) => item.id),
+          before: waiting.map((item) => item.id),
           fromId,
-          items: selectNotifyItems(useNotifyStore.getState()),
+          items,
           sent: true,
           open: (id) => openSessionApproval(sessionId, id),
           caughtUp: () => showCaughtUp(surface, fromId),

@@ -211,6 +211,17 @@ describe('NotifyQueue replies (the reply contract)', () => {
     expect(queue.snapshot().queue).toEqual(['q20', 'newer']);
   });
 
+  it('orders approvals asked in the same millisecond by id, the way every list does, before and after a restart (T-88)', () => {
+    const first = queueWith();
+    // No time passes between them: the shared comparator's id tie-break decides.
+    void first.ask({ question: q20, source: orchestrator, id: 'b-card' });
+    void first.ask({ question: { ui: 'approve', title: 'Apply migration 0042?' }, source: orchestrator, id: 'a-card' });
+    void first.ask({ question: { ui: 'approve', title: 'Ship the badge?' }, source: orchestrator, id: 'c-card' });
+    expect(first.snapshot().queue).toEqual(['a-card', 'b-card', 'c-card']);
+    first.dispose();
+    expect(queueWith().snapshot().queue).toEqual(['a-card', 'b-card', 'c-card']);
+  });
+
   it('keeps the newest approval first after a restart (T-88)', () => {
     const first = queueWith();
     void first.ask({ question: q20, source: orchestrator, id: 'q20' });

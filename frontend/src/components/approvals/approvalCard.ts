@@ -124,7 +124,7 @@ export function replyBeingRead(item: NotifyItem): boolean {
 }
 
 /** Being read or asked about: Send moves past it (J14). */
-function isBeingRead(item: NotifyItem): boolean {
+export function isBeingRead(item: NotifyItem): boolean {
   return item.state === 'waiting' && (item.reply?.state === 'reading' || item.reply?.state === 'question');
 }
 

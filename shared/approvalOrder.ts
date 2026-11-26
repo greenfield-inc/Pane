@@ -31,3 +31,18 @@ export function nextAfterAnswer(order: readonly string[], id: string, waits: (id
   if (at === -1) return order.find(open);
   return order.slice(at + 1).find(open) ?? order.slice(0, at).reverse().find(open);
 }
+
+/**
+ * The order to move on through when a Send or Dismiss returns (T-88): the list as it is now, with
+ * the answered card put back where it was (`before`, the order when it was sent) if it has already
+ * left, after the nearest card that was above it and still is. So cards that arrived or were
+ * answered elsewhere while it was sending count, and "next" still means below it.
+ */
+export function placeAnswered(current: readonly string[], before: readonly string[], id: string): string[] {
+  if (current.includes(id)) return [...current];
+  const at = before.indexOf(id);
+  const above = at === -1 ? undefined : before.slice(0, at).reverse().find(other => current.includes(other));
+  const index = above === undefined ? 0 : current.indexOf(above) + 1;
+  return [...current.slice(0, index), id, ...current.slice(index)];
+}
+

@@ -3,6 +3,7 @@ import type { NotifyItem } from '../../../../shared/types/notify';
 import { selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { bridgedFrom, firstToOpen, sessionApprovals } from './approvalCard';
+import { canAdvanceTo } from './approvalAdvance';
 import { sessionTodoScope, useSessionTodoScope } from '../../stores/todosStore';
 
 /** A Session's waiting approvals, newest first, as its pager walks them (J14, T-88). */
@@ -25,6 +26,8 @@ export function openNewSessionApprovals(sessionId: string, chatPanelId?: string)
   const since = Date.now();
   const seen = new Set<string>();
   const quiet = new Set<string>();
+  let caughtUpFrom: string | undefined;
+  let caughtUpGone = false;
   const notice = (items: readonly NotifyItem[]) => {
     for (const item of items) if (item.quiet) quiet.add(item.id);
   };
@@ -38,9 +41,21 @@ export function openNewSessionApprovals(sessionId: string, chatPanelId?: string)
     notice(items);
     for (const item of fresh) seen.add(item.id);
     const newest = fresh[0];
-    // An "All caught up" column holds nothing being typed: the new approval takes its place (T-88).
     const column = useApprovalColumnStore.getState().open[`session:${sessionId}`];
-    if (newest && (!column || column.caughtUp)) openSessionApproval(sessionId, newest.id);
+    // "All caught up" holds nothing being typed, and must not outlive a card that waits again: a new
+    // one, an older one updated or reopened, or the last one undone from another screen (review S-1).
+    if (column?.caughtUp) {
+      // The card just answered counts only once it was seen answered or dismissed: before that, a
+      // snapshot from before the Send can still show it waiting.
+      if (column.itemId !== caughtUpFrom) { caughtUpFrom = column.itemId; caughtUpGone = false; }
+      const from = selectNotifyItems(state).find((item) => item.id === caughtUpFrom);
+      if (!from || !canAdvanceTo(from)) caughtUpGone = true;
+      // A worker's question still quiet (its orchestrator may answer it first) waits, as below.
+      const waitingAgain = firstToOpen(items.filter((item) => canAdvanceTo(item) && !item.quiet && (item.id !== caughtUpFrom || caughtUpGone)));
+      if (waitingAgain) openSessionApproval(sessionId, waitingAgain.id);
+      return;
+    }
+    if (newest && !column) openSessionApproval(sessionId, newest.id);
   });
 }
 

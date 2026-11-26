@@ -3,7 +3,8 @@ import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, CircleAlert, Fil
 import type { NotifyAnswer, NotifyItem, NotifyLink } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { cn } from '../../utils/cn';
-import { countsAsWaiting, runNotify, sendNotify, useNotifyStore } from '../../stores/notifyStore';
+import { runNotify, sendNotify, useNotifyStore } from '../../stores/notifyStore';
+import { canAdvanceTo } from './approvalAdvance';
 import { approvalLinkScope, resolveApprovalLink } from './approvalLink';
 import { leadingQn } from '../../../../shared/autopilotDecision';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
@@ -127,7 +128,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
   const advancedFrom = useApprovalColumnStore((state) => state.advanced[surface]);
   const sentBefore = advancedFrom && advancedFrom !== itemId ? byId.get(advancedFrom) : undefined;
   // "3 left": what still waits on the person in this column, the card shown included (T-88).
-  const left = pager.filter((id) => { const other = byId.get(id); return other !== undefined && countsAsWaiting(other); }).length;
+  const left = pager.filter((id) => { const other = byId.get(id); return other !== undefined && canAdvanceTo(other); }).length;
   const [rootRef, narrow] = useNarrow();
   // ⌘F searches what the column shows; on the Approvals screen, the screen searches it with its list.
   useSurfaceFind(approvalFindId(surface), rootRef, surface !== 'approvals');
