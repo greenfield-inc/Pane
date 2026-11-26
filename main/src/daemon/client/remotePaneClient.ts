@@ -140,6 +140,11 @@ interface RemotePaneClientConnectOptions {
    * address that connection dialed there. A Tailscale route then skips its address lookup once.
    */
   firstRoute?: LiveRoute | null;
+  /**
+   * The caller dials again if this first attempt fails, so its failure runs no diagnosis and
+   * shows no checklist; the next attempt's own failure does (review F-6).
+   */
+  quietInitialFailure?: boolean;
 }
 
 interface RemoteInvokeSuccessPayload {
@@ -1600,7 +1605,7 @@ export class RemotePaneClientController extends EventEmitter {
     }
     try {
       try {
-        await this.connectProfile(profile, { retryOnInitialFailure: false, resolveOnReady: true, firstRoute: recent });
+        await this.connectProfile(profile, { retryOnInitialFailure: false, resolveOnReady: true, firstRoute: recent, quietInitialFailure: Boolean(recent) });
       } catch (error) {
         // The live connection's address stopped answering since its heartbeat: look the route up and dial once more.
         if (!recent || generation !== this.activationGeneration) throw error;
@@ -1894,6 +1899,7 @@ export class RemotePaneClientController extends EventEmitter {
 
     let hostChanged = options.resolveOnReady === true;
     let liveUsed = false;
+    let quietFailure = options.quietInitialFailure === true;
     // The credential's own level: nothing the host says changes it.
     const access = [savedProfile, ...routes.map((route) => route.profile)].some((route) => tokenAccess(route.token) === 'read') ? 'read' as const : undefined;
     const client = new RemotePaneClient(profile, {
@@ -1929,7 +1935,8 @@ export class RemotePaneClientController extends EventEmitter {
       },
       onConnectionStateChange: (status, errorMessage, metadata) => {
         if (this.activeClient !== client) return;
-        this.advanceCheck(savedProfile, status, errorMessage, metadata?.hostVersion);
+        if (status === 'connected') quietFailure = false;
+        this.advanceCheck(savedProfile, status, errorMessage, metadata?.hostVersion, !quietFailure);
         if (status === 'error' || status === 'reconnecting') {
           this.pendingRestore?.reject(new Error('Connection interrupted'));
           this.pendingRestore = null;
@@ -2244,6 +2251,7 @@ export class RemotePaneClientController extends EventEmitter {
     status: RemotePaneConnectionStatus,
     errorMessage: string | null | undefined,
     hostVersion: string | undefined,
+    diagnose = true,
   ): void {
     const check = this.check;
     // A codeless host already described its version to the probe; older hosts omit it on ready.
@@ -2255,7 +2263,7 @@ export class RemotePaneClientController extends EventEmitter {
       return;
     }
     if (!check || check.profileId !== profile.id || check.outcome !== 'running') {
-      if (status === 'error') void this.diagnoseFailure(profile, errorMessage);
+      if (status === 'error' && diagnose) void this.diagnoseFailure(profile, errorMessage);
       return;
     }
     const id = check.id;

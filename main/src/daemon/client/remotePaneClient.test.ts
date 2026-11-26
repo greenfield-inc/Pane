@@ -1312,11 +1312,15 @@ describe('RemotePaneClientController switches fast (T-128)', () => {
     config.client.computers = [studio];
     const controller = createController();
     let lookups = 0;
+    let probes = 0;
+    let checklistShown = false;
     controller.initialize({
       configManager: createConfigManagerStub(config),
-      rendererEventSink: { send() {} },
+      rendererEventSink: { send() {
+        if (controller.getConnectionState().check) checklistShown = true;
+      } },
       resolveTailnetMachineUrl: async () => { lookups += 1; return server.baseUrl; },
-      checkDependencies: { lookupTailnetMachine: async () => ({ kind: 'not-found', reason: 'not in this test' }) },
+      checkDependencies: { lookupTailnetMachine: async () => { probes += 1; return { kind: 'not-found', reason: 'not in this test' }; } },
     });
     let liveUrl = server.baseUrl;
     controller.setRecentAnswers(() => ({ routeId: tailscale.id, baseUrl: liveUrl }));
@@ -1332,6 +1336,11 @@ describe('RemotePaneClientController switches fast (T-128)', () => {
     await controller.activateProfile(primaryProfile(studio));
     await waitFor(() => controller.getConnectionState().status === 'connected');
     expect(lookups).toBe(1);
+    // Review F-6: the first dial's failure isn't diagnosed while the retry dials; only the retry's
+    // own failure would show the checklist.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(probes).toBe(0);
+    expect(checklistShown).toBe(false);
     await controller.switchToLocalMode();
   });
 

@@ -388,8 +388,9 @@ Computers, Paste a connection code, the sidebar's machine menu, or Retry), the
 main area shows a checklist of
 the connection's stages. The first stage that fails shows what went wrong and a
 fix. A computer this desktop heard from in the last 30 seconds (its dot is
-green) connects without the checklist; one that then fails to connect still
-shows it. Pressing another computer while a connection is still being checked
+green) connects without the checklist. If its last address stops answering,
+Pane looks the computer up and tries once more; only when that also fails does
+the checklist show. Pressing another computer while a connection is still being checked
 stops that check and leaves the window where it was. The same checklist appears when Pane gives up reconnecting after five
 minutes, and from **Retry now** on the "Reconnecting to <machine>…" banner. That
 banner appears once the connection has been down for 10 seconds; until then
