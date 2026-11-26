@@ -270,6 +270,30 @@ describe('landing on the Session pressed on another machine (T-128)', () => {
     now.mockRestore();
   });
 
+  it('a landing taken after the restore ended is held for a second only (review F-3)', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(5_000);
+    // The restore's list doesn't have the pressed Session yet.
+    list.mockResolvedValueOnce({ success: true, data: { sessions: [sessions[0]], selectedSessionId: 'a' } });
+    list.mockResolvedValue(reply('a'));
+    select.mockResolvedValue(reply('a'));
+    const store = await setup();
+
+    store.getState().landOn('b');
+    store.getState().invalidateHost();
+    await store.getState().refresh({ adoptServerSelection: true });
+    store.getState().settleLanding();
+    // A later change notice lists it: the landing is taken now, after the restore.
+    await store.getState().refresh();
+    expect(store.getState().selectedSessionId).toBe('b');
+    await store.getState().select({ sessionId: 'a' }, { automatic: true });
+    expect(store.getState().selectedSessionId).toBe('b');
+
+    now.mockReturnValue(6_100);
+    await store.getState().select({ sessionId: 'a' }, { automatic: true });
+    expect(store.getState().selectedSessionId).toBe('a');
+    now.mockRestore();
+  });
+
   it('drops a landing that a newer press or a cancelled switch replaced', async () => {
     list.mockResolvedValue(reply('a'));
     const store = await setup();

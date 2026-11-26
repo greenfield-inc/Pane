@@ -117,6 +117,8 @@ let landing: { sessionId: string; armed: boolean } | undefined;
  */
 let heldLanding: { sessionId: string; until: number | null } | undefined;
 const LANDING_HOLD_AFTER_RESTORE_MS = 1_000;
+/** A host switch's restore is running: a landing taken now is held until it ends. */
+let restoring = false;
 
 function landingHolds(sessionId: string | undefined): boolean {
   if (!heldLanding) return false;
@@ -132,7 +134,8 @@ function takeLanding(sessions: OrchestrationSessionSummary[]): string | undefine
   const sessionId = activeSessionIdFromList(sessions, landing.sessionId);
   if (!sessionId) return undefined;
   landing = undefined;
-  heldLanding = { sessionId, until: null };
+  // Taken after the restore ended (the Session arrived late), it is held for a second from now (review F-3).
+  heldLanding = { sessionId, until: restoring ? null : Date.now() + LANDING_HOLD_AFTER_RESTORE_MS };
   operationGeneration += 1;
   pendingSelectionGeneration = null;
   preferredSessionId = sessionId;
@@ -179,12 +182,14 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     heldLanding = undefined;
   },
   settleLanding: () => {
+    restoring = false;
     if (heldLanding && heldLanding.until === null) heldLanding.until = Date.now() + LANDING_HOLD_AFTER_RESTORE_MS;
   },
   invalidateHost: () => {
     // The host switch a press started arms its landing; the next host's list takes it.
     if (landing) landing.armed = true;
     heldLanding = undefined;
+    restoring = true;
     operationGeneration += 1;
     refreshSequence += 1;
     pendingSelectionGeneration = null;
