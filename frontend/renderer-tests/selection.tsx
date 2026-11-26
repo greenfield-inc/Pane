@@ -34,9 +34,11 @@ const records: OrchestrationSessionRecord[] = ['a', 'b'].map(id => ({ id, name: 
 const transportCalls: Array<{ method: string; payload?: unknown; data?: unknown }> = [];
 // sessionStorage is mock service storage, not application persistence. It survives
 // page reload in this test's fresh browser context, never touching a user profile.
+// These races pin the Session path that reads one call after another; with arrow keys opening
+// Sessions (T-87) a Session paints from the view cache instead, covered by its own tests.
 const savedMockConfig = sessionStorage.getItem('selection-mock-config');
 // SAFETY: Only this fixture writes the complete mock config to this private key.
-let mockConfig = savedMockConfig ? JSON.parse(savedMockConfig) as AppConfig : { appearance: DEFAULT_APPEARANCE, theme: 'dark', remoteDaemon: createDefaultRemoteDaemonConfig(), analytics: { enabled: false }, customCommands: [], defaultOrchestratorAgent: 'claude' } as AppConfig;
+let mockConfig = savedMockConfig ? JSON.parse(savedMockConfig) as AppConfig : { appearance: DEFAULT_APPEARANCE, theme: 'dark', remoteDaemon: createDefaultRemoteDaemonConfig(), analytics: { enabled: false }, customCommands: [], defaultOrchestratorAgent: 'claude', arrowKeysOpenSessions: false } as AppConfig;
 function sessionView(id: string): OrchestrationSessionView<Session> {
   const session = records.find(record => record.id === id);
   if (!session) throw new Error(`Unknown mock Session ${id}`);

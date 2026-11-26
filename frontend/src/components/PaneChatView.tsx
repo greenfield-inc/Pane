@@ -52,6 +52,7 @@ import type { DropZone, LayoutDirection } from '../utils/layoutTree';
 import { switchMark } from '../../../shared/switchMarks';
 import { useCursorFollowEnabled } from '../services/sessionCursor';
 import { SessionShowContext } from '../contexts/SessionShowContext';
+import { QuietSkeletons } from './ui/Skeleton';
 import {
   cachedSessionView,
   isOpening,
@@ -689,14 +690,17 @@ function CachedSessionTileBody({ sessionId, record, hostId, chrome }: {
         inert={showsAnother || undefined}
         data-session-shown-before={showsAnother ? display.view.session.id : undefined}
       >
-        <NamedSessionWorkspace
-          key={display.view.session.id}
-          view={view}
-          error={null}
-          chrome={chrome}
-          onOverviewUpdate={onOverviewUpdate}
-          onRetry={retryOpen}
-        />
+        {/* No bones anywhere in a Session the cursor only passes over (T-87, G): what loads fills in. */}
+        <QuietSkeletons quiet={show.peeking}>
+          <NamedSessionWorkspace
+            key={display.view.session.id}
+            view={view}
+            error={null}
+            chrome={chrome}
+            onOverviewUpdate={onOverviewUpdate}
+            onRetry={retryOpen}
+          />
+        </QuietSkeletons>
       </div>
       {showsAnother && (
         <div className="absolute inset-x-0 top-0 z-20 bg-bg-primary" data-testid="session-tile-next-name">

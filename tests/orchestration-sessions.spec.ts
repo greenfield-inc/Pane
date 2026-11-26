@@ -300,13 +300,19 @@ test('Session metadata refresh stays quiet and cannot steal a later selection', 
   const sessionsHeader = page.getByTestId('sessions-section-header');
   const beforeHeaderBox = await layoutBox(sessionsHeader);
   const beforeFirstRowBox = await layoutBox(firstSessionRow);
+  const selectCalls = () => page.evaluate(() => {
+    // SAFETY: installSessionsFixture adds these controls before the app loads.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationSelectCalls: () => number } };
+    return mockWindow.__paneTestElectronMock.getOrchestrationSelectCalls();
+  });
+  // Clicking the Session already shown selects it once, or (arrow keys opening Sessions, T-87) not again.
+  const selectedByClick = await selectCalls();
   await page.evaluate(() => {
     // SAFETY: installSessionsFixture adds these controls before the app loads.
     const mockWindow = window as typeof window & {
       __paneTestElectronMock: {
         setOrchestrationListDelay: (delayMs: number) => void;
         emitOrchestrationChanged: (kind?: string) => void;
-        getOrchestrationSelectCalls: () => number;
       };
     };
     mockWindow.__paneTestElectronMock.setOrchestrationListDelay(50);
@@ -318,11 +324,8 @@ test('Session metadata refresh stays quiet and cannot steal a later selection', 
   // A list refresh must not swap the open Session back to its opening skeleton.
   await expect(page.getByRole('status', { name: /^Opening / })).toHaveCount(0);
   await expect(page.getByTestId('session-workspace-skeleton')).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => {
-    // SAFETY: installSessionsFixture adds these controls before the app loads.
-    const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationSelectCalls: () => number } };
-    return mockWindow.__paneTestElectronMock.getOrchestrationSelectCalls();
-  })).toBe(1);
+  // The refreshes select nothing.
+  expect(await selectCalls()).toBe(selectedByClick);
 
   await page.evaluate(() => {
     // SAFETY: installSessionsFixture adds these controls before the app loads.
@@ -350,11 +353,8 @@ test('Session metadata refresh stays quiet and cannot steal a later selection', 
   expect(await layoutBox(firstSessionRow)).toEqual(beforeFirstRowBox);
   await expect(page.getByRole('heading', { level: 1, name: 'Beta', exact: true })).toBeAttached();
   await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => {
-    // SAFETY: installSessionsFixture adds these controls before the app loads.
-    const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationSelectCalls: () => number } };
-    return mockWindow.__paneTestElectronMock.getOrchestrationSelectCalls();
-  })).toBe(2);
+  // Beta's click is the one selection since.
+  await expect.poll(selectCalls).toBe(selectedByClick + 1);
 });
 
 test('Session view follows an external agent switch without selecting again or reloading on event bursts', async ({ page }) => {
