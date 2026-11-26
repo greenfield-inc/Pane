@@ -128,8 +128,8 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   0.1.0 removed most of them), neither as a profile nor as an agent a profile
   links to (a Session started from a launch link's command runs one), the row shows a red dot, Reload profile reads
   *profile gone* and refuses (`SESSION_PROFILE_GONE`), and Switch profile reads
-  *pick again*: the person picks a profile again. A list Pane can't read marks
-  nothing.
+  *pick again*: the person picks a profile again. A list Pane can't read, or one with
+  nothing from the profile's plugin yet (Pane's first start), marks nothing.
 
 With Profiles off, the menu has neither item, `orchestration-sessions:switch-profile`
 and `:reload-profile` refuse (`SESSION_PROFILE_UNSUPPORTED`), Pane reads no plugin for the changed mark, and rows show no amber dot.

@@ -511,6 +511,10 @@ describe('OrchestrationSessionManager', () => {
         const port = chatTabs();
         fixture.manager.attachChatTabs(port);
         const created = await fixture.manager.create({ name: 'Ran a removed profile', agentProfile: 'greenfield/product-researcher' });
+        // QA rerun: Pane's first start lists nothing from greenfield until it installs it; that proves nothing.
+        farm.profiles.mockResolvedValue({ profiles: [{ ref: 'pane/claude', plugin: 'pane', version: '1.0.0', harness: 'claude', hidden: true }], linked: [] });
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileGone).toBeUndefined();
         // QA finding 2: an agent a profile links to (a Session started from a launch link's command) isn't gone.
         farm.profiles.mockResolvedValue({ profiles: [{ ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false }], linked: ['greenfield/product-researcher'] });
         await fixture.manager.refreshPluginHashes(true);
