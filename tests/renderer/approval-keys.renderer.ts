@@ -161,6 +161,64 @@ test.describe('the approval column (D-381)', () => {
     expect((await commands(page)).filter((command) => command.type === 'answer')).toEqual([]);
   });
 
+  test('J/K move the highlight within the focused question, stop at the ends, and pick nothing (T-113)', async ({ page }) => {
+    // The highlight starts on the recommended option, the group's one Tab stop.
+    const first = option(page, 0, '⌘/ everywhere Recommended');
+    await expect(first).toHaveAttribute('data-highlighted', 'true');
+    await expect(first).toHaveAttribute('tabindex', '0');
+    await page.getByTestId('approval-title').click();
+    await page.keyboard.press('j');
+    await expect(option(page, 0, '? outside text fields only')).toBeFocused();
+    await expect(option(page, 0, '? outside text fields only')).toHaveAttribute('data-highlighted', 'true');
+    await page.keyboard.press('j');
+    await page.keyboard.press('j');
+    // Stops at the last.
+    await expect(option(page, 0, 'Both')).toBeFocused();
+    await page.keyboard.press('k');
+    await page.keyboard.press('k');
+    await page.keyboard.press('k');
+    // Stops at the first.
+    await expect(first).toBeFocused();
+    await expect(page.getByRole('radio', { checked: true })).toHaveCount(0);
+    // Tab moves to the next question, where J/K are its own.
+    await page.keyboard.press('Tab');
+    await expect(option(page, 1, 'Yes, a small dot Recommended')).toBeFocused();
+    await page.keyboard.press('j');
+    await expect(option(page, 1, 'No marker')).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(first).toBeFocused();
+    expect(await commands(page)).toEqual([]);
+  });
+
+  test('Enter on an option sends each question\'s pick, else its highlighted option (T-113)', async ({ page }) => {
+    await option(page, 0, '⌘/ everywhere Recommended').focus();
+    await page.keyboard.press('j');
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('j');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q12', answer: { picks: ['? outside text fields only', 'No marker'] } }]);
+  });
+
+  test('Enter with no J/K sends what ⇧↩ would (T-113)', async ({ page }) => {
+    await option(page, 0, '⌘/ everywhere Recommended').focus();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q12', answer: { picks: ['⌘/ everywhere', 'Yes, a small dot'] } }]);
+  });
+
+  test('J/K and Enter with ⌘ or Ctrl held do nothing of theirs (T-113)', async ({ page }) => {
+    await option(page, 0, '⌘/ everywhere Recommended').focus();
+    await page.keyboard.press('Control+j');
+    await page.keyboard.press('Alt+k');
+    await expect(option(page, 0, '⌘/ everywhere Recommended')).toBeFocused();
+    await page.keyboard.press('Alt+Enter');
+    await page.waitForTimeout(200);
+    expect(await commands(page)).toEqual([]);
+  });
+
+  test('the hint names J, K and ↩ (T-113)', async ({ page }) => {
+    await expect(page.getByTestId('approval-reply-hint')).toContainText('J K move, ↩ sends');
+  });
+
   test('the palette\'s Next and Previous Approval page the approval shown', async ({ page }) => {
     await page.getByLabel('Chat composer').click();
     await page.evaluate(() => window.approvalKeysTest.run('next-approval'));

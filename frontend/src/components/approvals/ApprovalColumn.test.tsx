@@ -54,7 +54,7 @@ describe('ApprovalColumn', () => {
     expect(visible).toContain('Question 1 of 2');
     expect(visible).toContain('Question 2 of 2');
     expect(visible).toContain('Recommended');
-    expect(visible).toContain('Pick an option, or reply in your own words');
+    expect(visible).toContain('Pick an option ( J K move, ↩ sends), or reply in your own words');
   });
 
   it('T-88: the card it moved on to says what was sent, with Undo while held, and how many are left', () => {

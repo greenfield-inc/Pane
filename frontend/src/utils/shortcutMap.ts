@@ -102,6 +102,8 @@ export const REFERENCE_ROWS: readonly ReferenceRow[] = [
   { id: 'reference-approval-tabs', label: 'Decide, Summary and reference tabs', chord: 'mod+shift+] mod+shift+[', group: 'approvals', follows: ['cycle-tab-next-d', 'cycle-tab-prev-a'] },
   { id: 'reference-approval-move', label: 'Move between options', chord: 'ArrowDown ArrowUp', group: 'approvals' },
   { id: 'reference-approval-pick', label: 'Pick the focused option', chord: 'Space', group: 'approvals' },
+  { id: 'reference-approval-highlight', label: 'Highlight the next / previous option (stops at the ends)', chord: 'J K', group: 'approvals' },
+  { id: 'reference-approval-send-highlighted', label: 'Send the highlighted options', chord: 'Enter', group: 'approvals' },
   { id: 'reference-approval-question', label: 'Next / previous question', chord: 'Tab shift+Tab', group: 'approvals' },
   { id: 'reference-approval-recommended', label: 'Send the recommended options (nothing picked)', chord: 'shift+Enter', group: 'approvals' },
   { id: 'reference-approvals-list', label: 'Approvals list: move, open, back', chord: 'ArrowDown ArrowUp Enter Escape', group: 'approvals' },

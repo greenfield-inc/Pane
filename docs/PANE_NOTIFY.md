@@ -350,7 +350,12 @@ asker stopped waiting").
   accent only while it has focus, as a split's does. By keyboard, each
   question is one Tab stop: ↑ ↓ move and pick, Space picks the focused
   option, Tab goes to the next question and then the reply box, and ⌘↩ sends
-  from anywhere in the approval. With nothing picked or typed, ⇧↩ sends each
+  from anywhere in the approval. J and K move a highlight to the next and
+  previous option of the focused question without picking it, stopping at the
+  ends; it starts on the recommended option (else the first), and ↩ on an
+  option sends each question's pick, else its highlighted option, so ↩ with no
+  J or K sends what ⇧↩ would. J, K and ↩ never act in a text field or with
+  ⌘, Ctrl or ⌥ held. With nothing picked or typed, ⇧↩ sends each
   question's recommended option (its chip reads "Recommended · ⇧↩ sends");
   nothing starts picked, so it is the person's own key. When a question has no
   recommendation it sends nothing and says which. It never fires in a text
@@ -384,14 +389,19 @@ asker stopped waiting").
   Session, and a worker's or a Pane's item shows the tab that asked.
 - **The strip**: with Show outside Pane on, while Pane isn't in front, a borderless card at the bottom
   center of the screen with the pointer. It never takes keyboard focus when it
-  appears; click a choice to answer, or click its text field to type. After
+  appears; click a choice to answer, or click its text field to type. With
+  the pointer on it (or after a click), number keys answer, J and K move a
+  highlight between the choices (from the recommended one, stopping at the
+  ends) and ↩ sends the highlighted one. After
   you answer, it shows "Sent to <agent>" with **Undo** for 3 seconds before
   the agent gets it. Only one strip is ever on screen, oldest question first.
   **Open in Pane** brings Pane to the front on Approvals with that item
   selected.
 - **The round**: press ⌃⇧Space (Ctrl+Shift+Space on Windows and Linux) from
   any other app for a centered panel that works through the queue by
-  keyboard: nothing starts chosen; number keys or arrows choose, ↵ sends,
+  keyboard: nothing starts chosen; number keys, arrows or J and K (which
+  stop at the ends) choose, ↵ sends (with nothing chosen, the highlighted
+  recommended choice, else the first),
   → skips, Tab adds a note (a note with no pick goes as a reply on its own),
   Esc closes.
 - **The menu bar or tray icon** shows an amber dot while questions wait. Its

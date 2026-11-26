@@ -5,6 +5,7 @@ import { useDraftChoice } from '../../stores/approvalColumnStore';
 import { canReplyAlone } from '../approvals/approvalCard';
 import { cn } from '../../utils/cn';
 import { askedBy, cardAnswer, leaseSummary, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs } from './notifyFormat';
+import { choiceStep, highlightOf, stepHighlight } from '../approvals/choiceCursor';
 import { LeaseRows, ShortcutCap, UnreachableNotice } from './NotifyCard';
 import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
@@ -111,6 +112,10 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
   const [askPick, setAskPick] = useState(-1);
   const selected = ask ? askPick : draftPick;
   const setSelected = ask ? setAskPick : setDraftPick;
+  // An options card's highlight (T-113): the pick, else the recommended choice, else the first.
+  // J/K move it (and pick, as ↑↓ do here) and stop at the ends; Enter sends it.
+  const choiceRows = !ask && !approval;
+  const lit = choiceRows ? highlightOf(selected, rows) : selected;
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState('');
   const [text, setText] = useState('');
@@ -135,11 +140,18 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
       sendAnswer(cardAnswer(item, null, (index >= 0 ? rows[index]?.label : text) ?? ''));
       return;
     }
-    if (index < 0) {
+    if (index < 0 && trimmedNote) {
       // Words with no pick are a reply on their own: an answer or a question (D-245).
-      if (trimmedNote && canReplyAlone(item)) sendAnswer(cardAnswer(item, null, trimmedNote));
+      if (canReplyAlone(item)) sendAnswer(cardAnswer(item, null, trimmedNote));
       return;
     }
+    // Nothing picked and nothing typed: an options card sends its highlighted choice (T-113).
+    if (index < 0 && choiceRows && lit >= 0) {
+      const highlighted = rows[lit]?.label;
+      if (highlighted) sendAnswer(cardAnswer(item, { choice: highlighted }, ''));
+      return;
+    }
+    if (index < 0) return;
     // A lease answer is the bare approval main intercepts, so a note never turns it into a reply.
     if (approval && item.lease) {
       sendAnswer({ approved: index === 0 });
@@ -155,10 +167,10 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
 
   // Read the latest state from the key handler without re-binding it each render.
   const sendRef = useRef(send);
-  const stateRef = useRef({ selected, noteOpen, setSelected });
+  const stateRef = useRef({ selected, lit, noteOpen, setSelected });
   useLayoutEffect(() => {
     sendRef.current = send;
-    stateRef.current = { selected, noteOpen, setSelected };
+    stateRef.current = { selected, lit, noteOpen, setSelected };
   });
 
   useEffect(() => {
@@ -191,6 +203,12 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
         if (event.key === 'n' || event.key === 'N') stateRef.current.setSelected(1);
         return;
       }
+      const step = choiceRows ? choiceStep(event) : null;
+      if (step !== null && rows.length > 0) {
+        event.preventDefault();
+        stateRef.current.setSelected(stepHighlight(stateRef.current.lit, rows.length, step));
+        return;
+      }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
         const step = event.key === 'ArrowDown' ? 1 : -1;
@@ -203,10 +221,10 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [approval, ask, item.id, onCommand, rows.length]);
+  }, [approval, ask, choiceRows, item.id, onCommand, rows.length]);
 
   const replyAlone = !ask && selected < 0 && note.trim().length > 0 && canReplyAlone(item);
-  const canSend = ask ? text.trim().length > 0 : selected >= 0 || replyAlone;
+  const canSend = ask ? text.trim().length > 0 : selected >= 0 || replyAlone || (choiceRows && lit >= 0);
   const unpicked = !ask && !canSend;
   const action = approval && unpicked ? 'Press Y or N' : unpicked ? 'Pick a choice' : secret ? 'Save securely' : `Send to ${item.source.agent}`;
 
@@ -289,6 +307,9 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
               type="button"
               role="option"
               aria-selected={index === selected}
+              // The panel's keys work on the window, not a focused row: the highlight is aria-current.
+              aria-current={(choiceRows && index === lit) || undefined}
+              data-highlighted={(choiceRows && index === lit) || undefined}
               onClick={() => {
                 if (!ask) {
                   setSelected(index);
@@ -303,6 +324,8 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
               className={cn(
                 'flex h-[50px] w-full items-center gap-3.5 rounded-xl px-3.5 text-left text-[16px]',
                 index === selected ? 'bg-surface-tertiary' : 'hover:bg-surface-hover',
+                // Highlighted, not picked: a ring, so nothing reads as chosen for the person (D-385).
+                choiceRows && index === lit && index !== selected && 'ring-2 ring-inset ring-focus-ring-subtle',
               )}
             >
               <span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-md border border-border-primary font-mono text-[11px] font-medium text-text-tertiary">{row.key}</span>
@@ -310,7 +333,7 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
               {row.detail && <span className="min-w-0 truncate text-[14px] text-text-muted">{row.detail}</span>}
               {row.recommended && <span className="ml-auto shrink-0 text-[13px] text-text-tertiary">Recommended</span>}
               {/* The return icon keeps its box on every row so selection never shifts the text. */}
-              <CornerDownLeft className={cn('h-4 w-4 shrink-0 text-text-tertiary', !row.recommended && 'ml-auto', index !== selected && 'invisible')} aria-hidden="true" />
+              <CornerDownLeft className={cn('h-4 w-4 shrink-0 text-text-tertiary', !row.recommended && 'ml-auto', index !== (choiceRows ? lit : selected) && 'invisible')} aria-hidden="true" />
             </button>
           ))}
         </div>
@@ -332,6 +355,7 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
         <FooterKey label="Close" cap="Esc" onClick={() => onCommand({ type: 'close-round' })} />
         <FooterKey label="Skip" cap={<ArrowRight className="inline h-3 w-3" />} onClick={() => onCommand({ type: 'skip', id: item.id })} />
         {!ask && <FooterKey label="Note" cap="Tab" onClick={() => setNoteOpen((open) => !open)} />}
+        {choiceRows && rows.length > 1 && <span className="inline-flex items-center gap-[7px]" data-testid="notify-round-jk">Move <ShortcutCap>J</ShortcutCap><ShortcutCap>K</ShortcutCap></span>}
         {secret && (
           <button type="button" onClick={() => { setText(''); onCommand({ type: 'answer', id: item.id, answer: { approved: false } }); }} className="hover:text-text-primary">
             Decline

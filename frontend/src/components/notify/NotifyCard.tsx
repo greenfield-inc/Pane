@@ -4,6 +4,7 @@ import type { NotifyAnswer, NotifyChoice, NotifyCommand, NotifyItem, NotifyRemin
 import { showActionError } from '../../stores/errorStore';
 import { useDraftChoice } from '../../stores/approvalColumnStore';
 import { canReplyAlone } from '../approvals/approvalCard';
+import { choiceStep, highlightOf, stepHighlight } from '../approvals/choiceCursor';
 import { canClose, canCopyAnswer, canOverride, canReopen, decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
 import { cn } from '../../utils/cn';
 import { askedBy, cardAnswer, leaseRemoteMachine, leaseSummary, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
@@ -432,13 +433,20 @@ interface ChipProps {
   onClick: () => void;
   tall?: boolean;
   inbox?: boolean;
+  /**
+   * Where J/K are (T-113): Enter sends it. Ringed while the pointer or focus is on the card. The
+   * card's keys work without focus (the strip never takes it), so it is `aria-current`, not focus.
+   */
+  highlighted?: boolean;
 }
 
-function Chip({ keyLabel, label, detail, shaded, recommended, onClick, tall, inbox }: ChipProps) {
+function Chip({ keyLabel, label, detail, shaded, recommended, onClick, tall, inbox, highlighted }: ChipProps) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-current={highlighted || undefined}
+      data-highlighted={highlighted || undefined}
       aria-pressed={tall ? shaded : undefined}
       title={tall ? undefined : label}
       className={cn(
@@ -446,6 +454,7 @@ function Chip({ keyLabel, label, detail, shaded, recommended, onClick, tall, inb
         tall ? 'items-start gap-2.5 px-3.5 py-3' : 'h-[42px] items-center gap-2.5 whitespace-nowrap pl-3 pr-4',
         inbox ? 'text-[14.5px]' : 'text-[15px]',
         shaded && 'bg-surface-tertiary font-medium text-text-primary hover:bg-surface-tertiary',
+        highlighted && 'group-hover/card:ring-2 group-hover/card:ring-focus-ring-subtle group-focus-within/card:ring-2 group-focus-within/card:ring-focus-ring-subtle',
       )}
     >
       <KeyCap className={tall ? 'mt-px' : undefined}>{keyLabel}</KeyCap>
@@ -493,7 +502,7 @@ function QueueSegments({ queue }: { queue: NotifyQueuePosition }) {
  */
 const FOCUSED_CONTROL = 'button, a[href], summary, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"]';
 
-function useCardKeys(rootRef: RefObject<HTMLDivElement | null>, floating: boolean, onKey: (key: string) => boolean): void {
+function useCardKeys(rootRef: RefObject<HTMLDivElement | null>, floating: boolean, onKey: (key: string, event: KeyboardEvent) => boolean): void {
   const handler = useRef(onKey);
   useEffect(() => {
     handler.current = onKey;
@@ -518,7 +527,7 @@ function useCardKeys(rootRef: RefObject<HTMLDivElement | null>, floating: boolea
       if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
       // A focused control (Dismiss, a choice, a link) keeps its own Enter: it clicks that control, never sends.
       if (event.key === 'Enter' && target instanceof HTMLElement && target.closest(FOCUSED_CONTROL)) return;
-      if (!handler.current(event.key)) return;
+      if (!handler.current(event.key, event)) return;
       event.preventDefault();
       event.stopPropagation();
     };
@@ -548,7 +557,16 @@ function QuestionCard({
   const [expanded, setExpanded] = useState(form === 'docked' || (form === 'strip' && Boolean(showDetails)));
   const choices = item.choices ?? [];
   // Nothing starts selected, recommended or not (D-385); the person's own pick is kept in the draft.
-  const [selected, setSelected] = useDraftChoice(item, choices.map((choice) => choice.label));
+  const [selected, setDraftSelected] = useDraftChoice(item, choices.map((choice) => choice.label));
+  // J/K move a highlight over the choices shown (T-113), from the pick, else the recommended one,
+  // else the first; they stop at the ends. A click or number key moves it to that pick.
+  const [cursor, setCursor] = useState<number | null>(null);
+  const setSelected = (index: number) => {
+    setDraftSelected(index);
+    setCursor(null);
+  };
+  const shownChoices = expanded || onCancelOverride ? choices.length : Math.min(choices.length, COMPACT_CHOICE_LIMIT);
+  const lit = cursor !== null && cursor < shownChoices ? cursor : highlightOf(selected, choices.slice(0, shownChoices));
   const [note, setNote] = useState('');
   const [denying, setDenying] = useState(false);
   const [text, setText] = useState('');
@@ -601,20 +619,24 @@ function QuestionCard({
   };
   const rootRef = useRef<HTMLDivElement>(null);
   // The card's own keys, matching the key on each chip.
-  useCardKeys(rootRef, Boolean(onFieldFocusRequest), (key) => {
+  useCardKeys(rootRef, Boolean(onFieldFocusRequest), (key, event) => {
     const index = /^[1-9]$/.test(key) ? Number(key) - 1 : -1;
     if (item.ui === 'options') {
-      if (index >= 0 && index < (expanded || onCancelOverride ? choices.length : Math.min(choices.length, COMPACT_CHOICE_LIMIT))) {
+      if (index >= 0 && index < shownChoices) {
         if (expanded) setSelected(index);
         else answerChoice(index);
         return true;
       }
-      // Enter is Send: the pick with its note, or the note alone as a reply.
-      if (key === 'Enter' && expanded && canSendChoice) {
-        sendChoiceOrNote();
+      const step = choiceStep(event);
+      if (step !== null && shownChoices > 0) {
+        setCursor(stepHighlight(lit, shownChoices, step));
         return true;
       }
-      return false;
+      if (key !== 'Enter' || lit < 0) return false;
+      // Enter sends the highlighted choice, with any note; a note with no pick and no J/K goes on its own as a reply.
+      if (expanded && cursor === null && replyAlone) answerText(note);
+      else answerChoice(lit, expanded ? note : undefined);
+      return true;
     }
     if (item.ui === 'approve' && item.lease) {
       if (key.toLowerCase() === 'y') startLease();
@@ -650,7 +672,7 @@ function QuestionCard({
   if (item.ui === 'options' && expanded) {
     body = (
       <>
-        <div className={cn('grid gap-x-3 gap-y-2.5 px-3.5 pb-4 pt-3', form === 'inbox' ? 'grid-cols-1' : narrow ? 'grid-cols-2' : 'grid-cols-3')}>
+        <div role="group" aria-label="Choices" className={cn('grid gap-x-3 gap-y-2.5 px-3.5 pb-4 pt-3', form === 'inbox' ? 'grid-cols-1' : narrow ? 'grid-cols-2' : 'grid-cols-3')}>
           {choices.map((choice, index) => (
             <Chip
               key={choice.label}
@@ -660,6 +682,7 @@ function QuestionCard({
               detail={choice.detail}
               shaded={index === selected}
               recommended={choice.recommended}
+              highlighted={index === lit}
               onClick={() => setSelected(index)}
             />
           ))}
@@ -683,13 +706,14 @@ function QuestionCard({
     const opensInPlace = form === 'inbox' && !onCancelOverride;
     const more = choices.length > visible.length ? 'More' : opensInPlace && choices.some((choice) => choice.detail) ? 'Details' : undefined;
     body = (
-      <div className={cn('flex flex-wrap items-center gap-2', actionsClass)}>
+      <div role="group" aria-label="Choices" className={cn('flex flex-wrap items-center gap-2', actionsClass)}>
         {visible.map((choice, index) => (
           <Chip
             key={choice.label}
             keyLabel={String(index + 1)}
             label={choice.label}
             inbox={form === 'inbox'}
+            highlighted={index === lit}
             onClick={() => answerChoice(index)}
           />
         ))}
@@ -702,9 +726,9 @@ function QuestionCard({
             {more}
           </button>
         )}
-        {recommended >= 0 && (
-          <span className="ml-auto pr-2 text-[13px] text-text-tertiary">{recommended + 1} is recommended</span>
-        )}
+        <span className="ml-auto inline-flex items-center gap-1 pr-2 text-[13px] text-text-tertiary" data-testid="notify-choice-keys">
+          <KeyCap>J</KeyCap><KeyCap>K</KeyCap> move · <KeyCap>↩</KeyCap> sends{recommended >= 0 ? ` · ${recommended + 1} is recommended` : ''}
+        </span>
       </div>
     );
   } else if (item.ui === 'approve' && item.lease) {
@@ -854,7 +878,7 @@ function QuestionCard({
   if (form !== 'inbox' && item.ui === 'options' && expanded) {
     footer = (
       <CardFooter
-        left={<span>Click a choice or type a reply, then Send</span>}
+        left={<span className="inline-flex items-center gap-1">Click a choice (<KeyCap>J</KeyCap><KeyCap>K</KeyCap> move, <KeyCap>↩</KeyCap> sends) or type a reply, then Send</span>}
         right={(
           <>
             <FooterLink onClick={() => showDetailsChange(false)}>Hide details</FooterLink>
@@ -892,7 +916,7 @@ function QuestionCard({
     <div
       ref={rootRef}
       {...cardFocus}
-      className={cardShell(form, narrow, className)}
+      className={cn('group/card', cardShell(form, narrow, className))}
       data-testid="notify-card" data-pane-part="notify-card"
       data-notify-ui={item.ui}
       // The floating strip takes the keyboard only when clicked, so typing elsewhere never answers it.

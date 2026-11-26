@@ -23,11 +23,14 @@ function render(shown: NotifyItem): string {
 }
 
 describe('NotifyRound', () => {
-  it('opens with nothing chosen, keeps the Recommended mark, and Send waits for a pick (D-385)', () => {
+  it('opens with nothing chosen (D-385), the highlight on the recommended choice, and Enter sends it (T-113)', () => {
     const markup = render(item);
     expect(markup).not.toContain('aria-selected="true"');
     expect(markup).toContain('Recommended');
-    expect(markup).toContain('Pick a choice');
+    // A highlight, not a pick: J/K move it and Enter sends it.
+    expect(markup.match(/<button[^>]*data-highlighted="true"[^>]*>/)?.[0]).toContain('aria-selected="false"');
+    expect(markup).toContain('Send to Claude');
+    expect(markup).toContain('data-testid="notify-round-jk"');
   });
 
   it('an approval starts with neither Approve nor Deny', () => {
