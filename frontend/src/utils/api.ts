@@ -78,6 +78,29 @@ const isElectron = () => {
 };
 
 // Wrapper class for API calls that provides error handling and consistent interface
+/** `orchestration-sessions:open` made of the calls it replaced, for a preload that lacks it (a test double, an older build). */
+async function openOneByOne(selector: OrchestrationSessionSelector, select: boolean): Promise<IPCResponse<OrchestrationSessionOpenResult<Session>>> {
+  const api = window.electronAPI.orchestrationSessions;
+  let list: OrchestrationSessionListResult | undefined;
+  if (select) {
+    const selected = await api.select(selector);
+    if (!selected.success) return { success: false, error: selected.error };
+    list = selected.data;
+  }
+  const got = await api.get(selector);
+  if (!got.success || !got.data) return { success: false, error: got.error };
+  const view = got.data;
+  const panels = await window.electronAPI.panels.getSessionPanels(view.internalSession.id);
+  const layout = await window.electronAPI.invoke('panels:get-layout', view.internalSession.id);
+  const data: OrchestrationSessionOpenResult<Session> = {
+    view,
+    panels: panels.success && panels.data ? panels.data : [],
+    layout: layout.success ? layout.data ?? null : null,
+  };
+  if (list) data.list = list;
+  return { success: true, data };
+}
+
 export class API {
   static preferences = {
     async get(key: string): Promise<string | null> {
@@ -123,13 +146,17 @@ export class API {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.orchestrationSessions.get(selector);
     },
+    /** Read-only (T-87). A preload without it reads the view the way `open` does. */
     async peek(selector: OrchestrationSessionSelector): Promise<IPCResponse<OrchestrationSessionOpenResult<Session>>> {
       if (!isElectron()) throw new Error('Electron API not available');
-      return window.electronAPI.orchestrationSessions.peek(selector);
+      const peek = window.electronAPI.orchestrationSessions.peek;
+      return peek ? peek(selector) : openOneByOne(selector, false);
     },
+    /** One call for a Session's view, tabs, layout and chat (T-87). A preload without it makes the calls one by one. */
     async open(selector: OrchestrationSessionSelector, options?: OrchestrationSessionOpenOptions): Promise<IPCResponse<OrchestrationSessionOpenResult<Session>>> {
       if (!isElectron()) throw new Error('Electron API not available');
-      return window.electronAPI.orchestrationSessions.open(selector, options);
+      const open = window.electronAPI.orchestrationSessions.open;
+      return open ? open(selector, options) : openOneByOne(selector, options?.select === true);
     },
     async update(selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput): Promise<IPCResponse<OrchestrationSessionRecord>> {
       if (!isElectron()) throw new Error('Electron API not available');

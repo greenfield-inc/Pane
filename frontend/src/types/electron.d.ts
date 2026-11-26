@@ -293,9 +293,9 @@ interface ElectronAPI {
     create: (input: OrchestrationSessionCreateInput) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
     get: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionView<Session>>>;
     /** Reads a Session to show it, changing nothing and starting no agent (T-87). */
-    peek: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionOpenResult<Session>>>;
+    peek?: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionOpenResult<Session>>>;
     /** `get`, its tabs, layout and chat in one call; starts the chat's agent, and with `select` saves the selection. */
-    open: (selector: OrchestrationSessionSelector, options?: OrchestrationSessionOpenOptions) => Promise<IPCResponse<OrchestrationSessionOpenResult<Session>>>;
+    open?: (selector: OrchestrationSessionSelector, options?: OrchestrationSessionOpenOptions) => Promise<IPCResponse<OrchestrationSessionOpenResult<Session>>>;
     update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     /** Saves the order of the listed Sessions among the places they hold; leaves every Session record unchanged. */
     reorder: (sessionIds: string[]) => Promise<IPCResponse<OrchestrationSessionListResult>>;

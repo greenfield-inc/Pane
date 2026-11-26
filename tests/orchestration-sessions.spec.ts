@@ -4101,12 +4101,14 @@ test('F-8: opened cold from the sidebar count, the approval waits for the saved 
   await expect(page.getByTestId('session-approval-split')).toHaveCount(0);
 });
 
+// With arrow keys opening Sessions off: Pane reads a Session one call after another, behind
+// a skeleton. On (the default, T-87), a Session not held keeps the previous one on screen, dimmed.
 test('A Session opens behind one skeleton of its workspace: bones only past 150 ms, unbroken from record to layout', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [
     sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
-  ]);
+  ], [], { initialConfig: { arrowKeysOpenSessions: false } });
   await page.clock.install();
   await gotoApp(page);
   await dismissStartupDialogs(page);

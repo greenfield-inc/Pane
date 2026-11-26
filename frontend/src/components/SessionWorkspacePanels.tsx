@@ -34,7 +34,7 @@ import { useProjectViewActionsStore, type ProjectViewActions } from '../stores/p
 import { announceTerminalReflow } from '../utils/terminalReflow';
 import { switchMark } from '../../../shared/switchMarks';
 import { useSessionShow } from '../contexts/SessionShowContext';
-import { rememberCachedLayout } from '../stores/sessionViewCache';
+import { rememberCachedLayout, rememberCachedPanels } from '../stores/sessionViewCache';
 import {
   activatePanelInLayout,
   addPanelToGroup,
@@ -351,6 +351,8 @@ export function SessionWorkspacePanels({
     persistTimer.current = setTimeout(flushLayout, 300);
   }, [sessionId, flushLayout]);
   useEffect(() => flushLayout, [sessionId, flushLayout]);
+  // Leaving the Session hands its tabs to the Session view cache, as they are now (T-87).
+  useEffect(() => () => rememberCachedPanels(sessionId, usePanelStore.getState().panels[sessionId]), [sessionId]);
 
   // A layout effect: with the tabs and layout already held (the Session view cache), the
   // layout is placed in this commit, before the first paint.
