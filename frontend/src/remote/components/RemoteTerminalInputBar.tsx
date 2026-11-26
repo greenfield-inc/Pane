@@ -12,7 +12,7 @@ import type {
   VoiceTranscriptionResult,
 } from '../../../../shared/types/voiceTranscription';
 import { Bone, LoadingStatus, Skeleton, SkeletonSwap } from '../../components/ui/Skeleton';
-import { useRemoteVoiceDictation } from '../hooks/useRemoteVoiceDictation';
+import { useVoiceDictation } from '../../hooks/useVoiceDictation';
 
 interface RemoteTerminalInputBarProps {
   shortcuts: RemotePwaTerminalShortcut[];
@@ -83,7 +83,7 @@ export function RemoteTerminalInputBar({
     setDraft(current => appendTranscriptDraft(current, text));
   };
 
-  const voice = useRemoteVoiceDictation({
+  const voice = useVoiceDictation({
     mode: selectedVoiceMode,
     onTranscript: appendTranscript,
     onTranscribeAudio,

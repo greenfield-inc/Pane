@@ -22,5 +22,8 @@
     <true/>
     <key>com.apple.security.network.server</key>
     <true/>
+    <!-- Microphone, for holding R2 on a game controller to dictate -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
 </dict>
 </plist>

@@ -256,6 +256,7 @@ Notes tab.
 | Chat tabs (ACP agents without a terminal) | `main/src/services/chatTabs/`, `main/src/ipc/chatTabs.ts`, `frontend/src/components/chatTab/` | [CHAT_TABS.md](CHAT_TABS.md) |
 | Machine health (disk, memory, cleanup, Resources) | `main/src/services/machineHealth/`, `main/src/ipc/resourceMonitor.ts`, `frontend/src/components/machineHealth/` | [MACHINE_HEALTH.md](MACHINE_HEALTH.md) |
 | Autopilot (experimental agent above every Session) | `main/src/services/autopilot/`, `main/src/ipc/autopilot.ts`, `frontend/src/components/autopilot/` | [AUTOPILOT.md](AUTOPILOT.md) |
+| Game controllers | `shared/controller/` (profiles, interpreter, bindings, geometry), `frontend/src/controller/` (Gamepad API adapter, focus ring, overlays, dictation) | [CONTROLLERS.md](CONTROLLERS.md) |
 | Renderer updates | IPC events in `main/src/events.ts` | [STATE_MANAGEMENT.md](STATE_MANAGEMENT.md) |
 | Timestamps | `main/src/utils/timestampUtils.ts` | [TIMESTAMP_HANDLING.md](TIMESTAMP_HANDLING.md) |
 | Pane Chat and orchestration sessions | `paneChatManager.ts`, `skillCacheManager.ts`, `paneChatBundle/` | [SESSIONS.md](SESSIONS.md) |

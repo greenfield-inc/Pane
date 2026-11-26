@@ -175,10 +175,10 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'shortcuts',
     label: 'Shortcuts',
-    description: 'Application and terminal snippet hotkeys.',
+    description: 'Application and terminal snippet hotkeys, and game controllers.',
     icon: Keyboard,
-    settingIds: ['keyboard-shortcuts', 'command-palette-shortcut', 'keyboard-shortcut-map', 'kitty-keyboard', 'terminal-shortcuts'],
-    aliases: ['hotkeys', 'keyboard', 'keybindings', 'keybinding', 'rebind', 'remap', 'agent shortcut', 'snippets', 'kitty', 'key reporting'],
+    settingIds: ['keyboard-shortcuts', 'command-palette-shortcut', 'keyboard-shortcut-map', 'controller', 'kitty-keyboard', 'terminal-shortcuts'],
+    aliases: ['hotkeys', 'keyboard', 'keybindings', 'keybinding', 'rebind', 'remap', 'agent shortcut', 'snippets', 'kitty', 'key reporting', 'controller', 'gamepad', 'game controller', 'xbox', 'playstation', 'nintendo', 'button letters'],
   },
   {
     id: 'privacy',

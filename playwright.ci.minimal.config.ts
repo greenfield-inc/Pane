@@ -27,6 +27,7 @@ const BROWSER_SPECS = [
   'chrome-evidence.spec.ts',
   'codeless-remote.spec.ts',
   'command-palette.spec.ts',
+  'controller.spec.ts',
   'commit-dialog.spec.ts',
   'desktop-notifications.spec.ts',
   'device-tab.spec.ts',

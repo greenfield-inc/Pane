@@ -57,6 +57,7 @@ import { usePanelStore } from './stores/panelStore';
 import { forgetRevealedTerminal, forgetRevealedTerminalsInSession } from './utils/revealedTerminals';
 import { API } from './utils/api';
 import { onOpenSettingsRequest } from './utils/openSettings';
+import { ControllerLayer } from './controller/ControllerLayer';
 import { onOpenFirstRunRequest } from './utils/openFirstRun';
 import { dropLaunchOutline, revealApp } from './utils/launchOutline';
 import { prepareLaunchChat, restoreHostNavigation, restoreLaunchChat, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
@@ -1157,6 +1158,7 @@ function App() {
           onNewPane={handleNewPaneInProject}
         />
         <SessionArchiveConfirmDialog />
+        <ControllerLayer />
         <ArchiveConfirmDialog />
         {showCreateSessionDialog && activeProject && (
           <CreateSessionDialog

@@ -22,7 +22,8 @@ export type ShortcutCategory =
   | 'machines'
   | 'debug'
   | 'shortcuts'
-  | 'approvals';
+  | 'approvals'
+  | 'controller';
 
 type Digit1to9 = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
 type CustomSlot = '0' | '1' | '2' | '3';
@@ -65,6 +66,9 @@ const STATIC_SHORTCUT_IDS = [
   'open-machine-switcher', 'next-machine', 'previous-machine', 'toggle-all-machines',
   'show-keyboard-shortcuts', 'toggle-approvals', 'open-session-approval',
   'next-approval', 'previous-approval', 'approvals-group-by', 'send-approval',
+  'controller-focus-up', 'controller-focus-down', 'controller-focus-left', 'controller-focus-right',
+  'controller-activate', 'controller-back', 'controller-switch-column', 'dictate-hold', 'send-draft',
+  'open-key-pad', 'jump-to-bottom', 'next-needs-you', 'open-recent', 'show-controller-help',
 ] as const;
 
 export type StaticKeyboardShortcutId = typeof STATIC_SHORTCUT_IDS[number];
@@ -191,6 +195,31 @@ const SCROLL_ENTRIES: readonly ShortcutCatalogEntry[] = [
   entry({ id: 'page-focused-surface-down', label: 'Page focused surface down', category: 'view', scope: 'app', defaultChord: 'shift+PageDown' }),
 ];
 
+/**
+ * The controller scheme's commands (shared/controller/bindings.ts). They have
+ * no default key; a keyboard user can bind any of them in Settings › Shortcuts.
+ */
+function controllerCommand(id: KeyboardShortcutId, label: string): ShortcutCatalogEntry {
+  return entry({ id, label, category: 'controller', scope: 'app', defaultChord: null });
+}
+
+const CONTROLLER_ENTRIES: readonly ShortcutCatalogEntry[] = [
+  controllerCommand('controller-focus-up', 'Move Focus Up'),
+  controllerCommand('controller-focus-down', 'Move Focus Down'),
+  controllerCommand('controller-focus-left', 'Move Focus Left'),
+  controllerCommand('controller-focus-right', 'Move Focus Right'),
+  controllerCommand('controller-activate', 'Open or Pick Focused Item'),
+  controllerCommand('controller-back', 'Back'),
+  controllerCommand('controller-switch-column', 'Switch Split Column'),
+  controllerCommand('dictate-hold', 'Dictate (start or stop)'),
+  controllerCommand('send-draft', 'Send Draft'),
+  controllerCommand('open-key-pad', 'Open Key Pad'),
+  controllerCommand('jump-to-bottom', 'Jump to Bottom'),
+  controllerCommand('next-needs-you', 'Next Thing That Needs You'),
+  controllerCommand('open-recent', 'Open Recent'),
+  controllerCommand('show-controller-help', 'Show Controller Buttons'),
+];
+
 const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
 const panelEntries = digits.map(digit => entry({
   id: `panel-tab-${digit}`,
@@ -224,6 +253,7 @@ export const KEYBOARD_SHORTCUT_CATALOG = [
   ...APP_ENTRIES,
   ...SESSION_ENTRIES,
   ...SCROLL_ENTRIES,
+  ...CONTROLLER_ENTRIES,
   ...panelEntries,
   ...switchEntries,
   ...customEntries,
