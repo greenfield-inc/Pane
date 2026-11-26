@@ -76,13 +76,22 @@ export class SessionSettingsForm {
     return settingsSave(this.prefill, values);
   }
 
-  /** The form to show after a save failed with `message`, and what to tell the person. */
-  afterFailure(message: string, current: OrchestrationSessionRecord): SessionSettingsRetry {
+  /**
+   * The form to show after a save failed with `message`, and what to tell the person. After a
+   * refusal it refills from the full record `readCurrent` fetches from the host: the dialog's own
+   * record may still be a list summary folded over the old profile (#1768 review F-4).
+   */
+  async afterFailure(message: string, readCurrent: () => Promise<OrchestrationSessionRecord>): Promise<SessionSettingsRetry> {
     if (!REVISION_REFUSAL.test(message)) return { form: this, message };
-    return {
-      form: new SessionSettingsForm(current),
-      message: 'These settings changed on another device. The form now shows the current ones: check them and save again.',
-    };
+    try {
+      return {
+        form: new SessionSettingsForm(await readCurrent()),
+        message: 'These settings changed on another device. The form now shows the current ones: check them and save again.',
+      };
+    } catch (cause) {
+      const reason = cause instanceof Error ? cause.message : 'no reason given';
+      return { form: this, message: `These settings changed on another device, and Pane could not load the current ones (${reason}). Close Settings and open them again.` };
+    }
   }
 }
 

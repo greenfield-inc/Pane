@@ -91,23 +91,51 @@ describe('SessionSettingsForm (T-127 review F-3)', () => {
     expect(form.saveInput(form.values).expectedRevision).toBe(4);
   });
 
-  it('refills from the current record after the host refuses a stale save, so saving again cannot write the old profile', () => {
+  it('refills from the current record after the host refuses a stale save, so saving again cannot write the old profile', async () => {
     const { form } = openedBeforeTheOverview();
     const refused = 'Session Release changed; expected revision 4, found 5';
 
-    const next = form.afterFailure(refused, record(5, { profile: 'New' }));
+    const next = await form.afterFailure(refused, async () => record(5, { profile: 'New' }));
 
     expect(next.form.values.profile).toBe('New');
     expect(next.form.saveInput(next.form.values).expectedRevision).toBe(5);
     expect(next.message).toBe('These settings changed on another device. The form now shows the current ones: check them and save again.');
   });
 
-  it('keeps what the person typed when a save fails for another reason', () => {
+  // Review F-4: the refusal came back before the overview, so the dialog's record was still the folded view.
+  it('reads the full record from the host on a refusal, not the dialog\'s record, which may still hold the old profile', async () => {
+    const { view, form } = openedBeforeTheOverview();
+    const stillFolded = newestFullRecord(view, record(4, { profile: 'Old' }));
+    const reads: string[] = [];
+
+    const next = await form.afterFailure('Session Release changed; expected revision 4, found 5', async () => {
+      reads.push('get');
+      return record(5, { profile: 'New' });
+    });
+
+    expect(stillFolded.profile).toBe('Old');
+    expect(reads).toEqual(['get']);
+    expect(next.form.values.profile).toBe('New');
+    expect(next.form.saveInput(next.form.values).expectedRevision).toBe(5);
+  });
+
+  it('says so, and claims nothing current, when the current settings cannot be read after a refusal', async () => {
     const { form } = openedBeforeTheOverview();
 
-    const next = form.afterFailure('The host did not answer.', record(5, { profile: 'New' }));
+    const next = await form.afterFailure('Session Release changed; expected revision 4, found 5', async () => { throw new Error('The host did not answer.'); });
+
+    expect(next.form).toBe(form);
+    expect(next.message).toBe('These settings changed on another device, and Pane could not load the current ones (The host did not answer.). Close Settings and open them again.');
+  });
+
+  it('keeps what the person typed when a save fails for another reason, without reading anything', async () => {
+    const { form } = openedBeforeTheOverview();
+    let reads = 0;
+
+    const next = await form.afterFailure('The host did not answer.', async () => { reads += 1; return record(5, { profile: 'New' }); });
 
     expect(next.form).toBe(form);
     expect(next.message).toBe('The host did not answer.');
+    expect(reads).toBe(0);
   });
 });
