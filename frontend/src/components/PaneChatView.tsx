@@ -690,8 +690,8 @@ function CachedSessionTileBody({ sessionId, record, hostId, chrome }: {
         inert={showsAnother || undefined}
         data-session-shown-before={showsAnother ? display.view.session.id : undefined}
       >
-        {/* No bones anywhere in a Session the cursor only passes over (T-87, G): what loads fills in. */}
-        <QuietSkeletons quiet={show.peeking}>
+        {/* No bones anywhere in a Session the cursor only passes over, nor in the one kept dimmed behind it (T-87, G). */}
+        <QuietSkeletons quiet={show.peeking || showsAnother}>
           <NamedSessionWorkspace
             key={display.view.session.id}
             view={view}
