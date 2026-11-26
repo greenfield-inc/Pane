@@ -2299,10 +2299,13 @@ function isInspectorPanel(panel: ToolPanel): boolean {
 
 /**
  * Whether Agent Farm's list still has a Session's profile: as a profile, or as an agent a profile links
- * to, which a Session started from a launch link's command runs (T-83 P3).
+ * to, which a Session started from a launch link's command runs (T-83 P3). A list with nothing from the
+ * ref's plugin (Pane's first start, before it installs greenfield) proves nothing, so it counts as listed;
+ * Reload then refuses a plugin that stays missing on its own (SESSION_PROFILE_UNKNOWN).
  */
 function profileListed(list: AgentFarmProfileList, ref: string): boolean {
   const plugin = ref.split('/')[0];
+  if (!list.profiles.some(entry => entry.plugin === plugin)) return true;
   return list.profiles.some(entry => entry.ref === ref) || !!list.linked?.some(linked => linked === ref || linked === `${plugin}/*`);
 }
 
