@@ -414,16 +414,19 @@ describe('installBundledAgentFarm after a partial install (review F-1)', () => {
     return (await promisify(execFile)(agentFarm.executable, agentFarm.args, { env: agentFarm.env })).stdout;
   };
 
-  it('installs a plugin whose install failed on the retry, without taking Pane\'s half-copy for an edit', async () => {
+  it('keeps an edit to a plugin that finished installing when a later plugin failed, and installs the failed one on retry', async () => {
     const paneDir = tempDir();
     const configRoot = agentFarmConfigRoot(paneDir);
-    // greenfield is the only bundled plugin, so failing `plugin install` fails it.
-    const failed = await installBundledAgentFarm({ paneDir, run: failing('install'), log: () => undefined });
+    // Pane's own plugin installs after greenfield, so it is the later plugin that fails.
+    const failed = await installBundledAgentFarm({ paneDir, run: failing(path.join(configRoot, 'pane-plugin', 'pane')), log: () => undefined });
     expect(failed.state).toBe('failed');
+    const advisor = path.join(configRoot, 'plugins', 'greenfield', 'agents', 'advisor.md');
+    writeFileSync(advisor, '\nMine.\n', { flag: 'a' });
     const retried = await installBundledAgentFarm({ paneDir, run: failing(), log: () => undefined });
     expect(retried.error).toBeUndefined();
-    expect(retried).toMatchObject({ state: 'ready', edited: [] });
-    expect(readFileSync(path.join(configRoot, '.plugins', 'greenfield.json'), 'utf8')).toContain('"name": "greenfield"');
+    expect(retried).toMatchObject({ state: 'ready', edited: ['greenfield'] });
+    expect(readFileSync(advisor, 'utf8')).toContain('Mine.');
+    expect(readFileSync(path.join(configRoot, '.plugins', 'pane.json'), 'utf8')).toContain('"name": "pane"');
   }, 180_000);
 });
 

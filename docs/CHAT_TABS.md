@@ -625,7 +625,7 @@ Farm's profile format has fields for them. The tab edits the plugins in
 place: a save is first checked with `agent-farm plugin validate` on a staged copy
 (without a pack's stale `checksums`, which launches don't read), so nothing changes
 unless Agent Farm accepts it, and Sessions using the plugin then show the changed
-dot. Saving greenfield or dcouple makes it **Edited** this way, and **Restore
+dot. Saving greenfield makes it **Edited** this way, and **Restore
 Pane's version** reinstalls the bundled copy and takes it off `edited`. A new
 profile is a plugin installed with `agent-farm plugin install`, since Agent Farm
 finds plugins by their receipts. `run` writes its launch bundle to
@@ -702,9 +702,9 @@ written after the install. The plugin, its receipt and its photos there are set
 aside first (nothing there is removed until both have been) and put back if
 anything before the record is written fails; a
 deletion is recorded only when a plugin's receipt is certainly gone, never on a
-read that failed. greenfield and dcouple sync only once you change them: a photo
+read that failed. greenfield syncs only once you change it: a photo
 alone keeps each computer's own Pane version (`pane` records), an edit (a title or
-cover page counts, as those plugins ship neither) travels as your copy and stays
+cover page counts, as greenfield ships neither) travels as your copy and stays
 **Edited** there (Pane updates keep it while Profiles is on; off, Agent Farm's
 receipt alone decides, as before), and Restore restores Pane's version everywhere. The calls answer only your own machines, never a
 teammate on a shared tailnet. Two dev instances on one computer sync through

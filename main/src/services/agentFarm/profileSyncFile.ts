@@ -54,7 +54,7 @@ export async function writeProfileSync(configRoot: string, data: ProfileSyncFile
 }
 
 /**
- * Pane plugins (greenfield, dcouple) whose newest save here is your edited copy, synced from
+ * Pane plugins (greenfield) whose newest save here is your edited copy, synced from
  * another computer or saved here: Pane updates keep them, as they keep a plugin edited here (A-3).
  */
 export async function syncedPluginEdits(configRoot: string): Promise<Set<string>> {
