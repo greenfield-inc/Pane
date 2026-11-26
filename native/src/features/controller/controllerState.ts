@@ -10,6 +10,8 @@ interface ControllerState {
   /** A pad is connected and has been pressed since. */
   active: boolean;
   family: ControllerFamily;
+  /** What the pad calls itself, shown on the cheat sheet beside the letters Pane chose. */
+  padName: string;
   /** The ring shows after a controller press and hides on touch or disconnect. */
   ringShown: boolean;
   /** The cheat sheet is open: − held, the first press after install, or Settings' button. */
@@ -30,6 +32,7 @@ function storedLetters(): ButtonLettersOverride {
 export const useControllerState = create<ControllerState>(set => ({
   active: false,
   family: 'generic',
+  padName: '',
   ringShown: false,
   cheatSheet: null,
   letters: storedLetters(),

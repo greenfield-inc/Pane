@@ -115,7 +115,7 @@ export function ControllerInput() {
       activePad.id = id;
       activePad.hasRumble = raw.hasRumble ?? false;
       const state = useControllerState.getState();
-      useControllerState.setState({ active: true, family, ringShown: true });
+      useControllerState.setState({ active: true, family, padName: raw.name ?? '', ringShown: true });
       if (!state.sheetSeen) {
         state.markSheetSeen();
         useControllerState.setState({ cheatSheet: 'open' });

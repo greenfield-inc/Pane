@@ -1,7 +1,7 @@
 import { Linking, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { cheatSheet } from '@shared/controller/bindings';
-import { BUTTON_LETTERS_OVERRIDES } from '@shared/controller/profiles';
+import { BUTTON_LETTERS_OVERRIDES, type ControllerFamily } from '@shared/controller/profiles';
 
 import { useTheme, withAlpha } from '@/theme';
 import { Text } from '@/ui';
@@ -19,6 +19,7 @@ export function CheatSheet() {
   const theme = useTheme();
   const shown = useControllerState(state => state.cheatSheet);
   const family = useControllerState(state => state.family);
+  const padName = useControllerState(state => state.padName);
   if (!shown) return null;
   const sheet = cheatSheet(family);
   const close = () => useControllerState.setState({ cheatSheet: null });
@@ -26,6 +27,7 @@ export function CheatSheet() {
       <Pressable testID="controller-cheat-sheet" accessibilityLabel="Close controller buttons" style={[styles.backdrop, { backgroundColor: withAlpha(theme.colors.background, 0.72) }]} onPress={close}>
         <View style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
           <Text variant="headline">Controller</Text>
+          <Text testID="controller-pad" variant="footnote" tone="secondary">{[padName, family === 'unrecognised' ? null : `${FAMILY_LETTERS[family]} letters`].filter(Boolean).join(' · ')}</Text>
           {sheet.note
             ? <Text variant="body" tone="secondary">{sheet.note}</Text>
             : sheet.rows.map(row => (
@@ -56,6 +58,13 @@ export function CheatSheet() {
     </Modal>
   );
 }
+
+const FAMILY_LETTERS: Record<Exclude<ControllerFamily, 'unrecognised'>, string> = {
+  xbox: 'Xbox',
+  playstation: 'PlayStation',
+  nintendo: 'Nintendo',
+  generic: 'Xbox-style',
+};
 
 export const LETTER_LABELS: Record<(typeof BUTTON_LETTERS_OVERRIDES)[number], string> = {
   auto: 'Auto',
