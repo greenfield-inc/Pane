@@ -124,7 +124,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   /** Whether a Session agent's finished turn ended with a message the person can read (sessionReply.ts). */
   private replyProbe: ReplyProbe = createReplyProbe(hostReplyProbeSources(
     paneId => this.sessionManager.getSession(paneId)?.worktreePath,
-    { loadCursor: panelId => this.replyCursorOf(panelId), saveCursor: (panelId, cursor) => this.saveReplyCursor(panelId, cursor) },
+    { loadCursors: panelId => this.replyCursorsOf(panelId), saveCursors: (panelId, cursors) => this.saveReplyCursors(panelId, cursors) },
   ));
 
   constructor(
@@ -1142,25 +1142,22 @@ export class OrchestrationSessionManager extends EventEmitter {
     }
   }
 
-  /** Where the reply probe last finished reading `panelId`'s transcript, as saved with its Session. */
-  private async replyCursorOf(panelId: string): Promise<TranscriptCursor | undefined> {
+  /** Where the reply probe last finished reading `panelId`'s transcripts, as saved with its Session. */
+  private async replyCursorsOf(panelId: string): Promise<TranscriptCursor[]> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
-      const saved = this.store.read().sessions.find(session => session.replyCursor?.panelId === panelId)?.replyCursor;
-      if (!saved) return undefined;
-      const cursor: TranscriptCursor = { file: saved.file, id: saved.id, offset: saved.offset };
-      if (saved.fresh) cursor.fresh = true;
-      return cursor;
+      const saved = this.store.read().sessions.find(session => session.replyCursors?.panelId === panelId)?.replyCursors;
+      return saved ? saved.cursors.map(cursor => ({ ...cursor })) : [];
     });
   }
 
-  private async saveReplyCursor(panelId: string, cursor: TranscriptCursor): Promise<void> {
+  private async saveReplyCursors(panelId: string, cursors: readonly TranscriptCursor[]): Promise<void> {
     await withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
       const current = data.sessions.find(session => Object.values(session.panelIds).includes(panelId));
       if (!current) return;
-      this.store.write(replaceSession(data, { ...current, replyCursor: { panelId, ...cursor } }));
+      this.store.write(replaceSession(data, { ...current, replyCursors: { panelId, cursors: cursors.map(cursor => ({ ...cursor })) } }));
     });
   }
 

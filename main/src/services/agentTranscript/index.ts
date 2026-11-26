@@ -185,15 +185,17 @@ function turnEndsWithText(turn: TranscriptTurn): boolean {
  * prompt has finished; the last one has finished only when the agent is idle now (`idleNow`), so a
  * turn still working never lends its reply to the one before.
  *
- * With no cursor for this transcript (none yet, another file, or the same path replaced or rewritten
- * shorter), nothing counts: the answer is a fresh start at the transcript's end, so resumed history
- * is never read as a new reply. The exception is a transcript new to this Pane run (`runStartedAtMs`):
- * another file than the cursor's, created since Pane started, as a new Session or a relaunched agent
- * writes. It holds no history the person read, so it is read from its start.
+ * `known` holds the tab's cursors, one per transcript it read (path and identity), so going back to
+ * a transcript (A, then /clear to B, then /resume A) reads it from its own place. With no cursor for
+ * this transcript (none yet, or the same path replaced or rewritten shorter), nothing counts: the
+ * answer is a fresh start at the transcript's end, so resumed history is never read as a new reply.
+ * The exception is a transcript at a path the tab has no cursor for, created since Pane started
+ * (`runStartedAtMs`), as a new Session or a relaunched agent writes: it holds no history the person
+ * read, so it is read from its start.
  */
-async function readFinishedTurns(locator: TranscriptLocator, cursor: TranscriptCursor | undefined, idleNow: boolean, runStartedAtMs?: number): Promise<FinishedTurns> {
+async function readFinishedTurns(locator: TranscriptLocator, known: readonly TranscriptCursor[], idleNow: boolean, runStartedAtMs?: number): Promise<FinishedTurns> {
   const [file] = await transcriptFiles(locator, locator.notBeforeMs ?? 0);
-  if (!file) return { endedWithText: undefined, cursor };
+  if (!file) return { endedWithText: undefined, cursor: undefined };
   let id: string;
   let size: number;
   let createdMs: number;
@@ -204,15 +206,16 @@ async function readFinishedTurns(locator: TranscriptLocator, cursor: TranscriptC
     // 0 where the file system keeps no creation time: such a file is never taken as new.
     createdMs = stats.birthtimeMs;
   } catch {
-    return { endedWithText: undefined, cursor };
+    return { endedWithText: undefined, cursor: undefined };
   }
-  const newToRun = cursor?.file !== file && runStartedAtMs !== undefined && createdMs > 0 && createdMs >= runStartedAtMs;
-  if (newToRun) cursor = { file, id, offset: 0 };
-  if (!cursor || cursor.file !== file || cursor.id !== id || size < cursor.offset) {
+  const samePath = known.filter(candidate => candidate.file === file);
+  const newToRun = samePath.length === 0 && runStartedAtMs !== undefined && createdMs > 0 && createdMs >= runStartedAtMs;
+  const cursor = newToRun ? { file, id, offset: 0 } : samePath.find(candidate => candidate.id === id);
+  if (!cursor || size < cursor.offset) {
     return { endedWithText: undefined, cursor: { file, id, offset: size, fresh: true }, missed: true };
   }
   const entries = await readEntries(locator, file);
-  if (!entries) return { endedWithText: undefined, cursor };
+  if (!entries) return { endedWithText: undefined, cursor: undefined };
   const turns: TranscriptTurn[] = [];
   let lastOffset: number | undefined;
   for (const entry of entries) {
@@ -227,7 +230,7 @@ async function readFinishedTurns(locator: TranscriptLocator, cursor: TranscriptC
   }
   const working = idleNow ? undefined : turns.at(-1);
   const finished = working ? turns.slice(0, -1) : turns;
-  if (lastOffset === undefined) return { endedWithText: undefined, cursor };
+  if (lastOffset === undefined) return { endedWithText: undefined, cursor: undefined };
   const next: TranscriptCursor = { file, id, offset: working ? working.start : lastOffset + 1 };
   // Only rows before the next prompt so far: the fresh start still holds.
   if (cursor.fresh && turns.length === 0) next.fresh = true;

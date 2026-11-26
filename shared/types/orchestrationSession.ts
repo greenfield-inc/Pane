@@ -145,11 +145,12 @@ export interface OrchestrationSessionRecord {
    */
   readState?: SessionReadState;
   /**
-   * Where the host last finished reading the Session agent's terminal transcript for replies
-   * (sessionReply.ts): the tab, the file and its identity, and the offset. Stored, so a restart
-   * neither replays an old reply nor misses a new one.
+   * Where the host last finished reading the Session agent's terminal transcripts for replies
+   * (sessionReply.ts): the tab, and per transcript (path and identity, the last 8) the offset.
+   * Stored, so a restart or a return to an earlier conversation neither replays an old reply nor
+   * misses a new one.
    */
-  replyCursor?: { panelId: string; file: string; id: string; offset: number; fresh?: boolean };
+  replyCursors?: { panelId: string; cursors: Array<{ file: string; id: string; offset: number; fresh?: boolean }> };
   agent: PaneChatAgent;
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;

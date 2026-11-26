@@ -34,48 +34,53 @@ export interface ReplyProbeSources {
   locatorOf(panelId: string): TranscriptLocator | undefined;
   /** The tab's agent is idle now, so its last turn has finished. */
   isIdle(panelId: string): boolean;
-  readTurns(locator: TranscriptLocator, cursor: TranscriptCursor | undefined, idleNow: boolean, runStartedAtMs: number): Promise<FinishedTurns>;
+  readTurns(locator: TranscriptLocator, known: readonly TranscriptCursor[], idleNow: boolean, runStartedAtMs: number): Promise<FinishedTurns>;
   /** When this Pane run started; a transcript created since is new and read from its start. Defaults to the probe's creation. */
   runStartedAtMs?: number;
   wait(ms: number): Promise<void>;
-  /** The tab's cursor as saved with its Session, so a restart starts where the last judgment stopped. */
-  loadCursor(panelId: string): Promise<TranscriptCursor | undefined>;
-  saveCursor(panelId: string, cursor: TranscriptCursor): Promise<void>;
+  /** The tab's cursors (one per transcript it read) as saved with its Session, so a restart starts where the last judgment stopped. */
+  loadCursors(panelId: string): Promise<readonly TranscriptCursor[]>;
+  saveCursors(panelId: string, cursors: readonly TranscriptCursor[]): Promise<void>;
 }
+
+/** Cursors kept per tab: the transcripts it read most recently. */
+const MAX_TRANSCRIPT_CURSORS = 8;
 
 /** Reads after the tab went idle: at once, then after these waits. A positive read needs the next one to agree. */
 const TRANSCRIPT_READ_WAITS_MS = [1_000, 1_000, 2_000];
 
 export function createReplyProbe(sources: ReplyProbeSources): ReplyProbe {
-  const cursors = new Map<string, TranscriptCursor>();
+  const cursors = new Map<string, readonly TranscriptCursor[]>();
   const runStartedAtMs = sources.runStartedAtMs ?? Date.now();
   /** Per tab, the judgment running now: the next one waits for it. */
   const running = new Map<string, Promise<boolean>>();
 
-  const keep = async (panelId: string, cursor: TranscriptCursor) => {
-    cursors.set(panelId, cursor);
-    await sources.saveCursor(panelId, cursor).catch(error => { console.warn(`[Sessions] Could not save where panel ${panelId}'s turns were read to:`, error); });
+  /** Records where reading `cursor.file` stopped, in place of that path's earlier cursor, newest last. */
+  const keep = async (panelId: string, known: readonly TranscriptCursor[], cursor: TranscriptCursor) => {
+    const next = [...known.filter(candidate => candidate.file !== cursor.file), cursor].slice(-MAX_TRANSCRIPT_CURSORS);
+    cursors.set(panelId, next);
+    await sources.saveCursors(panelId, next).catch(error => { console.warn(`[Sessions] Could not save where panel ${panelId}'s turns were read to:`, error); });
   };
 
   const judge = async (panelId: string): Promise<boolean> => {
     if (!isTranscriptAgent(sources.agentTypeOf(panelId))) return true;
     const locator = sources.locatorOf(panelId);
     if (!locator) return false;
-    const from = cursors.get(panelId) ?? await sources.loadCursor(panelId).catch(() => undefined);
+    const known = cursors.get(panelId) ?? await sources.loadCursors(panelId).catch(() => []);
     let previous: boolean | undefined;
     let last: FinishedTurns | undefined;
     let settled = false;
     for (const delay of [0, ...TRANSCRIPT_READ_WAITS_MS]) {
       if (delay > 0) await sources.wait(delay);
       try {
-        last = await sources.readTurns(locator, from, sources.isIdle(panelId), runStartedAtMs);
+        last = await sources.readTurns(locator, known, sources.isIdle(panelId), runStartedAtMs);
       } catch (error) {
         console.warn(`[Sessions] Could not read panel ${panelId}'s transcript, so its turn does not mark the Session unread:`, error);
         return false;
       }
       // No cursor for this transcript: keep the fresh start, credit nothing.
       if (last.missed) {
-        if (last.cursor) await keep(panelId, last.cursor);
+        if (last.cursor) await keep(panelId, known, last.cursor);
         return false;
       }
       settled = last.endedWithText === true && previous === true;
@@ -83,7 +88,7 @@ export function createReplyProbe(sources: ReplyProbeSources): ReplyProbe {
       previous = last.endedWithText;
     }
     // Judged: the next turn is read from where this judgment stopped. Nothing found leaves the cursor.
-    if (last?.endedWithText !== undefined && last.cursor) await keep(panelId, last.cursor);
+    if (last?.endedWithText !== undefined && last.cursor) await keep(panelId, known, last.cursor);
     return settled;
   };
 
@@ -108,7 +113,7 @@ function terminalAgentType(panelId: string): string | undefined {
 /** The host's sources: `worktreeOf` gives a Pane's working directory, where its agent's transcript is kept. */
 export function hostReplyProbeSources(
   worktreeOf: (paneId: string) => string | undefined,
-  saved: Pick<ReplyProbeSources, 'loadCursor' | 'saveCursor'>,
+  saved: Pick<ReplyProbeSources, 'loadCursors' | 'saveCursors'>,
 ): ReplyProbeSources {
   return {
     ...saved,
