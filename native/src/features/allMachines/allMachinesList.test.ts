@@ -157,7 +157,9 @@ describe('buildAllMachinesList', () => {
 });
 
 describe('recentlyOpened', () => {
-  it('lists the Panes and Sessions opened on any machine, last opened first, at most ten', () => {
+  const at = (iso: string) => Date.parse(iso);
+
+  it('lists what was last opened on any machine, newest first, at most ten, from hosts that report it', () => {
     const opened: MachineFeed = {
       key: 'profile-studio',
       name: 'studio-mac',
@@ -175,9 +177,11 @@ describe('recentlyOpened', () => {
     const other: MachineFeed = {
       key: 'profile-build',
       name: 'build-box',
-      snapshot: { projects: [{ id: 1, name: 'infra', sessions: [{ id: 'pane-1', name: 'deploy', lastViewedAt: '2026-10-30 09:45:00' }] }] },
+      snapshot: {
+        projects: [{ id: 1, name: 'infra', sessions: [{ id: 'pane-1', name: 'deploy', lastViewedAt: '2026-10-30 09:45:00' }] }],
+        sessions: [{ ...session('s-9', 'Infra', [], '2026-10-01T08:00:00Z'), openedAt: '2026-10-01T08:00:00.000Z' }],
+      },
     };
-
     const rows = recentlyOpened(buildAllMachinesList([opened, other], '').recent);
     expect(rows.map(row => row.key)).toEqual([
       'profile-studio:session:s-1',
@@ -185,8 +189,58 @@ describe('recentlyOpened', () => {
       'profile-studio:pane:pane-1',
       ...[9, 8, 7, 6, 5, 4, 3].map(index => `profile-studio:pane:old-${index}`),
     ]);
-    expect(rows[0].openedAt).toBe(Date.parse('2026-10-30T09:50:00Z'));
-    expect(rows[2].openedAt).toBe(Date.parse('2026-10-30T09:40:00Z'));
+    expect(rows[0].openedAt).toBe(at('2026-10-30T09:50:00Z'));
+    expect(rows[2].openedAt).toBe(at('2026-10-30T09:40:00Z'));
+  });
+
+  it('counts a Session as opened when a Pane in it was, on the desktop or this phone', () => {
+    const machine: MachineFeed = {
+      key: 'profile-studio',
+      name: 'studio-mac',
+      snapshot: {
+        projects: [{ id: 1, name: 'acme-web', sessions: [
+          { id: 'worker', name: 'worker', lastViewedAt: '2026-10-30 09:30:00' },
+          { id: 'other', name: 'other', lastViewedAt: '2026-10-30 09:20:00' },
+        ] }],
+        sessions: [
+          { ...session('s-1', 'App and fixes', ['worker', 'other'], '2026-10-30T08:00:00Z'), openedAt: '2026-10-30T08:00:00.000Z' },
+          { ...session('s-2', 'Cloud', [], '2026-10-30T08:00:00Z'), openedAt: '2026-10-30T09:00:00.000Z' },
+        ],
+      },
+    };
+    const list = buildAllMachinesList([machine], '').recent;
+    expect(recentlyOpened(list).map(row => [row.key, row.openedAt])).toEqual([
+      ['profile-studio:session:s-1', at('2026-10-30T09:30:00Z')],
+      ['profile-studio:pane:worker', at('2026-10-30T09:30:00Z')],
+      ['profile-studio:pane:other', at('2026-10-30T09:20:00Z')],
+      ['profile-studio:session:s-2', at('2026-10-30T09:00:00Z')],
+    ]);
+    // Opened since on this phone, before the host's list caught up.
+    expect(recentlyOpened(list, { 'profile-studio': { other: at('2026-10-30T09:55:00Z') } }).slice(0, 2).map(row => row.key))
+      .toEqual(['profile-studio:session:s-1', 'profile-studio:pane:other']);
+  });
+
+  it('lists only what this phone opened on a host that does not report Sessions\' openedAt', () => {
+    // Such a host never marked a Session's Panes viewed, so its Panes' last views are days old.
+    const olderHost: MachineFeed = {
+      key: 'profile-studio',
+      name: 'studio-mac',
+      snapshot: {
+        projects: [{ id: 1, name: 'acme-web', sessions: [
+          { id: 'stale', name: 'stale', lastViewedAt: '2026-10-21 09:00:00' },
+          { id: 'worker', name: 'worker', lastViewedAt: '2026-10-21 08:00:00' },
+          { id: 'chat', name: 'chat', isHidden: true },
+        ] }],
+        sessions: [{ ...session('s-1', 'App and fixes', ['worker'], '2026-10-30T08:00:00Z'), internalSessionId: 'chat' }],
+      },
+    };
+    const list = buildAllMachinesList([olderHost], '').recent;
+    expect(recentlyOpened(list)).toEqual([]);
+    expect(recentlyOpened(list, { 'profile-studio': { chat: at('2026-10-30T09:50:00Z'), worker: at('2026-10-30T09:10:00Z') } })
+      .map(row => [row.key, row.openedAt])).toEqual([
+      ['profile-studio:session:s-1', at('2026-10-30T09:50:00Z')],
+      ['profile-studio:pane:worker', at('2026-10-30T09:10:00Z')],
+    ]);
   });
 });
 

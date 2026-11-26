@@ -91,7 +91,12 @@ export interface AllPane {
 }
 
 export type RecentRow =
-  | RowBase & { type: 'pane'; pane: AllPane; openedAt?: number }
+  | RowBase & {
+    type: 'pane';
+    pane: AllPane;
+    /** Epoch ms someone last opened it, on any device. Left out for hosts that don't report Sessions' `openedAt`. */
+    openedAt?: number;
+  }
   | RowBase & {
     type: 'session';
     session: OrchestrationSessionRecord;
@@ -140,6 +145,8 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
     const asked = approvalItems(snapshot.notify);
     const blocked = new Set([...pending.map(request => request.sessionId), ...asked.flatMap(item => (item.state === 'waiting' && !isWithAgent(item) && item.source.paneId) || [])]);
     const sessions = (snapshot.sessions ?? []).filter(session => !session.archived);
+    // Hosts before Sessions' `openedAt` also left a Pane's last view stale (opening its Session never set it).
+    const reportsOpens = (snapshot.sessions ?? []).some(session => session.openedAt !== undefined);
     const sessionOf = new Map(sessions.flatMap(session => session.associations.map(association => [association.paneId, { id: session.id, name: session.name }] as const)));
     const paneNames = new Map<string, string>();
     const projectOfPane = new Map<string, string>();
@@ -165,7 +172,7 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
             paused: pane.paused,
             activeAt: timeOf(pane.lastActivity) ?? timeOf(pane.createdAt) ?? 0,
           },
-          openedAt: timeOf(pane.lastViewedAt),
+          openedAt: reportsOpens ? timeOf(pane.lastViewedAt) : undefined,
         });
       }
     }
@@ -233,9 +240,32 @@ export function sinceLabel(at: number, now: number): string {
 export const RECENT_PREVIEW = 3;
 const RECENT_LIMIT = 10;
 
-/** The Panes and Sessions someone last opened, on the desktop or a phone, newest first. */
-export function recentlyOpened(recent: readonly RecentRow[]): RecentRow[] {
-  return recent.filter(row => row.openedAt !== undefined).sort((a, b) => (b.openedAt ?? 0) - (a.openedAt ?? 0)).slice(0, RECENT_LIMIT);
+/**
+ * The Panes and Sessions last opened, newest first: what the host reports, or this phone opened
+ * (`onPhone`: by machine, then Pane id). A Session counts as opened when its chat or a Pane in it was.
+ */
+export function recentlyOpened(recent: readonly RecentRow[], onPhone: Readonly<Record<string, Readonly<Record<string, number>>>> = {}): RecentRow[] {
+  const paneOpened = new Map(recent.flatMap(row => (row.type === 'pane' ? [[row.key, latest(row.openedAt, onPhone[row.machineKey]?.[row.pane.id])] as const] : [])));
+  return recent
+    .map((row): RecentRow => (row.type === 'pane'
+      ? { ...row, openedAt: paneOpened.get(row.key) }
+      : {
+        ...row,
+        openedAt: latest(
+          row.openedAt,
+          onPhone[row.machineKey]?.[row.session.internalSessionId],
+          ...row.session.associations.map(association => paneOpened.get(`${row.machineKey}:pane:${association.paneId}`)),
+        ),
+      }))
+    .filter(row => row.openedAt !== undefined)
+    // A Session sits above the Pane that made it recent.
+    .sort((a, b) => (b.openedAt ?? 0) - (a.openedAt ?? 0) || Number(b.type === 'session') - Number(a.type === 'session'))
+    .slice(0, RECENT_LIMIT);
+}
+
+function latest(...times: Array<number | undefined>): number | undefined {
+  const known = times.filter((time): time is number => time !== undefined);
+  return known.length > 0 ? Math.max(...known) : undefined;
 }
 
 /** An ISO time, or SQLite's UTC `YYYY-MM-DD HH:MM:SS` (a Pane's `lastViewedAt`). */

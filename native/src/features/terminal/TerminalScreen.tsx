@@ -34,6 +34,7 @@ import { useAffordances } from '../hosts/hostSettings';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { clearPaneNotifications } from '../notifications/device';
 import { LogsTab } from '../runScript/LogsTab';
+import { useOpenedOnPhone } from '../home/useOpenedOnPhone';
 import { useAgentStatuses, useMarkPaneSeen } from '../panes/hooks';
 import { ShortcutsSheet } from '../shortcuts/ShortcutsSheet';
 import { PlaceholderTab } from '../tabs/PlaceholderTab';
@@ -133,11 +134,14 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   // and out, however the screen was opened (list, notification or link).
   const markSeen = useMarkPaneSeen();
   // The host keeps when it was last opened, on any device: Home's Recent lists by it. A Session's
-  // view is its chat Pane's, which the Sessions list reports as the Session's `openedAt`.
+  // view is its chat Pane's, which the Sessions list reports as the Session's `openedAt`. The phone
+  // keeps its own record too, for hosts that don't report it.
   const markViewed = useInvokeMutation<[string]>('sessions:mark-viewed', { invalidates: ['orchestration-sessions:list'] });
+  const recordOpened = useOpenedOnPhone(state => state.record);
   const markThisPaneSeen = useEffectEvent(() => {
     markSeen(paneId);
     markViewed.mutate([paneId]);
+    recordOpened(profile.id, paneId);
     void clearPaneNotifications(paneId);
   });
   useEffect(() => {

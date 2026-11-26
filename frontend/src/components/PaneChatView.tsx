@@ -202,6 +202,16 @@ function SessionWorkspace() {
     void select({ sessionId }).catch(() => undefined);
   }, [select]);
 
+  // The Session on screen counts as opened when it shows (a launch restores one without a click)
+  // and each time the window comes back to it: a phone's Recent lists Sessions by when they were opened.
+  const shownChatPaneId = sessions.find(session => session.id === selectedSessionId)?.internalSessionId;
+  useEffect(() => {
+    if (!shownChatPaneId) return;
+    const markOpened = () => { void API.sessions.markViewed(shownChatPaneId).catch(() => undefined); };
+    markOpened();
+    return window.electronAPI?.events?.onWindowFocusChanged?.(focused => { if (focused) markOpened(); });
+  }, [shownChatPaneId]);
+
   // Something always has to be selected for the layout to have a starting tile;
   // what the layout already shows beats an arbitrary first Session.
   useEffect(() => {
