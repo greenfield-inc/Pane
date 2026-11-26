@@ -50,12 +50,17 @@ describe('remapRange', () => {
   });
 
   it('keeps them when the window trims turns off its start', () => {
-    expect(remapRange(['a', 'b', 'c', 'd'], { start: 2, end: 4 }, ['c', 'd', 'e'])).toEqual({ start: 0, end: 2 });
+    expect(remapRange(['a', 'b', 'c', 'd'], { start: 2, end: 3 }, ['c', 'd', 'e'])).toEqual({ start: 0, end: 1 });
   });
 
   it('widens by one at an edge whose turn was renamed (an earlier page merged into it)', () => {
     // "turn:start:m5" became "turn:m4" once the page with m4 loaded; it is the turn just before c.
     expect(remapRange(['turn:start:m5', 'c', 'd'], { start: 0, end: 2 }, ['a', 'turn:m4', 'c', 'd'])).toEqual({ start: 1, end: 3 });
+  });
+
+  it('keeps reaching the last turn when a turn arrives at the live end', () => {
+    expect(remapRange(['a', 'b', 'c'], { start: 1, end: 3 }, ['a', 'b', 'c', 'd'])).toEqual({ start: 1, end: 4 });
+    expect(remapRange(['a', 'b', 'c'], { start: 0, end: 2 }, ['a', 'b', 'c', 'd'])).toEqual({ start: 0, end: 2 });
   });
 
   it('is null when none of the rendered turns is left (jumped to the latest window)', () => {

@@ -63,6 +63,7 @@ export function rangeHolds(range: TurnRange, visible: TurnRange, wanted: TurnRan
  * trimmed): the rows rendered before stay rendered, so a paging anchor still finds them.
  * A turn whose key changed (an earlier page merged into the first turn) is the one
  * just before the first key still there, so the range widens by one at a missing edge.
+ * A range that reached the last turn keeps reaching it, so a turn arriving at the live end renders at once.
  * Null when none of the rendered turns is left.
  */
 export function remapRange(previousKeys: readonly string[], range: TurnRange, keys: readonly string[]): TurnRange | null {
@@ -73,12 +74,21 @@ export function remapRange(previousKeys: readonly string[], range: TurnRange, ke
   const first = index.get(previousKeys[range.start] ?? '');
   const last = index.get(previousKeys[range.end - 1] ?? '');
   const start = first ?? Math.max(0, Math.min(...kept) - 1);
-  const end = last !== undefined ? last + 1 : Math.min(keys.length, Math.max(...kept) + 2);
+  const end = range.end >= previousKeys.length ? keys.length : last !== undefined ? last + 1 : Math.min(keys.length, Math.max(...kept) + 2);
   return { start: Math.min(start, end), end };
 }
 
+/** Estimates by turn: chatTurns hands back the same object for a turn that did not change. */
+const estimates = new WeakMap<ChatTurn, number>();
+
 /** A first guess at a turn's height before it has rendered: its text in lines, plus the fold row. */
 function estimateTurnHeight(turn: ChatTurn): number {
+  let estimate = estimates.get(turn);
+  if (estimate === undefined) { estimate = guessTurnHeight(turn); estimates.set(turn, estimate); }
+  return estimate;
+}
+
+function guessTurnHeight(turn: ChatTurn): number {
   let lines = 0;
   const count = (text: string) => { for (const paragraph of text.split('\n')) lines += Math.max(1, Math.ceil(paragraph.length / 90)); };
   for (const part of turn.user?.parts ?? []) if (part.type === 'text') count(part.text);
