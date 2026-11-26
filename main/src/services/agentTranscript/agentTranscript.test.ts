@@ -273,12 +273,12 @@ describe('readFinishedTurns', () => {
     fs.appendFileSync(file, jsonl(rows));
     fs.utimesSync(file, writtenAt, writtenAt);
   };
-  /** A transcript with one earlier turn already judged: the cursor is where that judgment stopped. */
+  /** A transcript with an earlier turn, and the cursor Pane set at its end on first sight. */
   const afterEarlierTurn = async () => {
     const file = writeClaude(sessionId, [prompt('start', '2026-09-27T18:29:00.000Z'), say('msg_0', 'Earlier turn', '2026-09-27T18:30:00.000Z')]);
-    const earlier = await readFinishedTurns(claudeLocator(), undefined, true);
-    expect(earlier.endedWithText).toBe(true);
-    return { file, cursor: earlier.cursor };
+    const first = await readFinishedTurns(claudeLocator(), undefined, true);
+    expect(first).toMatchObject({ missed: true, endedWithText: undefined });
+    return { file, cursor: first.cursor };
   };
 
   it('credits a turn a Pane line started that ends with a reply', async () => {
@@ -355,18 +355,37 @@ describe('readFinishedTurns', () => {
     await expect(readFinishedTurns(claudeLocator(), cursor, true)).resolves.toMatchObject({ endedWithText: true });
   });
 
-  it('with no earlier judgment, reads only the newest finished turn, never older history', async () => {
-    writeClaude(sessionId, [
-      prompt('old', '2026-09-27T18:29:00.000Z'),
-      say('msg_0', 'An old reply the person read long ago.', '2026-09-27T18:30:00.000Z'),
-      prompt('wake', '2026-09-27T18:40:00.000Z'),
-      tool('msg_1', '2026-09-27T18:40:02.000Z'),
-      prompt('next', '2026-09-27T18:40:04.000Z'),
-      say('msg_2', 'Still working on it.', '2026-09-27T18:40:05.000Z'),
-    ]);
+  it('with no cursor (a restart, a new transcript), credits nothing: a resumed transcript\'s history never bolds, nor rows before the next prompt', async () => {
+    // Pane restarts; the resumed transcript already holds a reply the person read.
+    const file = writeClaude(sessionId, [prompt('old', '2026-09-27T18:29:00.000Z'), say('msg_0', 'An old reply the person read long ago.', '2026-09-27T18:30:00.000Z')]);
+    const first = await readFinishedTurns(claudeLocator(), undefined, true);
+    expect(first).toMatchObject({ missed: true, endedWithText: undefined });
+    // The turn that ended as Pane came back writes its rows late, with no prompt after the cursor: not credited.
+    append(file, [say('msg_1', 'Late text of the turn before the cursor.', '2026-09-27T18:40:00.000Z')]);
+    const late = await readFinishedTurns(claudeLocator(), first.cursor, true);
+    expect(late.endedWithText).toBeUndefined();
+    // A fresh prompt and its reply: that turn counts.
+    append(file, [prompt('next', '2026-09-27T18:41:00.000Z'), say('msg_2', 'A new reply.', '2026-09-27T18:41:05.000Z')]);
+    await expect(readFinishedTurns(claudeLocator(), late.cursor, true)).resolves.toMatchObject({ endedWithText: true });
+  });
 
-    // Still working: the newest finished turn is the tool-only wake.
-    await expect(readFinishedTurns(claudeLocator(), undefined, false)).resolves.toMatchObject({ endedWithText: false });
+  it('starts over at the end of a transcript rewritten shorter at the same path, or replaced, and bolds the next new reply', async () => {
+    const { file, cursor } = await afterEarlierTurn();
+    // The transcript is rewritten in place, shorter than where the cursor stands.
+    fs.writeFileSync(file, jsonl([prompt('compact', '2026-09-27T18:50:00.000Z')]));
+    fs.utimesSync(file, writtenAt, writtenAt);
+    const rewritten = await readFinishedTurns(claudeLocator(), { ...cursor!, offset: cursor!.offset + 10_000 }, true);
+    expect(rewritten).toMatchObject({ missed: true, endedWithText: undefined });
+    append(file, [prompt('after', '2026-09-27T18:51:00.000Z'), say('msg_3', 'Reply after the rewrite.', '2026-09-27T18:51:02.000Z')]);
+    const afterReply = await readFinishedTurns(claudeLocator(), rewritten.cursor, true);
+    expect(afterReply.endedWithText).toBe(true);
+
+    // Replaced by another file at the same path (a new identity): the same.
+    const replacement = `${file}.new`;
+    fs.writeFileSync(replacement, jsonl([prompt('x', '2026-09-27T18:52:00.000Z'), say('msg_4', 'History in the new file.', '2026-09-27T18:52:01.000Z')]));
+    fs.renameSync(replacement, file);
+    fs.utimesSync(file, writtenAt, writtenAt);
+    await expect(readFinishedTurns(claudeLocator(), afterReply.cursor, true)).resolves.toMatchObject({ missed: true, endedWithText: undefined });
   });
 
   it('moves the cursor past what it judged, and keeps a turn still working for the next read', async () => {
@@ -387,8 +406,9 @@ describe('readFinishedTurns', () => {
 
   it('reads Codex replies and tool calls too', async () => {
     const file = writeCodex('01a0e428', [codex.meta(worktree, '2026-09-27T18:37:14.814Z')]);
+    const start = await readFinishedTurns(codexLocator(), undefined, true);
     append(file, [codex.user('check', '2026-09-27T18:40:00.000Z'), codex.assistant('Watching the workers.', '2026-09-27T18:40:02.000Z')]);
-    const first = await readFinishedTurns(codexLocator(), undefined, true);
+    const first = await readFinishedTurns(codexLocator(), start.cursor, true);
     expect(first.endedWithText).toBe(true);
 
     append(file, [codex.user('again', '2026-09-27T18:41:00.000Z'), { timestamp: '2026-09-27T18:41:02.000Z', type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{}', call_id: 'c1' } }]);

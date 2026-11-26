@@ -34,6 +34,8 @@ import * as wslUtils from '../utils/wslUtils';
 import { PaneError, toPaneDaemonError } from '../../../shared/paneError';
 import { agentTerminalCommand } from '../../../shared/agents';
 import { sessionIsUnread } from '../../../shared/sessionUnread';
+import { createReplyProbe } from './sessionReply';
+import type { TranscriptCursor, TranscriptLocator } from './agentTranscript';
 
 const liveStates = new Map<string, AgentState>();
 
@@ -2318,6 +2320,36 @@ describe('OrchestrationSessionManager', () => {
       await fixture.manager.notifyViewed(created.internalSession.id);
       answer?.(true);
       await ended;
+      expect(sessionIsUnread(await record())).toBe(false);
+    });
+
+    it('never credits a reply already read to a later tool-only turn whose check overlapped it', async () => {
+      const { fixture, created, record } = await fixtureWithSession('Overlapping turns');
+      let release: () => void = () => undefined;
+      const held = new Promise<void>(resolve => { release = resolve; });
+      const at = (offset: number): TranscriptCursor => ({ file: '/t/s.jsonl', id: '1:1', offset });
+      // Turn A's rows end at 100 with a reply; turn B's rows, after 100, end on a tool call.
+      const readTurns = vi.fn(async (_locator: TranscriptLocator, cursor: TranscriptCursor | undefined) =>
+        cursor?.offset === 100 ? { endedWithText: false, cursor: at(200) } : { endedWithText: true, cursor: at(100) });
+      fixture.manager.setReplyProbe(createReplyProbe({
+        agentTypeOf: () => 'claude', locatorOf: () => ({ agent: 'claude', cwd: '/work' }), isIdle: () => true,
+        readTurns, wait: () => held, loadCursor: async () => at(0), saveCursor: async () => undefined,
+      }));
+
+      // A ends with a reply; its check waits for its second read.
+      await fixture.manager.notifyLiveActivity(created.panel.id, 'working');
+      const a = fixture.manager.notifyLiveActivity(created.panel.id, 'idle');
+      await vi.waitFor(() => expect(readTurns).toHaveBeenCalledTimes(1));
+      // The person opens the Session, reads A's reply, and switches away.
+      await fixture.manager.notifyViewed(created.internalSession.id);
+      // B runs and ends with tool calls only while A's check is still settling.
+      await fixture.manager.notifyLiveActivity(created.panel.id, 'working');
+      const b = fixture.manager.notifyLiveActivity(created.panel.id, 'idle');
+      // Give B's check time to start while A's is still settling.
+      await new Promise(resolve => { setTimeout(resolve, 50); });
+      release();
+      await Promise.all([a, b]);
+
       expect(sessionIsUnread(await record())).toBe(false);
     });
 
