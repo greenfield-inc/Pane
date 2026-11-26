@@ -140,7 +140,8 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   says so (`AGENT_FARM_SNAPSHOT_FAILED`, "Nothing was reloaded."). If the snapshot
   can't be saved when the Session is created, the Session is still created
   without one. Its activity then says "No Agent Farm snapshot", and its agents
-  read the installed plugins until Reload profile. Sessions from before snapshots
+  read the installed plugins until Reload profile, or, for a Session whose lead
+  runs in a terminal and so has nothing to reload, until a new Session. Sessions from before snapshots
   have none.
 - When a profile's plugin changes after a Session took it, the row shows an amber
   dot and Reload profile is marked. For a Session with a snapshot, the dot means
