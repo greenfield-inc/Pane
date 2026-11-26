@@ -40,8 +40,17 @@ interface LinkedCard {
   warnings: string[];
 }
 
-/** An absolute or ~/ path of two or more parts, after a space, a bracket or a quote. */
-const MENTIONED_PATH = /(?:^|[\s(“"'`])((?:~|\/[\w.@+~-]+)(?:\/[\w.@+~-]+)+(?:#[\w.-]+)?)/gu;
+/**
+ * An absolute, ~/ or Windows drive (C:\) path of two or more parts, after a space, a bracket or a
+ * quote.
+ */
+const MENTIONED_PATH = /(?:^|[\s(“"'`])((?:~|\/[\w.@+~-]+)(?:\/[\w.@+~-]+)+(?:#[\w.-]+)?|[A-Za-z]:[\\/][\w.@+~-]+(?:[\\/][\w.@+~-]+)+(?:#[\w.-]+)?)/gu;
+
+/** The path's first folder under its root: /Users for /Users/me/a.md, C:\Users for C:\Users\me\a.md. */
+function topFolder(target: string): string {
+  const { root } = path.parse(target);
+  return root + target.slice(root.length).split(/[\\/]/u)[0];
+}
 
 const PATH_LINK_FORM = '{"label":"…","path":"/abs/path"}';
 
@@ -79,8 +88,7 @@ function linkMentionedFiles(card: CardFields, files: CardFiles): LinkedCard {
       const mentioned = match[1].replace(/[.,;:]+$/u, '').replace(/#.*$/u, '');
       const target = mentioned.startsWith('~/') ? path.join(files.home, mentioned.slice(2)) : mentioned;
       if (linked.has(mentioned) || linked.has(target)) continue;
-      const root = target.split('/').slice(0, 2).join('/');
-      if (files.kind(root) !== 'folder') continue;
+      if (files.kind(topFolder(target)) !== 'folder') continue;
       const kind = files.kind(target);
       if (kind === 'folder') continue;
       linked.add(target);

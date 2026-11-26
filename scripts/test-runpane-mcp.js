@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { spawn } = require('node:child_process');
 const { test } = require('./runpane-test-shard');
 const { after } = require('node:test');
@@ -1661,11 +1662,11 @@ test('the notify tool\'s check is a switch: it returns the card as Pane would po
         assert.equal(notify.inputSchema.properties.check.type, 'boolean');
         const checked = await client.callTool({ name: 'notify', arguments: {
           ui: 'approve', title: 'Ship the mock-ups?', check: true, paneDir,
-          links: [{ label: 'Mock-ups', url: 'file:///tmp/mock/index.html' }],
+          links: [{ label: 'Mock-ups', url: pathToFileURL(path.resolve('/tmp/mock/index.html')).href }],
         } });
         assert.notEqual(checked.isError, true, checked.content[0].text);
         assert.deepEqual(checked.structuredContent, {
-          check: true, card: { ui: 'approve', title: 'Ship the mock-ups?', links: [{ label: 'Mock-ups', path: '/tmp/mock/index.html' }] }, warnings: [warning],
+          check: true, card: { ui: 'approve', title: 'Ship the mock-ups?', links: [{ label: 'Mock-ups', path: path.resolve('/tmp/mock/index.html') }] }, warnings: [warning],
         });
       });
       assert.deepEqual(requests.map((request) => request.channel), ['runpane:notify:check']);

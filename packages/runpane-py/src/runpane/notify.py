@@ -375,7 +375,17 @@ def local_file_url(url: str) -> Any:
     """
     if url[:5].lower() == "file:":
         parts = urlparse(url)
-        if parts.netloc not in ("", "localhost") or "%2f" in parts.path.lower():
+        encoded = parts.path.lower()
+        if os.name == "nt":
+            # As Node's fileURLToPath on Windows: another host is a UNC path; a local one needs a drive.
+            if "%2f" in encoded or "%5c" in encoded:
+                return _MISSING
+            if parts.netloc not in ("", "localhost"):
+                return "\\\\" + parts.netloc + unquote(parts.path).replace("/", "\\")
+            if not re.match(r"^/[A-Za-z]:", parts.path):
+                return _MISSING
+            return unquote(parts.path[1:]).replace("/", "\\")
+        if parts.netloc not in ("", "localhost") or "%2f" in encoded:
             return _MISSING
         return unquote(parts.path)
     if url.startswith("~/"):

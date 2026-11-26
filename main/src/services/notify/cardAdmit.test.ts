@@ -1,15 +1,20 @@
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { PaneError } from '../../../../shared/paneError';
 import { admitCard, type CardFiles } from './cardAdmit';
 
+/** ~/notes/d.md under the fake home, joined as this platform joins it. */
+const notes = path.join('/Users/me', 'notes/d.md');
 const choices = [{ label: 'Ship it', detail: 'It goes out tonight.', recommended: true }, { label: 'Wait', detail: 'It waits a day.' }];
 
 /** A disk with these files and folders; every folder above a file exists too. */
 function disk(files: string[], folders: string[] = []): CardFiles {
   const dirs = new Set(folders);
   for (const file of files) {
-    const parts = file.split('/');
-    for (let end = 2; end < parts.length; end += 1) dirs.add(parts.slice(0, end).join('/'));
+    // Windows joins a ~/ path with backslashes; every folder above it exists in either form.
+    const separator = file.includes('\\') ? '\\' : '/';
+    const parts = file.split(separator);
+    for (let end = 2; end < parts.length; end += 1) dirs.add(parts.slice(0, end).join(separator));
   }
   return {
     kind: (target) => (files.includes(target) ? 'file' : dirs.has(target) ? 'folder' : undefined),
@@ -25,7 +30,7 @@ describe('admitting a card that mentions files', () => {
   });
 
   it('attaches files named in the title, an option and a question, and a ~/ path, after the asker\'s own links', () => {
-    const files = disk(['/Users/me/a.md', '/Users/me/b/c.md', '/Users/me/notes/d.md', '/Users/me/e/f.html']);
+    const files = disk(['/Users/me/a.md', '/Users/me/b/c.md', notes, '/Users/me/e/f.html']);
     const admitted = admitCard({
       title: 'Ship /Users/me/a.md?',
       context: 'See ~/notes/d.md.',
@@ -38,7 +43,7 @@ describe('admitting a card that mentions files', () => {
     expect(admitted.card.links).toEqual([
       { label: 'PR #1', url: 'https://github.com/org/repo/pull/1' },
       { label: 'a.md', path: '/Users/me/a.md' },
-      { label: 'd.md', path: '/Users/me/notes/d.md' },
+      { label: 'd.md', path: notes },
       { label: 'f.html', path: '/Users/me/e/f.html' },
       { label: 'c.md', path: '/Users/me/b/c.md' },
     ]);

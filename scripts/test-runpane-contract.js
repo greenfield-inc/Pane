@@ -5,6 +5,7 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { inShard } = require('./runpane-test-shard');
 
 const rootDir = path.resolve(__dirname, '..');
@@ -6939,9 +6940,10 @@ async function checkNotifyCardCheck() {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-notify-check-'));
   const outsidePane = { PANE_SESSION_ID: '', PANE_PANEL_ID: '', RUNPANE_NOTIFY_AGENT: '', RUNPANE_NOTIFY_RETURN_AFTER_MS: '' };
   const warning = 'Attached /tmp/mock/index.html as a link: the card names it but --links didn\'t.';
-  const links = '[{"label":"Mock-ups","url":"file:///tmp/mock%20ups/index.html"},{"label":"Plan","url":"/tmp/plan.md"},{"label":"PR #1611","url":"https://github.com/org/repo/pull/1611"}]';
+  const mockUps = path.resolve('/tmp/mock ups/index.html');
+  const links = JSON.stringify([{ label: 'Mock-ups', url: pathToFileURL(mockUps).href }, { label: 'Plan', url: '/tmp/plan.md' }, { label: 'PR #1611', url: 'https://github.com/org/repo/pull/1611' }]);
   const card = ['notify', '--ui', 'approve', '--title', 'Ship the mock-ups?', '--links', links];
-  const sentLinks = [{ label: 'Mock-ups', path: '/tmp/mock ups/index.html' }, { label: 'Plan', path: '/tmp/plan.md' }, { label: 'PR #1611', url: 'https://github.com/org/repo/pull/1611' }];
+  const sentLinks = [{ label: 'Mock-ups', path: mockUps }, { label: 'Plan', path: '/tmp/plan.md' }, { label: 'PR #1611', url: 'https://github.com/org/repo/pull/1611' }];
   const sent = { npm: [], pip: [] };
   try {
     for (const runtime of ['npm', 'pip']) {
@@ -6970,7 +6972,7 @@ async function checkNotifyCardCheck() {
       assert.strictEqual(text.stdout.trim(), [
         'Checked, not posted: Ship the mock-ups?',
         'Links:',
-        '  Mock-ups: /tmp/mock ups/index.html',
+        `  Mock-ups: ${mockUps}`,
         '  Plan: /tmp/plan.md',
         '  PR #1611: https://github.com/org/repo/pull/1611',
         'No warnings.',
@@ -7158,7 +7160,8 @@ async function checkNotifyParity() {
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Q-1","approval":" "}]'], 'links[0] approval must be another approval\'s id or Q-n.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","path":" "}]'], 'links[0] path must be non-empty text.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"PR","url":"https://example.com"},{"label":"Files","url":"ftp://files.example/a.md"}]'], 'links[1] url must start with http:// or https://; for a local file use {"label":…,"path":"/abs/path"}; url is only for http(s) pages.'],
-    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Share","url":"file://server/share/a.md"}]'], 'links[0] url is a file:// URL on another computer; for a local file use {"label":…,"path":"/abs/path"}.'],
+    // On Windows another host's file:// URL is a UNC path, which both wrappers take as the path.
+    ...(process.platform === 'win32' ? [] : [['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Share","url":"file://server/share/a.md"}]'], 'links[0] url is a file:// URL on another computer; for a local file use {"label":…,"path":"/abs/path"}.']]),
     ['check', ['--check', '--resume', 'n-1'], 'check shows a new card or an --update without posting it, so it does not go with --resume, --took or --close.'],
     ['check', ['--check', '--close', 'Q-20'], 'check shows a new card or an --update without posting it, so it does not go with --resume, --took or --close.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"","url":"https://example.com"}]'], 'links[0] must be an object with a non-empty "label" and one of "path", "url" or "approval".'],

@@ -688,7 +688,8 @@ describe('Approvals items, through the registered handlers', () => {
       code: 'ERR_NOTIFY_INVALID',
       message: expect.stringContaining('for a local file use {"label":…,"path":"/abs/path"}; url is only for http(s) pages'),
     });
-    await expect(call([{ label: 'Share', url: 'file://server/share/a.md' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
+    // On Windows the same URL is a UNC path (\\server\share\a.md), which Pane can open.
+    if (process.platform !== 'win32') await expect(call([{ label: 'Share', url: 'file://server/share/a.md' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
     await expect(call([{ label: 'Both', url: 'https://a.example', path: '/a' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
     await expect(call(Array.from({ length: 7 }, (_, index) => ({ label: `L${index}`, url: 'https://a.example' })))).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
     await expect(call([{ label: 'x'.repeat(81), url: 'https://a.example' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
@@ -700,7 +701,7 @@ describe('Approvals items, through the registered handlers', () => {
     const result = await pane.registry.invoke('runpane:notify:check', [{
       ui: 'options', title: 'Ship the mock-ups?', caller: { cwd: '/repo' },
       choices: [{ label: 'Ship', recommended: true }, { label: 'Wait' }],
-      links: [{ label: 'Plan', url: 'file:///tmp/plan.md' }],
+      links: [{ label: 'Plan', url: pathToFileURL(path.resolve('/tmp/plan.md')).href }],
     }]);
     expect(result).toMatchObject({
       check: true,
