@@ -35,6 +35,8 @@ describe('buildShortcutSheet', () => {
       'Decide, Summary and reference tabs',
       'Move between options',
       'Pick the focused option',
+      'Highlight the next / previous option (stops at the ends)',
+      'Send the highlighted options',
       'Next / previous question',
       'Send your answer',
       'Send the recommended options (nothing picked)',
@@ -46,6 +48,8 @@ describe('buildShortcutSheet', () => {
       'Answer all, from any app',
     ]);
     expect(caps(groups, 'approvals', 'Open or close Approvals')).toEqual(['⌘⇧A']);
+    expect(caps(groups, 'approvals', 'Highlight the next / previous option (stops at the ends)')).toEqual(['J', 'K']);
+    expect(caps(groups, 'approvals', 'Send the highlighted options')).toEqual(['↩']);
     expect(caps(groups, 'approvals', 'Open this Session’s approval (from its chat)')).toEqual(['⌘⌥A']);
     expect(caps(groups, 'approvals', 'Next / previous approval (from anywhere; set your own key)')).toEqual([]);
     expect(caps(groups, 'approvals', 'Next / previous question')).toEqual(['tab', '⇧tab']);

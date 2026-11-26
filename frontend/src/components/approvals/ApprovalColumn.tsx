@@ -31,6 +31,7 @@ import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { approvalFindId, useSurfaceFind } from '../find/surfaceFind';
 import { isTypingTarget } from '../../utils/typingTarget';
 import { enterHeld, holdEnterUntilReleased } from './heldEnter';
+import { choiceStep, highlightedAnswer, highlightOf, isChoiceEnter, stepHighlight } from './choiceCursor';
 import { ReminderSnoozeLink } from '../todos/ReminderSnoozeLink';
 import {
   askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, recommendedAnswer, replyLine,
@@ -131,8 +132,8 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
   // "3 left": what still waits on the person in this column, the card shown included (T-88).
   const left = pager.filter((id) => { const other = byId.get(id); return other !== undefined && canAdvanceTo(other); }).length;
   const [rootRef, narrow] = useNarrow();
-  // ⇧↩ from the card itself, its pager or its tabs goes to its Decide tab (T-88); a nested card
-  // (an approval it links to) takes its own keys inside itself.
+  // ⇧↩ and J/K (T-113) from the card itself, its pager or its tabs go to its Decide tab (T-88); a
+  // nested card (an approval it links to) takes its own keys inside itself.
   const sendRecommendedFromCard = useRef<((event: React.KeyboardEvent) => void) | null>(null);
   const cardKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
     pagerKey(event, step);
@@ -437,6 +438,45 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab, fromCard }: {
     option.focus();
   };
 
+  // J/K move the highlight within the question with focus, else the first (T-113), and stop at the
+  // ends; the option they land on takes the focus (roving tabindex). Enter on an option sends each
+  // question's pick, else its highlighted option. Never while typing, nor with ⌘/Ctrl/⌥ held.
+  const [highlights, setHighlights] = useState<number[]>(() => questions.map((question, at) => highlightOf(question.choices.findIndex((choice) => choice.label === picks[at]), question.choices)));
+  const highlight = (at: number, index: number) => setHighlights((current) => (current[at] === index ? current : Object.assign([...current], { [at]: index })));
+  const moveHighlight = (event: React.KeyboardEvent, root: HTMLElement | null) => {
+    const step = choiceStep(event);
+    if (step === null || !sendable || item.relay || event.defaultPrevented || !root) return;
+    const groups = Array.from(root.querySelectorAll<HTMLElement>('[role="radiogroup"]'));
+    const group = groups.find((candidate) => candidate.contains(document.activeElement)) ?? groups[0];
+    const options = group ? Array.from(group.querySelectorAll<HTMLButtonElement>('[role="radio"]:not(:disabled)')) : [];
+    const at = group ? groups.indexOf(group) : -1;
+    if (at < 0 || options.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const next = stepHighlight(highlights[at] ?? -1, options.length, step);
+    highlight(at, next);
+    options[next]?.focus({ focusVisible: true });
+  };
+  const sendHighlighted = (event: React.KeyboardEvent) => {
+    if (!isChoiceEnter(event) || event.defaultPrevented) return;
+    // Only on an option: Enter on Send, Close… or a reference keeps clicking that button.
+    if (!(event.target instanceof Element && event.target.closest('[role="radiogroup"] [role="radio"]'))) return;
+    if (enterHeld()) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (!sendable || item.relay || item.unreachable || closing) return;
+    // Taken even when it sends nothing, so the focused option isn't clicked (and its pick cleared).
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.repeat) return;
+    const chosen = highlightedAnswer(questions, picks, highlights);
+    if (chosen.some((label) => !label)) return;
+    holdEnterUntilReleased();
+    void send(chosen);
+  };
+
   // ⇧↩ sends each question's recommended option while nothing is picked or typed (T-88, D-385
   // holds: nothing is preselected). With a pick of the person's own it does nothing special, and
   // with a question that has no recommendation it says so instead. Never while typing or
@@ -464,7 +504,11 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab, fromCard }: {
     holdEnterUntilReleased();
     void send(recommended.send);
   };
-  const latestSendRecommended = useCommittedRef(sendRecommended);
+  const fromCardKeys = (event: React.KeyboardEvent) => {
+    moveHighlight(event, rootRef.current);
+    sendRecommended(event);
+  };
+  const latestSendRecommended = useCommittedRef(fromCardKeys);
   useEffect(() => {
     if (!fromCard) return;
     const route = (event: React.KeyboardEvent) => latestSendRecommended.current(event);
@@ -474,7 +518,7 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab, fromCard }: {
   const recommendedKey = recommended && 'send' in recommended ? formatKeyDisplay('shift+Enter') : undefined;
 
   return (
-    <div ref={rootRef} className="flex h-full min-h-0 flex-col" data-approval-decide="" onKeyDown={(event) => { pickByNumber(event); sendRecommended(event); }}>
+    <div ref={rootRef} className="group/decide flex h-full min-h-0 flex-col" data-approval-decide="" onKeyDown={(event) => { pickByNumber(event); moveHighlight(event, event.currentTarget); sendHighlighted(event); sendRecommended(event); }}>
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5" data-testid="approval-qa">
         <p className="text-[13px] text-text-tertiary">{[...askedBy(item), relativeAge(item.createdAt, now)].join(' · ')}</p>
         <h2 className="mt-1.5 text-[19px] font-semibold leading-snug text-text-primary" data-testid="approval-title">{item.title}</h2>
@@ -530,6 +574,8 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab, fromCard }: {
                 question={question}
                 label={questions.length > 1 ? `Question ${at + 1} of ${questions.length}` : 'Question'}
                 picked={picks[at]}
+                highlighted={highlights[at] ?? -1}
+                onHighlight={(index) => highlight(at, index)}
                 disabled={!waiting}
                 onPick={(label) => setPicks((current) => { const next = [...current]; next[at] = current[at] === label ? '' : label; return next; })}
                 onChoose={(label) => setPicks((current) => { const next = [...current]; next[at] = label; return next; })}
@@ -627,6 +673,7 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab, fromCard }: {
                 {noRecommended ? noRecommendedLine(noRecommended, questions.length, sendKeys ? formatKeyDisplay(sendKeys) : 'Send')
                   : item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.'
                   : replyBeingRead(item) ? `${sentenceStart(item.reply?.reader?.name ?? item.source.name)} is reading your last reply. You can send another once it says how it took it, or pick an option now.`
+                    : questions.length > 0 ? <>Pick an option (<Kbd size="xs">J</Kbd> <Kbd size="xs">K</Kbd> move, <Kbd size="xs">↩</Kbd> sends), or reply in your own words: an answer, or a question about it.</>
                     : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
               </p>
               {!item.agentPrompt && (
@@ -714,14 +761,16 @@ function radioGroupKey(event: React.KeyboardEvent<HTMLDivElement>, onChoose: (la
   }
 }
 
-function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, onTabOut, showTitle, recommendedKey }: {
+function QuestionBlock({ question, label, picked, highlighted, onHighlight, disabled, onPick, onChoose, onTabOut, showTitle, recommendedKey }: {
   question: CardQuestion; label: string; picked?: string; disabled: boolean; onPick: (label: string) => void;
+  /** The option J/K move to and Enter sends (T-113); ringed while the card has the keyboard. */
+  highlighted: number; onHighlight: (index: number) => void;
   onChoose: (label: string) => void; onTabOut?: () => boolean; showTitle: boolean;
   /** ⇧↩ would send the recommended options now: the chip names the key (T-88). */
   recommendedKey?: string;
 }) {
-  // Roving focus: the picked option is the group's one Tab stop, else the first.
-  const stop = question.choices.some((choice) => choice.label === picked) ? picked : question.choices[0]?.label;
+  // Roving focus: the picked option is the group's one Tab stop, else the highlighted one (T-113).
+  const stop = question.choices.some((choice) => choice.label === picked) ? picked : (question.choices[highlighted] ?? question.choices[0])?.label;
   return (
     <section className="mt-4 rounded-xl border border-border-secondary p-4" data-testid="approval-question">
       <div className="text-[12px] font-medium uppercase tracking-wide text-text-tertiary">{label}</div>
@@ -730,6 +779,7 @@ function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, on
       <div className="mt-2 flex flex-col gap-2" role="radiogroup" aria-label={question.title} onKeyDown={(event) => radioGroupKey(event, onChoose, onTabOut)}>
         {question.choices.map((choice, at) => {
           const selected = picked === choice.label;
+          const lit = at === highlighted && !disabled;
           // 1 to 9 pick an option of the question with focus (T-88); the number shows on the option.
           const digit = at < 9 ? String(at + 1) : undefined;
           return (
@@ -741,12 +791,16 @@ function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, on
               disabled={disabled}
               tabIndex={choice.label === stop ? 0 : -1}
               data-choice={choice.label}
+              data-highlighted={lit || undefined}
+              onFocus={() => onHighlight(at)}
               // Space picks on key down (above); its key-up click would clear the pick again.
               onKeyUp={(event) => { if (event.key === ' ') event.preventDefault(); }}
               onClick={() => onPick(choice.label)}
               className={cn(
                 'flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive disabled:cursor-default disabled:hover:bg-transparent',
                 selected ? 'border-interactive bg-interactive/5' : 'border-border-secondary',
+                // The highlight shows while the card has the keyboard; a focused option draws its own ring.
+                lit && 'group-focus-within/decide:[&:not(:focus-visible)]:ring-2 group-focus-within/decide:[&:not(:focus-visible)]:ring-focus-ring-subtle',
                 choice.mark === 'new' && 'border-l-[3px] border-l-status-success',
                 choice.mark === 'reworded' && 'border-l-[3px] border-l-status-info',
               )}

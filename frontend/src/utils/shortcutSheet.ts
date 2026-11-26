@@ -79,7 +79,7 @@ const PLACEMENTS = {
     { command: 'open-session-approval', label: 'Open this Session’s approval (from its chat)' },
     { commands: ['next-approval', 'previous-approval'], label: 'Next / previous approval (from anywhere; set your own key)' },
     { reference: 'reference-approval-page' }, { reference: 'reference-approval-tabs' },
-    { reference: 'reference-approval-move' }, { reference: 'reference-approval-pick' }, { reference: 'reference-approval-question' },
+    { reference: 'reference-approval-move' }, { reference: 'reference-approval-pick' }, { reference: 'reference-approval-highlight' }, { reference: 'reference-approval-send-highlighted' }, { reference: 'reference-approval-question' },
     { command: 'send-approval', label: 'Send your answer' }, { reference: 'reference-approval-recommended' },
     { reference: 'reference-approvals-list' }, { reference: 'reference-approvals-archive' },
     { command: 'approvals-group-by', label: 'Approvals list: Group by… (set your own key)' },
