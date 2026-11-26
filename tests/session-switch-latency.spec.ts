@@ -202,12 +202,25 @@ async function switchTo(page: Page, session: Seeded, trigger: Trigger, scenario:
     window.addEventListener('click', input, { capture: true, once: true });
     window.addEventListener('keydown', input, { capture: true, once: true });
     const laidOut = (element: Element | null | undefined) => !!element && element.getClientRects().length > 0;
+    /** The last message's marker is inside the conversation's scroll viewport, not just somewhere in its text. */
+    const markerOnScreen = (region: Element) => {
+      if (!laidOut(region) || !region.textContent?.includes(mark)) return false;
+      const viewport = region.getBoundingClientRect();
+      const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent?.includes(mark)) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const text = range.getBoundingClientRect();
+        return text.height > 0 && text.bottom > viewport.top && text.top < viewport.bottom;
+      }
+      return false;
+    };
     const tick = () => {
       const now = performance.now();
       const composer = document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${CSS.escape(panelId)}"]`);
       if (done.visible === undefined && laidOut(composer)) {
-        const shown = Array.from(document.querySelectorAll('[aria-label="Conversation messages"]')).some(region => laidOut(region) && region.textContent?.includes(mark));
-        if (shown) done.visible = now;
+        if (Array.from(document.querySelectorAll('[aria-label="Conversation messages"]')).some(markerOnScreen)) done.visible = now;
       } else if (done.visible !== undefined && done.painted === undefined && now > done.visible) done.painted = now;
       if (focuses && done.focused === undefined && composer && document.activeElement === composer) done.focused = now;
       const finished = done.painted !== undefined && (!focuses || done.focused !== undefined);
@@ -247,7 +260,8 @@ async function switchTo(page: Page, session: Seeded, trigger: Trigger, scenario:
     chatGetStatus: chatGetEnd?.detail.status ?? null,
     chatReady: since(find('chat:ready', ownPanel)?.t),
     firstCommit: since(commit?.t),
-    cacheHit: !!commit && !!chatGetEnd && commit.t <= chatGetEnd.t,
+    // A commit before the read answered, or while it is still in flight, painted from the cache.
+    cacheHit: !!commit && (!chatGetEnd || commit.t <= chatGetEnd.t),
     chatMounts: marks.filter(mark => mark.name === 'chat:mount' && ownPanel(mark)).length,
     marks: marks.map(mark => [mark.name, since(mark.t) ?? NaN]),
   };
@@ -403,17 +417,23 @@ test(`switching leaves at most ${MAX_RETAINED_NODES_PER_SWITCH} DOM nodes per sw
   const { app, page } = await launch(pane, baseURL);
   try {
     // Start both agents and compile the switch path first, so neither counts as retained.
-    for (const session of [a, b, rest, a, b, a, b, rest]) await switchTo(page, session, 'click', 'retention-warmup');
+    // Every switch must finish (its Session's last message on screen), or the delta would be
+    // divided by switches that never built and tore down a view.
+    const shown = async (session: Seeded, scenario: string) => {
+      const sample = await switchTo(page, session, 'click', scenario);
+      expect(sample.visible, `${scenario}: ${session.name} shows its last message`).not.toBeNull();
+    };
+    for (const session of [a, b, rest, a, b, a, b, rest]) await shown(session, 'retention-warmup');
     await page.waitForTimeout(1000);
     const before = await countersAfterGc(app);
-    for (let index = 0; index < RETENTION_SWITCHES; index++) await switchTo(page, index % 2 === 0 ? a : b, 'click', 'retention');
+    for (let index = 0; index < RETENTION_SWITCHES; index++) await shown(index % 2 === 0 ? a : b, 'retention');
     // The same Session as before is open, so the attached DOM matches and the difference is what was kept.
-    await switchTo(page, rest, 'click', 'retention');
+    await shown(rest, 'retention');
     await page.waitForTimeout(1000);
     const after = await countersAfterGc(app);
-    const per = (key: keyof Counters, digits: number) => +((after[key] - before[key]) / RETENTION_SWITCHES).toFixed(digits);
-    report.retention = { switches: RETENTION_SWITCHES, before, after, perSwitch: { nodes: per('nodes', 0), listeners: per('listeners', 0), heapMB: per('heapMB', 3) } };
-    expect(report.retention.perSwitch.nodes, `DOM nodes kept per switch (before ${JSON.stringify(before)}, after ${JSON.stringify(after)})`).toBeLessThanOrEqual(MAX_RETAINED_NODES_PER_SWITCH);
+    const per = (key: keyof Counters) => (after[key] - before[key]) / RETENTION_SWITCHES;
+    report.retention = { switches: RETENTION_SWITCHES, before, after, perSwitch: { nodes: Math.round(per('nodes')), listeners: Math.round(per('listeners')), heapMB: +per('heapMB').toFixed(3) } };
+    expect(per('nodes'), `DOM nodes kept per switch (before ${JSON.stringify(before)}, after ${JSON.stringify(after)})`).toBeLessThanOrEqual(MAX_RETAINED_NODES_PER_SWITCH);
   } finally {
     writeReport();
     await app.close().catch(() => undefined);

@@ -503,12 +503,14 @@ jobs:
     # summary and the uploaded samples; its hard checks (DOM kept per switch, one
     # chat mount per switch, Enter focus) fail the job.
     - name: Build production renderer for the switch benchmark
+      id: session-switch-build
       if: ${{ !cancelled() && matrix.shard == 2 }}
       run: pnpm build:frontend
 
+    # Runs after an unrelated journey failure, but never on a renderer that failed to build.
     - name: Run Session switch benchmark
       id: session-switch
-      if: ${{ !cancelled() && matrix.shard == 2 }}
+      if: ${{ !cancelled() && matrix.shard == 2 && steps.session-switch-build.outcome == 'success' }}
       run: xvfb-run -a pnpm test:session-switch --output=test-results/session-switch-playwright
       env:
         PANE_DIR: ${{ runner.temp }}/pane-session-switch
