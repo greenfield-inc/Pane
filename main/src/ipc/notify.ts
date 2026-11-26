@@ -2,7 +2,9 @@ import { ChatTabNotifyBridge } from '../services/chatTabs/notifyBridge';
 import { getChatTabManager, setChatTabNotify } from '../services/chatTabs';
 import { app, BrowserWindow, powerMonitor, type IpcMain } from 'electron';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { isDesktopAlertHandedOff, showDesktopAlert } from './desktopAlerts';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
@@ -30,7 +32,7 @@ import { checkCard, fitLinks } from '../services/notify/cardCheck';
 import { summaryPage } from '../services/notify/summaryPage';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import type { MachineHealthCard } from '../../../shared/types/machineHealth';
-import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage, type NotifyTodoLink } from '../../../shared/types/notify';
+import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCheckResult, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage, type NotifyTodoLink } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import { thisMachineName, type ApprovalStore } from '../services/approvals/approvalStore';
@@ -615,6 +617,17 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     return warnings.length && !('unavailable' in result) ? { ...result, warnings } : result;
   });
 
+  // The same checks as a card that is posted, and nothing posted: the CLIs run it before a card waits.
+  commandRegistry.register('runpane:notify:check', async (request: PaneCommandValue): Promise<NotifyCheckResult> => {
+    const parsed = parseNotifyRequest(request);
+    const teammate = teammatePaneCaller();
+    if (teammate && parsed.ui === 'secret') throw teammateSecretRefusal(teammate, 'ask for a secret');
+    if (teammate && parsed.lease) throw teammateSecretRefusal(teammate, 'ask for a lease');
+    const warnings = [...admitNotifyCard(parsed), ...loopInfoWarning(parsed)];
+    const { caller: _caller, returnAfterMs: _after, ...card } = parsed;
+    return { check: true, card, warnings };
+  });
+
   commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
   // An approval's Summary (P4): the asker's page or Pane's template, served with no scripts or network.
   commandRegistry.register('notify:summary-page', async (id: PaneCommandValue, options?: PaneCommandValue): Promise<NotifySummaryPage> => {
@@ -1095,11 +1108,33 @@ function parseLinks(links: Array<{ label: string; path?: string; url?: string; a
     if ([filePath, url, approval].filter(Boolean).length !== 1) throw invalid(`${where} needs exactly one of path, url or approval.`);
     if (approval) return { label, approval };
     if (url) {
-      if (!/^https?:\/\/\S+$/i.test(url)) throw invalid(`${where}.url must be an http(s) URL.`);
+      const local = localFileUrl(url);
+      if (local === null) throw invalid(`${where}.url is a file:// URL Pane can't open here; for a local file use {"label":…,"path":"/abs/path"}.`);
+      if (local !== undefined) return { label, path: local };
+      if (!/^https?:\/\/\S+$/i.test(url)) throw invalid(`${where}.url must be an http(s) URL; for a local file use {"label":…,"path":"/abs/path"}; url is only for http(s) pages.`);
       return { label, url };
     }
-    return { label, path: cwd && !path.isAbsolute(filePath ?? '') ? path.resolve(cwd, filePath ?? '') : filePath ?? '' };
+    const given = filePath?.startsWith('~/') ? path.join(os.homedir(), filePath.slice(2)) : filePath ?? '';
+    return { label, path: cwd && !path.isAbsolute(given) ? path.resolve(cwd, given) : given };
   });
+}
+
+/**
+ * A link's url that names a local file (file://, an absolute path or ~/) as that file's path, so
+ * an agent that reached for url still gets a chip that opens it. Undefined for any other url;
+ * null for a file:// URL on another host, which Pane can't open.
+ */
+function localFileUrl(url: string): string | null | undefined {
+  if (/^file:/iu.test(url)) {
+    try {
+      return fileURLToPath(url);
+    } catch {
+      return null;
+    }
+  }
+  if (url.startsWith('~/')) return path.join(os.homedir(), url.slice(2));
+  if (path.isAbsolute(url) && !url.startsWith('//')) return url;
+  return undefined;
 }
 
 function invalid(reason: string): PaneError {

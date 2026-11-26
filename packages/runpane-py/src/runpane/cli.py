@@ -204,7 +204,7 @@ FLAG_OWNERS = {
     "--kind": ("machine cleanup", "todos attach"),
     "--done-when": ("todos create", "todos update"),
     "--parent": ("todos create",),
-    "--check": ("todos update",),
+    "--check": ("todos update", "notify"),
     "--uncheck": ("todos update",),
     "--label": ("todos attach",),
     "--no-start": ("todos create",),
@@ -388,6 +388,8 @@ class ParsedArgs:
     notify_suggestions: Optional[str] = None
     notify_action: Optional[str] = None
     notify_links: Optional[str] = None
+    # `notify --check`: check the card and print it as Pane would post it, posting nothing.
+    notify_check: Optional[bool] = None
     notify_relays: Optional[str] = None
     notify_about_session: Optional[str] = None
     notify_questions: Optional[str] = None
@@ -1054,6 +1056,9 @@ def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
             parsed.wait_for_result = True
         elif is_local_command and arg in FLAG_OWNERS and parsed.command not in FLAG_OWNERS[arg]:
             raise ValueError(f"{arg} is only valid with runpane {' or runpane '.join(FLAG_OWNERS[arg])}.")
+        elif parsed.command == "notify" and arg == "--check":
+            # `todos update --check <n,...>` takes a value; on notify `--check` is a switch.
+            parsed.notify_check = True
         elif parsed.command == "notify" and arg == "--took":
             # `notify --took <id|Q-n> answer|question`: the word after the id says how the reply was taken.
             index += 1

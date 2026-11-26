@@ -2536,10 +2536,10 @@ const CONTRACT_SECTION_11 = [
     "name": "notify",
     "summary": "Ask the person a question, or tell them something, wherever they are, and get their answer back.",
     "usage": [
-      "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--json] [--pane-dir <path>]",
+      "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--check] [--json] [--pane-dir <path>]",
       "runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
       "runpane notify --close <id|Q-n> [--json] [--pane-dir <path>]",
-      "runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
+      "runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--check] [--json] [--pane-dir <path>]",
       "runpane notify --resume <id> [--json] [--pane-dir <path>]"
     ],
     "mutates": true,
@@ -5800,10 +5800,10 @@ const CONTRACT_SECTION_13 = {
     ],
     "notify": [
       "Usage:",
-      "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--json] [--pane-dir <path>]",
+      "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--check] [--json] [--pane-dir <path>]",
       "  runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
       "  runpane notify --close <id|Q-n> [--json] [--pane-dir <path>]",
-      "  runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
+      "  runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--check] [--json] [--pane-dir <path>]",
       "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
       "",
       "Asks the person a question, or tells them something, in Pane, and",
@@ -5825,8 +5825,8 @@ const CONTRACT_SECTION_13 = {
       "  --detail-label <text>          approve: label of the disclosure for --detail (default Show details)",
       "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
       "  --action <json>                info: one button, such as {\"label\":\"Open PR\",\"url\":\"https://...\"}",
-      "  --links <json>                 Any ui: up to 6 related files, pages or approvals, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
-      "                                 or [{\"label\":\"Q-19\",\"approval\":\"Q-19\"}]",
+      "  --links <json>                 Any ui: up to 6 related files, pages or approvals: a file is {\"label\":\"Plan\",\"path\":\"/abs/plan.md\"},",
+      "                                 a page {\"label\":\"PR\",\"url\":\"https://...\"} (url is only for http(s) pages), or [{\"label\":\"Q-19\",\"approval\":\"Q-19\"}]",
       "  --relays <item>                Session orchestrator: improve this worker's waiting card (an id from runpane inbox)",
       "                                 instead of posting a second one; the call waits on it, and the answer goes to the worker's tab",
       "  --about-session <id|name>      Autopilot's own item: the Session it is about",
@@ -5843,10 +5843,12 @@ const CONTRACT_SECTION_13 = {
       "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
       "  --pane-dir <path>              Connect to a specific Pane data directory",
       "  --todo <T-n>                   The to-do this card is about; it shows on the to-do's page",
+      "  --check                        Check the card and print it as Pane would post it, with its warnings; post nothing",
       "  --json                         Print machine-readable output",
       "",
       "Examples:",
       "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'",
+      "  runpane notify --ui approve --title \"Ship the mock-ups?\" --links '[{\"label\":\"Mock-ups\",\"path\":\"/abs/path/index.html\"},{\"label\":\"PR #1611\",\"url\":\"https://github.com/org/repo/pull/1611\"}]' --check",
       "  runpane notify --took Q-20 question",
       "  runpane notify --close Q-20",
       "  runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: it can be undone from Settings\" --context \"...\""
@@ -8637,10 +8639,10 @@ const CONTRACT_SECTION_13 = {
     ],
     "notify": [
       "Usage:",
-      "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--json] [--pane-dir <path>]",
+      "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--check] [--json] [--pane-dir <path>]",
       "  runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
       "  runpane notify --close <id|Q-n> [--json] [--pane-dir <path>]",
-      "  runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
+      "  runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--check] [--json] [--pane-dir <path>]",
       "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
       "",
       "Asks the person a question, or tells them something, in Pane, and",
@@ -8662,8 +8664,8 @@ const CONTRACT_SECTION_13 = {
       "  --detail-label <text>          approve: label of the disclosure for --detail (default Show details)",
       "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
       "  --action <json>                info: one button, such as {\"label\":\"Open PR\",\"url\":\"https://...\"}",
-      "  --links <json>                 Any ui: up to 6 related files, pages or approvals, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
-      "                                 or [{\"label\":\"Q-19\",\"approval\":\"Q-19\"}]",
+      "  --links <json>                 Any ui: up to 6 related files, pages or approvals: a file is {\"label\":\"Plan\",\"path\":\"/abs/plan.md\"},",
+      "                                 a page {\"label\":\"PR\",\"url\":\"https://...\"} (url is only for http(s) pages), or [{\"label\":\"Q-19\",\"approval\":\"Q-19\"}]",
       "  --relays <item>                Session orchestrator: improve this worker's waiting card (an id from runpane inbox)",
       "                                 instead of posting a second one; the call waits on it, and the answer goes to the worker's tab",
       "  --about-session <id|name>      Autopilot's own item: the Session it is about",
@@ -8680,10 +8682,12 @@ const CONTRACT_SECTION_13 = {
       "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
       "  --pane-dir <path>              Connect to a specific Pane data directory",
       "  --todo <T-n>                   The to-do this card is about; it shows on the to-do's page",
+      "  --check                        Check the card and print it as Pane would post it, with its warnings; post nothing",
       "  --json                         Print machine-readable output",
       "",
       "Examples:",
       "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'",
+      "  runpane notify --ui approve --title \"Ship the mock-ups?\" --links '[{\"label\":\"Mock-ups\",\"path\":\"/abs/path/index.html\"},{\"label\":\"PR #1611\",\"url\":\"https://github.com/org/repo/pull/1611\"}]' --check",
       "  runpane notify --took Q-20 question",
       "  runpane notify --close Q-20",
       "  runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: it can be undone from Settings\" --context \"...\""
@@ -10100,6 +10104,7 @@ const CONTRACT_SECTION_14 = {
     "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
     "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered, with its buttons as `--choices` or `--questions` in notify's JSON), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
     "`runpane notify` asks the person a question, or tells them something, in Pane, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab), and Pane records the reply as the answer once it is delivered. If the reply asks something instead, `--took <id|Q-n> question [--status <text>]` reopens the approval and shows that the agent is getting more context (`--took <id|Q-n> answer` confirms it, and changes nothing), and `runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. `runpane notify --close <id|Q-n>` withdraws a waiting card the calling tab asked and prints `{closed: true, id}`; nothing is sent to anyone. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A question asked from a Pane tab outlives its call: if the call ends first (killed, timed out, the agent restarted), the card stays open and its answer is typed into the asking tab as `answer: Q-n → <answer> (by you)`. A `{waiting: true, id, next}` result means the wait can continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
+    "`runpane notify` asks the person a question, or tells them something, in Pane, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card: `path` for local files, `url` only for http(s) pages (a `file://` URL or an absolute path given as url is taken as its path). A file the title, context or an option names but no link opens is attached, with a warning; a card naming one that isn't there is refused. Before a card waits, notify runs Pane's card check without posting and prints its warnings on stderr; `--check` prints that checked card as `{check, card, warnings}` and posts nothing. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab), and Pane records the reply as the answer once it is delivered. If the reply asks something instead, `--took <id|Q-n> question [--status <text>]` reopens the approval and shows that the agent is getting more context (`--took <id|Q-n> answer` confirms it, and changes nothing), and `runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
     "Work sent to an agent through `runpane panels create`, `panes create` (with a prompt), or `panels submit` records that the sender waits for a `runpane report`, unless the request says `--source user` (Pane's own UI does) or `--no-expect-report`; `--expect-report` asks for one anyway. Typing into a tab never does. If the agent then goes ready or its panel exits without a report, Pane journals one opt-in `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id> panel <panel-id> ready|exited`) whose `lastOutput` is the agent's last transcript reply or last screen lines; it skips the `--min-interval` batch and reaches only watchers that list it in `--kinds`. While the agent's screen shows background work (Claude's `· 1 shell` footer or a running background subagent row, Codex's `background terminal running` line), Pane waits and looks again every 10 seconds instead. `agent.blocked` entries carry `screenLines`, the prompt the agent waits on, and are journalled once a panel has stayed blocked for 2 seconds.",
     "The orchestrator guide prescribes submit without `--wait`, followed by its named watch; use one completion consumer. As an optional CLI route, `--wait` on `runpane panels submit`, `panels create`, and `panes create` turns the expected report on and blocks on that panel until the first `agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or `pane.gone`, then prints one line of JSON (`dispatchWaitResult`): the outcome, ids, the report's state, summary, `summaryPath`, PR and head, `screenLines` for a prompt, or `lastOutput` for a missing report, never the transcript. It exits 0 for a report, 3 missing, 4 blocked, 5 exited or gone, and 124 when `--timeout <duration>` passes. It follows the journal from the position the daemon took before delivering the work, so nothing that happens right after delivery is missed. It reuses watch --until-event and returns indeterminate (exit 6) if the journal epoch changes or retained history is lost; inspect the panel and inbox before retrying. Report-expected dispatches are serialized per panel and refused before writing while a result or missing-output collection is outstanding. A send with --no-expect-report is a reply (an answer, or an addition to the current work): it is delivered while a report is outstanding and leaves that expectation in place. Then watch for the original result.",
     "`runpane inbox [--session <id|name>] [--json]` lists what a Session's orchestrator has not acknowledged: reports, missing reports, and on-screen questions (a question clears itself once its panel moves on), plus `answers`, what its workers were told, kept 7 days; an answer with no `decision` still needs its D-n. `runpane inbox ack <item-id>...` or `--all --session <id|name>` clears items, and `runpane inbox ack <item-id>... --decision <D-n>` records the D-n, even on an item already cleared. An orchestrator runs it when it starts or resumes, to catch anything that finished while it was down; Pane never injects the inbox into its turns.",
@@ -19468,8 +19473,8 @@ const CONTRACT_SECTION_16 = {
       },
       "url": {
         "type": "string",
-        "pattern": "^https?://\\S+$",
-        "description": "An http or https page."
+        "pattern": "^(?:https?://\\S+|file:.+|/.+|~/.+)$",
+        "description": "An http or https page. A file:// URL or an absolute path here is taken as path: url is only for http(s) pages."
       },
       "approval": {
         "type": "string",
@@ -19907,6 +19912,32 @@ const CONTRACT_SECTION_16 = {
           },
           "next": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "description": "notify --check: the card as Pane would post it, and its warnings. Nothing was posted.",
+        "required": [
+          "check",
+          "card",
+          "warnings"
+        ],
+        "properties": {
+          "check": {
+            "const": true
+          },
+          "card": {
+            "type": "object",
+            "description": "The normalized notify request without its caller: links attached, an old paragraph card tidied."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the card check would warn about when it is posted."
           }
         },
         "additionalProperties": false
@@ -29617,7 +29648,7 @@ const CONTRACT_SECTION_17 = {
           "name": "--links",
           "value": "<json>",
           "required": false,
-          "description": "Any ui: up to 6 related files, pages or approvals, shown as chips on the card. A file is {label, path}, on this machine; a relative path resolves against the working directory. A page is {label, url}, http or https. Another approval is {label, approval}, its id or Q-n.",
+          "description": "Any ui: up to 6 related files, pages or approvals, shown as chips on the card. A file is {label, path}, on this machine; a relative path resolves against the working directory. A page is {label, url}, http or https: url is only for http(s) pages (a file:// URL or an absolute path given as url is taken as its path). Another approval is {label, approval}, its id or Q-n. An absolute path the title, context or an option names but no link opens is attached when the file exists, and refuses the card when it does not.",
           "schema": {
             "type": "array",
             "maxItems": 6,
@@ -29712,6 +29743,14 @@ const CONTRACT_SECTION_17 = {
           "value": "<T-n>",
           "required": false,
           "description": "The to-do this card is about (T-12). Pane links the approval to it, so it shows on the to-do's page and makes it read Waiting on you."
+        },
+        {
+          "name": "--check",
+          "required": false,
+          "description": "Check the card without posting it: prints the card as Pane would post it (links attached, old paragraph cards tidied) and its warnings, or the refusal. Every card runs the same check before it waits and prints its warnings on stderr.",
+          "schema": {
+            "type": "boolean"
+          }
         },
         {
           "name": "--json",

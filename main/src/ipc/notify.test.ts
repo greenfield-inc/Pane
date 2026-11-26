@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcMain } from 'electron';
+import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
@@ -682,10 +683,51 @@ describe('Approvals items, through the registered handlers', () => {
     ]);
 
     const call = (links: PaneCommandValue) => pane.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Ship?', caller: { cwd: '/repo' }, links }]);
-    await expect(call([{ label: 'Site', url: 'file:///etc/passwd' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
+    await expect(call([{ label: 'Site', url: 'ftp://files.example/a.md' }])).rejects.toMatchObject({
+      code: 'ERR_NOTIFY_INVALID',
+      message: expect.stringContaining('for a local file use {"label":…,"path":"/abs/path"}; url is only for http(s) pages'),
+    });
+    await expect(call([{ label: 'Share', url: 'file://server/share/a.md' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
     await expect(call([{ label: 'Both', url: 'https://a.example', path: '/a' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
     await expect(call(Array.from({ length: 7 }, (_, index) => ({ label: `L${index}`, url: 'https://a.example' })))).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
     await expect(call([{ label: 'x'.repeat(81), url: 'https://a.example' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
+    pane.notify.dispose();
+  });
+
+  it('checks a card without posting it: the card as Pane would show it, with its warnings', async () => {
+    const pane = await startWithSessions();
+    const result = await pane.registry.invoke('runpane:notify:check', [{
+      ui: 'options', title: 'Ship the mock-ups?', caller: { cwd: '/repo' },
+      choices: [{ label: 'Ship', recommended: true }, { label: 'Wait' }],
+      links: [{ label: 'Plan', url: 'file:///tmp/plan.md' }],
+    }]);
+    expect(result).toMatchObject({
+      check: true,
+      card: { ui: 'options', title: 'Ship the mock-ups?', links: [{ label: 'Plan', path: path.resolve('/tmp/plan.md') }] },
+      warnings: [expect.stringMatching(/^No subtitle/u), expect.stringMatching(/^Some options have no consequence/u)],
+    });
+    expect(result).not.toHaveProperty('card.caller');
+    expect(pane.notify.snapshot().items).toEqual([]);
+    await expect(pane.registry.invoke('runpane:notify:check', [{ ui: 'options', title: 'x'.repeat(170), choices: [{ label: 'A' }], caller: {} }]))
+      .rejects.toMatchObject({ code: 'ERR_NOTIFY_TITLE' });
+    expect(pane.notify.snapshot().items).toEqual([]);
+    pane.notify.dispose();
+  });
+
+  it('takes a local file given as a url (file:// or a bare path) as the path it names', async () => {
+    const pane = await startWithSessions();
+    const fileUrl = pathToFileURL(path.resolve('/tmp/mock ups/index.html')).href;
+    void pane.registry.invoke('runpane:notify', [{
+      ui: 'approve', title: 'Ship the mock-ups?', caller: { cwd: '/repo' },
+      links: [{ label: 'Mock-ups', url: fileUrl }, { label: 'Plan', url: '/tmp/plan.md' }, { label: 'Notes', url: '~/notes.md' }, { label: 'Draft', path: '~/draft.md' }],
+    }]);
+    await flush();
+    expect(pane.notify.snapshot().items[0].links).toEqual([
+      { label: 'Mock-ups', path: path.resolve('/tmp/mock ups/index.html') },
+      { label: 'Plan', path: '/tmp/plan.md' },
+      { label: 'Notes', path: path.join(os.homedir(), 'notes.md') },
+      { label: 'Draft', path: path.join(os.homedir(), 'draft.md') },
+    ]);
     pane.notify.dispose();
   });
 
