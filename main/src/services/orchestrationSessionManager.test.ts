@@ -518,6 +518,24 @@ describe('OrchestrationSessionManager', () => {
         expect(port.relaunch).toHaveBeenCalledWith(created.panel.id, { launch: expect.objectContaining({ profile: 'greenfield/orchestrator' }), divider: 'Reloaded Greenfield orchestrator · conversation kept' });
       }));
 
+      it('with Profiles off, refuses Switch and Reload, reads no plugin and shows no changed mark, as on main', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        // A Session that took a profile while Profiles was on, then the switch goes off.
+        const created = await fixture.manager.create({ name: 'Was profiled', agentProfile: 'greenfield/orchestrator' });
+        Object.assign(fixture.configManager.getConfig(), { sessionProfilesEnabled: false });
+        farm.pluginHash.mockClear();
+        farm.pluginHash.mockImplementation(async (plugin: string) => `changed-${plugin}`);
+        await fixture.manager.refreshPluginHashes(true);
+        const listed = (await fixture.manager.list()).sessions.find(session => session.id === created.session.id);
+        expect(listed?.agentProfileChanged).toBeUndefined();
+        expect(farm.pluginHash).not.toHaveBeenCalled();
+        await expect(fixture.manager.switchProfile({ sessionId: created.session.id }, 'pane/claude')).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNSUPPORTED', message: expect.stringContaining('Profiles is off') });
+        await expect(fixture.manager.reloadProfile({ sessionId: created.session.id })).rejects.toMatchObject({ code: 'SESSION_PROFILE_UNSUPPORTED' });
+        expect(port.relaunch).not.toHaveBeenCalled();
+        expect(fixture.store.read().sessions.find(session => session.id === created.session.id)?.agentProfile?.ref).toBe('greenfield/orchestrator');
+      }));
+
       it('refuses a Session with no profile to reload, and one whose agent runs in a terminal', async () => withChatTabs(async fixture => {
         fixture.manager.attachChatTabs(chatTabs());
         const legacy = await fixture.manager.create({ name: 'Before profiles', agent: 'claude' });

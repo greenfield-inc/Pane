@@ -882,8 +882,8 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost, onS
   // Opening the menu reads the Sessions again, so the host re-checks their profiles and Reload shows a change (T-63).
   const menuSessionId = menu?.sessionId;
   useEffect(() => {
-    if (menuSessionId) void useOrchestrationSessionStore.getState().refresh().catch(() => undefined);
-  }, [menuSessionId]);
+    if (profiles && menuSessionId) void useOrchestrationSessionStore.getState().refresh().catch(() => undefined);
+  }, [profiles, menuSessionId]);
 
   const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
@@ -911,7 +911,8 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost, onS
       x={menu?.x ?? 0}
       y={menu?.y ?? 0}
       onClose={onClose}
-      className="w-60"
+      // Wider with Profiles on, so Reload profile's note fits beside it.
+      className={profiles ? 'w-60' : 'w-48'}
     >
       <div ref={menuRef} role="menu" aria-label={`Session actions for ${menu?.sessionName ?? 'Session'}`} onKeyDown={handleMenuKeyDown}>
         {!menu?.loopOwned && (

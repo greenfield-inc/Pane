@@ -143,7 +143,7 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   profiles (Reload only), refuses with why.
 
 With Profiles off, the menu has neither item, `orchestration-sessions:switch-profile`
-and `:reload-profile` refuse (`SESSION_PROFILES_OFF`), and rows show no amber dot.
+and `:reload-profile` refuse (`SESSION_PROFILE_UNSUPPORTED`), Pane reads no plugin for the changed mark, and rows show no amber dot.
 
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,
