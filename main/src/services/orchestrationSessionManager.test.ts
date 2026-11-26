@@ -376,6 +376,8 @@ describe('OrchestrationSessionManager', () => {
         expect(created.session.agentFarmSnapshot).toBeUndefined();
         expect(JSON.stringify(created.panel.state.customState)).not.toContain('snapshot');
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('disk full'));
+        // Review F-2: the Session's own activity says it isn't pinned.
+        expect(created.session.activity.at(-1)?.message).toContain('No Agent Farm snapshot');
       } finally { warn.mockRestore(); }
     }));
 
@@ -672,6 +674,81 @@ describe('OrchestrationSessionManager', () => {
           vi.useRealTimers();
         }
         expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBe(true);
+      }));
+
+      // Review F-1 (D-9): a terminal lead keeps its snapshot; Reload re-snapshots it without relaunching the lead.
+      it('reloads a terminal-lead Session\'s snapshot without relaunching its lead, so tabs opened afterwards get it', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const created = await fixture.manager.create({ name: 'Terminal lead', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+        expect(created.panel.type).toBe('terminal');
+        expect(created.session.agentProfile).toBeUndefined();
+        const first = created.session.agentFarmSnapshot;
+        farm.receiptHash.mockImplementation(async (plugin: string) => `receipt-${plugin}-2`);
+        await fixture.manager.refreshPluginHashes(true);
+        expect((await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentProfileChanged).toBe(true);
+        farm.snapshotHashes.mockImplementation(async () => ({ pane: 'receipt-pane-2', greenfield: 'receipt-greenfield-2' }));
+        const reloaded = await fixture.manager.reloadProfile({ sessionId: created.session.id });
+        expect(reloaded.agentFarmSnapshot).not.toBe(first);
+        expect(reloaded.agentProfileChanged).toBeUndefined();
+        expect(port.relaunch).not.toHaveBeenCalled();
+        expect(reloaded.activity.at(-1)?.message).toContain('tabs opened from now on');
+        expect(fixture.store.read().sessions.find(session => session.id === created.session.id)?.agentFarmSnapshot).toBe(reloaded.agentFarmSnapshot);
+      }));
+
+      // Review F-3: a Reload or Switch refused for a cheap reason takes no snapshot.
+      it('takes no snapshot for a Reload or Switch it refuses before changing anything', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const terminal = await fixture.manager.create({ name: 'Terminal lead', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+        const chat = await fixture.manager.create({ name: 'Chat lead', agentProfile: 'greenfield/product-researcher' });
+        const taken = () => farm.snapshot.mock.calls.length;
+        let before = taken();
+        await expect(fixture.manager.switchProfile({ sessionId: terminal.session.id }, 'pane/claude')).rejects.toMatchObject({ code: 'SESSION_PROFILE_TERMINAL' });
+        expect(taken()).toBe(before);
+        expect((await fixture.manager.switchProfile({ sessionId: chat.session.id }, 'greenfield/product-researcher')).effect).toBe('current');
+        expect(taken()).toBe(before);
+        farm.profiles.mockResolvedValue({ profiles: [{ ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false }], linked: [] });
+        before = taken();
+        await expect(fixture.manager.reloadProfile({ sessionId: chat.session.id })).rejects.toMatchObject({ code: 'SESSION_PROFILE_GONE' });
+        expect(taken()).toBe(before);
+        // A Session with neither a profile nor a snapshot (from before both) has nothing to reload.
+        fixture.store.write({ ...fixture.store.read(), sessions: fixture.store.read().sessions.map(session => session.id === terminal.session.id ? { ...session, agentFarmSnapshot: undefined } : session) });
+        await expect(fixture.manager.reloadProfile({ sessionId: terminal.session.id })).rejects.toMatchObject({ code: 'SESSION_PROFILE_NONE' });
+        expect(taken()).toBe(before);
+        expect(port.relaunch).not.toHaveBeenCalled();
+      }));
+
+      // Review F-5: a Switch whose new snapshot fails changes nothing.
+      it('switches nothing when the new snapshot can\'t be saved', async () => withChatTabs(async (fixture, farm) => {
+        const port = chatTabs();
+        fixture.manager.attachChatTabs(port);
+        const created = await fixture.manager.create({ name: 'Keeps its profile', agent: 'claude' });
+        farm.snapshot.mockRejectedValueOnce(new PaneError('AGENT_FARM_SNAPSHOT_FAILED', 'Agent Farm couldn\'t save the Session\'s snapshot: disk full.', 'Restart Pane.'));
+        await expect(fixture.manager.switchProfile({ sessionId: created.session.id }, 'greenfield/orchestrator')).rejects.toMatchObject({ code: 'AGENT_FARM_SNAPSHOT_FAILED', message: expect.stringContaining('The Session was not switched.') });
+        expect(port.relaunch).not.toHaveBeenCalled();
+        expect(fixture.store.read().sessions.find(session => session.id === created.session.id)).toMatchObject({ agentProfile: { ref: 'pane/claude' }, agentFarmSnapshot: created.session.agentFarmSnapshot });
+      }));
+
+      // Review F-4: the 10 s check reads only what the mark needs.
+      it('makes the 10 s check skip the profile list and the whole-folder hash of plugins only snapshotted Sessions use', async () => withChatTabs(async (fixture, farm) => {
+        fixture.manager.attachChatTabs(chatTabs());
+        await fixture.manager.create({ name: 'Snapshotted', agentProfile: 'greenfield/orchestrator' });
+        await fixture.manager.refreshPluginHashes(true);
+        farm.profiles.mockClear();
+        farm.pluginHash.mockClear();
+        farm.receiptHash.mockClear();
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+        try {
+          fixture.manager.watchProfileChanges();
+          await vi.advanceTimersByTimeAsync(10_000);
+          await vi.waitFor(() => expect(farm.receiptHash).toHaveBeenCalled());
+        } finally {
+          fixture.manager.stopWatchingProfileChanges();
+          vi.useRealTimers();
+        }
+        expect(farm.profiles).not.toHaveBeenCalled();
+        expect(farm.pluginHash).not.toHaveBeenCalled();
       }));
 
       it('reloads nothing when the new snapshot can\'t be saved', async () => withChatTabs(async (fixture, farm) => {

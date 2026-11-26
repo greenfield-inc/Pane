@@ -160,9 +160,16 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   A chat tab started from a launch link's command keeps the link's `--snapshot`.
   A greenfield update reaches a running Session only through Reload profile or
   Switch profile, which take a new snapshot. The lead and tabs opened after that
-  get it; agents already running keep theirs until they close. If the snapshot
-  can't be saved, the Session is still created, without one, and its agents read
-  the installed plugins as before. Sessions from before snapshots have none.
+  get it; agents already running keep theirs until they close. A Session whose
+  lead runs in a terminal (a promoted or resumed conversation, WSL, a wrapper or
+  custom resume command, or Chat tabs off) gets a snapshot too. Its Reload profile
+  takes a new snapshot without restarting the lead, so only tabs opened afterwards
+  use it. If a Reload or Switch can't save its snapshot, it changes nothing and
+  says so (`AGENT_FARM_SNAPSHOT_FAILED`, "Nothing was reloaded."). If the snapshot
+  can't be saved when the Session is created, the Session is still created
+  without one. Its activity then says "No Agent Farm snapshot", and its agents
+  read the installed plugins until Reload profile. Sessions from before snapshots
+  have none.
 - When a profile's plugin changes after a Session took it, the row shows an amber
   dot and Reload profile is marked. For a Session with a snapshot, the dot means
   that some plugin in the snapshot differs from the installed copy (a worker may
@@ -170,13 +177,14 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   Farm receipt lists count, as a snapshot copies only those: a cache, `.venv` or
   `.DS_Store` beside them never marks a Session, and an edit in place does. Pane
   re-checks the plugins every 10 seconds, whether or not anything lists Sessions.
-  A Session whose agent runs in a terminal, or one from before profiles, refuses
-  Reload and says why.
+  The dot shows only where Reload can act on it: on a Session with a snapshot, or
+  on a chat lead's profile. A Session from before profiles refuses Reload and says
+  why.
 - When Agent Farm refuses the Session's snapshot because it was deleted, a file
   in it changed, or a newer Agent Farm wrote it, it never falls back to the
-  installed plugins. The lead's chat stops with **Reload profile**, which takes a
-  new snapshot and keeps the conversation. Another tab says to reload from the
-  lead.
+  installed plugins. The lead's chat stops (`CHAT_PROFILE_SNAPSHOT_UNREADABLE`)
+  with **Reload profile**, which takes a new snapshot and keeps the conversation.
+  Another tab says to reload from the lead.
 - When this computer's Agent Farm no longer lists a Session's profile (greenfield
   0.1.0 removed most of them), neither as a profile nor as an agent a profile
   links to (a Session started from a launch link's command runs one), or its
@@ -673,10 +681,11 @@ Pane then packs, sends and rebuilds the Session:
   paths. `moved.json` in the folder records the path map, for anything that
   still names the old paths (conversation history keeps them). Agent Farm's
   rebuilt launch bundles (`.agent-farm/generated/`) stay behind; its snapshots
-  (`.agent-farm/snapshots/`) are copied byte for byte and checked against their
-  own checksums there, and one that doesn't arrive intact fails the move, so
-  the Session runs the same profile files on that machine until Reload profile.
-  The check before the move therefore accepts a tab's Agent Farm profile that the
+  (`.agent-farm/snapshots/`) are copied byte for byte, so the Session runs the
+  same profile files on that machine until Reload profile. The other machine
+  checks each snapshot against its own checksums. One that doesn't arrive intact
+  fails the move (`ERR_MOVE_SNAPSHOT_UNREADABLE`), and nothing changes on this
+  machine. The check before the move accepts a tab's Agent Farm profile that the
   snapshot holds even when that machine hasn't installed its plugin, and blocks only
   a profile that neither the snapshot nor that machine's plugins hold (with
   Profiles off there, only the installed plugins count). A tab started from a launch

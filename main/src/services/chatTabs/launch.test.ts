@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import path from 'path';
 import { chatLaunchForTerminal, chatLaunchFromCommand, chatTabEnv, sessionChatLaunch, sessionFolderMeta } from './launch';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../../core/runtime';
@@ -171,8 +171,11 @@ describe('the environment a chat tab agent starts with', () => {
       readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: true }));
       expect(chatTabEnv(panel, { agent: 'claude', launch: { kind: 'agent' }, cwd: '/w', status: 'starting', agentFarmSnapshot: '/s/.agent-farm/snapshots/d1' }).AGENT_FARM_SNAPSHOT).toBe('/s/.agent-farm/snapshots/d1');
       expect(chatTabEnv(panel, { agent: 'claude', launch: { kind: 'profile', profile: 'greenfield/orchestrator', snapshot: '/s/.agent-farm/snapshots/d2' }, cwd: '/w', status: 'starting', agentFarmSnapshot: '/s/.agent-farm/snapshots/d1' }).AGENT_FARM_SNAPSHOT).toBe('/s/.agent-farm/snapshots/d2');
+      // Review F-5: an inherited value shows what Profiles off leaves alone, and what Profiles on drops.
+      vi.stubEnv('AGENT_FARM_SNAPSHOT', '/inherited/d0');
+      expect(chatTabEnv(panel, { agent: 'claude', launch: { kind: 'agent' }, cwd: '/w', status: 'starting' }).AGENT_FARM_SNAPSHOT).toBeUndefined();
       readProfilesSwitchFrom(() => undefined);
-      expect(chatTabEnv(panel, { agent: 'claude', launch: { kind: 'agent' }, cwd: '/w', status: 'starting', agentFarmSnapshot: '/s/.agent-farm/snapshots/d1' }).AGENT_FARM_SNAPSHOT).toBe(process.env.AGENT_FARM_SNAPSHOT);
-    } finally { readProfilesSwitchFrom(() => undefined); }
+      expect(chatTabEnv(panel, { agent: 'claude', launch: { kind: 'agent' }, cwd: '/w', status: 'starting', agentFarmSnapshot: '/s/.agent-farm/snapshots/d1' }).AGENT_FARM_SNAPSHOT).toBe('/inherited/d0');
+    } finally { readProfilesSwitchFrom(() => undefined); vi.unstubAllEnvs(); }
   });
 });

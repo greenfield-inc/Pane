@@ -285,7 +285,7 @@ describe('MoveImporter', { timeout: BUILD_TIMEOUT_MS }, () => {
     importer.build(moveId);
     const status = await waitStage(importer, moveId, ['built', 'failed']);
     expect(status.stage).toBe('failed');
-    expect(JSON.stringify(status)).toContain('snapshot');
+    expect(status).toMatchObject({ error: { message: expect.stringContaining('snapshot .agent-farm/snapshots/d1 didn\'t arrive intact'), next: expect.stringContaining('Nothing was changed on A') } });
     expect(fs.existsSync(path.join(sessionWorkspacePath('sess-1'), '.agent-farm', 'snapshots', 'd1'))).toBe(false);
   });
 
