@@ -22,6 +22,9 @@ const INPUT_TIMEOUT_MS = 10_000;
 // A bare ESC must end its write. Terminal apps that parse by read boundary, such
 // as Codex and Claude Code, treat ESC followed by a key in one read as Alt+key.
 const ESCAPE = '\x1b';
+// A bare Enter is a write of its own. Agents read a long write as a paste and
+// keep an Enter inside it as a newline, so the message is never submitted.
+const ENTER = '\r';
 const inputSchema = boundary.object({ panelId: boundary.nonEmptyString, data: boundary.string });
 
 /** Serializes remote input per terminal, batching only while a request is in flight. */
@@ -53,6 +56,8 @@ export class RemoteInputQueue<Result> {
         last
         && last.channel === channel
         && !last.data.endsWith(ESCAPE)
+        && last.data !== ENTER
+        && data !== ENTER
         && last.data.length + data.length <= MAX_BATCH_CHARACTERS
       ) {
         last.data += data;

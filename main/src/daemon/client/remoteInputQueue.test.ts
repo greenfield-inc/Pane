@@ -83,6 +83,25 @@ describe('RemoteInputQueue lifecycle', () => {
     expect(send).toHaveBeenCalledTimes(expected.length);
   });
 
+  it('sends a bare Enter in a write of its own, so an agent submits instead of reading it as part of a paste', async () => {
+    const finish: Array<() => void> = [];
+    const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal) =>
+      new Promise<void>(resolve => finish.push(resolve)));
+    const queue = new RemoteInputQueue(send);
+    const wheel = '\x1b[<65;40;12M';
+    // A message sent while a scroll's wheel reports are in flight, then a key after it.
+    const completed = Promise.all([wheel, wheel, 'fix the build', '\r', 'y'].map(key =>
+      queue.invoke('terminal:input', ['panel', key])));
+    const expected = [wheel, `${wheel}fix the build`, '\r', 'y'];
+    for (const [index, data] of expected.entries()) {
+      await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(index + 1));
+      expect(send.mock.calls[index][1]).toEqual(['panel', data]);
+      finish[index]();
+    }
+    await completed;
+    expect(send).toHaveBeenCalledTimes(expected.length);
+  });
+
   it('bounds combined batches without splitting individual input events', async () => {
     const finish: Array<() => void> = [];
     const send = vi.fn((_channel: string, _args: unknown[], _signal?: AbortSignal) =>

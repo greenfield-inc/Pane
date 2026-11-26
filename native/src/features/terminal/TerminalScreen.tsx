@@ -394,20 +394,23 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
     };
   });
   // An empty box sends a bare Enter, to answer a menu or confirm a prompt.
-  // Sending closes the keyboard so the output shows.
+  // Sending closes the keyboard so the output shows. One message at a time: its text stays in the
+  // box, read-only, until the host confirms it reached the terminal.
   const submit = () => {
-    const text = draft;
-    onChangeDraft('');
+    if (composer.sending) return;
     setSendError(null);
     Keyboard.dismiss();
     terminal.scrollToBottom();
     // The client resends through a drop, so a failure here is final. Say whether it may have landed.
-    void terminal.sendInput(`${text}${KEYS.enter}`).catch((error: unknown) => {
-      onChangeDraft(text);
+    // An agent reads text and Enter arriving together as a paste and keeps the Enter as a newline,
+    // so the Enter is a write of its own: the client sends a bare Enter alone, after the text.
+    void composer.send(async text => {
+      await Promise.all([text ? terminal.sendInput(text) : undefined, terminal.sendInput(KEYS.enter)]);
+    }).catch((error: unknown) => {
       const mayHaveLanded = error instanceof RemoteUnconfirmedResultError || (error instanceof PaneError && error.code === 'ERR_REMOTE_DELIVERY_UNKNOWN');
       setSendError(mayHaveLanded
         ? 'Not confirmed: this may have reached the terminal. Check it before sending again.'
-        : 'Not sent. Your text is back in the box; send it again when connected.');
+        : 'Not sent. Your text is still in the box; send it again when connected.');
     });
   };
   const insertText = (text: string) => {
@@ -509,6 +512,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
           draft={draft}
           onChangeDraft={onChangeDraft}
           onSubmit={submit}
+          sending={composer.sending}
           voice={voice}
           onAttach={() => (isDemoProfile(profile) ? explainDemoLimit('Sending files') : setShowAttach(true))}
           onPaste={() => void paste()}
