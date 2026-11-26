@@ -6,18 +6,6 @@ import { CONFIGURED_AGENT_IDS, agentConfig, agentLabel, configuredAgent, type Co
  */
 export const PANE_PROFILE_PLUGIN = 'pane';
 
-/**
- * TEMPORARY, until T-83 restructures greenfield: the only named profiles Pane shows (New's To,
- * the Profiles tab). Display only: any installed profile still starts by its ref, from runpane or
- * a saved Session. Remove this list, and its uses, once greenfield marks the rest unlisted.
- */
-export const TEMPORARY_SHOWN_PROFILES: readonly string[] = ['greenfield/orchestrator', 'greenfield/business', 'greenfield/seo'];
-
-/** Whether a named profile is on the TEMPORARY short list (variants count as their profile). */
-export function isTemporarilyShownProfile(ref: string): boolean {
-  return TEMPORARY_SHOWN_PROFILES.includes(ref.split(':')[0]);
-}
-
 /** The agents with a plain profile: those whose config names an Agent Farm model. */
 export function plainProfileAgents(): ConfiguredAgentId[] {
   return CONFIGURED_AGENT_IDS.filter(id => !!configuredAgent(id).chat?.profileModel);
@@ -52,6 +40,14 @@ export function profileSwitchEffect(from: { agent: string; ref?: string }, to: {
 
 function capitalized(word: string): string {
   return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+/**
+ * A profile's name as people see it: Agent Farm's title when the list gives one (T-83), else
+ * "Greenfield orchestrator" for `greenfield/orchestrator`; a plain profile is its agent's name.
+ */
+export function profileEntryName(entry: { ref: string; title?: string }): string {
+  return plainProfileAgent(entry.ref) ? profileDisplayName(entry.ref) : entry.title?.trim() || profileDisplayName(entry.ref);
 }
 
 /** "Greenfield orchestrator" for `greenfield/orchestrator`; a plain profile is its agent's name. */

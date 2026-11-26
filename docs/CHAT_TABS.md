@@ -621,23 +621,28 @@ was on. An install that never finished (its lock, a
 plugin Pane was installing then, recorded in `pane-installing.json`, or one with
 no receipt) is cleared before the next one, and a failed install is logged and
 never blocks startup. With Profiles on (Settings › Advanced › Experimental), the
-sidebar's **Profiles** tab lists the top-level profiles, pinned ones first: a
-profile Agent Farm's `profiles list` marks `| unlisted` (one another profile runs
-as a subagent) shows inside that profile instead, and an Agent Farm that doesn't
-say lists every profile. For now it shows only greenfield's orchestrator,
-business and seo, the same temporary short list as Create New's To. With
-Profiles off there is no tab and its channels refuse. A profile opens on its cover page,
+sidebar's **Profiles** tab lists every profile Agent Farm's
+`profiles list --json` lists (greenfield's Orchestrator, Business and SEO, and
+any of your own), pinned ones first, each with Agent Farm's title, description
+and SVG photo. Every other role is an agent a profile links to, and shows in its
+tree. With Profiles off there is no tab and its channels refuse. A profile opens on its cover page,
 `covers/<profile>.html` or `.md` in the plugin when there is one (HTML is shown in
 a sandboxed frame with no scripts and no network), otherwise one Pane makes from
 its title, description, identity, subagents, skills and references. Beside it, a
-tree holds only that profile's own files: its identity, instructions, skills,
-references and the subagents it calls, each nested with its own files, and its
-settings. Files preview first (Markdown with its front-matter as a metadata
-header, YAML as key/value) and **Edit** opens the source. **Edit details**
-writes a profile's description into its identity's front-matter (Agent Farm's own
-`description:`, checked like any save). Its title goes in the plugin's `pane.yaml`
-for now, and its photo stays on this computer: both are temporary until Agent
-Farm's profile format has fields for them. The tab edits the plugins in
+tree holds that profile's own files (its identity, instructions, skills,
+references and settings) and, under Subagents, the agents it links to, drawn from
+the listing's `tree`. Each linked agent says how it runs (inside its parent,
+its own process, or its own launch), whether it has Claude and Codex versions, and
+nests its own files and links; a link back to an agent already above it is
+marked as a cycle and not expanded again. Files preview first (Markdown with its
+front-matter as a metadata header, YAML as key/value) and **Edit** opens the
+source. **Edit details** saves a profile's title and description, and its photo
+menu an SVG photo (at most 64 KB), with `agent-farm profiles set`. Agent Farm
+checks the SVG (no scripts, external links or embedded pages) and keeps all three
+as its own display override in `<PANE_DIR>/agent-farm/profile-overrides/`, so
+they survive Pane reinstalling greenfield on an update, don't make it **Edited**,
+and an empty value goes back to the plugin's own. Photos are shown only as images.
+The tab edits the plugins in
 place: a save is first checked with `agent-farm plugin validate` on a staged copy
 (without a pack's stale `checksums`, which launches don't read), so nothing changes
 unless Agent Farm accepts it, and Sessions using the plugin then show the changed
@@ -714,17 +719,18 @@ A save travels as one pack (`profile-sync:export`/`read` to pull,
 `profile-sync:write`/`apply` to push) with Session move's chunked, SHA-256-checked
 transfer. The receiving computer checks the pack's hash, then installs it with
 `agent-farm plugin install`, which refuses files that don't match the checksums
-in its plugin.yaml. The Profiles tab's own files, which Agent Farm's install
-leaves out (`pane.yaml` titles and `covers/` pages), travel in the pack and are
-written after the install. The plugin, its receipt and its photos there are set
+in its plugin.yaml. What Agent Farm's install leaves out travels in the pack
+too and is written after the install: the Profiles tab's `covers/` pages, and the
+plugin's display overrides (your titles, descriptions and SVG photos, from
+`profile-overrides/<plugin>/`). The plugin, its receipt and its overrides there are set
 aside first (nothing there is removed until both have been) and put back if
 anything before the record is written fails; a
 deletion is recorded only when a plugin's receipt is certainly gone, never on a
-read that failed. greenfield syncs only once you change it: a photo
-alone keeps each computer's own Pane version (`pane` records), an edit (a title or
-cover page counts, as greenfield ships neither) travels as your copy and stays
-**Edited** there (Pane updates keep it while Profiles is on; off, Agent Farm's
-receipt alone decides, as before), and Restore restores Pane's version everywhere. The calls answer only your own machines, never a
+read that failed. greenfield syncs only once you change it: a title, description
+or photo alone keeps each computer's own Pane version (`pane` records), an edit travels as
+your copy and stays **Edited** there (Pane updates keep it while Profiles is on;
+off, Agent Farm's receipt alone decides, as before), and Restore restores
+Pane's version everywhere. The calls answer only your own machines, never a
 teammate on a shared tailnet. Two dev instances on one computer sync through
 `PANE_MOVE_TEST_PEERS`, as a Session move does (CONTRIBUTING.md).
 

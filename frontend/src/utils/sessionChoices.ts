@@ -1,13 +1,12 @@
 import { agentConfig, agentLabel, isConfiguredAgent } from '../../../shared/agents';
 import type { AgentFarmProfileEntry } from '../../../shared/types/agentFarmProfiles';
 import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
-import { profileDisplayName } from './profileAvatar';
-import { isTemporarilyShownProfile } from '../../../shared/agentProfiles';
+import { profileEntryName } from '../../../shared/agentProfiles';
 import { pinnedFirst } from '../components/profiles/profilePins';
 
 /**
  * What Create New's To offers (T-63), in this order: Claude and Codex on their own, the machine's
- * listed Agent Farm profiles, and the other agents, which start directly with no profile (A-1).
+ * Agent Farm profiles, and the other agents, which start directly with no profile (A-1).
  * Profiles pinned in the Profiles tab go first, in pin order.
  */
 export interface SessionChoice {
@@ -57,12 +56,11 @@ export function sessionChoices({ agents, profiles, profilesUnavailable, pins = [
     const model = agentConfig(agent)?.chat?.profileModel;
     return { key: `agent:${agent}`, group: 'agents', label: agentLabel(agent), detail: `${model ? modelDisplayName(model) : agentLabel(agent)} · nothing added`, agent };
   });
-  // Pane's own plain profiles are hidden; a profile Agent Farm marks unlisted (a subagent's own) is
-  // left out, and one from an Agent Farm that doesn't say counts as listed.
-  // TEMPORARY (T-83): only the short list in shared/agentProfiles.ts is shown.
-  const named = profiles.filter(entry => !entry.hidden && entry.listed !== false && isTemporarilyShownProfile(entry.ref) && agents.includes(entry.harness) && runsThroughAgentFarm(entry.harness)).map((entry): SessionChoice => {
+  // Every profile Agent Farm lists (T-83: helpers are agents in a profile's tree, not profiles),
+  // except Pane's own plain ones, which are the agents above.
+  const named = profiles.filter(entry => !entry.hidden && agents.includes(entry.harness) && runsThroughAgentFarm(entry.harness)).map((entry): SessionChoice => {
     const choice: SessionChoice = {
-      key: `profile:${entry.ref}`, group: 'profiles', label: profileDisplayName(entry.ref), detail: `${entry.ref} · ${agentLabel(entry.harness)}`,
+      key: `profile:${entry.ref}`, group: 'profiles', label: profileEntryName(entry), detail: `${entry.ref} · ${agentLabel(entry.harness)}`,
       agent: entry.harness, profileRef: entry.ref,
     };
     if (profilesUnavailable) choice.disabledReason = profilesUnavailable;

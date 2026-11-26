@@ -9,7 +9,7 @@ import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { TODOS_HEADER_BUTTON } from '../todos/todoStyles';
 import { GeneratedCover, HtmlPage, MarkdownWithMeta, YamlPreview } from './ProfilePreviews';
-import { findNode, previewKind } from './profilePreview';
+import { findNode, previewKind, subagentLabel } from './profilePreview';
 import { savedSyncText } from './profileSyncText';
 import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
 
@@ -99,7 +99,7 @@ export function ProfileFilePane({ plugin, profile, file, notify, onShow }: {
   };
   const cancel = () => { if (dirty) setConfirmCancel(true); else discard(); };
 
-  const heading = cover ? (subagent ? subagent.label : 'Cover page') : file;
+  const heading = cover ? (subagent ? subagentLabel(subagent) : 'Cover page') : file;
   const coverNote = cover && path ? `From the ${subagent ? 'subagent’s profile' : 'profile'}: ${path}` : null;
   const status = dirty
     ? 'Unsaved changes'

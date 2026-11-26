@@ -33,19 +33,21 @@ describe('sessionChoices', () => {
     expect(choices.map(choice => choice.label)).toEqual(['Claude', 'Greenfield orchestrator', 'Greenfield business', 'OpenCode']);
   });
 
-  it('leaves out a profile Agent Farm marks unlisted, and offers one when Agent Farm says nothing', () => {
-    const choices = sessionChoices({ agents: ['claude'], profiles: [profile('greenfield/seo', 'claude', { listed: false }), profile('greenfield/orchestrator', 'claude', { listed: true }), profile('greenfield/business')] });
-    expect(choices.filter(choice => choice.group === 'profiles').map(choice => choice.profileRef)).toEqual(['greenfield/orchestrator', 'greenfield/business']);
+  it('offers every profile Agent Farm lists, from any plugin, except Pane\'s own (T-83)', () => {
+    const choices = sessionChoices({ agents: ['claude'], profiles: [profile('pane/claude'), profile('writer/writer'), profile('greenfield/orchestrator:codex'), profile('greenfield/business')] });
+    expect(choices.filter(choice => choice.group === 'profiles').map(choice => choice.profileRef)).toEqual(['writer/writer', 'greenfield/orchestrator:codex', 'greenfield/business']);
   });
 
-  it('shows only the TEMPORARY short list of named profiles (T-83)', () => {
-    const choices = sessionChoices({ agents: ['claude'], profiles: [profile('greenfield/planner'), profile('greenfield/orchestrator:codex'), profile('dcouple/business'), profile('greenfield/business')] });
-    expect(choices.filter(choice => choice.group === 'profiles').map(choice => choice.profileRef)).toEqual(['greenfield/orchestrator:codex', 'greenfield/business']);
+  it('names a profile by Agent Farm\'s title when it has one, else by its ref', () => {
+    const choices = sessionChoices({ agents: ['claude'], profiles: [profile('greenfield/orchestrator', 'claude', { title: 'Orchestrator' }), profile('greenfield/business', 'claude', { title: '  ' })] });
+    expect(choices.filter(choice => choice.group === 'profiles').map(choice => [choice.label, choice.detail])).toEqual([
+      ['Orchestrator', 'greenfield/orchestrator · Claude'], ['Greenfield business', 'greenfield/business · Claude'],
+    ]);
+    expect(filterSessionChoices(choices, 'orches').map(choice => choice.profileRef)).toEqual(['greenfield/orchestrator']);
   });
 
-  it('puts pinned profiles first, in pin order, and leaves out profiles Agent Farm doesn\'t list', () => {
-    const profiles = [...PROFILES, profile('greenfield/planner', 'claude', { listed: false })];
-    const choices = sessionChoices({ agents: ['claude', 'codex'], profiles, pins: ['greenfield/business', 'greenfield/orchestrator'] });
+  it('puts pinned profiles first, in pin order', () => {
+    const choices = sessionChoices({ agents: ['claude', 'codex'], profiles: PROFILES, pins: ['greenfield/business', 'greenfield/orchestrator'] });
     expect(choices.map(choice => choice.label)).toEqual(['Greenfield business', 'Greenfield orchestrator', 'Claude', 'Codex', 'Greenfield seo']);
   });
 

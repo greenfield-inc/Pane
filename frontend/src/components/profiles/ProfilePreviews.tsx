@@ -6,7 +6,7 @@ import { fileKey, useProfilesStore } from '../../stores/profilesStore';
 import { profileDisplayName } from '../../utils/profileAvatar';
 import { MarkdownPreview } from '../MarkdownPreview';
 import { ProfileAvatar } from './ProfileAvatar';
-import { coverFacts, sandboxedHtml, splitFrontMatter } from './profilePreview';
+import { LINK_MODE_TEXT, coverFacts, sandboxedHtml, splitFrontMatter, subagentLabel, subagentState, variantsText } from './profilePreview';
 
 /**
  * The profile page's previews (T-63, build-6 feedback items 3 and 5): an HTML file as a page in a
@@ -160,16 +160,20 @@ export function GeneratedCover({ plugin, profile, subagent, onOpenSubagent }: {
   subagent?: ProfileSubagentNode;
   onOpenSubagent: (id: string) => void;
 }) {
-  const identity = subagent ? subagent.identity : profile.entry;
+  const identity = subagent ? subagent.identity : profile.entry || undefined;
   const text = useFileText(plugin, identity);
   const body = text === undefined ? '' : splitFrontMatter(text).body.trim();
   const tree: ProfileTreeNode[] = subagent ? subagent.children : profile.tree;
   const facts = coverFacts(tree);
-  const title = subagent ? subagent.label : profile.title ?? profileDisplayName(profile.ref);
+  const title = subagent ? subagentLabel(subagent) : profile.title ?? profileDisplayName(profile.ref);
   const description = subagent ? subagent.description : profile.description;
   const harness = subagent ? subagent.harness : profile.harness;
   const model = subagent ? subagent.model : profile.model;
-  const coverName = subagent ? (subagent.profile?.split('/')[1] ?? subagent.agent) : profile.name;
+  const variants = variantsText(subagent ? subagent.variants : profile.variants, agentLabel);
+  // A cover file belongs to an agent of this plugin (an `any` link or another plugin's agent has none here).
+  const coverName = subagent ? (subagent.profile?.split('/')[1] ?? (subagent.identity ? subagent.agent.split('/').pop() : undefined)) : profile.name;
+  const state = subagent ? subagentState(subagent) : 'agent';
+  const runs = [variants ?? (harness ? agentLabel(harness) : undefined), model].filter(Boolean).join(' · ');
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6" data-testid="profiles-generated-cover">
       <div className="flex items-center gap-4">
@@ -177,12 +181,33 @@ export function GeneratedCover({ plugin, profile, subagent, onOpenSubagent }: {
         <div className="min-w-0">
           <h2 className="text-[22px] font-semibold leading-tight text-text-primary">{title}</h2>
           {description && <p className="mt-0.5 text-[14px] text-text-secondary">{description}</p>}
-          <p className="mt-0.5 text-[12.5px] text-text-tertiary">{agentLabel(harness)}{model ? ` · ${model}` : ''}</p>
+          {runs && <p className="mt-0.5 text-[12.5px] text-text-tertiary">{runs}</p>}
+          {subagent && (
+            <p className="mt-0.5 text-[12.5px] text-text-tertiary" data-testid="profiles-cover-link">
+              {subagent.any ? `${subagent.alias} · any agent in ${subagent.agent}` : `${subagent.alias} · ${subagent.agent}`} · {LINK_MODE_TEXT[subagent.mode].toLowerCase()}
+            </p>
+          )}
         </div>
       </div>
-      <p className="mt-3 text-[12px] text-text-tertiary">
-        Generated from the {subagent ? 'subagent' : 'profile'}’s title, description, identity and subagents. Add covers/{coverName}.html to replace it.
-      </p>
+      {state === 'error' && subagent && (
+        <p role="alert" className="mt-3 text-[13px] text-status-warning" data-testid="profiles-cover-error">Agent Farm couldn’t resolve this link: {subagent.error}</p>
+      )}
+      {state === 'cycle' && (
+        <p className="mt-3 text-[13px] text-text-secondary" data-testid="profiles-cover-cycle">↻ This agent is already above on this path, so its files and links show there.</p>
+      )}
+      {state === 'any' && subagent && (
+        <p className="mt-3 text-[13px] text-text-secondary" data-testid="profiles-cover-any">Its parent may start any agent in {subagent.agent}.</p>
+      )}
+      {subagent?.command && (
+        <CoverSection title="Run it on its own">
+          <code className="block whitespace-pre-wrap break-all rounded-md border border-border-primary bg-surface-primary px-3 py-2 font-mono text-[12.5px] text-text-primary" data-testid="profiles-cover-command">{subagent.command}</code>
+        </CoverSection>
+      )}
+      {state === 'agent' && (
+        <p className="mt-3 text-[12px] text-text-tertiary">
+          Generated from the {subagent ? 'agent' : 'profile'}’s title, description, identity and subagents.{coverName ? ` Add covers/${coverName}.html to replace it.` : ''}
+        </p>
+      )}
       {body && (
         <CoverSection title="What it does">
           <MarkdownPreview content={body} />

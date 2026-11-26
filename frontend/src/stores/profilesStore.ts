@@ -48,11 +48,13 @@ interface ProfilesState {
   newProfile: (name: string, agent: string) => Promise<ProfileSaveResult>;
   newFile: (plugin: string, profile: string, kind: ProfileNewFileKind, name: string) => Promise<ProfileSaveResult>;
   restore: (plugin: string) => Promise<ProfileSaveResult>;
-  /** Edit details: a profile's title and description, saved in its plugin's pane.yaml. */
+  /** Edit details: a profile's title and description, kept by Agent Farm on this computer (`profiles set`); empty goes back to the plugin's own. */
   setDetails: (plugin: string, profile: string, details: ProfileDetails) => Promise<ProfileSaveResult>;
   /** YAML as data for a preview (main parses it), or why it doesn't parse. */
   parseYaml: (source: string) => Promise<{ data?: JsonValue; error?: string }>;
-  setPhoto: (ref: string, base64: string) => Promise<void>;
+  /** Sets your photo: the SVG file's text, which Agent Farm checks (SVG only, at most 64 KiB, no scripts). */
+  setPhoto: (ref: string, svg: string) => Promise<void>;
+  /** Removes your photo: the plugin's own SVG shows again, or initials when it has none. */
   removePhoto: (ref: string) => Promise<void>;
   /** Hides a saved-aside plugin's notice for good (#1740 review F-3). */
   dismissRecovery: (id: string) => Promise<void>;
@@ -67,7 +69,7 @@ interface ProfilesState {
   follow: () => () => void;
 }
 
-const EMPTY_PHOTOS: ProfilePhotos = { profiles: {}, plugins: {} };
+const EMPTY_PHOTOS: ProfilePhotos = { profiles: {}, sources: {} };
 
 export const fileKey = (plugin: string, file: string): string => `${plugin}/${file}`;
 
@@ -313,8 +315,8 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
       parsedYaml.set(source, parsed);
       return parsed;
     },
-    setPhoto: async (ref, base64) => {
-      await answer(api().setPhoto(ref, base64), nothing);
+    setPhoto: async (ref, svg) => {
+      await answer(api().setPhoto(ref, svg), nothing);
       await get().loadPhotos();
     },
     removePhoto: async (ref) => {
@@ -365,17 +367,16 @@ function qualified(ref: string): string {
   return ref.split(':')[0];
 }
 
-/** A profile's picture here: your photo, else its plugin's own picture; undefined shows its initials. */
+/** A profile's photo here (yours, else the plugin's own SVG, as Agent Farm resolves it); undefined shows its initials. */
 export function profilePicture(photos: ProfilePhotos, ref: string | undefined): string | undefined {
   if (!ref) return undefined;
-  const name = qualified(ref);
-  return photos.profiles[name] ?? photos.plugins[name.split('/')[0]];
+  return photos.profiles[qualified(ref)];
 }
 
 export function profilePhotoSource(photos: ProfilePhotos, ref: string): ProfilePhotoSource {
   const name = qualified(ref);
-  if (photos.profiles[name]) return 'yours';
-  return photos.plugins[name.split('/')[0]] ? 'plugin' : 'default';
+  if (!photos.profiles[name]) return 'default';
+  return photos.sources[name] ?? 'plugin';
 }
 
 let photosRequested = false;
