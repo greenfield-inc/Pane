@@ -6,9 +6,9 @@ import path from 'node:path';
 
 /**
  * A fully isolated Pane for end-to-end journeys (D-288): its own PANE_DIR, Electron profile,
- * HOME, CLAUDE_CONFIG_DIR and CODEX_HOME under one throwaway folder, OS integration off, and
- * nothing inherited from the terminal that runs the tests (PANE_*, RUNPANE_*, CLAUDE*,
- * AGENT_FARM*). It refuses to start when any of it resolves to the real ~/.pane.
+ * HOME, CLAUDE_CONFIG_DIR and CODEX_HOME under one throwaway folder, OS integration and
+ * Tailscale off, and nothing inherited from the terminal that runs the tests (PANE_*, RUNPANE_*,
+ * CLAUDE*, AGENT_FARM*). It refuses to start when any of it resolves to the real ~/.pane.
  */
 declare global {
   interface Window {
@@ -63,6 +63,8 @@ export function isolatedPane(prefix: string, extra: Record<string, string> = {},
     CODEX_HOME: path.join(home, '.codex'),
     XDG_CONFIG_HOME: path.join(home, '.config'),
     PANE_DISABLE_OS_INTEGRATION: '1',
+    // No Tailscale discovery: a test Pane never probes the person's real machines (D-288).
+    PANE_DISABLE_TAILSCALE: '1',
     NODE_ENV: 'development',
     ...extra,
   });

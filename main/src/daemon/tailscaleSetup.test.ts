@@ -87,3 +87,22 @@ describe('Tailscale discovery after a macOS GUI relaunch', () => {
     });
   });
 });
+
+describe('Tailscale turned off for an isolated test Pane (PANE_DISABLE_TAILSCALE)', () => {
+  afterEach(() => {
+    vi.resetAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('finds no Tailscale and runs nothing, even with the CLI installed', async () => {
+    vi.stubEnv('PANE_DISABLE_TAILSCALE', '1');
+    exists.mockReturnValue(true);
+    spawn.mockReturnValue({ status: 0, stdout: '', stderr: '' });
+    run.mockResolvedValue({ ok: true, stdout: '', stderr: '' });
+
+    expect(resolveTailscaleCommand({ spawnSync: spawn }, exists)).toBeNull();
+    await expect(resolveTailscaleCommandAsync(run, exists)).resolves.toBeNull();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+});

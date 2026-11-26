@@ -455,6 +455,8 @@ export function getTailscaleServeSetupInstructions(port?: number): string {
 }
 
 function tailscaleCandidates(pathExists: (candidate: string) => boolean = existsSync): ResolvedCommand[] {
+  // Isolated test Panes (tests/isolatedPane.ts, D-288) see no Tailscale, so they never probe a real machine.
+  if (process.env.PANE_DISABLE_TAILSCALE === '1') return [];
   const commands: ResolvedCommand[] = [{ command: 'tailscale', displayCommand: 'tailscale' }];
   if (process.platform === 'darwin') {
     // GUI and updater relaunches may omit Homebrew from PATH.
