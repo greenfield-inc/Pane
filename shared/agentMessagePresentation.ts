@@ -71,7 +71,7 @@ export function classifyChatLine(text: string): ChatAgentLine | undefined {
   if (from && 'via' in from) return { type: 'relayed', via: from.via, body, ref };
   if (from) return { type: 'message', sender: from.sender, body, ref };
   // A prefix Pane doesn't write ("[From a brain-dump …]") counts only on a message with an id.
-  if (route && prefix) return { type: 'message', sender: { name: prefix[1].trim(), kind: '' }, body, ref };
+  if (route && prefix) return { type: 'message', sender: senderOfName(prefix[1].trim()), body, ref };
   if (route) return { type: 'message', sender: senderOfName(route[2]), body, ref };
   return undefined;
 }
@@ -90,9 +90,11 @@ export type MessageStatus =
   | { state: 'sending' }
   | { state: 'undelivered'; reason: string };
 
-export function messageStatus(record: AgentMessageRecord, byRef: ReadonlyMap<string, AgentMessageRecord>): MessageStatus {
+/** Undefined for a reply nobody answered: a reply waits for nothing. */
+export function messageStatus(record: AgentMessageRecord, byRef: ReadonlyMap<string, AgentMessageRecord>): MessageStatus | undefined {
   const replies = record.replies.flatMap(ref => byRef.get(ref) ?? []);
   if (record.state === 'answered' || replies.length > 0) return { state: 'answered', replies };
+  if (record.kind === 'reply' && record.state !== 'undelivered') return undefined;
   if (record.state === 'sending') return { state: 'sending' };
   if (record.state === 'undelivered') return { state: 'undelivered', reason: record.undeliveredReason ?? 'it could not be delivered' };
   return { state: 'waiting' };
@@ -102,9 +104,9 @@ export function messageStatus(record: AgentMessageRecord, byRef: ReadonlyMap<str
 interface TurnSpan { id: string; startedAt?: string; endedAt?: string }
 
 /**
- * The messages this tab sent, by the turn its agent sent them in: the first turn that ended after
- * the message was made, else the turn still running. A message older than every turn shown
- * (its turn paged out) is left out.
+ * The messages this tab sent, by the turn its agent sent them in: the latest turn that had started
+ * when the message was made (a running turn starts when the one before it ended). A message older
+ * than every turn shown (its turn paged out) is left out.
  */
 export function sentMessagesByTurn(turns: readonly TurnSpan[], records: readonly AgentMessageRecord[], panelId: string): ReadonlyMap<string, AgentMessageRecord[]> {
   const sent = records.filter(record => record.kind === 'message' && record.sender.panelId === panelId)
@@ -114,8 +116,11 @@ export function sentMessagesByTurn(turns: readonly TurnSpan[], records: readonly
   for (const record of sent) {
     const made = Date.parse(record.createdAt);
     if (firstStart && made < Date.parse(firstStart)) continue;
-    const turn = turns.find(candidate => candidate.endedAt !== undefined && Date.parse(candidate.endedAt) >= made)
-      ?? [...turns].reverse().find(candidate => candidate.endedAt === undefined);
+    let turn: TurnSpan | undefined;
+    for (const [index, candidate] of turns.entries()) {
+      const start = candidate.startedAt ?? turns[index - 1]?.endedAt;
+      if (start === undefined || Date.parse(start) <= made) turn = candidate;
+    }
     if (!turn) continue;
     placed.set(turn.id, [...(placed.get(turn.id) ?? []), record]);
   }

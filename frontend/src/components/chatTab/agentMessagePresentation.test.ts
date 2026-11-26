@@ -80,6 +80,10 @@ describe('messageStatus', () => {
     expect(messageStatus(record(12, { state: 'answered', replies: ['M-13'] }), new Map([['M-13', reply]]))).toEqual({ state: 'answered', replies: [reply] });
     expect(messageStatus(record(12, { state: 'undelivered', undeliveredReason: 'its tab closed' }), new Map())).toEqual({ state: 'undelivered', reason: 'its tab closed' });
   });
+  it('gives a reply no waiting state', () => {
+    expect(messageStatus(record(13, { kind: 'reply', replyTo: 'M-12', state: 'delivered' }), new Map())).toBeUndefined();
+    expect(messageStatus(record(13, { kind: 'reply', replyTo: 'M-12', state: 'queued' }), new Map())).toBeUndefined();
+  });
 });
 
 describe('sentMessagesByTurn', () => {
@@ -98,5 +102,11 @@ describe('sentMessagesByTurn', () => {
       record(6, { sender: party('me', 'x'), createdAt: '2026-11-25T09:00:00.000Z' }),
     ], 'me');
     expect([...placed].map(([turn, sent]) => [turn, sent.map(item => item.ref)])).toEqual([['t1', ['M-1']], ['t2', ['M-2']], ['t3', ['M-3']]]);
+  });
+  it('keeps a message sent after a turn ended with that turn, when later turns come', () => {
+    const ended = turns.slice(0, 2);
+    const late = record(1, { sender: party('me', 'x'), createdAt: '2026-11-25T10:05:30.000Z' });
+    expect([...sentMessagesByTurn(ended, [late], 'me').keys()]).toEqual(['t1']);
+    expect([...sentMessagesByTurn([...ended, { id: 't3' }], [late], 'me').keys()]).toEqual(['t1']);
   });
 });
