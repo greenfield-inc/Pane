@@ -2211,6 +2211,52 @@ describe('OrchestrationSessionManager', () => {
     expect(find(await fixture.manager.list())?.openedAt).toBe('2026-11-25T09:30:00.000Z');
   });
 
+  it('stamps when the Session\'s own agent finished a turn; worker tabs, reports and Pane lines never do', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-26T10:00:00.000Z') });
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Unread work' });
+    const pane = paneFixture(fixture, 'unread-worker-pane', { name: 'Worker Pane' });
+    const worker = createPanel('unread-worker-terminal', pane.id);
+    await seedPanel(worker);
+    await fixture.manager.associate({ sessionId: created.session.id }, { paneId: pane.id, panelIds: [worker.id] });
+    const repliedAt = async () => (await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentRepliedAt;
+
+    // A worker finishing, its report, and a Pane line on the Session are not the Session's agent talking.
+    await fixture.manager.notifyLiveActivity(worker.id, 'working');
+    await fixture.manager.notifyLiveActivity(worker.id, 'idle');
+    await fixture.manager.recordAgentReport(worker.id, { state: 'ready', summary: 'Done', reportedAt: '2026-11-26T10:00:00.000Z' });
+    await fixture.manager.update({ sessionId: created.session.id }, { blockers: ['Waiting on review'], source: 'system' });
+    expect(await repliedAt()).toBeUndefined();
+
+    // The Session's agent starting a turn is not a message yet; ending it is.
+    await fixture.manager.notifyLiveActivity(created.panel.id, 'working');
+    expect(await repliedAt()).toBeUndefined();
+    vi.setSystemTime(new Date('2026-11-26T10:05:00.000Z'));
+    const changed: Array<{ sessionId: string; kind: string }> = [];
+    fixture.manager.on('changed', event => changed.push(event));
+    await fixture.manager.notifyLiveActivity(created.panel.id, 'idle');
+    expect(await repliedAt()).toBe('2026-11-26T10:05:00.000Z');
+    expect(changed).toContainEqual(expect.objectContaining({ sessionId: created.session.id }));
+
+    // An idle that follows idle (a resize, a reconnect) is not another message.
+    vi.setSystemTime(new Date('2026-11-26T10:09:00.000Z'));
+    await fixture.manager.notifyLiveActivity(created.panel.id, 'blocked');
+    await fixture.manager.notifyLiveActivity(created.panel.id, 'idle');
+    expect(await repliedAt()).toBe('2026-11-26T10:05:00.000Z');
+  });
+
+  it('tells sidebars when a Session was viewed, so its unread mark clears everywhere', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Viewed work' });
+    const changed: Array<{ sessionId: string; kind: string }> = [];
+    fixture.manager.on('changed', event => changed.push(event));
+
+    fixture.manager.notifyViewed(created.internalSession.id);
+    fixture.manager.notifyViewed('some-ordinary-pane');
+
+    expect(changed).toEqual([{ sessionId: created.session.id, kind: 'viewed' }]);
+  });
+
   it('supports exact-name selectors and rejects lost updates with an optimistic revision guard', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Context handoff', context: 'Initial context' });
