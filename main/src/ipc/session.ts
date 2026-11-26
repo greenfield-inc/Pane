@@ -1507,8 +1507,12 @@ export function registerSessionHandlers(
 
   commandRegistry.register('sessions:mark-viewed', async (sessionId: string) => {
     try {
-      await sessionManager.markSessionAsViewed(sessionId);
-      await services.orchestrationSessionManager?.notifyViewed(sessionId);
+      // A Session's chat Pane viewed again with nothing to clear writes nothing (viewNeedsWrite).
+      const manager = services.orchestrationSessionManager;
+      if (!manager || await manager.viewNeedsWrite(sessionId, sessionManager.getSession(sessionId)?.lastViewedAt)) {
+        await sessionManager.markSessionAsViewed(sessionId);
+      }
+      await manager?.notifyViewed(sessionId);
       return { success: true };
     } catch (error) {
       console.error('Failed to mark session as viewed:', error);

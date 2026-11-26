@@ -74,7 +74,8 @@ export function parseClaudeLine(line: string): TranscriptEntry | undefined {
   if (!text) return undefined;
   if (row.type === 'user') {
     const typed = row.message.role === 'user' && row.isMeta !== true && (row.origin?.kind ?? 'human') === 'human';
-    return typed ? { kind: 'user', text, timestampMs: timestampMs(row.timestamp) } : undefined;
+    // A prompt nobody typed (a background task's notification) still starts a turn.
+    return { kind: typed ? 'user' : 'boundary', text, timestampMs: timestampMs(row.timestamp) };
   }
   return { kind: 'assistant', text, timestampMs: timestampMs(row.timestamp), messageId: row.message.id };
 }

@@ -1,3 +1,4 @@
+import { promises as fs } from 'fs';
 import { claudeTranscriptFiles, parseClaudeLine } from './claude';
 import { codexTranscriptFiles, parseCodexLine } from './codex';
 import { readTranscriptTail, type TranscriptEntry } from './tail';
@@ -111,7 +112,7 @@ async function findUserTurnSince(
     if (!entries) continue;
     result.file ??= file;
     for (const entry of entries) {
-      if (entry.kind === 'assistant' || entry.kind === 'tool' || entry.timestampMs === undefined || entry.timestampMs < earliest) continue;
+      if ((entry.kind !== 'user' && entry.kind !== 'queued') || entry.timestampMs === undefined || entry.timestampMs < earliest) continue;
       if (text !== undefined && !turnTextMatches(entry.text, text)) continue;
       const state = entry.kind === 'user' ? 'taken' : 'queued';
       if (result.state !== 'taken') {
@@ -143,28 +144,58 @@ async function lastAssistantMessage(locator: TranscriptLocator): Promise<string 
   return parts.join('\n');
 }
 
-/**
- * Whether the turn the agent ran from `startedAtMs` to `endedAtMs` ended with text the person can
- * read: of its reply and tool-call rows recorded in that window, the last is non-blank reply text.
- * Progress text before a tool call, a tool-only turn, and rows of the turns before or after do not
- * count. Undefined when no transcript, or no row of the turn, was found (yet).
- */
-async function turnEndedWithText(locator: TranscriptLocator, startedAtMs: number, endedAtMs: number): Promise<boolean | undefined> {
-  const earliest = startedAtMs - SINCE_SLACK_MS;
-  const latest = endedAtMs + SINCE_SLACK_MS;
-  const files = await transcriptFiles(locator, Math.max(earliest, locator.notBeforeMs ?? 0));
-  for (const file of files) {
-    const entries = await readEntries(locator, file);
-    const last = entries?.filter(entry => (entry.kind === 'assistant' || entry.kind === 'tool')
-      && entry.timestampMs !== undefined && entry.timestampMs >= earliest && entry.timestampMs <= latest).at(-1);
-    if (last) return last.kind === 'assistant' && last.text.trim() !== '';
+/** Where a transcript ended at a moment: its newest file and that file's size. */
+export interface TranscriptMark {
+  file: string;
+  size: number;
+}
+
+/** Where a turn starts: a transcript mark, or (when Pane could not mark one) the time it started. */
+export type TurnStart = TranscriptMark | { startedAtMs: number };
+
+/** Marks where the panel's transcript ends now (a turn's start); undefined without one. */
+async function mark(locator: TranscriptLocator): Promise<TranscriptMark | undefined> {
+  const [file] = await transcriptFiles(locator, locator.notBeforeMs ?? 0);
+  if (!file) return undefined;
+  try {
+    return { file, size: (await fs.stat(file)).size };
+  } catch {
+    return undefined;
   }
-  return undefined;
+}
+
+/**
+ * Whether a turn ended with text the person can read. The turn is the transcript's rows after
+ * `since` (where the transcript ended when the turn started, or failing that the turn's start
+ * time), up to the next prompt once the turn has written something: a typed one, a queued one the
+ * agent took, or one nobody typed (a task notification). Row order decides, never the clock, so
+ * the next turn's rows never count and a clock set back mid-turn hides nothing. Of the turn's reply
+ * and tool-call rows, the last must be non-blank reply text: progress text before a tool call and
+ * a tool-only turn do not count. Undefined when no transcript, or no row of the turn, was found yet.
+ */
+async function turnEndedWithText(locator: TranscriptLocator, since: TurnStart): Promise<boolean | undefined> {
+  const startedAtMs = 'startedAtMs' in since ? since.startedAtMs - SINCE_SLACK_MS : undefined;
+  const file = 'file' in since
+    ? since.file
+    : (await transcriptFiles(locator, Math.max(startedAtMs ?? 0, locator.notBeforeMs ?? 0)))[0];
+  const entries = file ? await readEntries(locator, file) : undefined;
+  if (!entries) return undefined;
+  const inTurn = (entry: TranscriptEntry) => 'file' in since
+    ? entry.offset !== undefined && entry.offset >= since.size
+    : entry.timestampMs !== undefined && startedAtMs !== undefined && entry.timestampMs >= startedAtMs;
+  let last: TranscriptEntry | undefined;
+  for (const entry of entries) {
+    if (!inTurn(entry)) continue;
+    if (entry.kind === 'assistant' || entry.kind === 'tool') last = entry;
+    else if (last && entry.kind !== 'queued') break;
+  }
+  return last && last.kind === 'assistant' && last.text.trim() !== '';
 }
 
 /** The transcript reader, as one object so callers' tests can stub its reads. */
 export const agentTranscripts = {
   findUserTurnSince,
   lastAssistantMessage,
+  mark,
   turnEndedWithText,
 };

@@ -973,6 +973,22 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /**
+   * Whether marking `paneId` viewed should write its view time (`sessions.last_viewed_at`, and with
+   * it a Pane update to every client). A Session's chat Pane with nothing to clear, viewed under a
+   * minute ago, needs no write: window focus would otherwise update it, and re-read every machine's
+   * Panes in All machines, each time. Any other Pane is written as before.
+   */
+  async viewNeedsWrite(paneId: string, lastViewedAt: string | undefined, now = Date.now()): Promise<boolean> {
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const record = this.store.read().sessions.find(session => session.internalSessionId === paneId);
+      if (!record || viewedReadState(record.readState)) return true;
+      const lastMs = lastViewedAt ? parseSessionTimestampMs(lastViewedAt) : Number.NaN;
+      return Number.isNaN(lastMs) || now - lastMs >= VIEW_REFRESH_MS;
+    });
+  }
+
+  /**
    * Adds what a read computes, never stored: `paused` when its chat and every Pane in it are paused,
    * and `openedAt`, its chat Pane's last view.
    */
@@ -1091,6 +1107,8 @@ export class OrchestrationSessionManager extends EventEmitter {
           updatedAt: now,
           activity: [...current.activity, this.activity(state, `Agent state changed to ${state}.`, 'agent', association?.paneId, panelId)],
         };
+        // The Session's own agent started a turn: a terminal tab's transcript is read from here when it ends.
+        if (isOrchestratorPanel && state === 'working') this.replyProbe.turnStarted(panelId);
         // The Session's own agent finished a turn: it takes its place in the read order now, so a
         // view while its text is still being checked wins. A chat tab says at once how it ended.
         if (isOrchestratorPanel && state === 'idle' && lastForPanel?.kind === 'working') {
@@ -1116,7 +1134,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
     // A terminal tab's transcript is read outside the lock.
     for (const ended of endedTurns) {
-      if (await this.replyProbe(panelId, { startedAtMs: ended.startedAtMs, endedAtMs: Date.parse(ended.endedAt) })) {
+      if (await this.replyProbe.turnEnded(panelId, { startedAtMs: ended.startedAtMs, endedAtMs: Date.parse(ended.endedAt) })) {
         await this.stampAgentReply(ended.sessionId, ended.turn, ended.endedAt);
       }
     }
@@ -1923,6 +1941,9 @@ function orderedSessions(data: OrchestrationSessionStoreData): OrchestrationSess
     return right.createdAt.localeCompare(left.createdAt);
   });
 }
+
+/** A Session's view time is rewritten at most this often when there is nothing to clear (a phone's Recent orders by it). */
+const VIEW_REFRESH_MS = 60_000;
 
 /** The read state after a view: the next clock value, when a turn ended since the last view; otherwise nothing changes. */
 function viewedReadState(state: SessionReadState | undefined): SessionReadState | undefined {

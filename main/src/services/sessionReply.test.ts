@@ -36,7 +36,7 @@ describe('the reply probe for a terminal Session agent', () => {
   it('falls back to the turn\'s start time when Pane could not mark where it started', async () => {
     const readTurn = vi.fn(async () => true);
     await expect(endedWithText(sources({ mark: async () => undefined, readTurn }))).resolves.toBe(true);
-    expect(readTurn).toHaveBeenCalledWith(locator, turn.startedAtMs);
+    expect(readTurn).toHaveBeenCalledWith(locator, { startedAtMs: turn.startedAtMs });
   });
 
   it('settles a positive read before believing it: progress text seen first, its tool call only on the next read, is no reply', async () => {

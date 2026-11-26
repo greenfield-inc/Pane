@@ -56,7 +56,8 @@ export function parseCodexLine(line: string): TranscriptEntry | undefined {
   if (row.type === 'response_item' && payload.type === 'message' && 'role' in payload) {
     if (payload.role === 'user') {
       const text = decodeOptionalBoundary(payload.content, userContent);
-      return text && !isInjectedContext(text) ? { kind: 'user', text, timestampMs: at } : undefined;
+      if (!text) return undefined;
+      return { kind: isInjectedContext(text) ? 'boundary' : 'user', text, timestampMs: at };
     }
     if (payload.role === 'assistant') {
       const text = decodeOptionalBoundary(payload.content, assistantContent);

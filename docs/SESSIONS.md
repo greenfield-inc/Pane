@@ -289,9 +289,12 @@ count as reading.
 How Pane knows a turn ended with text:
 - A chat Session checks the turn's last reply as the turn ends.
 - A Claude or Codex terminal Session reads the agent's own transcript for that
-  turn only. If the transcript lands a moment after the turn ends, Pane reads it
-  again for a few seconds. With no transcript, the turn doesn't bold the
-  Session.
+  turn only: from where the transcript ended when the turn started, up to the
+  next prompt (typed, queued or a task notification). Pane goes by the order of
+  the rows, not the clock. If the transcript lands a moment after the turn ends,
+  Pane reads it again for a few seconds, and a reply counts only once a second
+  read agrees. With no transcript, the turn doesn't bold the Session. A message
+  you send mid-turn ends the turn's window early; you were watching it anyway.
 - Any other terminal agent has no transcript Pane can read, so each of its
   finished turns counts as a message. That is a known limit.
 
