@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
-import { newestFullRecord, settingsSave, withNewerSummary } from './sessionRecords';
+import { newestFullRecord, SessionSettingsForm, settingsSave, withNewerSummary } from './sessionRecords';
 
 function record(revision: number, overrides: Partial<OrchestrationSessionRecord> = {}): OrchestrationSessionRecord {
   return {
@@ -71,5 +71,43 @@ describe('Session settings after another client changed the profile (T-127 revie
     const folded = withNewerSummary(record(4), summary);
 
     expect(settingsSave(withNewerSummary(folded, record(6)), {}).expectedRevision).toBe(6);
+  });
+});
+
+describe('SessionSettingsForm (T-127 review F-3)', () => {
+  // The phone set the profile to "New" at revision 5; the list summary landed first, the overview later.
+  function openedBeforeTheOverview() {
+    const { activity: _activity, profile: _profile, ...summary } = record(5);
+    const view = withNewerSummary(record(4, { profile: 'Old' }), summary);
+    return { view, form: new SessionSettingsForm(newestFullRecord(view, record(4, { profile: 'Old' }))) };
+  }
+
+  it('checks a save against the record the form was filled from, even after the overview lands while it is open', () => {
+    const { view, form } = openedBeforeTheOverview();
+    const landed = newestFullRecord(view, record(5, { profile: 'New' }));
+
+    expect(landed.profile).toBe('New');
+    expect(form.values.profile).toBe('Old');
+    expect(form.saveInput(form.values).expectedRevision).toBe(4);
+  });
+
+  it('refills from the current record after the host refuses a stale save, so saving again cannot write the old profile', () => {
+    const { form } = openedBeforeTheOverview();
+    const refused = 'Session Release changed; expected revision 4, found 5';
+
+    const next = form.afterFailure(refused, record(5, { profile: 'New' }));
+
+    expect(next.form.values.profile).toBe('New');
+    expect(next.form.saveInput(next.form.values).expectedRevision).toBe(5);
+    expect(next.message).toBe('These settings changed on another device. The form now shows the current ones: check them and save again.');
+  });
+
+  it('keeps what the person typed when a save fails for another reason', () => {
+    const { form } = openedBeforeTheOverview();
+
+    const next = form.afterFailure('The host did not answer.', record(5, { profile: 'New' }));
+
+    expect(next.form).toBe(form);
+    expect(next.message).toBe('The host did not answer.');
   });
 });

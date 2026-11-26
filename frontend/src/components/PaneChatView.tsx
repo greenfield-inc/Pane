@@ -30,9 +30,8 @@ import { SessionWorkspaceSkeleton } from './SessionWorkspaceSkeleton';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { SessionLaunchFields } from './SessionLaunchFields';
 import { SessionChangesPanel, SessionOverviewPanel, useSessionOverview } from './SessionOverviewPanel';
-import { newestFullRecord, settingsSave, withNewerSummary } from '../utils/sessionRecords';
+import { newestFullRecord, SessionSettingsForm, withNewerSummary } from '../utils/sessionRecords';
 import { useConfigStore } from '../stores/configStore';
-import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import { cn } from '../utils/cn';
 import { LiveRegion } from './ui/LiveRegion';
 import { Tooltip } from './ui/Tooltip';
@@ -889,9 +888,11 @@ function SessionSettingsDialog({ record, onClose, onSave }: {
 }) {
   const config = useConfigStore(state => state.config);
   const fetchConfig = useConfigStore(state => state.fetchConfig);
-  const [command, setCommand] = useState(record.launchCommand ?? '');
-  const [customResume, setCustomResume] = useState<CustomCommandResume | null>(record.customResume ?? null);
-  const [profile, setProfile] = useState(record.profile ?? DEFAULT_SESSION_PROFILE);
+  // Made once when the dialog opens: a save is checked against the record the form was filled from (review F-3).
+  const [form, setForm] = useState(() => new SessionSettingsForm(record));
+  const [command, setCommand] = useState(form.values.launchCommand);
+  const [customResume, setCustomResume] = useState<CustomCommandResume | null>(form.values.customResume);
+  const [profile, setProfile] = useState(form.values.profile);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -904,10 +905,17 @@ function SessionSettingsDialog({ record, onClose, onSave }: {
     setSaving(true);
     setSaveError(null);
     try {
-      await onSave(settingsSave(record, { launchCommand: command, profile, customResume }));
+      await onSave(form.saveInput({ launchCommand: command, profile, customResume }));
       onClose();
     } catch (cause) {
-      setSaveError(cause instanceof Error ? cause.message : 'Failed to save Session settings');
+      const next = form.afterFailure(cause instanceof Error ? cause.message : 'Failed to save Session settings', record);
+      if (next.form !== form) {
+        setForm(next.form);
+        setCommand(next.form.values.launchCommand);
+        setCustomResume(next.form.values.customResume);
+        setProfile(next.form.values.profile);
+      }
+      setSaveError(next.message);
     } finally {
       setSaving(false);
     }
@@ -919,7 +927,8 @@ function SessionSettingsDialog({ record, onClose, onSave }: {
         <ModalHeader title="Session settings" />
         <ModalBody className="min-h-0 space-y-4">
           <p className="text-sm text-text-secondary">Saved changes apply the next time this Session terminal starts. Saving keeps the current conversation running.</p>
-          <SessionLaunchFields resume={customResume} onResumeChange={setCustomResume} command={command} profile={profile} customCommands={config?.customCommands} onCommandChange={setCommand} onProfileChange={setProfile} />
+          {/* Remounted when a refusal refills the form, so its own profile draft starts from the refill. */}
+          <SessionLaunchFields key={form.revision} resume={customResume} onResumeChange={setCustomResume} command={command} profile={profile} customCommands={config?.customCommands} onCommandChange={setCommand} onProfileChange={setProfile} />
           {saveError && <p role="alert" className="text-sm text-status-error">{saveError}</p>}
         </ModalBody>
         <ModalFooter className="shrink-0">
