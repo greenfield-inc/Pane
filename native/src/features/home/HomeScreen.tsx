@@ -8,7 +8,7 @@ import { canClose } from '@shared/approvalReceipts';
 
 import { ScreenFocus } from '@/daemon';
 
-import { buildAllMachinesList, feedsAnswered, type RecentRow } from '@/features/allMachines/allMachinesList';
+import { buildAllMachinesList, feedsAnswered, RECENT_PREVIEW, recentlyOpened, type RecentRow } from '@/features/allMachines/allMachinesList';
 import { AllMachinesNotes, allOffline, offlineAlert, openRecentRow, openWaitingRow, RecentRowView, waitingRowText } from '@/features/allMachines/AllMachinesRows';
 import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
 import { sessionKey } from '@/features/approvals/approvals';
@@ -94,6 +94,7 @@ export function HomeScreen() {
   const query = useHomeView(state => state.query);
   const setQuery = useHomeView(state => state.setQuery);
   const [refreshing, setRefreshing] = useState(false);
+  const [recentExpanded, setRecentExpanded] = useState(false);
   const openSessions = useOpenSessions(state => state.open[profile.id]) ?? [];
   const toggleSession = useOpenSessions(state => state.toggle);
   const pinnedExpanded = useSidebarSections(state => state.allPinned);
@@ -315,7 +316,37 @@ export function HomeScreen() {
     </>
   );
 
-  // All panes on one machine: Pinned in place, then rows that open Sessions, Repositories and Archived.
+  // What was last opened on any device, above Pinned: three rows, Show more lists up to ten.
+  const recentRows = recentlyOpened(board.recent);
+  const recentRow = (row: RecentRow, index: number) => (
+    <OpenMark key={row.key} open={row.type === 'pane' ? isOpen('/pane/[paneId]', row.pane.id, row.machineKey) : isOpen('/session/[sessionId]', row.session.id, row.machineKey)}>
+      <RecentRowView
+        idPrefix="recent"
+        card={{ divided: index > 0 }}
+        row={row}
+        at={row.openedAt}
+        waiting={row.type === 'session' ? waitingBySession.get(sessionKey(row.machineKey, row.session.id)) ?? 0 : 0}
+        machine={markOf(row.machineKey)}
+        currentKey={profile.id}
+        actions={actions}
+        onOpen={() => openRecentRow(row, profile.id, actions, sayOffline)}
+      />
+    </OpenMark>
+  );
+  const recent = recentRows.length > 0 ? (
+    <Card testID="home-recent" style={styles.cardGap}>
+      <GroupRow testID="home-recent-header" icon={{ ios: 'clock', android: 'schedule' }} title="Recent" />
+      <View style={[styles.hairline, { backgroundColor: theme.colors.border }]} />
+      {(recentExpanded ? recentRows : recentRows.slice(0, RECENT_PREVIEW)).map(recentRow)}
+      {recentRows.length > RECENT_PREVIEW ? (
+        <Pressable testID="home-recent-more" accessibilityRole="button" hitSlop={4} onPress={() => setRecentExpanded(!recentExpanded)} style={styles.more}>
+          <Text variant="subhead" tone="accent">{recentExpanded ? 'Show less' : `Show ${recentRows.length - RECENT_PREVIEW} more`}</Text>
+        </Pressable>
+      ) : null}
+    </Card>
+  ) : null;
+
+  // All panes on one machine: Recent, then Pinned in place, then rows that open Sessions, Repositories and Archived.
   const pinnedItems = (() => {
     const items = sidebar('', { pinned: true, sessions: false, repositories: false, archived: false });
     const end = items.findIndex((item, index) => index > 0 && item.type === 'section');
@@ -333,6 +364,7 @@ export function HomeScreen() {
   const allPanes = (
     <>
       {(here.projects.data ?? []).length === 0 && !here.projects.isError ? <Notice testID="panes-empty" message="No remote panes found on this host." /> : null}
+      {recent}
       {pinnedItems.length > 0 ? (
         <Card testID="home-pinned" style={styles.cardGap}>
           <GroupRow testID="sidebar-section-pinned" icon={{ ios: 'pin', android: 'push_pin' }} title="Pinned" count={pinnedCount} open={expanded.pinned} onPress={() => toggleSection('pinned')} />
@@ -395,7 +427,7 @@ export function HomeScreen() {
       <StatusTiles counts={counts} selected={tile} onSelect={selectTile} />
       <View style={styles.below}>
         {tile === 'needs' ? needsYou
-          : tile === 'all' ? (all ? <BoardHeader title={allOffline(feeds) ? 'Last seen' : 'Recent'} count={counts?.all} /> : allPanes)
+          : tile === 'all' ? (all ? <>{recent}<BoardHeader title={allOffline(feeds) ? 'Last seen' : 'All panes'} count={counts?.all} /></> : allPanes)
           : <BoardHeader title={tileTitle} count={counts?.[tile]} right={<Text variant="rowDetail" tone="muted">Newest first</Text>} />}
       </View>
     </View>

@@ -132,8 +132,12 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   // Watching a pane counts as seeing it: clear its Ready badge on the way in
   // and out, however the screen was opened (list, notification or link).
   const markSeen = useMarkPaneSeen();
+  // The host keeps when it was last opened, on any device: Home's Recent lists by it. A Session's
+  // view is its chat Pane's, which the Sessions list reports as the Session's `openedAt`.
+  const markViewed = useInvokeMutation<[string]>('sessions:mark-viewed', { invalidates: ['orchestration-sessions:list'] });
   const markThisPaneSeen = useEffectEvent(() => {
     markSeen(paneId);
+    markViewed.mutate([paneId]);
     void clearPaneNotifications(paneId);
   });
   useEffect(() => {

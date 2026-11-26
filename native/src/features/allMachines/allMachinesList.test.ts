@@ -6,7 +6,7 @@ import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSess
 import { sessionKey } from '@/features/approvals/approvals';
 import { sessionWaiting } from '@/features/home/statusBoard';
 
-import { buildAllMachinesList, feedsAnswered, sinceLabel, type MachineFeed } from './allMachinesList';
+import { buildAllMachinesList, feedsAnswered, recentlyOpened, sinceLabel, type MachineFeed } from './allMachinesList';
 
 const notify = (items: Array<Pick<NotifyItem, 'id' | 'createdAt' | 'title'> & { paneId?: string }>): NotifySharedState => ({
   machine: 'host', epoch: 'e1', revision: 1, enabled: true, queue: [], hidden: [],
@@ -153,6 +153,40 @@ describe('buildAllMachinesList', () => {
       { key: 'gone', name: 'gone-box', offlineSince: 1, snapshot: { projects: [], notify: { ...studio.snapshot!.notify!, items: [done('three', now)] } } },
     ], '', now);
     expect(list.answered.map(row => row.key)).toEqual(['profile-build:question:two', 'profile-studio:question:one']);
+  });
+});
+
+describe('recentlyOpened', () => {
+  it('lists the Panes and Sessions opened on any machine, last opened first, at most ten', () => {
+    const opened: MachineFeed = {
+      key: 'profile-studio',
+      name: 'studio-mac',
+      snapshot: {
+        // Hosts send a Pane's last view as SQLite's UTC time, a Session's as ISO.
+        projects: [{ id: 1, name: 'acme-web', sessions: [
+          { id: 'pane-1', name: 'fix-tests', lastViewedAt: '2026-10-30 09:40:00' },
+          { id: 'pane-2', name: 'never-opened' },
+          { id: 'pane-3', name: 'hidden-chat', lastViewedAt: '2026-10-30 09:59:00', isHidden: true },
+          ...Array.from({ length: 10 }, (_, index) => ({ id: `old-${index}`, name: `old-${index}`, lastViewedAt: `2026-10-29 0${index}:00:00` })),
+        ] }],
+        sessions: [{ ...session('s-1', 'Spring sale launch', [], '2026-10-30T08:00:00Z'), openedAt: '2026-10-30T09:50:00.000Z' }],
+      },
+    };
+    const other: MachineFeed = {
+      key: 'profile-build',
+      name: 'build-box',
+      snapshot: { projects: [{ id: 1, name: 'infra', sessions: [{ id: 'pane-1', name: 'deploy', lastViewedAt: '2026-10-30 09:45:00' }] }] },
+    };
+
+    const rows = recentlyOpened(buildAllMachinesList([opened, other], '').recent);
+    expect(rows.map(row => row.key)).toEqual([
+      'profile-studio:session:s-1',
+      'profile-build:pane:pane-1',
+      'profile-studio:pane:pane-1',
+      ...[9, 8, 7, 6, 5, 4, 3].map(index => `profile-studio:pane:old-${index}`),
+    ]);
+    expect(rows[0].openedAt).toBe(Date.parse('2026-10-30T09:50:00Z'));
+    expect(rows[2].openedAt).toBe(Date.parse('2026-10-30T09:40:00Z'));
   });
 });
 

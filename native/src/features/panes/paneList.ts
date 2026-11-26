@@ -14,6 +14,8 @@ interface PaneSession {
   /** ISO times. Older hosts may leave either out. */
   createdAt?: string;
   lastActivity?: string;
+  /** When someone last opened it, on any device, as SQLite's UTC `YYYY-MM-DD HH:MM:SS`. */
+  lastViewedAt?: string;
   /** Set while every terminal tab is paused. Older hosts leave it out. */
   paused?: TerminalPausedMark;
 }

@@ -89,8 +89,14 @@ export function waitingRowText(row: WaitingRow): { title: string; detail: string
 }
 
 /** One row of All machines' every Pane and Session, newest first, with its machine's badge. */
-export function RecentRowView({ row, waiting, machine, currentKey, actions, onOpen }: {
+export function RecentRowView({ row, waiting, machine, currentKey, actions, onOpen, at, idPrefix = 'all', card }: {
   row: RecentRow;
+  /** The time its detail shows: its last activity unless given. */
+  at?: number;
+  /** Starts its testIDs, so one row listed twice on a screen stays findable. */
+  idPrefix?: string;
+  /** Set for a row in a card: it doesn't swipe, and `divided` draws the hairline above it. */
+  card?: { divided: boolean };
   /** What waits on the person in a Session's row. */
   waiting: number;
   machine: Machine | undefined;
@@ -98,11 +104,12 @@ export function RecentRowView({ row, waiting, machine, currentKey, actions, onOp
   actions: CurrentMachineActions;
   onOpen: () => void;
 }) {
-  const time = sinceLabel(row.type === 'pane' ? row.pane.activeAt : row.activeAt, Date.now());
-  const swipes = row.machineKey === currentKey && !row.stale;
+  const time = sinceLabel(at ?? (row.type === 'pane' ? row.pane.activeAt : row.activeAt), Date.now());
+  const swipes = !card && row.machineKey === currentKey && !row.stale;
+  const divided = card?.divided;
   return row.type === 'pane' ? (
     <AllRow
-      testID={`all-pane-row-${row.key}`}
+      testID={`${idPrefix}-pane-row-${row.key}`}
       title={row.pane.name}
       detail={[row.pane.repository, row.pane.session?.name, time].filter(Boolean).join(' · ')}
       label={paneLabel(row.pane, machine?.name)}
@@ -110,6 +117,7 @@ export function RecentRowView({ row, waiting, machine, currentKey, actions, onOp
       stale={row.stale}
       paused={Boolean(row.pane.paused)}
       leading={row.pane.paused ? <PausedBadge /> : <StatusBadge status={row.pane.status} />}
+      divided={divided}
       onPress={onOpen}
       swipe={swipes ? {
         pinned: row.pane.pinned,
@@ -120,7 +128,7 @@ export function RecentRowView({ row, waiting, machine, currentKey, actions, onOp
     />
   ) : (
     <AllRow
-      testID={`all-session-row-${row.key}`}
+      testID={`${idPrefix}-session-row-${row.key}`}
       title={row.session.name || 'Untitled'}
       detail={['Session', row.paneCount === 1 ? '1 Pane' : row.paneCount > 1 ? `${row.paneCount} Panes` : undefined, time].filter(Boolean).join(' · ')}
       machine={machine}
@@ -128,7 +136,8 @@ export function RecentRowView({ row, waiting, machine, currentKey, actions, onOp
       label={[row.session.name || 'Untitled', 'Session', waiting > 0 ? `${waiting} waiting` : undefined, machine?.name].filter(Boolean).join(', ')}
       paused={Boolean(row.session.paused)}
       leading={row.session.paused ? <PausedBadge /> : <Icon ios="bubble.left" android="chat_bubble" size={12} />}
-      trailing={<WaitingCount testID={`all-session-waiting-${row.key}`} count={waiting} />}
+      trailing={<WaitingCount testID={`${idPrefix}-session-waiting-${row.key}`} count={waiting} />}
+      divided={divided}
       onPress={onOpen}
       swipe={swipes ? {
         pinned: Boolean(row.session.isPinned),

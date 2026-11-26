@@ -158,11 +158,20 @@ export function GroupRow({ icon, title, count, open, onPress, testID }: {
   count?: number;
   /** Set for a group that opens in place: its chevron points down while it is open. */
   open?: boolean;
-  onPress: () => void;
+  /** Left out for a plain heading: no chevron, nothing to press. */
+  onPress?: () => void;
   testID: string;
 }) {
   const theme = useTheme();
   const chevron = open === undefined ? 'right' : open ? 'down' : 'right';
+  if (!onPress) {
+    return (
+      <View testID={testID} accessible accessibilityRole="header" accessibilityLabel={count === undefined ? title : `${title}, ${count}`} style={styles.group}>
+        <View style={styles.groupIcon}><Icon ios={icon.ios} android={icon.android} size={16} color={theme.colors.textSecondary} /></View>
+        <Text variant="rowValue" numberOfLines={1} style={[styles.fill, styles.bold]}>{title}</Text>
+      </View>
+    );
+  }
   return (
     <Pressable
       testID={testID}
