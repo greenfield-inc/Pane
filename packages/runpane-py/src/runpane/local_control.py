@@ -2153,7 +2153,6 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
         **optional_value("interrupt", True if parsed.interrupt else None),
         **optional_value("source", parsed.source),
         **optional_value("expectReport", parsed.expect_report if command == "submit" else None),
-        **optional_value("awaitReply", True if command == "submit" and getattr(parsed, "await_reply", False) else None),
         **optional_value("personWords", True if command == "submit" and getattr(parsed, "for_person", False) else None),
     }
 

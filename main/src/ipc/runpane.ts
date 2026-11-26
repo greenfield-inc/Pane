@@ -1770,7 +1770,7 @@ export function registerRunpaneHandlers(
         }
         outgoing = isMessage ? messages?.beginMessage({
           callerPanelId, receiverPanelId: panel.id, body: toSend.input, source: normalized.source,
-          personWords: normalized.personWords, operationId: normalized.operationId, awaitReply: normalized.awaitReply, requestKey,
+          personWords: normalized.personWords, operationId: normalized.operationId, requestKey,
           pointer: pointerFields.promptFile ? { promptFile: pointerFields.promptFile, attachments: pointerFields.attachments ?? [] } : undefined,
         }) : undefined;
       } finally {
@@ -5772,7 +5772,6 @@ function parsePanelSubmitRequest(value: PaneCommandValue): RunpanePanelSubmitReq
     expectReport: optionalBoolean(value.expectReport),
     fromPane: optionalBoolean(value.fromPane),
     personWords: optionalBoolean(value.personWords),
-    awaitReply: optionalBoolean(value.awaitReply),
   };
 }
 

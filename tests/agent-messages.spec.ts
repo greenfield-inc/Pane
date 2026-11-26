@@ -14,13 +14,13 @@ interface SubmitResult { ok: boolean; messageId?: string }
 const caller = (session: SessionRef) => ({ paneId: session.paneId, panelId: session.panelId });
 
 // The CLI's own daemon client, to send one request as a tab: `--await-reply` sends its submit and its wait as two
-// requests, so calling them apart forces a reply in between, the race the submit's reservation closes.
-interface RaceSubmit { panelId: string; input: string; awaitReply: true; expectReport: false }
+// requests, so calling them apart forces a reply in between. The wait still returns it, and the tab still gets it.
+interface RaceSubmit { panelId: string; input: string; expectReport: false }
 interface RaceWait { message: string; timeoutMs: number }
 const raceSubmitResult = boundary.object({ ok: boundary.boolean, messageId: boundary.optional(boundary.string) });
 const raceWaitResult = boundary.object({
   ok: boundary.boolean, outcome: boundary.enumeration('reply', 'timeout'),
-  reply: boundary.optional(boundary.object({ ref: boundary.string, text: boundary.string, deliveredVia: boundary.nullable(boundary.enumeration('tab', 'call')) })),
+  reply: boundary.optional(boundary.object({ ref: boundary.string, text: boundary.string, deliveredVia: boundary.nullable(boundary.enumeration('tab')) })),
 });
 
 async function asTab<T>(paneDir: string, from: SessionRef, channel: string, request: RaceSubmit | RaceWait, schema: BoundarySchema<T>): Promise<T> {
@@ -92,23 +92,31 @@ test('an agent asks another Session, gets its runpane reply in its own tab, afte
     await expect.poll(() => transcript(page, omni.panelId), { timeout: 60_000 }).toContain('reply: M-3 → \\"The Billing team.\\"');
     expect((await json<RunpaneMessageShowResult>(pane, ['messages', 'show', 'M-3'])).replies[0]).toMatchObject({ ref: 'M-4', state: 'delivered' });
 
-    // --await-reply: A's submit returns B's reply as its result, and it isn't typed into A's tab as well.
+    // How often a reply line shows in A's transcript. The scripted agent echoes what it is sent, so one typing shows
+    // as many times as M-3's reply, which Pane typed once.
+    const typedCount = async (ref: string) => (await transcript(page, omni.panelId)).split(`reply: ${ref} →`).length - 1;
+    const once = await typedCount('M-3');
+    expect(once).toBeGreaterThan(0);
+
+    // --await-reply: A's submit returns B's reply as its result, and Pane still types it into A's tab, once.
     const waiting = json<RunpaneMessageWaitResult>(pane, ['panels', 'submit', '--panel', billing.panelId, '--text', 'Ship Friday?', '--no-expect-report', '--await-reply', '--timeout', '45s', '--yes'], caller(omni));
     await expect.poll(async () => (await json<{ messages: AgentMessageRecord[] }>(pane, ['messages', 'list', '--all'])).messages[0]?.ref, { timeout: 30_000 }).toBe('M-5');
     await json(pane, ['reply', 'M-5', 'Yes, ship Friday.'], caller(billing));
     const awaited = await waiting;
-    expect(awaited).toMatchObject({ ok: true, outcome: 'reply', message: 'M-5', reply: { ref: 'M-6', text: 'Yes, ship Friday.', deliveredVia: 'call' } });
-    expect(await transcript(page, omni.panelId)).not.toContain('reply: M-5');
+    expect(awaited).toMatchObject({ ok: true, outcome: 'reply', message: 'M-5', reply: { ref: 'M-6', text: 'Yes, ship Friday.' } });
+    await expect.poll(() => typedCount('M-5'), { timeout: 30_000 }).toBe(once);
+    await expect.poll(async () => (await json<RunpaneMessageShowResult>(pane, ['messages', 'show', 'M-5'])).replies[0]?.deliveredVia, { timeout: 30_000 }).toBe('tab');
 
-    // Forced race: B's reply lands after the --await-reply submit and before its wait call. Pane holds it for the call.
-    const raced = await asTab(pane.paneDir, omni, 'runpane:panels:submit', { panelId: billing.panelId, input: 'Freeze the schema?', awaitReply: true, expectReport: false }, raceSubmitResult);
+    // Forced race: B's reply lands after the submit and before the wait call. The wait still returns it, and A's tab gets it once.
+    const raced = await asTab(pane.paneDir, omni, 'runpane:panels:submit', { panelId: billing.panelId, input: 'Freeze the schema?', expectReport: false }, raceSubmitResult);
     expect(raced.messageId).toBe('M-7');
-    expect((await json<RunpaneReplyResult>(pane, ['reply', 'M-7', 'Yes, freeze it.'], caller(billing))).delivery).toBe('queued');
-    await page.waitForTimeout(4_000);
-    expect(await transcript(page, omni.panelId)).not.toContain('reply: M-7');
+    await json<RunpaneReplyResult>(pane, ['reply', 'M-7', 'Yes, freeze it.'], caller(billing));
     const late = await asTab(pane.paneDir, omni, 'runpane:messages:wait', { message: 'M-7', timeoutMs: 5_000 }, raceWaitResult);
-    expect(late).toMatchObject({ ok: true, outcome: 'reply', reply: { ref: 'M-8', text: 'Yes, freeze it.', deliveredVia: 'call' } });
-    expect(await transcript(page, omni.panelId)).not.toContain('reply: M-7');
+    expect(late).toMatchObject({ ok: true, outcome: 'reply', reply: { ref: 'M-8', text: 'Yes, freeze it.' } });
+    await expect.poll(() => typedCount('M-7'), { timeout: 30_000 }).toBe(once);
+    await page.waitForTimeout(4_000);
+    expect(await typedCount('M-5')).toBe(once);
+    expect(await typedCount('M-7')).toBe(once);
 
     // What the app reads for a tab's history: every message it sent or received, newest first.
     const records = await forPanel(page, omni.panelId);
@@ -117,7 +125,7 @@ test('an agent asks another Session, gets its runpane reply in its own tab, afte
       ['M-6', 'reply', 'M-5', 'delivered'], ['M-5', 'message', null, 'answered'], ['M-4', 'reply', 'M-3', 'delivered'],
       ['M-3', 'message', null, 'answered'], ['M-2', 'reply', 'M-1', 'delivered'], ['M-1', 'message', null, 'answered'],
     ]);
-    await evidence(page, omni, '03-after-await-reply', `panels submit --await-reply (as Omni Chat) → ${JSON.stringify(awaited, null, 2)}\nforced race: reply M-8 before the wait call; wait → ${JSON.stringify(late, null, 2)}\nagent-messages:for-panel (Omni Chat) → ${JSON.stringify(records, null, 2)}\n`);
+    await evidence(page, omni, '03-after-await-reply', `panels submit --await-reply (as Omni Chat) → ${JSON.stringify(awaited, null, 2)}\nforced race: reply M-8 before the wait call (typed into the tab as well); wait → ${JSON.stringify(late, null, 2)}\nagent-messages:for-panel (Omni Chat) → ${JSON.stringify(records, null, 2)}\n`);
   } finally {
     await close();
   }

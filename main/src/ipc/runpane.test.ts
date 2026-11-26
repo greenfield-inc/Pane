@@ -3511,11 +3511,11 @@ describe('runpane IPC handlers', () => {
       expect(replayed).toMatchObject({ messageId: 'M-3' });
       expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.lastCall?.[1]).toBe(firstText);
 
-      // --await-reply reserves the waiter in the same submit: a reply before the wait call is held for it, not typed.
-      const awaited = await fromAgent({ panelId: terminalPanel.id, input: 'Ship Friday?', awaitReply: true, expectReport: false });
+      // --await-reply only watches: a reply before the wait call is still the call's answer, and it goes to the tab as well.
+      const awaited = await fromAgent({ panelId: terminalPanel.id, input: 'Ship Friday?', expectReport: false });
       expect(awaited).toMatchObject({ messageId: 'M-4' });
       await messages.reply({ to: 4, body: 'Yes', callerPanelId: terminalPanel.id });
-      await expect(messages.waitForReply(4, 10)).resolves.toMatchObject({ text: 'Yes', deliveredVia: 'call' });
+      await expect(messages.waitForReply(4, 10)).resolves.toMatchObject({ text: 'Yes' });
     } finally {
       db.close();
     }

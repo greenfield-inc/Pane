@@ -73,7 +73,7 @@ toolset. A reply can be up to 8,000 characters. Pane records it as message `M-13
 into the original sender's tab:
 
 ```text
-reply: M-12 → "Yes: the API is frozen until Friday." (from the "Billing" Session orchestrator) [M-13; answer it with runpane reply M-13 "…"]
+reply: M-12 → "Yes: the API is frozen until Friday." (from the "Billing" Session orchestrator) [M-13; answer it with runpane reply M-13 "…"] — if a waiting command already returned this reply, act on it once.
 ```
 
 Delivery reuses the path that to-do messages and owed answers take
@@ -87,24 +87,11 @@ Delivery reuses the path that to-do messages and owed answers take
   (`it would not restart: <why>`) and Pane stops trying.
 - A message sent as a Session's orchestrator is answered to the Session's
   orchestrator tab as it is now, even when the tab that sent it still exists
-  (Switch to chat, a new agent). This also holds while the old tab is still
-  waiting in `--await-reply` or `messages wait`: a waiting call gets a reply
-  only when the tab it was made from is that reply's route now. The old tab's
-  call gets nothing and times out. Any other message is answered to the tab
+  (Switch to chat, a new agent). Any other message is answered to the tab
   that sent it.
-- Each reply is delivered once: Pane either types it, or hands it to a waiting
-  call, never both. A wait for a reply that is being typed at that moment
-  waits for that attempt, within its own time limit. If the tab turned out to
-  be busy, the wait takes the reply only when it comes from the reply's route.
-- A wait answers with the first reply. A later reply that arrives while an
-  earlier one is being typed waits for that attempt. If the earlier one is
-  typed, the wait returns it, and the later one is typed into the tab after
-  it. If the attempt fails, the wait takes the later reply instead. A parked reply stays parked only while a listening call from its current
-  route can take it. When that call leaves, or the Session moves to another
-  orchestrator tab, Pane types the reply into its tab at once.
-- Only the tab that sent with `--await-reply` ends its own hold on early
-  replies. A wait from another tab takes only a held reply whose route it is
-  now, and leaves the rest held.
+- Every reply is typed into its tab exactly once, through one ordered outbox,
+  whether or not a waiting call also returned it (see below). Replies to one
+  tab are typed in the order they were recorded.
 - Overlapping retries of one operation take turns, so only the first writes a
   prompt file. Every retry returns the recorded file.
 - A sender whose tab is gone for good (a closed worker tab) gets nothing, and
@@ -122,18 +109,21 @@ runpane panels submit --panel <id> --text "Is the API frozen?" --await-reply --t
 runpane messages wait M-12 --timeout 30m --json
 ```
 
-Both block until the first reply comes and print it (`messageWaitResult`, exit
-0). After `--timeout` they exit 124, and a later reply is typed into the tab as
-usual. A reply that a waiting call returns is not typed as well: it is
-`delivered` with `deliveredVia: call`. `--await-reply` is sent with the submit
-itself, so Pane reserves the wait before it types the message: a reply that
-comes before the CLI's wait call reaches the daemon is held for that call,
-never typed. If no wait call comes within a minute (the CLI died), the held
-reply is typed into the tab instead. `messages wait` on a message whose reply
-was already typed returns that reply rather than waiting. Without `--timeout`, the wait gives up
-after a day. While a tab waits, Pane counts it as waiting rather than working,
-as it does for `runpane notify`. `--await-reply` can't be combined with
-`--wait`.
+Both block until the first reply to the message is recorded and print it
+(`messageWaitResult`, exit 0), or exit 124 after `--timeout`. Without
+`--timeout`, the wait gives up after a day.
+
+They only watch. A waiting call never holds, claims or holds back a reply: Pane
+types every reply into the sender's tab as described above, whether or not a
+call returned it, after a timeout, or after the Session switched orchestrator
+tabs. So the sender gets the same reply twice, once as the call's result and
+once as the `reply: M-12 → …` line, and acts on it once, from whichever reaches
+it first. This is the rule `runpane notify` answers follow, and the typed line
+says so. A wait answers with the first reply even when it is already there
+(it came before the wait started, or was already typed), and it may return
+that reply while it is still `queued` for the tab. While a tab waits, Pane
+counts it as waiting rather than working, as it does for `runpane notify`.
+`--await-reply` can't be combined with `--wait`.
 
 ## Reading messages
 
@@ -155,7 +145,7 @@ this computer, and `--limit` caps the count (default 50).
 | `sender`, `receiver` | `{ panelId, paneId, sessionId, name, orchestrator }`. `name` is what Pane shows ("the "Omni Chat" Session orchestrator", a Pane's name, or "the person" for a reply typed outside any tab). |
 | `text` | The sender's text, without the reply line Pane added |
 | `state` | `sending` (being typed), `delivered`, `answered` (a message with a reply), `queued` (a reply waiting for its tab), `undelivered` |
-| `deliveredVia` | For a delivered reply: `tab` (typed) or `call` (returned to `--await-reply`) |
+| `deliveredVia` | `tab` for a reply typed into its tab; `null` until then. A waiting call only reads a reply, so it never sets this. |
 | `undeliveredReason` | Why it can't arrive: `its tab closed`, `it would not restart`, … |
 | `replies` | The ids of its replies, oldest first |
 | `createdAt`, `deliveredAt`, `answeredAt` | ISO 8601 times |
@@ -188,6 +178,6 @@ line (`reply: M-n → …`) is the ground truth for where a reply was typed.
 Messages live in the `agent_messages` table in `sessions.db`
 (`main/src/database/agentMessagesSchema.ts`) and are kept for 30 days. The code
 is in `main/src/services/agentMessages/`: the store, the service (outbox,
-waiters, delivery), the host that binds it to the running Pane, and the text
+delivery, the read-only wait), the host that binds it to the running Pane, and the text
 of the lines Pane adds. `main/src/ipc/agentMessages.ts` holds the daemon
 channels (`runpane:reply`, `runpane:messages:list|show|wait`).

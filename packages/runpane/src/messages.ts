@@ -23,7 +23,7 @@ interface AgentMessage {
   receiver: MessageParty;
   text: string;
   state: 'sending' | 'queued' | 'delivered' | 'answered' | 'undelivered';
-  deliveredVia: 'tab' | 'call' | null;
+  deliveredVia: 'tab' | null;
   undeliveredReason: string | null;
   replies: string[];
   createdAt: string;
@@ -46,7 +46,7 @@ const messageSchema: BoundarySchema<AgentMessage> = boundary.object({
   ref: boundary.string, number: boundary.number, kind: boundary.enumeration('message', 'reply'), replyTo: nullableString,
   sender: partySchema, receiver: partySchema, text: boundary.string,
   state: boundary.enumeration('sending', 'queued', 'delivered', 'answered', 'undelivered'),
-  deliveredVia: boundary.nullable(boundary.enumeration('tab', 'call')), undeliveredReason: nullableString,
+  deliveredVia: boundary.nullable(boundary.enumeration('tab')), undeliveredReason: nullableString,
   replies: boundary.array(boundary.string), createdAt: boundary.string, deliveredAt: nullableString, answeredAt: nullableString,
 });
 const replyResultSchema: BoundarySchema<ReplyResult> = boundary.object({
@@ -105,14 +105,13 @@ function printJson(value: ReplyResult | MessageListResult | MessageShowResult | 
 }
 
 function describe(message: AgentMessage): string {
-  const via = message.state === 'delivered' && message.deliveredVia === 'call' ? ' (to the waiting call)' : '';
   const why = message.state === 'undelivered' && message.undeliveredReason ? `: ${message.undeliveredReason}` : '';
   const replyTo = message.replyTo ? ` reply to ${message.replyTo}` : '';
   const replies = message.replies.length > 0 ? ` · replies ${message.replies.join(', ')}` : '';
-  return `${message.ref}${replyTo} ${message.sender.name} → ${message.receiver.name} · ${message.state}${via}${why}${replies}\n  ${message.text.split('\n')[0]}`;
+  return `${message.ref}${replyTo} ${message.sender.name} → ${message.receiver.name} · ${message.state}${why}${replies}\n  ${message.text.split('\n')[0]}`;
 }
 
-/** `--await-reply` and `runpane messages wait`: block until the reply comes, print it, exit 0; 124 after --timeout. */
+/** `--await-reply` and `runpane messages wait`: block until the first reply comes, print it, exit 0; 124 after --timeout. Pane types it into the tab too. */
 export async function waitForMessageReply(parsed: ParsedArgs, ref: string): Promise<number> {
   const request: MessageWaitRequest = { message: ref };
   if (parsed.waitTimeoutMs) request.timeoutMs = parsed.waitTimeoutMs;

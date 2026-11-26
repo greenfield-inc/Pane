@@ -3214,7 +3214,7 @@ print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines(), "ref
   assert.strictEqual(python.refused, true);
 }
 
-/** T-104 review: --await-reply and --for-person ride on the submit request itself in both CLIs, so the daemon reserves the wait before it types. */
+/** T-104: --for-person rides on the submit request in both CLIs; --await-reply stays in the CLI (it waits after the submit) and adds nothing to the request. */
 function checkAwaitReplyRequestParity() {
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
   const { buildPanelInputRequest } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
@@ -3224,7 +3224,7 @@ function checkAwaitReplyRequestParity() {
     ['panels', 'submit', '--panel', 'panel-1', '--text', 'Plain', '--yes'],
   ];
   const node = samples.map((args) => JSON.parse(JSON.stringify(buildPanelInputRequest(parseRunpaneArgs(args), 'submit'))));
-  assert.strictEqual(node[0].awaitReply, true);
+  assert.ok(!('awaitReply' in node[0]));
   assert.strictEqual(node[1].personWords, true);
   assert.ok(!('awaitReply' in node[2]) && !('personWords' in node[2]));
   const python = JSON.parse(runPythonSnippet(`

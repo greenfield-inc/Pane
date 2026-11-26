@@ -70,16 +70,15 @@ def print_json(value: Any) -> None:
 
 
 def describe(message: Dict[str, Any]) -> str:
-    via = " (to the waiting call)" if message.get("state") == "delivered" and message.get("deliveredVia") == "call" else ""
     why = f": {message['undeliveredReason']}" if message.get("state") == "undelivered" and message.get("undeliveredReason") else ""
     reply_to = f" reply to {message['replyTo']}" if message.get("replyTo") else ""
     replies = f" · replies {', '.join(message['replies'])}" if message.get("replies") else ""
     first = (message.get("text") or "").split("\n")[0]
-    return f"{message['ref']}{reply_to} {message['sender']['name']} → {message['receiver']['name']} · {message['state']}{via}{why}{replies}\n  {first}"
+    return f"{message['ref']}{reply_to} {message['sender']['name']} → {message['receiver']['name']} · {message['state']}{why}{replies}\n  {first}"
 
 
 def wait_for_message_reply(parsed: Any, ref: str) -> int:
-    """`--await-reply` and `runpane messages wait`: block until the reply comes, print it, exit 0; 124 after --timeout."""
+    """`--await-reply` and `runpane messages wait`: block until the first reply comes, print it, exit 0; 124 after --timeout. Pane types it into the tab too."""
     request: Dict[str, Any] = {"message": ref}
     if parsed.wait_timeout_ms:
         request["timeoutMs"] = parsed.wait_timeout_ms

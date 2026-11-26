@@ -13,7 +13,7 @@ const rowSchema = boundary.object({
   number: boundary.number, kind: boundary.enumeration(...AGENT_MESSAGE_KINDS), reply_to: num,
   sender_panel_id: str, sender_pane_id: str, sender_session_id: str, sender_name: boundary.string, sender_orchestrator: boundary.number,
   receiver_panel_id: str, receiver_pane_id: str, receiver_session_id: str, receiver_name: boundary.string, receiver_orchestrator: boundary.number,
-  body: boundary.string, state: boundary.enumeration(...AGENT_MESSAGE_STATES), delivered_via: boundary.nullable(boundary.enumeration('tab', 'call')),
+  body: boundary.string, state: boundary.enumeration(...AGENT_MESSAGE_STATES), delivered_via: boundary.nullable(boundary.enumeration('tab')),
   undelivered_reason: str, created_at: boundary.number, delivered_at: num, answered_at: num,
   operation_id: boundary.optional(str),
   request_key: boundary.optional(str),
@@ -45,7 +45,7 @@ export interface StoredMessage {
   receiver: AgentMessageParty;
   body: string;
   state: AgentMessageState;
-  deliveredVia: 'tab' | 'call' | null;
+  deliveredVia: 'tab' | null;
   undeliveredReason: string | null;
   createdAt: number;
   deliveredAt: number | null;
@@ -164,7 +164,7 @@ export class AgentMessageStore {
     return rows.map(row => toStored(decodeBoundary(row, rowSchema)));
   }
 
-  setState(number: number, state: AgentMessageState, fields: { via?: 'tab' | 'call'; reason?: string; at: number }): void {
+  setState(number: number, state: AgentMessageState, fields: { via?: 'tab'; reason?: string; at: number }): void {
     if (state === 'delivered') {
       this.db.prepare('UPDATE agent_messages SET state = ?, delivered_via = ?, delivered_at = ?, undelivered_reason = NULL WHERE number = ?').run(state, fields.via ?? 'tab', fields.at, number);
     } else if (state === 'undelivered') {

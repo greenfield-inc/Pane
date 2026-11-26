@@ -4582,7 +4582,6 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
     interrupt: parsed.interrupt || undefined,
     source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
     expectReport: command === 'submit' ? parsed.expectReport : undefined,
-    awaitReply: command === 'submit' && parsed.awaitReply ? true : undefined,
     personWords: command === 'submit' && parsed.forPerson ? true : undefined,
   };
 }

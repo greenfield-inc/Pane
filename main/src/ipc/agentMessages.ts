@@ -69,8 +69,8 @@ export function registerAgentMessageHandlers(ipcMain: IpcMainHandleLike, service
   commandRegistry.register('runpane:messages:wait', async (value: PaneCommandValue): Promise<RunpaneMessageWaitResult> => {
     const request = decodeBoundary(value, boundary.object({ message: boundary.string, timeoutMs: boundary.optional(boundary.number) }));
     const number = requireRef(request.message);
-    // The calling tab: a reply goes to the call only while that tab is its route (a Session's current orchestrator, say).
-    const reply: AgentMessageRecord | undefined = await service().waitForReply(number, request.timeoutMs ?? DEFAULT_WAIT_MS, paneCommandSignal(), paneCommandCaller()?.panelId);
+    // Read-only: the reply is typed into the sender's tab as well, so the caller acts on it once.
+    const reply: AgentMessageRecord | undefined = await service().waitForReply(number, request.timeoutMs ?? DEFAULT_WAIT_MS, paneCommandSignal());
     if (reply) return { ok: true, message: messageRef(number), outcome: 'reply', reply };
     return {
       ok: false, message: messageRef(number), outcome: 'timeout',

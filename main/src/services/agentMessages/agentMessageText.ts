@@ -17,7 +17,7 @@ export function withReplyRoute(body: string, number: number, senderName: string)
   return `${body.replace(/\s+$/u, '')}\n\n${replyRouteLine(number, senderName)}`;
 }
 
-/** A reply as Pane types it into the original sender's tab. */
+/** A reply as Pane types it into the original sender's tab: always, even when a waiting command returned it too. */
 export function replyLine(original: number, reply: number, body: string, fromName: string): string {
-  return `reply: ${messageRef(original)} → "${body.trim()}" (from ${fromName}) [${messageRef(reply)}; answer it with runpane reply ${messageRef(reply)} "…"]`;
+  return `reply: ${messageRef(original)} → "${body.trim()}" (from ${fromName}) [${messageRef(reply)}; answer it with runpane reply ${messageRef(reply)} "…"] — if a waiting command already returned this reply, act on it once.`;
 }

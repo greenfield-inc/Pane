@@ -6,9 +6,9 @@
  */
 
 /**
- * `sending`: Pane is typing it. `delivered`: it reached the tab (a reply: typed, or handed to the
- * sender's waiting `--await-reply` call). `answered`: a message someone replied to. `queued`: a reply
- * waiting for its sender's tab to be at its prompt. `undelivered`: it can never arrive; `undeliveredReason` says why.
+ * `sending`: Pane is typing it. `delivered`: it reached the tab (a reply: typed into the sender's
+ * tab, whether or not a waiting command also returned it). `answered`: a message someone replied to.
+ * `queued`: a reply waiting for its sender's tab to be at its prompt. `undelivered`: it can never arrive; `undeliveredReason` says why.
  */
 export const AGENT_MESSAGE_STATES = ['sending', 'queued', 'delivered', 'answered', 'undelivered'] as const;
 export type AgentMessageState = (typeof AGENT_MESSAGE_STATES)[number];
@@ -41,8 +41,8 @@ export interface AgentMessageRecord {
   receiver: AgentMessageParty;
   text: string;
   state: AgentMessageState;
-  /** How a delivered reply arrived: typed into the tab, or returned to the sender's `--await-reply` call. */
-  deliveredVia: 'tab' | 'call' | null;
+  /** How a delivered reply arrived: always typed into the tab (a waiting command only reads it). */
+  deliveredVia: 'tab' | null;
   undeliveredReason: string | null;
   /** The replies to this message, oldest first ("M-13"). */
   replies: string[];
@@ -58,12 +58,15 @@ export interface RunpaneMessageShowResult { ok: true; message: AgentMessageRecor
 export interface RunpaneReplyResult {
   ok: true;
   reply: AgentMessageRecord;
-  /** `delivered` (typed, or handed to a waiting call), `queued` (Pane types it at the sender's next prompt), or `undelivered`. */
+  /** `delivered` (typed into the sender's tab), `queued` (Pane types it at the sender's next prompt), or `undelivered`. */
   delivery: 'delivered' | 'queued' | 'undelivered';
   next?: string;
 }
 
-/** `runpane panels submit --await-reply` (and `runpane messages wait`): the reply, or why none came. */
+/**
+ * `runpane panels submit --await-reply` (and `runpane messages wait`): the first reply, or why none
+ * came. The reply is typed into the sender's tab too; act on it once.
+ */
 export interface RunpaneMessageWaitResult {
   ok: boolean;
   message: string;
@@ -89,14 +92,14 @@ export function parseMessageRef(value: string): number | undefined {
  * The two phrases every surface that teaches the rule must carry, word for word (whitespace aside):
  * replyRule.test.ts checks them, so a change to the reply syntax can't leave a stale copy behind.
  */
-export const REPLY_RULE_PHRASES = ['runpane reply M-12 "…"', 'never only in your own chat'] as const;
+export const REPLY_RULE_PHRASES = ['runpane reply M-12 "…"', 'never only in your own chat', 'act on each reply once'] as const;
 
 /**
  * The rule every agent instruction carries (the Session AGENTS.md's capabilities section and
  * orchestrator mode, the pane-orchestrator and pane-orchestration skills; runpane agent-context has the same
  * words in its workspace rules).
  */
-export const AGENT_REPLY_RULE = 'A message from another agent (another Session\'s orchestrator, a worker, Autopilot) ends with a reply line, `Reply with runpane reply M-12 "…"`: answer it with `runpane reply M-12 "…"`, never only in your own chat, which the sender never sees. Its reply reaches you as `reply: M-12 → "…"`.';
+export const AGENT_REPLY_RULE = 'A message from another agent (another Session\'s orchestrator, a worker, Autopilot) ends with a reply line, `Reply with runpane reply M-12 "…"`: answer it with `runpane reply M-12 "…"`, never only in your own chat, which the sender never sees. Its reply reaches you as `reply: M-12 → "…"`, typed into your tab even when `--await-reply` or `runpane messages wait` already returned it: act on each reply once.';
 
 /** The app's channel for a tab's messages, and the event that says they changed. */
 export const AGENT_MESSAGES_FOR_PANEL_CHANNEL = 'agent-messages:for-panel';
