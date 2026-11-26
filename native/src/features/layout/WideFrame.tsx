@@ -9,8 +9,9 @@ import { ArchiveHoldProvider } from '@/features/approvals/ArchiveUndo';
 import { HomeScreen } from '@/features/home/HomeScreen';
 import { useTheme } from '@/theme';
 
+import { ColumnHandle } from './ColumnHandle';
 import { InColumn, noteScreenClosed, useRail, useWideLayout } from './wideLayout';
-import { columnWidth, RAIL_WIDTH } from './windowRule';
+import { columnRange, homeColumnWidth, orientationOf, RAIL_WIDTH } from './windowRule';
 
 /**
  * The signed-in app's frame. In a wide window Home is docked in a column to the left of the stack;
@@ -21,8 +22,14 @@ export function WideFrame({ children }: { children: ReactNode }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const wide = useWideLayout(state => state.wide);
-  const width = useWideLayout(state => state.window.width);
+  const laidOut = useWideLayout(state => state.window);
+  const width = laidOut.width;
+  const orientation = orientationOf(laidOut);
+  const dragged = useWideLayout(state => state.columnWidths[orientation]);
+  const setColumnWidth = useWideLayout(state => state.setColumnWidth);
   const rail = useRail();
+  const column = homeColumnWidth(width, dragged);
+  const range = columnRange(width);
   const setWindow = useWideLayout(state => state.setWindow);
   const setStack = useWideLayout(state => state.setStack);
   const navigation = useNavigationContainerRef();
@@ -44,7 +51,7 @@ export function WideFrame({ children }: { children: ReactNode }) {
       {/* Side by side, the column and the open screen keep clear of a cutout on either side. */}
       <View style={[styles.row, wide && { paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: theme.colors.background }]} onLayout={({ nativeEvent: { layout } }) => setWindow({ width: layout.width, height: layout.height })}>
         {wide ? (
-          <View key="home" testID="home-column" style={[styles.column, { width: rail ? RAIL_WIDTH : columnWidth(width), backgroundColor: theme.colors.background, borderRightColor: theme.colors.border }]}>
+          <View key="home" testID="home-column" style={[styles.column, { width: rail ? RAIL_WIDTH : column, backgroundColor: theme.colors.background, borderRightColor: theme.colors.border }]}>
             <InColumn value>
               {/* The column is always in view, whatever the stack shows. */}
               <ScreenFocus value>
@@ -54,6 +61,16 @@ export function WideFrame({ children }: { children: ReactNode }) {
           </View>
         ) : null}
         <View key="stack" style={styles.fill}>{children}</View>
+        {wide && !rail ? (
+          <ColumnHandle
+            left={insets.left + column}
+            width={column}
+            min={range.min}
+            max={range.max}
+            onResize={next => setColumnWidth(orientation, next)}
+            onReset={() => setColumnWidth(orientation, null)}
+          />
+        ) : null}
       </View>
     </ArchiveHoldProvider>
   );

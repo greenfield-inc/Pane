@@ -1,6 +1,6 @@
-import { Text as RNText, type TextProps as RNTextProps } from 'react-native';
+import { StyleSheet, Text as RNText, type TextProps as RNTextProps } from 'react-native';
 
-import { useTheme, type ThemeColors, type TypographyVariant } from '@/theme';
+import { scaleType, useTheme, type ThemeColors, type TypographyVariant } from '@/theme';
 
 type TextTone = 'primary' | 'secondary' | 'muted' | 'accent' | 'danger' | 'onAccent';
 
@@ -23,7 +23,8 @@ export function Text({ variant = 'body', tone = 'primary', style, ...props }: Te
   return (
     <RNText
       {...props}
-      style={[theme.typography[variant], { color: theme.colors[toneColor[tone]] }, style]}
+      // The variant is already at the UI scale; a size set in `style` is scaled here.
+      style={[theme.typography[variant], { color: theme.colors[toneColor[tone]] }, theme.uiScale === 1 ? style : scaleType(StyleSheet.flatten(style) ?? {}, theme.uiScale)]}
     />
   );
 }

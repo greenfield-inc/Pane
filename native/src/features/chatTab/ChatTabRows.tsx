@@ -36,11 +36,11 @@ function Markdown({ text }: { text: string }) {
   const theme = useTheme();
   const renderer = useLinkRenderer();
   const content = useMarkdown(text, { colorScheme: theme.scheme, renderer, styles: {
-    text: { color: theme.chat.foreground, fontSize: 16, lineHeight: 24 },
+    text: { color: theme.chat.foreground, fontSize: 16 * theme.uiScale, lineHeight: 24 * theme.uiScale },
     link: { color: theme.chat.foreground, textDecorationLine: 'underline' },
     codespan: { color: theme.chat.foreground, backgroundColor: theme.chat.muted, fontFamily: monoFontFamily },
     code: { backgroundColor: theme.chat.muted, borderRadius: 8, padding: 10 },
-    codeText: { color: theme.chat.foreground, fontSize: 12, fontFamily: monoFontFamily },
+    codeText: { color: theme.chat.foreground, fontSize: 12 * theme.uiScale, fontFamily: monoFontFamily },
     paragraph: { marginTop: 0, marginBottom: 10 },
   } });
   return <View>{content}</View>;

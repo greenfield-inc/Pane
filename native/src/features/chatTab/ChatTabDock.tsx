@@ -9,7 +9,7 @@ import type { AgentChatPermission } from '@shared/types/agentChat';
 import type { ChatTabAnswer, ChatTabProblem, ChatTabQuestion, ChatTabQueuedPrompt } from '@shared/types/chatTab';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
 
-import { monoFontFamily, useTheme } from '@/theme';
+import { monoFontFamily, scaleType, useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
 import { useLinkRenderer } from '../links/LinkMenu';
@@ -46,7 +46,7 @@ export function ProblemBanner({ problem, agent, busy, readOnly, onRestart, onSig
 function Plan({ text }: { text: string }) {
   const theme = useTheme();
   const renderer = useLinkRenderer();
-  const content = useMarkdown(text, { colorScheme: theme.scheme, renderer, styles: { text: { color: theme.chat.foreground, fontSize: 14, lineHeight: 20 } } });
+  const content = useMarkdown(text, { colorScheme: theme.scheme, renderer, styles: { text: { color: theme.chat.foreground, fontSize: 14 * theme.uiScale, lineHeight: 20 * theme.uiScale } } });
   return <View style={[styles.detail, { borderColor: theme.chat.border, backgroundColor: theme.chat.background }]}>{content}</View>;
 }
 
@@ -77,7 +77,7 @@ function QuestionInput({ field, value, disabled, heading, onChange }: { field: Q
         }} />;
       })}</View>
       : <TextInput testID={`chat-field-${field.key}`} accessibilityLabel={field.title} placeholder={field.required ? 'Your answer' : 'Your own answer (optional)'} placeholderTextColor={theme.chat.mutedForeground} editable={!disabled}
-        value={typeof value === 'string' ? value : ''} onChangeText={onChange} style={[styles.input, { color: theme.chat.foreground, borderColor: theme.chat.border }]} />}
+        value={typeof value === 'string' ? value : ''} onChangeText={onChange} style={[scaleType(styles.input, theme.uiScale), { color: theme.chat.foreground, borderColor: theme.chat.border }]} />}
   </View>;
 }
 

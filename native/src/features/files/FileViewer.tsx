@@ -276,11 +276,11 @@ function MarkdownView({ content }: { content: string }) {
   const { colors } = theme;
   const renderer = useLinkRenderer();
   const rendered = useMarkdown(content, { colorScheme: theme.scheme, renderer, styles: {
-    text: { color: colors.text, fontSize: 16, lineHeight: 26 },
+    text: { color: colors.text, fontSize: 16 * theme.uiScale, lineHeight: 26 * theme.uiScale },
     link: { color: colors.accentText },
     codespan: { color: colors.text, backgroundColor: colors.surfaceRaised, fontFamily: monoFontFamily, fontStyle: 'normal' },
     code: { backgroundColor: colors.surfaceRaised, borderRadius: 8, padding: 10 },
-    codeText: { color: colors.text, fontSize: 13, fontFamily: monoFontFamily },
+    codeText: { color: colors.text, fontSize: 13 * theme.uiScale, fontFamily: monoFontFamily },
     paragraph: { marginTop: 0, marginBottom: 12 },
     h1: { color: colors.text },
     h2: { color: colors.text },

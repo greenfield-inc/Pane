@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { columnWidth, isWide } from './windowRule';
+import { columnRange, columnWidth, homeColumnWidth, isWide, orientationOf } from './windowRule';
 
 describe('the window rule', () => {
   it('draws Home beside the open screen from 600 × 480 dp', () => {
@@ -24,5 +24,24 @@ describe('the window rule', () => {
     expect(columnWidth(852)).toBe(307);
     expect(columnWidth(883)).toBe(318);
     expect(columnWidth(1280)).toBe(352);
+  });
+
+  it('lets Home be dragged from 240 dp to 500 dp, leaving the open screen 320 dp', () => {
+    expect(columnRange(600)).toEqual({ min: 240, max: 280 });
+    expect(columnRange(852)).toEqual({ min: 240, max: 500 });
+    expect(columnRange(1280)).toEqual({ min: 240, max: 500 });
+  });
+
+  it('uses the dragged width while it fits, and the default until there is one', () => {
+    expect(homeColumnWidth(852, undefined)).toBe(307);
+    expect(homeColumnWidth(852, 420)).toBe(420);
+    // Saved on a wider window: the open screen still keeps 320 dp.
+    expect(homeColumnWidth(700, 420)).toBe(380);
+    expect(homeColumnWidth(852, 100)).toBe(240);
+  });
+
+  it('keeps a width for each way the phone is held', () => {
+    expect(orientationOf({ width: 852, height: 883 })).toBe('portrait');
+    expect(orientationOf({ width: 883, height: 852 })).toBe('landscape');
   });
 });

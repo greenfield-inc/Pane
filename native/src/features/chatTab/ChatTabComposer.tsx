@@ -4,7 +4,7 @@ import { Image, Pressable, ScrollView, StyleSheet, Text as RNText, View } from '
 
 import type { ComposerMark } from '@shared/composerMentions';
 
-import { useTheme } from '@/theme';
+import { scaleType, useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
 import { useAutocorrectInputProps } from '../composer/autocorrectPreference';
@@ -85,7 +85,7 @@ export function ChatTabComposer({ agent, placeholder, disabled, pending, working
     <ComposerPrimitive.Input {...autocorrect} autoCapitalize="sentences" testID="chat-input" accessibilityLabel={`Message ${agent}`} placeholder={placeholder} placeholderTextColor={theme.chat.mutedForeground}
       onChange={event => onDraft(event.nativeEvent.text)} onSelectionChange={event => onCaret(event.nativeEvent.selection.start, event.nativeEvent.selection.end)}
       selection={caret === undefined ? undefined : { start: caret, end: caret }}
-      editable={!pending} multiline style={[styles.input, { color: theme.chat.foreground }]}
+      editable={!pending} multiline style={[scaleType(styles.input, theme.uiScale), { color: theme.chat.foreground }]}
       {...(marks.length ? { value: undefined, children: markedText(text, marks, theme.chat.border) } : undefined)} />
     <View style={styles.actions}>
       {canAttach && <ComposerPrimitive.AddAttachment testID="chat-attach" accessibilityLabel="Attach image" disabled={disabled || pending} onPress={onAttach}

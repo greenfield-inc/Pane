@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { useChatTab } from '@/features/chatTab/useChatTab';
-import { useTheme, withAlpha } from '@/theme';
+import { scaleType, useTheme, withAlpha } from '@/theme';
 import { Button, Icon, Text } from '@/ui';
 
 import { awayLine, awaySummary, parseLogEntries, type SentinelLogEntry } from '@shared/autopilotTranscript';
@@ -122,7 +122,7 @@ function Correction({ panelId, sessions, onSent }: { panelId: string; sessions: 
         </View>
       ) : null}
       <TextInput testID="autopilot-away-text" accessibilityLabel="Your correction" placeholder={`What should ${session || 'it'} do instead?`} placeholderTextColor={colors.textMuted}
-        value={text} onChangeText={setText} multiline style={[styles.input, { color: colors.text, borderColor: colors.border, borderRadius: theme.radius.md }]} />
+        value={text} onChangeText={setText} multiline style={[scaleType(styles.input, theme.uiScale), { color: colors.text, borderColor: colors.border, borderRadius: theme.radius.md }]} />
       {error ? <Text variant="footnote" tone="danger">{error}</Text> : null}
       <Button testID="autopilot-away-send" title="Send to Autopilot" loading={busy} disabled={!text.trim() || !connected} onPress={() => void send()} />
     </View>

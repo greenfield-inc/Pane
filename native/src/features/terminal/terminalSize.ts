@@ -2,9 +2,6 @@ import { File, Paths } from 'expo-file-system';
 
 import type { TerminalSize } from './terminalSession';
 
-/** The terminal's font size, on the page and in the kept screen drawn before it. */
-export const TERMINAL_FONT_SIZE = 12;
-
 /**
  * The size the terminal page measured last, on load or once a resize settles. Every terminal fills the same space on a phone, so
  * the next one can size the computer's PTY and read its screen while its own page still loads.

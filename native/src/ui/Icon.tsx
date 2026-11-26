@@ -16,7 +16,7 @@ export function Icon({ ios, android, size = 20, color }: IconProps) {
   return (
     <SymbolView
       name={{ ios, android }}
-      size={size}
+      size={size * theme.uiScale}
       tintColor={color ?? theme.colors.textMuted}
       resizeMode="scaleAspectFit"
     />
