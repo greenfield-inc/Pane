@@ -400,6 +400,7 @@ test.describe('Approvals in the main window', () => {
 });
 
 test.describe('Approvals newest first, one after another (T-88)', () => {
+  // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
   const emit = (page: Page, snapshot: NotifySnapshot) => page.evaluate((next) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(next), snapshot);
   const focusInColumn = (page: Page) => page.evaluate(() => Boolean(document.activeElement?.closest('[data-testid="approval-column"], [data-testid="approval-caught-up"]')));
 
