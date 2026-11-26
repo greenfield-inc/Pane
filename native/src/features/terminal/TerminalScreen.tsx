@@ -156,7 +156,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   const right = leadingTab || !beside ? undefined : panels.find(candidate => candidate.id === beside && candidate.id !== panel?.id);
   const split: SplitState = { left: panel?.id ?? null, right: right?.id ?? null, focus: right && focus === 'right' ? 'right' : 'left' };
   const twoColumns = right !== undefined && splitFits(contentWidth);
-  const focusedPanel = right && split.focus === 'right' ? right : panel;
+  const focusedPanel = right && focusedTab(split) === right.id ? right : panel;
   const applySplit = (next: SplitState) => {
     navigation.setParams({ ...(next.left && next.left !== panel?.id ? { panelId: next.left } : {}), beside: next.right ?? '', focus: next.focus });
   };
@@ -201,7 +201,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   // Clear scrollback sits in the bar above the focused terminal, which owns it.
   const leftActions = useRef<TerminalActions | null>(null);
   const rightActions = useRef<TerminalActions | null>(null);
-  const terminalActions = right && split.focus === 'right' ? rightActions : leftActions;
+  const terminalActions = focusedPanel === right ? rightActions : leftActions;
 
   // With the host's resume-on-open setting, a paused tab the person opens resumes. Only the tab
   // shown when the screen opens, or one they pick, counts; a tab paused while on screen stays paused.
@@ -288,7 +288,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       {leadingTab ? null : (
       <View style={styles.row}>
         {/* The left column keeps its place in the tree, so a tab opening beside it keeps its draft and keyboard. */}
-        {twoColumns || split.focus === 'left' || !right ? (
+        {twoColumns || focusedPanel === panel ? (
           <TabColumn
             key="left"
             {...columnProps}
@@ -311,7 +311,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
             )}
           />
         ) : null}
-        {right && (twoColumns || split.focus === 'right') ? (
+        {right && (twoColumns || focusedPanel === right) ? (
           <TabColumn
             key="right"
             {...columnProps}
