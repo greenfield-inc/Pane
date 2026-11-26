@@ -2,6 +2,7 @@ import { isOpenForSession } from '../../../../shared/approvalOpen';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import type { SessionMoveCheck } from '../../../../shared/types/sessionMove';
 import type { PathMap } from './pathMap';
+import path from 'path';
 
 /**
  * The Agent Farm profile or linked agent a launch command runs, without its variant: `agent-farm run
@@ -88,4 +89,44 @@ export function sessionApprovals(items: readonly NotifyItem[], owner: ApprovalOw
     else if (isOpenForSession(item)) found.held.push(item);
   }
   return found;
+}
+
+/** The profile checks a move's target shows, and the profiles it lists as ready there. */
+export interface ProfileCheckResult { checks: SessionMoveCheck[]; installed: string[] }
+
+/**
+ * The target's checks for the Agent Farm profiles a Session's tabs launch (`wanted`, with the
+ * source's versions), against the profiles installed there (`here`). A profile the Session's
+ * snapshot holds (`held`) runs from that snapshot, which travels with the Session, so it needs
+ * nothing installed (T-110, D-3); `snapshots` is false where Pane doesn't use them (Profiles off).
+ */
+export function profileChecks(wanted: Record<string, string | null>, here: Record<string, string>, held: readonly string[], at: { machine: string; source: string; snapshots: boolean }): ProfileCheckResult {
+  const checks: SessionMoveCheck[] = [];
+  const installed: string[] = [];
+  for (const [profile, version] of Object.entries(wanted)) {
+    if (at.snapshots && held.includes(profile)) {
+      installed.push(`Agent Farm ${profile}${version ? ` ${version}` : ''}, from the Session's snapshot`);
+    } else if (!here[profile]) {
+      checks.push({ id: `profile:${profile}`, level: 'block', title: `Agent Farm profile ${profile} isn't on ${at.machine}`, detail: `Tabs launched with it can't resume there. Install its plugin with agent-farm plugin install on ${at.machine}, then check again.` });
+    } else if (version && here[profile] !== version) {
+      checks.push({ id: `profile:${profile}`, level: 'warning', title: `${profile} is ${here[profile]} there, ${version} here`, detail: `Tabs resume with ${here[profile]}. Update Agent Farm on ${at.machine} to match.` });
+    } else {
+      installed.push(`Agent Farm ${profile}${version ? ` ${version}` : ''}`);
+    }
+  }
+  return { checks, installed };
+}
+
+/**
+ * The snapshot folder an Agent Farm tab resolves from (T-110): its command's `--snapshot`, else the
+ * one it was pinned when it opened, else its Session's. Only one inside the Session folder travels
+ * with a move, so any other gives undefined.
+ */
+export function tabSnapshotFolder(command: string | undefined, state: { agentFarmSnapshot?: string }, sessionFolder: string, recordSnapshot: string | undefined): string | undefined {
+  const flag = /\s--snapshot(?:=|\s+)(?:'([^']+)'|"([^"]+)"|(\S+))/.exec(command ?? '');
+  const chosen = flag ? flag[1] ?? flag[2] ?? flag[3] : state.agentFarmSnapshot ?? (recordSnapshot ? path.join(sessionFolder, ...recordSnapshot.split('/')) : undefined);
+  if (!chosen) return undefined;
+  const resolved = path.resolve(sessionFolder, chosen);
+  const relative = path.relative(sessionFolder, resolved);
+  return relative.startsWith(`.agent-farm${path.sep}snapshots${path.sep}`) && !relative.startsWith('..') ? resolved : undefined;
 }

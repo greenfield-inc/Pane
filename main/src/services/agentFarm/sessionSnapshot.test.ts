@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseSnapshotCreated, sessionSnapshotForTab, snapshotPluginHashes, snapshotProblem, snapshotRefused, unreadableSnapshots, withSnapshotEnv, type SnapshotHolder } from './sessionSnapshot';
+import { parseSnapshotCreated, snapshotHoldsProfile, sessionSnapshotForTab, snapshotPluginHashes, snapshotProblem, snapshotRefused, unreadableSnapshots, withSnapshotEnv, type SnapshotHolder } from './sessionSnapshot';
 import { hashDirectory } from '../skillCacheManager';
 
 const folders: string[] = [];
@@ -131,5 +131,28 @@ describe('withSnapshotEnv', () => {
   });
   it('leaves the environment as it is with Profiles off', () => {
     expect(withSnapshotEnv({ PATH: '/bin', AGENT_FARM_SNAPSHOT: '/old' }, '/s/d1', false)).toEqual({ PATH: '/bin', AGENT_FARM_SNAPSHOT: '/old' });
+  });
+});
+
+// T-110 (D-3): whether a Session's snapshot can run a tab's profile on a computer that lacks its plugin.
+describe('snapshotHoldsProfile', () => {
+  it('holds a profile or agent its plugin folder has, in a snapshot that passes its checksums', async () => {
+    const session = tempFolder();
+    const folder = writeSnapshot(session, 'abc', { 'plugins/team/profiles/lead.yaml': 'agent: lead\n', 'plugins/team/agents/helper.md': 'Helper.', 'settings.json': '{"default_plugin":"team"}' });
+    expect(await snapshotHoldsProfile(folder, 'team/lead')).toBe(true);
+    expect(await snapshotHoldsProfile(folder, 'team/helper')).toBe(true);
+    // A bare name resolves through the snapshot's default_plugin, as Agent Farm does.
+    expect(await snapshotHoldsProfile(folder, 'lead')).toBe(true);
+    expect(await snapshotHoldsProfile(folder, 'team/missing')).toBe(false);
+    expect(await snapshotHoldsProfile(folder, 'other/lead')).toBe(false);
+    expect(await snapshotHoldsProfile(folder, '../team/lead')).toBe(false);
+  });
+
+  it('holds nothing when the snapshot fails its checksums or is gone', async () => {
+    const session = tempFolder();
+    const folder = writeSnapshot(session, 'abc', { 'plugins/team/profiles/lead.yaml': 'agent: lead\n' });
+    fs.writeFileSync(path.join(folder, 'plugins', 'team', 'profiles', 'lead.yaml'), 'agent: other\n');
+    expect(await snapshotHoldsProfile(folder, 'team/lead')).toBe(false);
+    expect(await snapshotHoldsProfile(path.join(session, 'nowhere'), 'team/lead')).toBe(false);
   });
 });

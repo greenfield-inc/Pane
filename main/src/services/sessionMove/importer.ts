@@ -33,7 +33,7 @@ import type { MovedApproval } from '../notify/notifyService';
 import { MoveReceiver, type WriteRequest, type WriteResult } from './transfer';
 import { isRegeneratedSessionFile, isTextFile, isVerbatimSessionFile } from './sessionFolder';
 import { unreadableSnapshots } from '../agentFarm/sessionSnapshot';
-import { agentFarmProfileOf, movedLine } from './rules';
+import { agentFarmProfileOf, movedLine, profileChecks } from './rules';
 import { MoveLedger, type CommitPlan, type JournalRecord, type LedgerEntry, type LedgerTab, type UndoStep } from './ledger';
 
 const run = promisify(execFile);
@@ -408,15 +408,10 @@ export class MoveImporter {
     const wantedProfiles = Object.entries(manifest.source.profiles);
     if (wantedProfiles.length) {
       const here = await agentFarmProfiles();
-      for (const [profile, version] of wantedProfiles) {
-        if (!here[profile]) {
-          checks.push({ id: `profile:${profile}`, level: 'block', title: `Agent Farm profile ${profile} isn't on ${machine}`, detail: `Tabs launched with it can't resume there. Install its plugin with agent-farm plugin install on ${machine}, then check again.` });
-        } else if (version && here[profile] !== version) {
-          checks.push({ id: `profile:${profile}`, level: 'warning', title: `${profile} is ${here[profile]} there, ${version} here`, detail: `Tabs resume with ${here[profile]}. Update Agent Farm on ${machine} to match.` });
-        } else {
-          installed.push(`Agent Farm ${profile}${version ? ` ${version}` : ''}`);
-        }
-      }
+      // T-110 (D-3): a profile the Session's snapshot holds runs from it here, whatever is installed.
+      const profileResult = profileChecks(manifest.source.profiles, here, manifest.source.snapshotProfiles ?? [], { machine, source: manifest.source.machine, snapshots: profilesOn() });
+      checks.push(...profileResult.checks);
+      installed.push(...profileResult.installed);
       // Agent Farm stops untrusted workspaces: each repository its tabs use must be trusted here.
       for (const found of repos.values()) {
         if (!found.found || !found.path) continue;

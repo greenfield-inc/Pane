@@ -142,3 +142,25 @@ export function withSnapshotEnv(env: Readonly<Record<string, string>>, snapshot:
   const { [AGENT_FARM_SNAPSHOT_ENV]: _inherited, ...rest } = env;
   return snapshot ? { ...rest, [AGENT_FARM_SNAPSHOT_ENV]: snapshot } : rest;
 }
+
+/**
+ * Whether a snapshot can run `name` (`plugin/name`, or a bare name through its `default_plugin`):
+ * its plugin folder has that profile or agent, and the snapshot passes its checksums, as Agent Farm
+ * needs before it reads one. A Session move counts a profile it holds as present (T-110, D-3).
+ */
+export async function snapshotHoldsProfile(folder: string, name: string): Promise<boolean> {
+  if (await snapshotProblem(folder)) return false;
+  const [named, profile] = name.includes('/') ? name.split('/', 2) : [undefined, name];
+  let plugin = named;
+  if (!plugin) {
+    try { plugin = decodeBoundary(JSON.parse(await fs.readFile(path.join(folder, 'settings.json'), 'utf8')), boundary.object({ default_plugin: boundary.optional(boundary.string) })).default_plugin; }
+    catch { return false; }
+  }
+  const safe = /^[a-z0-9][a-z0-9_-]*$/i;
+  if (!plugin || !safe.test(plugin) || !safe.test(profile)) return false;
+  const root = path.join(folder, 'plugins', plugin);
+  for (const file of [path.join(root, 'profiles', `${profile}.yaml`), path.join(root, 'agents', `${profile}.md`)]) {
+    if (await fs.stat(file).then(stat => stat.isFile(), () => false)) return true;
+  }
+  return false;
+}
