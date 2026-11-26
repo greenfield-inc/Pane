@@ -157,26 +157,40 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   const split: SplitState = { left: panel?.id ?? null, right: right?.id ?? null, focus: right && focus === 'right' ? 'right' : 'left' };
   const twoColumns = right !== undefined && splitFits(contentWidth);
   const focusedPanel = right && focusedTab(split) === right.id ? right : panel;
-  const applySplit = (next: SplitState) => {
-    navigation.setParams({ ...(next.left && next.left !== panel?.id ? { panelId: next.left } : {}), beside: next.right ?? '', focus: next.focus });
+  // The left tab this screen last put in the route; any other `panelId` came from outside (a link, a new tab, View diff).
+  const ownLeft = useRef(panelId);
+  // The tab the route named when the screen opened (an alert or a link), which wins over the desktop's split.
+  const namedAtOpen = useRef(panelId);
+  const applySplit = (next: SplitState, extra?: { mirrored: string }) => {
+    if (next.left) ownLeft.current = next.left;
+    navigation.setParams({ ...(next.left && next.left !== panel?.id ? { panelId: next.left } : {}), beside: next.right ?? '', focus: next.focus, ...extra });
   };
+  useEffect(() => {
+    const previous = ownLeft.current;
+    ownLeft.current = panelId;
+    if (!panelId || !previous || panelId === previous || leading) return;
+    // A tab named from outside shows on the focused side, beside the other column.
+    applySplit(selectTab({ left: previous, right: beside || null, focus: focus === 'right' ? 'right' : 'left' }, panelId));
+  }, [panelId]);
   // Home folds to its rail when that makes room for both columns.
   const makeRoom = useEffectEvent(() => {
     const layout = useWideLayout.getState();
     if (!layout.wide || layout.collapsed || twoColumns || contentWidth === 0) return;
     if (splitFits(contentWidth + columnWidth(layout.window.width) - RAIL_WIDTH)) useWideLayout.setState({ collapsed: true });
   });
+  // Also once the content's width is known: a reopened split can be set before the first layout.
+  const widthKnown = contentWidth > 0;
   useEffect(() => {
     if (right) makeRoom();
-  }, [right?.id]);
+  }, [right?.id, widthKnown]);
   // Opening a Session shows the desktop's split, and follows it while open; rearranging here stays here.
   const mirror = splitFromLayout(hostLayout.data, new Set(panels.map(candidate => candidate.id)));
   const mirrorKey = mirror ? `${mirror.left}|${mirror.right}|${mirror.focus}` : null;
   const followMirror = useEffectEvent(() => {
     if (leading || mirrorKey === (mirrored || null)) return;
-    if (mirror) applySplit(mirror);
-    else if (mirrored) applySplit(closeBeside(split));
-    navigation.setParams({ mirrored: mirrorKey ?? '' });
+    const named = mirrored === undefined ? namedAtOpen.current : undefined;
+    if (mirror) applySplit(named ? selectTab(mirror, named) : mirror, { mirrored: mirrorKey ?? '' });
+    else applySplit(closeBeside(split), { mirrored: '' });
   });
   useEffect(() => {
     followMirror();
@@ -185,7 +199,12 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   useEffect(() => {
     if (!followed || !follow) return;
     // Reading the screen's own tab (an approval), the phone stays put.
-    if (followsHost(followed) && !leadingTab) applySplit(followOpen(split, followed.id, follow.placement, wide));
+    if (followsHost(followed) && !leadingTab) {
+      const next = followOpen(split, followed.id, follow.placement, wide);
+      // The desktop saves this open with the new tab's side focused; that echo leaves the phone's focus on the left.
+      const echo = next.right === followed.id && follow.placement === 'split' ? { mirrored: `${next.left}|${next.right}|right` } : undefined;
+      applySplit(next, echo);
+    }
     setFollow(null);
   }, [followed, leadingTab]);
   // The tab on screen stays put until the person or a host announcement moves it,

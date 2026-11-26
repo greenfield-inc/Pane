@@ -84,6 +84,14 @@ describe('moving tabs', () => {
     expect(selectTab(split, 'term')).toEqual({ left: 'term', right: 'page', focus: 'left' });
   });
 
+  it('an alert naming a tab shows it over the desktop split: in its column, else on the focused side', () => {
+    // The desktop focused the preview an agent in `term` opened; the alert names `term`.
+    const desktop = splitFromLayout(desktopSplit('g2'), shown);
+    if (!desktop) throw new Error('expected the desktop split');
+    expect(focusedTab(selectTab(desktop, 'term'))).toBe('term');
+    expect(selectTab(desktop, 'file')).toEqual({ left: 'term', right: 'file', focus: 'right' });
+  });
+
   it('opening the left tab beside swaps the columns, and narrow shows the focused one', () => {
     const swapped = openBeside(split, 'chat');
     expect(swapped).toEqual({ left: 'page', right: 'chat', focus: 'right' });
