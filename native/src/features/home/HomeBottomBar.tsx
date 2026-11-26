@@ -54,7 +54,6 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
       input.current?.focus();
     }
   }, [inColumn, searchRequested]);
-<<<<<<< HEAD
   const onFocus = () => {
     const wanted = asked.current;
     asked.current = false;
@@ -62,8 +61,6 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
     if (inColumn && !wanted && screenJustClosed()) return input.current?.blur();
     onFocusChange(true);
   };
-||||||| parent of d6a1f7924 (Controller layer for the whole app, cheat sheet overlay on Android, search dictation, positional Android Nintendo pads)
-=======
   // While searching, a controller's R2 dictates the query.
   const voice = useVoiceDictation(words => onQuery(insertAtSelection(query, null, words).text.trimEnd()));
   useControllerActions('search', {
@@ -73,7 +70,6 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
       else voice.release();
     },
   }, typing);
->>>>>>> d6a1f7924 (Controller layer for the whole app, cheat sheet overlay on Android, search dictation, positional Android Nintendo pads)
   const onFocusChange = (focused: boolean) => {
     setTyping(focused);
     if (inColumn) setSearching(focused);
