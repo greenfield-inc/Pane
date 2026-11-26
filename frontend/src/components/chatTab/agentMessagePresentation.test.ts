@@ -56,6 +56,12 @@ describe('classifyChatLine', () => {
     expect(classifyChatLine(text)).toEqual({ type: 'reply', replyTo: 'M-12', ref: 'M-13', body: 'Same PR. "Quoted" words stay.', sender: { name: 'Billing', kind: 'Session orchestrator' } });
   });
 
+  it('reads a reply line that tells a waiting sender to act on it once (T-109)', () => {
+    const text = 'reply: M-1 → "Yes, until Friday." (from the "Billing" Session orchestrator) [M-2; answer it with runpane reply M-2 "…"] — if a waiting command already returned this reply, act on it once.';
+    expect(classifyChatLine(text)).toEqual({ type: 'reply', replyTo: 'M-1', ref: 'M-2', body: 'Yes, until Friday.', sender: { name: 'Billing', kind: 'Session orchestrator' } });
+    expect(classifyChatLine(`${text} And one more thing.`)).toBeUndefined();
+  });
+
   it('leaves a message that only quotes a reply line alone', () => {
     expect(classifyChatLine('Why did I get reply: M-12 → "x" in my tab?')).toBeUndefined();
   });

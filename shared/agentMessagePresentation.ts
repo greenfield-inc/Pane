@@ -35,7 +35,7 @@ export type ChatAgentLine =
   | { type: 'unverified'; ref: string };
 
 const REPLY_ROUTE = /\n*Reply with runpane reply (M-[0-9]+) "…": it reaches ([^\n]+), who never sees your own chat\.\s*$/u;
-const REPLY_LINE = /^reply: (M-[0-9]+) → "([\s\S]*)" \(from ([^\n]+?)\) \[(M-[0-9]+); answer it with runpane reply M-[0-9]+ "…"\]\s*$/u;
+const REPLY_LINE = /^reply: (M-[0-9]+) → "([\s\S]*)" \(from ([^\n]+?)\) \[(M-[0-9]+); answer it with runpane reply M-[0-9]+ "…"\](?: — if a waiting command already returned this reply, act on it once\.)?\s*$/u;
 const FROM_PREFIX = /^\[From ([^\]\n]+)\][ \t]*\n?/u;
 const SESSION_ORCHESTRATOR = /^the "(.+)" Session orchestrator$/u;
 const PANE_IN_SESSION = /^(.+) \(in the "(.+)" Session\)$/u;
