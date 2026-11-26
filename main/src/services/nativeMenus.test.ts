@@ -1,7 +1,7 @@
 import type { MenuItemConstructorOptions, PopupOptions, WebContents } from 'electron';
 import { Menu } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { attachEditContextMenu, showContextMenu } from './nativeMenus';
+import { attachEditContextMenu, installApplicationMenu, showContextMenu } from './nativeMenus';
 
 /** The menu showContextMenu built and how it popped it up. */
 interface ShownMenu {
@@ -125,5 +125,38 @@ describe('attachEditContextMenu', () => {
     vi.mocked(Menu.buildFromTemplate).mockClear();
     rightClick({ linkURL: 'file:///Applications/Calculator.app' });
     expect(Menu.buildFromTemplate).not.toHaveBeenCalled();
+  });
+});
+
+describe('installApplicationMenu: View › Zoom', () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  afterEach(() => {
+    if (platform) Object.defineProperty(process, 'platform', platform);
+  });
+
+  it('zooms Pane\'s window, never the focused page, and shows ⌘= for Zoom In (T-125)', () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    let template: MenuItemConstructorOptions[] = [];
+    vi.mocked(Menu.buildFromTemplate).mockImplementationOnce((built) => {
+      // SAFETY: installApplicationMenu passes only constructor options, never built MenuItems.
+      template = built as MenuItemConstructorOptions[];
+      // SAFETY: installApplicationMenu hands the built menu to setApplicationMenu unread.
+      return {} as Electron.Menu;
+    });
+    const onZoom = vi.fn();
+    installApplicationMenu({ isPackaged: true, onAction: vi.fn(), onZoom });
+
+    const viewItems = template.find(menu => menu.label === 'View')?.submenu;
+    // SAFETY: View's submenu is an array of constructor options in nativeMenus.ts.
+    const items = viewItems as MenuItemConstructorOptions[];
+    const item = (label: string) => items.find(entry => entry.label === label);
+    expect(items.some(entry => entry.role === 'zoomIn' || entry.role === 'zoomOut' || entry.role === 'resetZoom')).toBe(false);
+    expect(item('Zoom In')?.accelerator).toBe('CmdOrCtrl+=');
+    expect(item('Zoom Out')?.accelerator).toBe('CmdOrCtrl+-');
+    expect(item('Actual Size')?.accelerator).toBe('CmdOrCtrl+Shift+0');
+    click(item('Zoom In'));
+    click(item('Zoom Out'));
+    click(item('Actual Size'));
+    expect(onZoom.mock.calls).toEqual([['in'], ['out'], ['reset']]);
   });
 });

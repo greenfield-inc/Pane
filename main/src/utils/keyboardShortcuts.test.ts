@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   activePaneChords,
+  appZoomForInput,
+  applyAppZoom,
   createMenuKeyState,
   menuKeyTakenFromWindow,
   areKeyboardShortcutsEnabled,
@@ -127,5 +129,51 @@ describe('menuKeyTakenFromWindow: macOS menu keys a Pane command owns (F-2)', ()
   it('takes nothing off macOS, where there is no menu bar', () => {
     const remapped = { keyboardShortcutOverrides: { 'toggle-sidebar': 'mod+h' } };
     expect(menuKeyTakenFromWindow({ ...cmdH, meta: false, control: true }, remapped, createMenuKeyState(), 0, 'other')).toBe(false);
+  });
+});
+
+describe('appZoomForInput: View › Zoom keys main answers on Pane\'s window (T-125)', () => {
+  const press = (code: string, keyName: string, mods: { meta?: boolean; shift?: boolean; alt?: boolean; control?: boolean } = {}) => (
+    { type: 'keyDown', key: keyName, code, control: false, meta: false, shift: false, alt: false, ...mods }
+  );
+
+  it('zooms in on a plain ⌘=, which the menu\'s CmdOrCtrl+Plus (⌘⇧=) never matched', () => {
+    expect(appZoomForInput(press('Equal', '=', { meta: true }), {}, 'mac')).toBe('in');
+    expect(appZoomForInput(press('Equal', '+', { meta: true, shift: true }), {}, 'mac')).toBe('in');
+    expect(appZoomForInput(press('NumpadAdd', '+', { meta: true }), {}, 'mac')).toBe('in');
+  });
+
+  it('zooms out on ⌘- and back to actual size on ⌘⇧0', () => {
+    expect(appZoomForInput(press('Minus', '-', { meta: true }), {}, 'mac')).toBe('out');
+    expect(appZoomForInput(press('Digit0', ')', { meta: true, shift: true }), {}, 'mac')).toBe('reset');
+  });
+
+  it('leaves ⌘0 to Focus Sidebar, key-up and plain = to the page', () => {
+    expect(appZoomForInput(press('Digit0', '0', { meta: true }), {}, 'mac')).toBeNull();
+    expect(appZoomForInput({ ...press('Equal', '=', { meta: true }), type: 'keyUp' }, {}, 'mac')).toBeNull();
+    expect(appZoomForInput(press('Equal', '='), {}, 'mac')).toBeNull();
+  });
+
+  it('works with Pane\'s keys off, and leaves a key the person bound to a Pane command to it', () => {
+    expect(appZoomForInput(press('Equal', '=', { meta: true }), { keyboardShortcutsEnabled: false }, 'mac')).toBe('in');
+    const bound = { keyboardShortcutOverrides: { 'toggle-sidebar': 'mod+=' } };
+    expect(appZoomForInput(press('Equal', '=', { meta: true }), bound, 'mac')).toBeNull();
+    expect(appZoomForInput(press('Equal', '=', { meta: true }), { ...bound, keyboardShortcutsEnabled: false }, 'mac')).toBe('in');
+  });
+
+  it('zooms nothing off macOS, where there is no View menu', () => {
+    expect(appZoomForInput(press('Equal', '=', { control: true }), {}, 'other')).toBeNull();
+  });
+
+  it('steps half a zoom level like Electron\'s zoom roles, and Actual Size returns to level 0', () => {
+    let level = 0;
+    const contents = { getZoomLevel: () => level, setZoomLevel: (next: number) => { level = next; } };
+    applyAppZoom(contents, 'in');
+    applyAppZoom(contents, 'in');
+    expect(level).toBe(1);
+    applyAppZoom(contents, 'out');
+    expect(level).toBe(0.5);
+    applyAppZoom(contents, 'reset');
+    expect(level).toBe(0);
   });
 });

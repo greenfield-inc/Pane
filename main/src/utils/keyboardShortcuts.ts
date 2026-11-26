@@ -176,3 +176,46 @@ export function menuKeyTakenFromWindow(
   }
   return keys.single.has(chord);
 }
+
+export type AppZoom = 'in' | 'out' | 'reset';
+
+/**
+ * View › Zoom's keys on macOS. Main answers them itself (appZoomForInput) for
+ * two reasons. The menu can't match a plain ⌘= to Zoom In, because Electron
+ * reads CmdOrCtrl+Plus as ⌘⇧=. And the zoom roles act on the focused
+ * webContents, which is the page while a browser tab has focus, so Pane's
+ * own text size never changed. ⌘⇧= and the keypad's + count too.
+ */
+const MAC_ZOOM_CHORDS = new Map<string, AppZoom>([
+  ['mod+=', 'in'],
+  ['mod+shift+=', 'in'],
+  ['mod++', 'in'],
+  ['mod+-', 'out'],
+  ['mod+shift+0', 'reset'],
+]);
+
+/**
+ * The zoom this key press asks Pane's window for, or null. A key the person
+ * bound to a Pane command stays with that command.
+ */
+export function appZoomForInput(
+  input: ElectronKeyboardInputLike & { type: string },
+  config: MenuKeyConfig,
+  platform: KeyPlatform = keyPlatformFor(process.platform),
+): AppZoom | null {
+  if (platform !== 'mac' || input.type !== 'keyDown') return null;
+  const chord = chordFromElectronInput(input, platform);
+  const zoom = MAC_ZOOM_CHORDS.get(chord) ?? null;
+  if (!zoom) return null;
+  if (areKeyboardShortcutsEnabled(config) && paneKeysFor(config, platform).single.has(chord)) return null;
+  return zoom;
+}
+
+/** Steps Pane's window the way View › Zoom In, Zoom Out and Actual Size do. */
+export function applyAppZoom(contents: { getZoomLevel(): number; setZoomLevel(level: number): void }, zoom: AppZoom): void {
+  if (zoom === 'reset') {
+    contents.setZoomLevel(0);
+    return;
+  }
+  contents.setZoomLevel(contents.getZoomLevel() + (zoom === 'in' ? 0.5 : -0.5));
+}
