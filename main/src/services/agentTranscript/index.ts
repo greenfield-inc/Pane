@@ -189,11 +189,18 @@ function turnEndsWithText(turn: TranscriptTurn): boolean {
  * a transcript (A, then /clear to B, then /resume A) reads it from its own place. With no cursor for
  * this transcript (none yet, or the same path replaced or rewritten shorter), nothing counts: the
  * answer is a fresh start at the transcript's end, so resumed history is never read as a new reply.
- * The exception is a transcript at a path the tab has no cursor for, created since Pane started
- * (`runStartedAtMs`), as a new Session or a relaunched agent writes: it holds no history the person
- * read, so it is read from its start.
+ * The exception is a transcript at a path the tab has no cursor for and has never read in this
+ * Pane run (`seen`), created since Pane started (`runStartedAtMs`), as a new Session or a relaunched
+ * agent writes: it holds no history the person read, so it is read from its start. One the tab read
+ * earlier in the run but no longer keeps a cursor for starts at its end like any other.
  */
-async function readFinishedTurns(locator: TranscriptLocator, known: readonly TranscriptCursor[], idleNow: boolean, runStartedAtMs?: number): Promise<FinishedTurns> {
+async function readFinishedTurns(
+  locator: TranscriptLocator,
+  known: readonly TranscriptCursor[],
+  idleNow: boolean,
+  runStartedAtMs?: number,
+  seen: ReadonlySet<string> = new Set(),
+): Promise<FinishedTurns> {
   const [file] = await transcriptFiles(locator, locator.notBeforeMs ?? 0);
   if (!file) return { endedWithText: undefined, cursor: undefined };
   let id: string;
@@ -209,7 +216,7 @@ async function readFinishedTurns(locator: TranscriptLocator, known: readonly Tra
     return { endedWithText: undefined, cursor: undefined };
   }
   const samePath = known.filter(candidate => candidate.file === file);
-  const newToRun = samePath.length === 0 && runStartedAtMs !== undefined && createdMs > 0 && createdMs >= runStartedAtMs;
+  const newToRun = samePath.length === 0 && !seen.has(file) && runStartedAtMs !== undefined && createdMs > 0 && createdMs >= runStartedAtMs;
   const cursor = newToRun ? { file, id, offset: 0 } : samePath.find(candidate => candidate.id === id);
   if (!cursor || size < cursor.offset) {
     return { endedWithText: undefined, cursor: { file, id, offset: size, fresh: true }, missed: true };

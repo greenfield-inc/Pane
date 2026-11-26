@@ -34,7 +34,8 @@ export interface ReplyProbeSources {
   locatorOf(panelId: string): TranscriptLocator | undefined;
   /** The tab's agent is idle now, so its last turn has finished. */
   isIdle(panelId: string): boolean;
-  readTurns(locator: TranscriptLocator, known: readonly TranscriptCursor[], idleNow: boolean, runStartedAtMs: number): Promise<FinishedTurns>;
+  /** `seen`: every transcript path the tab read in this Pane run, kept or not. */
+  readTurns(locator: TranscriptLocator, known: readonly TranscriptCursor[], idleNow: boolean, runStartedAtMs: number, seen: ReadonlySet<string>): Promise<FinishedTurns>;
   /** When this Pane run started; a transcript created since is new and read from its start. Defaults to the probe's creation. */
   runStartedAtMs?: number;
   wait(ms: number): Promise<void>;
@@ -51,6 +52,8 @@ const TRANSCRIPT_READ_WAITS_MS = [1_000, 1_000, 2_000];
 
 export function createReplyProbe(sources: ReplyProbeSources): ReplyProbe {
   const cursors = new Map<string, readonly TranscriptCursor[]>();
+  /** Per tab, every transcript path it read in this Pane run, including ones whose cursor was dropped. */
+  const seen = new Map<string, Set<string>>();
   const runStartedAtMs = sources.runStartedAtMs ?? Date.now();
   /** Per tab, the judgment running now: the next one waits for it. */
   const running = new Map<string, Promise<boolean>>();
@@ -59,6 +62,7 @@ export function createReplyProbe(sources: ReplyProbeSources): ReplyProbe {
   const keep = async (panelId: string, known: readonly TranscriptCursor[], cursor: TranscriptCursor) => {
     const next = [...known.filter(candidate => candidate.file !== cursor.file), cursor].slice(-MAX_TRANSCRIPT_CURSORS);
     cursors.set(panelId, next);
+    seen.set(panelId, (seen.get(panelId) ?? new Set()).add(cursor.file));
     await sources.saveCursors(panelId, next).catch(error => { console.warn(`[Sessions] Could not save where panel ${panelId}'s turns were read to:`, error); });
   };
 
@@ -73,7 +77,7 @@ export function createReplyProbe(sources: ReplyProbeSources): ReplyProbe {
     for (const delay of [0, ...TRANSCRIPT_READ_WAITS_MS]) {
       if (delay > 0) await sources.wait(delay);
       try {
-        last = await sources.readTurns(locator, known, sources.isIdle(panelId), runStartedAtMs);
+        last = await sources.readTurns(locator, known, sources.isIdle(panelId), runStartedAtMs, seen.get(panelId) ?? new Set());
       } catch (error) {
         console.warn(`[Sessions] Could not read panel ${panelId}'s transcript, so its turn does not mark the Session unread:`, error);
         return false;
