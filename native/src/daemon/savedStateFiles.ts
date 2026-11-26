@@ -48,3 +48,6 @@ export const savedStateFiles = filesIn(new Directory(Paths.cache, 'saved-state')
 
 /** Which Sessions are open on each machine. */
 export const openSessionFiles = filesIn(new Directory(Paths.cache, 'open-sessions'));
+
+/** When the phone last opened each Pane on each machine. */
+export const openedOnPhoneFiles = filesIn(new Directory(Paths.cache, 'opened-on-phone'));

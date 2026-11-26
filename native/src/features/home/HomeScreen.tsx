@@ -46,6 +46,7 @@ import { homeScroll, useHomeView } from './homeView';
 import { boardCounts, PINNED_PREVIEW, sessionWaiting, terminalWaiting, tilePanes, type PaneRecentRow } from './statusBoard';
 import { StatusTiles } from './StatusTiles';
 import { useHomeFeeds } from './useHomeData';
+import { useOpenedOnPhone } from './useOpenedOnPhone';
 
 /** A row of home's list: a Working or Ready Pane, one of All machines' rows, or a search result. */
 type HomeRow =
@@ -95,6 +96,7 @@ export function HomeScreen() {
   const setQuery = useHomeView(state => state.setQuery);
   const [refreshing, setRefreshing] = useState(false);
   const [recentExpanded, setRecentExpanded] = useState(false);
+  const openedOnPhone = useOpenedOnPhone(state => state.opened);
   const openSessions = useOpenSessions(state => state.open[profile.id]) ?? [];
   const toggleSession = useOpenSessions(state => state.toggle);
   const pinnedExpanded = useSidebarSections(state => state.allPinned);
@@ -317,7 +319,7 @@ export function HomeScreen() {
   );
 
   // What was last opened on any device, above Pinned: three rows, Show more lists up to ten.
-  const recentRows = recentlyOpened(board.recent);
+  const recentRows = recentlyOpened(board.recent, openedOnPhone);
   const recentRow = (row: RecentRow, index: number) => (
     <OpenMark key={row.key} open={row.type === 'pane' ? isOpen('/pane/[paneId]', row.pane.id, row.machineKey) : isOpen('/session/[sessionId]', row.session.id, row.machineKey)}>
       <RecentRowView
