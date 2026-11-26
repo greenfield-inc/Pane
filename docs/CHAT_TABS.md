@@ -602,7 +602,8 @@ the Pane you came to Profiles from, and Pane then shows that Pane. With no Pane
 to open it in, a notice says so and nothing starts. The tab resumes like any
 Agent Farm tab (`--resume <id>`). An orchestrator opens its own linked agents
 with `runpane panels create --tool-command "<its link's command>"`, which
-carries `--parent`. Files preview first (Markdown with its
+carries `--parent` and, from Agent Farm 0.3.1, `--snapshot` (the Session's frozen plugins;
+see [SESSIONS.md](SESSIONS.md#switch-and-reload-profile-profiles-on)). Files preview first (Markdown with its
 front-matter as a metadata header, YAML as key/value) and **Edit** opens the
 source. **Edit details** saves a profile's title and description, and its photo
 menu an SVG photo (at most 64 KB), with `agent-farm profiles set`. Agent Farm

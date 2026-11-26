@@ -383,6 +383,24 @@ describe('chat tab manager', () => {
     expect(manager.view('p1').problem).toMatchObject({ ...problem, message, next: 'The next step.' });
   });
 
+  // T-110 (D-3): a Session's lead offers Reload profile when Agent Farm refuses its snapshot; another tab can't reload.
+  it('offers Reload profile on a Session\'s own tab when its snapshot is refused, and Restart elsewhere', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'pane-chat-manager-'));
+    cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
+    const refused = new PaneError('CHAT_PROFILE_SNAPSHOT_UNREADABLE', 'Agent Farm can\'t start greenfield/orchestrator from its snapshot: Snapshot /s/.agent-farm/snapshots/d1 is missing.', 'Press Reload profile to take a new snapshot.');
+    const run = async (state: Partial<ChatPanelState>) => {
+      const store = new MemoryStore();
+      const manager = new ChatTabManager({ store, send: () => undefined, spoolDirectory: directory, launcher: { resolve: async () => { throw refused; } } });
+      store.add('p1', { ...newTab(directory), ...state });
+      await expect(manager.ensure('p1')).rejects.toBeDefined();
+      return manager.view('p1').problem;
+    };
+    expect(await run({ orchestrationSessionId: 's1' })).toMatchObject({ code: 'failed', action: 'reload-profile', message: refused.message, next: expect.stringContaining('Press Reload profile') });
+    const worker = await run({});
+    expect(worker).toMatchObject({ code: 'failed', message: refused.message, next: expect.stringContaining('from its lead') });
+    expect(worker?.action).toBeUndefined();
+  });
+
   it('saves no environment or secret in the tab\'s state', async () => {
     const { manager, store, directory } = harness();
     store.add('p1', { ...newTab(directory), initialInput: 'env PANE_TEST_TOKEN' });

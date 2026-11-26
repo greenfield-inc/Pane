@@ -228,7 +228,7 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
   if (!agent && launch.kind === 'profile') {
     const probe: ChatPanelState = { agent: DEFAULT_AGENT_ID, launch, cwd: session.worktreePath, status: 'starting' };
     const placeholder: ToolPanel = { id: 'new', sessionId: request.sessionId, type: 'chat', title: '', state: { isActive: false }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
-    agent = (await agentFarmProfiles.print(launch.profile, launch.args ?? {}, DEFAULT_AGENT_ID, session.worktreePath, chatTabEnv(placeholder, probe), launch.parent)).harness;
+    agent = (await agentFarmProfiles.print(launch.profile, launch.args ?? {}, DEFAULT_AGENT_ID, session.worktreePath, chatTabEnv(placeholder, probe), launch.parent, launch.snapshot)).harness;
   }
   if (!agent) throw new PaneError('CHAT_AGENT_REQUIRED', 'No agent was named for the chat tab, so none was created.', `Choose an agent (${configuredChatAgentIds().join(', ')}), or name an Agent Farm profile.`);
   // Refused here, before a tab exists, naming the agents this host can open as chats.

@@ -31,7 +31,7 @@ const event: BoundarySchema<ChatTabEvent> = boundary.object({
 const problem: BoundarySchema<ChatTabProblem> = boundary.object({
   code: boundary.enumeration('signed-out', 'not-installed', 'adapter-setup', 'exited', 'failed', 'unsupported-host'),
   message: boundary.string, next: boundary.string,
-  action: boundary.optional(boundary.enumeration('sign-in', 'install', 'restart')), url: boundary.optional(boundary.string),
+  action: boundary.optional(boundary.enumeration('sign-in', 'install', 'restart', 'reload-profile')), url: boundary.optional(boundary.string),
 });
 const image = boundary.object({ mimeType: boundary.string, data: boundary.string });
 const queued: BoundarySchema<ChatTabQueuedPrompt> = boundary.object({ operationId: boundary.string, text: boundary.string, images: boundary.optional(boundary.array(image)), queuedAt: boundary.string, stored: boundary.optional(boundary.literal(true)), imageCount: boundary.optional(boundary.number) });

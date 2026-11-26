@@ -13,7 +13,8 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { panelManager } from './panelManager';
 import { getChatTabManager } from './chatTabs';
 import { sessionChatLaunch } from './chatTabs/launch';
-import { agentFarmConfigRoot, listPaneAgentFarmProfiles } from './agentFarm/bundledAgentFarm';
+import { agentFarmConfigRoot, createPaneSessionSnapshot, listPaneAgentFarmProfiles } from './agentFarm/bundledAgentFarm';
+import { snapshotLocation, snapshotPluginHashes, type SessionSnapshot } from './agentFarm/sessionSnapshot';
 import { installedPluginHash, profilePlugin } from './agentFarm/agentFarmProfiles';
 import { plainProfileAgent, plainProfileRef, profileDisplayName, profileSwitchEffect } from '../../../shared/agentProfiles';
 import { profilesEnabled } from './agentFarm/profilesFeature';
@@ -41,6 +42,10 @@ export interface SessionAgentFarm {
   /** An installed plugin's content hash, or undefined when it isn't installed. */
   pluginHash(plugin: string): Promise<string | undefined>;
   profiles(): Promise<AgentFarmProfileList>;
+  /** Saves a snapshot of every installed plugin in a Session folder (T-110), with its path relative to that folder. */
+  snapshot(sessionFolder: string): Promise<SessionSnapshot>;
+  /** The content hash of each plugin folder in a snapshot folder (absolute), by plugin name. */
+  snapshotHashes(snapshotFolder: string): Promise<Record<string, string>>;
 }
 import { terminalPanelManager } from './terminalPanelManager';
 import { databaseService } from './database';
@@ -474,6 +479,11 @@ export class OrchestrationSessionManager extends EventEmitter {
         updatedAt: now,
       };
       if (agentProfile) record.agentProfile = agentProfile;
+      // T-110 (D-4): every Profiles-on Session gets one snapshot, before its lead first starts.
+      if (this.profilesOn()) {
+        try { record.agentFarmSnapshot = (await this.agentFarm().snapshot(sessionWorkspacePath(record.id))).path; }
+        catch (error) { console.warn(`[Sessions] ${record.name} has no Agent Farm snapshot, so its agents read the installed plugins as before: ${reasonOf(error)}`); }
+      }
       const next: OrchestrationSessionStoreData = {
         ...data,
         selectedSessionId: record.id,
@@ -646,6 +656,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     const outcome = 'The Session was not switched.';
     this.refuseProfilesOff(outcome);
     const target = await this.profileTarget(ref, undefined, outcome);
+    const snapshot = await this.newSnapshot(selector, outcome);
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
@@ -669,6 +680,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         ...current, agent: target.agent, agentProfile: target.profile,
         revision: current.revision + 1, updatedAt: new Date().toISOString(), activity: [...current.activity],
       };
+      if (snapshot) next.agentFarmSnapshot = snapshot.path;
       if (agentChanging) { next.launchCommand = ''; next.customResume = undefined; next.resume = undefined; }
       const chat = this.chatLaunch(next);
       if (!chat || !('launch' in chat)) {
@@ -698,6 +710,7 @@ export class OrchestrationSessionManager extends EventEmitter {
           .catch(error => console.warn(`[Sessions] ${current.name}'s ${configuredAgent(current.agent).title} tab did not stop: ${reasonOf(error)}`));
       }
       this.pluginHashes.set(profilePlugin(ref), target.profile.hash);
+      if (snapshot) this.snapshotChanged.delete(next.id);
       this.emitChanged(next, 'updated');
       return { session: this.withPaused(clone(next)), previous, effect };
     });
@@ -711,6 +724,8 @@ export class OrchestrationSessionManager extends EventEmitter {
     this.refuseProfilesOff('Nothing was reloaded.');
     const ref = (await this.get(selector).catch(() => undefined))?.agentProfile?.ref;
     if (ref) await this.bringProfileCurrent(ref);
+    // T-110 (D-2): the lead, and tabs opened from now on, move to a new snapshot of what is installed.
+    const snapshot = await this.newSnapshot(selector, 'Nothing was reloaded.');
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
@@ -735,6 +750,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         ...current, agentProfile: { ref: profile.ref, hash },
         revision: current.revision + 1, updatedAt: new Date().toISOString(), activity: [...current.activity],
       };
+      if (snapshot) next.agentFarmSnapshot = snapshot.path;
       const chat = this.chatLaunch(next);
       if (!chat || !('launch' in chat)) throw new PaneError('SESSION_PROFILE_UNSUPPORTED', `Profiles run in chat tabs, which are off on this computer. ${outcome}`, 'Turn on Chat tabs in Settings > AI & Agents, then try again.');
       const divider = `Reloaded ${name} · conversation kept`;
@@ -743,9 +759,25 @@ export class OrchestrationSessionManager extends EventEmitter {
       this.store.write(replaceSession(data, next));
       this.chatTabs().relaunch(panel.id, { launch: chat.launch, divider });
       this.pluginHashes.set(profilePlugin(profile.ref), hash);
+      if (snapshot) this.snapshotChanged.delete(next.id);
       this.emitChanged(next, 'updated');
       return this.withPaused(clone(next));
     });
+  }
+
+  /**
+   * A new snapshot of what is installed, for a Switch or Reload (T-110), saved in the Session's folder.
+   * Undefined for a Session that can't be found here (the caller's own lookup refuses it); a snapshot
+   * that can't be saved refuses the change with `outcome`.
+   */
+  private async newSnapshot(selector: OrchestrationSessionSelector, outcome: string): Promise<SessionSnapshot | undefined> {
+    const record = await this.get(selector).catch(() => undefined);
+    if (!record || record.archived === true || record.move) return undefined;
+    try { return await this.agentFarm().snapshot(sessionWorkspacePath(record.id)); }
+    catch (error) {
+      if (error instanceof PaneError) throw new PaneError(error.code, `${error.message} ${outcome}`, error.next);
+      throw new PaneError('AGENT_FARM_SNAPSHOT_FAILED', `Agent Farm couldn't save ${record.name}'s snapshot: ${reasonOf(error)}. ${outcome}`, 'Restart Pane, then try again.');
+    }
   }
 
   /** Switch and Reload exist only with Profiles on (T-63); off, Sessions behave as on main. */
@@ -770,6 +802,10 @@ export class OrchestrationSessionManager extends EventEmitter {
   private readonly pluginHashes = new Map<string, string>();
   /** Profiles (refs without a variant) live Sessions run that Agent Farm's list no longer has, for the gone mark (T-83 P3). */
   private readonly goneProfiles = new Set<string>();
+  /** Each snapshot folder's plugin hashes; a snapshot never changes once written (T-110). */
+  private readonly snapshotHashes = new Map<string, Record<string, string>>();
+  /** Sessions with a snapshot in which some plugin differs from the installed one, for the changed mark (T-110). */
+  private readonly snapshotChanged = new Set<string>();
   private pluginHashesCheckedAt = 0;
   private pluginHashesChecking?: Promise<void>;
 
@@ -784,8 +820,13 @@ export class OrchestrationSessionManager extends EventEmitter {
     if (!force && Date.now() - this.pluginHashesCheckedAt < PLUGIN_HASH_INTERVAL_MS) return Promise.resolve();
     this.pluginHashesCheckedAt = Date.now();
     this.pluginHashesChecking = (async () => {
-      const sessions = this.store.read().sessions.filter(session => session.archived !== true && session.agentProfile);
-      const plugins = [...new Set(sessions.map(session => profilePlugin(session.agentProfile!.ref)))];
+      const live = this.store.read().sessions.filter(session => session.archived !== true && !session.move);
+      const sessions = live.filter(session => session.agentProfile);
+      // T-110: a Session with a snapshot compares every plugin in it, so plugins workers run count too.
+      const snapshotted = live.filter(session => session.agentFarmSnapshot);
+      const held = new Map<string, Record<string, string>>();
+      for (const session of snapshotted) held.set(session.id, await this.snapshotHashesOf(session));
+      const plugins = [...new Set([...sessions.map(session => profilePlugin(session.agentProfile!.ref)), ...[...held.values()].flatMap(hashes => Object.keys(hashes))])];
       const changed = new Set<string>();
       for (const plugin of plugins) {
         const hash = await this.agentFarm().pluginHash(plugin).catch(() => undefined);
@@ -793,13 +834,37 @@ export class OrchestrationSessionManager extends EventEmitter {
         this.pluginHashes.set(plugin, hash);
         changed.add(plugin);
       }
+      const flipped = new Set<string>();
+      for (const session of snapshotted) {
+        // A plugin no longer installed here doesn't count: Reload couldn't take it either.
+        const differs = Object.entries(held.get(session.id) ?? {}).some(([plugin, hash]) => { const installed = this.pluginHashes.get(plugin); return installed !== undefined && installed !== hash; });
+        if (differs === this.snapshotChanged.has(session.id)) continue;
+        if (differs) this.snapshotChanged.add(session.id); else this.snapshotChanged.delete(session.id);
+        flipped.add(session.id);
+      }
       const goneChanged = await this.refreshGoneProfiles(sessions.map(session => session.agentProfile!.ref));
-      for (const session of sessions) {
-        const qualified = session.agentProfile!.ref.split(':')[0];
-        if (changed.has(profilePlugin(session.agentProfile!.ref)) || goneChanged.has(qualified)) this.emitChanged(session, 'updated');
+      for (const session of live) {
+        const qualified = session.agentProfile?.ref.split(':')[0];
+        const own = !session.agentFarmSnapshot && !!session.agentProfile && changed.has(profilePlugin(session.agentProfile.ref));
+        if (own || flipped.has(session.id) || (qualified !== undefined && goneChanged.has(qualified))) this.emitChanged(session, 'updated');
       }
     })().finally(() => { this.pluginHashesChecking = undefined; });
     return this.pluginHashesChecking;
+  }
+
+  /** The plugin hashes of a Session's snapshot, read once per snapshot; empty when it can't be read. */
+  private async snapshotHashesOf(record: OrchestrationSessionRecord): Promise<Record<string, string>> {
+    const folder = snapshotLocation(sessionWorkspacePath(record.id), record.agentFarmSnapshot ?? '');
+    const cached = this.snapshotHashes.get(folder);
+    if (cached) return cached;
+    try {
+      const hashes = await this.agentFarm().snapshotHashes(folder);
+      this.snapshotHashes.set(folder, hashes);
+      return hashes;
+    } catch (error) {
+      console.warn(`[Sessions] Could not read ${record.name}'s Agent Farm snapshot for changes: ${reasonOf(error)}`);
+      return {};
+    }
   }
 
   /**
@@ -1175,7 +1240,8 @@ export class OrchestrationSessionManager extends EventEmitter {
     const profile = record.agentProfile;
     const newest = profile && this.profilesOn() ? this.pluginHashes.get(profilePlugin(profile.ref)) : undefined;
     const gone = !!profile && this.profilesOn() && this.goneProfiles.has(profile.ref.split(':')[0]);
-    const marked: OrchestrationSessionRecord = { ...record, agentProfileChanged: !gone && newest !== undefined && newest !== profile?.hash ? true : undefined, agentProfileGone: gone ? true : undefined };
+    const changed = record.agentFarmSnapshot ? this.profilesOn() && this.snapshotChanged.has(record.id) : newest !== undefined && newest !== profile?.hash;
+    const marked: OrchestrationSessionRecord = { ...record, agentProfileChanged: !gone && changed ? true : undefined, agentProfileGone: gone ? true : undefined };
     let latest: TerminalPausedMark | undefined;
     for (const paneId of this.pausablePaneIdsOf(record)) {
       const mark = this.sessionManager.getSession(paneId)?.paused;
@@ -1611,7 +1677,7 @@ export class OrchestrationSessionManager extends EventEmitter {
    * tab. Sessions that resume or promote a terminal conversation, run in WSL, use a truly
    * custom resume, or launch a wrapper keep their terminal (`sessionChatLaunch` says why).
    */
-  private chatLaunch(record: Pick<OrchestrationSessionRecord, 'agent' | 'runtime' | 'resume' | 'promotedFrom' | 'customResume' | 'launchCommand' | 'agentProfile'>) {
+  private chatLaunch(record: Pick<OrchestrationSessionRecord, 'agent' | 'runtime' | 'resume' | 'promotedFrom' | 'customResume' | 'launchCommand' | 'agentProfile'> & Partial<Pick<OrchestrationSessionRecord, 'id' | 'agentFarmSnapshot'>>) {
     if (this.configManager.getConfig().chatTabsEnabled !== true) return undefined;
     const result = sessionChatLaunch({
       agent: record.agent, runtime: record.runtime, resume: record.resume, promoted: !!record.promotedFrom, customResume: record.customResume,
@@ -1623,6 +1689,8 @@ export class OrchestrationSessionManager extends EventEmitter {
     if (!record.agentProfile || !this.profilesOn() || !('launch' in result) || result.launch.kind !== 'agent') return result;
     const launch: ChatTabLaunch = { kind: 'profile', profile: record.agentProfile.ref };
     if (result.launch.fullAccess === true || result.launch.mode) launch.fullAccess = true;
+    // T-110: the lead resolves from the Session's snapshot at every start, so a restart keeps its version.
+    if (record.id && record.agentFarmSnapshot) launch.snapshot = snapshotLocation(sessionWorkspacePath(record.id), record.agentFarmSnapshot);
     return { launch };
   }
 
@@ -1650,6 +1718,8 @@ export class OrchestrationSessionManager extends EventEmitter {
     return this.agentFarmPort ?? {
       pluginHash: plugin => installedPluginHash(agentFarmConfigRoot(getAppDirectory()), plugin),
       profiles: () => listPaneAgentFarmProfiles(getAppDirectory()),
+      snapshot: folder => createPaneSessionSnapshot(getAppDirectory(), folder),
+      snapshotHashes: snapshotPluginHashes,
     };
   }
 

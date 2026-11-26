@@ -102,6 +102,9 @@ const activitySchema: BoundarySchema<OrchestrationActivity> = boundary.object({
   panelId: boundary.optional(boundary.nonEmptyString),
 });
 
+/** A Session's Agent Farm snapshot, relative to its folder (T-110). */
+const SNAPSHOT_PATH = boundary.refine(boundary.nonEmptyString, value => /^\.agent-farm\/snapshots\/[^/\\.][^/\\]*$/.test(value), 'expected .agent-farm/snapshots/<digest>');
+
 const sessionSchema = boundary.object({
   runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
   wslDistribution: boundary.optional(boundary.nonEmptyString),
@@ -126,6 +129,7 @@ const sessionSchema = boundary.object({
   openingPrompt: boundary.optional(boundary.nonEmptyString),
   profile: boundary.optional(boundary.string),
   agentProfile: boundary.optional(sessionAgentProfileSchema),
+  agentFarmSnapshot: boundary.optional(SNAPSHOT_PATH),
   internalSessionId: boundary.nonEmptyString,
   // One panel id per configured agent, rebuilt in sanitizeSession.
   panelIds: boundary.jsonObject,
@@ -433,6 +437,8 @@ function sanitizeSession(value: JsonValue, index: number, problems: string[]): O
   }
   // A Session whose profile can't be read starts its agent directly, as before T-63, rather than being dropped.
   if (fields.agentProfile !== undefined && !decodes(fields.agentProfile, sessionAgentProfileSchema, `${label} agent profile`, problems)) delete fields.agentProfile;
+  // A snapshot path that can't be read is dropped: the Session runs as one from before T-110 until its next Reload.
+  if (fields.agentFarmSnapshot !== undefined && !decodes(fields.agentFarmSnapshot, SNAPSHOT_PATH, `${label} Agent Farm snapshot`, problems)) delete fields.agentFarmSnapshot;
   try {
     const session = decodeBoundary(fields, sessionSchema);
     // Each agent keeps its saved panel id. A Session saved before an agent joined gets that

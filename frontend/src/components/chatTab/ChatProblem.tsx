@@ -4,7 +4,7 @@ import type { ChatTabProblem } from '../../../../shared/types/chatTab';
  * Why a chat tab stopped and the one action that gets it going again. It never retries by itself.
  * `restart: false` leaves restarting to the tab's owner (Autopilot's Start), keeping the reason.
  */
-export function ChatProblem({ problem, agent, busy, restart = true, onRestart, onSignIn, onInstall }: {
+export function ChatProblem({ problem, agent, busy, restart = true, onRestart, onSignIn, onInstall, onReloadProfile }: {
   problem: ChatTabProblem;
   agent: string;
   busy: boolean;
@@ -12,6 +12,8 @@ export function ChatProblem({ problem, agent, busy, restart = true, onRestart, o
   onRestart: () => void;
   onSignIn: () => void;
   onInstall: (url: string) => void;
+  /** A Session's own tab: Reload profile takes a new snapshot when Agent Farm refused its old one (T-110). */
+  onReloadProfile?: () => void;
 }) {
   // The host's next step names this card's Restart or Retry; without them it points at the owner's Start.
   const next = restart ? problem.next
@@ -23,6 +25,7 @@ export function ChatProblem({ problem, agent, busy, restart = true, onRestart, o
     <p className="chat-problem-next">{next}</p>
     <div className="chat-problem-actions">
       {problem.action === 'sign-in' && <button type="button" className="chat-button chat-button-primary" disabled={busy} onClick={onSignIn}>Sign in in Terminal</button>}
+      {problem.action === 'reload-profile' && onReloadProfile && <button type="button" className="chat-button chat-button-primary" disabled={busy} onClick={onReloadProfile}>Reload profile</button>}
       {problem.action === 'install' && problem.url && <button type="button" className="chat-button chat-button-primary" disabled={busy} onClick={() => onInstall(problem.url!)}>Install {agent}</button>}
       {restart && problem.code !== 'unsupported-host' && <button type="button" className={`chat-button ${problem.action === 'restart' ? 'chat-button-primary' : 'chat-button-outline'}`} disabled={busy} onClick={onRestart}>{problem.action === 'restart' ? 'Restart' : 'Retry'}</button>}
     </div>

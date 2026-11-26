@@ -15,6 +15,8 @@ import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { sessionWorkspacePath } from './sessionWorkspace';
 import { getAppDirectory } from '../utils/appDirectory';
 import { withSessionFolderAccess } from './agents/sessionFolderAccess';
+import { sessionSnapshotForTab } from './agentFarm/sessionSnapshot';
+import { profilesOn } from './agentFarm/profilesFeature';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import type { ChatPanelState } from '../../../shared/types/chatTab';
 import { teammatePaneCaller } from '../daemon/commandRegistry';
@@ -150,6 +152,18 @@ class PanelManager {
           } catch (error) {
             console.warn(`[PanelManager] Could not configure Session access for terminal ${panelId}: ${reasonOf(error)}. The terminal will open without Session access; Session storage was left unchanged. Next: Check ${path.join(getAppDirectory(), 'orchestration-sessions.json')} and the associated Session folder for invalid data or unreadable paths, repair the data or permissions, then open a new terminal tab.`);
           }
+        }
+      }
+      // T-110 (D-2, D-4): a tab in a Session's Panes takes the Session's Agent Farm snapshot as it opens, and keeps it.
+      // SAFETY: terminal and chat custom state both carry these optional fields (TerminalPanelState, ChatPanelState).
+      const tabState = customState as Pick<TerminalPanelState, 'orchestrationSessionId' | 'agentFarmSnapshot'>;
+      if ((request.type === 'terminal' || request.type === 'chat') && profilesOn() && tabState.agentFarmSnapshot === undefined) {
+        try {
+          const sessions = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json')).read().sessions;
+          const snapshot = sessionSnapshotForTab(sessions, { paneId: request.sessionId, orchestrationSessionId: tabState.orchestrationSessionId }, sessionWorkspacePath);
+          if (snapshot) tabState.agentFarmSnapshot = snapshot;
+        } catch (error) {
+          console.warn(`[PanelManager] Tab ${panelId} opens without its Session's Agent Farm snapshot, so agent-farm in it reads the installed plugins: ${reasonOf(error)}`);
         }
       }
       if (!options.hostFileGrant) assertHostBrowserFileNavigation(request.type, state);

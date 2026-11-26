@@ -125,8 +125,9 @@ export interface OrchestrationSessionRecord {
   /** Set while the Session's chat and every Pane in it are paused. Computed when read, never stored. */
   paused?: TerminalPausedMark;
   /**
-   * The profile's plugin changed since the Session's agent last took it (T-63): Reload profile takes
-   * the new one. Computed when read, never stored.
+   * The profile's plugin changed since the Session's agent last took it (T-63), or, for a Session with
+   * a snapshot, any plugin in it differs from the installed one (T-110): Reload profile takes the new
+   * one. Computed when read, never stored.
    */
   agentProfileChanged?: true;
   /**
@@ -157,6 +158,13 @@ export interface OrchestrationSessionRecord {
    * from before T-63, and those whose agent keeps a terminal, have none and start the agent directly.
    */
   agentProfile?: SessionAgentProfile;
+  /**
+   * The Session's Agent Farm snapshot (T-110, Profiles on): a frozen copy of every installed plugin,
+   * which its lead and every Agent Farm tab in its Panes read until Reload profile takes a new one.
+   * Relative to the Session folder (`.agent-farm/snapshots/<digest>`), so it holds after a move.
+   * Sessions created with Profiles off or before T-110 have none.
+   */
+  agentFarmSnapshot?: string;
   /** Hidden detached Pane session that owns the durable terminal conversation. */
   internalSessionId: string;
   /** Deterministic terminal panel for each supported agent. */

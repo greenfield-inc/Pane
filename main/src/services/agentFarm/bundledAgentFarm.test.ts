@@ -11,6 +11,7 @@ import {
   bundledAgentFarm,
   agentFarmTelemetrySync,
   bundledAgentFarmProcess,
+  createPaneSessionSnapshot,
   installBundledAgentFarm,
   paneAgentFarmProcess,
   writeAgentFarmTelemetry,
@@ -537,5 +538,28 @@ describe('the pinned package', () => {
     if (!bundle) throw new Error('the pinned Agent Farm package is missing');
     expect(readdirSync(path.join(bundle.root, 'plugins'))).not.toContain('dcouple');
     expect(readdirSync(path.join(bundle.root, 'plugins', 'greenfield', 'profiles')).filter((file) => file.endsWith('.yaml')).sort()).toEqual(['business.yaml', 'orchestrator.yaml', 'seo.yaml']);
+  });
+});
+
+// T-110: a Session's snapshot, saved by the bundled CLI in the Session folder.
+describe('createPaneSessionSnapshot', () => {
+  it('runs snapshot create for the Session folder against Pane\'s config root, and keeps the path relative', async () => {
+    const paneDir = tempDir();
+    const sessionFolder = path.join(paneDir, 'sessions', 's1');
+    const calls: AgentFarmProcess[] = [];
+    const snapshot = await createPaneSessionSnapshot(paneDir, sessionFolder, async process => {
+      calls.push(process);
+      return JSON.stringify({ path: path.join(sessionFolder, '.agent-farm', 'snapshots', 'd1'), digest: 'd1', plugins: { greenfield: '0.1.2' } });
+    }, fakeBundle());
+    expect(snapshot).toEqual({ path: '.agent-farm/snapshots/d1', digest: 'd1', plugins: { greenfield: '0.1.2' } });
+    expect(calls[0].args.slice(1)).toEqual(['snapshot', 'create', '--directory', sessionFolder, '--json', '--config-root', agentFarmConfigRoot(paneDir)]);
+    expect(existsSync(sessionFolder)).toBe(true);
+  });
+
+  it('says what failed and what to do when the CLI fails or the build has none', async () => {
+    const paneDir = tempDir();
+    await expect(createPaneSessionSnapshot(paneDir, path.join(paneDir, 's'), async () => { throw Object.assign(new Error('Command failed'), { stderr: 'note\nError: disk full\n' }); }, fakeBundle()))
+      .rejects.toMatchObject({ code: 'AGENT_FARM_SNAPSHOT_FAILED', message: expect.stringContaining('Error: disk full'), next: expect.stringContaining('Restart Pane') });
+    await expect(createPaneSessionSnapshot(paneDir, path.join(paneDir, 's'), async () => '', null)).rejects.toMatchObject({ code: 'AGENT_FARM_SNAPSHOT_FAILED', next: expect.stringContaining('Reinstall Pane') });
   });
 });

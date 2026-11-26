@@ -15,6 +15,7 @@ import type { SaveChatFile } from './chatAttachments';
 import { uploadFileToHost } from '../../utils/hostUpload';
 import type { ChatTurnActions } from './ChatTurns';
 import { SessionApprovalCards } from '../approvals/SessionApprovalCards';
+import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import ChatTabPanel from './ChatTabPanel';
 import type { ChatRendering } from './chatRendering';
 
@@ -37,6 +38,7 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   // SAFETY: the panel type 'chat' carries ChatPanelState as its custom state.
   const state = panel.state.customState as ChatPanelState | undefined;
   const workers = useSessionWorkers(DESKTOP_WORKERS, state?.orchestrationSessionId);
+  const sessionId = state?.orchestrationSessionId;
   // Dropped and pasted files land in the Pane's folder on its machine, local or remote, as the terminal's do.
   const saveFile = useMemo<SaveChatFile>(() => (file, onProgress, signal) => uploadFileToHost({
     invoke: (channel, args) => window.electronAPI.invoke(channel, ...args), file, sessionId: panel.sessionId, keepName: true, onProgress, signal,
@@ -72,6 +74,7 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     actions={actions}
     // A Session's orchestrator chat shows its approvals as light cards above the composer (P5).
     dock={state?.orchestrationSessionId ? <SessionApprovalCards sessionId={state.orchestrationSessionId} chatPanelId={panel.id} /> : undefined}
+    onReloadProfile={sessionId ? async () => { await useOrchestrationSessionStore.getState().reloadProfile(sessionId); } : undefined}
     pr={pr}
   />;
 }

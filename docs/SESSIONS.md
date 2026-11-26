@@ -120,10 +120,32 @@ the agent to finish its current reply, then restart its chat tab on the new laun
 - If the agent can't load the conversation after a Reload or Switch, Pane starts
   a new one given the saved transcript, and the divider says so. It never drops
   the history silently.
+- Each Session created with Profiles on gets a snapshot when it is created: Agent
+  Farm's frozen copy of every plugin installed in Pane's Agent Farm
+  (`agent-farm snapshot create --directory <Session folder>`), kept at
+  `<Session folder>/.agent-farm/snapshots/<digest>/` and saved on the Session as
+  `agentFarmSnapshot`, relative to that folder. The lead's chat starts with
+  `--snapshot <folder>` at every start, so restarting Pane doesn't change its
+  version, and every terminal and chat tab opened in the Session's Panes gets
+  `AGENT_FARM_SNAPSHOT=<folder>`, so an `agent-farm run` typed in one reads the
+  same files (not in WSL or over SSH). A tab keeps the snapshot it opened with.
+  A chat tab started from a launch link's command keeps the link's `--snapshot`.
+  A greenfield update reaches a running Session only through Reload profile or
+  Switch profile, which take a new snapshot. The lead and tabs opened after that
+  get it; agents already running keep theirs until they close. If the snapshot
+  can't be saved, the Session is still created, without one, and its agents read
+  the installed plugins as before. Sessions from before snapshots have none.
 - When a profile's plugin changes after a Session took it, the row shows an amber
-  dot and Reload profile is marked; listing Sessions re-checks the plugins at most
-  every 10 seconds. A Session whose agent runs in a terminal, or one from before
-  profiles (Reload only), refuses with why.
+  dot and Reload profile is marked. For a Session with a snapshot, the dot means
+  that some plugin in the snapshot differs from the installed copy (a worker may
+  run any plugin), not only the profile's own. Listing Sessions re-checks the
+  plugins at most every 10 seconds. A Session whose agent runs in a terminal, or
+  one from before profiles, refuses Reload and says why.
+- When Agent Farm refuses the Session's snapshot because it was deleted, a file
+  in it changed, or a newer Agent Farm wrote it, it never falls back to the
+  installed plugins. The lead's chat stops with **Reload profile**, which takes a
+  new snapshot and keeps the conversation. Another tab says to reload from the
+  lead.
 - When this computer's Agent Farm no longer lists a Session's profile (greenfield
   0.1.0 removed most of them), neither as a profile nor as an agent a profile
   links to (a Session started from a launch link's command runs one), the row shows a red dot, Reload profile reads
@@ -133,6 +155,7 @@ the agent to finish its current reply, then restart its chat tab on the new laun
 
 With Profiles off, the menu has neither item, `orchestration-sessions:switch-profile`
 and `:reload-profile` refuse (`SESSION_PROFILE_UNSUPPORTED`), Pane reads no plugin for the changed mark, and rows show no amber dot.
+No snapshot is taken, no launch gets `--snapshot`, and no tab gets `AGENT_FARM_SNAPSHOT`.
 
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,
@@ -611,7 +634,11 @@ Pane then packs, sends and rebuilds the Session:
   continued after an earlier move is never overwritten: the move stops instead;
 - the Session folder is copied with its text files rewritten for that machine's
   paths. `moved.json` in the folder records the path map, for anything that
-  still names the old paths (conversation history keeps them);
+  still names the old paths (conversation history keeps them). Agent Farm's
+  rebuilt launch bundles (`.agent-farm/generated/`) stay behind; its snapshots
+  (`.agent-farm/snapshots/`) are copied byte for byte and checked against their
+  own checksums there, and one that doesn't arrive intact fails the move, so
+  the Session runs the same profile files on that machine until Reload profile;
 - a browser tab previewing a file (`runpane panels open --file`) moves when
   the file moved with the Session: in one of its worktrees or its Session
   folder, and there on the other machine. It opens the file at its new path

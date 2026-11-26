@@ -4,6 +4,8 @@ import { escapeForBash, windowsPathToWSLMount } from '../utils/wslUtils';
 import { validateCustomCommandResume, customResumeAgentType, effectiveCustomResume, reportedSessionIdLinePattern, AGENT_FARM_HOST_ENV } from '../../../shared/types/customCommandResume';
 import { prepareSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
+import { withSnapshotEnv } from './agentFarm/sessionSnapshot';
+import { profilesOn } from './agentFarm/profilesFeature';
 import { getAppDirectory, PANE_INSTANCE_ENV, paneInstanceTag } from '../utils/appDirectory';
 import { updateHoldIsLive } from './updateRestoration';
 import { noteContextPath } from './noteFiles';
@@ -2087,9 +2089,11 @@ export class TerminalPanelManager extends EventEmitter {
       ...sessionDirectoryEnv,
       ...wslEnvVars,
     } satisfies Record<string, string>;
+    // T-110 (D-4): the Session's Agent Farm snapshot from when the tab opened; WSL and SSH shells can't read this machine's path.
+    const snapshotEnv = withSnapshotEnv(baseSpawnEnv, isWSL || panelCustomState.sshHost ? undefined : panelCustomState.agentFarmSnapshot, profilesOn());
     const roleEnv: Record<string, string> = panelCustomState.orchestrationSessionId
-      ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId, GIT_CEILING_DIRECTORIES: sessionRuntimePath(sessionGitCeiling(), isWSL ? { runtime: 'wsl', wslDistribution: wslContext?.distribution } : undefined) }
-      : baseSpawnEnv;
+      ? { ...snapshotEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId, GIT_CEILING_DIRECTORIES: sessionRuntimePath(sessionGitCeiling(), isWSL ? { runtime: 'wsl', wslDistribution: wslContext?.distribution } : undefined) }
+      : snapshotEnv;
     // Pane's own runpane goes first on PATH (see runpaneShim.ts). WSL shells
     // get it from the rcfile getWSLShellSpawn passes, as a Linux path.
     const launch = isWSL ? { args: shellArgs, env: roleEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, roleEnv);
