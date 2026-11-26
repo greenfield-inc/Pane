@@ -6969,7 +6969,7 @@ async function checkNotifyCardCheck() {
       assert.strictEqual(sent[runtime].length, 3, `${runtime} notify --check posts nothing`);
       const text = await withFakeDaemon(paneDir, () => ({ result: { check: true, card: { ui: 'approve', title: 'Ship the mock-ups?', links: sentLinks }, warnings: [] } }),
         () => runCliOnce(runtime, [...card, '--check'], paneDir, 20_000, outsidePane));
-      assert.strictEqual(text.stdout.trim(), [
+      assert.strictEqual(text.stdout.replace(/\r\n/g, '\n').trim(), [
         'Checked, not posted: Ship the mock-ups?',
         'Links:',
         `  Mock-ups: ${mockUps}`,
