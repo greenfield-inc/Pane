@@ -152,6 +152,9 @@ const sizesOf = (turns: readonly ChatTurn[], heights: Map<string, number>) =>
   turns.map((turn, index) => heights.get(turn.id) ?? estimateTurnHeight(turn) + (index > 0 ? TURN_GAP_PX : 0));
 const sum = (sizes: readonly number[], from: number, to: number) => { let total = 0; for (let index = from; index < to; index++) total += sizes[index]; return total; };
 
+/** The list's top in the viewport's scroll coordinates. */
+const listTop = (viewport: HTMLElement, list: HTMLElement) => list.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
+
 export function useTurnWindow({ chatId, turns, viewportRef, listRef, all, follows }: TurnWindowOptions): TurnWindow {
   const [restoredAway] = useState(() => leftAway(chatId));
   const memory = useState(() => memoryOf(chatId))[0];
@@ -178,21 +181,21 @@ export function useTurnWindow({ chatId, turns, viewportRef, listRef, all, follow
   const restored = useRef(false);
   const observed = useRef<{ observer: ResizeObserver; rows: Set<Element> } | null>(null);
 
-  /** The list's top in the viewport's scroll coordinates. */
-  const listTop = (viewport: HTMLElement, list: HTMLElement) => list.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
   /** Measures the rendered turns; a change above the viewport's top moves the scroll by as much, unless the chat follows its end. */
   const measure = (viewport: HTMLElement, list: HTMLElement) => {
     const top = viewport.getBoundingClientRect().top;
     const current = live.current.sizes;
     let shift = 0;
     for (const row of list.children) {
-      if (!(row instanceof HTMLElement) || row.dataset.turnKey === undefined) continue;
+      if (!(row instanceof HTMLElement)) continue;
+      const { turnKey: key, turnIndex } = row.dataset;
+      if (key === undefined) continue;
       const rect = row.getBoundingClientRect();
-      const index = Number(row.dataset.turnIndex);
+      const index = Number(turnIndex);
       const was = current[index];
       if (was === undefined || Math.abs(was - rect.height) < 0.5) continue;
-      memory.heights.delete(row.dataset.turnKey);
-      memory.heights.set(row.dataset.turnKey, rect.height);
+      memory.heights.delete(key);
+      memory.heights.set(key, rect.height);
       current[index] = rect.height;
       // Only a turn wholly above the viewport moves what the reader sees; one crossing its top grew where the reader may be looking (a disclosure just opened).
       if (rect.bottom <= top + 0.5) shift += rect.height - was;
