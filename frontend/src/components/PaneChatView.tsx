@@ -204,13 +204,22 @@ function SessionWorkspace() {
 
   // The Session on screen counts as opened when it shows (a launch restores one without a click)
   // and each time the window comes back to it: a phone's Recent lists Sessions by when they were opened.
-  const shownChatPaneId = sessions.find(session => session.id === selectedSessionId)?.internalSessionId;
+  const shownSession = sessions.find(session => session.id === selectedSessionId);
+  const shownChatPaneId = shownSession?.internalSessionId;
   useEffect(() => {
     if (!shownChatPaneId) return;
     const markOpened = () => { void API.sessions.markViewed(shownChatPaneId).catch(() => undefined); };
     markOpened();
     return window.electronAPI?.events?.onWindowFocusChanged?.(focused => { if (focused) markOpened(); });
   }, [shownChatPaneId]);
+
+  // A reply that lands while the person is looking at the Session is read: mark it viewed again so
+  // the sidebar never bolds the Session on screen. Not while the window is in the background.
+  const shownRepliedAt = shownSession?.agentRepliedAt;
+  useEffect(() => {
+    if (!shownChatPaneId || !shownRepliedAt || !document.hasFocus()) return;
+    void API.sessions.markViewed(shownChatPaneId).catch(() => undefined);
+  }, [shownChatPaneId, shownRepliedAt]);
 
   // Something always has to be selected for the layout to have a starting tile;
   // what the layout already shows beats an arbitrary first Session.

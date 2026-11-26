@@ -950,6 +950,16 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /**
+   * A Pane was marked viewed. When it is a Session's own chat Pane, that Session's `openedAt`
+   * changed: tell every client, so a sidebar clears its unread mark at once.
+   */
+  notifyViewed(paneId: string): void {
+    for (const record of this.store.memberships()) {
+      if (record.internalSessionId === paneId) this.emit('changed', { sessionId: record.id, kind: 'viewed' });
+    }
+  }
+
+  /**
    * Adds what a read computes, never stored: `paused` when its chat and every Pane in it are paused,
    * and `openedAt`, its chat Pane's last view.
    */
@@ -1051,12 +1061,17 @@ export class OrchestrationSessionManager extends EventEmitter {
           refreshed.push({ panelId, sessionId: current.id, state });
           continue;
         }
+        const now = new Date().toISOString();
+        // The Session's own agent ending a turn is a new message from it: the sidebar bolds the
+        // Session until the person opens it (sessionIsUnread in the renderer).
+        const replied = isOrchestratorPanel && state === 'idle' && lastForPanel?.kind === 'working';
         const nextRecord: OrchestrationSessionRecord = {
           ...current,
           revision: current.revision + 1,
-          updatedAt: new Date().toISOString(),
+          updatedAt: now,
           activity: [...current.activity, this.activity(state, `Agent state changed to ${state}.`, 'agent', association?.paneId, panelId)],
         };
+        if (replied) nextRecord.agentRepliedAt = now;
         this.trimActivity(nextRecord);
         nextData = replaceSession(nextData, nextRecord);
         changed.push(nextRecord);

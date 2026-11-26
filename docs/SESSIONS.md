@@ -272,6 +272,14 @@ first. A host running an older Pane cannot save an order: the list snaps back
 and the error says to update Pane on that host. Dragging a Session onto the
 workspace still tiles it.
 
+A Session's name is bold while its agent has a message you haven't read: its
+own agent finished a turn after you last opened the Session. Opening it, or
+coming back to the window while it is on screen, clears the bold; a reply that
+arrives while you are looking at it never bolds it. Pane lines (status,
+approvals, to-dos, `[From Pane …]` messages), worker tabs and your own messages
+never do. Both times are kept on the Session's host, so the mark survives a
+restart and reads the same in This Mac and All machines.
+
 In the sidebar's **All machines** view, Sessions from every machine form one
 list you arrange the same way, by drag or **Alt+↑**/**Alt+↓**. That arrangement
 is saved on the computer you are looking from, not on any machine it shows: two

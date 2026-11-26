@@ -125,6 +125,12 @@ export interface OrchestrationSessionRecord {
   paused?: TerminalPausedMark;
   /** When someone last opened the Session, on the desktop or a phone (its chat Pane's last view). Computed when read, never stored. */
   openedAt?: string;
+  /**
+   * When the Session's own agent last finished a turn (its tab went from working to idle): its
+   * newest message. Stored. A Session is unread while this is newer than `openedAt`; Pane lines,
+   * worker tabs and reports never set it.
+   */
+  agentRepliedAt?: string;
   agent: PaneChatAgent;
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;

@@ -1508,6 +1508,7 @@ export function registerSessionHandlers(
   commandRegistry.register('sessions:mark-viewed', async (sessionId: string) => {
     try {
       await sessionManager.markSessionAsViewed(sessionId);
+      services.orchestrationSessionManager?.notifyViewed(sessionId);
       return { success: true };
     } catch (error) {
       console.error('Failed to mark session as viewed:', error);
