@@ -2565,9 +2565,35 @@ export async function runSessionsList(parsed: ParsedArgs): Promise<number> {
   return 0;
 }
 
+/** The daemon feature (Pane's RUNPANE_DAEMON_FEATURES) that says sessions create resolves `launchOption`; an older Pane drops it. */
+const SESSION_LAUNCH_OPTION = 'session-launch-option';
+const doctorFeaturesSchema = boundary.object({
+  app: boundary.object({ version: boundary.string }),
+  daemon: boundary.object({ features: boundary.optional(boundary.array(boundary.string)) }),
+});
+
+/**
+ * `--launch-command`: checked here so nothing is created when it can't be honoured. The value is never
+ * repeated in an error, since a command can hold a key.
+ */
+async function sessionLaunchOption(value: string, literal: string | undefined, paneDir: string | undefined): Promise<string> {
+  const next = 'Send one launch option name or command with --launch-command, or a literal command as launchCommand in the JSON, not both.';
+  if (!value.trim()) throw new RunpaneError('ERR_LAUNCH_OPTION_INVALID', 'The --launch-command value is blank. No Session was created.', next);
+  if (literal !== undefined) throw new RunpaneError('ERR_LAUNCH_OPTION_INVALID', 'The Session create payload has a launchCommand and --launch-command was given too. No Session was created.', next);
+  const doctor = await invokeDaemon('runpane:doctor', [], doctorFeaturesSchema, { paneDir });
+  if (doctor.daemon.features?.includes(SESSION_LAUNCH_OPTION)) return value;
+  throw new RunpaneError(
+    'ERR_SESSION_LAUNCH_OPTION_UNSUPPORTED',
+    `Pane ${doctor.app.version} on ${routedOtherMachine() ?? 'this machine'} can't pick a saved launch option by name, so --launch-command could start the wrong command. No Session was created.`,
+    'Update Pane (runpane install client) and run the create again. Or, with this Pane, put the literal command in the JSON as launchCommand and leave out --launch-command.',
+  );
+}
+
 export async function runSessionsCreate(parsed: ParsedArgs): Promise<number> {
   if (!parsed.fromJson) throw new Error('runpane sessions create requires --from-json <path|->.');
-  const input = parseSessionCreatePayload(JSON.parse(stripUtf8Bom(readInputSource(parsed.fromJson))));
+  const payload = parseSessionCreatePayload(JSON.parse(stripUtf8Bom(readInputSource(parsed.fromJson))));
+  const input = parsed.launchCommand === undefined ? payload
+    : { ...payload, launchOption: await sessionLaunchOption(parsed.launchCommand, payload.launchCommand, parsed.paneDir) };
   const result = await invokeDaemon('runpane:sessions:create', [input], runpaneSessionResultSchema, {
     paneDir: parsed.paneDir,
   });

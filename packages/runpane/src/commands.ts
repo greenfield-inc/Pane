@@ -65,6 +65,8 @@ export interface ParsedArgs {
   panelInput?: string;
   panelInputFile?: string;
   fromJson?: string;
+  /** `sessions create --launch-command`: a saved custom command's exact name, else the command itself. */
+  launchCommand?: string;
   /** `repos update`: Project Settings values, and the settings to clear. */
   buildScript?: string;
   runScript?: string;
@@ -1316,6 +1318,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--from-json') {
     parsed.fromJson = value;
+    return;
+  }
+  if (flag === '--launch-command') {
+    parsed.launchCommand = value;
     return;
   }
   if (flag === '--build-script') {

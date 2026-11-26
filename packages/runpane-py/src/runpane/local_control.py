@@ -226,8 +226,39 @@ def run_sessions_list(parsed: Any) -> int:
     return 0
 
 
+# The daemon feature (Pane's RUNPANE_DAEMON_FEATURES) that says sessions create resolves launchOption.
+SESSION_LAUNCH_OPTION = "session-launch-option"
+
+
+def _session_launch_option(value: str, payload: Dict[str, Any], pane_dir: Optional[str]) -> str:
+    """`--launch-command`, checked before anything is created. The value is never repeated in an error."""
+    next_step = "Send one launch option name or command with --launch-command, or a literal command as launchCommand in the JSON, not both."
+    if not value.strip():
+        raise RunpaneError("ERR_LAUNCH_OPTION_INVALID", "The --launch-command value is blank. No Session was created.", next_step)
+    if "launchCommand" in payload:
+        raise RunpaneError(
+            "ERR_LAUNCH_OPTION_INVALID",
+            "The Session create payload has a launchCommand and --launch-command was given too. No Session was created.",
+            next_step,
+        )
+    doctor = invoke_daemon("runpane:doctor", [], pane_dir=pane_dir)
+    daemon = doctor.get("daemon") if isinstance(doctor, dict) else None
+    features = daemon.get("features") if isinstance(daemon, dict) else None
+    if isinstance(features, list) and SESSION_LAUNCH_OPTION in features:
+        return value
+    app = doctor.get("app") if isinstance(doctor, dict) else None
+    version = app.get("version") if isinstance(app, dict) else "unknown"
+    raise RunpaneError(
+        "ERR_SESSION_LAUNCH_OPTION_UNSUPPORTED",
+        f"Pane {version} on this machine can't pick a saved launch option by name, so --launch-command could start the wrong command. No Session was created.",
+        "Update Pane (runpane install client) and run the create again. Or, with this Pane, put the literal command in the JSON as launchCommand and leave out --launch-command.",
+    )
+
+
 def run_sessions_create(parsed: Any) -> int:
     payload = read_session_payload(parsed, "create")
+    if parsed.launch_command is not None:
+        payload = {**payload, "launchOption": _session_launch_option(parsed.launch_command, payload, parsed.pane_dir)}
     result = invoke_daemon("runpane:sessions:create", [payload], pane_dir=parsed.pane_dir)
     return print_session_result(result, parsed.json, "Created")
 

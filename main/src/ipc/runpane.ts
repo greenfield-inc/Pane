@@ -461,6 +461,8 @@ const orchestrationSessionCreateSchema = boundary.object({
   isPinned: boundary.optional(boundary.boolean),
   agent: boundary.optional(configuredAgentSchema),
   launchCommand: boundary.optional(orchestrationTextSchema),
+  /** `runpane sessions create --launch-command`: a saved launch option's exact name, else the command itself. */
+  launchOption: boundary.optional(boundary.string),
   resume: boundary.optional(boundary.nonEmptyString),
   profile: boundary.optional(orchestrationTextSchema),
   goal: boundary.optional(orchestrationTextSchema),
@@ -783,7 +785,7 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:sessions:create', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
     return withRunpaneAction(services, 'sessions:create', {}, async () => {
       const manager = requireOrchestrationSessionManager(services);
-      const input = parseOrchestrationSessionCreateRequest(request);
+      const input = parseOrchestrationSessionCreateRequest(request, services.configManager.getConfig().customCommands);
       const view = await manager.create(input);
       // Start the agent now, as opening the Session in the app would, so a caller can wait for it and send a first prompt.
       try {
@@ -4955,8 +4957,34 @@ function parseOrchestrationSessionSelector(value: PaneCommandValue): RunpaneSess
   return selector;
 }
 
-function parseOrchestrationSessionCreateRequest(value: PaneCommandValue): OrchestrationSessionCreateInput {
-  return decodeOrchestrationSessionPayload(value, orchestrationSessionCreateSchema, 'create');
+function parseOrchestrationSessionCreateRequest(value: PaneCommandValue, customCommands: AppConfig['customCommands']): OrchestrationSessionCreateInput {
+  const { launchOption, ...input } = decodeOrchestrationSessionPayload(value, orchestrationSessionCreateSchema, 'create');
+  return launchOption === undefined ? input : { ...input, ...resolveSessionLaunchOption(launchOption, input.launchCommand, customCommands) };
+}
+
+/**
+ * `--launch-command`: the saved launch option with exactly this name (case-sensitive), with its resume
+ * settings, else the value as the command. A JSON launchCommand is always a literal command. Errors never
+ * repeat the value or a saved command, since either can hold a key.
+ */
+function resolveSessionLaunchOption(
+  value: string,
+  literal: string | undefined,
+  customCommands: AppConfig['customCommands'],
+): Pick<OrchestrationSessionCreateInput, 'launchCommand' | 'customResume'> {
+  const next = 'Send one launch option name or command with --launch-command, or a literal command as launchCommand in the JSON, not both.';
+  if (!value.trim()) throw new PaneError('ERR_LAUNCH_OPTION_INVALID', 'The --launch-command value is blank. No Session was created.', next);
+  if (literal !== undefined) throw new PaneError('ERR_LAUNCH_OPTION_INVALID', 'The Session create request has both --launch-command and a JSON launchCommand. No Session was created.', next);
+  const matches = (customCommands ?? []).filter(option => option.name === value);
+  if (matches.length > 1) {
+    throw new PaneError(
+      'ERR_LAUNCH_OPTION_AMBIGUOUS',
+      `${matches.length} saved launch options on ${thisMachineName()} are named "${value}", so Pane can't tell which to use. No Session was created.`,
+      'Rename one with the pencil beside it in a worktree\'s Add Tool (+) menu, then run the create again.',
+    );
+  }
+  const [option] = matches;
+  return option ? { launchCommand: option.command, customResume: option.resume ?? null } : { launchCommand: value };
 }
 
 interface OrchestrationSessionUpdateRequest {

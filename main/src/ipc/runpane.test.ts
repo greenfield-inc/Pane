@@ -54,7 +54,7 @@ import { EventEmitter } from 'events';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { RemoteMemberEvents } from '../services/remoteMemberEvents';
 import { SessionInbox } from '../services/sessionInbox';
-import { ApprovalStore } from '../services/approvals/approvalStore';
+import { ApprovalStore, thisMachineName } from '../services/approvals/approvalStore';
 import { NotifyService } from '../services/notify/notifyService';
 import { activeTodoService } from '../services/todos/todosFeature';
 import { TodoStore } from '../services/todos/todoStore';
@@ -506,6 +506,69 @@ describe('runpane IPC handlers', () => {
     expect(result).toMatchObject({ ok: true, session: { isPinned: true } });
     await expect(registry.invoke('runpane:sessions:create', [{ name: 'Invalid', isPinned: 'true' }]))
       .rejects.toThrow('expected boolean');
+  });
+
+  describe('Session create with a launch option (#1692)', () => {
+    const resume = { mode: 'custom-template' as const, initialTemplate: 'my-agent --id {{id}}', resumeTemplate: 'my-agent --resume {{id}}' };
+    function launchRegistry(customCommands: Array<{ name: string; command: string; resume?: typeof resume | null }>) {
+      const create = vi.fn(async (input: OrchestrationSessionCreateInput) => ({
+        session: { id: 'coordinator', name: input.name }, panel: { id: 'coordinator-panel' }, internalSession: { id: 'coordinator-owner' },
+      }));
+      // SAFETY: Session create only reaches the manager's create, stubbed here.
+      const services = createServices({ orchestrationSessionManager: { create } as never });
+      // SAFETY: Session create reads only customCommands from the config.
+      vi.mocked(services.configManager.getConfig).mockReturnValue({ customCommands } as never);
+      return { registry: createRegistry(services), create };
+    }
+
+    it('uses a saved option matched by its exact name, with its resume settings', async () => {
+      const { registry, create } = launchRegistry([
+        { name: 'build bot', command: 'other-agent' },
+        { name: 'Build bot', command: 'my-agent --fast', resume },
+      ]);
+      await registry.invoke('runpane:sessions:create', [{ name: 'Coordinator', launchOption: 'Build bot' }]);
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ launchCommand: 'my-agent --fast', customResume: resume }));
+      expect(create.mock.calls[0]?.[0]).not.toHaveProperty('launchOption');
+    });
+
+    it('clears resume settings for a saved option that has none', async () => {
+      const { registry, create } = launchRegistry([{ name: 'Plain', command: 'plain-agent' }]);
+      await registry.invoke('runpane:sessions:create', [{ name: 'Coordinator', launchOption: 'Plain' }]);
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ launchCommand: 'plain-agent', customResume: null }));
+    });
+
+    it('runs an unmatched value as the command itself', async () => {
+      const { registry, create } = launchRegistry([{ name: 'Build bot', command: 'my-agent' }]);
+      await registry.invoke('runpane:sessions:create', [{ name: 'Coordinator', launchOption: 'claude --model "opus"' }]);
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ launchCommand: 'claude --model "opus"' }));
+      expect(create.mock.calls[0]?.[0]).not.toHaveProperty('customResume');
+    });
+
+    it('refuses a name two saved options share, without creating a Session', async () => {
+      const { registry, create } = launchRegistry([
+        { name: 'Twin', command: 'secret-one' },
+        { name: 'Twin', command: 'secret-two' },
+      ]);
+      const failure = registry.invoke('runpane:sessions:create', [{ name: 'Coordinator', launchOption: 'Twin' }]);
+      await expect(failure).rejects.toMatchObject({ code: 'ERR_LAUNCH_OPTION_AMBIGUOUS', message: expect.stringContaining(`on ${thisMachineName()} are named "Twin"`), next: expect.stringContaining('Rename') });
+      await expect(failure).rejects.not.toThrow(/secret-/);
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a blank option and an option sent with a JSON launchCommand', async () => {
+      const { registry, create } = launchRegistry([]);
+      await expect(registry.invoke('runpane:sessions:create', [{ name: 'Coordinator', launchOption: '  ' }]))
+        .rejects.toMatchObject({ code: 'ERR_LAUNCH_OPTION_INVALID' });
+      await expect(registry.invoke('runpane:sessions:create', [{ name: 'Coordinator', launchOption: 'x', launchCommand: 'y' }]))
+        .rejects.toMatchObject({ code: 'ERR_LAUNCH_OPTION_INVALID' });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('keeps a JSON launchCommand literal even when it matches a saved name', async () => {
+      const { registry, create } = launchRegistry([{ name: 'Build bot', command: 'my-agent' }]);
+      await registry.invoke('runpane:sessions:create', [{ name: 'Coordinator', launchCommand: 'Build bot' }]);
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ launchCommand: 'Build bot' }));
+    });
   });
 
   it('accepts OpenCode in RunPane Session create, update and set-agent', async () => {
@@ -1427,6 +1490,8 @@ describe('runpane IPC handlers', () => {
     const daemon = (result as { daemon: { channels: string[]; features: string[] } }).daemon;
     // runpane handoff carries a session only to a Pane that says create honours resume.
     expect(daemon.features).toContain('resume-on-create');
+    // runpane sessions create --launch-command needs a Pane that resolves saved option names.
+    expect(daemon.features).toContain('session-launch-option');
     expect(daemon.channels).toContain('runpane:doctor');
     expect(daemon.channels).toContain('runpane:panes:rename');
     expect(daemon.channels).toContain('runpane:panes:focus');

@@ -129,7 +129,7 @@ runpane panels list --pane <pane-id> --json
 runpane panels output --panel <panel-id> --limit 200 --json
 printf 'Continue\n' | runpane panels input --panel <panel-id> --input-file - --yes --json
 runpane sessions list [--json] [--pane-dir <path>]
-runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]
+runpane sessions create --from-json <path|-> [--launch-command <name|command>] [--json] [--pane-dir <path>]
 runpane sessions get --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]
 runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]
@@ -638,7 +638,7 @@ runpane autopilot answer <id> (--choice <label> | --approve | --deny | --text <t
 runpane autopilot close <id> --reason <why> [--json] [--pane-dir <path>]
 runpane autopilot rewrite <id> --ui <options|approve|ask> --title <text> [--context <text>] [--choices <json>] [--suggestions <json>] [--links <json>] [--json] [--pane-dir <path>]
 runpane sessions list [--json] [--pane-dir <path>]
-runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]
+runpane sessions create --from-json <path|-> [--launch-command <name|command>] [--json] [--pane-dir <path>]
 runpane sessions get --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]
 runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]
@@ -808,6 +808,7 @@ These flags are consumed by local daemon-control commands:
 --initial-input-file <path|-> (aliases: --prompt-file)
 --attach <file>
 --from-json <path|->
+--launch-command <name|command>
 --timeout-ms <milliseconds>
 --ready-timeout-ms <milliseconds>
 --concurrency <count>

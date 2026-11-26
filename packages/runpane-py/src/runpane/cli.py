@@ -268,6 +268,8 @@ class ParsedArgs:
     panel_input: Optional[str] = None
     panel_input_file: Optional[str] = None
     from_json: Optional[str] = None
+    # `sessions create --launch-command`: a saved custom command's exact name, else the command itself.
+    launch_command: Optional[str] = None
     build_script: Optional[str] = None
     run_script: Optional[str] = None
     archive_script: Optional[str] = None
@@ -1373,6 +1375,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--from-json":
         parsed.from_json = value
+        return
+    if flag == "--launch-command":
+        parsed.launch_command = value
         return
     if flag == "--build-script":
         parsed.build_script = value
