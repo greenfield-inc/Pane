@@ -284,6 +284,15 @@ async function measureCursor({ app, page }: { app: ElectronApplication; page: Pa
     const observer = new PerformanceObserver(list => { for (const entry of list.getEntries()) probe.longTasks.push(entry.duration); });
     observer.observe({ type: 'longtask' });
     const rowList = () => Array.from(document.querySelectorAll<HTMLElement>('[data-testid="all-machines-sidebar"] [data-sidebar-item]'));
+    /** Where focus is, for the report: tag, its label or text, the nearest test id, and whether it is in the sidebar or a dialog. */
+    const describeFocus = (active: Element | null): string => {
+      if (!active) return 'nothing';
+      if (active === document.body) return 'body';
+      const label = active.getAttribute('aria-label') ?? active.textContent?.trim().replace(/\s+/g, ' ').slice(0, 40) ?? '';
+      const testId = active.closest('[data-testid]')?.getAttribute('data-testid');
+      const place = active.closest('[data-testid="all-machines-sidebar"]') ? 'in the sidebar' : active.closest('[role="dialog"]') ? 'in a dialog' : 'outside the sidebar';
+      return `${active.tagName.toLowerCase()} "${label}"${testId ? ` under ${testId}` : ''}, ${place}`;
+    };
     const activeIndex = (list: Element[]) => list.findIndex(element => element === document.activeElement);
     const keyOf = (element: Element | undefined | null) => (element ? element.getAttribute('data-sidebar-key') ?? `toggle:${element.textContent?.trim() ?? ''}` : '-');
     /** Resolves the newest press when the cursor is on its row. */
@@ -298,8 +307,7 @@ async function measureCursor({ app, page }: { app: ElectronApplication; page: Pa
       const list = rowList();
       const from = activeIndex(list);
       if (from < 0) {
-        const active = document.activeElement;
-        const where = active ? `${active.tagName.toLowerCase()}${active.getAttribute('data-testid') ? `[data-testid=${active.getAttribute('data-testid')}]` : ''}${active.getAttribute('aria-label') ? `[aria-label=${active.getAttribute('aria-label')}]` : ''}` : 'nothing';
+        const where = describeFocus(document.activeElement);
         if (!probe.focusOffRows.includes(where)) probe.focusOffRows.push(where);
       }
       const to = Math.max(0, Math.min(list.length - 1, from + (event.key === 'ArrowDown' ? 1 : -1)));
@@ -428,7 +436,7 @@ function markdown(): string {
   if (wrong.length) lines.push('', `Landed elsewhere: ${wrong.map(sample => `${sample.session} → ${sample.landedOn ?? 'no Session'}`).join('; ')}. The host's own selection was ${PARKED} before each open there.`);
   for (const cursor of report.cursor) {
     const tasks = cursor.longTasks ? `${cursor.longTasks} long tasks (longest ${ms(cursor.longestTask)} ms)` : 'no long tasks';
-    lines.push('', `Arrow keys ${cursor.label}: ${cursor.presses} presses (${cursor.repeats} key repeats) at **${cursor.rateHz ?? '–'} a second** (interval p95 ${ms(cursor.intervalP95)} ms, longest ${ms(Math.max(...cursor.intervals))} ms); the cursor reached the next row before the next press on **${cursor.moved} of ${cursor.presses - cursor.edge}**, ${cursor.lost} lost${cursor.offRows ? ` (${cursor.offRows} found focus off the sidebar's rows, on ${cursor.focusOffRows.join(', ')})` : ''}${cursor.edge ? `, ${cursor.edge} at the end of the list` : ''}; keydown → row p50 **${ms(cursor.p50)} ms**, p95 **${ms(cursor.p95)} ms**, max ${ms(cursor.max)} ms; key sent → row p95 **${ms(cursor.sentToRowP95)} ms**, max ${ms(cursor.sentToRowMax)} ms (key sent → keydown p95 ${ms(cursor.lagP95)} ms, max ${ms(cursor.lagMax)} ms; the main process's longest stall ${ms(cursor.mainStallMax)} ms); focus off the rows for ${cursor.strayedFrames} frames; ${tasks}.`);
+    lines.push('', `Arrow keys ${cursor.label}: ${cursor.presses} presses (${cursor.repeats} key repeats) at **${cursor.rateHz ?? '–'} a second** (interval p95 ${ms(cursor.intervalP95)} ms, longest ${ms(Math.max(...cursor.intervals))} ms); the cursor reached the next row before the next press on **${cursor.moved} of ${cursor.presses - cursor.edge}**, ${cursor.lost} lost${cursor.offRows ? ` (${cursor.offRows} found focus off the sidebar's rows, on ${cursor.focusOffRows.join('; ')})` : ''}${cursor.edge ? `, ${cursor.edge} at the end of the list` : ''}; keydown → row p50 **${ms(cursor.p50)} ms**, p95 **${ms(cursor.p95)} ms**, max ${ms(cursor.max)} ms; key sent → row p95 **${ms(cursor.sentToRowP95)} ms**, max ${ms(cursor.sentToRowMax)} ms (key sent → keydown p95 ${ms(cursor.lagP95)} ms, max ${ms(cursor.lagMax)} ms; the main process's longest stall ${ms(cursor.mainStallMax)} ms); focus off the rows for ${cursor.strayedFrames} frames; ${tasks}.`);
   }
   if (report.idle) lines.push('', `Idle link, window on this computer: **${report.idle.perMinute} bytes per minute** (${report.idle.toHost} bytes to the host, ${report.idle.toDesktop} back, over ${Math.round(report.idle.ms / 1000)} s).`);
   if (report.offline) lines.push('', `Link cut: the sidebar said the host went offline **${ms(report.offline.sinceCutMs)} ms** after the cut, ${ms(report.offline.sinceLastByteMs)} ms after the host's last bytes reached the desktop.`);
