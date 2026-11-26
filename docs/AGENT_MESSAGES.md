@@ -99,7 +99,9 @@ Delivery reuses the path that to-do messages and owed answers take
 - A wait answers with the first reply. A later reply that arrives while an
   earlier one is being typed waits for that attempt. If the earlier one is
   typed, the wait returns it, and the later one is typed into the tab after
-  it. If the attempt fails, the wait takes the later reply instead.
+  it. If the attempt fails, the wait takes the later reply instead. A parked reply stays parked only while a listening call from its current
+  route can take it. When that call leaves, or the Session moves to another
+  orchestrator tab, Pane types the reply into its tab at once.
 - Only the tab that sent with `--await-reply` ends its own hold on early
   replies. A wait from another tab takes only a held reply whose route it is
   now, and leaves the rest held.

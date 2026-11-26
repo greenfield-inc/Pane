@@ -259,10 +259,9 @@ export class AgentMessageService extends EventEmitter {
         if (timer) clearTimeout(timer);
         signal?.removeEventListener('abort', abort);
         waiting.delete(waiter);
-        if (waiting.size === 0 && this.waiters.get(number) === waiting) {
-          this.waiters.delete(number);
-          this.releaseParked(number);
-        }
+        if (waiting.size === 0 && this.waiters.get(number) === waiting) this.waiters.delete(number);
+        // Parked replies only the calls still listening may take; the rest go to their tab.
+        this.releaseUnclaimable(number);
         resolve(reply ? this.record(reply.number) : undefined);
       };
       const waiter: Waiter = { panelId: callerPanelId, settle: reply => finish(reply) };
@@ -276,6 +275,8 @@ export class AgentMessageService extends EventEmitter {
       signal?.addEventListener('abort', abort, { once: true });
       const scan = (): void => {
         if (settled) return;
+        // Routes may have changed while this call waited (a Session switched orchestrator): what no listening call can take goes to its tab.
+        this.releaseUnclaimable(number);
         const found = this.claimFor(number, callerPanelId);
         if (found && 'reply' in found) finish(found.reply);
         // Only replies being typed are left: wait for that attempt, then look again (still listening meanwhile).
@@ -328,14 +329,28 @@ export class AgentMessageService extends EventEmitter {
     return undefined;
   }
 
-  /** The last call on a message ended: replies parked for it go to their tab. */
-  private releaseParked(number: number): void {
+  /**
+   * Parked replies stay parked only while a listening call can take them: one made from the reply's
+   * route as it is now. The rest (no call left, or the route moved to another tab) go to the outbox,
+   * so the flush types them into their tab now; claimed and settled ones are dropped.
+   */
+  private releaseUnclaimable(number: number): void {
     const parked = this.parked.get(number);
     if (!parked) return;
-    this.parked.delete(number);
-    const waiting = parked.filter(reply => this.store.get(reply)?.state === 'queued');
-    if (waiting.length === 0) return;
-    this.outbox.push(...waiting);
+    const listening = [...this.waiters.get(number) ?? []];
+    const keep: number[] = [];
+    const release: number[] = [];
+    for (const replyNumber of parked) {
+      const reply = this.store.get(replyNumber);
+      if (reply?.state !== 'queued') continue;
+      const route = this.targetOf(reply);
+      if (listening.some(waiter => this.isRoute(waiter.panelId, route))) keep.push(replyNumber);
+      else release.push(replyNumber);
+    }
+    if (keep.length > 0) this.parked.set(number, keep);
+    else this.parked.delete(number);
+    if (release.length === 0) return;
+    for (const replyNumber of release) if (!this.outbox.includes(replyNumber)) this.outbox.push(replyNumber);
     void this.flush();
   }
 

@@ -445,4 +445,49 @@ describe('AgentMessageService', () => {
     await service.flush();
     expect(host.typed.map(entry => entry.text)).toEqual([expect.stringContaining('"A1"'), expect.stringContaining('"A2"')]);
   });
+  // Review 6: a parked reply that no listening call can take any more (the Session moved) goes to its tab at once.
+  it("sends a parked reply to the Session's new orchestrator when the old tab's wait can no longer take it", async () => {
+    let open: () => void = () => undefined;
+    host.typingGate = new Promise<void>(resolve => { open = resolve; });
+    host.typeResult = 'unsupported';
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+    const first = service.reply({ to: 1, body: 'A1', callerPanelId: 'b' });
+    await vi.waitFor(() => expect(host.attempts).toBe(1));
+    const waited = service.waitForReply(1, 1_000, undefined, 'a');
+    expect((await service.reply({ to: 1, body: 'A2', callerPanelId: 'b' })).delivery).toBe('queued');
+    host.add('a2', 'the "Omni Chat" Session orchestrator', { sessionId: 's1', orchestrator: true });
+    host.orchestrators.set('s1', 'a2');
+    open();
+    await first;
+    host.typingGate = undefined;
+    host.typeResult = 'delivered';
+    await service.flush();
+    // Typed into a2 now, while the old tab's call is still waiting.
+    expect(host.typed).toEqual([{ panelId: 'a2', text: expect.stringContaining('"A2"') }]);
+    expect(service.show(1).replies.map(reply => [reply.ref, reply.state])).toEqual([['M-2', 'undelivered'], ['M-3', 'delivered']]);
+    await expect(waited).resolves.toBeUndefined();
+  });
+
+  it("doesn't leave a parked reply with a call from another tab, which can never take it", async () => {
+    let open: () => void = () => undefined;
+    host.typingGate = new Promise<void>(resolve => { open = resolve; });
+    host.typeResult = 'unsupported';
+    host.add('x', 'Other agent');
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+    const first = service.reply({ to: 1, body: 'A1', callerPanelId: 'b' });
+    await vi.waitFor(() => expect(host.attempts).toBe(1));
+    const fromRoute = service.waitForReply(1, 30, undefined, 'a');
+    const fromOther = service.waitForReply(1, 1_000, undefined, 'x');
+    expect((await service.reply({ to: 1, body: 'A2', callerPanelId: 'b' })).delivery).toBe('queued');
+    // The route's call leaves while A1 is still being typed; A1 then fails. Only the other tab's call is left, and it can't take A2.
+    await expect(fromRoute).resolves.toBeUndefined();
+    open();
+    await first;
+    host.typingGate = undefined;
+    host.typeResult = 'delivered';
+    await service.flush();
+    expect(host.typed).toEqual([{ panelId: 'a', text: expect.stringContaining('"A2"') }]);
+    // That call was never A2's route, so it ends with no reply of its own.
+    await expect(fromOther).resolves.toBeUndefined();
+  });
 });
