@@ -99,6 +99,8 @@ export function ControllerLayer() {
     };
 
     const onEvents = (events: ControllerEvent[]) => {
+      // A stick move counts as controller use too: the ring comes back after the mouse hid it.
+      setControllerMode(true);
       const swallow = swallowFrame.current;
       swallowFrame.current = false;
       for (const event of events) {
@@ -122,9 +124,11 @@ export function ControllerLayer() {
         const state = useControllerStore.getState();
         if (state.device?.id !== device.id || state.family !== family) useControllerStore.setState({ device, family });
         // The first press after install shows the cheat sheet once, and an unrecognised pad explains itself once per connection.
-        const unexplained = family === 'unrecognised' && !explained.current.has(device.id);
-        if ((state.preferencesLoaded && !state.cheatSheetSeen) || unexplained) {
-          if (unexplained) explained.current.add(device.id);
+        const show = family === 'unrecognised'
+          ? !explained.current.has(device.id)
+          : state.preferencesLoaded && !state.cheatSheetSeen;
+        if (show) {
+          if (family === 'unrecognised') explained.current.add(device.id);
           if (state.cheatSheet === 'closed') {
             setCheatSheetOpener(document.activeElement instanceof HTMLElement ? document.activeElement : null);
             useControllerStore.setState({ cheatSheet: 'open' });

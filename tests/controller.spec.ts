@@ -4,6 +4,7 @@ import { installElectronApiMock, gotoApp } from './electronApiMock';
 /** The stub pad the init script installs. */
 interface PadStub {
   set(index: number, value: number): void;
+  setAxis(index: number, value: number): void;
   connect(): void;
   rumbles(): number;
   /** How many times the page read navigator.getGamepads(). */
@@ -48,11 +49,11 @@ const panels = [
   terminal('shell', 'pad-a', 'Shell', 2),
 ];
 
-async function installPad(page: Page, id: string): Promise<void> {
-  await page.addInitScript((padId: string) => {
+async function installPad(page: Page, id: string, mapping: string): Promise<void> {
+  await page.addInitScript(({ padId, padMapping }: { padId: string; padMapping: string }) => {
     const pad = { buttons: Array.from({ length: 17 }, () => 0), axes: [0, 0, 0, 0], timestamp: 0, rumbles: 0, reads: 0 };
     const snapshot = () => ({
-      id: padId, index: 0, connected: true, mapping: 'standard', timestamp: pad.timestamp,
+      id: padId, index: 0, connected: true, mapping: padMapping, timestamp: pad.timestamp,
       buttons: pad.buttons.map(value => ({ pressed: value > 0, touched: value > 0, value })),
       axes: [...pad.axes],
       vibrationActuator: { playEffect: async () => { pad.rumbles += 1; return 'complete'; } },
@@ -62,6 +63,7 @@ async function installPad(page: Page, id: string): Promise<void> {
     Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => { pad.reads += 1; return connected ? [snapshot()] : [null]; } });
     window.__pad = {
       set(index: number, value: number) { pad.buttons[index] = value; pad.timestamp += 1; },
+      setAxis(index: number, value: number) { pad.axes[index] = value; pad.timestamp += 1; },
       connect() {
         connected = true;
         const event = new Event('gamepadconnected');
@@ -71,7 +73,7 @@ async function installPad(page: Page, id: string): Promise<void> {
       rumbles: () => pad.rumbles,
       reads: () => pad.reads,
     };
-  }, id);
+  }, { padId: id, padMapping: mapping });
 }
 
 /** Presses and releases a button, a frame apart so the adapter sees both. */
@@ -82,8 +84,8 @@ async function press(page: Page, button: Button): Promise<void> {
   await page.waitForTimeout(50);
 }
 
-async function openFixture(page: Page, padId = XBOX, preferences: Record<string, string> = { controller_cheat_sheet_seen: 'true' }, connect = true): Promise<void> {
-  await installPad(page, padId);
+async function openFixture(page: Page, padId = XBOX, preferences: Record<string, string> = { controller_cheat_sheet_seen: 'true' }, connect = true, mapping = 'standard'): Promise<void> {
+  await installPad(page, padId, mapping);
   await installElectronApiMock(page, { initialProjects: [project], initialSessions: sessions, initialPanels: panels, activeProjectId: project.id, initialPreferences: preferences });
   await gotoApp(page);
   await page.getByRole('button', { name: 'Expand project Pad fixture', exact: true }).click();
@@ -171,6 +173,11 @@ test('B goes back to the sidebar, the D-pad walks it with a visible ring, and th
   await page.mouse.move(400, 300);
   await page.mouse.move(420, 320);
   await expect(page.locator('html')).not.toHaveAttribute('data-controller-mode', 'true');
+  // The left stick alone brings the ring back.
+  await page.evaluate(() => window.__pad.setAxis(1, 1));
+  await page.waitForTimeout(50);
+  await page.evaluate(() => window.__pad.setAxis(1, 0));
+  await expect(page.locator('html')).toHaveAttribute('data-controller-mode', 'true');
 });
 
 test('holding R2 with no voice key says where to add one', async ({ page }, testInfo) => {
@@ -188,4 +195,17 @@ test('with no pad connected, Pane never polls for one', async ({ page }) => {
   const before = await page.evaluate(() => window.__pad.reads());
   await page.waitForTimeout(1000);
   expect(await page.evaluate(() => window.__pad.reads())).toBe(before);
+});
+
+test('a pad with no known layout says so once, and the note stays closed after it is dismissed', async ({ page }, testInfo) => {
+  await openFixture(page, 'Mystery Pad (Vendor: 1234 Product: 5678)', { controller_cheat_sheet_seen: 'false' }, true, '');
+  await press(page, 'south');
+  const note = page.getByTestId('controller-cheat-sheet-note');
+  await expect(note).toContainText("can't read this controller's layout");
+  await page.screenshot({ path: testInfo.outputPath('unrecognised-pad.png') });
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(note).toBeHidden();
+  await press(page, 'south');
+  await press(page, 'east');
+  await expect(note).toBeHidden();
 });
