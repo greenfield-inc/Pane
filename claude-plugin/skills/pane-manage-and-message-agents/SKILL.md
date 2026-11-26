@@ -26,6 +26,7 @@ Prefer Pane MCP (`agents_start`, `agents_status`, `agents_send`, `repos_list`, `
 - **Start:** `agents_start` with repo, a short pane name, the agent they named (`codex` / `claude` / `cursor`), and the full task. The worker has none of this chat: put goal, constraints, paths, and "done means" in the prompt. Create in the background.
 - **Check:** `agents_status`. Report what the screen shows. Check once per ask; babysit when they asked you to keep watching.
 - **Follow up:** `agents_send` for a message. Menus and trust prompts: `panels_input` for keys, and ask the user before accepting a permission prompt.
+- **Replies:** a message you send from an agent's tab gets an id (M-12) and a reply line; the other agent answers with `reply` (`runpane reply M-12 "…"`) and it lands in your current tab (the Session's current orchestrator tab after a handoff) as `reply: M-12 → "…"`, even when `--await-reply` or `messages wait` already returned it: act on each reply once, by its id. A message that reaches you with that line gets the same: answer with `reply`, never only in your own chat.
 
 If start fails, say so and wait.
 

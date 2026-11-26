@@ -10,6 +10,7 @@ import { confirmMutation } from './daemonActions';
 import { RunpaneError, describeFailure } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { parseReportOptions, type NotifyChoice, type NotifySubQuestion } from './notify';
+import { waitForMessageReply } from './messages';
 import {
   CONVERSATION_ID_PATTERN,
   CONVERSATION_SOURCES,
@@ -942,6 +943,10 @@ interface PanelInputRequest {
   source?: 'user' | 'agent';
   /** panels submit only. */
   expectReport?: boolean;
+  /** panels submit `--await-reply`: Pane holds the reply for this call from before the message is typed. */
+  awaitReply?: boolean;
+  /** panels submit `--for-person`: the person's own words, passed on; no reply line. */
+  personWords?: boolean;
 }
 
 interface PanelInputResult {
@@ -1018,6 +1023,8 @@ interface PanelSubmitResult {
   /** Epoch of the pre-dispatch journal position. */
   epoch?: string;
   ok: boolean;
+  /** T-104: the message's id when an agent's tab sent it to another agent's tab. */
+  messageId?: string;
   generation?: number;
   panelId: string;
   paneId?: string;
@@ -2114,6 +2121,7 @@ export const panelSubmitResultSchema: BoundarySchema<PanelSubmitResult> = bounda
   nextCommand: boundary.optional(boundary.string),
   epoch: boundary.optional(boundary.string),
   generation: boundary.optional(boundary.number),
+  messageId: boundary.optional(boundary.string),
 });
 const panelSubmitComposerResultSchema: BoundarySchema<PanelSubmitComposerResult> = boundary.object({
   ok: boundary.boolean,
@@ -4242,6 +4250,16 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
   if (parsed.waitForResult && result.ok) {
     return waitForDispatchResult(parsed, { paneId: result.paneId, panelId: result.panelId, since: result.generation, epoch: result.epoch });
   }
+  if (parsed.awaitReply && result.ok) {
+    if (!result.messageId) {
+      throw new RunpaneError(
+        'ERR_AWAIT_REPLY_NOT_A_MESSAGE',
+        `Pane sent the text to panel ${result.panelId}, but not as an agent-to-agent message, so there is no reply to wait for.`,
+        'Run --await-reply from an agent\'s Pane tab (PANE_PANEL_ID set) to another agent\'s tab, without --source user.',
+      );
+    }
+    return waitForMessageReply(parsed, result.messageId);
+  }
 
   if (parsed.json) {
     printJson(result);
@@ -4250,6 +4268,7 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
     const verified = result.verifiedSubmitted ? ' verified' : ' unverified';
     console.log(`${verb} ${result.inputBytes} byte${result.inputBytes === 1 ? '' : 's'} via ${result.sequenceName} to panel ${result.panelId}.${verified}`);
     printDelivery(result.delivery);
+    if (result.messageId) console.log(`Message ${result.messageId}: the reply comes back to this tab as "reply: ${result.messageId} → …".`);
     if (result.blocked) {
       console.log(`Blocked: ${result.blocked.message}`);
     }
@@ -4563,6 +4582,7 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
     interrupt: parsed.interrupt || undefined,
     source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
     expectReport: command === 'submit' ? parsed.expectReport : undefined,
+    personWords: command === 'submit' && parsed.forPerson ? true : undefined,
   };
 }
 

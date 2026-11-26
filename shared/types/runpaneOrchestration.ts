@@ -1515,6 +1515,10 @@ export interface RunpanePanelSubmitRequest {
   source?: 'user' | 'agent';
   /** The sender waits for a `runpane report`: journal `agent.report.missing` if the agent goes ready or exits without one. */
   expectReport?: boolean;
+  /** Pane's own line (an owed answer, a to-do message, a reply): never an agent-to-agent message, so it gets no M-n reply line. */
+  fromPane?: boolean;
+  /** `--for-person`: the person's own words an agent passes on (Autopilot's relay); sent as the person's, with no reply line. */
+  personWords?: boolean;
 }
 
 export type RunpanePanelVerification = 'observed' | 'unverifiable';
@@ -1556,6 +1560,8 @@ export interface RunpanePanelSubmitResult {
   warnings?: RunpanePromptWarning[];
   /** The report Pane now waits for (`expectReport`); absent when nothing was sent. */
   expectedReport?: TerminalExpectedReport;
+  /** T-104: the message's id when one agent's tab sent it to another; its reply comes back with `runpane reply`. */
+  messageId?: string;
   nextCommand?: string;
 }
 

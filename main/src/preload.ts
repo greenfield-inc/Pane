@@ -698,6 +698,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     create: (input: TodoCreateInput): Promise<IPCResponse> => invokeIpc('todos:create', input),
     act: (action: TodoAction): Promise<IPCResponse> => invokeIpc('todos:act', action),
   },
+  // Agent-to-agent messages (T-104): one tab's messages, sent and received, newest first
+  agentMessages: {
+    forPanel: (panelId: string, page?: { before?: string | number; limit?: number }): Promise<IPCResponse> => invokeIpc('agent-messages:for-panel', panelId, page ?? {}),
+  },
   // Mission Control — live overview of every agent pane across all sessions
   missionControl: {
     listAgents: (options?: { includeArchived?: boolean }): Promise<IPCResponse> => invokeIpc('mission-control:list-agents', options),
@@ -1134,6 +1138,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = () => callback();
       ipcRenderer.on('todos:changed', wrappedCallback);
       return () => ipcRenderer.removeListener('todos:changed', wrappedCallback);
+    },
+    onAgentMessagesChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('agent-messages:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('agent-messages:changed', wrappedCallback);
     },
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: RunpanePaneFocusRequestedEvent) => callback(data);

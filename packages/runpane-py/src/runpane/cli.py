@@ -98,6 +98,7 @@ from .notify import RunpaneError, run_notify
 from .todos_feature import is_todo_command, todos_disabled_error, todos_on, without_todo_lines
 from .pairing_link import run_link
 from .todos import run_todos
+from .messages import run_messages
 from .secrets import (
     run_secrets_delete,
     run_secrets_exec,
@@ -134,6 +135,7 @@ COMMAND_GROUP_HELP_TOPICS.add("lock")
 COMMAND_GROUP_HELP_TOPICS.add("machine")
 COMMAND_GROUP_HELP_TOPICS.add("loops")
 COMMAND_GROUP_HELP_TOPICS.add("todos")
+COMMAND_GROUP_HELP_TOPICS.add("messages")
 COMMAND_GROUP_HELP_TOPICS.add("secrets")
 COMMAND_GROUP_HELP_TOPICS.add("autopilot")
 COMMAND_GROUP_HELP_TOPICS.add("devices")
@@ -209,6 +211,8 @@ FLAG_OWNERS = {
     "--label": ("todos attach",),
     "--no-start": ("todos create",),
     "--escalate": ("todos comment",),
+    "--await-reply": ("panels submit",),
+    "--for-person": ("panels submit",),
     "--no-attachments": ("todos review",),
     "--person-said": ("todos done",),
     "--until": ("todos snooze",),
@@ -405,6 +409,10 @@ class ParsedArgs:
     notify_close: Optional[str] = None
     # `runpane todos <verb>`: the words after the verb (the to-do, then a title, target, id or text).
     todo_args: List[str] = field(default_factory=list)
+    # `runpane reply` and `runpane messages <verb>`: the message id, then reply's text.
+    message_args: List[str] = field(default_factory=list)
+    await_reply: bool = False
+    for_person: bool = False
     # todos create|update --done-when, repeatable; a JSON array of lines also works (the MCP tool's input).
     done_when: Optional[List[str]] = None
     todo_parent: Optional[str] = None
@@ -708,6 +716,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         parsed.pairing_link = args.pop(0)
     if parsed.command.startswith("todos "):
         parsed.todo_args = take_todo_words(args)
+    if parsed.command == "reply" or parsed.command.startswith("messages "):
+        parsed.message_args = take_todo_words(args)
     if parsed.command == "inbox ack":
         while args and not args[0].startswith("-"):
             parsed.inbox_ids.append(args.pop(0))
@@ -837,8 +847,11 @@ WAIT_FOR_RESULT_COMMANDS = {"panels submit", "panels create", "panes create"}
 
 
 def validate_wait_for_result_args(parsed: ParsedArgs) -> None:
-    if parsed.wait_timeout_ms is not None and not parsed.wait_for_result:
-        raise ValueError("--timeout only applies with --wait.")
+    if parsed.await_reply and parsed.wait_for_result:
+        raise ValueError("Pass either --wait (the worker's report) or --await-reply (the receiving agent's runpane reply), not both.")
+    # --await-reply and `messages wait` bound their wait for a reply.
+    if parsed.wait_timeout_ms is not None and not parsed.wait_for_result and not parsed.await_reply and parsed.command != "messages wait":
+        raise ValueError("--timeout only applies with --wait or --await-reply.")
     if not parsed.wait_for_result:
         return
     if parsed.expect_report is False:
@@ -1234,6 +1247,12 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--escalate":
         parsed.escalate = True
+        return
+    if flag == "--await-reply":
+        parsed.await_reply = True
+        return
+    if flag == "--for-person":
+        parsed.for_person = True
         return
     if flag == "--remind-me":
         parsed.remind_me = True
@@ -2035,6 +2054,10 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "panels input": lambda parsed, context: run_panels_input(parsed),
     "panels screen": lambda parsed, context: run_panels_screen(parsed),
     "panels submit": lambda parsed, context: run_panels_submit(parsed),
+    "reply": lambda parsed, context: run_messages(parsed),
+    "messages list": lambda parsed, context: run_messages(parsed),
+    "messages show": lambda parsed, context: run_messages(parsed),
+    "messages wait": lambda parsed, context: run_messages(parsed),
     "panels submit-composer": lambda parsed, context: run_panels_submit_composer(parsed),
     "panels wait": lambda parsed, context: run_panels_wait(parsed),
     "panels resume": lambda parsed, context: run_panels_resume(parsed),

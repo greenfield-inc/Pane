@@ -231,6 +231,12 @@ export interface ParsedArgs {
   notifyWhatChanged?: string;
   /** `runpane todos <verb>`: the words after the verb (the to-do, then a title, target, id or text). */
   todoArgs?: string[];
+  /** `runpane reply` and `runpane messages <verb>`: the words after the command (the message id, then reply's text). */
+  messageArgs?: string[];
+  /** panels submit `--await-reply`: wait for the receiving agent's `runpane reply` and print it. */
+  awaitReply?: boolean;
+  /** panels submit `--for-person`: the text is the person's own words this agent passes on (Autopilot's relay). */
+  forPerson?: boolean;
   /** todos create|update `--done-when`, repeatable; a JSON array of lines also works (the MCP tool's input). */
   doneWhen?: string[];
   /** todos create `--parent <T-n>`. */
@@ -312,7 +318,7 @@ const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactForm
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'machine', 'loops', 'todos', 'secrets', 'autopilot', 'devices', 'browser']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'machine', 'loops', 'todos', 'messages', 'secrets', 'autopilot', 'devices', 'browser']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -356,6 +362,8 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--label', ['todos attach']],
   ['--no-start', ['todos create']],
   ['--escalate', ['todos comment']],
+  ['--await-reply', ['panels submit']],
+  ['--for-person', ['panels submit']],
   ['--no-attachments', ['todos review']],
   ['--person-said', ['todos done']],
   ['--until', ['todos snooze']],
@@ -530,8 +538,12 @@ const WAIT_FOR_RESULT_COMMANDS: ReadonlySet<string> = new Set(['panels submit', 
 
 function validateWaitForResultArgs(parsed: ParsedArgs): void {
   // `ask` bounds its one agent turn with --timeout.
-  if (parsed.waitTimeoutMs !== undefined && !parsed.waitForResult && parsed.command !== 'ask') {
-    throw new Error('--timeout only applies with --wait.');
+  if (parsed.awaitReply && parsed.waitForResult) {
+    throw new Error('Pass either --wait (the worker\'s report) or --await-reply (the receiving agent\'s runpane reply), not both.');
+  }
+  // `ask` bounds its one agent turn with --timeout; --await-reply and `messages wait` bound their wait for a reply.
+  if (parsed.waitTimeoutMs !== undefined && !parsed.waitForResult && !parsed.awaitReply && parsed.command !== 'ask' && parsed.command !== 'messages wait') {
+    throw new Error('--timeout only applies with --wait or --await-reply.');
   }
   if (!parsed.waitForResult) return;
   if (parsed.expectReport === false) {
@@ -601,8 +613,9 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
 }
 
 /** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; relay takes all of it; read and write take one path; inbox ack takes item ids; secrets lease takes secret names; Autopilot's answer, close and rewrite take one; link takes the link; profiles show and launch take the profile's name. */
-function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink' | 'todoArgs' | 'secretNames'> {
+function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink' | 'todoArgs' | 'messageArgs' | 'secretNames'> {
   if (command.startsWith('todos ')) return { todoArgs: takeTodoWords(args) };
+  if (command === 'reply' || command.startsWith('messages ')) return { messageArgs: takeTodoWords(args) };
   if (command === 'link') return args[0] !== undefined && !args[0].startsWith('-') ? { pairingLink: args.shift() ?? '' } : {};
   if (AUTOPILOT_ITEM_COMMANDS.has(command)) {
     return args[0] !== undefined && !args[0].startsWith('-') ? { item: args.shift() ?? '' } : {};
@@ -1111,6 +1124,14 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--no-start') {
     parsed.noStart = true;
+    return;
+  }
+  if (flag === '--await-reply') {
+    parsed.awaitReply = true;
+    return;
+  }
+  if (flag === '--for-person') {
+    parsed.forPerson = true;
     return;
   }
   if (flag === '--escalate') {

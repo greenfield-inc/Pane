@@ -925,7 +925,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
     'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
-    'repos_add', 'repos_list', 'repos_rename', 'secrets_lease', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
+    'reply', 'repos_add', 'repos_list', 'repos_rename', 'secrets_lease', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'theme_read', 'theme_set',
     'todos_archive', 'todos_ask', 'todos_assign', 'todos_attach', 'todos_comment', 'todos_create', 'todos_detach', 'todos_done',
     'todos_drop', 'todos_list', 'todos_review', 'todos_show', 'todos_snooze', 'todos_start', 'todos_stop', 'todos_update', 'todos_wake',
@@ -967,7 +967,7 @@ test('the plugin toolset is core without the tools that reach other machines', a
     'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
-    'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
+    'reply', 'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'todos_archive', 'todos_ask', 'todos_assign', 'todos_attach', 'todos_comment', 'todos_create', 'todos_detach', 'todos_done',
     'todos_drop', 'todos_list', 'todos_review', 'todos_show', 'todos_snooze', 'todos_start', 'todos_stop', 'todos_update', 'todos_wake',
     'workspace_state',
@@ -1242,6 +1242,35 @@ test('panels_input presses named keys, so a model can answer a menu without raw 
         assert.match(unknown.content[0].text, /Unknown key "pagedown"\. Use enter, escape/);
       }, { args: [] });
       assert.deepEqual(requests.map((request) => request.args[0]), [{ panelId: 'panel-8', input: '\u001b[B\r' }]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('reply answers an agent-to-agent message through the daemon, like runpane reply (T-104)', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const party = (panelId, name) => ({ panelId, paneId: `pane-${panelId}`, sessionId: null, name, orchestrator: false });
+  const reply = {
+    ref: 'M-13', number: 13, kind: 'reply', replyTo: 'M-12', sender: party('panel-b', 'Billing'), receiver: party('panel-a', 'Omni Chat'),
+    text: 'Yes, until Friday.', state: 'delivered', deliveredVia: 'tab', undeliveredReason: null, replies: [],
+    createdAt: '2026-11-25T10:05:00.000Z', deliveredAt: '2026-11-25T10:05:01.000Z', answeredAt: null,
+  };
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:reply': () => ({ ok: true, reply, delivery: 'delivered' }),
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const tool = (await client.listTools()).tools.find((item) => item.name === 'reply');
+        assert.ok(tool, 'the core toolset serves reply');
+        assert.deepEqual(tool.inputSchema.required, ['message']);
+        const answered = await client.callTool({ name: 'reply', arguments: { message: 'M-12', text: 'Yes, until Friday.', paneDir } });
+        assert.equal(answered.isError, undefined, answered.content[0].text);
+        assertMatchesAdvertisedSchema(tool, answered.structuredContent);
+        assert.equal(answered.structuredContent.reply.ref, 'M-13');
+      }, { args: [] });
+      // The tab that runs it (PANE_PANEL_ID) rides along as callerPanelId when there is one.
+      assert.deepEqual(requests.map(({ args: [{ callerPanelId: _caller, ...request }] }) => request), [{ message: 'M-12', text: 'Yes, until Friday.' }]);
     });
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });

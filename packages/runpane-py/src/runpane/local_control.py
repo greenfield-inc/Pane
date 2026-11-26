@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from .daemon_actions import confirm_mutation
 from .daemon_client import PaneDaemonClientError, invoke_daemon
 from .generated_contract import RUNPANE_CONTRACT
+from .messages import wait_for_message_reply
 from .notify import RunpaneError, parse_report_options
 
 
@@ -1899,6 +1900,14 @@ def run_panels_submit(parsed: Any) -> int:
     result = invoke_daemon("runpane:panels:submit", [request], pane_dir=parsed.pane_dir)
     if parsed.wait_for_result and result.get("ok"):
         return wait_for_dispatch_result(parsed, result.get("paneId"), result.get("panelId"), result.get("generation"), result.get("epoch"))
+    if getattr(parsed, "await_reply", False) and result.get("ok"):
+        if not result.get("messageId"):
+            raise RunpaneError(
+                "ERR_AWAIT_REPLY_NOT_A_MESSAGE",
+                f"Pane sent the text to panel {result.get('panelId')}, but not as an agent-to-agent message, so there is no reply to wait for.",
+                "Run --await-reply from an agent's Pane tab (PANE_PANEL_ID set) to another agent's tab, without --source user.",
+            )
+        return wait_for_message_reply(parsed, result["messageId"])
 
     if parsed.json:
         print_json(result)
@@ -1912,6 +1921,8 @@ def run_panels_submit(parsed: Any) -> int:
             f"to panel {result.get('panelId')}.{verified}"
         )
         print_delivery(result.get("delivery"))
+        if result.get("messageId"):
+            print(f"Message {result['messageId']}: the reply comes back to this tab as \"reply: {result['messageId']} → …\".")
         if result.get("blocked"):
             print(f"Blocked: {result['blocked'].get('message')}")
         print_prompt_notes(result)
@@ -2142,6 +2153,7 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
         **optional_value("interrupt", True if parsed.interrupt else None),
         **optional_value("source", parsed.source),
         **optional_value("expectReport", parsed.expect_report if command == "submit" else None),
+        **optional_value("personWords", True if command == "submit" and getattr(parsed, "for_person", False) else None),
     }
 
 

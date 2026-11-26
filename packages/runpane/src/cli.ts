@@ -14,6 +14,7 @@ import { runAsk, runModels } from './ask';
 import { runLinksCreate } from './links';
 import { runNotify } from './notify';
 import { runTodos } from './todos';
+import { runMessages } from './messages';
 import { isTodoCommand, todosDisabledError, todosOn } from './todosFeature';
 import { runLink } from './pairingLink';
 import { runSecretsDelete, runSecretsExec, runSecretsLease, runSecretsLeaseEnd, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
@@ -445,6 +446,10 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'panels submit': async (parsed, _telemetryContext) => {
     return runPanelsSubmit(parsed);
   },
+  'reply': async (parsed) => runMessages(parsed),
+  'messages list': async (parsed) => runMessages(parsed),
+  'messages show': async (parsed) => runMessages(parsed),
+  'messages wait': async (parsed) => runMessages(parsed),
   'panels submit-composer': async (parsed, _telemetryContext) => {
     return runPanelsSubmitComposer(parsed);
   },

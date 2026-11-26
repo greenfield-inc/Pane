@@ -47,6 +47,7 @@ import { registerExportHandlers } from './export';
 import { registerSetupHandlers } from './setup';
 import { registerLoopHandlers } from './loops';
 import { registerTodoHandlers } from './todos';
+import { registerAgentMessageHandlers } from './agentMessages';
 import { registerMissionControlHandlers } from './missionControl';
 import { createDaemonBridgeRouter, registerDaemonBridgeHandlers } from './daemon';
 import { registerPermissionHandlers } from './permissions';
@@ -206,6 +207,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerSessionMoveHandlers(ipcMain, services, commandRegistry);
   if (services.loopManager) registerLoopHandlers(ipcMain, services.loopManager, commandRegistry);
   registerTodoHandlers(ipcMain, services, commandRegistry);
+  registerAgentMessageHandlers(ipcMain, services, commandRegistry);
   registerMissionControlHandlers(ipcMain, services, commandRegistry);
   registerOnboardingHandlers(ipcMain, services);
   registerDaemonBridgeHandlers(ipcMain, bridgeRouter);

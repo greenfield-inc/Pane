@@ -43,6 +43,7 @@ import {
 } from "./panelBufferMigration";
 import { ensureApprovalsSchema } from "./approvalsSchema";
 import { ensureTodosSchema } from "./todosSchema";
+import { ensureAgentMessagesSchema } from "./agentMessagesSchema";
 
 /**
  * Hard ceiling on one serialized `tool_panels.state` row. Terminal bytes live
@@ -349,6 +350,7 @@ export class DatabaseService {
   private runMigrations(): void {
     ensureApprovalsSchema(this.db);
     ensureTodosSchema(this.db);
+    ensureAgentMessagesSchema(this.db);
 
     // Check if archived column exists
     interface SqliteTableInfo {

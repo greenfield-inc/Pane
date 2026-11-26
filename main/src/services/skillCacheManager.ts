@@ -11,6 +11,7 @@ import { keepSessionTidySection, todosSection } from './sessionTidyRules';
 import { TODOS_TEXT_END, TODOS_TEXT_START, withTodosText } from '../../../shared/todosText';
 import { todosOn } from './todos/todosFeature';
 import { APPROVALS_RULES } from './approvalsRules';
+import { AGENT_REPLY_RULE } from './agentMessages/agentMessageText';
 import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
 
 // Every skill Pane installs for its agents ships with Pane.
@@ -591,6 +592,12 @@ Then, as quiet setup:
 ${SESSION_STARTUP_GUIDANCE}
 
 ${SESSION_PANE_ASSOCIATION_GUIDANCE}
+
+## Messages from other agents
+
+${AGENT_REPLY_RULE} To ask another agent something and wait for its answer, send with
+\`runpane panels submit --panel <id> --text "…" --await-reply --timeout 30m --yes --json\`;
+\`runpane messages list\` shows this tab's messages and whether each was answered.
 
 ## The Onboarding Session
 

@@ -11,6 +11,8 @@ import { getRemoteDaemonExecutableCandidates } from '../daemon/remoteDaemonServi
 import { pathToFileURL } from 'url';
 import { describe, expect, it, vi, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
+import { AgentMessageService, type MessagePanelInfo } from '../services/agentMessages/agentMessageService';
+import { AgentMessageStore } from '../services/agentMessages/agentMessageStore';
 import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import type { Project } from '../database/models';
@@ -3457,6 +3459,230 @@ describe('runpane IPC handlers', () => {
       enter: 'cr',
       nextCommand: `runpane panels wait --panel ${terminalPanel.id} --for ready --timeout-ms 30000 --json`,
     });
+  });
+
+  it("ends an agent tab's message to another tab with its M-n reply line, and leaves the person's and Pane's own lines as typed (T-104)", async () => {
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+    const db = new Database(':memory:');
+    const tabs = new Map<string, MessagePanelInfo>([
+      ['agent-tab', { panelId: 'agent-tab', paneId: 'pane-a', sessionId: 's1', name: 'the "Omni Chat" Session orchestrator', orchestrator: true, agent: true }],
+      [terminalPanel.id, { panelId: terminalPanel.id, paneId: session.id, sessionId: null, name: 'Worker', orchestrator: false, agent: true }],
+    ]);
+    const messages = new AgentMessageService(new AgentMessageStore(db), {
+      panel: id => tabs.get(id) ?? null, orchestratorPanel: () => null, isPanelDown: async () => false, resumePanel: async () => true,
+      isMidTurn: () => false, hasUnsentText: async () => false, typeIntoTab: async () => 'delivered', log: () => undefined,
+    });
+    try {
+      const registry = createRegistry(createServices({ agentMessageService: messages }));
+      const fromAgent = (input: PaneCommandValue) => registry.invokeConnected('runpane:panels:submit', [input], new AbortController().signal, { panelId: 'agent-tab' });
+
+      const sent = await fromAgent({ panelId: terminalPanel.id, input: 'Is the API frozen?', expectReport: false });
+      expect(sent).toMatchObject({ ok: true, messageId: 'M-1' });
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenLastCalledWith(terminalPanel.id,
+        'Is the API frozen?\n\nReply with runpane reply M-1 "…": it reaches the "Omni Chat" Session orchestrator, who never sees your own chat.\r');
+      expect(messages.show(1).message).toMatchObject({ state: 'delivered', text: 'Is the API frozen?', sender: { panelId: 'agent-tab' } });
+
+      for (const input of [
+        { panelId: terminalPanel.id, input: 'owed answer', fromPane: true, expectReport: false },
+        { panelId: terminalPanel.id, input: 'typed by the person', source: 'user', expectReport: false },
+      ]) {
+        expect(await fromAgent(input)).not.toHaveProperty('messageId');
+        expect(terminalPanelManager.writeToTerminal).toHaveBeenLastCalledWith(terminalPanel.id, `${input.input}\r`);
+      }
+      // Pane's own UI sends with no calling tab.
+      expect(await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'from the app', expectReport: false }])).not.toHaveProperty('messageId');
+      expect(messages.list({ limit: 10 }).map(message => message.ref)).toEqual(['M-1']);
+
+      // Autopilot's relay of the person's words stays the person's (--for-person, or its relay prefix); its own lines get an id.
+      for (const input of [
+        { panelId: terminalPanel.id, input: 'Ship it', personWords: true, source: 'agent', expectReport: false },
+        { panelId: terminalPanel.id, input: '[From the person, via Autopilot] Ship it', source: 'agent', expectReport: false },
+      ]) {
+        expect(await fromAgent(input)).not.toHaveProperty('messageId');
+        expect(terminalPanelManager.writeToTerminal).toHaveBeenLastCalledWith(terminalPanel.id, `${input.input}\r`);
+      }
+      expect(await fromAgent({ panelId: terminalPanel.id, input: '[From Autopilot] Where does T-3 stand?', source: 'agent', expectReport: false })).toMatchObject({ messageId: 'M-2' });
+
+      // A replayed submit (same operation id) types the same message with the same reply line.
+      const first = await fromAgent({ panelId: terminalPanel.id, input: 'Retry me', operationId: 'op-1', expectReport: false });
+      const firstText = vi.mocked(terminalPanelManager.writeToTerminal).mock.lastCall?.[1];
+      const replayed = await fromAgent({ panelId: terminalPanel.id, input: 'Retry me', operationId: 'op-1', expectReport: false });
+      expect(first).toMatchObject({ messageId: 'M-3' });
+      expect(replayed).toMatchObject({ messageId: 'M-3' });
+      expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.lastCall?.[1]).toBe(firstText);
+
+      // --await-reply only watches: a reply before the wait call is still the call's answer, and it goes to the tab as well.
+      const awaited = await fromAgent({ panelId: terminalPanel.id, input: 'Ship Friday?', expectReport: false });
+      expect(awaited).toMatchObject({ messageId: 'M-4' });
+      await messages.reply({ to: 4, body: 'Yes', callerPanelId: terminalPanel.id });
+      await expect(messages.waitForReply(4, 10)).resolves.toMatchObject({ text: 'Yes' });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("puts a file-pointer message's id and reply line on the typed line, and records that line as its text (T-104)", async () => {
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-message-pointer-'));
+    const worktree = path.join(root, 'worktree');
+    fs.mkdirSync(worktree);
+    execFileSync('git', ['init', '-q'], { cwd: worktree });
+    const db = new Database(':memory:');
+    const tabs = new Map<string, MessagePanelInfo>([
+      ['agent-tab', { panelId: 'agent-tab', paneId: 'pane-a', sessionId: 's1', name: 'Omni Chat', orchestrator: false, agent: true }],
+      [terminalPanel.id, { panelId: terminalPanel.id, paneId: session.id, sessionId: null, name: 'Worker', orchestrator: false, agent: true }],
+    ]);
+    const messages = new AgentMessageService(new AgentMessageStore(db), {
+      panel: id => tabs.get(id) ?? null, orchestratorPanel: () => null, isPanelDown: async () => false, resumePanel: async () => true,
+      isMidTurn: () => false, hasUnsentText: async () => false, typeIntoTab: async () => 'delivered', log: () => undefined,
+    });
+    try {
+      const base = createServices();
+      const registry = createRegistry(createServices({
+        agentMessageService: messages,
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        sessionManager: { ...base.sessionManager, getSession: vi.fn(() => ({ ...session, worktreePath: worktree })) } as never,
+      }));
+      // SAFETY: The panels:submit handler resolves to a RunpanePanelSubmitResult.
+      const result = await registry.invokeConnected('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Long brief\nwith lines', asFilePointer: true, expectReport: false }],
+        new AbortController().signal, { panelId: 'agent-tab' }) as { messageId?: string; promptFile?: string };
+
+      const relative = path.relative(fs.realpathSync.native(worktree), result.promptFile ?? '');
+      expect(result.messageId).toBe('M-1');
+      expect(fs.readFileSync(result.promptFile ?? '', 'utf8')).toBe('Long brief\nwith lines\n');
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenLastCalledWith(terminalPanel.id,
+        `Read and follow ${relative}\n\nReply with runpane reply M-1 "…": it reaches Omni Chat, who never sees your own chat.\r`);
+      expect(messages.show(1).message.text).toBe(`Read and follow ${relative}`);
+    } finally {
+      db.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // Codex review 2 of #1736, Must-Fix 1: the chat tab's receipt contract survives the reply line.
+  it('replays the same chat send under its operation id, and still refuses other content under it (T-104)', async () => {
+    const chatPanel: ToolPanel = { ...terminalPanel, id: 'chat-panel', type: 'chat', title: 'Claude' };
+    vi.mocked(panelManager.getPanel).mockReturnValue(chatPanel);
+    const manager = getChatTabManager();
+    // The chat manager's own receipt rule (manager.send): one operation id, one text.
+    const receipts = new Map<string, string>();
+    const send = vi.spyOn(manager, 'send').mockImplementation((_panelId, request) => {
+      const previous = receipts.get(request.operationId);
+      if (previous !== undefined && previous !== request.text) throw new PaneError('CHAT_OPERATION_CONFLICT', 'This send was already used for a different message. Nothing new was sent.', 'Send the new message again.');
+      receipts.set(request.operationId, request.text);
+      return { operationId: request.operationId, generation: 1, fingerprint: request.text, state: 'accepted' };
+    });
+    const view = vi.spyOn(manager, 'view').mockReturnValue({ panelId: chatPanel.id, agent: 'claude', status: 'idle', permissions: [], questions: [], queue: [], messageCount: 0 });
+    const db = new Database(':memory:');
+    const tabs = new Map<string, MessagePanelInfo>([
+      ['agent-tab', { panelId: 'agent-tab', paneId: 'pane-a', sessionId: null, name: 'Omni Chat', orchestrator: false, agent: true }],
+      [chatPanel.id, { panelId: chatPanel.id, paneId: session.id, sessionId: null, name: 'Billing', orchestrator: false, agent: true }],
+    ]);
+    const messages = new AgentMessageService(new AgentMessageStore(db), {
+      panel: id => tabs.get(id) ?? null, orchestratorPanel: () => null, isPanelDown: async () => false, resumePanel: async () => true,
+      isMidTurn: () => false, hasUnsentText: async () => false, typeIntoTab: async () => 'delivered', log: () => undefined,
+    });
+    try {
+      const registry = createRegistry(createServices({ agentMessageService: messages }));
+      const fromAgent = (input: PaneCommandValue) => registry.invokeConnected('runpane:panels:submit', [input], new AbortController().signal, { panelId: 'agent-tab' });
+      const first = await fromAgent({ panelId: chatPanel.id, input: 'Ship Friday?', operationId: 'op-x', expectReport: false });
+      const again = await fromAgent({ panelId: chatPanel.id, input: 'Ship Friday?', operationId: 'op-x', expectReport: false });
+      expect(first).toMatchObject({ ok: true, messageId: 'M-1' });
+      expect(again).toMatchObject({ ok: true, messageId: 'M-1' });
+      expect(send.mock.calls.map(([, request]) => request.text)).toEqual([send.mock.calls[0][1].text, send.mock.calls[0][1].text]);
+      await expect(fromAgent({ panelId: chatPanel.id, input: 'Ship Monday?', operationId: 'op-x', expectReport: false })).rejects.toMatchObject({ code: 'CHAT_OPERATION_CONFLICT' });
+      expect(messages.show(1).message).toMatchObject({ text: 'Ship Friday?', state: 'delivered' });
+    } finally {
+      send.mockRestore();
+      view.mockRestore();
+      db.close();
+    }
+  });
+
+  // Codex review 2 of #1736, Must-Fix 2: a replayed file-pointer send returns the first send's files and writes none.
+  it('replays a file-pointer message with attachments: the same paths, the same typed line, no new files (T-104)', async () => {
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-message-pointer-replay-'));
+    const worktree = path.join(root, 'worktree');
+    fs.mkdirSync(worktree);
+    execFileSync('git', ['init', '-q'], { cwd: worktree });
+    const plan = path.join(root, 'plan.md');
+    fs.writeFileSync(plan, '# Plan');
+    const db = new Database(':memory:');
+    const tabs = new Map<string, MessagePanelInfo>([
+      ['agent-tab', { panelId: 'agent-tab', paneId: 'pane-a', sessionId: null, name: 'Omni Chat', orchestrator: false, agent: true }],
+      [terminalPanel.id, { panelId: terminalPanel.id, paneId: session.id, sessionId: null, name: 'Worker', orchestrator: false, agent: true }],
+    ]);
+    const messages = new AgentMessageService(new AgentMessageStore(db), {
+      panel: id => tabs.get(id) ?? null, orchestratorPanel: () => null, isPanelDown: async () => false, resumePanel: async () => true,
+      isMidTurn: () => false, hasUnsentText: async () => false, typeIntoTab: async () => 'delivered', log: () => undefined,
+    });
+    try {
+      const base = createServices();
+      const registry = createRegistry(createServices({
+        agentMessageService: messages,
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        sessionManager: { ...base.sessionManager, getSession: vi.fn(() => ({ ...session, worktreePath: worktree })) } as never,
+      }));
+      const request = { panelId: terminalPanel.id, input: 'Build it', asFilePointer: true, attachments: [plan], operationId: 'op-p', expectReport: false };
+      const submit = () => registry.invokeConnected('runpane:panels:submit', [request], new AbortController().signal, { panelId: 'agent-tab' });
+      // SAFETY: The panels:submit handler resolves to a RunpanePanelSubmitResult.
+      const first = await submit() as { messageId?: string; promptFile?: string; attachments?: string[] };
+      const firstLine = vi.mocked(terminalPanelManager.writeToTerminal).mock.lastCall?.[1];
+      const written = fs.readdirSync(path.dirname(first.promptFile ?? '')).sort();
+      // The source attachment is gone by the replay: nothing is copied again, so nothing fails.
+      fs.rmSync(plan);
+      // SAFETY: The panels:submit handler resolves to a RunpanePanelSubmitResult.
+      const again = await submit() as { messageId?: string; promptFile?: string; attachments?: string[] };
+      expect(again).toMatchObject({ messageId: first.messageId, promptFile: first.promptFile, attachments: first.attachments });
+      expect(vi.mocked(terminalPanelManager.writeToTerminal).mock.lastCall?.[1]).toBe(firstLine);
+      expect(fs.readdirSync(path.dirname(first.promptFile ?? '')).sort()).toEqual(written);
+      expect(messages.list().map(message => message.ref)).toEqual(['M-1']);
+    } finally {
+      db.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // Codex review 3 of #1736, Must-Fix 1: overlapping retries of one file-pointer send write one file and return it.
+  it('answers two overlapping identical file-pointer submits with the one recorded prompt file (T-104)', async () => {
+    vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-message-pointer-overlap-'));
+    const worktree = path.join(root, 'worktree');
+    fs.mkdirSync(worktree);
+    execFileSync('git', ['init', '-q'], { cwd: worktree });
+    const plan = path.join(root, 'plan.md');
+    fs.writeFileSync(plan, '# Plan');
+    const db = new Database(':memory:');
+    const tabs = new Map<string, MessagePanelInfo>([
+      ['agent-tab', { panelId: 'agent-tab', paneId: 'pane-a', sessionId: null, name: 'Omni Chat', orchestrator: false, agent: true }],
+      [terminalPanel.id, { panelId: terminalPanel.id, paneId: session.id, sessionId: null, name: 'Worker', orchestrator: false, agent: true }],
+    ]);
+    const messages = new AgentMessageService(new AgentMessageStore(db), {
+      panel: id => tabs.get(id) ?? null, orchestratorPanel: () => null, isPanelDown: async () => false, resumePanel: async () => true,
+      isMidTurn: () => false, hasUnsentText: async () => false, typeIntoTab: async () => 'delivered', log: () => undefined,
+    });
+    try {
+      const base = createServices();
+      const registry = createRegistry(createServices({
+        agentMessageService: messages,
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        sessionManager: { ...base.sessionManager, getSession: vi.fn(() => ({ ...session, worktreePath: worktree })) } as never,
+      }));
+      const request = { panelId: terminalPanel.id, input: 'Build it', asFilePointer: true, attachments: [plan], operationId: 'op-o', expectReport: false };
+      const submit = () => registry.invokeConnected('runpane:panels:submit', [request], new AbortController().signal, { panelId: 'agent-tab' });
+      // SAFETY: The panels:submit handler resolves to a RunpanePanelSubmitResult.
+      const [first, second] = await Promise.all([submit(), submit()]) as Array<{ messageId?: string; promptFile?: string; attachments?: string[] }>;
+      expect(second).toMatchObject({ messageId: first.messageId, promptFile: first.promptFile, attachments: first.attachments });
+      const prompts = fs.readdirSync(path.dirname(first.promptFile ?? '')).filter(name => name.endsWith('.md'));
+      expect(prompts).toEqual([path.basename(first.promptFile ?? '')]);
+      const lines = vi.mocked(terminalPanelManager.writeToTerminal).mock.calls.map(([, text]) => text).filter(text => text.startsWith('Read and follow'));
+      expect(new Set(lines).size).toBe(1);
+      expect(messages.list().map(message => message.ref)).toEqual(['M-1']);
+    } finally {
+      db.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('types nothing into a Pi selector, and submits once Pi\'s input box is back', async () => {

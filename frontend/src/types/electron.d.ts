@@ -82,6 +82,7 @@ import type { RelayLinkOpenedEvent, RelayPairedEvent, RelayStatus } from '../../
 import type { StartLinkAnswer, StartLinkRequest } from '../../../shared/types/startLinks';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../../shared/types/sessionImport';
+import type { AgentMessageRecord } from '../../../shared/types/agentMessages';
 import type { TodoAction, TodoActionResult, TodoCreateInput, TodoDetail, TodoRecord, TodosSnapshot } from '../../../shared/types/todos';
 import type {
   ProjectDashboardData,
@@ -361,6 +362,11 @@ interface ElectronAPI {
     create: (input: TodoCreateInput) => Promise<IPCResponse<TodoRecord>>;
     act: (action: TodoAction) => Promise<IPCResponse<TodoActionResult>>;
   };
+  // Agent-to-agent messages (T-104): one tab's messages, sent and received, newest first (docs/AGENT_MESSAGES.md)
+  agentMessages: {
+    /** Newest first, at most 200 (or `limit`); `before` (the oldest ref you have, "M-12") reads the page older than it. */
+    forPanel: (panelId: string, page?: { before?: string | number; limit?: number }) => Promise<IPCResponse<AgentMessageRecord[]>>;
+  };
   // Mission Control — every agent pane across all sessions
   missionControl: {
     listAgents: (options?: { includeArchived?: boolean }) => Promise<IPCResponse<MissionControlAgentPanel[]>>;
@@ -636,6 +642,7 @@ interface ElectronAPI {
     /** Loops or their runs changed; read them again with `loops.list`. */
     onLoopsChanged: (callback: () => void) => () => void;
     onTodosChanged: (callback: () => void) => () => void;
+    onAgentMessagesChanged: (callback: () => void) => () => void;
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => () => void;
     onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
     onListeningPortsChanged: (callback: (snapshot: ListeningPortsSnapshot) => void) => () => void;

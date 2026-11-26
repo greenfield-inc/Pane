@@ -410,7 +410,7 @@ export async function typeIntoLocalTab(commandRegistry: PaneCommandRegistry, pan
     if (!tabTakesText(status, agentInForeground)) return 'busy';
   }
   try {
-    const submit = () => commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: text, expectReport: false }]);
+    const submit = () => commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: text, expectReport: false, fromPane: true }]);
     const result = decodeOptionalBoundary(await (panel.type === 'chat' ? submit() : submitOnlyToAgent(panelId, submit)), boundary.object({ ok: boundary.optional(boundary.boolean) }));
     return result?.ok === false ? 'busy' : 'delivered';
   } catch (error) {
