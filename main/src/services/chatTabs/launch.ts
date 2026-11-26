@@ -24,6 +24,7 @@ import type { ResolvedProjectEnv } from '../projectEnvVars';
 import { sessionGitCeiling } from '../sessionWorkspace';
 import { plainProfileAgent } from '../../../../shared/agentProfiles';
 import { profilesOn } from '../agentFarm/profilesFeature';
+import { agentFarmConfigRoot } from '../agentFarm/bundledAgentFarm';
 
 /** API keys a person may set for chat tabs on this machine, kept in the OS secure store. */
 export interface ChatTabSecrets { apiKey(agent: ChatAgent): string | undefined }
@@ -181,8 +182,43 @@ function fullAccessLaunch(chat: AgentChatConfig | undefined, launch: ChatTabLaun
 }
 
 /**
+ * An `agent-farm run <profile> …` command as a chat tab's profile launch, or the first token a chat
+ * tab can't run the same way. `--arg k=v` always carries over. With Profiles on (T-83 P3) so does
+ * what Agent Farm prints for a launch link: the CLI as a path to an `agent-farm` (Pane's shim),
+ * `--parent <token>`, and `--config-root` naming Pane's own config root, which chat tabs always use.
+ */
+function agentFarmRunLaunch(tokens: readonly string[], on: boolean = profilesOn()): { launch: Extract<ChatTabLaunch, { kind: 'profile' }> } | { unsupported: string } | undefined {
+  const cli = tokens[0] ?? '';
+  const named = cli === 'agent-farm' || (on && /^agent-farm(\.cmd)?$/i.test(path.basename(cli.replace(/\\/g, '/'))));
+  if (!named || tokens[1] !== 'run' || !tokens[2] || tokens[2].startsWith('-')) return undefined;
+  const args: Record<string, string> = {};
+  let parent: string | undefined;
+  for (let index = 3; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const [flag, inline] = on && token.startsWith('--') && token.includes('=') ? [token.slice(0, token.indexOf('=')), token.slice(token.indexOf('=') + 1)] : [token, undefined];
+    const value = inline ?? tokens[index + 1];
+    if (inline === undefined) index += 1;
+    if (flag === '--arg') {
+      const separator = value?.indexOf('=') ?? -1;
+      if (!value || separator <= 0) return { unsupported: token };
+      args[value.slice(0, separator)] = value.slice(separator + 1);
+    } else if (on && flag === '--parent' && value && !value.startsWith('-')) {
+      parent = value;
+    } else if (on && flag === '--config-root' && value && path.resolve(value) === path.resolve(agentFarmConfigRoot(getAppDirectory()))) {
+      continue;
+    } else {
+      return { unsupported: token };
+    }
+  }
+  const launch: Extract<ChatTabLaunch, { kind: 'profile' }> = { kind: 'profile', profile: tokens[2] };
+  if (Object.keys(args).length) launch.args = args;
+  if (parent) launch.parent = parent;
+  return { launch };
+}
+
+/**
  * A terminal launch command a chat tab can run instead: the plain agent (its full-access
- * flags become the chat's full access) or `agent-farm run <profile> [--arg k=v]`.
+ * flags become the chat's full access) or `agent-farm run <profile> [--arg k=v]` (agentFarmRunLaunch).
  * Anything else (wrappers, other flags) keeps its terminal, where it runs unchanged.
  */
 export function chatLaunchFromCommand(command: string | undefined, agent: ChatAgent): ChatTabLaunch | undefined {
@@ -197,17 +233,8 @@ export function chatLaunchFromCommand(command: string | undefined, agent: ChatAg
     const mode = config.chat.fullAccess?.mode;
     return mode ? { kind: 'agent', mode } : { kind: 'agent', fullAccess: true };
   }
-  if (tokens[0] === 'agent-farm' && tokens[1] === 'run' && tokens[2] && !tokens[2].startsWith('-')) {
-    const args: Record<string, string> = {};
-    for (let index = 3; index < tokens.length; index += 2) {
-      const value = tokens[index + 1];
-      const separator = value?.indexOf('=') ?? -1;
-      if (tokens[index] !== '--arg' || !value || separator <= 0) return undefined;
-      args[value.slice(0, separator)] = value.slice(separator + 1);
-    }
-    return Object.keys(args).length ? { kind: 'profile', profile: tokens[2], args } : { kind: 'profile', profile: tokens[2] };
-  }
-  return undefined;
+  const run = agentFarmRunLaunch(tokens);
+  return run && 'launch' in run ? run.launch : undefined;
 }
 
 /** A flag of the agent's own terminal launch that a chat runs the same way: its full-access flags and its other default args. */
@@ -271,9 +298,8 @@ export function chatLaunchForTerminal(command: string | undefined, agent: ChatAg
 function firstUnsupported(tokens: string[], agent: ChatAgent): string {
   const config = agentConfig(agent);
   if (config && config.executables.includes(tokens[0] ?? '')) return tokens.slice(1).find(token => !terminalFlagCarriedOver(config, token)) ?? tokens[0];
-  if (tokens[0] === 'agent-farm' && tokens[1] === 'run') {
-    for (let index = 3; index < tokens.length; index += 2) if (tokens[index] !== '--arg' || !tokens[index + 1]?.includes('=')) return tokens[index];
-  }
+  const run = agentFarmRunLaunch(tokens);
+  if (run && 'unsupported' in run) return run.unsupported;
   return tokens[0] ?? agent;
 }
 

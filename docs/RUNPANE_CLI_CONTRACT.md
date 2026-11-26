@@ -897,7 +897,7 @@ These flags are consumed by local daemon-control commands:
 --wait-ms <milliseconds>
 --kind <kind>
 --done-when <text>
---parent <T-n>
+--parent <T-n|token>
 --check <n,...>
 --uncheck <n,...>
 --label <label>

@@ -52,6 +52,8 @@ export interface ParsedArgs {
   agentFarm?: string;
   /** `--arg key=value`, repeatable: launch arguments for --agent-farm. */
   launchArgs?: Record<string, string>;
+  /** `panels create --parent <token>`: the Agent Farm parent token of a launch link started with --agent-farm (T-83 P3). */
+  agentFarmParent?: string;
   title?: string;
   url?: string;
   file?: string;
@@ -343,7 +345,7 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--css', ['theme set']],
   ['--kind', ['machine cleanup', 'todos attach']],
   ['--done-when', ['todos create', 'todos update']],
-  ['--parent', ['todos create']],
+  ['--parent', ['todos create', 'panels create']],
   ['--check', ['todos update']],
   ['--uncheck', ['todos update']],
   ['--label', ['todos attach']],
@@ -1155,7 +1157,8 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     return;
   }
   if (flag === '--parent') {
-    parsed.todoParent = value;
+    if (parsed.command === 'panels create') parsed.agentFarmParent = value;
+    else parsed.todoParent = value;
     return;
   }
   if (flag === '--check' || flag === '--uncheck') {

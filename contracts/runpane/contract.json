@@ -3936,7 +3936,7 @@
       {
         "name": "--agent-farm",
         "value": "<profile>",
-        "description": "Start an Agent Farm profile (such as greenfield/implementer:opus) in a chat tab."
+        "description": "Start an Agent Farm profile (such as greenfield/orchestrator) in a chat tab."
       },
       {
         "name": "--arg",
@@ -4055,8 +4055,8 @@
       },
       {
         "name": "--parent",
-        "value": "<T-n>",
-        "description": "todos create: make a sub-to-do of this to-do, in its Session."
+        "value": "<T-n|token>",
+        "description": "todos create: make a sub-to-do of this to-do (T-n), in its Session. panels create with --agent-farm: the Agent Farm parent token (PLUGIN/NAME[:VARIANT]@LAUNCH-ID) of the agent starting this linked agent, as its launch links print it."
       },
       {
         "name": "--check",
@@ -10622,7 +10622,7 @@
         "--name",
         "farm",
         "--tool-command",
-        "agent-farm run free-range",
+        "agent-farm run greenfield/orchestrator",
         "--agent",
         "claude",
         "--prompt",
@@ -25075,7 +25075,7 @@
         ],
         "examples": [
           "runpane panes adopt --repo active --path /path/to/worktree --name imported --agent codex --resume <id> --yes --json",
-          "runpane panes adopt --repo active --path /path/to/worktree --name imported --tool-command \"agent-farm run free-range\" --agent claude --launch --yes --json",
+          "runpane panes adopt --repo active --path /path/to/worktree --name imported --tool-command \"agent-farm run greenfield/orchestrator\" --agent claude --launch --yes --json",
           "runpane panes adopt --repo active --path /path/to/worktree --name imported --agent claude --launch --prompt-file prompt.md --wait-ready --yes --json"
         ],
         "jsonSchemas": [
@@ -26191,6 +26191,12 @@
             "description": "A launch argument for --agent-farm; repeatable."
           },
           {
+            "name": "--parent",
+            "value": "<token>",
+            "required": false,
+            "description": "With --agent-farm: the Agent Farm parent token (PLUGIN/NAME[:VARIANT]@LAUNCH-ID) from the starting agent's launch links, so Agent Farm checks the link and records the parent. Needs Profiles on."
+          },
+          {
             "name": "--title",
             "value": "<title>",
             "required": false,
@@ -26287,7 +26293,7 @@
         "examples": [
           "runpane panels create --pane <pane-id> --agent <agent> --source agent --no-focus --wait-ready --yes --json",
           "runpane panels create --pane <pane-id> --tool-command <command> --title <title> --source agent --no-focus --wait-ready --yes --json",
-          "runpane panels create --pane <pane-id> --tool-command \"agent-farm run free-range\" --agent claude --source agent --no-focus --wait-ready --yes --json"
+          "runpane panels create --pane <pane-id> --tool-command \"agent-farm run greenfield/orchestrator\" --agent claude --source agent --no-focus --wait-ready --yes --json"
         ],
         "jsonSchemas": [
           "panelCreateRequest",

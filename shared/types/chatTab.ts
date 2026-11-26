@@ -23,8 +23,10 @@ export type ChatTabLaunch =
   /**
    * An Agent Farm profile. `fullAccess` applies only to Pane's plain profiles (pane/claude, pane/codex),
    * which keep the permissions the agent had before Agent Farm ran it; every other profile sets its own.
+   * `parent`: the Agent Farm parent token (PLUGIN/NAME[:VARIANT]@LAUNCH-ID) of the agent that started
+   * this one from its launch links, passed as `--parent` at every start (T-83 P3; Profiles on only).
    */
-  | { kind: 'profile'; profile: string; args?: Record<string, string>; fullAccess?: true };
+  | { kind: 'profile'; profile: string; args?: Record<string, string>; parent?: string; fullAccess?: true };
 
 /** Last known runtime state. `stopped` always carries a `problem` or an explicit stop. */
 export type ChatTabStatus = 'starting' | 'idle' | 'working' | 'blocked' | 'stopped';

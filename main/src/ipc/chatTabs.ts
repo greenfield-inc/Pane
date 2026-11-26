@@ -31,6 +31,8 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from '../services/claudeSessionTranscript';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 import { paneScratchDirectory } from '../services/paneScratch';
+import { agentFarmLauncherPath } from '../services/runpaneShim';
+import { plainProfileAgent, profileEntryName } from '../../../shared/agentProfiles';
 
 /** Any agent id; the launcher refuses one this host cannot run, with the agents it can. */
 const agentSchema = boundary.refine(boundary.nonEmptyString, id => /^[a-z0-9][a-z0-9._-]*$/i.test(id), 'expected an agent id');
@@ -41,7 +43,7 @@ const createSchema = boundary.object({
   agent: boundary.optional(agentSchema),
   launch: boundary.optional(boundary.union(
     boundary.object({ kind: boundary.literal('agent') }),
-    boundary.object({ kind: boundary.literal('profile'), profile: boundary.nonEmptyString, args: boundary.optional(boundary.record(boundary.string)) }),
+    boundary.object({ kind: boundary.literal('profile'), profile: boundary.nonEmptyString, args: boundary.optional(boundary.record(boundary.string)), parent: boundary.optional(boundary.nonEmptyString) }),
   )),
   title: boundary.optional(boundary.string),
   initialInput: boundary.optional(boundary.string),
@@ -63,7 +65,10 @@ const agentFarmProfiles = new AgentFarmProfiles({
     // `run` writes its launch bundle to <worktree>/.agent-farm/generated; hide that from git like .pane/ (workspace.yaml beside it is meant to be committed).
     await worktreePaneFolder(cwd, '.agent-farm/generated', candidate => new PaneError('CHAT_PROFILE_FOLDER_LINK', `${candidate} is a symbolic link, so Pane won't let Agent Farm write through it. Nothing was started.`, 'Remove the link, then start the profile again.'));
     // The live Profiles state, so a config.json that can't be read keeps telemetry held off (review F-7).
-    return paneAgentFarmProcess(getAppDirectory(), args, { env, profiles: profilesOn() });
+    // Through the agent-farm shim's launcher, so the child launches Agent Farm prints into the
+    // agent's instructions name the shim, which runs in any terminal, not Pane's Electron (T-83 P3).
+    const on = profilesOn();
+    return paneAgentFarmProcess(getAppDirectory(), args, { env, profiles: on, launcher: on ? agentFarmLauncherPath() : undefined });
   },
   adapter: async agent => {
     const packageName = agentConfig(agent)?.chat?.adapter?.package;
@@ -72,7 +77,12 @@ const agentFarmProfiles = new AgentFarmProfiles({
     return adapterFileForPlainNode(entry, path.join(getAppDirectory(), 'agent-adapters'));
   },
   checkCli: (agent, context) => checkAgentCli(agent, printedCli(agent, context.env, findExecutableInPath), context),
-  sessionProfile: async (folder, profile, instructions) => writeSessionProfile(folder, profile, instructions),
+  // The Session text names the profile by Agent Farm's title and its ref (T-83 P3); a failed read names the ref alone.
+  sessionProfile: async (folder, profile, instructions) => {
+    const qualified = profile.split(':')[0];
+    const entry = plainProfileAgent(qualified) ? undefined : (await listPaneAgentFarmProfiles(getAppDirectory())).profiles.find(candidate => candidate.ref === qualified);
+    writeSessionProfile(folder, profile, instructions, entry ? profileEntryName(entry) : undefined);
+  },
 });
 
 const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key', 'agents', 'profiles', 'registry', 'install-agent', 'remove-agent'] as const;
@@ -209,12 +219,16 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
   const session = services.sessionManager.getSession(request.sessionId);
   if (!session?.worktreePath) throw new PaneError('CHAT_PANE_MISSING', 'That Pane was not found, so no chat tab was created.', 'Open the Pane first, then add the tab.');
   const launch = request.launch ?? { kind: 'agent' as const };
+  // A launch link's parent token is an Agent Farm 0.3 rule, run only by Pane's bundled copy (T-83 P3, D-474).
+  if (launch.kind === 'profile' && launch.parent && !profilesOn()) {
+    throw new PaneError('CHAT_PROFILE_PARENT_OFF', `Profiles is off on this computer, so Pane can't start ${launch.profile} as a linked agent of ${launch.parent}. No tab was created.`, 'Turn on Profiles in Settings > Advanced > Experimental, or leave out --parent.');
+  }
   // A profile names its own harness; Agent Farm says which when the caller did not.
   let agent = request.agent;
   if (!agent && launch.kind === 'profile') {
     const probe: ChatPanelState = { agent: DEFAULT_AGENT_ID, launch, cwd: session.worktreePath, status: 'starting' };
     const placeholder: ToolPanel = { id: 'new', sessionId: request.sessionId, type: 'chat', title: '', state: { isActive: false }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
-    agent = (await agentFarmProfiles.print(launch.profile, launch.args ?? {}, DEFAULT_AGENT_ID, session.worktreePath, chatTabEnv(placeholder, probe))).harness;
+    agent = (await agentFarmProfiles.print(launch.profile, launch.args ?? {}, DEFAULT_AGENT_ID, session.worktreePath, chatTabEnv(placeholder, probe), launch.parent)).harness;
   }
   if (!agent) throw new PaneError('CHAT_AGENT_REQUIRED', 'No agent was named for the chat tab, so none was created.', `Choose an agent (${configuredChatAgentIds().join(', ')}), or name an Agent Farm profile.`);
   // Refused here, before a tab exists, naming the agents this host can open as chats.

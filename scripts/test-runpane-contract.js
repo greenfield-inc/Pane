@@ -3208,6 +3208,8 @@ async function checkChatTabCreateParity() {
     ['panels', 'create', '--pane', 'pane-1', '--chat', '--agent', 'codex', '--initial-input', 'Fix it', '--yes'],
     ['panels', 'create', '--pane', 'pane-1', '--agent-farm', 'greenfield/implementer:opus', '--arg', 'docs=grain', '--arg', 'task=a=b', '--title', 'Implementer', '--source', 'agent', '--yes'],
     ['panels', 'create', '--pane', 'pane-1', '--agent', 'opencode', '--chat', '--yes'],
+    // T-83 P3: a linked agent, with its parent's token.
+    ['panels', 'create', '--pane', 'pane-1', '--agent-farm', 'greenfield/planner', '--parent', 'greenfield/orchestrator:claude@af-1', '--yes'],
   ];
   const npm = [];
   for (const args of cases) npm.push(JSON.parse(JSON.stringify(await buildPanelCreateRequest(parseRunpaneArgs(args)))));
@@ -3215,6 +3217,8 @@ async function checkChatTabCreateParity() {
   assert.deepStrictEqual(npm[1], { paneId: 'pane-1', type: 'chat', chat: { profile: 'greenfield/implementer:opus', args: { docs: 'grain', task: 'a=b' }, title: 'Implementer' }, noFocus: true, source: 'agent' });
   // With --chat any agent id goes to the host, which refuses one it cannot run; without --chat --agent names a terminal agent.
   assert.deepStrictEqual(npm[2], { paneId: 'pane-1', type: 'chat', chat: { agent: 'opencode' } });
+  assert.deepStrictEqual(npm[3], { paneId: 'pane-1', type: 'chat', chat: { profile: 'greenfield/planner', parent: 'greenfield/orchestrator:claude@af-1' } });
+  await assert.rejects(buildPanelCreateRequest(parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--agent', 'claude', '--parent', 'x/y@1', '--yes'])), /--parent is the Agent Farm parent token/);
   assert.throws(() => parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--agent', 'goose', '--yes']), /Invalid --agent "goose"/);
   assert.throws(() => parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--chat', '--agent', 'Not An Id', '--yes']), /Invalid --agent "Not An Id"/);
   await assert.rejects(buildPanelCreateRequest(parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--chat', '--yes'])), /--chat needs --agent <id> or --agent-farm <profile>/);
