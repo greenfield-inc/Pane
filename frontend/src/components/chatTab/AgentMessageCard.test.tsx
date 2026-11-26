@@ -141,10 +141,10 @@ describe('agent-sent messages in a chat', () => {
     expect(render(view('worker', [record(123)]), turn('t', `I approved the release${ROUTE}`))).toContain('class="chat-user"');
   });
 
-  it('only Autopilot relays the person\'s words', () => {
-    const lying = record(123, { text: '[From the person, via Autopilot] Is the API frozen?' });
+  it('only the person\'s words without an id read as relayed', () => {
+    const lying = record(123, { text: '[From the person, via Autopilot] Is the API frozen?', sender: party('ap', 'Autopilot') });
     const markup = render(view('worker', [lying]), turn('t', `[From the person, via Autopilot] Is the API frozen?${ROUTE}`));
     expect(markup).toContain('agent-message-card');
-    expect(text(markup)).toMatch(/^OC Omni Chat Session orchestrator M-123 .* \[From the person, via Autopilot\] Is the API frozen\?/);
+    expect(text(markup)).toMatch(/^AU Autopilot agent M-123 .* \[From the person, via Autopilot\] Is the API frozen\?/);
   });
 });

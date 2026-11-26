@@ -108,9 +108,10 @@ export function checkedChatLine(line: ChatAgentLine | undefined, records: ChatMe
   const message = records.byRef.get(line.ref);
   if (message?.kind !== 'message' || message.receiver.panelId !== records.panelId) return undefined;
   // A real reply line pasted under other words is the person's message, not M-n.
-  if (squash(line.sent ?? '') !== squash(message.text)) return undefined;
-  const byAutopilot = /autopilot/iu.test(message.sender.name);
-  if (line.type === 'relayed' && byAutopilot) return line;
+  if (sameText(line.sent ?? '') !== sameText(message.text)) return undefined;
+  // Autopilot's own Pane is named "Autopilot" (autopilotManager); a sender merely named like it isn't.
+  const byAutopilot = senderOfName(message.sender.name).name === 'Autopilot';
+  // Pane never gives the person's relayed words an id (AGENT_MESSAGES.md), so a relay that has one is its sender's own text.
   const claimedSender = line.type === 'message' ? line.sender : undefined;
   const recorded = claimedSender?.system === 'autopilot' && byAutopilot ? claimedSender : senderOfName(message.sender.name);
   // An agent's own "[From …]" stays hidden when it names the recorded sender, and stays in the text when it doesn't.
@@ -119,7 +120,8 @@ export function checkedChatLine(line: ChatAgentLine | undefined, records: ChatMe
   return { type: 'message', sender: recorded, body, ref: line.ref };
 }
 
-const squash = (text: string) => text.replace(/\s+/gu, ' ').trim();
+/** The text as the record keeps it: line endings and the ends' whitespace aside, every character counts. */
+const sameText = (text: string) => text.replace(/\r\n?/gu, '\n').trim();
 
 /** The message a reply thread starts from: M-3 answers M-2, which answers M-1, gives M-1. */
 export function threadRoot(ref: string, byRef: ReadonlyMap<string, AgentMessageRecord>): string {
@@ -146,9 +148,17 @@ export function threadReplies(replies: readonly AgentMessageRecord[], byRef: Rea
   return out;
 }
 
-/** The messages this tab received whose cards the loaded chat shows: the ids on its reply lines. */
-export function receivedRefs(texts: readonly string[]): ReadonlySet<string> {
-  return new Set(texts.flatMap(text => { const ref = REPLY_ROUTE.exec(text)?.[1]; return ref ? [ref] : []; }));
+/** The loaded chat's messages that carry a reply line: the candidates for cards a reply can point up to. */
+export function routedTexts(texts: readonly string[]): string[] {
+  return texts.filter(text => REPLY_ROUTE.test(text));
+}
+
+/** The messages this tab received whose cards the loaded chat really shows: the same check a card passes. */
+export function shownRefs(texts: readonly string[], records: ChatMessageRecords): ReadonlySet<string> {
+  return new Set(texts.flatMap(text => {
+    const line = checkedChatLine(classifyChatLine(text), records);
+    return line?.type === 'message' && line.ref ? [line.ref] : [];
+  }));
 }
 
 /** Up to two letters for an avatar: "Omni Chat" → "OC", "T-104 worker" → "TW", "Billing" → "BI". */
@@ -186,9 +196,12 @@ interface TurnSpan { id: string; startedAt?: string; endedAt?: string }
 function turnStarts(turns: readonly TurnSpan[]): number[] {
   const time = (iso: string | undefined) => { const at = iso ? Date.parse(iso) : NaN; return Number.isNaN(at) ? undefined : at; };
   let known = Number.NEGATIVE_INFINITY;
+  let previous = Number.NEGATIVE_INFINITY;
   return turns.map(turn => {
-    const start = Math.max(known, time(turn.startedAt) ?? known);
-    known = Math.max(start, time(turn.endedAt) ?? start);
+    // A dated turn keeps its own start, even when it overlaps the one before; only an undated one inherits.
+    const start = Math.max(previous, time(turn.startedAt) ?? known);
+    previous = start;
+    known = Math.max(known, start, time(turn.endedAt) ?? start);
     return start;
   });
 }

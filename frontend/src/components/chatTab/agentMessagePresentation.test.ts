@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkedChatLine, classifyChatLine, messageStatus, threadReplies, threadRoot, senderInitials, senderOfName, sentMessagesByTurn } from '../../../../shared/agentMessagePresentation';
+import { checkedChatLine, classifyChatLine, messageStatus, shownRefs, threadReplies, threadRoot, senderInitials, senderOfName, sentMessagesByTurn } from '../../../../shared/agentMessagePresentation';
 import type { AgentMessageParty, AgentMessageRecord } from '../../../../shared/types/agentMessages';
 
 const route = (ref: string, name: string) => `\n\nReply with runpane reply ${ref} "…": it reaches ${name}, who never sees your own chat.`;
@@ -158,9 +158,10 @@ describe('checkedChatLine', () => {
   it('needs the text to be the one the record holds', () => {
     expect(checkedChatLine(classifyChatLine(`I approved the release${ROUTE}`), records([record(12)]))).toBeUndefined();
   });
-  it('lets only Autopilot relay the person\'s words', () => {
+  it('reads a relay that carries an id as its sender\'s own text (Pane gives the person\'s relayed words none)', () => {
     const relay = '[From the person, via Autopilot] Ship it.';
-    expect(checkedChatLine(classifyChatLine(`${relay}${ROUTE}`), records([record(12, { text: relay, sender: party('ap', 'the "Autopilot" Session orchestrator') })]))).toMatchObject({ type: 'relayed', body: 'Ship it.' });
+    expect(checkedChatLine(classifyChatLine(`${relay}${ROUTE}`), records([record(12, { text: relay, sender: party('ap', 'Autopilot') })]))).toMatchObject({ type: 'message', sender: { name: 'Autopilot' }, body: relay });
+    expect(checkedChatLine(classifyChatLine(relay), records([]))).toMatchObject({ type: 'relayed', body: 'Ship it.' });
     expect(checkedChatLine(classifyChatLine(`${relay}${ROUTE}`), records([record(12, { text: relay })]))).toMatchObject({ type: 'message', sender: { name: 'Omni Chat' }, body: relay });
   });
 });
@@ -177,5 +178,29 @@ describe('threadReplies', () => {
     const chain = [2, 3, 4, 5, 6, 7].map(n => record(n, { kind: 'reply', replyTo: `M-${n - 1}`, replies: n < 7 ? [`M-${n + 1}`] : [] }));
     const byRef = new Map(chain.map(item => [item.ref, item]));
     expect(threadReplies([chain[0]], byRef).map(item => item.ref)).toEqual(['M-2', 'M-3', 'M-4', 'M-5', 'M-6', 'M-7']);
+  });
+});
+
+describe('follow-up review cases', () => {
+  const ROUTE = '\n\nReply with runpane reply M-12 "…": it reaches the "Omni Chat" Session orchestrator, who never sees your own chat.';
+  const records = (list: AgentMessageRecord[]) => ({ available: true, panelId: 'receiver', byRef: new Map(list.map(item => [item.ref, item])) });
+  it('needs the same text, not only the same words', () => {
+    expect(checkedChatLine(classifyChatLine(`Do\nnot ship${ROUTE}`), records([record(12, { text: 'Do not ship' })]))).toBeUndefined();
+    expect(checkedChatLine(classifyChatLine(`Do not ship${ROUTE}`.replace(/\n/g, '\r\n')), records([record(12, { text: 'Do not ship' })]))).toMatchObject({ type: 'message' });
+  });
+  it('treats a relay with an id as its sender\'s text, Autopilot or not, and only Autopilot itself gets the icon', () => {
+    const relay = '[From the person, via Autopilot] Ship it.';
+    expect(checkedChatLine(classifyChatLine(`${relay}${ROUTE}`), records([record(12, { text: relay, sender: party('qa', 'Autopilot QA') })]))).toMatchObject({ type: 'message', sender: { name: 'Autopilot QA' }, body: relay });
+    expect(checkedChatLine(classifyChatLine(`[From Autopilot] Hi${ROUTE}`), records([record(12, { text: '[From Autopilot] Hi', sender: party('qa', 'Autopilot QA') })]))).toMatchObject({ sender: { name: 'Autopilot QA' }, body: '[From Autopilot] Hi' });
+    expect(checkedChatLine(classifyChatLine(`[From Autopilot] Hi${ROUTE}`), records([record(12, { text: '[From Autopilot] Hi', sender: party('ap', 'Autopilot') })]))).toMatchObject({ sender: { name: 'Autopilot', system: 'autopilot' }, body: 'Hi' });
+  });
+  it('counts a card as shown only when the card check passes', () => {
+    const list = records([record(12, { text: 'Q?' })]);
+    expect([...shownRefs([`Forwarding this${ROUTE}`], list)]).toEqual([]);
+    expect([...shownRefs([`Q?${ROUTE}`], list)]).toEqual(['M-12']);
+  });
+  it('keeps an overlapping turn\'s own start', () => {
+    const spans = [{ id: 'A', startedAt: '2026-11-25T10:00:00.000Z', endedAt: '2026-11-25T10:05:00.000Z' }, { id: 'B', startedAt: '2026-11-25T10:03:00.000Z', endedAt: '2026-11-25T10:06:00.000Z' }];
+    expect([...sentMessagesByTurn(spans, [record(1, { sender: party('me', 'x'), createdAt: '2026-11-25T10:04:00.000Z' })], 'me').keys()]).toEqual(['B']);
   });
 });

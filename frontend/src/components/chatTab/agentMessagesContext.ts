@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { AgentMessageRecord } from '../../../../shared/types/agentMessages';
-import { checkedChatLine, classifyChatLine, type ChatAgentLine, type ChatMessageRecords } from '../../../../shared/agentMessagePresentation';
+import { checkedChatLine, classifyChatLine, shownRefs, type ChatAgentLine, type ChatMessageRecords } from '../../../../shared/agentMessagePresentation';
 
 /** This tab's messages (T-105), sent and received, by ref; and the ones it sent, by the turn that sent them. */
 export interface AgentMessagesView extends ChatMessageRecords {
@@ -47,9 +47,13 @@ function placementKey(sentByTurn: ReadonlyMap<string, AgentMessageRecord[]>): st
  * The view the chat's cards read. It changes only when the records or the placement do, not on
  * every streamed token (turns change with each one), so a turn's cards don't re-render while an agent writes.
  */
-export function useAgentMessagesView(panelId: string, loaded: PanelMessageRecords, sentByTurn: ReadonlyMap<string, AgentMessageRecord[]>, shownHere: ReadonlySet<string>): AgentMessagesView {
-  const key = `${placementKey(sentByTurn)}|${[...shownHere].join(',')}`;
-  const build = (): AgentMessagesView => ({ panelId, available: loaded.available, byRef: new Map(loaded.records.map(record => [record.ref, record])), sentByTurn, shownHere });
+export function useAgentMessagesView(panelId: string, loaded: PanelMessageRecords, sentByTurn: ReadonlyMap<string, AgentMessageRecord[]>, routed: readonly string[]): AgentMessagesView {
+  // Each routed text by its length and its end, which holds the reply line's id: cheap to build on every token.
+  const key = `${placementKey(sentByTurn)}|${routed.map(text => `${text.length}:${text.slice(-120)}`).join('\u0000')}`;
+  const build = (): AgentMessagesView => {
+    const records = { panelId, available: loaded.available, byRef: new Map(loaded.records.map(record => [record.ref, record])) };
+    return { ...records, sentByTurn, shownHere: shownRefs(routed, records) };
+  };
   const [held, setHeld] = useState(() => ({ panelId, loaded, key, view: build() }));
   if (held.panelId === panelId && held.loaded === loaded && held.key === key) return held.view;
   // Adjusting state while rendering (react.dev "storing information from previous renders"): the new view is used now.
