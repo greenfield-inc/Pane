@@ -106,6 +106,9 @@ let seeded: Promise<Fixture> | undefined;
 
 /** Creates the Sessions once per run, then rewrites each scripted agent's stored history. */
 function fixture(baseURL: string | undefined): Promise<Fixture> {
+  if (!existsSync(path.resolve('frontend/dist/index.html'))) {
+    throw new Error('The Session switch benchmark serves the production renderer, and frontend/dist has none, so nothing was launched. Run `pnpm build:frontend`, then run it again.');
+  }
   seeded ??= (async () => {
     const pane = isolatedPane('session-switch');
     withFakeClaude(pane);

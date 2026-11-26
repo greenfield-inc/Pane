@@ -1,6 +1,4 @@
 import { defineConfig } from '@playwright/test';
-import { existsSync } from 'node:fs';
-import path from 'node:path';
 import electronConfig from './playwright.chat-tabs.config';
 import { getPlaywrightPort, getPlaywrightServerEnv } from './playwright.shared';
 
@@ -8,10 +6,9 @@ import { getPlaywrightPort, getPlaywrightServerEnv } from './playwright.shared';
 // `pnpm build:main` against the production renderer, so run `pnpm build:frontend` first.
 // The dev server's StrictMode mounts every chat twice and its unminified React is 2-5x
 // slower, so its numbers say nothing about the app people use. Timing is reported only;
-// the spec's hard checks (retained DOM, one chat mount, Enter focus) fail the run.
-if (!existsSync(path.join(__dirname, 'frontend', 'dist', 'index.html'))) {
-  throw new Error('playwright.session-switch.config.ts serves the production renderer, and frontend/dist has none. Run `pnpm build:frontend` first, then run this config again.');
-}
+// the spec's hard checks (retained DOM, one chat mount, Enter focus) fail the run. The spec
+// refuses to start without frontend/dist; this file must still load without it, since
+// scripts/ci-test-inventory.mjs lists its tests in a job that builds nothing.
 process.env.PANE_SWITCH_BENCH = '1';
 const port = getPlaywrightPort();
 
