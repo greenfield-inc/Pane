@@ -69,6 +69,9 @@ function markdownComponents(blocks: ChatRendering['blocks']): Components {
  * the text, per components set; the least recently used goes first.
  */
 const PARSED_LIMIT = 4000;
+/** And at most this much source text in all, in UTF-16 units (about 16 MB). */
+const PARSED_CHARS = 8 * 1024 * 1024;
+let parsedChars = 0;
 const parsed = new WeakMap<Components, Map<string, ReactElement>>();
 const REMARK_PLUGINS = [remarkGfm];
 function parsedMarkdown(text: string, components: Components): ReactElement {
@@ -83,7 +86,12 @@ function parsedMarkdown(text: string, components: Components): ReactElement {
   // react-markdown's sync Markdown is a plain function of its options (no hooks): its result is the tree it would render.
   const tree = ReactMarkdown({ children: text, remarkPlugins: REMARK_PLUGINS, components });
   cache.set(text, tree);
-  while (cache.size > PARSED_LIMIT) cache.delete(cache.keys().next().value!);
+  parsedChars += text.length;
+  while (cache.size > PARSED_LIMIT || (parsedChars > PARSED_CHARS && cache.size > 1)) {
+    const oldest = cache.keys().next().value!;
+    cache.delete(oldest);
+    parsedChars -= oldest.length;
+  }
   return tree;
 }
 
@@ -103,9 +111,26 @@ const Markdown = memo(({ text, live }: { text: string; live: boolean }) => {
 });
 Markdown.displayName = 'Markdown';
 
+/** Both modes return the same tree (react-markdown's output, with no component of its own around it), so a block that becomes cacheable as its turn ends keeps its elements, focus and state. */
 const MarkdownBlock = memo(({ text, components, cache }: { text: string; components: Components; cache: boolean }) =>
-  cache ? parsedMarkdown(text, components) : <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>{text}</ReactMarkdown>);
+  cache ? parsedMarkdown(text, components) : ReactMarkdown({ children: text, remarkPlugins: REMARK_PLUGINS, components }));
 MarkdownBlock.displayName = 'MarkdownBlock';
+
+/**
+ * Folds and step groups the reader opened, by id: a turn that leaves the chat's window
+ * (turnWindow.ts) and comes back, or a chat shown again, keeps them open. Bounded; the oldest goes first.
+ */
+const OPENED_LIMIT = 2000;
+const opened = new Set<string>();
+function useOpened(id: string): [boolean, (open: boolean) => void] {
+  const [open, setOpen] = useState(() => opened.has(id));
+  return [open, next => {
+    opened.delete(id);
+    if (next) opened.add(id);
+    while (opened.size > OPENED_LIMIT) opened.delete(opened.values().next().value!);
+    setOpen(next);
+  }];
+}
 
 const VERBS = { explore: ['Exploring', 'Explored'], edit: ['Edit', 'Edited'], run: ['Run', 'Ran'], think: ['Thinking', 'Thought'], other: ['Using', 'Used'] } satisfies Record<ChatStep['kind'], [string, string]>;
 const ICONS = { explore: Eye, edit: Pencil, run: Terminal, think: Brain, other: Wrench };
@@ -160,7 +185,7 @@ function StepGroupRow({ group, waiting, actions }: { group: StepGroup; waiting: 
 
 function StepGroupLine({ group, waiting, actions }: { group: StepGroup; waiting: ReadonlySet<string>; actions: ChatTurnActions }) {
   const state = groupState(group, waiting);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOpened(group.id);
   const single = group.steps.length === 1 ? group.steps[0] : undefined;
   const verb = VERBS[group.kind][state === 'running' || state === 'waiting' ? 0 : 1];
   const liveOutput = single?.kind === 'run' && state === 'running' && single.output;
@@ -258,7 +283,7 @@ export function WorkerNoteLine({ note, onOpen }: { note: WorkerNote; onOpen?: (p
  * the turn runs the row says what it's doing now; afterwards, how long it worked.
  */
 export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions, latest = false }: { turn: ChatTurn; waiting: ReadonlySet<string>; actions: ChatTurnActions; latest?: boolean }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useOpened(`fold:${turn.id}`);
   // D-202: the latest turn says when it finished; every message shows its time on hover.
   const { before, after, activity, fold: row, ended } = turnDisplay(turn, { latest, waiting });
   // The icon box stays after the turn ends, so the label never shifts.

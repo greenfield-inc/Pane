@@ -128,6 +128,18 @@ function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number 
   newer.current = hasNewer;
   const record = useCallback(() => { if (viewport.current) anchor.current = readAnchor(viewport.current, newer.current); }, [viewport]);
   const previous = useRef({ start, length });
+  /** The row just placed, held there for about 10 frames: assistant-ui sees the same prepend a commit later and moves the scroll by the height change, which is wrong when the window also trimmed its newest end. */
+  const held = useRef<{ id: string; offset: number; frames: number } | undefined>(undefined);
+  const hold = useCallback(() => {
+    const element = viewport.current;
+    const row = held.current;
+    if (!element || !row) return false;
+    const target = element.querySelector<HTMLElement>(`[data-anchor-id="${CSS.escape(row.id)}"]`);
+    if (!target) return false;
+    const drift = target.getBoundingClientRect().top - element.getBoundingClientRect().top - row.offset;
+    if (Math.abs(drift) >= 1) element.scrollTop += drift;
+    return true;
+  }, [viewport]);
   useLayoutEffect(() => {
     const element = viewport.current;
     const moved = previous.current.start !== start || (previous.current.length > length);
@@ -137,6 +149,7 @@ function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number 
         const target = element.querySelector<HTMLElement>(`[data-anchor-id="${CSS.escape(row.id)}"]`);
         if (!target) continue;
         element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top - row.offset;
+        held.current = { id: row.id, offset: row.offset, frames: 10 };
         break;
       }
       record();
@@ -144,6 +157,32 @@ function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number 
     // Not re-read otherwise: right after new content renders, a chat that follows the
     // live end has not scrolled yet, and reading then would mistake it for a reader.
   }, [viewport, start, length, record]);
+  // Every commit while held, and each frame until the hold ends: put the row back. A gesture ends the hold.
+  useLayoutEffect(() => { if (held.current) hold(); });
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element) return;
+    let frame = 0;
+    const tick = () => {
+      const row = held.current;
+      if (!row) return;
+      hold();
+      row.frames -= 1;
+      if (row.frames <= 0) { held.current = undefined; record(); return; }
+      frame = requestAnimationFrame(tick);
+    };
+    const onScroll = () => { if (held.current && !hold()) held.current = undefined; };
+    const release = () => { held.current = undefined; };
+    // Capture: on the viewport itself it runs before the turn window's own listener, which would otherwise render the wrong turns for the moved position first.
+    element.addEventListener('scroll', onScroll, { passive: true, capture: true });
+    for (const gesture of ['wheel', 'pointerdown', 'touchstart', 'keydown'] as const) element.addEventListener(gesture, release, { passive: true });
+    frame = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(frame);
+      element.removeEventListener('scroll', onScroll, { capture: true });
+      for (const gesture of ['wheel', 'pointerdown', 'touchstart', 'keydown'] as const) element.removeEventListener(gesture, release);
+    };
+  }, [viewport, hold, record, start, length]);
   return record;
 }
 

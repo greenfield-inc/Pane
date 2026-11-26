@@ -44,12 +44,12 @@ if (params.has('long')) {
   const messages = view.transcript!.messages;
   view.transcript!.messages = [...Array.from({ length: 4 }, (_, round) => messages.map(message => ({ ...message, id: `${message.id}:${round}` }))).flat(), ...messages];
 }
-// ?turns=N: a long conversation of N turns (a request, then a markdown reply naming "Reply n"); ?window=M
+// ?turns=N: a long conversation of N turns (a request, then a markdown reply naming "Reply n", every fifth after reading a file); ?window=M
 // mounts only its newest M messages, the rest paged in with Earlier messages (chat-tab:history).
 const turnCount = Number(params.get('turns') ?? 0);
 const everyMessage: AgentChatMessage[] = Array.from({ length: turnCount }, (_, turn) => [
   { id: `user:t${turn}`, role: 'user' as const, parts: [{ type: 'text' as const, text: `Request ${turn}: look at module ${turn % 7}.` }] },
-  { id: `a:t${turn}`, role: 'assistant' as const, parts: [{ type: 'text' as const, text: `Reply ${turn}: the **module** is fine.\n\n- one\n- two\n\n\`\`\`ts\nconst value${turn} = ${turn};\n\`\`\`\n\n${turn % 3 === 0 ? 'A longer paragraph that wraps across a couple of lines in a narrow column, so turns differ in height. '.repeat(3) : 'Short.'}` }] },
+  { id: `a:t${turn}`, role: 'assistant' as const, parts: [...(turn % 5 === 0 ? [{ type: 'tool' as const, id: `tool:t${turn}`, title: `Read src/module${turn}.ts`, kind: 'read' as const, status: 'completed' as const, locations: [{ path: `/repo/src/module${turn}.ts` }] }] : []), { type: 'text' as const, text: `Reply ${turn}: the **module** is fine.\n\n- one\n- two\n\n\`\`\`ts\nconst value${turn} = ${turn};\n\`\`\`\n\n${turn % 3 === 0 ? 'A longer paragraph that wraps across a couple of lines in a narrow column, so turns differ in height. '.repeat(3) : 'Short.'}` }] },
 ]).flat();
 if (turnCount) {
   const windowSize = Number(params.get('window') ?? everyMessage.length);

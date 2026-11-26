@@ -53,21 +53,63 @@ test('copy conversation copies every turn, not only the rendered ones', async ({
   for (const turn of [0, 150, 299]) expect(text).toContain(`Reply ${turn}:`);
 });
 
-test('Earlier messages pages in above the reader and keeps their place', async ({ page }) => {
-  await open(page, 'turns=300&window=200');
-  await expect(reply(page, 299)).toBeInViewport();
+/** Offsets of `text` from the viewport's top on every frame for `ms`, while `act` runs. */
+async function sampleDuring(page: Page, text: string, ms: number, act: () => Promise<void>) {
+  const sampling = page.evaluate(async ({ text: wanted, ms: span }) => {
+    const seen: Array<number | null> = [];
+    const started = performance.now();
+    while (performance.now() - started < span) {
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const element = document.querySelector<HTMLElement>('[aria-label="Conversation messages"]')!;
+      const message = [...element.querySelectorAll<HTMLElement>('[data-pane-part="chat-message"]')].find(node => node.textContent?.startsWith(wanted));
+      seen.push(message ? Math.round(message.getBoundingClientRect().top - element.getBoundingClientRect().top) : null);
+    }
+    return seen;
+  }, { text, ms });
+  await act();
+  return sampling;
+}
+
+for (const [name, query, label] of [
+  ['', 'turns=300&window=200', /^Earlier messages \(300\)/],
+  // 650 + a page of 100 is over the viewer's 700, so the newest end trims and Newer messages appears.
+  [' while the newest end trims', 'turns=400&window=650', /^Earlier messages \(50\)/],
+] as const) {
+  test(`Earlier messages pages in above the reader and keeps their place${name}`, async ({ page }) => {
+    await open(page, query);
+    await expect(page.getByText('Reply 399:', { exact: false }).or(reply(page, 299))).toBeInViewport();
+    const earlier = page.getByRole('button', { name: /^Earlier messages/ });
+    await expect(async () => {
+      await viewport(page).evaluate(element => { element.scrollTop = 0; });
+      await expect(earlier).toBeInViewport({ timeout: 200 });
+    }).toPass();
+    await page.waitForTimeout(100);
+    const before = await place(page);
+    expect(before?.text).toBeTruthy();
+    const offsets = await sampleDuring(page, before!.text!, 800, async () => {
+      await earlier.click();
+      await expect(page.getByRole('button', { name: label })).toBeAttached();
+    });
+    // Every frame through the prepend (and the trim) shows the reader's message where it was.
+    for (const offset of offsets.filter(value => value !== null)) expect(Math.abs(offset! - before!.offset)).toBeLessThanOrEqual(2);
+    expect(offsets.at(-1)).not.toBeNull();
+  });
+}
+
+test('a chat left on a page of older messages comes back at its live end, following it', async ({ page }) => {
+  await open(page, 'turns=400&window=650');
   const earlier = page.getByRole('button', { name: /^Earlier messages/ });
-  while (!await earlier.isVisible()) await scrollUp(page, 2000);
-  await viewport(page).evaluate(element => { element.scrollTop = 0; });
-  await page.waitForTimeout(100);
-  const before = await place(page);
-  expect(before).not.toBeNull();
+  await expect(async () => {
+    await viewport(page).evaluate(element => { element.scrollTop = 0; });
+    await expect(earlier).toBeInViewport({ timeout: 200 });
+  }).toPass();
   await earlier.click();
-  await expect(page.getByRole('button', { name: /^Earlier messages \(300\)/ })).toBeAttached();
-  await page.waitForTimeout(200);
-  const after = await place(page);
-  expect(after?.text).toBe(before?.text);
-  expect(Math.abs((after?.offset ?? 0) - (before?.offset ?? 0))).toBeLessThanOrEqual(2);
+  await expect(page.getByRole('button', { name: 'Newer messages' })).toBeAttached();
+  // The viewer drops an older page when the chat closes, so its place there can't come back.
+  await page.evaluate(() => window.qaSwitchAway());
+  await expect(page.getByText('Reply 399:', { exact: false })).toBeInViewport();
+  await page.evaluate(() => window.qaStream('A new reply after coming back.', true));
+  await expect(page.getByText('A new reply after coming back.')).toBeInViewport();
 });
 
 test('a reply streaming at the live end stays in view', async ({ page }) => {
@@ -116,3 +158,41 @@ test('a chat comes back where it was left, from its first frame', async ({ page 
   await page.evaluate(() => window.qaSwitchAway());
   await expect(reply(page, 299)).toBeInViewport();
 });
+
+test('a link in a reply keeps focus when the reply writes its next block', async ({ page }) => {
+  await open(page, 'turns=3&working=1');
+  await page.evaluate(() => window.qaStream('\n\nSee [the guide](https://example.com/guide) for the rest.'));
+  const link = page.getByRole('link', { name: 'the guide' });
+  await link.focus();
+  // Marked on the element itself, so a remount (a new element) would lose it.
+  await link.evaluate(element => element.setAttribute('data-qa-same', ''));
+  // The link's block is no longer the one being written, so it becomes cacheable.
+  await page.evaluate(() => window.qaStream('\n\nA new paragraph after the link.'));
+  await expect(page.getByText('A new paragraph after the link.')).toBeVisible();
+  expect(await page.evaluate(() => document.activeElement?.hasAttribute('data-qa-same') ?? false)).toBe(true);
+});
+
+test('an opened turn stays open, and a focused control stays rendered, when the turn leaves the window', async ({ page }) => {
+  await open(page, 'turns=300');
+  await expect(reply(page, 299)).toBeInViewport();
+  // Turn 295 read a file, so its activity folds into one row.
+  const turn = page.locator('.chat-turn-row[data-turn-key="turn:user:t295"]');
+  const fold = turn.locator('button.chat-fold');
+  await fold.scrollIntoViewIfNeeded();
+  await fold.click();
+  await expect(fold).toHaveAttribute('aria-expanded', 'true');
+  await expect(fold).toBeFocused();
+  // Scrolled far away (not by the keyboard), the focused row stays rendered and focused.
+  await viewport(page).evaluate(element => { element.scrollTop = 0; });
+  await expect(reply(page, 0)).toBeInViewport();
+  await expect(fold).toBeFocused();
+  // Once focus leaves it, it unmounts with the window, and comes back open.
+  await page.getByRole('textbox', { name: /^Message/ }).focus();
+  await expect(turn).toHaveCount(0);
+  await viewport(page).evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await expect(async () => {
+    if (!await turn.count()) await viewport(page).evaluate(element => { element.scrollTop -= 300; });
+    await expect(fold).toHaveAttribute('aria-expanded', 'true', { timeout: 200 });
+  }).toPass();
+});
+

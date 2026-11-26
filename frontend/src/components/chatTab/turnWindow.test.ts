@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { endRange, rangeHolds, remapRange, visibleRange } from './turnWindow';
+import { endRange, keepFocused, rangeHolds, remapRange, visibleRange } from './turnWindow';
 
 // Ten turns of 100 px: turn n spans [100n, 100n + 100).
 const tens = Array.from({ length: 10 }, () => 100);
@@ -65,5 +65,17 @@ describe('remapRange', () => {
 
   it('is null when none of the rendered turns is left (jumped to the latest window)', () => {
     expect(remapRange(['a', 'b'], { start: 0, end: 2 }, ['x', 'y'])).toBeNull();
+  });
+});
+
+describe('keepFocused', () => {
+  it('widens the range to the focused turn, above or below', () => {
+    expect(keepFocused({ start: 10, end: 15 }, 4)).toEqual({ start: 4, end: 15 });
+    expect(keepFocused({ start: 10, end: 15 }, 20)).toEqual({ start: 10, end: 21 });
+  });
+
+  it('leaves the range alone with no focused turn, or one already in it', () => {
+    expect(keepFocused({ start: 10, end: 15 }, undefined)).toEqual({ start: 10, end: 15 });
+    expect(keepFocused({ start: 10, end: 15 }, 12)).toEqual({ start: 10, end: 15 });
   });
 });

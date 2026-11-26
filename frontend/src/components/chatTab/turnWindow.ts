@@ -102,6 +102,8 @@ interface ChatPlace { key: string; into: number }
 interface ChatMemory { heights: Map<string, number>; place?: ChatPlace; atEnd: boolean; height: number }
 /** Chats remembered at once; the oldest is forgotten first. */
 const REMEMBERED = 100;
+/** Measured turns kept per chat; the least recently measured go first, so paging a long chat can't grow it without end. */
+const HEIGHTS_PER_CHAT = 2000;
 const memories = new Map<string, ChatMemory>();
 
 function memoryOf(chatId: string): ChatMemory {
@@ -129,6 +131,12 @@ interface TurnWindowOptions {
   all: boolean;
   /** The chat follows its live end now (autoScroll). */
   follows: boolean;
+}
+
+/** The range, widened to keep `focused` rendered: a focused control never unmounts under the keyboard. */
+export function keepFocused(range: TurnRange, focused: number | undefined): TurnRange {
+  if (focused === undefined || (focused >= range.start && focused < range.end)) return range;
+  return focused < range.start ? { start: focused, end: range.end } : { start: range.start, end: focused + 1 };
 }
 
 export interface TurnWindow {
@@ -165,9 +173,8 @@ export function useTurnWindow({ chatId, turns, viewportRef, listRef, all, follow
   }
   const shown = all ? { start: 0, end: keys.length } : range;
 
-  // What the listeners read: always this render's.
+  // What the listeners read: this commit's, published in the first layout effect below (a render React drops never reaches them).
   const live = useRef({ keys, sizes, shown, follows, all });
-  live.current = { keys, sizes, shown, follows, all };
   const restored = useRef(false);
   const observed = useRef<{ observer: ResizeObserver; rows: Set<Element> } | null>(null);
 
@@ -184,10 +191,13 @@ export function useTurnWindow({ chatId, turns, viewportRef, listRef, all, follow
       const index = Number(row.dataset.turnIndex);
       const was = current[index];
       if (was === undefined || Math.abs(was - rect.height) < 0.5) continue;
+      memory.heights.delete(row.dataset.turnKey);
       memory.heights.set(row.dataset.turnKey, rect.height);
       current[index] = rect.height;
-      if (rect.top < top) shift += rect.height - was;
+      // Only a turn wholly above the viewport moves what the reader sees; one crossing its top grew where the reader may be looking (a disclosure just opened).
+      if (rect.bottom <= top + 0.5) shift += rect.height - was;
     }
+    while (memory.heights.size > HEIGHTS_PER_CHAT) memory.heights.delete(memory.heights.keys().next().value!);
     if (shift && restored.current && !(live.current.follows && memory.atEnd)) viewport.scrollTop += shift;
   };
   /** Where the reader is. Whether they are at the live end is read only from scrolling: content growing is not the reader leaving. */
@@ -206,14 +216,20 @@ export function useTurnWindow({ chatId, turns, viewportRef, listRef, all, follow
     if (every) return;
     const top = viewport.scrollTop - listTop(viewport, list);
     const visible = visibleRange(current, top, viewport.clientHeight, 0);
-    const wanted = visibleRange(current, top, viewport.clientHeight);
+    const focusedRow = document.activeElement instanceof HTMLElement && list.contains(document.activeElement) ? document.activeElement.closest<HTMLElement>('[data-turn-index]') : null;
+    const wanted = keepFocused(visibleRange(current, top, viewport.clientHeight), focusedRow ? Number(focusedRow.dataset.turnIndex) : undefined);
     if (rangeHolds(now, visible, wanted)) return;
     const next = () => setState(previous => ({ ...previous, range: wanted }));
     if (urgent && (visible.start < now.start || visible.end > now.end)) flushSync(next);
     else next();
   };
   const handlers = useRef({ listTop, measure, remember, update });
-  handlers.current = { listTop, measure, remember, update };
+
+  // First: publish this commit's data and handlers to the listeners.
+  useLayoutEffect(() => {
+    live.current = { keys, sizes, shown, follows, all };
+    handlers.current = { listTop, measure, remember, update };
+  });
 
   // Scrolling and resizing, for the viewport's lifetime.
   useLayoutEffect(() => {
@@ -227,11 +243,18 @@ export function useTurnWindow({ chatId, turns, viewportRef, listRef, all, follow
       handlers.current.remember(viewport, list, scrolled);
     };
     const onScroll = () => step(true, true);
-    const observer = new ResizeObserver(() => step(false, false));
+    // A grown viewport (or a turn that shrank) can expose a spacer: render the turns now, before that frame paints.
+    const observer = new ResizeObserver(() => step(true, false));
     observer.observe(viewport);
     observed.current = { observer, rows: new Set() };
     viewport.addEventListener('scroll', onScroll, { passive: true });
+    // Focus leaving a turn kept for it lets the window let go of that turn, once focus has landed.
+    let frame = 0;
+    const onFocusOut = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => step(false, false)); };
+    viewport.addEventListener('focusout', onFocusOut);
     return () => {
+      cancelAnimationFrame(frame);
+      viewport.removeEventListener('focusout', onFocusOut);
       viewport.removeEventListener('scroll', onScroll);
       observer.disconnect();
       observed.current = null;
@@ -255,6 +278,8 @@ export function useTurnWindow({ chatId, turns, viewportRef, listRef, all, follow
     if (!restored.current && live.current.keys.length) {
       restored.current = true;
       const at = restoredAway && memory.place ? live.current.keys.indexOf(memory.place.key) : -1;
+      // The turn it was left at is not in this window (the viewer drops an older page as the chat closes): back to the live end, following it.
+      if (at < 0) memory.atEnd = true;
       viewport.scrollTop = at >= 0 ? topOf(viewport, list) + sum(live.current.sizes, 0, at) + memory.place!.into : viewport.scrollHeight;
     }
     pick(viewport, list, false);
