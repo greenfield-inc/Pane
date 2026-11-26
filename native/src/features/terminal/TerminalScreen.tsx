@@ -8,14 +8,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PaneError } from '@shared/paneError';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import type { OrchestrationSessionView } from '@shared/types/orchestrationSession';
-import { pausedMarkOf, type BrowserPanelState, type EditorPanelState, type TerminalPanelState, type ToolPanel } from '@shared/types/panels';
+import { pausedMarkOf, type BrowserPanelState, type EditorPanelState, type PanelActivationRequest, type SessionPanelLayout, type TerminalPanelState, type ToolPanel } from '@shared/types/panels';
 import { offersViewLive, streamChoices, viewLive } from '@shared/utils/streamChoice';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
 import { useDaemon, useInvokeMutation, useInvokeQuery, useReadOnlyHost } from '@/daemon';
 import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, SkeletonSwap, Text } from '@/ui';
-import { useAvoidsKeyboard } from '@/features/layout/wideLayout';
+import { useAvoidsKeyboard, useWideLayout } from '@/features/layout/wideLayout';
+import { columnWidth, RAIL_WIDTH } from '@/features/layout/windowRule';
 
 import { BrowserTab } from '../browser/BrowserTab';
 import { DeviceTab } from '../device/DeviceTab';
@@ -50,8 +51,9 @@ import { useControllerShown } from './controllerPreference';
 import { FloatingController } from './FloatingController';
 import { KEYS } from './keys';
 import { followsHost, pickPanel, sessionWorkspacePanels, stripPanels, tabView } from './panels';
-import { offerClose, PanelTabs, type LeadingTab } from './PanelTabs';
+import { offerClose, PanelTabs, type LeadingTab, type TabMenuAction } from './PanelTabs';
 import { PausedTerminal } from './PausedTerminal';
+import { closeBeside, focusedTab, followOpen, openBeside, selectTab, splitFits, splitFromLayout, type SplitState } from './sessionSplit';
 import { TerminalInputBar } from './TerminalInputBar';
 import { KeptScreen, PanelTabsSkeleton, TerminalSkeleton } from './TerminalSkeletons';
 import { TerminalTopBar } from './TerminalTopBar';
@@ -63,7 +65,7 @@ import { useTerminal } from './useTerminal';
 const KEYBOARD_GAP = 8;
 /** How long "Voice keys saved" stays above the box. */
 const NOTICE_MS = 4000;
-const PANEL_EVENTS = ['panel:created', 'panel:updated', 'panel:deleted', 'panel:activeChanged'];
+const PANEL_EVENTS = ['panel:created', 'panel:updated', 'panel:deleted', 'panel:activeChanged', 'panel:layoutChanged'];
 
 /**
  * A pane's tabs, laid out like the web app on a phone: the host bar and tabs
@@ -79,10 +81,12 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   topBar?: ReactNode;
   leading?: LeadingTabs;
 }) {
-  const { panelId } = useLocalSearchParams<{ panelId?: string }>();
+  // The split lives in the route, so a fold that recreates the app reopens it as it was: `beside` is
+  // the right tab ('' for none), `focus` the focused side, `mirrored` the desktop split last shown.
+  const { panelId, beside, focus, mirrored } = useLocalSearchParams<{ panelId?: string; beside?: string; focus?: string; mirrored?: string }>();
   const avoidsKeyboard = useAvoidsKeyboard();
   // This screen's own params: effects below run before the navigator is ready, and while another screen has focus.
-  const navigation = useNavigation<{ setParams(params: { panelId: string }): void }>();
+  const navigation = useNavigation<{ setParams(params: { panelId?: string; beside?: string; focus?: string; mirrored?: string }): void }>();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { client, profile } = useDaemon();
@@ -99,6 +103,10 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   const setActive = useInvokeMutation<[string, string]>('panels:set-active');
   const deletePanel = useInvokeMutation<[string]>('panels:delete', { invalidates: ['panels:list', 'panels:getActive'] });
   const statuses = useAgentStatuses();
+  // The desktop's split, which a wide phone mirrors; the phone never writes it.
+  const hostLayout = useInvokeQuery<SessionPanelLayout | null>('panels:get-layout', [paneId], { enabled: !leading });
+  const wide = useWideLayout(state => state.wide);
+  const [contentWidth, setContentWidth] = useState(0);
   const resumePanel = useInvokeMutation<[{ panelId: string }]>('runpane:panels:resume', { invalidates: ['panels:list'] });
   const resume = (tab: ToolPanel) => resumePanel.mutate([{ panelId: tab.id }], {
     onError: error => Alert.alert('Couldn’t resume the tab', error.message),
@@ -107,14 +115,18 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   // Tabs opened, closed or switched on the desktop show up here too. When the
   // host or an agent brings a tab forward, the phone follows if it draws that tab;
   // a tab opened that moment is followed once the refreshed list holds it.
-  const [follow, setFollow] = useState<string | null>(null);
+  const [follow, setFollow] = useState<PanelActivationRequest | null>(null);
   useEffect(() => client.onEvent(event => {
     if (event.type !== 'daemon-event' || !PANEL_EVENTS.includes(event.payload.channel)) return;
-    const payload = event.payload.args[0] as { sessionId?: string; panelId?: string } | undefined;
+    const payload = event.payload.args[0] as Partial<PanelActivationRequest> | undefined;
     if (payload?.sessionId !== paneId) return;
+    if (event.payload.channel === 'panel:layoutChanged') {
+      void queryClient.invalidateQueries({ queryKey: [profile.id, 'panels:get-layout', paneId] });
+      return;
+    }
     void queryClient.invalidateQueries({ queryKey: [profile.id, 'panels:list', paneId] });
     void queryClient.invalidateQueries({ queryKey: [profile.id, 'panels:getActive', paneId] });
-    if (event.payload.channel === 'panel:activeChanged' && payload.panelId) setFollow(payload.panelId);
+    if (event.payload.channel === 'panel:activeChanged' && payload.panelId) setFollow({ sessionId: paneId, panelId: payload.panelId, placement: payload.placement });
   }), [client, paneId, profile.id, queryClient]);
 
   // Watching a pane counts as seeing it: clear its Ready badge on the way in
@@ -139,13 +151,68 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   const panels = session ? sessionWorkspacePanels(session, strip) : strip;
   const leadingTab = leading?.tabs.find(tab => tab.id === (panelId ?? leading.tabs[0]?.id));
   const panel = leadingTab ? null : pickPanel(panels, panelId ?? null, hostActive.data?.id);
-  const view = panel ? tabView(panel) : null;
-  const paused = panel ? pausedMarkOf(panel) : undefined;
-  const followed = follow ? panels.find(candidate => candidate.id === follow) : undefined;
+  // A second tab beside the route's one. Two columns show when the content is wide enough;
+  // otherwise the focused side's tab shows alone, and the split comes back when there is room.
+  const right = leadingTab || !beside ? undefined : panels.find(candidate => candidate.id === beside && candidate.id !== panel?.id);
+  const split: SplitState = { left: panel?.id ?? null, right: right?.id ?? null, focus: right && focus === 'right' ? 'right' : 'left' };
+  const twoColumns = right !== undefined && splitFits(contentWidth);
+  const focusedPanel = right && focusedTab(split) === right.id ? right : panel;
+  // The left tab this screen last put in the route; any other `panelId` came from outside (a link, a new tab, View diff).
+  const ownLeft = useRef(panelId);
+  // The tab the route named when the screen opened (an alert or a link), which wins over the desktop's split.
+  const namedAtOpen = useRef(panelId);
+  const applySplit = (next: SplitState, extra?: { mirrored: string }) => {
+    if (next.left) ownLeft.current = next.left;
+    navigation.setParams({ ...(next.left && next.left !== panel?.id ? { panelId: next.left } : {}), beside: next.right ?? '', focus: next.focus, ...extra });
+  };
+  // The split as last shown: a screen that names a tab can replace the route's params (a new tab's `dismissTo`).
+  const shownRoute = useRef({ beside, focus, mirrored });
   useEffect(() => {
-    if (!followed) return;
+    const previous = ownLeft.current;
+    ownLeft.current = panelId;
+    if (!panelId || !previous || panelId === previous || leading) return;
+    // A tab named from outside shows on the focused side, beside the other column.
+    const was = shownRoute.current;
+    const next = selectTab({ left: previous, right: was.beside || null, focus: was.focus === 'right' ? 'right' : 'left' }, panelId);
+    applySplit(next, was.mirrored === undefined ? undefined : { mirrored: was.mirrored });
+  }, [panelId]);
+  useEffect(() => {
+    shownRoute.current = { beside, focus, mirrored };
+  });
+  // Home folds to its rail when that makes room for both columns.
+  const makeRoom = useEffectEvent(() => {
+    const layout = useWideLayout.getState();
+    if (!layout.wide || layout.collapsed || twoColumns || contentWidth === 0) return;
+    if (splitFits(contentWidth + columnWidth(layout.window.width) - RAIL_WIDTH)) useWideLayout.setState({ collapsed: true });
+  });
+  // Also once the content's width is known: a reopened split can be set before the first layout.
+  const widthKnown = contentWidth > 0;
+  useEffect(() => {
+    if (right) makeRoom();
+  }, [right?.id, widthKnown]);
+  // Opening a Session shows the desktop's split, and follows it while open; rearranging here stays here.
+  const mirror = splitFromLayout(hostLayout.data, new Set(panels.map(candidate => candidate.id)));
+  const mirrorKey = mirror ? `${mirror.left}|${mirror.right}|${mirror.focus}` : null;
+  const followMirror = useEffectEvent(() => {
+    if (leading || mirrorKey === (mirrored || null)) return;
+    const named = mirrored === undefined ? namedAtOpen.current : undefined;
+    namedAtOpen.current = undefined;
+    if (mirror) applySplit(named ? selectTab(mirror, named) : mirror, { mirrored: mirrorKey ?? '' });
+    else applySplit(closeBeside(split), { mirrored: '' });
+  });
+  useEffect(() => {
+    followMirror();
+  }, [mirrorKey]);
+  const followed = follow ? panels.find(candidate => candidate.id === follow.panelId) : undefined;
+  useEffect(() => {
+    if (!followed || !follow) return;
     // Reading the screen's own tab (an approval), the phone stays put.
-    if (followsHost(followed) && !leadingTab) navigation.setParams({ panelId: followed.id });
+    if (followsHost(followed) && !leadingTab) {
+      const next = followOpen(split, followed.id, follow.placement, wide);
+      // The desktop saves this open with the new tab's side focused; that echo leaves the phone's focus on the left.
+      const echo = next.right === followed.id && follow.placement === 'split' ? { mirrored: `${next.left}|${next.right}|right` } : undefined;
+      applySplit(next, echo);
+    }
     setFollow(null);
   }, [followed, leadingTab]);
   // The tab on screen stays put until the person or a host announcement moves it,
@@ -155,16 +222,13 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   useEffect(() => {
     if (!panelId && shownId && !hasLeading) navigation.setParams({ panelId: shownId });
   }, [panelId, shownId, hasLeading]);
-  const terminalActive = view === 'terminal' && !paused;
+  const terminalActive = focusedPanel !== null && tabView(focusedPanel) === 'terminal' && !pausedMarkOf(focusedPanel);
   const title = session ? session.session.name || 'Untitled' : pane.data?.name ?? '';
 
-  const composer = useComposerDraft(panel ? draftKey(profile.id, paneId, panel.id) : null);
-  const { draft, setDraft } = composer;
-  const voice = useVoiceDictation(composer.insert);
-  const uploads = useUploads(paneId, composer.insert);
-
-  // Clear scrollback sits in the bar above the open terminal, which owns it.
-  const terminalActions = useRef<TerminalActions | null>(null);
+  // Clear scrollback sits in the bar above the focused terminal, which owns it.
+  const leftActions = useRef<TerminalActions | null>(null);
+  const rightActions = useRef<TerminalActions | null>(null);
+  const terminalActions = focusedPanel === right ? rightActions : leftActions;
 
   // With the host's resume-on-open setting, a paused tab the person opens resumes. Only the tab
   // shown when the screen opens, or one they pick, counts; a tab paused while on screen stays paused.
@@ -178,9 +242,16 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   });
 
   const selectPanel = (next: ToolPanel) => {
-    navigation.setParams({ panelId: next.id });
+    applySplit(selectTab(split, next.id));
     setActive.mutate([paneId, next.id]);
-    if (resumeOnOpen && next.id !== panel?.id && pausedMarkOf(next)) resume(next);
+    if (resumeOnOpen && next.id !== focusedPanel?.id && pausedMarkOf(next)) resume(next);
+  };
+  // Where two columns could fit, a tab's menu opens it beside the left one, or shows it alone again.
+  const besideAction = (tab: ToolPanel): TabMenuAction | undefined => {
+    if (!wide || leading) return undefined;
+    if (tab.id === split.right) return { label: 'Show alone', onPress: () => applySplit({ left: tab.id, right: null, focus: 'left' }) };
+    if (tab.id === split.left && !split.right) return undefined;
+    return { label: 'Open beside', onPress: () => applySplit(openBeside(split, tab.id)) };
   };
 
 
@@ -197,20 +268,31 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
     // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
     const page = tab.type === 'browser' ? tab.state.customState as BrowserPanelState | undefined : undefined;
     const live = tab.type === 'browser' && offersViewLive(streamChoices.all().get(tab.id), page) ? () => { viewLive(tab.id, page); selectPanel(tab); } : undefined;
-    offerClose(tab.title, confirm, live);
+    offerClose(tab.title, confirm, live, besideAction(tab));
+  };
+  const columnProps = {
+    paneId,
+    title,
+    panels,
+    loading: panelList.isPending,
+    resuming: resumePanel.isPending,
+    onResume: readOnly ? undefined : resume,
+    shortcuts: affordances.data?.terminalShortcuts ?? [],
+    shortcutsLoading: affordances.isPending,
+    // Older hosts send no change events, so read the list fresh each time.
+    onOpenShortcuts: () => void affordances.refetch(),
   };
 
   return (
     <KeyboardAvoidingView
       testID="pane-detail-screen"
+      onLayout={({ nativeEvent: { layout } }) => setContentWidth(layout.width)}
       behavior="padding"
       enabled={avoidsKeyboard}
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
       {/* A watched terminal pans sideways, so swipe-back there starts from the left edge only. */}
       <Stack.Screen options={{ fullScreenGestureEnabled: !(readOnly && terminalActive) }} />
-      {/* Dictation's audio, here so a recording survives switching tabs; mounted on first use. */}
-      {voice.audio ? <VoiceAudio {...voice.audio} /> : null}
       {topBar ?? <TerminalTopBar paneName={title} onClearScrollback={terminalActive && !readOnly ? () => terminalActions.current?.clearScrollback() : undefined} />}
       {/* An approval's layout is final once the tabs and the tab body stop moving (perf marks). */}
       <View onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `tabs=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
@@ -219,7 +301,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
         <PanelTabs
           panels={panels}
           chatId={session?.panel.id}
-          selectedId={leadingTab?.id ?? panel?.id ?? null}
+          selectedId={leadingTab?.id ?? focusedPanel?.id ?? null}
           leading={leading?.tabs}
           onSelectLeading={id => navigation.setParams({ panelId: id })}
           onSelect={selectPanel}
@@ -231,40 +313,44 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       <View style={styles.fill} onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `body=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
       {leading ? <LeadingBodies leading={leading} selectedId={leadingTab?.id ?? null} /> : null}
       {leadingTab ? null : (
-      <SkeletonSwap loading={panelList.isPending && !panel} skeleton={<TerminalSkeleton testID="pane-skeleton" label="Loading the Pane" />} style={styles.fill}>
-      {panel && view !== 'terminal' ? (
-        <TabBody panel={panel} title={title} panels={panels} />
-      ) : panel && paused ? (
-        <PausedTerminal key={panel.id} panelId={panel.id} mark={paused} resuming={resumePanel.isPending} onResume={readOnly ? undefined : () => resume(panel)} />
-      ) : panel ? (
-        <TerminalPanel
-          key={panel.id}
-          panel={panel}
-          actions={terminalActions}
-          draft={draft}
-          onChangeDraft={setDraft}
-          composer={composer}
-          uploads={uploads}
-          voice={voice}
-          shortcuts={affordances.data?.terminalShortcuts ?? []}
-          shortcutsLoading={affordances.isPending}
-          // Older hosts send no change events, so read the list fresh each time.
-          onOpenShortcuts={() => void affordances.refetch()}
-        />
-      ) : (
-        <View style={[styles.fill, { backgroundColor: theme.terminal.background }]}>
-          {panelList.isError ? (
-            <ErrorState error={panelList.error} onRetry={() => void panelList.refetch()} />
-          ) : (
-            <EmptyState
-              testID="terminal-empty"
-              title="No tabs"
-              message={readOnly ? 'This pane has no terminal or chat tabs open.' : 'This pane has no tabs open. Tap + to start a terminal.'}
-            />
-          )}
-        </View>
-      )}
-      </SkeletonSwap>
+      <View style={styles.row}>
+        {/* The left column keeps its place in the tree, so a tab opening beside it keeps its draft and keyboard. */}
+        {twoColumns || focusedPanel === panel ? (
+          <TabColumn
+            key="left"
+            {...columnProps}
+            panel={panel}
+            actions={leftActions}
+            focused={twoColumns && split.focus === 'left'}
+            onFocus={twoColumns ? () => { if (split.focus !== 'left') navigation.setParams({ focus: 'left' }); } : undefined}
+            empty={(
+              <View style={[styles.fill, { backgroundColor: theme.terminal.background }]}>
+                {panelList.isError ? (
+                  <ErrorState error={panelList.error} onRetry={() => void panelList.refetch()} />
+                ) : (
+                  <EmptyState
+                    testID="terminal-empty"
+                    title="No tabs"
+                    message={readOnly ? 'This pane has no terminal or chat tabs open.' : 'This pane has no tabs open. Tap + to start a terminal.'}
+                  />
+                )}
+              </View>
+            )}
+          />
+        ) : null}
+        {right && (twoColumns || focusedPanel === right) ? (
+          <TabColumn
+            key="right"
+            {...columnProps}
+            panel={right}
+            actions={rightActions}
+            focused={twoColumns && split.focus === 'right'}
+            onFocus={twoColumns ? () => { if (split.focus !== 'right') navigation.setParams({ focus: 'right' }); } : undefined}
+            beside={twoColumns}
+            empty={null}
+          />
+        ) : null}
+      </View>
       )}
       </View>
       {/* The box sits on the bottom safe area (HIG: controls stay out of it), or a hair above the keyboard. */}
@@ -291,6 +377,72 @@ export function LeadingBodies({ leading, selectedId }: { leading: LeadingTabs; s
       {first ? <View style={first.id === selectedId ? styles.fill : styles.hidden}>{leading.render(first.id)}</View> : null}
       {other ? <View key={other.id} style={styles.fill}>{leading.render(other.id)}</View> : null}
     </>
+  );
+}
+
+/**
+ * One column of a Pane's tabs: the open tab's body, with a terminal's composer box under it.
+ * The column owns its box, so each side of a split keeps its own draft and dictation.
+ */
+function TabColumn({ paneId, panel, title, panels, loading, empty, actions, resuming, onResume, focused, onFocus, beside = false, shortcuts, shortcutsLoading, onOpenShortcuts }: {
+  paneId: string;
+  panel: ToolPanel | null;
+  title: string;
+  panels: readonly ToolPanel[];
+  loading: boolean;
+  /** Shown when there is no tab. */
+  empty: ReactNode;
+  actions: RefObject<TerminalActions | null>;
+  resuming: boolean;
+  onResume?: (panel: ToolPanel) => void;
+  /** Marked as the side the tab strip picks into, in a split. */
+  focused: boolean;
+  onFocus?: () => void;
+  /** The right column of a split. */
+  beside?: boolean;
+  shortcuts: RemotePwaAffordances['terminalShortcuts'];
+  shortcutsLoading: boolean;
+  onOpenShortcuts: () => void;
+}) {
+  const theme = useTheme();
+  const { profile } = useDaemon();
+  const composer = useComposerDraft(panel ? draftKey(profile.id, paneId, panel.id) : null);
+  const voice = useVoiceDictation(composer.insert);
+  const uploads = useUploads(paneId, composer.insert);
+  const paused = panel ? pausedMarkOf(panel) : undefined;
+  return (
+    <View
+      testID={beside ? 'split-right-column' : 'split-left-column'}
+      style={[styles.fill, beside && { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: theme.colors.border }]}
+      // A touch anywhere in a column (finger or mouse) makes it the focused side; it doesn't take the touch.
+      onTouchStart={onFocus}
+    >
+      {/* The focused side of a split: a fixed 2 dp line in both columns, so focus moving never shifts the tabs. */}
+      {onFocus ? <View testID={focused ? 'split-focused-mark' : undefined} style={[styles.focusMark, { backgroundColor: focused ? theme.colors.accent : 'transparent' }]} /> : null}
+      {/* Dictation's audio, here so a recording survives switching tabs; mounted on first use. */}
+      {voice.audio ? <VoiceAudio {...voice.audio} /> : null}
+      <SkeletonSwap loading={loading && !panel} skeleton={<TerminalSkeleton testID="pane-skeleton" label="Loading the Pane" />} style={styles.fill}>
+      {panel && tabView(panel) !== 'terminal' ? (
+        <TabBody panel={panel} title={title} panels={panels} />
+      ) : panel && paused ? (
+        <PausedTerminal key={panel.id} panelId={panel.id} mark={paused} resuming={resuming} onResume={onResume ? () => onResume(panel) : undefined} />
+      ) : panel ? (
+        <TerminalPanel
+          key={panel.id}
+          panel={panel}
+          actions={actions}
+          draft={composer.draft}
+          onChangeDraft={composer.setDraft}
+          composer={composer}
+          uploads={uploads}
+          voice={voice}
+          shortcuts={shortcuts}
+          shortcutsLoading={shortcutsLoading}
+          onOpenShortcuts={onOpenShortcuts}
+        />
+      ) : empty}
+      </SkeletonSwap>
+    </View>
   );
 }
 
@@ -583,6 +735,8 @@ function useKeyboardVisible(): boolean {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  row: { flex: 1, flexDirection: 'row' },
+  focusMark: { height: 2 },
   hidden: { display: 'none' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   // The web app insets xterm 8 pt from the sides and top.

@@ -37,7 +37,7 @@ const ANSWERED = [
 const READABLE_EVENTS = [
   'chat-tab:event', 'chat-tab:state', 'chat-tab:view', 'folder:created', 'folder:deleted', 'folder:updated', 'git-status-loading', 'git-status-updated', 'loops:changed',
   'orchestration-sessions:activity', 'orchestration-sessions:changed', 'orchestration-sessions:overview-updated',
-  'panel:activityStatus', 'panel:agentStatus', 'panel:created', 'panel:deleted', 'panel:event', 'panel:prompt-added', 'panel:response-added', 'panel:updated',
+  'panel:activityStatus', 'panel:agentStatus', 'panel:created', 'panel:deleted', 'panel:event', 'panel:layoutChanged', 'panel:prompt-added', 'panel:response-added', 'panel:updated',
   'project:list-changed', 'project:updated', 'session:created', 'session:creation-failed', 'session:deleted', 'session:updated', 'sessions:loaded',
   'terminal:alternateScreen', 'terminal:cliReady', 'terminal:exited', 'terminal:output', 'terminal:ptyReady', 'terminal:relaunched', 'todos:changed',
 ];

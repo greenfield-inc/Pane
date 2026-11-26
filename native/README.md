@@ -136,7 +136,9 @@ A Pane or Session screen shows every tab in one strip, each with its type's icon
 - **Run script** (`src/features/runScript/`) shows the Pane's script output and follows it live (`sessions:get-logs`, then `session-log` events), staying at the end until you scroll up.
 - **Notes, Dashboard and Setup tasks** tabs are dimmed and say which computer they open on.
 
-The phone follows the computer to a tab it brings forward (an agent's `runpane panels open`, for example) only when the phone draws that tab and it sits on the desktop's stage; Explorer and Diff live in the desktop's side panel, so the phone never jumps to them. Demo mode has a sample of every tab type (`src/features/demo/demoFiles.ts`, `demoPages.ts`).
+The phone follows the computer to a tab it brings forward (an agent's `runpane panels open`, for example) only when the phone draws that tab and it sits on the desktop's stage; Explorer and Diff live in the desktop's side panel, so the phone never jumps to them.
+
+Where two columns of at least 320 dp fit (an unfolded foldable, a tablet), a Pane or Session shows two tabs side by side (`src/features/terminal/sessionSplit.ts`). Opening it shows the desktop's split: the same left tab, right tab and focused side, read from the host's stored layout (`panels:get-layout`) and followed while open (`panel:layoutChanged`). The phone mirrors only a side-by-side split whose two tabs it draws; a desktop showing Overview or To-dos on the right shows one tab here. A tab an agent opens in a split (`runpane panels open`) goes in the right column, and the left tab keeps its draft and keyboard. Home folds to its rail when that makes room. Touching a column focuses it (a 2 dp accent line on top), and the tab strip picks into the focused column. Hold a tab for **Open beside**, or **Show alone** on the right one. Folded, the focused tab shows alone; unfolding brings the split back, also when the fold restarted the app. Rearranging on the phone never changes the desktop. Demo mode has a sample of every tab type (`src/features/demo/demoFiles.ts`, `demoPages.ts`).
 
 ## The terminal page
 
