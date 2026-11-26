@@ -33,7 +33,7 @@ import {
 const RETRY_AFTER_GIVE_UP_MS = 60_000;
 
 type RemoteClientOptions = NonNullable<ConstructorParameters<typeof RemotePaneClient>[1]>;
-export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume' | 'openPortStream' | 'measureLatency' | 'lastHeardAt'>;
+export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume' | 'openPortStream' | 'measureLatency' | 'lastHeardAt' | 'profile'>;
 export type CreateMachineClient = (profile: RemotePaneConnectionProfile, options: RemoteClientOptions) => MachineClient;
 
 export interface MachineConnectionsDeps {
@@ -212,15 +212,16 @@ export class MachineConnections {
   }
 
   /**
-   * The route a saved machine's connection is on, when the machine is online and sent an event or
-   * heartbeat in the last `ms`; null otherwise. A switch to it can skip the connection checklist (T-128).
+   * The route a saved machine's connection is on, and the address it dialed there, when the machine
+   * is online and sent an event or heartbeat in the last `ms`; null otherwise. A switch to it can skip
+   * the connection checklist and the route's address lookup (T-128).
    */
-  answeredWithin(machineId: string, ms: number): { routeId: string | null } | null {
+  answeredWithin(machineId: string, ms: number): { routeId: string | null; baseUrl: string } | null {
     const machine = this.machines.get(machineId);
     if (machine?.state.status !== 'online') return null;
     const heard = machine.client.lastHeardAt();
     if (heard === null || Date.now() - heard > ms) return null;
-    return { routeId: machine.state.routeId ?? null };
+    return { routeId: machine.state.routeId ?? null, baseUrl: machine.client.profile.baseUrl };
   }
 
   /** A saved machine's current state, or undefined for an unknown id. */

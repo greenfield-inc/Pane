@@ -51,6 +51,7 @@ function setup(ids: string[]) {
         openPortStream: vi.fn(),
         measureLatency: vi.fn(async () => 4),
         lastHeardAt: vi.fn<MachineClient['lastHeardAt']>(() => null),
+        profile: { ...saved, baseUrl: `https://${saved.id}.tail1234.ts.net:8443` },
       };
       clients.set(saved.id, client);
       return client;
@@ -262,7 +263,7 @@ describe('MachineConnections', () => {
     expect(machines.answeredWithin('build-box', 30_000)).toBeNull();
     heard.mockReturnValue(Date.now());
     vi.advanceTimersByTime(29_000);
-    expect(machines.answeredWithin('build-box', 30_000)).toEqual({ routeId: 'lan:https://bb.local' });
+    expect(machines.answeredWithin('build-box', 30_000)).toEqual({ routeId: 'lan:https://bb.local', baseUrl: 'https://build-box.tail1234.ts.net:8443' });
     vi.advanceTimersByTime(2_000);
     expect(machines.answeredWithin('build-box', 30_000)).toBeNull();
     heard.mockReturnValue(Date.now());

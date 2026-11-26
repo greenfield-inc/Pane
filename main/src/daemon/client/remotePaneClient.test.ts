@@ -1287,7 +1287,7 @@ describe('RemotePaneClientController switches fast (T-128)', () => {
     const asked: Array<[string, number]> = [];
     controller.setRecentAnswers((computerId, ms) => {
       asked.push([computerId, ms]);
-      return fresh ? { routeId: studio.routes[0].id } : null;
+      return fresh ? { routeId: studio.routes[0].id, baseUrl: server.baseUrl } : null;
     });
 
     await controller.activateProfile(primaryProfile(studio));
@@ -1300,6 +1300,38 @@ describe('RemotePaneClientController switches fast (T-128)', () => {
     await controller.activateProfile(primaryProfile(studio));
     await waitFor(() => controller.getConnectionState().status === 'connected');
     expect(checklistShown).toBe(true);
+    await controller.switchToLocalMode();
+  });
+
+  it('dials the address the machine\'s live connection uses, without a Tailscale lookup, and looks it up only when that dial fails', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const tailscale = { id: 'tailscale:https://studio-mac.tail1234.ts.net:8443', kind: 'tailscale' as const, source: 'found' as const, baseUrl: 'https://studio-mac.tail1234.ts.net:8443', token: 'test-token', tailnetMachine: 'studio-mac', tailnetDomain: 'tail1234.ts.net' };
+    const studio = { id: 'studio-mac', label: 'studio-mac', routes: [tailscale] };
+    const config = createDefaultRemoteDaemonConfig();
+    config.client.computers = [studio];
+    const controller = createController();
+    let lookups = 0;
+    controller.initialize({
+      configManager: createConfigManagerStub(config),
+      rendererEventSink: { send() {} },
+      resolveTailnetMachineUrl: async () => { lookups += 1; return server.baseUrl; },
+      checkDependencies: { lookupTailnetMachine: async () => ({ kind: 'not-found', reason: 'not in this test' }) },
+    });
+    let liveUrl = server.baseUrl;
+    controller.setRecentAnswers(() => ({ routeId: tailscale.id, baseUrl: liveUrl }));
+
+    await controller.activateProfile(primaryProfile(studio));
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(lookups).toBe(0);
+    expect(controller.getConnectionState().activeBaseUrl).toBe(server.baseUrl);
+
+    await controller.switchToLocalMode();
+    // The live connection's address stopped answering between its heartbeat and the switch.
+    liveUrl = 'http://127.0.0.1:1';
+    await controller.activateProfile(primaryProfile(studio));
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(lookups).toBe(1);
     await controller.switchToLocalMode();
   });
 
@@ -1317,13 +1349,15 @@ describe('RemotePaneClientController switches fast (T-128)', () => {
       checkDependencies: { lookupTailnetMachine: () => new Promise(() => undefined) },
     });
     await waitFor(() => controller.getConnectionState().status === 'connected');
-    expect(controller.cancelActivation()).toBe(false);
+    expect(controller.cancelActivation('build-box')).toBe(false);
 
     const switching = controller.activateProfile({
       id: 'build-box', label: 'build-box', baseUrl: 'https://build-box.tail1234.ts.net:8443', token: '', transport: 'http+sse', tailnetMachine: 'build-box', tailnetDomain: 'tail1234.ts.net',
     });
     await waitFor(() => controller.getConnectionState().check?.outcome === 'running');
-    expect(controller.cancelActivation()).toBe(true);
+    // Only a cancel for the machine being switched to stops it (review F-4).
+    expect(controller.cancelActivation('studio-mac')).toBe(false);
+    expect(controller.cancelActivation('build-box')).toBe(true);
 
     await expect(switching).rejects.toMatchObject({ code: 'ERR_REMOTE_SWITCH_CANCELLED' });
     expect(controller.getConnectionState()).toMatchObject({ status: 'connected', activeProfileId: 'studio-mac', check: null });
