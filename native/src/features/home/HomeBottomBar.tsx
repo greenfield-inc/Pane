@@ -9,6 +9,7 @@ import { InColumn, screenJustClosed, useWideLayout } from '@/features/layout/wid
 import { IconButton } from '@/features/panes/PaneKit';
 import { useTheme } from '@/theme';
 import { Icon } from '@/ui';
+import { Focusable } from '@/features/controller/Focusable';
 import { ListeningBar } from '@/features/controller/ListeningBar';
 import { useControllerActions } from '@/features/controller/useControllerActions';
 import { useVoiceDictation } from '@/features/voice/useVoiceDictation';
@@ -120,7 +121,7 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
           </IconButton>
         ) : null}
       </View>
-      {canCreate ? <Pressable
+      {canCreate ? <Focusable onActivate={() => router.push('/new')}><Pressable
         testID="home-new"
         accessibilityRole="button"
         accessibilityLabel="New"
@@ -129,7 +130,7 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
         style={({ pressed }) => [styles.new, { backgroundColor: theme.colors.accent, opacity: pressed ? 0.85 : 1 }]}
       >
         <Icon ios="plus" android="add" size={22} color={theme.colors.onAccent} />
-      </Pressable> : null}
+      </Pressable></Focusable> : null}
     </Animated.View>
   );
 }

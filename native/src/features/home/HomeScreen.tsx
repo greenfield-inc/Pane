@@ -298,6 +298,7 @@ export function HomeScreen() {
         title="Needs you"
         count={counts?.needs}
         right={(
+          <Focusable onActivate={() => router.push('/sort-approvals')}>
           <Pressable
             testID="approvals-sort"
             accessibilityRole="button"
@@ -308,6 +309,7 @@ export function HomeScreen() {
           >
             <Icon ios="arrow.up.arrow.down" android="swap_vert" size={14} color={theme.colors.textSecondary} />
           </Pressable>
+          </Focusable>
         )}
       />
       <SkeletonSwap loading={nothingWaiting && !answered.approvals} skeleton={<CardSkeleton testID="approvals-skeleton" label="Loading approvals" />}>
