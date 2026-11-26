@@ -211,7 +211,7 @@ describe('the sidebar cursor (T-87)', () => {
     store.getState().showAtCursor('b');
     const settling = store.getState().settle('b', null);
     expect(store.getState()).toMatchObject({ cursorSessionId: undefined, selectedSessionId: 'b' });
-    expect(open).toHaveBeenCalledWith({ sessionId: 'b' }, { select: true });
+    expect(open).toHaveBeenCalledWith({ sessionId: 'b' }, { select: true, resume: true });
     reply.resolve({ success: true, data: { view: null, panels: [], layout: null, list: { sessions: store.getState().sessions, selectedSessionId: 'b' } } });
     await settling;
     expect(store.getState().selectedSessionId).toBe('b');
@@ -229,5 +229,30 @@ describe('the sidebar cursor (T-87)', () => {
     first.resolve({ success: true, data: { view: null, panels: [], layout: null, list: { sessions: store.getState().sessions, selectedSessionId: 'b' } } });
     await slow;
     expect(store.getState().selectedSessionId).toBe('a');
+  });
+
+  it('a settle by itself keeps a paused chat paused until Enter or a click', async () => {
+    const open = vi.fn().mockResolvedValue({ success: true, data: { view: null, panels: [], layout: null } });
+    const store = await setupWithOpen(open);
+    await store.getState().settle('b', null, { resume: false });
+    expect(open).toHaveBeenCalledWith({ sessionId: 'b' }, { select: true, resume: false });
+    expect(store.getState().quietSessionId).toBe('b');
+    await store.getState().settle('b', null);
+    expect(store.getState().quietSessionId).toBeUndefined();
+  });
+
+  it('keeps a list that landed while the settle read, instead of the settle\'s own', async () => {
+    const reply = deferred<{ success: true; data: { view: null; panels: never[]; layout: null; list: { sessions: OrchestrationSessionRecord[]; selectedSessionId: string } } }>();
+    const open = vi.fn().mockReturnValue(reply.promise);
+    const store = await setupWithOpen(open);
+    const settling = store.getState().settle('b', null);
+    // A rename lands first.
+    const renamed = store.getState().sessions.map(session => (session.id === 'b' ? { ...session, name: 'B renamed' } : session));
+    list.mockResolvedValueOnce({ success: true, data: { sessions: renamed, selectedSessionId: 'b' } });
+    await store.getState().refresh();
+    reply.resolve({ success: true, data: { view: null, panels: [], layout: null, list: { sessions: store.getState().sessions.map(session => ({ ...session, name: session.id.toUpperCase() })), selectedSessionId: 'b' } } });
+    await settling;
+    expect(store.getState().sessions.find(session => session.id === 'b')?.name).toBe('B renamed');
+    expect(store.getState().selectedSessionId).toBe('b');
   });
 });

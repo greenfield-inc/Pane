@@ -71,6 +71,7 @@ import {
   focusedSessionTile,
   resizeSessionSplit,
   showSessionInLayout,
+  findTileForSession,
   toggleMaximizedTile,
 } from '../utils/sessionWorkspaceLayout';
 
@@ -382,8 +383,12 @@ function SessionWorkspace() {
 
   // The displayed tree follows intent in this commit. The passive effect above
   // only remembers it; it must never expose the outgoing focused workspace.
-  const shownSessionId = cursorSessionId ?? selectedSessionId;
-  const displayedLayout = shownSessionId ? showSessionInLayout(layout, shownSessionId) : layout;
+  // The cursor shows its Session in the focused tile only. One already on screen in another
+  // tile is left where it is: the settled focus (and a maximized tile) stays until it settles.
+  const settledLayout = selectedSessionId ? showSessionInLayout(layout, selectedSessionId) : layout;
+  const displayedLayout = cursorSessionId && !findTileForSession(settledLayout.root, cursorSessionId)
+    ? showSessionInLayout(settledLayout, cursorSessionId)
+    : settledLayout;
   return (
     <div data-testid="session-tile-layout" className="relative flex min-h-0 flex-1 overflow-hidden bg-bg-primary">
       <SessionTileLayout
@@ -619,6 +624,7 @@ function CachedSessionTileBody({ sessionId, record, hostId, chrome }: {
   chrome: SessionTileChrome;
 }) {
   const cursorSessionId = useOrchestrationSessionStore(state => state.cursorSessionId);
+  const quietSessionId = useOrchestrationSessionStore(state => state.quietSessionId);
   const peeking = cursorSessionId === sessionId;
   const selectionError = useOrchestrationSessionStore(state => state.selectedSessionId === sessionId ? state.selectionError : null);
   const entry = useSessionViewCache(state => state.entries[sessionId]);
@@ -657,8 +663,14 @@ function CachedSessionTileBody({ sessionId, record, hostId, chrome }: {
     return current && current.revision > display.view.session.revision ? { ...display.view, session: current } : display.view;
   }, [display, record]);
 
-  // The cursor's Session is only being looked at: nothing is saved for it, no agent starts.
-  const show = useMemo(() => ({ peeking: !!display && display.view.session.id === cursorSessionId, entry: display }), [cursorSessionId, display]);
+  // The cursor's Session, and the one kept dimmed behind it while the next is read, are only
+  // being looked at: nothing is saved for them, and no agent starts.
+  const showsAnother = !!display && display.view.session.id !== sessionId;
+  const show = useMemo(() => {
+    const shownId = display?.view.session.id;
+    const lookedAt = showsAnother || shownId === cursorSessionId;
+    return { peeking: lookedAt, startsAgents: !lookedAt && shownId !== quietSessionId, entry: display };
+  }, [cursorSessionId, display, quietSessionId, showsAnother]);
 
   const onOverviewUpdate = useCallback(async (input: OrchestrationSessionUpdateInput): Promise<OrchestrationSessionRecord> => {
     const base = cachedSessionView(sessionId)?.view;
@@ -679,9 +691,13 @@ function CachedSessionTileBody({ sessionId, record, hostId, chrome }: {
     return <SessionTileFallback record={record} error={error} isLoading={false} chrome={chrome} onRetry={retryOpen} />;
   }
   if (!display || !view) {
-    return <SessionTileFallback record={record} error={null} isLoading chrome={chrome} onRetry={retryOpen} />;
+    // Nothing shown yet (the cursor came from another view): no bones while the cursor only passes over.
+    return (
+      <QuietSkeletons quiet={peeking}>
+        <SessionTileFallback record={record} error={null} isLoading chrome={chrome} onRetry={retryOpen} />
+      </QuietSkeletons>
+    );
   }
-  const showsAnother = display.view.session.id !== sessionId;
   return (
     <SessionShowContext.Provider value={show}>
       <div
@@ -691,7 +707,7 @@ function CachedSessionTileBody({ sessionId, record, hostId, chrome }: {
         data-session-shown-before={showsAnother ? display.view.session.id : undefined}
       >
         {/* No bones anywhere in a Session the cursor only passes over, nor in the one kept dimmed behind it (T-87, G). */}
-        <QuietSkeletons quiet={show.peeking || showsAnother}>
+        <QuietSkeletons quiet={show.peeking}>
           <NamedSessionWorkspace
             key={display.view.session.id}
             view={view}

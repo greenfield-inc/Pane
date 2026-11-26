@@ -35,11 +35,9 @@ export interface SessionViewEntry {
 
 interface SessionViewCacheState {
   entries: Record<string, SessionViewEntry>;
-  /** Sessions a peek found nothing to show for yet (their agent tab is created on open). */
-  unpeekable: Record<string, true>;
 }
 
-export const useSessionViewCache = create<SessionViewCacheState>(() => ({ entries: {}, unpeekable: {} }));
+export const useSessionViewCache = create<SessionViewCacheState>(() => ({ entries: {} }));
 
 /** Sessions kept; the least recently read go first. A chat's messages are the bulk of an entry. */
 const KEPT_SESSIONS = 30;
@@ -56,7 +54,12 @@ const order: string[] = [];
  * applied to what the read returns, so a held Session never comes back with old tabs.
  */
 type PanelChange = { kind: 'set'; panel: ToolPanel } | { kind: 'deleted'; panelId: string };
-const changesDuringRead = new Map<string, PanelChange[]>();
+/** Per internal Pane id: the changes made while any read of it runs, kept until the last reader finishes. */
+const changesDuringRead = new Map<string, { changes: PanelChange[]; readers: number }>();
+/** Each read's place in the order reads started, so an older reply never replaces a newer one. */
+let readSequence = 0;
+/** Per Session: the sequence of the read whose entry is held, and whether that read was an open. */
+const heldFrom = new Map<string, { sequence: number; opened: boolean }>();
 let followingPanels = false;
 
 function applyChanges(panels: ToolPanel[], changes: readonly PanelChange[]): ToolPanel[] {
@@ -71,7 +74,7 @@ function applyChanges(panels: ToolPanel[], changes: readonly PanelChange[]): Too
 }
 
 function panelChanged(internalSessionId: string, change: PanelChange): void {
-  changesDuringRead.get(internalSessionId)?.push(change);
+  changesDuringRead.get(internalSessionId)?.changes.push(change);
   const state = useSessionViewCache.getState();
   const held = Object.entries(state.entries).filter(([, entry]) => entry.view.internalSession.id === internalSessionId);
   if (held.length === 0) return;
@@ -95,18 +98,20 @@ function followPanels(): void {
   events.onPanelDeleted(({ sessionId, panelId }) => panelChanged(sessionId, { kind: 'deleted', panelId }));
 }
 
-/** Runs a read with every tab change made meanwhile kept for it. */
-async function whileReading<T>(internalSessionId: string, read: (changes: readonly PanelChange[]) => Promise<T>): Promise<T> {
+/** Runs a read with every tab change made from its start kept for it. */
+async function whileReading<T>(internalSessionId: string, read: (changes: () => readonly PanelChange[]) => Promise<T>): Promise<T> {
   followPanels();
-  const own: PanelChange[] = [];
-  const outer = changesDuringRead.get(internalSessionId);
-  // Reads of the same Pane at once share the list: each applies what it saw.
-  const changes = outer ?? own;
-  if (!outer) changesDuringRead.set(internalSessionId, changes);
+  let log = changesDuringRead.get(internalSessionId);
+  if (!log) { log = { changes: [], readers: 0 }; changesDuringRead.set(internalSessionId, log); }
+  log.readers += 1;
+  const shared = log;
+  // Reads of the same Pane at once share the log; each applies what arrived after it started.
+  const from = shared.changes.length;
   try {
-    return await read(changes);
+    return await read(() => shared.changes.slice(from));
   } finally {
-    if (!outer) changesDuringRead.delete(internalSessionId);
+    shared.readers -= 1;
+    if (shared.readers === 0 && changesDuringRead.get(internalSessionId) === shared) changesDuringRead.delete(internalSessionId);
   }
 }
 
@@ -117,13 +122,20 @@ function touch(sessionId: string): string[] {
   return order.length > KEPT_SESSIONS ? order.splice(0, order.length - KEPT_SESSIONS) : [];
 }
 
-function store(sessionId: string, entry: SessionViewEntry): void {
+/**
+ * Holds what a read returned, unless something newer is held: a peek never replaces what an
+ * open read, and a reply never replaces one from a read that started after it.
+ */
+function store(sessionId: string, entry: SessionViewEntry, sequence: number): void {
+  const current = heldFrom.get(sessionId);
+  if (current && cachedSessionView(sessionId) && (current.sequence > sequence || (current.opened && !entry.opened))) return;
+  heldFrom.set(sessionId, { sequence, opened: entry.opened });
   const dropped = touch(sessionId);
+  for (const id of dropped) heldFrom.delete(id);
   useSessionViewCache.setState(state => {
     const entries = { ...state.entries, [sessionId]: entry };
     for (const id of dropped) delete entries[id];
-    const { [sessionId]: _found, ...unpeekable } = state.unpeekable;
-    return { entries, unpeekable };
+    return { entries };
   });
 }
 
@@ -163,7 +175,13 @@ export function cachedOverview(sessionId: string): OrchestrationSessionOverview 
   return overviews.get(sessionId);
 }
 
-export function rememberOverview(sessionId: string, overview: OrchestrationSessionOverview): void {
+/** The machine generation a read belongs to: an overview read on another machine is not kept. */
+export function sessionViewGeneration(): number {
+  return generation;
+}
+
+export function rememberOverview(sessionId: string, overview: OrchestrationSessionOverview, readGeneration: number): void {
+  if (readGeneration !== generation) return;
   overviews.delete(sessionId);
   overviews.set(sessionId, overview);
   // As many as the Sessions held, the oldest first out.
@@ -181,7 +199,8 @@ export function clearSessionViewCache(): void {
   peeks.clear();
   opens.clear();
   order.length = 0;
-  useSessionViewCache.setState({ entries: {}, unpeekable: {} });
+  heldFrom.clear();
+  useSessionViewCache.setState({ entries: {} });
 }
 
 export function cachedSessionView(sessionId: string): SessionViewEntry | undefined {
@@ -200,15 +219,16 @@ export function peekSessionView(target: SessionViewTarget): Promise<SessionViewE
   const pending = peeks.get(sessionId) ?? opens.get(sessionId)?.then(() => cachedSessionView(sessionId) ?? null);
   if (pending) return pending;
   const started = generation;
+  const sequence = ++readSequence;
   switchMark('session:peek', { sessionId });
   const peek = whileReading(target.internalSessionId, async changes => {
     const [response, remembered] = await Promise.all([API.orchestrationSessions.peek({ sessionId }), rememberedLayout(target)]);
     const result = responseData(response, 'Failed to show Session');
     if (started !== generation) return null;
-    const entry = entryFrom(result, remembered, false, changes);
-    if (entry) store(sessionId, entry);
-    else useSessionViewCache.setState(state => ({ unpeekable: { ...state.unpeekable, [sessionId]: true } }));
-    return entry;
+    // Nothing to show yet (no agent tab): the next visit peeks again, and settling creates it.
+    const entry = entryFrom(result, remembered, false, changes());
+    if (entry) store(sessionId, entry, sequence);
+    return cachedSessionView(sessionId) ?? entry;
   }).finally(() => { if (peeks.get(sessionId) === peek) peeks.delete(sessionId); });
   peeks.set(sessionId, peek);
   return peek;
@@ -219,19 +239,20 @@ export function peekSessionView(target: SessionViewTarget): Promise<SessionViewE
  * its chat's agent and, with `select`, saves the selection. The entry it returns replaces
  * the held one. Calls for the same Session while one is in flight share it.
  */
-export function openSessionView(target: SessionViewTarget, { select = false }: { select?: boolean } = {}): Promise<OrchestrationSessionOpenResult<Session>> {
+export function openSessionView(target: SessionViewTarget, { select = false, resume = true }: { select?: boolean; resume?: boolean } = {}): Promise<OrchestrationSessionOpenResult<Session>> {
   const { sessionId } = target;
   const pending = opens.get(sessionId);
   // A selecting open is never folded into a reading one: it saves something the other does not.
   if (pending && !select) return pending;
   const started = generation;
+  const sequence = ++readSequence;
   switchMark('session:open', { sessionId });
   const open = whileReading(target.internalSessionId, async changes => {
-    const [response, remembered] = await Promise.all([API.orchestrationSessions.open({ sessionId }, { select }), rememberedLayout(target)]);
+    const [response, remembered] = await Promise.all([API.orchestrationSessions.open({ sessionId }, { select, resume }), rememberedLayout(target)]);
     const result = responseData(response, 'Failed to open Session');
     if (started === generation) {
-      const entry = entryFrom(result, remembered, true, changes);
-      if (entry) store(sessionId, entry);
+      const entry = entryFrom(result, remembered, true, changes());
+      if (entry) store(sessionId, entry, sequence);
     }
     return result;
   }).finally(() => { if (opens.get(sessionId) === open) opens.delete(sessionId); });

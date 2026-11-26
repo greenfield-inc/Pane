@@ -361,10 +361,16 @@ export class OrchestrationSessionManager extends EventEmitter {
         panel,
         agent: record.agent,
         cwd: sessionRuntimePath(sessionWorkspacePath(record.id), record),
-        guidePath: sessionRuntimePath(await this.ensureGuidePath(), record),
+        // Where the guide lives; a peek writes nothing, so it is not created here (open does).
+        guidePath: sessionRuntimePath(this.guidePathWithoutWriting(), record),
         started: this.agentStarted(panel.id),
       };
     });
+  }
+
+  private guidePathWithoutWriting(): string {
+    if (!this.skillCacheManager) throw new Error('Pane Chat skill cache manager is not initialized');
+    return this.skillCacheManager.paneChatGuidePath;
   }
 
   /** `terminal`: start the orchestrator in a terminal even with chat tabs on, for a client that can't show a chat (D-203). */

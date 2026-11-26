@@ -830,6 +830,10 @@ describe('chat tab manager', () => {
     const peeked = second.manager.view('p1', 200, false);
     expect(replyText(peeked)).toBe('You said: hello');
     expect(second.manager.isRunning('p1')).toBe(false);
+    // Only that view shows it: history and export readers answer as if no one had looked.
+    expect([...second.manager.messages('p1')]).toEqual([]);
+    expect(second.manager.history('p1', 10, 10)).toEqual([]);
+    expect(second.manager.lastMessage('p1')).toBeUndefined();
 
     // Saved for another conversation (Switch, /clear): not shown.
     const third = harness(store, {}, directory);
@@ -839,6 +843,21 @@ describe('chat tab manager', () => {
     // Closing the tab removes it.
     await second.manager.close('p1');
     expect(existsSync(recent)).toBe(false);
+  });
+
+  it('says a paused tab is paused, and a read that may not start leaves it paused (T-87)', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    expect(manager.isPaused('p1')).toBe(false);
+    await manager.pause(['p1'], { at: '2026-11-25T00:00:00.000Z', by: 'auto' });
+    expect(manager.isPaused('p1')).toBe(true);
+    expect(replyText(manager.view('p1', 200, false))).toBe('You said: hello');
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(manager.isRunning('p1')).toBe(false);
+    expect(manager.isPaused('p1')).toBe(true);
   });
 
   const MARK = { at: '2026-11-13T00:00:00.000Z', by: 'auto' as const };

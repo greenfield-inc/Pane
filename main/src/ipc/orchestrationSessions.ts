@@ -26,7 +26,7 @@ import {
 } from '../services/orchestrationSessionPayload';
 import { configuredAgentSchema } from '../../../shared/agents';
 
-const openOptionsSchema = boundary.object({ select: boundary.optional(boundary.boolean) });
+const openOptionsSchema = boundary.object({ select: boundary.optional(boundary.boolean), resume: boundary.optional(boundary.boolean) });
 /** Newest chat messages an open or peek returns, as the desktop's chat viewer reads them. */
 const OPEN_CHAT_LIMIT = 200;
 
@@ -183,9 +183,14 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry.register('orchestration-sessions:open', async (value: PaneCommandValue, options?: PaneCommandValue, openOptions?: PaneCommandValue) => {
     return invokeSafely(async () => {
       const selector = decodeSelector(value);
-      const list = decodeBoundary(openOptions ?? {}, openOptionsSchema).select === true ? await requireManager().select(selector) : undefined;
-      const result = openResult(await requireManager().getView(selector), options, true);
-      if (list) result.list = list;
+      const { select, resume } = decodeBoundary(openOptions ?? {}, openOptionsSchema);
+      if (select === true) await requireManager().select(selector);
+      const view = await requireManager().getView(selector);
+      // `resume: false` (the cursor settled by itself): a paused chat stays paused; Enter or a click resumes it.
+      const start = resume !== false || view.panel.type !== 'chat' || !getChatTabManager().isPaused(view.panel.id);
+      const result = openResult(view, options, start);
+      // The list as it is now, after anything that changed while the view was read.
+      if (select === true) result.list = await requireManager().list();
       return result;
     });
   });

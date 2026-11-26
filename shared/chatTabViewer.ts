@@ -31,6 +31,8 @@ const KEPT_CLOSED = 5;
 const KEPT_MESSAGES = 200;
 /** How long a window prime() painted counts as just read (T-87): the Session's call and this mount are one switch. */
 const PRIMED_FRESH_MS = 1000;
+/** How long after a primed window paints its catch-up read runs. */
+const PRIMED_READ_DELAY_MS = 150;
 /** Viewers with no screen open that still hold messages, the most recently closed last. */
 const closedWithMessages: ChatTabViewer[] = [];
 
@@ -55,7 +57,7 @@ export class ChatTabViewer {
   private notifiedAt = 0;
   /** Off while the sidebar cursor only shows the chat's Session (T-87): reads then never start its agent. */
   private startOnRead = true;
-  /** When the window prime() last painted was read (performance.now()); a fresh one spares the attach its read. */
+  /** When the window prime() last painted was read (performance.now()); a fresh one moves the attach's read after the paint. */
   private primedAt = 0;
 
   constructor(private chatClient: ChatTabClient, readonly panelId: string) {}
@@ -101,8 +103,8 @@ export class ChatTabViewer {
   prime(view: ChatTabView, readAt: number): void {
     if (view.panelId !== this.panelId || this.state.transcript || !view.transcript) return;
     this.state = { ...this.state, view: this.state.view ?? { ...view, transcript: undefined }, transcript: view.transcript, hasNewer: false };
-    // Read this instant by the Session's call: the attach that follows needs no read of its own.
-    // A starting tab still reads, and an event past this window's revision reads again (resync).
+    // Read this instant by the Session's call: the attach that follows reads again only after it paints.
+    // A starting tab reads at once.
     if (view.status !== 'starting') this.primedAt = readAt;
   }
 
@@ -186,7 +188,12 @@ export class ChatTabViewer {
     this.detach = () => { events(); states(); reconnect?.(); };
     const primed = this.primedAt !== 0 && performance.now() - this.primedAt < PRIMED_FRESH_MS;
     this.primedAt = 0;
-    if (!primed) void this.refresh();
+    if (!primed) { void this.refresh(); return; }
+    // The window was read just now: it paints first, and the read that catches anything said
+    // since (an event sent before this subscription) runs after that paint, not before it.
+    const later = setTimeout(() => { if (this.detach && this.chatClient === client) void this.refresh(); }, PRIMED_READ_DELAY_MS);
+    const detach = this.detach;
+    this.detach = () => { clearTimeout(later); detach(); };
   }
 
   /** A fresh snapshot of the newest window, then any events that arrived while it loaded. */

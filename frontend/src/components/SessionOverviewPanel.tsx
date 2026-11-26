@@ -1,4 +1,4 @@
-import { cachedOverview, rememberOverview } from '../stores/sessionViewCache';
+import { cachedOverview, rememberOverview, sessionViewGeneration } from '../stores/sessionViewCache';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { List, PanelRight, Pencil, RefreshCw, X } from 'lucide-react';
 import { API } from '../utils/api';
@@ -52,6 +52,7 @@ export function useSessionOverview(sessionId: string): SessionOverviewState {
     const requestId = ++overviewRequestId.current;
     const isCurrentRequest = () => isMounted.current && requestId === overviewRequestId.current;
 
+    const readGeneration = sessionViewGeneration();
     try {
       const response = await API.orchestrationSessions.overview({ sessionId });
       const responseFailure = responseError(response, 'Failed to refresh Session overview');
@@ -61,7 +62,7 @@ export function useSessionOverview(sessionId: string): SessionOverviewState {
         return;
       }
       setOverview(response.data);
-      rememberOverview(sessionId, response.data);
+      rememberOverview(sessionId, response.data, readGeneration);
       setOverviewError(null);
     } catch (cause) {
       if (!isCurrentRequest()) { if (required && isMounted.current) throw cause; return; }

@@ -283,18 +283,21 @@ describe('a Session shown by the sidebar cursor (T-87)', () => {
     off();
   });
 
-  it('paints a window read just now without reading it again, and reads an older one', async () => {
+  it('paints a window read just now, reads it again only after the paint, and reads an older one at once', async () => {
     const fake = host(3);
     const viewer = new ChatTabViewer(fake.client, 'p');
     viewer.prime(fake.view(), performance.now());
     expect(ids(viewer)).toEqual(['m0', 'm1', 'm2']);
+    // A message the agent finished between that read and this subscription: no event will say so.
+    fake.append(false);
     const off = viewer.subscribe(() => undefined);
     await settle();
     expect(fake.get).not.toHaveBeenCalled();
-    // An event past the primed window still arrives.
-    fake.append();
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(fake.get).toHaveBeenCalledTimes(1);
     expect(ids(viewer)).toEqual(['m0', 'm1', 'm2', 'm3']);
     off();
+    fake.get.mockClear();
 
     const stale = new ChatTabViewer(fake.client, 'p');
     stale.prime(fake.view(), performance.now() - 60_000);

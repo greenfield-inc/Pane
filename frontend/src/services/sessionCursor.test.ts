@@ -60,7 +60,7 @@ describe('Arrow keys open chat Sessions (T-87)', () => {
     expect(settle).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(settle).toHaveBeenCalledTimes(1);
-    expect(settle).toHaveBeenCalledWith('c', null);
+    expect(settle).toHaveBeenCalledWith('c', null, { resume: true });
   });
 
   it('peeks each Session it does not hold once, and none it holds', async () => {
@@ -90,7 +90,7 @@ describe('Arrow keys open chat Sessions (T-87)', () => {
     expect(settle).not.toHaveBeenCalled();
     expect(store.getState().cursorSessionId).toBe('b');
     cursor.settleSessionCursor();
-    expect(settle).toHaveBeenCalledWith('b', null);
+    expect(settle).toHaveBeenCalledWith('b', null, { resume: true });
   });
 
   it('skips a Session whose agent runs in a terminal', async () => {
@@ -117,5 +117,44 @@ describe('settling from a click or Enter (T-87)', () => {
     expect(settle).not.toHaveBeenCalled();
     await cursor.settleOnSession('b');
     expect(settle).toHaveBeenCalledWith('b', null);
+  });
+});
+
+describe('the cursor never outlives its intent (T-87)', () => {
+  it('a selection made another way cancels the pending settle', async () => {
+    const { cursor, store, settle } = await setup();
+    cursor.showSessionAtCursor('b');
+    // A tile click, a restore or a host switch selects something else and clears the cursor.
+    store.setState({ cursorSessionId: undefined, selectedSessionId: 'c' });
+    vi.advanceTimersByTime(2000);
+    expect(settle).not.toHaveBeenCalled();
+  });
+
+  it('turning the setting off drops what the cursor shows', async () => {
+    const { cursor, store, settle, appConfig } = await setup();
+    cursor.showSessionAtCursor('b');
+    const { useConfigStore } = await import('../stores/configStore');
+    useConfigStore.setState({ config: { ...appConfig, arrowKeysOpenSessions: false } });
+    vi.advanceTimersByTime(2000);
+    expect(store.getState().cursorSessionId).toBeUndefined();
+    expect(settle).not.toHaveBeenCalled();
+  });
+
+  it('Enter on a Session settled by itself opens it again, so a paused chat resumes', async () => {
+    const { cursor, store, settle } = await setup();
+    store.setState({ quietSessionId: 'a' });
+    await cursor.settleOnSession('a');
+    expect(settle).toHaveBeenCalledWith('a', null);
+  });
+});
+
+describe('a paused chat (T-87)', () => {
+  it('a settle by itself on a paused Session asks main not to resume it', async () => {
+    const { cursor, store, settle } = await setup();
+    // SAFETY: the cursor reads only the record's paused mark.
+    store.setState({ sessions: store.getState().sessions.map(session => (session.id === 'b' ? { ...session, paused: { at: '2026-11-25T00:00:00.000Z', by: 'manual' } } as OrchestrationSessionRecord : session)) });
+    cursor.showSessionAtCursor('b');
+    vi.advanceTimersByTime(1000);
+    expect(settle).toHaveBeenCalledWith('b', null, { resume: false });
   });
 });

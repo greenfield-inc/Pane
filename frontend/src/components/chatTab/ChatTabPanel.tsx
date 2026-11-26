@@ -216,7 +216,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const show = useSessionShow();
   const primed = show.entry?.chat?.panelId === panelId ? show.entry.chat : undefined;
   useMemo(() => {
-    viewer.setStartOnRead(!show.peeking);
+    viewer.setStartOnRead(show.startsAgents);
     if (primed && show.entry) viewer.prime(primed, show.entry.readAt);
   }, [viewer, show.peeking, show.entry, primed]);
   const catalog = useChatAgents(client);

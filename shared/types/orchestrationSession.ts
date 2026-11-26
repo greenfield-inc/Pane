@@ -216,6 +216,8 @@ export interface OrchestrationSessionOpenResult<TSession = unknown> {
 export interface OrchestrationSessionOpenOptions {
   /** Save this Session as the selected one, as `select` does. */
   select?: boolean;
+  /** False when the sidebar cursor settled by itself: a paused chat stays paused (Enter or a click resumes it). */
+  resume?: boolean;
 }
 
 export interface OrchestrationGitSummary {

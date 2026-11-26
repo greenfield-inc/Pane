@@ -119,13 +119,25 @@ interface Tab {
   toolsRunning?: Map<string, boolean>;
   /** A save of the newest window to `recent.json` is due (F-lite). */
   recentTimer?: ReturnType<typeof setTimeout>;
+  /** The save of `recent.json` in flight; saves run one at a time, and close waits for it. */
+  recentSaving?: Promise<void>;
   /** `recent.json` was read for this tab already (found or not). */
   recentRead?: boolean;
+  /**
+   * The newest window `recent.json` held, shown only by a view of a tab whose agent has not
+   * started since launch (the sidebar cursor's peek). History, export and last-message
+   * readers never see it, so what they answer does not depend on where the sidebar went.
+   */
+  recent?: ChatTabTranscript;
+  /** close() ran: nothing is saved for this tab any more. */
+  closed?: boolean;
 }
 
 const DEFAULT_VIEW_LIMIT = 200;
 /** How long after a tab goes idle its newest window is saved (F-lite). */
 const RECENT_SAVE_DELAY_MS = 1000;
+/** Makes each `recent.json` temporary file name unique within this process. */
+let recentWrites = 0;
 /** Time rows kept per conversation; older turns lose theirs after a restart. */
 const TURN_TIMES_LIMIT = 200;
 const RECEIPT_LIMIT = 256;
@@ -189,6 +201,11 @@ export class ChatTabManager {
     if (!tab.held) return tab.transcript?.last(role, accept);
     const found = [...(tab.held?.messages ?? [])].reverse().find(message => message.role === role && accept(message));
     return found && structuredClone(found);
+  }
+
+  /** Whether the tab is paused (its agent stopped by a pause, not a problem). */
+  isPaused(panelId: string): boolean {
+    return this.options.store.state(panelId)?.paused !== undefined;
   }
 
   /** The tab's status as agent status (sidebar, tabs, runpane), without starting it. */
@@ -664,6 +681,9 @@ export class ChatTabManager {
     this.bodies.clear(panelId);
     clearTimeout(tab.recentTimer);
     tab.recentTimer = undefined;
+    tab.closed = true;
+    // A save already writing finishes first, so it cannot put the file back after it is removed.
+    await tab.recentSaving?.catch(() => undefined);
     for (const file of [this.pausedFile(panelId), this.recentFile(panelId)]) {
       try { rmSync(file, { force: true }); } catch (error) { console.warn(`[ChatTabs] ${panelId}: could not remove ${path.basename(file)}:`, error); }
     }
@@ -697,7 +717,12 @@ export class ChatTabManager {
     tab.generation = tab.run = this.lastGeneration = Math.max(Date.now(), this.lastGeneration + 1);
     // Viewers keep seeing the conversation while the restart replays it.
     if (tab.transcript && tab.transcript.count() > 0) tab.held = tab.transcript.snapshot(DEFAULT_VIEW_LIMIT);
-    else if (!tab.held) this.loadRecent(panelId, tab);
+    else if (!tab.held) {
+      // The first start since launch shows the saved window while the agent replays, as a restart does.
+      this.loadRecent(panelId, tab);
+      tab.held = tab.recent;
+    }
+    tab.recent = undefined;
     tab.transcript?.dispose();
     tab.transcript = undefined;
     tab.notice = undefined;
@@ -977,7 +1002,10 @@ export class ChatTabManager {
     if (tab.recentTimer) return;
     tab.recentTimer = setTimeout(() => {
       tab.recentTimer = undefined;
-      void this.saveRecent(panelId, tab);
+      const previous = tab.recentSaving ?? Promise.resolve();
+      const saving = previous.then(() => this.saveRecent(panelId, tab));
+      tab.recentSaving = saving;
+      void saving.finally(() => { if (tab.recentSaving === saving) tab.recentSaving = undefined; });
     }, RECENT_SAVE_DELAY_MS);
     tab.recentTimer.unref?.();
   }
@@ -985,14 +1013,14 @@ export class ChatTabManager {
   private async saveRecent(panelId: string, tab: Tab): Promise<void> {
     const sessionId = this.options.store.state(panelId)?.acpSessionId;
     const transcript = tab.transcript;
-    if (!sessionId || !transcript || !replayed(tab) || transcript.count() === 0) return;
+    if (tab.closed || !sessionId || !transcript || !replayed(tab) || transcript.count() === 0) return;
     const file = this.recentFile(panelId);
     const saved: ChatPausedView = { sessionId, held: boundedWindow(transcript.snapshot(DEFAULT_VIEW_LIMIT)) };
     if (tab.shown) saved.shown = tab.shown;
     try {
       await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
       // Written whole, then renamed: a reader never sees half a file.
-      const temporary = `${file}.${process.pid}.tmp`;
+      const temporary = `${file}.${process.pid}.${++recentWrites}.tmp`;
       await writeFile(temporary, JSON.stringify(saved), { mode: 0o600 });
       await rename(temporary, file);
     } catch (error) {
@@ -1010,7 +1038,7 @@ export class ChatTabManager {
       const saved = decodeOptionalBoundary(JSON.parse(readFileSync(this.recentFile(panelId), 'utf8')), chatPausedViewSchema);
       // Saved for another conversation (Switch, /clear): not this one's messages.
       if (!saved || saved.sessionId !== state.acpSessionId) return;
-      tab.held = { ...saved.held, panelId, generation: 0 };
+      tab.recent = { ...saved.held, panelId, generation: 0 };
       if (saved.shown && !tab.shown) tab.shown = saved.shown;
     } catch {
       // Nothing saved yet: the tab shows its messages once its agent starts.
@@ -1094,6 +1122,8 @@ export class ChatTabManager {
     // A stopped tab offers nothing; a starting or paused one keeps showing what its agent last offered.
     const shown = state.status === 'stopped' ? undefined : tab.shown;
     const ready = tab.transcript && replayed(tab);
+    // A tab not started since launch shows the window it saved last (F-lite).
+    const shownHeld = tab.held ?? (tab.transcript ? undefined : tab.recent);
     const permissions = runtime ? runtime.permissions().map(permission => ({
       id: permission.id, generation: tab.generation,
       title: permission.request.toolCall.title ?? 'Approval needed',
@@ -1111,8 +1141,8 @@ export class ChatTabManager {
       controls: shown?.controls ?? [], commands: shown?.commands ?? [],
       permissions, questions, queue: state.queue ?? [],
       // While history replays the window is incomplete; viewers fetch it once the tab has started.
-      transcript: limit <= 0 ? undefined : ready ? tab.transcript!.snapshot(limit) : tab.held && heldWindow(tab.held, limit),
-      messageCount: ready || !tab.held ? tab.transcript?.count() ?? 0 : tab.held.start + tab.held.messages.length,
+      transcript: limit <= 0 ? undefined : ready ? tab.transcript!.snapshot(limit) : shownHeld && heldWindow(shownHeld, limit),
+      messageCount: ready || !shownHeld ? tab.transcript?.count() ?? 0 : shownHeld.start + shownHeld.messages.length,
       ...extras(state, runtime),
     };
     if (state.banner) view.banner = state.banner;

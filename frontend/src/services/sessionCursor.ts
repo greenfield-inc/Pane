@@ -19,6 +19,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { cachedSessionView, peekSessionView } from '../stores/sessionViewCache';
 import { usePanelStore } from '../stores/panelStore';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
+import { panePausedMark } from '../../../shared/types/panels';
 import type { AppConfig } from '../types/config';
 
 /** How long the cursor rests on a row before its Session is selected and its agent starts. */
@@ -70,6 +71,14 @@ function listen(): void {
   useSessionStore.subscribe(state => {
     if (state.activeSessionId) dropSessionCursor();
   });
+  // A selection made any other way (a tile, a restore, another host) ends the cursor's intent,
+  // and so does turning the setting off or the window leaving this machine.
+  useOrchestrationSessionStore.subscribe(state => {
+    if (pending !== undefined && state.cursorSessionId !== pending) { clearTimer(); pending = undefined; }
+  });
+  useConfigStore.subscribe(state => {
+    if (!cursorFollowEnabled(state.config)) dropSessionCursor();
+  });
 }
 
 /** A Session whose agent runs in a terminal keeps Enter (known once it was read). */
@@ -116,13 +125,27 @@ export function pauseSessionCursor(): void {
   clearTimer();
 }
 
-/** Settle now on what the cursor shows (Enter, Space, a click, typing, focus leaving the sidebar). */
+/**
+ * Settle now on what the cursor shows, by itself (the rest, typing, focus leaving the
+ * sidebar): it is selected and its agent started, but a paused chat stays paused (the open
+ * says `resume: false`, and main also checks, so a tab paused since it was read stays paused too).
+ */
 export function settleSessionCursor(): void {
   clearTimer();
   const sessionId = pending;
   pending = undefined;
-  if (!sessionId) return;
-  void useOrchestrationSessionStore.getState().settle(sessionId, hostIdOf(useConfigStore.getState().config)).catch(() => undefined);
+  const sessions = useOrchestrationSessionStore.getState();
+  // Only what the cursor still shows, with the setting on and the window on this machine.
+  if (!sessionId || sessions.cursorSessionId !== sessionId || !cursorFollowEnabled()) return;
+  void sessions.settle(sessionId, hostIdOf(useConfigStore.getState().config), { resume: !chatPaused(sessionId) }).catch(() => undefined);
+}
+
+/** Whether the Session's chat is paused, from its record or the tabs this window holds for it. */
+function chatPaused(sessionId: string): boolean {
+  const record = useOrchestrationSessionStore.getState().sessions.find(session => session.id === sessionId);
+  if (record?.paused) return true;
+  const panels = cachedSessionView(sessionId)?.panels ?? (record ? usePanelStore.getState().panels[record.internalSessionId] : undefined);
+  return panels !== undefined && panePausedMark(panels) !== undefined;
 }
 
 /** Forget what the cursor shows without selecting it. */
@@ -137,12 +160,14 @@ export function pendingCursorSession(): string | undefined {
   return pending;
 }
 
-/** A click, Enter or Space on a Session row: select it now, whatever the cursor showed. */
+/** A click, Enter or Space on a Session row: select it now, whatever the cursor showed, resuming a paused chat as opening one does. */
 export function settleOnSession(sessionId: string): Promise<void> {
   clearTimer();
   pending = undefined;
   const sessions = useOrchestrationSessionStore.getState();
-  // Already settled and shown (the cursor rested on it, then Enter): nothing to read again.
-  if (sessionId === sessions.selectedSessionId && !sessions.cursorSessionId && sessions.availability === 'ready' && !sessions.selectionError) return Promise.resolve();
+  // Already settled and shown (the cursor rested on it, then Enter): nothing to read again,
+  // unless it settled by itself and a paused chat waits for this Enter or click to resume.
+  if (sessionId === sessions.selectedSessionId && !sessions.cursorSessionId && sessions.quietSessionId !== sessionId
+    && sessions.availability === 'ready' && !sessions.selectionError) return Promise.resolve();
   return sessions.settle(sessionId, hostIdOf(useConfigStore.getState().config));
 }
