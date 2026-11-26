@@ -756,15 +756,16 @@ export class ProfileEditor {
   }
 
   /**
-   * Every profile's photo here, as an SVG data URL, and whether it is yours or the plugin's (Agent
-   * Farm's listing). A file that is gone or larger than Agent Farm allows is left out.
+   * Every profile's photo here, as an SVG data URL, and whether it is yours or the plugin's, and its
+   * title (Agent Farm's listing). A photo file that is gone or larger than Agent Farm allows is left out.
    */
   async photos(): Promise<ProfilePhotos> {
-    const result: ProfilePhotos = { profiles: {}, sources: {} };
+    const result: ProfilePhotos = { profiles: {}, sources: {}, titles: {} };
     let listed: AgentFarmListedProfile[];
     try { listed = await this.listing(await this.pluginNames()); }
     catch { return result; }
     for (const entry of listed) {
+      if (entry.title && !entry.error) result.titles[entry.ref] = entry.title;
       if (!entry.photo || entry.error) continue;
       const stat = await fs.stat(entry.photo).catch(() => undefined);
       if (!stat?.isFile() || stat.size > MAX_PROFILE_PHOTO_BYTES) continue;

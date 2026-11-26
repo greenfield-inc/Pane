@@ -69,7 +69,7 @@ interface ProfilesState {
   follow: () => () => void;
 }
 
-const EMPTY_PHOTOS: ProfilePhotos = { profiles: {}, sources: {} };
+const EMPTY_PHOTOS: ProfilePhotos = { profiles: {}, sources: {}, titles: {} };
 
 export const fileKey = (plugin: string, file: string): string => `${plugin}/${file}`;
 
@@ -306,7 +306,12 @@ export const useProfilesStore = create<ProfilesState>((set, get) => {
       });
       return result;
     },
-    setDetails: async (plugin, profile, details) => applied(await answer(api().setDetails(plugin, profile, details), profileSaveResultSchema)),
+    setDetails: async (plugin, profile, details) => {
+      const saved = applied(await answer(api().setDetails(plugin, profile, details), profileSaveResultSchema));
+      // Avatars name a profile by the title the photos answer carries (T-83).
+      void get().loadPhotos();
+      return saved;
+    },
     parseYaml: async (source) => {
       const known = parsedYaml.get(source);
       if (known) return known;
