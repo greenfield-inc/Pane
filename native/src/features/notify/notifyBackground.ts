@@ -31,7 +31,7 @@ const setup = (async () => {
   // One at a time: each call rewrites the whole category set, so parallel calls drop each other's.
   for (const category of notifyCategories(opensApp)) await Notifications.setNotificationCategoryAsync(category.identifier, category.actions);
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL, { name: 'Questions from agents', importance: Notifications.AndroidImportance.HIGH, sound: 'default' });
+    await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL, { name: 'Questions from agents', importance: Notifications.AndroidImportance.HIGH });
   }
 })().catch(() => undefined);
 
