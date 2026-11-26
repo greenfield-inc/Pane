@@ -412,4 +412,37 @@ describe('AgentMessageService', () => {
     await service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
     expect(host.typed.map(entry => entry.panelId)).toEqual(['a']);
   });
+  // Review 5: the call prints the first reply. A later reply that comes while the first is typed waits for that outcome.
+  it('returns the first reply when it is typed while a later one arrives, and types the later one once', async () => {
+    let open: () => void = () => undefined;
+    host.typingGate = new Promise<void>(resolve => { open = resolve; });
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+    const first = service.reply({ to: 1, body: 'A1', callerPanelId: 'b' });
+    await vi.waitFor(() => expect(host.attempts).toBe(1));
+    const waited = service.waitForReply(1, 500, undefined, 'a');
+    expect((await service.reply({ to: 1, body: 'A2', callerPanelId: 'b' })).delivery).toBe('queued');
+    open();
+    await first;
+    await expect(waited).resolves.toMatchObject({ ref: 'M-2', text: 'A1', deliveredVia: 'tab' });
+    host.typingGate = undefined;
+    await service.flush();
+    expect(host.typed.map(entry => entry.text)).toEqual([expect.stringContaining('"A1"'), expect.stringContaining('"A2"')]);
+    expect(service.show(1).replies.map(reply => [reply.ref, reply.state, reply.deliveredVia])).toEqual([['M-2', 'delivered', 'tab'], ['M-3', 'delivered', 'tab']]);
+  });
+
+  it('types a reply parked behind an earlier one when the wait ends without taking it', async () => {
+    let open: () => void = () => undefined;
+    host.typingGate = new Promise<void>(resolve => { open = resolve; });
+    service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+    const first = service.reply({ to: 1, body: 'A1', callerPanelId: 'b' });
+    await vi.waitFor(() => expect(host.attempts).toBe(1));
+    const waited = service.waitForReply(1, 20, undefined, 'a');
+    await service.reply({ to: 1, body: 'A2', callerPanelId: 'b' });
+    await expect(waited).resolves.toBeUndefined();
+    open();
+    await first;
+    host.typingGate = undefined;
+    await service.flush();
+    expect(host.typed.map(entry => entry.text)).toEqual([expect.stringContaining('"A1"'), expect.stringContaining('"A2"')]);
+  });
 });

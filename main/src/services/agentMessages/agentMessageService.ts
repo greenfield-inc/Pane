@@ -91,6 +91,12 @@ export class AgentMessageService extends EventEmitter {
    * reply's route after AWAIT_REPLY_GRACE_MS without a wait call.
    */
   private readonly reservations = new Map<number, Reservation>();
+  /**
+   * Replies parked for a waiting call because an earlier reply to the same message was being typed:
+   * the call answers with the first reply, so a later one waits until that attempt's outcome is known.
+   * By original message number. Released to the tab when the last call on that message ends.
+   */
+  private readonly parked = new Map<number, number[]>();
   private flushing: Promise<void> | null = null;
 
   constructor(private readonly store: AgentMessageStore, private readonly host: AgentMessageHost, private readonly now: () => number = Date.now) {
@@ -205,6 +211,12 @@ export class AgentMessageService extends EventEmitter {
     const route = this.targetOf(reply);
     const waiter = [...this.waiters.get(original.number) ?? []].find(candidate => this.isRoute(candidate.panelId, route));
     if (waiter) {
+      // The call prints the first reply: while an earlier one is being typed, this one waits for that outcome.
+      if (this.store.replies(original.number).some(earlier => earlier.number < reply.number && this.typing.has(earlier.number))) {
+        this.parked.set(original.number, [...this.parked.get(original.number) ?? [], reply.number]);
+        this.changed();
+        return { reply: this.record(reply.number), delivery: 'queued' };
+      }
       this.handToCall(reply);
       waiter.settle(this.mustGet(reply.number));
       return { reply: this.record(reply.number), delivery: 'delivered' };
@@ -247,7 +259,10 @@ export class AgentMessageService extends EventEmitter {
         if (timer) clearTimeout(timer);
         signal?.removeEventListener('abort', abort);
         waiting.delete(waiter);
-        if (waiting.size === 0 && this.waiters.get(number) === waiting) this.waiters.delete(number);
+        if (waiting.size === 0 && this.waiters.get(number) === waiting) {
+          this.waiters.delete(number);
+          this.releaseParked(number);
+        }
         resolve(reply ? this.record(reply.number) : undefined);
       };
       const waiter: Waiter = { panelId: callerPanelId, settle: reply => finish(reply) };
@@ -297,15 +312,11 @@ export class AgentMessageService extends EventEmitter {
       }
     }
     const held = new Set(this.reservations.get(number)?.held ?? []);
-    let typing: Promise<void> | undefined;
     for (const reply of this.store.replies(number)) {
       if (reply.state === 'undelivered' || held.has(reply.number)) continue;
       const attempt = this.typing.get(reply.number);
-      if (attempt) {
-        // Being typed: its outcome decides (typed, busy, or undelivered); look again when it ends.
-        typing ??= attempt;
-        continue;
-      }
+      // The first reply decides: while it is being typed, nothing later is taken; look again when that attempt ends.
+      if (attempt) return { typing: attempt };
       if (reply.state === 'queued') {
         // A call takes a queued reply only from its route.
         if (!this.isRoute(callerPanelId, this.targetOf(reply))) continue;
@@ -314,7 +325,18 @@ export class AgentMessageService extends EventEmitter {
       }
       return { reply };
     }
-    return typing ? { typing } : undefined;
+    return undefined;
+  }
+
+  /** The last call on a message ended: replies parked for it go to their tab. */
+  private releaseParked(number: number): void {
+    const parked = this.parked.get(number);
+    if (!parked) return;
+    this.parked.delete(number);
+    const waiting = parked.filter(reply => this.store.get(reply)?.state === 'queued');
+    if (waiting.length === 0) return;
+    this.outbox.push(...waiting);
+    void this.flush();
   }
 
   /** A call from `panelId` may take a reply whose route is `route`: the same tab, or a call made outside any tab. */

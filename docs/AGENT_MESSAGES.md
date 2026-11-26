@@ -96,6 +96,10 @@ Delivery reuses the path that to-do messages and owed answers take
   call, never both. A wait for a reply that is being typed at that moment
   waits for that attempt, within its own time limit. If the tab turned out to
   be busy, the wait takes the reply only when it comes from the reply's route.
+- A wait answers with the first reply. A later reply that arrives while an
+  earlier one is being typed waits for that attempt. If the earlier one is
+  typed, the wait returns it, and the later one is typed into the tab after
+  it. If the attempt fails, the wait takes the later reply instead.
 - Only the tab that sent with `--await-reply` ends its own hold on early
   replies. A wait from another tab takes only a held reply whose route it is
   now, and leaves the rest held.
