@@ -64,8 +64,8 @@ describe('new since last seen', () => {
     const answered = mac([]);
     const gone = step(seen, answered, [], 1_000).seen;
     expect(freshCounts(things(before), step(gone, before, [], 2_000).seen).total).toBe(0);
-    const forgotten = step(gone, answered, [], 1_000 + GONE_GRACE_MS).seen;
-    expect(freshCounts(things(before), step(forgotten, before, [], 1_000 + GONE_GRACE_MS).seen).total).toBe(1);
+    // Back in the first read after the grace, with no read in between.
+    expect(freshCounts(things(before), step(gone, before, [], 1_000 + GONE_GRACE_MS).seen).total).toBe(1);
   });
 
   it('keeps what it saw on a machine whose lists have not answered', () => {

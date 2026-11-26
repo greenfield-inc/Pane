@@ -15,9 +15,9 @@ export interface WaitingThing {
 }
 
 /**
- * What the phone has seen, by thing key. `goneAt` marks a thing its machine stopped listing; it is
- * forgotten after `GONE_GRACE_MS`, so it is new again if it comes back later, while a Pane whose
- * status flickers between blocked and working stays seen.
+ * What the phone has seen, by thing key. `goneAt` marks when a complete read first missed a thing;
+ * `GONE_GRACE_MS` later it is forgotten, so it is new if it comes back, while a Pane whose status
+ * flickers between blocked and working stays seen.
  */
 export type SeenMap = Readonly<Record<string, { machine: string; goneAt?: number }>>;
 
@@ -60,9 +60,11 @@ export function reconcileSeen({ seen, things, complete, open, now }: {
   const present = new Set(things.map(thing => thing.key));
   const next: Record<string, { machine: string; goneAt?: number }> = {};
   for (const [key, entry] of Object.entries(seen)) {
+    // Gone past the grace: forgotten, so it is new if it is back in this very read.
+    if (entry.goneAt !== undefined && now - entry.goneAt >= GONE_GRACE_MS) continue;
     if (present.has(key)) next[key] = { machine: entry.machine };
     else if (!complete.has(entry.machine)) next[key] = entry;
-    else if (now - (entry.goneAt ?? now) < GONE_GRACE_MS) next[key] = { machine: entry.machine, goneAt: entry.goneAt ?? now };
+    else next[key] = { machine: entry.machine, goneAt: entry.goneAt ?? now };
   }
   const marked: string[] = [];
   for (const thing of things) {

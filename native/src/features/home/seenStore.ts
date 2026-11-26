@@ -37,6 +37,11 @@ export const useSeenWaiting = create<SeenState>((set, get) => {
     if (changed && seen !== null) void secureStore.setItem(STORAGE_KEY, JSON.stringify(seen)).catch(() => undefined);
     set({ ...change, seen: changed ? seen : state.seen, justSeen: justSeen.size === 0 && state.justSeen.size === 0 ? state.justSeen : justSeen });
   };
+  // Loading always reconciles: Home may have published these same things before it finished.
+  void secureStore.getItem(STORAGE_KEY).then(saved => {
+    const parsed: unknown = saved ? JSON.parse(saved) : null;
+    return parsed && typeof parsed === 'object' ? parsed as SeenMap : null;
+  }).catch(() => null).then(seen => reconcile({ seen }));
   return {
     seen: undefined,
     things: [],
@@ -55,14 +60,6 @@ export const useSeenWaiting = create<SeenState>((set, get) => {
       return () => reconcile({ open: get().open.filter(entry => entry.id !== id) });
     },
   };
-});
-
-void secureStore.getItem(STORAGE_KEY).then(saved => {
-  const parsed: unknown = saved ? JSON.parse(saved) : null;
-  return parsed && typeof parsed === 'object' ? parsed as SeenMap : null;
-}).catch(() => null).then(seen => {
-  useSeenWaiting.setState({ seen });
-  useSeenWaiting.getState().publish(useSeenWaiting.getState().things, useSeenWaiting.getState().complete);
 });
 
 /** While this screen is in view, what it shows (a Pane, Session or approval on the current machine) stops being new. */
