@@ -125,6 +125,7 @@ const CATEGORY_GROUP = {
   shortcuts: 'help',
   debug: 'help',
   approvals: 'approvals',
+  controller: 'navigation',
 } satisfies Record<ShortcutMapRow['category'], SheetGroupId>;
 
 const ACCELERATOR_MODIFIERS = new Map([
