@@ -20,9 +20,9 @@ import type { ChatTurn } from '../../../../shared/chatTabPresentation';
 export interface TurnRange { start: number; end: number }
 
 /** How far past each edge of the viewport turns stay rendered, in px. */
-export const OVERSCAN_PX = 800;
+const OVERSCAN_PX = 800;
 /** The gap above every turn but the first (the column's 24 px gap and the turn's 14 px margin before windowing). */
-export const TURN_GAP_PX = 38;
+const TURN_GAP_PX = 38;
 
 /** The turns whose rows cross [top - overscan, top + height + overscan), measured from the list's top. */
 export function visibleRange(sizes: readonly number[], top: number, height: number, overscan = OVERSCAN_PX): TurnRange {
@@ -78,7 +78,7 @@ export function remapRange(previousKeys: readonly string[], range: TurnRange, ke
 }
 
 /** A first guess at a turn's height before it has rendered: its text in lines, plus the fold row. */
-export function estimateTurnHeight(turn: ChatTurn): number {
+function estimateTurnHeight(turn: ChatTurn): number {
   let lines = 0;
   const count = (text: string) => { for (const paragraph of text.split('\n')) lines += Math.max(1, Math.ceil(paragraph.length / 90)); };
   for (const part of turn.user?.parts ?? []) if (part.type === 'text') count(part.text);
@@ -108,9 +108,6 @@ export function leftAway(chatId: string): boolean {
   const memory = memories.get(chatId);
   return !!memory && !memory.atEnd && !!memory.place;
 }
-
-/** Test seam: forget every chat's place and measured turns. */
-export function forgetChatPlaces(): void { memories.clear(); }
 
 interface TurnWindowOptions {
   /** One per chat: places and measured heights are remembered under it. */
@@ -145,7 +142,7 @@ export function useTurnWindow({ chatId, turns, viewportRef, listRef, all, follow
 
   /** The first range for a list: where the chat was left, or its live end. */
   const placed = (): TurnRange => {
-    const height = memory.height || (typeof window === 'undefined' ? 800 : window.innerHeight);
+    const height = memory.height || window.innerHeight;
     const at = restoredAway && memory.place ? keys.indexOf(memory.place.key) : -1;
     if (at < 0) return endRange(sizes, height);
     return visibleRange(sizes, sum(sizes, 0, at) + memory.place!.into, height);

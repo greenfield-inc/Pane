@@ -320,7 +320,7 @@ function summarize(samples: Sample[]): Summary[] {
 
 const ms = (value: number | null) => (value === null ? '–' : String(Math.round(value)));
 
-function markdown(summary: Summary[], retention: Retention | undefined): string {
+function markdown(summary: Summary[], retention: Retention | undefined, perChat: PerChat[] | undefined): string {
   const lines = [
     '### Session switch latency (reported only)',
     '',
@@ -331,11 +331,15 @@ function markdown(summary: Summary[], retention: Retention | undefined): string 
   if (retention) {
     lines.push('', `Retained after ${retention.switches} switches and a forced GC, per switch: **${retention.perSwitch.nodes} DOM nodes** (limit ${MAX_RETAINED_NODES_PER_SWITCH}), ${retention.perSwitch.listeners} listeners, ${retention.perSwitch.heapMB} MB heap.`);
   }
+  if (perChat?.length) {
+    lines.push('', '| Mounted chat | messages | elements in its conversation | DOM nodes over a short chat | heap over a short chat (MB) |', '|---|---|---|---|---|',
+      ...perChat.map(row => `| ${row.size} | ${row.messages} | ${row.regionElements} | ${row.nodesOverShort} | ${row.heapMBOverShort} |`));
+  }
   return `${lines.join('\n')}\n`;
 }
 
 interface Meta { commit: string; branch: string; platform: string; renderer: string; at: string }
-interface Report { meta?: Meta; summary: Summary[]; samples: Sample[]; retention?: Retention }
+interface Report { meta?: Meta; summary: Summary[]; samples: Sample[]; retention?: Retention; perChat?: PerChat[] }
 const report: Report = { summary: [], samples: [] };
 
 /** Writes session-switch.json (every sample) and session-switch.md (the table); returns the table. */
@@ -343,7 +347,7 @@ function writeReport(): string {
   mkdirSync(OUT, { recursive: true });
   report.summary = summarize(report.samples);
   writeFileSync(path.join(OUT, 'session-switch.json'), JSON.stringify(report, null, 2));
-  const table = markdown(report.summary, report.retention);
+  const table = markdown(report.summary, report.retention, report.perChat);
   writeFileSync(path.join(OUT, 'session-switch.md'), table);
   return table;
 }
@@ -357,6 +361,8 @@ function meta(): Meta {
 // Memory: CDP forced GC, then the renderer's counters.
 
 interface Counters { heapMB: number; nodes: number; listeners: number }
+/** One mounted chat's cost: elements in its conversation region, and what opening it added over a short chat, after GC. */
+interface PerChat { size: Size; messages: number; regionElements: number; nodesOverShort: number; heapMBOverShort: number }
 interface Retention { switches: number; before: Counters; after: Counters; perSwitch: { nodes: number; listeners: number; heapMB: number } }
 
 async function countersAfterGc(app: ElectronApplication): Promise<Counters> {
@@ -378,7 +384,7 @@ async function countersAfterGc(app: ElectronApplication): Promise<Counters> {
 // ---------------------------------------------------------------------------
 
 test.afterAll(() => {
-  if (report.samples.length === 0 && !report.retention) return;
+  if (report.samples.length === 0 && !report.retention && !report.perChat) return;
   const table = writeReport();
   console.log(`\n${table}\nSamples: ${path.join(OUT, 'session-switch.json')}`);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
@@ -434,6 +440,35 @@ test(`switching leaves at most ${MAX_RETAINED_NODES_PER_SWITCH} DOM nodes per sw
     const per = (key: keyof Counters) => (after[key] - before[key]) / RETENTION_SWITCHES;
     report.retention = { switches: RETENTION_SWITCHES, before, after, perSwitch: { nodes: Math.round(per('nodes')), listeners: Math.round(per('listeners')), heapMB: +per('heapMB').toFixed(3) } };
     expect(per('nodes'), `DOM nodes kept per switch (before ${JSON.stringify(before)}, after ${JSON.stringify(after)})`).toBeLessThanOrEqual(MAX_RETAINED_NODES_PER_SWITCH);
+  } finally {
+    writeReport();
+    await app.close().catch(() => undefined);
+  }
+});
+
+test('DOM nodes and heap per mounted chat (reported only)', async ({ baseURL }) => {
+  test.setTimeout(10 * 60_000);
+  const { pane, sessions } = await fixture(baseURL);
+  const [rest] = bySize(sessions, 'short');
+  const { app, page } = await launch(pane, baseURL);
+  const regionElements = () => page.evaluate(() => Math.max(0, ...Array.from(document.querySelectorAll('[aria-label="Conversation messages"]'))
+    .filter(region => region.getClientRects().length > 0).map(region => region.querySelectorAll('*').length)));
+  try {
+    const targets = [bySize(sessions, 'short')[1], bySize(sessions, 'long')[0], bySize(sessions, 'xl')[0]];
+    // Start every agent first, so an agent's start is not counted as the chat's.
+    for (const session of [rest, ...targets, rest]) await switchTo(page, session, 'click', 'per-chat-warmup');
+    const rows: PerChat[] = [];
+    for (const target of targets) {
+      await switchTo(page, rest, 'click', 'per-chat');
+      await page.waitForTimeout(500);
+      const base = await countersAfterGc(app);
+      const sample = await switchTo(page, target, 'click', 'per-chat');
+      expect(sample.visible, `per-chat: ${target.name} shows its last message`).not.toBeNull();
+      await page.waitForTimeout(500);
+      const shown = await countersAfterGc(app);
+      rows.push({ size: target.size, messages: target.messages, regionElements: await regionElements(), nodesOverShort: shown.nodes - base.nodes, heapMBOverShort: +(shown.heapMB - base.heapMB).toFixed(2) });
+    }
+    report.perChat = rows;
   } finally {
     writeReport();
     await app.close().catch(() => undefined);
