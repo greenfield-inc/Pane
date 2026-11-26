@@ -1,6 +1,5 @@
 import { useEffect, type RefObject } from 'react';
 import { VIEWER_ID } from '../browserWatch';
-import { usePageVisible } from './usePageVisible';
 import type { JsonValue } from '../../../../../../shared/validation/boundaryDecoder';
 
 /** How often a screen repeats that it shows a tab; the host forgets one silent for 15 s. */
@@ -11,13 +10,13 @@ type Invoke = (channel: string, ...args: Array<string | null | { kind: string; o
 /**
  * Tells the tab's host this screen shows it (`browser:watch`) every 5 s and when it changes size,
  * with the room its stream gives the page (the element marked data-testid "browser-stream" inside
- * `rootRef`), and that it stopped when unmounted or hidden. Hidden, it reports nothing.
+ * `rootRef`), and that it stopped when unmounted. Hiding sends one report off screen and then
+ * nothing: the host keeps this screen, and the page the size it gave, for 15 s of silence, so a
+ * short switch to another app changes nothing.
  */
 export function useStreamWatch(invoke: Invoke, panelId: string, kind: 'desktop' | 'phone' | 'web', rootRef: RefObject<HTMLElement | null>, on = true): void {
-  const visible = usePageVisible();
-  const live = on && visible;
   useEffect(() => {
-    if (!live) return;
+    if (!on) return;
     const box = () => rootRef.current?.querySelector('[data-testid="browser-stream"]');
     // The room before a phone's keyboard opened: the keyboard shrinks the stream's box, and the
     // host's page must not reflow to it.
@@ -33,17 +32,24 @@ export function useStreamWatch(invoke: Invoke, panelId: string, kind: 'desktop' 
       // A rotation changes the width too: that size is the new room.
       if (typing() && steady?.width === size.width) size = steady;
       else steady = size;
-      void invoke('browser:watch', panelId, VIEWER_ID, { kind, onScreen: true, ...size, scale: window.devicePixelRatio || 1 }).catch(() => undefined);
+      void invoke('browser:watch', panelId, VIEWER_ID, { kind, onScreen: document.visibilityState === 'visible', ...size, scale: window.devicePixelRatio || 1 }).catch(() => undefined);
     };
-    report();
-    const timer = window.setInterval(report, WATCH_EVERY_MS);
+    let timer: number | undefined;
+    const follow = () => {
+      report();
+      window.clearInterval(timer);
+      timer = document.visibilityState === 'visible' ? window.setInterval(report, WATCH_EVERY_MS) : undefined;
+    };
+    follow();
+    document.addEventListener('visibilitychange', follow);
     const observer = new ResizeObserver(report);
     const element = box();
     if (element) observer.observe(element);
     return () => {
       window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', follow);
       observer.disconnect();
       void invoke('browser:watch', panelId, VIEWER_ID, null).catch(() => undefined);
     };
-  }, [invoke, panelId, kind, rootRef, live]);
+  }, [invoke, panelId, kind, rootRef, on]);
 }

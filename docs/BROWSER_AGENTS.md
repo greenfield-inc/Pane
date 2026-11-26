@@ -223,7 +223,9 @@ tab's route), with no new port:
   reads, so a still page costs a read about every 4 seconds. A new frame, your input, or a change
   in the tab's state (the agent clicked or navigated) makes it read at once and quickly again.
   A screen that is hidden (another tab selected, the app in the background, the phone locked, the
-  window minimized) sends no frame, state or watch reads until it shows again.
+  window minimized) sends no frame or state reads until it shows again. Its last watch report
+  says it is off screen, and the host keeps it, and the page size it set, for 15 seconds of
+  silence, so a short switch to another app leaves the page as it was.
 - **Input** (`browser:input`). Mouse, wheel, touch, keys, text, navigation, dialog answers and
   files for the page's file picker, applied in order. It counts as yours: it takes over from an
   agent by the 750 ms rule and revokes its refs, and the page takes that screen's size. A click
