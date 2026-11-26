@@ -182,3 +182,63 @@ describe('Session order', () => {
     expect(ids(store.getState().sessions)).toEqual(['a', 'b', 'c', 'd']);
   });
 });
+
+describe('landing on the Session pressed on another machine (T-128)', () => {
+  // The rig in #1767 found Enter on another machine's Session showing the host's own last-used one.
+  it('lands on the pressed Session even when a select from the restored layout is still in flight', async () => {
+    const layoutSelect = deferred<ReturnType<typeof reply>>();
+    select.mockReturnValueOnce(layoutSelect.promise);
+    list.mockResolvedValue(reply('a'));
+    const store = await setup();
+
+    store.getState().landOn('b');
+    store.getState().invalidateHost();
+    store.setState({ sessions });
+    const layout = store.getState().select({ sessionId: 'a' });
+    await store.getState().refresh({ adoptServerSelection: true });
+    store.getState().preferSelection('b');
+    layoutSelect.resolve(reply('a'));
+    await layout;
+    await store.getState().refresh({ adoptServerSelection: true });
+
+    expect(store.getState().selectedSessionId).toBe('b');
+  });
+
+  it('keeps the pressed Session through the switch, which clears the outgoing host\'s Sessions', async () => {
+    list.mockResolvedValue(reply('a'));
+    const store = await setup();
+
+    store.getState().landOn('b');
+    store.getState().invalidateHost();
+    await store.getState().load();
+
+    expect(store.getState().selectedSessionId).toBe('b');
+    expect(store.getState().selectionRevision).toBeGreaterThan(0);
+  });
+
+  it('lands only once, so a later click on the new host is not undone', async () => {
+    list.mockResolvedValue(reply('a'));
+    select.mockResolvedValue(reply('a'));
+    const store = await setup();
+
+    store.getState().landOn('b');
+    store.getState().invalidateHost();
+    await store.getState().load();
+    await store.getState().select({ sessionId: 'a' });
+    await store.getState().refresh({ adoptServerSelection: true });
+
+    expect(store.getState().selectedSessionId).toBe('a');
+  });
+
+  it('drops a landing that a newer press or a cancelled switch replaced', async () => {
+    list.mockResolvedValue(reply('a'));
+    const store = await setup();
+
+    store.getState().landOn('b');
+    store.getState().landOn(undefined);
+    store.getState().invalidateHost();
+    await store.getState().load();
+
+    expect(store.getState().selectedSessionId).toBe('a');
+  });
+});

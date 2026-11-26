@@ -38,6 +38,11 @@ interface OrchestrationSessionState {
   invalidateHost: () => void;
   load: () => Promise<void>;
   refresh: (options?: { adoptServerSelection?: boolean; throwOnError?: boolean }) => Promise<void>;
+  /**
+   * Remembers the Session to land on once the host switch that follows clears this host's
+   * Sessions (T-128); undefined drops it, as a newer press or a cancelled switch does.
+   */
+  landOn: (sessionId: string | undefined) => void;
   /** This desktop's remembered Session for the current host, preferred over the host's last-used one. */
   preferSelection: (sessionId: string | undefined) => void;
   select: (selector: OrchestrationSessionSelector) => Promise<void>;
@@ -91,8 +96,39 @@ function revisionAfter(state: OrchestrationSessionState, selectedSessionId: stri
   return adoptsRemembered ? state.selectionRevision + 1 : state.selectionRevision;
 }
 
+/**
+ * The Session a press on another machine's row asked for (T-128). It waits through the host
+ * switch, which clears the outgoing host's Sessions, and is taken by the first list of the new
+ * host that has it: that list selects it as a click would, and any select already in flight
+ * (one the restored layout started) is dropped, so the host's own last-used Session never wins.
+ */
+let landing: { sessionId: string; armed: boolean } | undefined;
+
+function takeLanding(sessions: OrchestrationSessionSummary[]): string | undefined {
+  if (!landing?.armed) return undefined;
+  const sessionId = activeSessionIdFromList(sessions, landing.sessionId);
+  if (!sessionId) return undefined;
+  landing = undefined;
+  operationGeneration += 1;
+  pendingSelectionGeneration = null;
+  preferredSessionId = sessionId;
+  return sessionId;
+}
+
+/** The state a landing leaves: the Session selected and counted as this desktop's own choice. */
+function landedState(state: OrchestrationSessionState, sessionId: string): Partial<OrchestrationSessionState> {
+  return {
+    selectedSessionId: sessionId,
+    selectionRevision: state.selectionRevision + 1,
+    selectionVisits: { ...state.selectionVisits, [sessionId]: (state.selectionVisits[sessionId] ?? 0) + 1 },
+    selectionError: null,
+  };
+}
+
 function applyList(data: OrchestrationSessionListResult<OrchestrationSessionSummary>, ownSelectionId?: string): void {
   useOrchestrationSessionStore.setState((state) => {
+    const landed = takeLanding(data.sessions);
+    if (landed) return { sessions: data.sessions, availability: 'ready', error: null, ...landedState(state, landed) };
     const selectedSessionId = activeSessionIdFromList(data.sessions, ownSelectionId)
       ?? activeSessionIdFromList(data.sessions, data.selectedSessionId);
     return {
@@ -114,7 +150,12 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
   selectionRevision: 0,
   selectionVisits: {},
   hostRevision: 0,
+  landOn: (sessionId) => {
+    landing = sessionId ? { sessionId, armed: false } : undefined;
+  },
   invalidateHost: () => {
+    // The host switch a press started arms its landing; the next host's list takes it.
+    if (landing) landing.armed = true;
     operationGeneration += 1;
     refreshSequence += 1;
     pendingSelectionGeneration = null;
@@ -173,6 +214,8 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
         return;
       }
       set((state) => {
+        const landed = takeLanding(data.sessions);
+        if (landed) return { sessions: data.sessions, availability: state.availability === 'idle' ? 'ready' : state.availability, error: null, ...landedState(state, landed) };
         // Adopting starts from this desktop's own choice and falls back to the
         // host's last-used Session only when it has none.
         const selectedSessionId = options?.adoptServerSelection && mayAdoptSelection

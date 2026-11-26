@@ -75,9 +75,13 @@ export async function rememberOnMachine(machineId: string, target: MachineTarget
  * that machine's navigation memory, which the switch restores. An offline machine says so.
  */
 export async function openOnMachine(machineId: string, target: MachineTarget): Promise<void> {
+  // Latest wins (T-128, D-6): a newer press replaces this one's landing and silences its errors.
+  const press = ++openPresses;
+  const sessions = useOrchestrationSessionStore.getState();
   const state = useAllMachinesStore.getState();
   const entry = state.entries.find((machine) => machine.id === machineId);
   if (entry?.active) {
+    sessions.landOn(undefined);
     useAllMachinesStore.setState({ offlineNotice: null });
     openHere(target);
     return;
@@ -92,11 +96,23 @@ export async function openOnMachine(machineId: string, target: MachineTarget): P
   }
   if (!state.switchMachine) return;
   useAllMachinesStore.setState({ offlineNotice: null });
+  // The switch's restore clears this host's Sessions; the landing then picks the pressed one
+  // over the host's own last-used Session, whatever else selects meanwhile (#1767's rig).
+  sessions.landOn(target.kind === 'session' ? target.id : undefined);
+  const failed = (error: unknown) => {
+    if (press !== openPresses) return;
+    useOrchestrationSessionStore.getState().landOn(undefined);
+    showActionError(`Could not open ${target.name} on ${name}`, error);
+  };
   try {
     await rememberOnMachine(machineId, target);
+    if (press !== openPresses) return;
     const outcome = await state.switchMachine(machineId);
-    if (!outcome.ok) showActionError(`Could not open ${target.name} on ${name}`, outcome.needsPassword ? `${name} needs its password. Enter it in Remote Access settings, then try again.` : outcome.error);
+    if (!outcome.ok) failed(outcome.needsPassword ? `${name} needs its password. Enter it in Remote Access settings, then try again.` : outcome.error);
   } catch (error) {
-    showActionError(`Could not open ${target.name} on ${name}`, error);
+    failed(error);
   }
 }
+
+/** Presses of rows on any machine so far; the newest one owns the landing. */
+let openPresses = 0;
