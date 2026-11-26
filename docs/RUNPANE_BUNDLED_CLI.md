@@ -35,7 +35,11 @@ same command to the end of your own `PATH`, so it works in any terminal.
 - While Settings › Advanced › *Profiles* is on, `<PANE_DIR>/bin/agent-farm`
   (plus `agent-farm.cmd` on Windows) runs the Agent Farm bundled with this build through its launcher `agent-farm.cjs`, with
   the same binary as Node and `--config-root <PANE_DIR>/agent-farm` added before
-  any `--`; see [CHAT_TABS.md](CHAT_TABS.md#agent-farm-profiles). It has no `node`
+  any `--`; see [CHAT_TABS.md](CHAT_TABS.md#agent-farm-profiles). The launcher
+  gives Agent Farm the shim as its CLI, so the child launches it prints into a
+  profile's Launch links read `<PANE_DIR>/bin/agent-farm run …` (on Windows
+  `<PANE_DIR>\bin\agent-farm-launch\agent-farm`, a folder whose only command
+  is `agent-farm.cmd`) and run in any terminal. It has no `node`
   fallback, since that copy sits inside `app.asar`, and it uses Pane's own
   binary even after a CLI-only update. In WSL it starts the Windows binary
   through interop, as `pane-node` does. Pane leaves an `agent-farm` file it did
