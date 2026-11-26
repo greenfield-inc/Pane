@@ -170,6 +170,7 @@ export function RemotePwaApp() {
   /** Bumped by each Pane or Session open, so a slow Session open cannot replace a later choice. */
   const navigationRequestRef = useRef(0);
   const archivedLoadRequestRef = useRef(0);
+  const affordancesLoadRequestRef = useRef(0);
   const pushRoutePanelRef = useRef<{ sessionId: string; panelId: string } | null>(null);
   /** To-dos on screen (P7): its screen, or null while a Pane or Session shows. */
   const [todosRoute, setTodosRoute] = useState<PhoneTodosRoute | null>(null);
@@ -404,14 +405,17 @@ export function RemotePwaApp() {
 
   const loadAffordances = useCallback(async (runtime: RemoteRuntimeAdapter | null = adapter) => {
     if (!runtime) return;
+    // Only the newest request applies, so an older answer never overwrites a later settings change.
+    const request = ++affordancesLoadRequestRef.current;
+    const current = () => runtime === activeRuntimeRef.current && request === affordancesLoadRequestRef.current;
     setAffordancesLoading(true);
     try {
       const nextAffordances = await runtime.getPwaAffordances();
-      if (runtime === activeRuntimeRef.current) setAffordances(nextAffordances);
+      if (current()) setAffordances(nextAffordances);
     } catch {
-      if (runtime === activeRuntimeRef.current) setAffordances(EMPTY_AFFORDANCES);
+      if (current()) setAffordances(EMPTY_AFFORDANCES);
     } finally {
-      if (runtime === activeRuntimeRef.current) setAffordancesLoading(false);
+      if (current()) setAffordancesLoading(false);
     }
   }, [adapter]);
 
@@ -1164,9 +1168,15 @@ export function RemotePwaApp() {
 
       if (event.channel === 'orchestration-sessions:changed') {
         void refreshOrchestrationSessions(adapter);
+        return;
+      }
+
+      // The host's custom commands or shortcuts changed (runpane, its desktop, another phone): refetch them. The event carries no values.
+      if (event.channel === 'remote:settings-changed') {
+        void loadAffordances(adapter);
       }
     });
-  }, [adapter, loadArchivedIfShown, refreshOrchestrationSessions, refreshProjects, removePanel, selectedSessionId, setSelectedPanel, upsertPanel]);
+  }, [adapter, loadAffordances, loadArchivedIfShown, refreshOrchestrationSessions, refreshProjects, removePanel, selectedSessionId, setSelectedPanel, upsertPanel]);
 
   useEffect(() => {
     if (!selectedSessionId || !adapter) return;

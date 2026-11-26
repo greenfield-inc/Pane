@@ -98,6 +98,15 @@ from .notify import RunpaneError, run_notify
 from .todos_feature import is_todo_command, todos_disabled_error, todos_on, without_todo_lines
 from .pairing_link import run_link
 from .todos import run_todos
+from .custom_commands import (
+    delegated_workspace_argv,
+    run_custom_commands_add,
+    run_custom_commands_list,
+    run_custom_commands_remove,
+    run_custom_commands_reorder,
+    run_custom_commands_update,
+    run_through_node_cli,
+)
 from .secrets import (
     run_secrets_delete,
     run_secrets_exec,
@@ -138,6 +147,9 @@ COMMAND_GROUP_HELP_TOPICS.add("secrets")
 COMMAND_GROUP_HELP_TOPICS.add("autopilot")
 COMMAND_GROUP_HELP_TOPICS.add("devices")
 COMMAND_GROUP_HELP_TOPICS.add("browser")
+COMMAND_GROUP_HELP_TOPICS.add("custom-commands")
+# `custom-commands` verbs that take the entry's exact name as their first word.
+CUSTOM_COMMAND_NAMED_VERBS = {"custom-commands update", "custom-commands remove", "custom-commands reorder"}
 LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
 LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
 MAX_LOCK_DURATION_MS = 86_400_000
@@ -217,6 +229,11 @@ FLAG_OWNERS = {
     "--conversation": ("panels conversation",),
     "--hook": ("panels conversation",),
     "--web": ("links create",),
+    "--command": ("custom-commands add", "custom-commands update"),
+    "--resume-mode": ("custom-commands add", "custom-commands update"),
+    "--initial-template": ("custom-commands add", "custom-commands update"),
+    "--resume-template": ("custom-commands add", "custom-commands update"),
+    "--to": ("custom-commands reorder",),
 }
 HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 
@@ -285,6 +302,13 @@ class ParsedArgs:
     # secrets lease: the secret names, given as words; secrets lease end --id: the lease to end.
     secret_names: Optional[List[str]] = None
     lease_id: Optional[str] = None
+    # `runpane custom-commands`: the entry named as a word (update, remove, reorder), and the entry's fields.
+    custom_command_name: Optional[str] = None
+    custom_command_text: Optional[str] = None
+    resume_mode: Optional[str] = None
+    initial_template: Optional[str] = None
+    resume_template: Optional[str] = None
+    position: Optional[int] = None
     reason: Optional[str] = None
     kind: Optional[str] = None
     exec_command: Optional[List[str]] = None
@@ -443,6 +467,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             return run_tracked_command(
                 telemetry_context,
                 lambda: run_no_args_entrypoint(telemetry_context),
+            )
+        # `workspace <machine> custom-commands|sessions create ...` runs through Pane's Node CLI, argv unchanged.
+        if delegated_workspace_argv(effective_argv):
+            return run_tracked_command(
+                telemetry_context,
+                lambda: run_through_node_cli(effective_argv, explicit_pane_dir(effective_argv)),
             )
 
         try:
@@ -701,6 +731,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         parsed.exec_command = take_exec_command(args)
     if parsed.command == "secrets lease":
         parsed.secret_names = take_secret_names(args)
+    if parsed.command in CUSTOM_COMMAND_NAMED_VERBS and args and not args[0].startswith("-"):
+        parsed.custom_command_name = args.pop(0)
     if parsed.command == "relay":
         # Every word after `relay` is pane-relay's; this package points to npx instead.
         del args[:]
@@ -1253,6 +1285,23 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
 
 
 def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
+    if flag == "--command":
+        parsed.custom_command_text = value
+        return
+    if flag == "--resume-mode":
+        parsed.resume_mode = value
+        return
+    if flag == "--initial-template":
+        parsed.initial_template = value
+        return
+    if flag == "--resume-template":
+        parsed.resume_template = value
+        return
+    if flag == "--to":
+        if not re.fullmatch(r"\d+", value):
+            raise ValueError(f'--to must be a whole number position, 1 or more; got "{value}".')
+        parsed.position = int(value)
+        return
     if flag == "--pane-dir":
         parsed.pane_dir = value
         return
@@ -1694,7 +1743,7 @@ def read_value(args: List[str], index: int, flag: str, literal_values: Set[int])
     if clearable and index < len(args) and args[index] == "":
         return ""
     bare_flag = index < len(args) and re.fullmatch(r"--[a-z][a-z-]*", args[index]) is not None
-    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains", "--because", "--reason", "--choice", "--asked", "--what-changed", "--done-when", "--no-attachments", "--person-said"}
+    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--command", "--initial-template", "--resume-template", "--name-contains", "--because", "--reason", "--choice", "--asked", "--what-changed", "--done-when", "--no-attachments", "--person-said"}
     if index >= len(args) or not args[index] or (not free_text and args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]
@@ -1929,6 +1978,11 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "repos update": lambda parsed, context: run_repos_update(parsed),
     "repos rename": lambda parsed, context: run_repos_rename(parsed),
     "secrets list": lambda parsed, context: run_secrets_list(parsed),
+    "custom-commands list": lambda parsed, context: run_custom_commands_list(parsed),
+    "custom-commands add": lambda parsed, context: run_custom_commands_add(parsed),
+    "custom-commands update": lambda parsed, context: run_custom_commands_update(parsed),
+    "custom-commands remove": lambda parsed, context: run_custom_commands_remove(parsed),
+    "custom-commands reorder": lambda parsed, context: run_custom_commands_reorder(parsed),
     "secrets set": lambda parsed, context: run_secrets_set(parsed),
     "secrets delete": lambda parsed, context: run_secrets_delete(parsed),
     "secrets exec": lambda parsed, context: run_secrets_exec(parsed),
@@ -2090,3 +2144,17 @@ if _missing_handlers:
     raise RuntimeError(f"Missing command handlers: {', '.join(sorted(_missing_handlers))}")
 if _unexpected_handlers:
     raise RuntimeError(f"Unexpected command handlers: {', '.join(sorted(_unexpected_handlers))}")
+
+
+def explicit_pane_dir(argv: List[str]) -> Optional[str]:
+    """The `--pane-dir` the invocation names, as the parser reads it: the last one before `--`."""
+    pane_dir: Optional[str] = None
+    index = 0
+    while index < len(argv) and argv[index] != "--":
+        if argv[index] == "--pane-dir" and index + 1 < len(argv):
+            index += 1
+            pane_dir = argv[index]
+        elif argv[index].startswith("--pane-dir="):
+            pane_dir = argv[index][len("--pane-dir="):]
+        index += 1
+    return pane_dir or None

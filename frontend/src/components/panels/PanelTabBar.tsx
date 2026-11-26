@@ -26,6 +26,7 @@ import { PromoteChatButton } from './PromoteChatButton';
 import { focusChatSoon } from '../../services/regionFocus';
 import { SwitchToChatPaletteEntry } from './SwitchToChat';
 import { CustomCommandForm } from './CustomCommandForm';
+import type { CustomCommand } from '../../types/config';
 import { AgentFarmProfileDialog } from '../chatTab/AgentFarmProfileDialog';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
 
@@ -127,7 +128,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const controlsOnTitlePlane = !!trailingSlot;
   // Rename state moved to PanelTabStrip
   const [showCustomInput, setShowCustomInput] = useState(false);
-  const [editingCustomIndex, setEditingCustomIndex] = useState<number | null>(null);
+  // The row the pencil opened, as the menu showed it: its save edits that row only while it still holds this entry.
+  const [editingCustom, setEditingCustom] = useState<{ index: number; entry: CustomCommand } | null>(null);
   const [focusedDropdownIndex, setFocusedDropdownIndex] = useState(-1);
   const dropdownItemsRef = useRef<(HTMLButtonElement | HTMLInputElement | null)[]>([]);
 
@@ -172,12 +174,9 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     return () => { cancelled = true; };
   }, [session?.id, resolveKey]);
 
-  const deleteCustomCommand = useCallback(async (index: number) => {
-    const existing = config?.customCommands ?? [];
-    await updateConfig({
-      customCommands: existing.filter((_, i) => i !== index)
-    }).catch(() => {});
-  }, [config, updateConfig]);
+  const deleteCustomCommand = useCallback(async (index: number, entry: CustomCommand) => {
+    await editCustomCommandRow(index, entry, null).catch(error => console.warn('[PanelTabBar] Could not remove the custom command:', error));
+  }, []);
   
   // Add Tool dropdown positioning
   useEffect(() => {
@@ -234,7 +233,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     onPanelCreate(type, options);
     setShowDropdown(false);
     setShowCustomInput(false);
-    setEditingCustomIndex(null);
+    setEditingCustom(null);
   }, [onPanelCreate]);
   
   // Rename handlers moved to PanelTabStrip
@@ -252,7 +251,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
       ) {
         setShowDropdown(false);
         setShowCustomInput(false);
-        setEditingCustomIndex(null);
+        setEditingCustom(null);
       }
     };
 
@@ -284,7 +283,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     } else {
       setFocusedDropdownIndex(-1);
       setShowCustomInput(false);
-      setEditingCustomIndex(null);
+      setEditingCustom(null);
       dropdownItemsRef.current = [];
     }
   }, [showDropdown]);
@@ -774,13 +773,13 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                         if (e.key === 'F2') {
                           e.preventDefault();
                           e.stopPropagation();
-                          setEditingCustomIndex(index);
+                          setEditingCustom({ index, entry: cmd });
                           setShowCustomInput(true);
                         }
                         if (!showCustomInput && (e.key === 'Delete' || e.key === 'Backspace')) {
                           e.preventDefault();
                           e.stopPropagation();
-                          deleteCustomCommand(index);
+                          deleteCustomCommand(index, cmd);
                         }
                       }}
                     >
@@ -793,7 +792,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                     type="button"
                     className="p-1 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary flex-shrink-0"
                     onClick={() => {
-                      setEditingCustomIndex(index);
+                      setEditingCustom({ index, entry: cmd });
                       setShowCustomInput(true);
                     }}
                     aria-label={`Rename ${cmd.name} shortcut`}
@@ -805,7 +804,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                     type="button"
                     className="p-1 mr-1.5 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary flex-shrink-0"
                     disabled={showCustomInput}
-                    onClick={() => deleteCustomCommand(index)}
+                    onClick={() => deleteCustomCommand(index, cmd)}
                     aria-label={`Remove ${cmd.name} shortcut`}
                   >
                     <X className="w-3 h-3" />
@@ -816,24 +815,24 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               {availablePanelTypes.includes('terminal') && (
                 showCustomInput ? (
                   <CustomCommandForm
-                    key={editingCustomIndex ?? 'new'}
-                    existing={editingCustomIndex === null ? undefined : customCommands[editingCustomIndex]}
+                    key={editingCustom?.index ?? 'new'}
+                    existing={editingCustom?.entry}
                     onCancel={() => {
                       setShowCustomInput(false);
-                      setEditingCustomIndex(null);
+                      setEditingCustom(null);
                     }}
                     onSave={async (name, command, resume) => {
-                      const existing = config?.customCommands ?? [];
-                      await updateConfig({
-                        customCommands: editingCustomIndex === null
-                          ? [...existing, { name, command, resume }]
-                          : existing.map((entry, index) => index === editingCustomIndex ? { ...entry, name, resume } : entry),
-                      });
-                      if (editingCustomIndex === null) {
+                      if (editingCustom) {
+                        await editCustomCommandRow(editingCustom.index, editingCustom.entry, { ...editingCustom.entry, name, resume });
+                      } else {
+                        const existing = config?.customCommands ?? [];
+                        await updateConfig({ customCommands: [...existing, { name, command, resume }] });
+                      }
+                      if (!editingCustom) {
                         handleAddPanel('terminal', { initialCommand: command, title: name, customResume: resume });
                       } else {
                         setShowCustomInput(false);
-                        setEditingCustomIndex(null);
+                        setEditingCustom(null);
                       }
                     }}
                   />
@@ -843,7 +842,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                     ref={itemRef()}
                     role="menuitem"
                     className={menuItemClass}
-                    onClick={() => { setEditingCustomIndex(null); setShowCustomInput(true); }}
+                    onClick={() => { setEditingCustom(null); setShowCustomInput(true); }}
                   >
                     <Plus className="w-3.5 h-3.5 flex-shrink-0" />
                     <span className="truncate">Add custom command…</span>
@@ -889,3 +888,10 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 });
 
 PanelTabBar.displayName = 'PanelTabBar';
+
+/** Saves the pencil's rename or the ×'s removal in main, against the list as it is now; refused if that row changed meanwhile. */
+async function editCustomCommandRow(index: number, expected: CustomCommand, next: CustomCommand | null): Promise<void> {
+  // SAFETY: config:custom-commands:edit-row answers { success, error? } (main/src/ipc/customCommands.ts).
+  const result = await window.electronAPI.invoke('config:custom-commands:edit-row', { index, expected, next }) as { success: boolean; error?: string };
+  if (!result.success) throw new Error(result.error ?? 'Could not save the custom command.');
+}

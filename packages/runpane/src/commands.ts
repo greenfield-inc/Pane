@@ -91,6 +91,14 @@ export interface ParsedArgs {
   secretFiles?: string[];
   /** `secrets lease`: the secret names, given as words. */
   secretNames?: string[];
+  /** `runpane custom-commands`: the entry named as a word (update, remove, reorder), and the entry's fields. */
+  customCommandName?: string;
+  customCommandText?: string;
+  resumeMode?: string;
+  initialTemplate?: string;
+  resumeTemplate?: string;
+  /** `custom-commands reorder --to`: the 1-based final position. */
+  position?: number;
   /** `secrets lease end --id`: the lease to end. */
   leaseId?: string;
   reason?: string;
@@ -312,7 +320,9 @@ const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactForm
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'machine', 'loops', 'todos', 'secrets', 'autopilot', 'devices', 'browser']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'machine', 'loops', 'todos', 'secrets', 'autopilot', 'devices', 'browser', 'custom-commands']);
+/** `custom-commands` verbs that take the entry's exact name as their first word. */
+const CUSTOM_COMMAND_NAMED_VERBS = new Set(['custom-commands update', 'custom-commands remove', 'custom-commands reorder']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -364,6 +374,11 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--conversation', ['panels conversation']],
   ['--hook', ['panels conversation']],
   ['--web', ['links create']],
+  ['--command', ['custom-commands add', 'custom-commands update']],
+  ['--resume-mode', ['custom-commands add', 'custom-commands update']],
+  ['--initial-template', ['custom-commands add', 'custom-commands update']],
+  ['--resume-template', ['custom-commands add', 'custom-commands update']],
+  ['--to', ['custom-commands reorder']],
 ]);
 const LOCAL_VALUE_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localValue);
 const LOCAL_BOOLEAN_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localBoolean);
@@ -601,7 +616,10 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
 }
 
 /** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; relay takes all of it; read and write take one path; inbox ack takes item ids; secrets lease takes secret names; Autopilot's answer, close and rewrite take one; link takes the link; profiles show and launch take the profile's name. */
-function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink' | 'todoArgs' | 'secretNames'> {
+function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink' | 'todoArgs' | 'secretNames' | 'customCommandName'> {
+  if (CUSTOM_COMMAND_NAMED_VERBS.has(command)) {
+    return args[0] !== undefined && !args[0].startsWith('-') ? { customCommandName: args.shift() ?? '' } : {};
+  }
   if (command.startsWith('todos ')) return { todoArgs: takeTodoWords(args) };
   if (command === 'link') return args[0] !== undefined && !args[0].startsWith('-') ? { pairingLink: args.shift() ?? '' } : {};
   if (AUTOPILOT_ITEM_COMMANDS.has(command)) {
@@ -1139,6 +1157,27 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
 }
 
 function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): void {
+  if (flag === '--command') {
+    parsed.customCommandText = value;
+    return;
+  }
+  if (flag === '--resume-mode') {
+    parsed.resumeMode = value;
+    return;
+  }
+  if (flag === '--initial-template') {
+    parsed.initialTemplate = value;
+    return;
+  }
+  if (flag === '--resume-template') {
+    parsed.resumeTemplate = value;
+    return;
+  }
+  if (flag === '--to') {
+    if (!/^\d+$/u.test(value)) throw new Error(`--to must be a whole number position, 1 or more; got "${value}".`);
+    parsed.position = Number(value);
+    return;
+  }
   if (flag === '--pane-dir') {
     parsed.paneDir = value;
     return;
@@ -1835,7 +1874,7 @@ function readValue(args: string[], index: number, flag: string, literalValues: S
   const clearable = REPO_SETTING_FLAGS.includes(flag);
   if (clearable && value === '') return value;
   const freeText = (clearable && !/^--[a-z][a-z-]*$/.test(value ?? ''))
-    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains', '--because', '--reason', '--choice', '--asked', '--what-changed', '--done-when', '--no-attachments', '--person-said'].includes(flag);
+    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--command', '--initial-template', '--resume-template', '--name-contains', '--because', '--reason', '--choice', '--asked', '--what-changed', '--done-when', '--no-attachments', '--person-said'].includes(flag);
   if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }

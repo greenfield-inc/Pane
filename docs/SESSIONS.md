@@ -85,6 +85,10 @@ default seeds new Sessions. Creating a Session remembers its launch command and
 arguments for the next creation; cancelling, or a create Pane refuses, leaves that default unchanged.
 Selecting the agent default clears the remembered custom command. Each Session saves its own launch configuration
 and behavior. Changing defaults does not overwrite existing Sessions.
+The saved custom commands in the launch list are each machine's own; manage
+them with `runpane custom-commands` (see
+[Named custom commands](TOOL_PANEL_SYSTEM.md#named-custom-commands)), and an
+open New Session dialog shows a change at once without losing its draft.
 Launch changes take effect on the next explicit restart.
 Use **Edit behavior…** during creation or in Session settings to open the
 separate behavior editor. **Back** discards the draft; **Save behavior** applies it

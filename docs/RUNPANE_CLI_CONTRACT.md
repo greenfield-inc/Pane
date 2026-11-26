@@ -350,6 +350,11 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `secrets request`: Ask the person for a secret on a masked card. Pane saves what they type as a Pane secret and never returns it.
 - `secrets lease`: Ask the person to lease 1Password-backed Pane secrets to this machine for a while. Returns the lease's id, end time and machines, never a value.
 - `secrets lease end`: End a Pane secret lease now: this machine deletes the leased values.
+- `custom-commands list`: List this machine's custom launch commands in order, with each command and its resume templates (owner only).
+- `custom-commands add`: Save a new custom launch command at the end of this machine's list; the "+" menu and New Session show it at once.
+- `custom-commands update`: Change a custom launch command, selected by its exact name: rename it, change its command, or change or clear its resume settings.
+- `custom-commands remove`: Remove a custom launch command, selected by its exact name.
+- `custom-commands reorder`: Move a custom launch command, selected by its exact name, to a 1-based position; keyboard shortcut slots follow the new order.
 - `devices list`: List the phone simulators and emulators this Pane can open: platform, name, OS, machine, state, and which Pane holds each.
 - `devices open`: Boot a phone simulator or emulator for this Pane and show its live screen in a device tab beside the agent.
 - `devices screenshot`: Capture the screen of this Pane's open device as an image.
@@ -523,6 +528,11 @@ runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>].
 runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json] [--pane-dir <path>]
 runpane secrets lease <name>... --project <project> [--reason <text>] [--json] [--pane-dir <path>]
 runpane secrets lease end --id <lease-id> --yes [--json] [--pane-dir <path>]
+runpane custom-commands list [--json] [--pane-dir <path>]
+runpane custom-commands add --name <name> --command <command> [--resume-mode <mode>] [--initial-template <template>] [--resume-template <template>] --yes [--json] [--pane-dir <path>]
+runpane custom-commands update <name> [--name <new-name>] [--command <command>] [--resume-mode <mode|none>] [--initial-template <template>] [--resume-template <template>] --yes [--json] [--pane-dir <path>]
+runpane custom-commands remove <name> --yes [--json] [--pane-dir <path>]
+runpane custom-commands reorder <name> --to <position> --yes [--json] [--pane-dir <path>]
 runpane devices list [--json] [--pane-dir <path>]
 runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]
 runpane devices screenshot [--platform <ios|android>] [--json] [--pane-dir <path>]
@@ -912,6 +922,11 @@ These flags are consumed by local daemon-control commands:
 --person-said <words>
 --until <time>
 --todo <T-n>
+--command <command>
+--resume-mode <mode>
+--initial-template <template>
+--resume-template <template>
+--to <position>
 --json
 --wait-ready
 --no-focus
