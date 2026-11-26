@@ -29,7 +29,6 @@ export interface SwitchCursorHoldOptions {
   onLanded: () => void;
 }
 
-const SIDEBAR_ITEM = '[data-sidebar-item]';
 const keyOf = (element: CursorRow | null): string | null => element?.getAttribute('data-sidebar-key') ?? null;
 
 let releaseCurrent: (() => void) | null = null;
@@ -59,7 +58,15 @@ export function releaseSwitchCursorHold(): void {
   releaseCurrent?.();
 }
 
-/** Starts a hold for `options.switching`, replacing any hold already running. */
+/** Keys the sidebar uses to move or open; any other key is the person going somewhere else. */
+const SIDEBAR_KEYS = new Set(['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Enter', ' ', 'j', 'k']);
+
+/**
+ * Starts a hold for `options.switching`, replacing any hold already running. Focus goes back to the
+ * cursor's row only when it was lost: to the body, or with a row that re-rendered away. Anywhere
+ * else focus goes (a dialog, the palette, the composer) is left alone, so the hold never takes
+ * input from where the person or a dialog put it, and never fights a focus trap (review F-1).
+ */
 export function holdCursorThroughSwitch(options: SwitchCursorHoldOptions): void {
   releaseCurrent?.();
   const pressedKey = keyOf(options.cursor());
@@ -74,43 +81,40 @@ export function holdCursorThroughSwitch(options: SwitchCursorHoldOptions): void 
     if (row?.isConnected) return row;
     return lastKey ? options.findByKey(lastKey) : null;
   };
-  const restore = () => {
-    const row = cursorRow();
-    row?.focus({ preventScroll: true });
+  const focusLost = (): boolean => {
+    const active = document.activeElement;
+    return !active || active === document.body || !active.isConnected;
   };
-  const onFocusIn = (event: FocusEvent) => {
-    // SAFETY: focusin targets on the window are elements.
-    const target = event.target as HTMLElement | null;
-    if (target?.closest?.(SIDEBAR_ITEM)) return;
-    restore();
-  };
-  // A focused row that re-renders away leaves focus on the body with no focus event: check each frame.
+  // Losing focus with an element fires no focus event: check each frame.
   const watch = () => {
     frame = null;
     if (released) return;
-    const active = document.activeElement;
-    if (!active || active === document.body) restore();
+    if (focusLost()) cursorRow()?.focus({ preventScroll: true });
     frame = requestAnimationFrame(watch);
+  };
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (!SIDEBAR_KEYS.has(event.key)) release();
   };
   const release = () => {
     if (released) return;
     released = true;
-    window.removeEventListener('focusin', onFocusIn, true);
+    window.removeEventListener('keydown', onKeyDown, true);
     window.removeEventListener('mousedown', release, true);
     if (frame !== null) cancelAnimationFrame(frame);
     if (releaseCurrent === release) releaseCurrent = null;
   };
 
-  window.addEventListener('focusin', onFocusIn, true);
-  // A click is the person choosing where focus goes.
+  // A click, or a key that isn't the sidebar's, is the person choosing where focus goes.
+  window.addEventListener('keydown', onKeyDown, true);
   window.addEventListener('mousedown', release, true);
   frame = requestAnimationFrame(watch);
   releaseCurrent = release;
 
   void options.switching.catch(() => undefined).finally(() => {
     if (released) return;
-    const landedOnPressed = keyOf(cursorRow()) === pressedKey;
+    // Into the work only when focus is still on the pressed row, never over a dialog or a field.
+    const onPressedRow = keyOf(cursorRow()) === pressedKey && document.activeElement?.getAttribute('data-sidebar-key') === pressedKey;
     release();
-    if (landedOnPressed) options.onLanded();
+    if (onPressedRow) options.onLanded();
   });
 }
