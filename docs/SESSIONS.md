@@ -1016,8 +1016,8 @@ The daemon and Electron IPC channels are:
 `orchestration-sessions:list`, `orchestration-sessions:select`,
 `orchestration-sessions:create`, `orchestration-sessions:get`,
 `orchestration-sessions:update`, `orchestration-sessions:archive-preview`, `orchestration-sessions:archive`, `orchestration-sessions:reorder`, `orchestration-sessions:set-agent`,
-`orchestration-sessions:associate`, `orchestration-sessions:detach`, and
-`orchestration-sessions:overview`.
+`orchestration-sessions:associate`, `orchestration-sessions:detach`, `orchestration-sessions:overview`, and
+`orchestration-sessions:snapshots`.
 
 Selectors accept a stable Session ID or an exact Session name. Phone apps
 released before chat tabs crash on a tab kind they don't know, so clients that
@@ -1035,7 +1035,26 @@ Sessions the list fell from 4.5 MB to 262 KB. The sidebar, the All machines feed
 a host switch and the phone ask for it; `get` and `overview` still carry the
 full record. A host older than this ignores the argument and sends full records.
 Desktop requests to another machine also ask for gzip, and the host compresses
-answers of 1 KB or more. The existing
+answers of 1 KB or more.
+
+`orchestration-sessions:snapshots` serves host snapshots, which let the owner's
+other machines show a chat Session ahead of opening it. There is one snapshot
+per unarchived chat Session: the summary record, its tabs as `panels:list`
+returns them, the stored layout, and the chat view with its newest 30 messages.
+Inline attachment bytes over 4 KB (`data`, `blob`) are replaced by
+`omitted: { field, length }`. Each snapshot has a `revision` that rises on any
+change to the record (except order and selection), the tabs, the layout or the
+chat. The request is `{ since?, held? }`: the answer lists every snapshotted
+Session id, the snapshots newer than `since`, and the `revision` to send next
+time. `held` maps a Session id to the `{ generation, count }` of messages the
+caller already has, and only the messages from the last held one on are sent.
+After a restart every Session reads as changed. A change also sends
+`session-snapshot:changed` `{ sessionId, revision }` on the event stream, at
+most once a second per Session. Reading creates no tab and starts no agent. Only
+the owner's own devices get an answer; teammates and Read only devices are
+refused with `SESSION_SNAPSHOTS_OWNER_ONLY`.
+
+The existing
 `pane-chat:*` channels remain compatibility endpoints for the imported legacy
 conversation.
 

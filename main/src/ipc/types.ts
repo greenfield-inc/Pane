@@ -21,6 +21,7 @@ import type { MemoryRelief } from '../services/machineHealth/memoryRelief';
 import type { OtherApps } from '../services/machineHealth/otherApps';
 import type { ApprovalStore } from '../services/approvals/approvalStore';
 import type { TodoService } from '../services/todos/todoService';
+import type { SessionSnapshotService } from '../services/sessionSnapshots';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 
 export interface DaemonHostServices extends CoreServices {
@@ -55,6 +56,8 @@ export interface DaemonHostServices extends CoreServices {
   otherApps?: OtherApps;
   /** To-dos (D-409): this machine's to-dos, their supervisor and load gate. */
   todoService?: TodoService;
+  /** Host snapshots of this machine's chat Sessions for the owner's other machines (T-116 PR 4). */
+  sessionSnapshots?: SessionSnapshotService;
 }
 
 export interface AppServices extends DaemonHostServices {
