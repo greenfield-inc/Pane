@@ -27,6 +27,8 @@ const MAX_ENTRIES = 400;
 const MAX_TAILS = 32;
 
 interface TailState {
+  /** The file's identity (device and inode): a file replaced at the same path is read again from its tail. */
+  id: string;
   /** End of the last complete line read. */
   offset: number;
   /** Whether `offset` is the start of a line (a first read from the tail is not). */
@@ -86,12 +88,13 @@ export function timestampMs(value: string | undefined): number | undefined {
 export async function readTranscriptTail(file: string, parse: TranscriptLineParser): Promise<TranscriptEntry[]> {
   const handle = await fs.open(file, 'r');
   try {
-    const { size } = await handle.stat();
+    const { size, dev, ino } = await handle.stat();
+    const id = `${dev}:${ino}`;
     let state = tails.get(file);
     tails.delete(file);
-    if (!state || size < state.offset) {
+    if (!state || state.id !== id || size < state.offset) {
       const offset = Math.max(0, size - INITIAL_TAIL_BYTES);
-      state = { offset, aligned: offset === 0, entries: [] };
+      state = { id, offset, aligned: offset === 0, entries: [] };
     }
     tails.set(file, state);
     const oldest = tails.size > MAX_TAILS ? tails.keys().next().value : undefined;

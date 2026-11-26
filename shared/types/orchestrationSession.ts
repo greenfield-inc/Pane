@@ -144,6 +144,12 @@ export interface OrchestrationSessionRecord {
    * Stored; older records omit it and read as read.
    */
   readState?: SessionReadState;
+  /**
+   * Where the host last finished reading the Session agent's terminal transcript for replies
+   * (sessionReply.ts): the tab, the file and its identity, and the offset. Stored, so a restart
+   * neither replays an old reply nor misses a new one.
+   */
+  replyCursor?: { panelId: string; file: string; id: string; offset: number; fresh?: boolean };
   agent: PaneChatAgent;
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;
