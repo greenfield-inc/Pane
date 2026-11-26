@@ -2,8 +2,8 @@
 
 Pick up a game controller and drive Pane without a mouse or keyboard: move
 around with the stick, open what needs you, hold a trigger to talk, and send.
-The desktop app (macOS, Windows and Linux) reads Xbox, PlayStation and
-Switch-style pads while its window is in front.
+The desktop app (macOS, Windows and Linux) and the phone app (Android and
+iPhone) read Xbox, PlayStation and Switch-style pads while Pane is in front.
 
 ## Getting started
 
@@ -105,10 +105,41 @@ mode.
 - Pane reads the pad only while its window is focused and visible, and does no
   work while no pad is connected.
 
+## On the phone
+
+The Android and iPhone apps follow the same scheme, with a phone's screens in
+place of the sidebar. They need app version 1.6 or later (runtime 1.6): older
+builds ignore the pad.
+
+1. Pair the pad with the phone in its Bluetooth settings.
+2. Open Pane and press any button. The cheat sheet shows once, with the pad's
+   name and the letters Pane picked for it. Touch the screen and the ring
+   hides until the next press.
+
+What differs from desktop:
+
+- **B** goes back a screen; on a Pane or Session it goes to Home.
+- **L2** shows or hides Home's column on a tablet or an unfolded phone, and
+  goes to Home on a phone.
+- **−** opens Recent as a sheet. **L3** opens Home's search.
+- **R2** dictates into the terminal's box, a chat tab's box, a question's
+  answer box, or search, using the computer's voice keys like the mic button.
+- In a split (an unfolded phone or a tablet), **L1 + R1** moves to the other
+  column and the right stick scrolls only the focused one.
+- **Settings › General › Controller** holds Button letters (Auto, Xbox,
+  PlayStation, Nintendo), Show cheat sheet, and a link here.
+- On Android, the Shortcuts, Attach, Voice setup and Copy sheets are separate
+  windows Pane can't read the pad in: there B closes the sheet and the D-pad
+  moves Android's own focus.
+- On iPhone, **Home** opens Apple's Games app unless you add Pane under the
+  pad's Home Button settings. Pane leaves it alone.
+
 ## For contributors
 
 The scheme lives in `shared/controller/`: family profiles, the interpreter
 (holds, chords, stick repeat), the binding table, the direction picker and the
 Needs-you order. The desktop adapter and overlays are in
-`frontend/src/controller/`. The scheme table above is checked against
+`frontend/src/controller/`, the phone's in `native/src/features/controller/`
+with its native module in `native/modules/pane-controller` (see
+[native/README.md](../native/README.md#game-controllers)). The scheme table above is checked against
 `shared/controller/bindings.ts` by `frontend/src/controller/sharedController.test.ts`.
