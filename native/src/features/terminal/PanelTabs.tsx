@@ -88,12 +88,18 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
   const strip = useRef<ScrollView>(null);
   const tabFrames = useRef(new Map<string, { x: number; width: number }>());
   const view = useRef({ offset: 0, width: 0 });
+  // Noted at once: a fold lays the strip out several times before its scroll event arrives.
+  const scrollTo = (x: number) => {
+    view.current.offset = x;
+    strip.current?.scrollTo({ x, animated: true });
+  };
   const revealSelected = () => {
     const frame = selectedId ? tabFrames.current.get(selectedId) : undefined;
     const { offset, width } = view.current;
     if (!frame || width === 0) return;
-    if (frame.x < offset) strip.current?.scrollTo({ x: Math.max(0, frame.x - 8), animated: true });
-    else if (frame.x + frame.width > offset + width) strip.current?.scrollTo({ x: frame.x + frame.width - width + 8, animated: true });
+    // A tab wider than the window shows its start.
+    if (frame.x < offset) scrollTo(Math.max(0, frame.x - 8));
+    else if (frame.x + frame.width > offset + width) scrollTo(Math.max(0, Math.min(frame.x - 8, frame.x + frame.width - width + 8)));
   };
   // A tab opened from a link, a notification or the computer can sit outside the strip's window.
   useEffect(revealSelected, [selectedId]);
