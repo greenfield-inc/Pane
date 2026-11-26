@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Bot, ChevronDown, ChevronRight, FileText, ImageIcon, Pencil, Pin, Plus, RefreshCw, RotateCcw, Sparkles, X } from 'lucide-react';
 import { DEFAULT_AGENT_ID, agentLabel, configuredAgent } from '../../../../shared/agents';
-import { plainProfileAgents } from '../../../../shared/agentProfiles';
+import { isTemporarilyShownProfile, plainProfileAgents } from '../../../../shared/agentProfiles';
 import { PROFILE_NAME_PATTERN, PROFILE_SYNC_AVAILABLE, type ProfileNewFileKind, type ProfilePlugin, type ProfileSummary } from '../../../../shared/types/profileEditor';
 import { useConfigStore } from '../../stores/configStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
@@ -223,8 +223,10 @@ function ProfileList({ plugins }: { plugins: ProfilePlugin[] }) {
   const pins = usePinnedProfiles();
   const listRef = useRef<HTMLDivElement>(null);
   const all = plugins.flatMap(plugin => plugin.profiles.map(profile => ({ plugin, profile })));
-  const listed = all.filter(item => item.profile.listed);
-  const pinned = pinnedFirst(all.filter(item => isPinned(pins, item.profile.ref)), pins, item => item.profile.ref);
+  // TEMPORARY (T-83): only the short list New's To shows too (shared/agentProfiles.ts), until
+  // greenfield marks the rest unlisted. Display only; their trees still show their subagents.
+  const listed = all.filter(item => item.profile.listed && isTemporarilyShownProfile(item.profile.ref));
+  const pinned = pinnedFirst(listed.filter(item => isPinned(pins, item.profile.ref)), pins, item => item.profile.ref);
   const rest = listed.filter(item => !isPinned(pins, item.profile.ref));
   const hidden = all.length - listed.length;
   // Keys belong to the list once it is open: the first profile takes focus.
@@ -260,7 +262,7 @@ function ProfilesFooter() {
   const telemetry = useConfigStore(state => state.config?.agentFarmTelemetry === true);
   const used = useSessionsByProfile();
   if (!overview) return null;
-  const profiles = overview.plugins.reduce((total, plugin) => total + plugin.profiles.filter(profile => profile.listed).length, 0);
+  const profiles = overview.plugins.reduce((total, plugin) => total + plugin.profiles.filter(profile => profile.listed && isTemporarilyShownProfile(profile.ref)).length, 0);
   const known = new Set(overview.plugins.flatMap(plugin => plugin.profiles.map(profile => profile.ref)));
   const sessions = [...used].filter(([ref]) => known.has(ref)).reduce((total, [, count]) => total + count, 0);
   return (

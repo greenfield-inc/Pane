@@ -407,6 +407,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   const hasSshHosts = useSshHostsStore((state) => state.rows.length > 0);
   const missionControlEnabled = useConfigStore((state) => isMissionControlEnabled(state.config));
   const todosEnabled = useConfigStore((state) => isTodosEnabled(state.config));
+  const profilesRailOn = useConfigStore((state) => isProfilesEnabled(state.config));
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
   const orchestrationAvailability = useOrchestrationSessionStore((state) => state.availability);
   const loadOrchestrationSessions = useOrchestrationSessionStore((state) => state.load);
@@ -775,7 +776,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
               </Tooltip>
             )}
 
-            {window.electronAPI?.profiles && (
+            {window.electronAPI?.profiles && profilesRailOn && (
               <Tooltip content="Profiles" side="right">
                 <ProfilesRailButton buttonClass={COMPACT_RAIL_BUTTON} activeClass={COMPACT_RAIL_ACTIVE} idleClass={COMPACT_RAIL_IDLE} />
               </Tooltip>

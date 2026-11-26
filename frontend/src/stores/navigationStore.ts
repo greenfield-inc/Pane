@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { PaneNavigationView } from '../../../shared/types/hostNavigation';
-import { isTodosEnabled, shownHostId, useConfigStore } from './configStore';
+import { isProfilesEnabled, isTodosEnabled, shownHostId, useConfigStore } from './configStore';
 
 export type SidebarNavigationScope = 'repositories' | 'pinned' | 'orchestration';
 
@@ -343,6 +343,10 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
   // Profiles are this computer's, so it clears the project scope.
   navigateToProfiles: (options) => {
+    // Profiles off (D-474): nothing opens it. Before the settings load it opens, and SessionView
+    // leaves it once they say Profiles is off.
+    const config = useConfigStore.getState().config;
+    if (config && !isProfilesEnabled(config)) return;
     const state = get();
     const profilesReturn = state.activeView === 'profiles'
       ? state.profilesReturn

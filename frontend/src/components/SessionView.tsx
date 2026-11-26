@@ -74,7 +74,7 @@ import { requestOpenSettings } from '../utils/openSettings';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
-import { isChatTabsEnabled, isMissionControlEnabled, isTodosEnabled, useConfigStore } from '../stores/configStore';
+import { isChatTabsEnabled, isMissionControlEnabled, isProfilesEnabled, isTodosEnabled, useConfigStore } from '../stores/configStore';
 import { leaveTodos } from './todos/todosNavigation';
 import { configuredIde } from '../../../shared/utils/ideCommands';
 import { cycleIndex } from '../utils/arrayUtils';
@@ -88,6 +88,7 @@ import { LivePreviewPrompt } from './LivePreviewPrompt';
 import { ApprovalsView } from './approvals/ApprovalsView';
 import { TodosView } from './todos/TodosView';
 import { ProfilesView } from './profiles/ProfilesView';
+import { leaveProfiles } from './profiles/profilesNavigation';
 import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
 import { CUSTOM_COMMAND_KEYS, type CustomCommandId } from '../../../shared/constants/keyboardShortcuts';
 import { useRegionActions } from '../hooks/useRegionNavigation';
@@ -136,6 +137,11 @@ export const SessionView = memo(() => {
   }, [activeView, config, missionControlEnabled, navigateToSessions]);
   // To-dos is opt-in too (T-39): turned off while open, it goes back to where you were.
   const todosOn = isTodosEnabled(config);
+  // Profiles is behind its switch too (D-474): turned off while open, it goes back to where you were.
+  const profilesOn = isProfilesEnabled(config);
+  useEffect(() => {
+    if (config && !profilesOn && activeView === 'profiles') leaveProfiles();
+  }, [activeView, config, profilesOn]);
   useEffect(() => {
     if (config && !todosOn && activeView === 'todos') leaveTodos();
   }, [activeView, config, todosOn]);
@@ -1967,7 +1973,7 @@ export const SessionView = memo(() => {
     return <TodosView />;
   }
 
-  if (activeView === 'profiles') {
+  if (activeView === 'profiles' && profilesOn) {
     return <ProfilesView />;
   }
 

@@ -32,6 +32,7 @@ import {
   type AgentFarmRunner,
   type BundledAgentFarm,
 } from './bundledAgentFarm';
+import { parseProfileList } from './agentFarmProfiles';
 
 /** The folders of a plugin Agent Farm reads, besides plugin.yaml (Agent Farm's plugins.js). */
 const SECTIONS = ['profiles', 'agents', 'skills', 'instructions', 'references'];
@@ -366,10 +367,10 @@ export class ProfileEditor {
   private listedCache?: { signature: string; listed: Map<string, boolean> };
 
   /**
-   * Which profiles Agent Farm lists (`agent-farm profiles list --json`, `listed: false` for one
-   * another profile runs as a subagent). Asked again only when a profile file or plugin changed,
-   * since the tab reads the list every few seconds. An Agent Farm without `--json`, or a field it
-   * doesn't print, leaves every profile listed.
+   * Which profiles Agent Farm lists (`agent-farm profiles list` prints `| unlisted` for one its
+   * plugin hides, such as a subagent's own profile). Asked again only when a profile file or plugin
+   * changed, since the tab reads the list every few seconds. An Agent Farm that doesn't print it
+   * leaves every profile listed.
    */
   private async listedProfiles(names: string[]): Promise<Map<string, boolean>> {
     const parts: string[] = [];
@@ -384,25 +385,13 @@ export class ProfileEditor {
     if (this.listedCache?.signature === signature) return this.listedCache.listed;
     const listed = new Map<string, boolean>();
     try {
-      const output = await this.agentFarm(['profiles', 'list', '--json']);
-      const parsed = decodeOptionalBoundary(JSON.parse(output), boundary.json);
-      const entries = decodeOptionalBoundary(parsed, boundary.array(boundary.jsonObject))
-        ?? decodeOptionalBoundary(decodeOptionalBoundary(parsed, boundary.jsonObject)?.profiles, boundary.array(boundary.jsonObject)) ?? [];
-      for (const entry of entries) {
-        const ref = text(entry.qualified) ?? text(entry.ref) ?? (text(entry.plugin) && text(entry.profile) ? `${text(entry.plugin)}/${text(entry.profile)}` : undefined);
-        const flag = decodeOptionalBoundary(entry.listed, boundary.boolean);
-        if (ref && flag !== undefined) listed.set(ref, flag);
-      }
+      // The same reading New Session's list uses (parseProfileList): a trailing `| unlisted` marks one.
+      for (const entry of parseProfileList(await this.agentFarm(['profiles', 'list']))) listed.set(entry.ref, entry.listed !== false);
     } catch {
-      // Agent Farm before `listed` (no --json): every profile is listed.
+      // Agent Farm couldn't list: every profile is shown.
     }
     this.listedCache = { signature, listed };
     return listed;
-  }
-
-  /** Which profiles Agent Farm lists, by `plugin/profile`; one absent is listed. New Session hides the rest. */
-  async listedRefs(): Promise<Map<string, boolean>> {
-    return this.listedProfiles(await this.pluginNames());
   }
 
   private async readPlugin(name: string): Promise<ProfilePlugin> {
