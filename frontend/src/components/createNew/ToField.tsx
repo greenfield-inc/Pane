@@ -122,6 +122,8 @@ export const ToField = forwardRef<HTMLInputElement, ToFieldProps>(function ToFie
     );
   }
   if (!query && lastGroup === 'agents' && statusRow) rows.push(heading('profiles'), statusRow);
+  // Typed before the profiles arrive: say they're still coming rather than that nothing matches.
+  if (query && statusRow) rows.push(statusRow);
 
   return (
     <div className="relative min-w-0 flex-1">
@@ -163,7 +165,7 @@ export const ToField = forwardRef<HTMLInputElement, ToFieldProps>(function ToFie
         className="absolute inset-x-0 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-lg border border-border-primary bg-surface-primary py-1 shadow-lg"
       >
         {rows}
-        {shown.length === 0 && <div className="px-3 py-3 text-center text-[13px] text-text-tertiary">No agent or profile matches “{query}”</div>}
+        {shown.length === 0 && !(query && statusRow) && <div className="px-3 py-3 text-center text-[13px] text-text-tertiary">No agent or profile matches “{query}”</div>}
       </div>
     </div>
   );
