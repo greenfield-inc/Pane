@@ -146,7 +146,10 @@ describe('checkedChatLine', () => {
   });
   it('needs a reply to be a recorded reply to this tab', () => {
     const line = classifyChatLine('reply: M-12 → "Yes." (from Billing) [M-13; answer it with runpane reply M-13 "…"]');
-    expect(checkedChatLine(line, records([]))).toBeUndefined();
+    // Not loaded here (a Session orchestrator's new tab, whose replies' records name the old one): the typed line stands.
+    expect(checkedChatLine(line, records([]))).toMatchObject({ type: 'reply' });
+    expect(checkedChatLine(line, records([record(13, { kind: 'reply', replyTo: 'M-12', receiver: party('old-orchestrator', 'x') })]))).toBeUndefined();
+    expect(checkedChatLine(line, records([record(13, { kind: 'reply', replyTo: 'M-12', receiver: { ...party('old-orchestrator', 'x'), orchestrator: true } })]))).toMatchObject({ type: 'reply' });
     expect(checkedChatLine(line, records([record(13, { kind: 'reply', replyTo: 'M-12', receiver: party('receiver', 'x'), sender: party('b', 'the "Billing" Session orchestrator') })]))).toMatchObject({ type: 'reply', sender: { name: 'Billing' } });
   });
   it('finds a thread\'s first message', () => {

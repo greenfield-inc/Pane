@@ -96,13 +96,18 @@ export interface ChatMessageRecords {
  * counts only when that message reached this tab with this text, and its recorded sender wins over
  * any `[From …]` in the body: only Autopilot relays the person's words. Autopilot's lines always
  * carry an id, so one without is the person's. Pane's own To-dos lines have no record (Pane types
- * them as is) and stay read from their text.
+ * them as is) and stay read from their text. A reply line is the exception: Pane's typed line is where the
+ * reply went, so it stands unless a loaded record says it went to another tab.
  */
 export function checkedChatLine(line: ChatAgentLine | undefined, records: ChatMessageRecords): ChatAgentLine | undefined {
   if (!line || !records.available) return line;
   if (line.type === 'reply') {
+    // The typed reply line is where Pane delivered it (AGENT_MESSAGES.md): a reply to a Session's orchestrator
+    // lands in its current tab while its record names the old one, which this tab's records may not hold.
     const reply = records.byRef.get(line.ref);
-    return reply?.kind === 'reply' && reply.replyTo === line.replyTo && reply.receiver.panelId === records.panelId ? { ...line, sender: senderOfName(reply.sender.name) } : undefined;
+    if (!reply) return line;
+    const here = reply.receiver.panelId === records.panelId || reply.receiver.orchestrator;
+    return reply.kind === 'reply' && reply.replyTo === line.replyTo && here ? { ...line, sender: senderOfName(reply.sender.name) } : undefined;
   }
   if (!line.ref) return line.type === 'message' && line.sender.system === 'autopilot' ? undefined : line;
   const message = records.byRef.get(line.ref);
