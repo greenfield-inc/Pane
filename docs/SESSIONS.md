@@ -672,7 +672,11 @@ Pane then packs, sends and rebuilds the Session:
   rebuilt launch bundles (`.agent-farm/generated/`) stay behind; its snapshots
   (`.agent-farm/snapshots/`) are copied byte for byte and checked against their
   own checksums there, and one that doesn't arrive intact fails the move, so
-  the Session runs the same profile files on that machine until Reload profile;
+  the Session runs the same profile files on that machine until Reload profile.
+  The check before the move therefore accepts a tab's Agent Farm profile that the
+  snapshot holds even when that machine hasn't installed its plugin, and blocks only
+  a profile that neither the snapshot nor that machine's plugins hold (with
+  Profiles off there, only the installed plugins count);
 - a browser tab previewing a file (`runpane panels open --file`) moves when
   the file moved with the Session: in one of its worktrees or its Session
   folder, and there on the other machine. It opens the file at its new path

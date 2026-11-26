@@ -6,7 +6,7 @@ import path from 'path';
 import { promisify } from 'util';
 import { app } from 'electron';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import {
   SESSION_MOVE_FEATURE,
   SESSION_MOVE_MANIFEST_VERSION,
@@ -38,7 +38,8 @@ import { databaseService } from '../database';
 import { locateConversation } from './conversations';
 import { createBundle, createSnapshot, ignoredPaths, putBackRef } from './gitSnapshot';
 import { agentFarmProfiles, cliVersion, type TargetPreflight, type TargetStatus } from './importer';
-import { agentFarmProfileOf, heldBackChecks, sessionApprovals, type SessionApprovals } from './rules';
+import { agentFarmProfileOf, heldBackChecks, sessionApprovals, tabSnapshotFolder, type SessionApprovals } from './rules';
+import { snapshotHoldsProfile } from '../agentFarm/sessionSnapshot';
 import type { MovedApproval } from '../notify/notifyService';
 import { keepIgnoredFiles } from './ignoredFiles';
 import { runpaneWaits } from '../agentStatus/midTurn';
@@ -201,6 +202,9 @@ export class MoveCoordinator {
     const panes: MovePane[] = [];
     const agentVersions: Record<string, string | null> = {};
     const profileNames = new Set<string>();
+    // T-110: the snapshot each Agent Farm tab resolves from, for the profiles a move needs nothing installed for.
+    const profileSnapshots = new Map<string, Array<string | undefined>>();
+    const sessionFolder = sessionWorkspacePath(record.id);
     const envNames = new Set<string>();
     const tabState = new Map((pack?.tabs ?? []).map(tab => [tab.panel.id, tab]));
     const paneIds = [record.internalSessionId, ...this.memberPaneIds(record)];
@@ -249,7 +253,11 @@ export class MoveCoordinator {
         const { agentId: agent, conversationId, launch } = readTabFields(custom);
         if (agent && isConfiguredAgent(agent) && !(agent in agentVersions)) agentVersions[agent] = await cliVersion(configuredAgent(agent).executables[0]);
         const profile = agentFarmProfileOf(launch);
-        if (profile) profileNames.add(profile);
+        if (profile) {
+          profileNames.add(profile);
+          const pinned = decodeOptionalBoundary(custom.agentFarmSnapshot, boundary.string);
+          profileSnapshots.set(profile, [...profileSnapshots.get(profile) ?? [], tabSnapshotFolder(launch, { agentFarmSnapshot: pinned }, sessionFolder, record.agentFarmSnapshot)]);
+        }
         const tab: MoveTab = {
           id: panel.id, type: panel.type, title: panel.title,
           metadata: toJsonObject(panel.metadata ?? {}),
@@ -284,11 +292,17 @@ export class MoveCoordinator {
         tabs, ignored,
       });
     }
-    const folderRoot = sessionWorkspacePath(record.id);
+    const folderRoot = sessionFolder;
     const folderFiles = listSessionFolder(folderRoot);
     if (pack) for (const relative of folderFiles) sources.set(`session/${relative}`, path.join(folderRoot, ...relative.split('/')));
     const here = profileNames.size ? await agentFarmProfiles() : {};
     const profiles = Object.fromEntries([...profileNames].map(name => [name, here[name] ?? null]));
+    const snapshotProfiles: string[] = [];
+    for (const [name, folders] of profileSnapshots) {
+      let held = true;
+      for (const folder of folders) held = held && !!folder && await snapshotHoldsProfile(folder, name);
+      if (held) snapshotProfiles.push(name);
+    }
     const approvals = (pack?.approvals ?? []).map(approval => toJsonObject(approval));
     const files: PackageFile[] = [];
     if (pack) for (const [packagePath, source] of sources) files.push({ path: packagePath, ...(await fileDigest(source)) });
@@ -296,7 +310,7 @@ export class MoveCoordinator {
       version: SESSION_MOVE_MANIFEST_VERSION, moveId,
       source: {
         machine: thisMachineName(), home: os.homedir(), paneDir: getAppDirectory(), platform: process.platform,
-        paneVersion: app?.getVersion?.() ?? '0.0.0', agentVersions, profiles, envNames: [...envNames].sort(),
+        paneVersion: app?.getVersion?.() ?? '0.0.0', agentVersions, profiles, snapshotProfiles, envNames: [...envNames].sort(),
       },
       session: toJsonObject(record),
       sessionFolder: { root: folderRoot, files: folderFiles },
