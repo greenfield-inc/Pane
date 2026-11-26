@@ -1,6 +1,6 @@
 import React from 'react';
-import { AppWindow, Download, ExternalLink, LogIn, X } from 'lucide-react';
-import type { BrowserTabNotice } from '../../../../../shared/types/browser';
+import { AppWindow, Download, ExternalLink, KeyRound, LogIn, X } from 'lucide-react';
+import { browserLoginLine, type BrowserTabNotice } from '../../../../../shared/types/browser';
 
 export interface ShownTabNotice {
   key: string;
@@ -18,7 +18,7 @@ interface TabNoticesProps {
 
 const ACTION = 'flex-shrink-0 rounded px-1.5 py-0.5 font-medium text-interactive hover:bg-surface-hover hover:text-interactive-hover';
 
-/** Lines under a browser tab's address bar: an app link to confirm, a sign-in that refuses apps, a finished download. */
+/** Lines under a browser tab's address bar: an app link to confirm, a sign-in that refuses apps, a finished download, a saved login an agent filled. */
 export const TabNotices: React.FC<TabNoticesProps> = ({ notices, onOpenApp, onOpenSignIn, onShowInFolder, onDismiss }) => (
   <>
     {notices.map(({ key, notice }) => (
@@ -36,6 +36,10 @@ export const TabNotices: React.FC<TabNoticesProps> = ({ notices, onOpenApp, onOp
           <span aria-hidden className="text-text-tertiary">·</span>
           <button type="button" className={ACTION} onClick={() => onShowInFolder(notice.file)}>Show in folder</button>
           <span className="flex-1" />
+        </>}
+        {notice.kind === 'login' && <>
+          <KeyRound className="h-3.5 w-3.5 flex-shrink-0 text-text-tertiary" />
+          <span className="min-w-0 flex-1 truncate" title={browserLoginLine(notice)}>{browserLoginLine(notice)}</span>
         </>}
         {notice.kind !== 'app' && (
           <button type="button" onClick={() => onDismiss(key)} className="flex-shrink-0 rounded p-0.5 hover:bg-surface-hover hover:text-text-primary" title="Dismiss" aria-label="Dismiss">

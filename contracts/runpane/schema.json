@@ -977,6 +977,7 @@
         "browser screenshot",
         "browser click",
         "browser type",
+        "browser fill",
         "browser press",
         "browser select",
         "browser scroll",
@@ -1228,6 +1229,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "browser type": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser fill": {
           "$ref": "#/$defs/helpLines"
         },
         "browser press": {

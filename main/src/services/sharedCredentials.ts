@@ -45,6 +45,7 @@ export const sharedCredentialsSchema: BoundarySchema<SharedCredentials> = bounda
   apns: boundary.optional(credentialSchema),
   paneSecrets: boundary.optional(boundary.record(credentialSchema)),
   paneSecretReferences: boundary.optional(boundary.record(credentialSchema)),
+  paneLogins: boundary.optional(boundary.record(credentialSchema)),
 });
 
 function configValue(config: AppConfig, id: SharedCredentialId): string | undefined {
