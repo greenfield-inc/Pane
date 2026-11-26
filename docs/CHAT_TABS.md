@@ -630,7 +630,7 @@ agent on its own (`withoutPlainProfile` in `chatTabs/launch.ts`), and
 Agent Farm at start either way: nothing reads it while Profiles is off, and turning
 Profiles on then needs no restart.
 
-Switch and Reload profile (see [SESSIONS.md](SESSIONS.md#switch-and-reload-profile))
+Switch and Reload profile (see [SESSIONS.md](SESSIONS.md#switch-and-reload-profile-profiles-on))
 restart the tab with `ChatTabManager.relaunch`: the request is saved as the tab's
 `relaunch` and applied when no reply is in progress, before the next queued message.
 A kept conversation is loaded again with the new launch; `loadFallback` names the
