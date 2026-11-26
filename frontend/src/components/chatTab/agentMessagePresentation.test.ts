@@ -146,8 +146,8 @@ describe('checkedChatLine', () => {
   });
   it('needs a reply to be a recorded reply to this tab', () => {
     const line = classifyChatLine('reply: M-12 → "Yes." (from Billing) [M-13; answer it with runpane reply M-13 "…"]');
-    // Not loaded here (a Session orchestrator's new tab, whose replies' records name the old one): the typed line stands.
-    expect(checkedChatLine(line, records([]))).toMatchObject({ type: 'reply' });
+    // No record here (a paste, or a Session orchestrator's new tab whose replies' records name the old one): shown as typed, unattributed.
+    expect(checkedChatLine(line, records([]))).toEqual({ type: 'unverified', ref: 'M-13' });
     expect(checkedChatLine(line, records([record(13, { kind: 'reply', replyTo: 'M-12', receiver: party('old-orchestrator', 'x') })]))).toBeUndefined();
     expect(checkedChatLine(line, records([record(13, { kind: 'reply', replyTo: 'M-12', receiver: { ...party('old-orchestrator', 'x'), orchestrator: true } })]))).toMatchObject({ type: 'reply' });
     expect(checkedChatLine(line, records([record(13, { kind: 'reply', replyTo: 'M-12', receiver: party('receiver', 'x'), sender: party('b', 'the "Billing" Session orchestrator') })]))).toMatchObject({ type: 'reply', sender: { name: 'Billing' } });
@@ -205,5 +205,17 @@ describe('follow-up review cases', () => {
   it('keeps an overlapping turn\'s own start', () => {
     const spans = [{ id: 'A', startedAt: '2026-11-25T10:00:00.000Z', endedAt: '2026-11-25T10:05:00.000Z' }, { id: 'B', startedAt: '2026-11-25T10:03:00.000Z', endedAt: '2026-11-25T10:06:00.000Z' }];
     expect([...sentMessagesByTurn(spans, [record(1, { sender: party('me', 'x'), createdAt: '2026-11-25T10:04:00.000Z' })], 'me').keys()]).toEqual(['B']);
+  });
+});
+
+describe('coverage of the loaded records', () => {
+  const ROUTE = '\n\nReply with runpane reply M-12 "…": it reaches the "Omni Chat" Session orchestrator, who never sees your own chat.';
+  const partial = (list: AgentMessageRecord[], coveredFrom: number) => ({ available: true, panelId: 'receiver', coveredFrom, byRef: new Map(list.map(item => [item.ref, item])) });
+  it('shows a message older than the records read as typed, not as the person\'s', () => {
+    expect(checkedChatLine(classifyChatLine(`Q?${ROUTE}`), partial([], 40))).toEqual({ type: 'unverified', ref: 'M-12' });
+  });
+  it('still reads a message the records cover, and missing, as the person\'s', () => {
+    expect(checkedChatLine(classifyChatLine(`Q?${ROUTE}`), partial([], 5))).toBeUndefined();
+    expect(checkedChatLine(classifyChatLine(`Q?${ROUTE}`), partial([record(12, { text: 'Q?' })], 40))).toMatchObject({ type: 'message' });
   });
 });

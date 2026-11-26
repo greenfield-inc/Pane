@@ -1,4 +1,4 @@
-import type { AgentMessageRecord } from './types/agentMessages';
+import { parseMessageRef, type AgentMessageRecord } from './types/agentMessages';
 
 /**
  * How a chat draws a message Pane or another agent typed into a tab (T-105, D-1): as a card with
@@ -30,7 +30,9 @@ export type ChatAgentLine =
   /** The person's own words, delivered by Autopilot or To-dos: stays the 'You' bubble, with "You, via …". */
   | ({ type: 'relayed'; via: string; body: string } & Routed)
   /** A reply to a message this tab sent (`reply: M-12 → "…"`). */
-  | { type: 'reply'; replyTo: string; ref: string; body: string; sender: ChatSender };
+  | { type: 'reply'; replyTo: string; ref: string; body: string; sender: ChatSender }
+  /** A line naming M-n that the loaded records can't vouch for: shown as typed, credited to nobody. */
+  | { type: 'unverified'; ref: string };
 
 const REPLY_ROUTE = /\n*Reply with runpane reply (M-[0-9]+) "…": it reaches ([^\n]+), who never sees your own chat\.\s*$/u;
 const REPLY_LINE = /^reply: (M-[0-9]+) → "([\s\S]*)" \(from ([^\n]+?)\) \[(M-[0-9]+); answer it with runpane reply M-[0-9]+ "…"\]\s*$/u;
@@ -88,6 +90,8 @@ export interface ChatMessageRecords {
   available: boolean;
   panelId?: string;
   byRef: ReadonlyMap<string, AgentMessageRecord>;
+  /** The records read cover M-n from this number up (0: all of them); an older id missing from them proves nothing. */
+  coveredFrom?: number;
 }
 
 /**
@@ -101,16 +105,19 @@ export interface ChatMessageRecords {
  */
 export function checkedChatLine(line: ChatAgentLine | undefined, records: ChatMessageRecords): ChatAgentLine | undefined {
   if (!line || !records.available) return line;
+  if (line.type === 'unverified') return line;
   if (line.type === 'reply') {
-    // The typed reply line is where Pane delivered it (AGENT_MESSAGES.md): a reply to a Session's orchestrator
-    // lands in its current tab while its record names the old one, which this tab's records may not hold.
+    // A reply line with no record here (a paste, or a Session orchestrator's new tab, whose replies' records
+    // name the old tab) is shown as typed: nothing here says who sent it or which thread it belongs to.
     const reply = records.byRef.get(line.ref);
-    if (!reply) return line;
+    if (!reply) return { type: 'unverified', ref: line.ref };
     const here = reply.receiver.panelId === records.panelId || reply.receiver.orchestrator;
     return reply.kind === 'reply' && reply.replyTo === line.replyTo && here ? { ...line, sender: senderOfName(reply.sender.name) } : undefined;
   }
   if (!line.ref) return line.type === 'message' && line.sender.system === 'autopilot' ? undefined : line;
   const message = records.byRef.get(line.ref);
+  // Older than the records read: it may well be an agent's, so it is shown as typed, not as the person's.
+  if (!message && (parseMessageRef(line.ref) ?? 0) < (records.coveredFrom ?? 0)) return { type: 'unverified', ref: line.ref };
   if (message?.kind !== 'message' || message.receiver.panelId !== records.panelId) return undefined;
   // A real reply line pasted under other words is the person's message, not M-n.
   if (sameText(line.sent ?? '') !== sameText(message.text)) return undefined;

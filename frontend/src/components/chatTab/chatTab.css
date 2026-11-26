@@ -381,3 +381,4 @@ a.chat-status-item:hover,button.chat-status-item:hover:not(:disabled),.chat-stat
 .chat-relayed-caption svg { width:12px; height:12px; }
 @media (hover:hover) { .chat-agent-row:hover .chat-copy { opacity:1; } }
 .chat-agent-reply .chat-markdown :not(pre)>code { background:var(--chat-background); }
+.chat-agent-unverified { border-style:dashed; box-shadow:none; }

@@ -15,8 +15,10 @@ export interface PanelMessageRecords {
   /** False until a read succeeds, and always where the app has no records (the phone, a remote PWA). */
   available: boolean;
   records: AgentMessageRecord[];
+  /** The read covers M-n from this number up; 0 when it reached the tab's first message. */
+  coveredFrom: number;
 }
-const NONE: PanelMessageRecords = { available: false, records: [] };
+const NONE: PanelMessageRecords = { available: false, records: [], coveredFrom: 0 };
 /** forPanel's page size, and how far back one read goes (2,000 messages). */
 const PAGE = 200;
 const MAX_PAGES = 10;
@@ -25,18 +27,21 @@ const MAX_PAGES = 10;
  * Newest first, page by page (`before` the oldest ref so far) until the pages reach `since`, the
  * oldest loaded turn's start, so a chat paged back still finds the messages its turns sent.
  */
-export async function readRecords(forPanel: NonNullable<NonNullable<Window['electronAPI']>['agentMessages']>['forPanel'], panelId: string, since: number | undefined): Promise<AgentMessageRecord[] | undefined> {
+export async function readRecords(forPanel: NonNullable<NonNullable<Window['electronAPI']>['agentMessages']>['forPanel'], panelId: string, since: number | undefined, maxPages = MAX_PAGES): Promise<{ records: AgentMessageRecord[]; coveredFrom: number } | undefined> {
   const records: AgentMessageRecord[] = [];
   let before: string | undefined;
-  for (let page = 0; page < MAX_PAGES; page += 1) {
+  for (let page = 0; page < maxPages; page += 1) {
     const response = await forPanel(panelId, before ? { before } : undefined);
-    if (!response.success || !response.data) return page === 0 ? undefined : records;
+    if (!response.success || !response.data) return page === 0 ? undefined : { records, coveredFrom: records.at(-1)?.number ?? 0 };
     records.push(...response.data);
     const oldest = response.data.at(-1);
-    if (!oldest || response.data.length < PAGE || since === undefined || Date.parse(oldest.createdAt) <= since) break;
+    // A short page is the tab's first: everything is read.
+    if (!oldest || response.data.length < PAGE) return { records, coveredFrom: 0 };
+    if (since === undefined || Date.parse(oldest.createdAt) <= since) break;
     before = oldest.ref;
   }
-  return records;
+  // Stopped early (reached the oldest turn, or the page cap): older ids are outside what was read.
+  return { records, coveredFrom: records.at(-1)?.number ?? 0 };
 }
 
 /** A tab's message records, read again whenever any message changes, or the chat pages back to older turns (`since`). */
@@ -52,8 +57,8 @@ export function useAgentMessageRecords(panelId: string, since?: string): PanelMe
     const load = () => {
       // Reads can overlap when messages change quickly: only the last one started is kept.
       const read = ++latest;
-      void readRecords(forPanel, panelId, Number.isNaN(sinceAt) ? undefined : sinceAt).then(records => {
-        if (live && read === latest && records) setState({ panelId, available: true, records });
+      void readRecords(forPanel, panelId, Number.isNaN(sinceAt) ? undefined : sinceAt).then(result => {
+        if (live && read === latest && result) setState({ panelId, available: true, ...result });
       }, () => undefined);
     };
     load();
@@ -77,7 +82,7 @@ export function useAgentMessagesView(panelId: string, loaded: PanelMessageRecord
   // Each routed text by its length and its end, which holds the reply line's id: cheap to build on every token.
   const key = `${placementKey(sentByTurn)}|${routed.map(text => `${text.length}:${text.slice(-120)}`).join('\u0000')}`;
   const build = (): AgentMessagesView => {
-    const records = { panelId, available: loaded.available, byRef: new Map(loaded.records.map(record => [record.ref, record])) };
+    const records = { panelId, available: loaded.available, coveredFrom: loaded.coveredFrom, byRef: new Map(loaded.records.map(record => [record.ref, record])) };
     return { ...records, sentByTurn, shownHere: shownRefs(routed, records) };
   };
   const [held, setHeld] = useState(() => ({ panelId, loaded, key, view: build() }));

@@ -125,7 +125,10 @@ function ReplyArrival({ line, anchorId, startedAt, text, renderText }: { line: E
   const { byRef, sentByTurn, shownHere } = useContext(AgentMessagesContext);
   // The card that holds this reply: the thread's first message, when its card is loaded in this chat.
   const root = threadRoot(line.replyTo, byRef);
-  const shown = [...sentByTurn.values()].some(sent => sent.some(record => record.ref === root)) || shownHere.has(root);
+  const first = byRef.get(root);
+  const cardHere = [...sentByTurn.values()].some(sent => sent.some(record => record.ref === root)) || shownHere.has(root);
+  // Only a reply that card's thread really shows becomes a jump; anything else keeps its own text here.
+  const shown = cardHere && first !== undefined && threadReplies(first.replies.flatMap(ref => byRef.get(ref) ?? []), byRef).some(reply => reply.ref === line.ref);
   if (shown) {
     const jump = () => {
       const card = document.querySelector<HTMLElement>(`[data-testid="agent-message-card"][data-ref="${CSS.escape(root)}"]`);
@@ -149,6 +152,17 @@ function ReplyArrival({ line, anchorId, startedAt, text, renderText }: { line: E
   </>} />;
 }
 
+/** A line naming M-n that this tab's records can't vouch for: its text exactly as typed, credited to nobody. */
+function UnverifiedLine({ line, anchorId, text }: { line: Extract<ChatAgentLine, { type: 'unverified' }>; anchorId: string; text: string }) {
+  return <div className="chat-agent-row">
+    <div className="chat-agent-card chat-agent-unverified" data-pane-part="chat-message" data-anchor-id={anchorId} data-testid="agent-message-unverified" data-ref={line.ref}>
+      <div className="chat-agent-head"><span className="chat-agent-kind">Message</span><Ref value={line.ref} /><span className="chat-agent-kind">· not in this tab's message records</span></div>
+      <div className="chat-agent-body">{plainBody(text)}</div>
+    </div>
+    <div className="chat-message-actions"><ChatCopyButton label="Copy message" text={() => text} /></div>
+  </div>;
+}
+
 /** The person's words that Autopilot or To-dos passed on: still the 'You' bubble, with who carried them. */
 function RelayedBubble({ line, anchorId, text, title }: { line: Extract<ChatAgentLine, { type: 'relayed' }>; anchorId: string; text: string; title?: string }) {
   const Icon = line.via === 'Autopilot' ? Zap : ListChecks;
@@ -164,6 +178,7 @@ export function AgentLineView({ line, anchorId, startedAt, text, renderText }: {
   switch (line.type) {
     case 'message': return <IncomingCard line={line} anchorId={anchorId} startedAt={startedAt} text={text} renderText={renderText} />;
     case 'reply': return <ReplyArrival line={line} anchorId={anchorId} startedAt={startedAt} text={text} renderText={renderText} />;
+    case 'unverified': return <UnverifiedLine line={line} anchorId={anchorId} text={text} />;
     case 'relayed': return <RelayedBubble line={line} anchorId={anchorId} text={text} title={messageTime(startedAt)?.full} />;
   }
 }

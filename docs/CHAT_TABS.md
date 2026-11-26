@@ -339,10 +339,17 @@ composer marks it in amber like a mode that never asks.
   queued*, *Not delivered: its tab closed*), and a reply to a reply sits under
   the reply it answers. The state and replies come from
   `agentMessages.forPanel`, read back page by page as far as the oldest turn
-  loaded. Where the app has the records, a line counts as a message only when
-  that message reached this tab with this exact text, and the recorded sender
-  wins over any `[From …]` in it, so a pasted message stays the person's own.
-  Where the app has no records (the PWA and phone today) the cards come from
+  loaded, up to the tab's 2,000 newest messages. Where the app has the
+  records, a line counts as a message only when that message reached this tab
+  with this exact text, and the recorded sender wins over any `[From …]` in
+  it, so a pasted message stays the person's own. A line Pane wrote that the
+  records can't vouch for is shown as typed in a dashed row marked *not in
+  this tab's message records*, credited to nobody: a message older than the
+  2,000 read, a `reply: M-n →` line with no record here (pasted, or a Session
+  orchestrator's reply that reached its new tab while its record names the
+  old one). A reply line folds into a jump up to its card only when that
+  card's thread shows that reply. Messages older than the 2,000 read also have
+  no sent card in the sending tab. Where the app has no records (the PWA and phone today) the cards come from
   the text alone, without state or replies. Terminal tabs show the lines as
   typed.
 - **Approvals** dock above the composer with exactly the choices the agent

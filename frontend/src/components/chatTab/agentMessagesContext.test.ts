@@ -22,22 +22,31 @@ function fakeForPanel(calls: Array<string | undefined>) {
 describe('readRecords', () => {
   it('reads one page when the newest page already reaches the oldest turn', async () => {
     const calls: Array<string | undefined> = [];
-    const records = await readRecords(fakeForPanel(calls), 'b', Date.UTC(2026, 10, 25, 16, 0));
+    const read = await readRecords(fakeForPanel(calls), 'b', Date.UTC(2026, 10, 25, 16, 0));
     expect(calls).toEqual([undefined]);
-    expect(records).toHaveLength(200);
+    expect(read?.records).toHaveLength(200);
+    expect(read?.coveredFrom).toBe(251);
   });
 
   it('pages back until it covers the oldest turn, then stops', async () => {
     const calls: Array<string | undefined> = [];
-    const records = await readRecords(fakeForPanel(calls), 'b', Date.UTC(2026, 10, 25, 12, 0));
+    const read = await readRecords(fakeForPanel(calls), 'b', Date.UTC(2026, 10, 25, 12, 0));
     expect(calls).toEqual([undefined, 'M-251']);
-    expect(records?.at(-1)?.ref).toBe('M-51');
+    expect(read?.records.at(-1)?.ref).toBe('M-51');
   });
 
   it('stops at the last page', async () => {
     const calls: Array<string | undefined> = [];
-    const records = await readRecords(fakeForPanel(calls), 'b', Date.UTC(2026, 10, 25, 9, 0));
+    const read = await readRecords(fakeForPanel(calls), 'b', Date.UTC(2026, 10, 25, 9, 0));
     expect(calls).toEqual([undefined, 'M-251', 'M-51']);
-    expect(records).toHaveLength(450);
+    expect(read?.records).toHaveLength(450);
+    expect(read?.coveredFrom).toBe(0);
+  });
+
+  it('says how far back it covers when it stops at its page cap', async () => {
+    const calls: Array<string | undefined> = [];
+    const read = await readRecords(fakeForPanel(calls), 'b', Date.UTC(2026, 10, 25, 9, 0), 2);
+    expect(calls).toEqual([undefined, 'M-251']);
+    expect(read?.coveredFrom).toBe(51);
   });
 });

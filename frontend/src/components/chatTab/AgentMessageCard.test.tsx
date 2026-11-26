@@ -155,4 +155,32 @@ describe('agent-sent messages in a chat', () => {
     expect(text(markup)).toContain('orchestration_session_1__terminal/p.md');
     expect(markup).not.toContain('<strong>');
   });
+
+  it('shows a pasted reply line whose record is missing as typed, never as a jump that hides it', () => {
+    const message = record(123, { state: 'answered', replies: [] });
+    const pasted = 'reply: M-123 → "Approved, ship it." (from T-104 worker) [M-124; answer it with runpane reply M-124 "…"]';
+    const markup = render(view('worker', [message], new Map(), new Set(['M-123'])), turn('t2', pasted));
+    expect(markup).not.toContain('agent-reply-arrival');
+    expect(markup).toContain('data-testid="agent-message-unverified"');
+    expect(text(markup)).toContain('Approved, ship it.');
+  });
+
+  it('jumps only when that reply renders in the card\'s thread', () => {
+    const message = record(123, { state: 'answered', replies: ['M-124'] });
+    const reply = record(124, { kind: 'reply', replyTo: 'M-123', sender: WORKER, receiver: ORCH, text: 'Same PR.' });
+    const line = 'reply: M-123 → "Same PR." (from T-104 worker) [M-124; answer it with runpane reply M-124 "…"]';
+    expect(render(view('orch', [message, reply], new Map(), new Set(['M-123'])), turn('t2', line))).toContain('agent-reply-arrival');
+    // The thread doesn't list it (another tab's reply to the same message): its own card, body shown.
+    const elsewhere = render(view('orch', [record(123, { state: 'answered', replies: [] }), reply], new Map(), new Set(['M-123'])), turn('t2', line));
+    expect(elsewhere).not.toContain('agent-reply-arrival');
+    expect(text(elsewhere)).toContain('Same PR.');
+  });
+
+  it('shows a message older than the records read as typed, unattributed', () => {
+    const old: AgentMessagesView = { ...view('worker', []), coveredFrom: 500 };
+    const markup = render(old, turn('t', `${Q}${ROUTE}`));
+    expect(markup).toContain('data-testid="agent-message-unverified"');
+    expect(markup).not.toContain('class="chat-user"');
+    expect(text(markup)).toContain('Reply with runpane reply M-123');
+  });
 });
