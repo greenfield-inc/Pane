@@ -296,9 +296,11 @@ How Pane knows a turn ended with text:
   Pane reads it again for a few seconds, and a reply counts only once a second
   read agrees. With no transcript, the turn doesn't bold the Session. Pane saves
   where it stopped reading with the Session, tied to that transcript file, so a
-  restart picks up there. When it has no such place (another transcript, or one
-  rewritten or replaced), it starts at the transcript's end and counts nothing
-  until the agent's next turn: resumed history never bolds a Session.
+  restart picks up there. A transcript made since Pane started (a new Session,
+  or an agent relaunched without resuming) is read from its start, so its first
+  reply bolds. Otherwise, when Pane has no such place (an older transcript, or
+  one rewritten or replaced), it starts at the transcript's end and counts
+  nothing until the agent's next turn: resumed history never bolds a Session.
 - Any other terminal agent has no transcript Pane can read, so each of its
   finished turns counts as a message. That is a known limit.
 

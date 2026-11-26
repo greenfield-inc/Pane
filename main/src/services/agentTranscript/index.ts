@@ -187,20 +187,27 @@ function turnEndsWithText(turn: TranscriptTurn): boolean {
  *
  * With no cursor for this transcript (none yet, another file, or the same path replaced or rewritten
  * shorter), nothing counts: the answer is a fresh start at the transcript's end, so resumed history
- * is never read as a new reply.
+ * is never read as a new reply. The exception is a transcript new to this Pane run (`runStartedAtMs`):
+ * another file than the cursor's, created since Pane started, as a new Session or a relaunched agent
+ * writes. It holds no history the person read, so it is read from its start.
  */
-async function readFinishedTurns(locator: TranscriptLocator, cursor: TranscriptCursor | undefined, idleNow: boolean): Promise<FinishedTurns> {
+async function readFinishedTurns(locator: TranscriptLocator, cursor: TranscriptCursor | undefined, idleNow: boolean, runStartedAtMs?: number): Promise<FinishedTurns> {
   const [file] = await transcriptFiles(locator, locator.notBeforeMs ?? 0);
   if (!file) return { endedWithText: undefined, cursor };
   let id: string;
   let size: number;
+  let createdMs: number;
   try {
     const stats = await fs.stat(file);
     id = `${stats.dev}:${stats.ino}`;
     size = stats.size;
+    // 0 where the file system keeps no creation time: such a file is never taken as new.
+    createdMs = stats.birthtimeMs;
   } catch {
     return { endedWithText: undefined, cursor };
   }
+  const newToRun = cursor?.file !== file && runStartedAtMs !== undefined && createdMs > 0 && createdMs >= runStartedAtMs;
+  if (newToRun) cursor = { file, id, offset: 0 };
   if (!cursor || cursor.file !== file || cursor.id !== id || size < cursor.offset) {
     return { endedWithText: undefined, cursor: { file, id, offset: size, fresh: true }, missed: true };
   }

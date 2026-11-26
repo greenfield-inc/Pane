@@ -356,14 +356,15 @@ describe('readFinishedTurns', () => {
   });
 
   it('reads a transcript new to this Pane run from its start: a new Session\'s first reply bolds', async () => {
-    const runStartedAt = Date.now() - 60_000;
+    // Before the file was made, even where dating the fixture back also dates its creation back (APFS).
+    const runStartedAt = writtenAt.getTime() - 60_000;
     writeClaude(sessionId, [prompt('hello', '2026-09-27T18:40:00.000Z'), say('msg_1', 'Hi, on it.', '2026-09-27T18:40:01.000Z')]);
-
     await expect(readFinishedTurns(claudeLocator(), undefined, true, runStartedAt)).resolves.toMatchObject({ endedWithText: true });
   });
 
   it('after a restart that starts a new transcript, reads the new one from its start: its first reply bolds', async () => {
-    const runStartedAt = Date.now() - 60_000;
+    // Before the file was made, even where dating the fixture back also dates its creation back (APFS).
+    const runStartedAt = writtenAt.getTime() - 60_000;
     // The cursor saved before the restart names the old transcript.
     const before = { file: path.join(home, 'old-session.jsonl'), id: '1:1', offset: 4096 };
     writeClaude(sessionId, [prompt('[From Pane] resumed work', '2026-09-27T18:40:00.000Z'), say('msg_1', 'Back on it.', '2026-09-27T18:40:01.000Z')]);

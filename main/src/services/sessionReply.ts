@@ -34,7 +34,9 @@ export interface ReplyProbeSources {
   locatorOf(panelId: string): TranscriptLocator | undefined;
   /** The tab's agent is idle now, so its last turn has finished. */
   isIdle(panelId: string): boolean;
-  readTurns(locator: TranscriptLocator, cursor: TranscriptCursor | undefined, idleNow: boolean): Promise<FinishedTurns>;
+  readTurns(locator: TranscriptLocator, cursor: TranscriptCursor | undefined, idleNow: boolean, runStartedAtMs: number): Promise<FinishedTurns>;
+  /** When this Pane run started; a transcript created since is new and read from its start. Defaults to the probe's creation. */
+  runStartedAtMs?: number;
   wait(ms: number): Promise<void>;
   /** The tab's cursor as saved with its Session, so a restart starts where the last judgment stopped. */
   loadCursor(panelId: string): Promise<TranscriptCursor | undefined>;
@@ -46,6 +48,7 @@ const TRANSCRIPT_READ_WAITS_MS = [1_000, 1_000, 2_000];
 
 export function createReplyProbe(sources: ReplyProbeSources): ReplyProbe {
   const cursors = new Map<string, TranscriptCursor>();
+  const runStartedAtMs = sources.runStartedAtMs ?? Date.now();
   /** Per tab, the judgment running now: the next one waits for it. */
   const running = new Map<string, Promise<boolean>>();
 
@@ -65,7 +68,7 @@ export function createReplyProbe(sources: ReplyProbeSources): ReplyProbe {
     for (const delay of [0, ...TRANSCRIPT_READ_WAITS_MS]) {
       if (delay > 0) await sources.wait(delay);
       try {
-        last = await sources.readTurns(locator, from, sources.isIdle(panelId));
+        last = await sources.readTurns(locator, from, sources.isIdle(panelId), runStartedAtMs);
       } catch (error) {
         console.warn(`[Sessions] Could not read panel ${panelId}'s transcript, so its turn does not mark the Session unread:`, error);
         return false;
