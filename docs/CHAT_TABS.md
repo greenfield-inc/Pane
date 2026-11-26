@@ -667,6 +667,12 @@ as Node.
 
 ### Profile sync across your computers
 
+Sync runs only with [Profiles](#profiles-switch) on. Off, nothing is recorded or
+sent, a Session starts without first fetching its profile, and the
+`profile-sync:*` calls refuse with `ERR_PROFILES_OFF`, which another computer's
+Sync sheet shows as "Profiles is off there". Turning the switch on starts syncing
+without a restart.
+
 Every change to a plugin here (a save, a new profile or file, Restore, a photo,
 or a plugin removed with `agent-farm plugin uninstall`) is recorded in
 `<PANE_DIR>/agent-farm/sync.json`: the plugin's sync hash (its files, ignoring a
@@ -686,8 +692,12 @@ A save travels as one pack (`profile-sync:export`/`read` to pull,
 `profile-sync:write`/`apply` to push) with Session move's chunked, SHA-256-checked
 transfer. The receiving computer checks the pack's hash, then installs it with
 `agent-farm plugin install`, which refuses files that don't match the checksums
-in its plugin.yaml; the plugin there is moved aside first and put back if the
-install fails. greenfield and dcouple sync only once you change them: a photo
+in its plugin.yaml. The Profiles tab's own files, which Agent Farm's install
+leaves out (`pane.yaml` titles and `covers/` pages), travel in the pack and are
+written after the install. The plugin, its receipt and its photos there are set
+aside first and put back if anything before the record is written fails; a
+deletion is recorded only when a plugin's receipt is certainly gone, never on a
+read that failed. greenfield and dcouple sync only once you change them: a photo
 alone keeps each computer's own Pane version (`pane` records), an edit travels as
 your copy and stays **Edited** there (Pane updates keep it), and Restore restores
 Pane's version everywhere. The calls answer only your own machines, never a
