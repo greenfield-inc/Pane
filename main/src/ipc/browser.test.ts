@@ -8,8 +8,9 @@ import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { BrowserPanelState, ToolPanel } from '../../../shared/types/panels';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { WAIT_DEFAULT_MS, type BrowserPageContents } from '../services/browser/pageDriver';
-import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHoldSettings, type BrowserHost, type BrowserServices, type TabDownload } from './browser';
+import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHoldSettings, type BrowserHost, type BrowserLogins, type BrowserServices, type TabDownload } from './browser';
 import { readFileSync } from 'fs';
+import type { PaneLoginUse } from '../../../shared/types/paneSecrets';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { decodeBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 import { browserFrameAnswerSchema, browserTabViewSchema } from '../../../shared/validation/browserStreamSchemas';
@@ -71,6 +72,10 @@ function fakePage(id: number, url: string): BrowserPageContents & EventEmitter &
         if (method === 'Page.captureScreenshot') return { data: pngOf(780, 1688).toString('base64') };
         if (method === 'Runtime.evaluate' && JSON.stringify(given).includes('innerWidth')) return { result: { value: { width: 800, height: 600, x: 0, y: 120, ratio: 2 } } };
         if (method === 'Page.getLayoutMetrics') return { cssContentSize: { width: 800, height: 600 }, cssLayoutViewport: { clientWidth: 800, clientHeight: 600 } };
+        if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main' } } };
+        if (method === 'Page.createIsolatedWorld') return { executionContextId: 9 };
+        if (method === 'Runtime.evaluate') return { result: { objectId: 'login-world' } };
+        if (method === 'Runtime.callFunctionOn') return { result: { value: JSON.stringify(given).includes('this.check') ? { origin: new URL(url).origin } : {} } };
         if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
         if (method === 'DOM.querySelector') return { nodeId: 7 };
         return {};
@@ -90,6 +95,8 @@ interface Fixture {
   download(tabId: string, filename: string, content: string): Promise<string>;
   /** The tabs that said "Downloaded …", with the file. */
   shownDownloads: Array<[string, string]>;
+  /** The fills the tabs showed. */
+  shownLogins: Array<{ panelId: string; login: string; site: string; agent: string }>;
   /** Archives a Pane, as Pane does: it is marked archived, then the host hears it went. */
   archive(paneId: string): void;
   /** The tab's page stopped a sign-in that refuses to run inside apps, as the host reports it. */
@@ -107,7 +114,7 @@ function agentTab(id: string, paneId: string, agent: string): ToolPanel {
   return { id, sessionId: paneId, type: 'terminal', title: agent, state: { isActive: false, customState: { agent } }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
 }
 
-function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: string[]; painting?: string[]; holds?: Partial<BrowserHoldSettings>; loading?: boolean; window?: { open: boolean } } = {}): Fixture {
+function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: string[]; painting?: string[]; holds?: Partial<BrowserHoldSettings>; loading?: boolean; window?: { open: boolean }; openers?: Record<string, string>; logins?: BrowserLogins } = {}): Fixture {
   const archived = new Set<string>();
   const goneListeners: Array<() => void> = [];
   const worktree = mkdtempSync(path.join(os.tmpdir(), 'pane-browser-tools-'));
@@ -118,6 +125,7 @@ function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: 
   let downloadListener: ((download: TabDownload) => void) | undefined;
   const signInListeners: Array<(panelId: string, signIn: { site: string; url: string }) => void> = [];
   const shownDownloads: Array<[string, string]> = [];
+  const shownLogins: Fixture['shownLogins'] = [];
   for (const tab of initial) {
     if (tab.type !== 'browser') continue;
     // SAFETY: browserTab builds every initial tab's customState as a BrowserPanelState.
@@ -164,6 +172,8 @@ function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: 
     personDownloads: () => path.join(worktree, 'Downloads'),
     agentDownloads: async () => path.join(worktree, '.scratch', 'browser-downloads'),
     showDownload: (panelId, file) => { shownDownloads.push([panelId, file]); },
+    showLogin: (panelId, login) => { shownLogins.push({ panelId, ...login }); },
+    openerTab: (panelId) => options.openers?.[panelId],
   };
   mkdirSync(path.join(worktree, 'Downloads'));
   const download = async (tabId: string, filename: string, content: string): Promise<string> => {
@@ -181,10 +191,10 @@ function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: 
     configManager: { getConfig: () => ({ browser: { agentTools: tools } }) },
   };
   const registry = new PaneCommandRegistry();
-  onTestFinished(registerBrowserHandlers(services, registry, host, options.holds));
+  onTestFinished(registerBrowserHandlers(services, registry, host, options.holds, options.logins));
   const archive = (paneId: string) => { archived.add(paneId); for (const listener of goneListeners) listener(); };
   const refuseSignIn = (tabId: string, site: string, url: string) => { for (const listener of signInListeners) listener(tabId, { site, url }); };
-  return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree, download, shownDownloads, archive, refuseSignIn };
+  return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree, download, shownDownloads, shownLogins, archive, refuseSignIn };
 }
 
 const signal = new AbortController().signal;
@@ -916,5 +926,98 @@ describe('browser tools: Take over pressed during a call', () => {
     // The held call sees the hand-back on its next poll, then clicks and lets the page settle.
     while (!settled) await vi.advanceTimersByTimeAsync(50);
     expect(await next).toMatchObject({ ok: true });
+  });
+});
+
+describe('browser tools: filling a saved login', () => {
+  const VALUE = 'canary-9f31-login';
+  const SITE = 'https://bank.example';
+
+  function savedLogins(overrides: Partial<BrowserLogins> = {}) {
+    const used: PaneLoginUse[] = [];
+    const logins: BrowserLogins = {
+      sites: (project, name) => (project === 'bank' && name === 'PIN' ? [SITE] : null),
+      read: async () => ({ value: VALUE, sites: [SITE] }),
+      record: async use => { used.push(use); },
+      ...overrides,
+    };
+    return { logins, used };
+  }
+  const request = { ref: 'e1', project: 'bank', name: 'PIN' };
+
+  it('fills it, and shows and records the login, site, agent, Pane and time, with the value in none of it', async () => {
+    const { logins, used } = savedLogins();
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a', `${SITE}/pin`)], { logins });
+    const before = Date.now();
+    const result = await call(fixture, 'fill', request);
+    expect(result).toMatchObject({ ok: true, tab: 'mine', note: expect.stringContaining('Filled bank/PIN.') });
+    expect(used).toEqual([{ project: 'bank', name: 'PIN', site: SITE, agent: 'Claude', pane: 'pane-a', at: expect.any(String) }]);
+    expect(Date.parse(used[0].at)).toBeGreaterThanOrEqual(before);
+    expect(fixture.shownLogins).toEqual([{ panelId: 'mine', login: 'bank/PIN', site: SITE, agent: 'Claude' }]);
+    // Another screen's copy of the tab's state, and everything the tab keeps.
+    const view = decodeBoundary(await fixture.registry.invokeRemote('browser:view', ['mine', 0]), browserTabViewSchema);
+    expect(view.logins).toEqual([{ login: 'bank/PIN', site: SITE, agent: 'Claude', at: expect.any(Number) }]);
+    expect(JSON.stringify([result, used, fixture.shownLogins, view, fixture.tabs])).not.toContain(VALUE);
+  });
+
+  it('reads no value for another site, a malformed request or a call that names no agent tab, and refuses a plain secret', async () => {
+    let reads = 0;
+    const { logins, used } = savedLogins({ read: async (_project, name) => {
+      if (name === 'PLAIN') throw new PaneError('SECRET_NOT_LOGIN', 'x', 'y');
+      reads += 1;
+      return { value: VALUE, sites: [SITE] };
+    } });
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a', 'https://evil.test/')], { logins });
+    expect(await code(call(fixture, 'fill', request))).toBe('ERR_BROWSER_LOGIN_SITE');
+    expect(await code(call(fixture, 'fill', { ...request, name: 'PLAIN' }))).toBe('SECRET_NOT_LOGIN');
+    expect(await code(call(fixture, 'fill', { ref: 'e1', project: 'bank' }))).toBe('ERR_BROWSER_INVALID_REQUEST');
+    // Sites, origins and values in the request are ignored: they come only from the saved login.
+    expect(await code(call(fixture, 'fill', { ...request, sites: ['https://evil.test'], site: 'https://evil.test', value: 'x' }))).toBe('ERR_BROWSER_LOGIN_SITE');
+    expect(await code(call(fixture, 'fill', request, { paneId: 'pane-a' }))).toBe('ERR_BROWSER_NO_PANE');
+    expect([reads, used]).toEqual([0, []]);
+  });
+
+  it('is only for agents that may act on the tab, in its own Pane, while the tools are on, and never for a teammate', async () => {
+    const { logins, used } = savedLogins();
+    const fixture = setup([browserTab('claudes', 'pane-a', 'claude-a', SITE), browserTab('others', 'pane-b', undefined, SITE)], { logins });
+    expect(await code(call(fixture, 'fill', { ...request, tab: 'claudes' }, codexInA))).toBe('ERR_BROWSER_NOT_YOURS');
+    expect(await code(call(fixture, 'fill', { ...request, tab: 'others' }))).toBe('ERR_BROWSER_NO_TAB');
+    expect(await code(call(fixture, 'fill', request, null))).toBe('ERR_BROWSER_NO_PANE');
+    expect(await code(fixture.registry.invokeRemote('runpane:browser:fill', [request], { caller: claudeInA }))).toBe('ERR_BROWSER_LOCAL_ONLY');
+    const claude = fixture.tabs.find(tab => tab.id === 'claude-a');
+    if (claude) claude.metadata.teammate = 'teammate@example.com';
+    expect(await code(call(fixture, 'fill', request))).toBe('SECRET_OWNER_REQUIRED');
+    if (claude) delete claude.metadata.teammate;
+    fixture.setTools(false);
+    expect(await code(call(fixture, 'fill', request))).toBe('ERR_BROWSER_TOOLS_OFF');
+    expect(used).toEqual([]);
+  });
+
+  it('passes on a lease that ended, and fills nothing when the use can\'t be recorded', async () => {
+    for (const [overrides, expected] of [
+      [{ read: async () => { throw new PaneError('SECRET_LEASE_ENDED', 'ended', 'lease it'); } }, 'SECRET_LEASE_ENDED'],
+      [{ record: async () => { throw new PaneError('SECRET_WRITE_FAILED', 'disk full', 'free space'); } }, 'SECRET_WRITE_FAILED'],
+    ] as const) {
+      const fixture = setup([browserTab('mine', 'pane-a', 'claude-a', SITE)], { logins: savedLogins(overrides).logins });
+      expect(await code(call(fixture, 'fill', request))).toBe(expected);
+      expect(JSON.stringify([...(fixture.pages.get('mine')?.params ?? [])])).not.toContain(VALUE);
+    }
+  });
+
+  it('keeps logins out of sign-in popups, and out of a page an agent\'s script in its popup can reach', async () => {
+    const popup = browserTab('popup', 'pane-a', undefined, SITE);
+    popup.state.customState = { currentUrl: SITE, signInPopup: true };
+    const { logins, used } = savedLogins();
+    const fixture = setup([browserTab('opener', 'pane-a', undefined, SITE), popup], { logins, openers: { popup: 'opener' } });
+    expect(await code(call(fixture, 'fill', { ...request, tab: 'popup' }))).toBe('ERR_BROWSER_LOGIN_POPUP');
+    await call(fixture, 'evaluate', { tab: 'popup', expression: '1' });
+    expect(await code(call(fixture, 'fill', { ...request, tab: 'opener' }))).toBe('ERR_BROWSER_LOGIN_SCRIPTED');
+    expect(used).toEqual([]);
+  });
+
+  it('runs no script in a popup of a page that holds a login', async () => {
+    const fixture = setup([browserTab('opener', 'pane-a', undefined, SITE), browserTab('popup', 'pane-a', undefined, SITE)], { logins: savedLogins().logins, openers: { popup: 'opener' } });
+    await call(fixture, 'fill', { ...request, tab: 'opener' });
+    expect(await code(call(fixture, 'evaluate', { tab: 'popup', expression: 'opener.document.title' }))).toBe('ERR_BROWSER_LOGIN_ON_PAGE');
   });
 });

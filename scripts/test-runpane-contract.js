@@ -4821,7 +4821,7 @@ async function checkSecretsParity() {
   assert.deepStrictEqual(JSON.parse(declined.stdout), { status: 'declined' });
   assert.deepStrictEqual(leased, {
     code: 0,
-    stdout: 'Leased stripe/STRIPE_LIVE_KEY, STRIPE_RESTRICTED_KEY until 2026-11-05T12:00:00.000Z on studio, devbox. Lease lease-a. Use them with `runpane secrets exec --project stripe -- <command>`.\n',
+    stdout: 'Leased stripe/STRIPE_LIVE_KEY, STRIPE_RESTRICTED_KEY until 2026-11-05T12:00:00.000Z on studio, devbox. Lease lease-a. Use them with `runpane secrets exec --project stripe -- <command>`, and logins with `runpane browser fill`.\n',
   });
   assert.deepStrictEqual(leaseDeclined, { code: 0, stdout: 'The person declined the lease.\n' });
   assert.deepStrictEqual(ended, { code: 0, stdout: 'Ended lease lease-a.\n' });

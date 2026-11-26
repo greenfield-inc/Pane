@@ -363,6 +363,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `browser screenshot`: Pane's browser, shared with the person, signed in as them. Capture the tab as a PNG image.
 - `browser click`: Pane's browser, shared with the person, signed in as them. Click an element by its ref from browser_snapshot, or a point in the page.
 - `browser type`: Pane's browser, shared with the person, signed in as them. Type text into a field by its ref from browser_snapshot.
+- `browser fill`: Pane's browser, shared with the person, signed in as them. Fill a field with a login the person saved for the page's site, without its value ever reaching you.
 - `browser press`: Pane's browser, shared with the person, signed in as them. Press a key or chord, such as Enter, Escape, Tab, ArrowDown or Meta+A.
 - `browser select`: Pane's browser, shared with the person, signed in as them. Choose options in a select element by its ref from browser_snapshot.
 - `browser scroll`: Pane's browser, shared with the person, signed in as them. Scroll the page, or an element by its ref, by a number of pixels.
@@ -535,6 +536,7 @@ runpane browser snapshot [--tab <tab-id>] [--json] [--pane-dir <path>]
 runpane browser screenshot [--tab <tab-id>] [--full-page] [--json] [--pane-dir <path>]
 runpane browser click [--tab <tab-id>] (--ref <ref>|--x <x> --y <y>) [--button <left|right|middle>] [--double] [--json] [--pane-dir <path>]
 runpane browser type [--tab <tab-id>] --ref <ref> --text <text> [--clear] [--submit] [--json] [--pane-dir <path>]
+runpane browser fill [--tab <tab-id>] --ref <ref> --project <project> --name <name> [--json] [--pane-dir <path>]
 runpane browser press [--tab <tab-id>] --key <key> [--ref <ref>] [--json] [--pane-dir <path>]
 runpane browser select [--tab <tab-id>] --ref <ref> --values <values> [--json] [--pane-dir <path>]
 runpane browser scroll [--tab <tab-id>] [--ref <ref>] [--dx <pixels>] [--dy <pixels>] [--json] [--pane-dir <path>]

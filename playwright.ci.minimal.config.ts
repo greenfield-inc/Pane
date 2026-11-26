@@ -20,6 +20,7 @@ const BROWSER_SPECS = [
   'archive-cleanup.spec.ts',
   'autopilot-settings.spec.ts',
   'browser-ports.spec.ts',
+  'browser-saved-logins.spec.ts',
   'changes-list-perf.spec.ts',
   'changes-list.spec.ts',
   'chat-enter-focus.spec.ts',
