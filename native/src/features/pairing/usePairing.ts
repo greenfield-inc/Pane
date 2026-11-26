@@ -26,6 +26,7 @@ export function usePairing(onPaired?: () => void) {
     mutationFn: async ({ code, preview: agreed }: { code: string; preview?: LinkPreviewAnswer }) => {
       const link = parseRelayPairingLink(code);
       if (!link) {
+        if (!code.trim().startsWith('pane-remote://')) throw new Error('Paste a pairing link (https://runpane.net/pair#…) or a connection code that starts with pane-remote://');
         const profile = await verifyConnectionCode(code);
         onPaired?.();
         await addHost(profile);

@@ -32,12 +32,17 @@ export interface StoredRelayProfile extends RemoteRelayProfile {
 export type RelayConnectionProfile = RemotePaneConnectionProfile & { relay: StoredRelayProfile };
 
 const COMPUTER_ID = /^[a-z0-9-]{1,63}$/u;
-// https://<domain>/pair#… (any https host: dev domains vary) or pane://pair#… from the landing's "Open in Pane app".
-const PAIRING_LINK = /^(?:https:\/\/([^/?#\s]+)\/pair\/?|pane:\/\/pair\/?)(?:\?[^#]*)?#(.+)$/u;
+// https://<domain>/pair#… (any https host: dev domains vary; the scheme may be left off) or pane://pair#… from the landing's "Open in Pane app".
+const PAIRING_LINK = /^(?:(?:https:\/\/)?([^/?#]+)\/pair\/?|pane:\/\/pair\/?)(?:\?[^#]*)?#(.+)$/u;
+// A link pasted from a chat or a wrapped line can carry line breaks, spaces or zero-width characters; a link holds none.
+const PASTED_GAPS = /[\s\u200B-\u200D\uFEFF]+/gu;
 
-/** Reads a pairing QR or link: `https://<domain>/pair#s=<secret>&c=<id>&n=<name>` or `pane://pair#…`. Null for anything else. */
+/**
+ * Reads a pairing QR or link: `https://<domain>/pair#s=<secret>&c=<id>&n=<name>` or `pane://pair#…`,
+ * as scanned or pasted (with or without `https://`, whitespace anywhere). Null for anything else.
+ */
 export function parseRelayPairingLink(text: string): RelayPairingLink | null {
-  const match = PAIRING_LINK.exec(text.trim());
+  const match = PAIRING_LINK.exec(text.replace(PASTED_GAPS, ''));
   if (!match) return null;
   const fragment = new URLSearchParams(match[2]);
   const secret = fragment.get('s') ?? '';
