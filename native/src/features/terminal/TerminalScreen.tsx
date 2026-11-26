@@ -81,10 +81,12 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   topBar?: ReactNode;
   leading?: LeadingTabs;
 }) {
-  const { panelId } = useLocalSearchParams<{ panelId?: string }>();
+  // The split lives in the route, so a fold that recreates the app reopens it as it was: `beside` is
+  // the right tab ('' for none), `focus` the focused side, `mirrored` the desktop split last shown.
+  const { panelId, beside, focus, mirrored } = useLocalSearchParams<{ panelId?: string; beside?: string; focus?: string; mirrored?: string }>();
   const avoidsKeyboard = useAvoidsKeyboard();
   // This screen's own params: effects below run before the navigator is ready, and while another screen has focus.
-  const navigation = useNavigation<{ setParams(params: { panelId: string }): void }>();
+  const navigation = useNavigation<{ setParams(params: { panelId?: string; beside?: string; focus?: string; mirrored?: string }): void }>();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { client, profile } = useDaemon();
@@ -151,14 +153,12 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   const panel = leadingTab ? null : pickPanel(panels, panelId ?? null, hostActive.data?.id);
   // A second tab beside the route's one. Two columns show when the content is wide enough;
   // otherwise the focused side's tab shows alone, and the split comes back when there is room.
-  const [beside, setBeside] = useState<Omit<SplitState, 'left'>>({ right: null, focus: 'left' });
-  const right = leadingTab ? undefined : panels.find(candidate => candidate.id === beside.right && candidate.id !== panel?.id);
-  const split: SplitState = { left: panel?.id ?? null, right: right?.id ?? null, focus: right ? beside.focus : 'left' };
+  const right = leadingTab || !beside ? undefined : panels.find(candidate => candidate.id === beside && candidate.id !== panel?.id);
+  const split: SplitState = { left: panel?.id ?? null, right: right?.id ?? null, focus: right && focus === 'right' ? 'right' : 'left' };
   const twoColumns = right !== undefined && splitFits(contentWidth);
   const focusedPanel = right && split.focus === 'right' ? right : panel;
   const applySplit = (next: SplitState) => {
-    if (next.left && next.left !== panel?.id) navigation.setParams({ panelId: next.left });
-    setBeside({ right: next.right, focus: next.focus });
+    navigation.setParams({ ...(next.left && next.left !== panel?.id ? { panelId: next.left } : {}), beside: next.right ?? '', focus: next.focus });
   };
   // Home folds to its rail when that makes room for both columns.
   const makeRoom = useEffectEvent(() => {
@@ -172,15 +172,14 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   // Opening a Session shows the desktop's split, and follows it while open; rearranging here stays here.
   const mirror = splitFromLayout(hostLayout.data, new Set(panels.map(candidate => candidate.id)));
   const mirrorKey = mirror ? `${mirror.left}|${mirror.right}|${mirror.focus}` : null;
-  const lastMirror = useRef<string | null>(null);
   const followMirror = useEffectEvent(() => {
-    const was = lastMirror.current;
-    lastMirror.current = mirrorKey;
+    if (leading || mirrorKey === (mirrored || null)) return;
     if (mirror) applySplit(mirror);
-    else if (was) applySplit(closeBeside(split));
+    else if (mirrored) applySplit(closeBeside(split));
+    navigation.setParams({ mirrored: mirrorKey ?? '' });
   });
   useEffect(() => {
-    if (!leading && mirrorKey !== lastMirror.current) followMirror();
+    followMirror();
   }, [mirrorKey]);
   const followed = follow ? panels.find(candidate => candidate.id === follow.panelId) : undefined;
   useEffect(() => {
@@ -296,7 +295,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
             panel={panel}
             actions={leftActions}
             focused={twoColumns && split.focus === 'left'}
-            onFocus={twoColumns ? () => setBeside(current => ({ ...current, focus: 'left' })) : undefined}
+            onFocus={twoColumns ? () => { if (split.focus !== 'left') navigation.setParams({ focus: 'left' }); } : undefined}
             empty={(
               <View style={[styles.fill, { backgroundColor: theme.terminal.background }]}>
                 {panelList.isError ? (
@@ -319,7 +318,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
             panel={right}
             actions={rightActions}
             focused={twoColumns && split.focus === 'right'}
-            onFocus={twoColumns ? () => setBeside(current => ({ ...current, focus: 'right' })) : undefined}
+            onFocus={twoColumns ? () => { if (split.focus !== 'right') navigation.setParams({ focus: 'right' }); } : undefined}
             beside={twoColumns}
             empty={null}
           />
