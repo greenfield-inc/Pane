@@ -204,7 +204,7 @@ runpane loops create --session new --name morning-standup --cron "0 9 * * 1-5" \
   --trust`). That holds for every message the Session gets, not only loop
   runs. A custom launch command gets the flags added after the agent's
   program, or after the profile of an `agent-farm run` launch as
-  `--native-arg=<flag>` (for example `agent-farm run greenfield/implementer
+  `--native-arg=<flag>` (for example `agent-farm run greenfield/orchestrator
   --native-arg=--dangerously-skip-permissions`); one Pane cannot change safely
   (a wrapper such as `sh -c`, an `env` or variable prefix, or `&&`, `;`, a
   pipe or a redirect) is refused when you save. An Agent Farm Session whose

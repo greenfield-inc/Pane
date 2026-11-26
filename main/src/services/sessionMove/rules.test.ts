@@ -5,8 +5,16 @@ import { buildPathMap } from './pathMap';
 
 describe('agentFarmProfileOf', () => {
   it('reads the profile an Agent Farm tab launches, without its variant', () => {
-    expect(agentFarmProfileOf('agent-farm run greenfield/implementer:opus --arg parent=/x')).toBe('greenfield/implementer');
+    expect(agentFarmProfileOf('agent-farm run greenfield/planner:codex --arg parent=/x')).toBe('greenfield/planner');
     expect(agentFarmProfileOf('claude --dangerously-skip-permissions')).toBeNull();
+  });
+
+  // T-83 P3: a launch link's command names the shim by its path and carries --parent.
+  it('reads a launch link\'s command as Agent Farm prints it, with the shim\'s path', () => {
+    expect(agentFarmProfileOf('/Users/me/.pane/bin/agent-farm run greenfield/planner --config-root /Users/me/.pane/agent-farm --parent greenfield/orchestrator:claude@abc')).toBe('greenfield/planner');
+    expect(agentFarmProfileOf("'/Users/Jo B/.pane/bin/agent-farm' run greenfield/reviewer:codex --parent greenfield/orchestrator@abc")).toBe('greenfield/reviewer');
+    expect(agentFarmProfileOf('C:\\Users\\me\\.pane\\bin\\agent-farm-launch\\agent-farm run greenfield/planner --parent greenfield/orchestrator@abc')).toBe('greenfield/planner');
+    expect(agentFarmProfileOf('my-agent-farm run x')).toBeNull();
   });
 });
 
