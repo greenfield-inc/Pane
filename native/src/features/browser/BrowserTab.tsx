@@ -101,7 +101,7 @@ function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBa
   const [space, setSpace] = useState(box);
   useEffect(() => { if (box && !keyboardOpen) setSpace(box); }, [box, keyboardOpen]);
   const stream = useBrowserStream(panel.id, focused && active, space && { ...space, scale: PixelRatio.get() });
-  const { frame, view, stop } = stream;
+  const { frame, view, stop, hurry } = stream;
   const host = view?.host || profile.label;
 
   // Input goes to the host in order through one queue for the tab's life.
@@ -141,13 +141,14 @@ function StreamedBrowserTab({ panel, onBack, onInput }: { panel: ToolPanel; onBa
   const send = useCallback((input: BrowserInput | null) => {
     if (stopRef.current && stopRef.current !== 'older') return;
     onInputRef.current();
+    hurry();
     // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
     if (movesFocus(input)) {
       fieldRef.current = 'password';
       setField('password');
     }
     queue(input);
-  }, [queue]);
+  }, [queue, hurry]);
   const [control] = useState(() => new PhoneControl());
   useEffect(() => { if (view) control.view(view); }, [control, view]);
 

@@ -46,7 +46,7 @@ export function stopLine(stop: StreamStop, host: string, phone = false): string 
 interface BrowserStreamViewProps {
   client: BrowserStreamClient;
   panelId: string;
-  stream: BrowserStream & { wake(): void };
+  stream: BrowserStream & { wake(): void; hurry(): void };
   /** The host's name until its state arrives. */
   hostName: string;
   /** A phone: the first tap only takes control (the page gets the phone's size), and a tap into a field opens the keyboard. */
@@ -76,7 +76,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   }, [keyboardRef]);
   const [box, setBox] = useState({ width: 0, height: 0 });
   const [field, setField] = useState<'text' | 'password' | null>(null);
-  const { frame, view, stop } = stream;
+  const { frame, view, stop, hurry } = stream;
   const host = view?.host ?? hostName;
   const page = useMemo(() => (frame ? { width: frame.width, height: frame.height } : undefined), [frame]);
 
@@ -101,10 +101,11 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   const send = useCallback((input: BrowserInput | null) => {
     if (stopRef.current && stopRef.current !== 'older') return;
     onPersonInputRef.current?.();
+    hurry();
     // After Enter, Tab or a navigation the page may focus a password field by itself: type securely until the host says.
     if (movesFocus(input)) setField('password');
     queue(input);
-  }, [queue]);
+  }, [queue, hurry]);
 
   // Hover goes on its own read channel, at most every HOVER_MS, one on its way at a time: the host
   // keeps no answer for it, so pointing around never uses up this screen's write allowance.
