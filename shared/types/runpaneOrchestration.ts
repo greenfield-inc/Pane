@@ -372,8 +372,10 @@ export interface RunpaneRepoListResult {
  * panels create and sessions create honour `resume`, launching the agent's own resume for that id
  * and recording it as the tab's conversation. `session-move`: this Pane can receive a whole Session
  * from another of the owner's machines (the `runpane:move:` calls, docs/SESSIONS.md).
+ * `session-launch-option`: sessions create takes `launchOption`, a saved launch option's exact name or
+ * else the command itself (`runpane sessions create --launch-command`); an older Pane drops it.
  */
-export const RUNPANE_DAEMON_FEATURES = ['resume-on-create', 'session-move'] as const;
+export const RUNPANE_DAEMON_FEATURES = ['resume-on-create', 'session-move', 'session-launch-option'] as const;
 
 export interface RunpaneDoctorResult {
   ok: true;

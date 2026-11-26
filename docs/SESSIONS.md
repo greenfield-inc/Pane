@@ -86,6 +86,16 @@ arguments for the next creation; cancelling, or a create Pane refuses, leaves th
 Selecting the agent default clears the remembered custom command. Each Session saves its own launch configuration
 and behavior. Changing defaults does not overwrite existing Sessions.
 Launch changes take effect on the next explicit restart.
+
+From the CLI, `runpane sessions create --from-json <file> --launch-command <name or command>`
+picks the launch on the machine that creates the Session (with `runpane workspace <machine>`, that
+machine). A saved custom command whose name matches exactly, case included, is used with its resume
+settings; any other value runs as the command itself. Pane refuses a blank value, a name two saved
+commands share (rename one in **Add Tool (+)**), and a JSON `launchCommand` sent with the flag.
+A JSON `launchCommand` alone is always a literal command, even when it matches a saved name: use it
+for a Pane too old to have the flag, which runpane names before creating anything. Keep keys and
+passwords out of launch commands; use Pane Secrets (`runpane secrets exec`) or environment variables.
+
 Use **Edit behavior…** during creation or in Session settings to open the
 separate behavior editor. **Back** discards the draft; **Save behavior** applies it
 to the form, which is persisted when you create the Session or save settings.

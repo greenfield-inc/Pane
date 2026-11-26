@@ -6709,6 +6709,65 @@ async function checkPauseCommands() {
   }
 }
 
+/** `sessions create --launch-command` (#1692): both CLIs check the Pane can resolve it, then send it as launchOption. */
+async function checkSessionLaunchCommand() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-launch-command-'));
+  const payload = path.join(paneDir, 'session.json');
+  const withLiteral = path.join(paneDir, 'literal.json');
+  fs.writeFileSync(payload, JSON.stringify({ name: 'Release QA' }));
+  fs.writeFileSync(withLiteral, JSON.stringify({ name: 'Release QA', launchCommand: 'codex' }));
+  const session = { id: 'coordinator', name: 'Release QA', isPinned: false, agent: 'codex',
+    internalSessionId: 'owner', panelIds: { claude: 'claude-panel', codex: 'codex-panel', cursor: 'cursor-panel' },
+    goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [], associations: [],
+    activity: [], revision: 1, createdAt: '2026-11-26T03:00:00Z', updatedAt: '2026-11-26T03:00:00Z' };
+  const doctor = (features) => ({ ok: true, app: { version: '2.4.254', isPackaged: true, platform: process.platform }, daemon: { channels: [], features } });
+  const attempt = (runtime, args, features) => {
+    const channels = [];
+    const sent = [];
+    return withFakeDaemon(paneDir, (frame) => {
+      channels.push(frame.channel);
+      if (frame.channel === 'runpane:doctor') return { result: doctor(features) };
+      sent.push(frame.args[0]);
+      return { result: { ok: true, session, panelId: 'codex-panel', internalSessionId: 'owner' } };
+    }, () => runControlProcess(runtime, runtime === 'npm' ? args : ['-m', 'runpane', ...args], paneDir)
+      .then((stdout) => ({ ok: true, text: stdout }), (error) => ({ ok: false, text: error.message })))
+      .then((outcome) => ({ ...outcome, channels, sent }));
+  };
+  const current = ['resume-on-create', 'session-move', 'session-launch-option'];
+  try {
+    for (const runtime of ['npm', 'pip']) {
+      const value = 'my agent --label "two words"';
+      const named = await attempt(runtime, ['sessions', 'create', '--from-json', payload, '--launch-command', value, '--json'], current);
+      assert.ok(named.ok, `${runtime} create with --launch-command: ${named.text}`);
+      assert.deepStrictEqual(named.channels, ['runpane:doctor', 'runpane:sessions:create'], `${runtime} checks the Pane before creating`);
+      assert.deepStrictEqual(named.sent, [{ name: 'Release QA', launchOption: value }], `${runtime} sends the value verbatim as launchOption`);
+
+      const older = await attempt(runtime, ['sessions', 'create', '--from-json', payload, '--launch-command', 'Build bot'], ['resume-on-create']);
+      assert.ok(!older.ok, `${runtime} refuses --launch-command on an older Pane`);
+      assert.match(older.text, /Pane 2\.4\.254 on this machine can't pick a saved launch option/, `${runtime} names the Pane version`);
+      assert.match(older.text, /launchCommand/, `${runtime} points at the JSON literal path`);
+      assert.deepStrictEqual(older.sent, [], `${runtime} created nothing on an older Pane`);
+
+      for (const [label, args] of [
+        ['blank value', ['sessions', 'create', '--from-json', payload, '--launch-command', '  ']],
+        ['JSON launchCommand too', ['sessions', 'create', '--from-json', withLiteral, '--launch-command', 'Build bot']],
+      ]) {
+        const refused = await attempt(runtime, args, current);
+        assert.ok(!refused.ok, `${runtime} refuses a ${label}`);
+        assert.match(refused.text, /--launch-command[\s\S]*No Session was created/, `${runtime} ${label} says nothing was created`);
+        assert.deepStrictEqual(refused.channels, [], `${runtime} ${label} reaches no Pane`);
+      }
+
+      const plain = await attempt(runtime, ['sessions', 'create', '--from-json', withLiteral, '--json'], []);
+      assert.ok(plain.ok, `${runtime} JSON-only create: ${plain.text}`);
+      assert.deepStrictEqual(plain.channels, ['runpane:sessions:create'], `${runtime} JSON-only create skips the check`);
+      assert.deepStrictEqual(plain.sent, [{ name: 'Release QA', launchCommand: 'codex' }], `${runtime} JSON-only create is unchanged`);
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
 async function checkSessionRuntime() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -7724,6 +7783,7 @@ const checks = [
   checkPaneAdoptOverrides,
   checkPaneCreateBlockedReadiness,
   checkSessionRuntime,
+  checkSessionLaunchCommand,
   checkBoundaryDecoderCollectsEveryIssue,
   checkSessionPayloadErrors,
   checkContractDocListsEveryCommand,

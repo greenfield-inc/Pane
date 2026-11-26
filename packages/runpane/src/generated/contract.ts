@@ -2705,7 +2705,7 @@ const CONTRACT_SECTION_11 = [
     "name": "sessions create",
     "summary": "Create a durable named orchestration Session and its hidden terminal owner; JSON isPinned sets the pin star (default false).",
     "usage": [
-      "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]"
+      "runpane sessions create --from-json <path|-> [--launch-command <name|command>] [--json] [--pane-dir <path>]"
     ],
     "mutates": true,
     "additive": true,
@@ -3640,6 +3640,11 @@ const CONTRACT_SECTION_12 = {
       "description": "Read a structured JSON request payload from a file or stdin."
     },
     {
+      "name": "--launch-command",
+      "value": "<name|command>",
+      "description": "sessions create: a saved custom command's exact name, else the command to run."
+    },
+    {
       "name": "--timeout-ms",
       "value": "<milliseconds>",
       "description": "Maximum time to wait for each pane creation job."
@@ -4403,7 +4408,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane theme set --theme <id> [--json]",
       "  runpane theme reset [--json]",
       "  runpane sessions list [--json] [--pane-dir <path>]",
-      "  runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
+      "  runpane sessions create --from-json <path|-> [--launch-command <name|command>] [--json] [--pane-dir <path>]",
       "  runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
       "  runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
       "  runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
@@ -5382,15 +5387,18 @@ const CONTRACT_SECTION_13 = {
     ],
     "sessions create": [
       "Usage:",
-      "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
+      "runpane sessions create --from-json <path|-> [--launch-command <name|command>] [--json] [--pane-dir <path>]",
       "",
       "Options:",
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
+      "  --launch-command <name|command>  A saved custom command's exact name (case-sensitive), else the command itself.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
       "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
       "  --json                       Print JSON output.",
       "",
+      "--launch-command uses the saved custom command with exactly that name, with its resume settings; any other value runs as the command. It refuses a blank value, a name two saved commands share, and a JSON launchCommand.",
+      "A JSON launchCommand is always a literal command. Use it with a Pane too old for --launch-command. Keep keys out of commands: use Pane Secrets or environment variables.",
       "JSON isPinned: true pins the Session; omitted or false leaves it unpinned.",
       "Create-time isPinned requires an updated Pane app; on older apps, use sessions pin after creation and read back the result."
     ],
@@ -8254,15 +8262,18 @@ const CONTRACT_SECTION_13 = {
     ],
     "sessions create": [
       "Usage:",
-      "python -m runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
+      "python -m runpane sessions create --from-json <path|-> [--launch-command <name|command>] [--json] [--pane-dir <path>]",
       "",
       "Options:",
       "  --session <id|name>         Named Session id or exact name.",
       "  --from-json <path|->         Read structured JSON from a file or stdin.",
+      "  --launch-command <name|command>  A saved custom command's exact name (case-sensitive), else the command itself.",
       "  --pane <pane-id>             User-visible Pane to associate or detach.",
       "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
       "  --json                       Print JSON output.",
       "",
+      "--launch-command uses the saved custom command with exactly that name, with its resume settings; any other value runs as the command. It refuses a blank value, a name two saved commands share, and a JSON launchCommand.",
+      "A JSON launchCommand is always a literal command. Use it with a Pane too old for --launch-command. Keep keys out of commands: use Pane Secrets or environment variables.",
       "JSON isPinned: true pins the Session; omitted or false leaves it unpinned.",
       "Create-time isPinned requires an updated Pane app; on older apps, use sessions pin after creation and read back the result."
     ],
@@ -10001,7 +10012,7 @@ const CONTRACT_SECTION_14 = {
     "runpane panels output --panel <panel-id> --limit 200 --json",
     "printf 'Continue\\n' | runpane panels input --panel <panel-id> --input-file - --yes --json",
     "runpane sessions list [--json] [--pane-dir <path>]",
-    "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
+    "runpane sessions create --from-json <path|-> [--launch-command <name|command>] [--json] [--pane-dir <path>]",
     "runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
     "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
     "runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
@@ -28074,6 +28085,12 @@ const CONTRACT_SECTION_17 = {
       "mutates": true,
       "arguments": [
         {
+          "name": "--launch-command",
+          "value": "<name|command>",
+          "required": false,
+          "description": "The saved custom command with exactly this name (case-sensitive) on the machine that creates the Session, with its resume settings; any other value is the command to run. Refused when blank, when two saved commands share the name, or with a JSON launchCommand."
+        },
+        {
           "name": "--pane-dir",
           "value": "<path>",
           "required": false,
@@ -28081,12 +28098,14 @@ const CONTRACT_SECTION_17 = {
         }
       ],
       "examples": [
-        "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]"
+        "runpane sessions create --from-json <path|-> [--launch-command <name|command>] [--json] [--pane-dir <path>]",
+        "runpane sessions create --from-json session.json --launch-command \"Build bot\""
       ],
       "jsonSchemas": [
         "sessionResult"
       ],
       "notes": [
+        "--launch-command needs a Pane that resolves saved names; runpane checks first and, on an older Pane, names the version and creates nothing. A JSON launchCommand is always a literal command, even when it matches a saved name. Keep keys and passwords out of commands; use Pane Secrets (runpane secrets exec) or environment variables.",
         "Structured input accepts launchCommand (full command including arguments; empty uses the selected agent default) and profile (Session behavior instructions). Creating/opening a Session submits no automatic prompt. Create starts the Session's agent; to give it a first prompt, run `runpane panels wait --panel <panelId> --for ready`, then `runpane panels submit --panel <panelId>`. Changes apply on next terminal launch.",
         "JSON isPinned: true/false sets the UI pin star. Creation defaults to false; update preserves the pin when omitted.",
         "Create-time isPinned requires an updated Pane app. Older apps may ignore the field; use sessions pin after creation and read back the result.",

@@ -59,6 +59,15 @@ function answer(hostname, { channel }) {
     return [200, { ok: true, result: { hostname: 'tylers-mac-mini', os: 'macOS', isWsl: false, shell: '/bin/zsh', homeDir: '/Users/tyler', wslDistros: [] } }];
   }
   if (channel === 'runpane:sessions:list') return [200, { ok: true, result: { ok: true, sessions: [] } }];
+  if (channel === 'runpane:doctor') {
+    const features = process.env.FAKE_LAUNCH_OPTION ? ['session-launch-option'] : [];
+    return [200, { ok: true, result: { ok: true, app: { version: '2.4.200', isPackaged: true, platform: 'darwin' }, daemon: { channels: [], features } } }];
+  }
+  if (channel === 'runpane:sessions:create') {
+    return [200, { ok: true, result: { ok: true, panelId: 'codex-panel', internalSessionId: 'owner', session: { id: 'coordinator', name: 'Release QA', isPinned: false, agent: 'codex',
+      internalSessionId: 'owner', panelIds: { claude: 'c', codex: 'codex-panel', cursor: 'u' }, goal: '', context: '', decisions: [], blockers: [], nextAction: '',
+      evidence: [], outputs: [], associations: [], activity: [], revision: 1, createdAt: '2026-11-26T03:00:00Z', updatedAt: '2026-11-26T03:00:00Z' } } }];
+  }
   return [404, { ok: false, error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'unknown channel' } }];
 }
 https.request = (url, options, callback) => {
@@ -68,6 +77,7 @@ https.request = (url, options, callback) => {
   return new Writable({
     write(chunk, encoding, done) { body += chunk; done(); },
     final(done) {
+      if (process.env.FAKE_REQUEST_LOG) require('node:fs').appendFileSync(process.env.FAKE_REQUEST_LOG, body + '\\n');
       const [status, payload] = answer(hostname, JSON.parse(body));
       const response = new PassThrough();
       response.statusCode = status;
@@ -80,12 +90,16 @@ https.request = (url, options, callback) => {
 `);
 
 function runpane(...args) {
+  return runpaneWith({}, ...args);
+}
+
+function runpaneWith(env, ...args) {
   const result = spawnSync(process.execPath, ['--require', answers, cli, ...args], {
     cwd: bin,
     input: 'brief\n',
     encoding: 'utf8',
     timeout: 20_000,
-    env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, PANE_DIR: bin, RUNPANE_TELEMETRY_DISABLED: '1' },
+    env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, PANE_DIR: bin, RUNPANE_TELEMETRY_DISABLED: '1', ...env },
   });
   return { status: result.status, output: `${result.stdout}${result.stderr}` };
 }
@@ -190,6 +204,30 @@ test('another machine answers daemon commands, including workspace state; local-
   assert.match(runpane('workspace', 'parsa-devbox', 'sessions', 'list', '--json').output, /Could not reach Pane on parsa-devbox/);
   assert.match(runpane('workspace', 'parsa-devbox', 'workspace', 'list').output, /runs on this machine only/);
   assert.match(runpane('workspace', 'parsa-devbox', 'doctor').output, /use: runpane workspace parsa-devbox exec -- runpane doctor/);
+});
+
+test('sessions create --launch-command asks the named machine, and an older Pane there creates nothing', posixOnly, () => {
+  const payload = path.join(bin, 'launch-session.json');
+  const log = path.join(bin, 'launch-requests.log');
+  fs.writeFileSync(payload, JSON.stringify({ name: 'Release QA' }));
+  const sent = () => fs.readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  const create = ['workspace', 'tylers-mac-mini', 'sessions', 'create', '--from-json', payload, '--launch-command', 'Build bot', '--json'];
+  try {
+    const created = runpaneWith({ FAKE_LAUNCH_OPTION: '1', FAKE_REQUEST_LOG: log }, ...create);
+    assert.equal(created.status, 0, created.output);
+    assert.deepEqual(sent().map(({ channel }) => channel), ['runpane:doctor', 'runpane:sessions:create']);
+    assert.deepEqual(sent()[1].args, [{ name: 'Release QA', launchOption: 'Build bot' }]);
+
+    fs.rmSync(log, { force: true });
+    const older = runpaneWith({ FAKE_REQUEST_LOG: log }, ...create);
+    assert.notEqual(older.status, 0);
+    assert.match(older.output, /tylers-mac-mini/);
+    assert.match(older.output, /Pane 2\.4\.200 on tylers-mac-mini can't pick a saved launch option/);
+    assert.deepEqual(sent().map(({ channel }) => channel), ['runpane:doctor']);
+  } finally {
+    fs.rmSync(log, { force: true });
+    fs.rmSync(payload, { force: true });
+  }
 });
 
 /** Runs runpane while a fake local Pane answers machine commands; returns the output and what Pane was asked. */
