@@ -8,6 +8,7 @@ import { agentTranscripts, turnTextMatches, type TranscriptCursor, type Transcri
 
 const { findUserTurnSince, lastAssistantMessage, readFinishedTurns } = agentTranscripts;
 import { readTranscriptTail } from './tail';
+import { createReplyProbe } from '../sessionReply';
 import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
 
 // Line shapes recorded from Claude Code 2.1.283 and Codex 0.157.1 (see the
@@ -400,6 +401,33 @@ describe('readFinishedTurns', () => {
     append(fileA, [prompt('/resume', '2026-09-27T18:50:00.000Z'), say('msg_3', 'A new reply on A.', '2026-09-27T18:50:01.000Z')]);
 
     await expect(readFinishedTurns(claudeLocator(), kept, true, runStartedAt)).resolves.toMatchObject({ endedWithText: true });
+  });
+
+  it('a transcript of this run pushed off the 8 kept cursors and then resumed starts at its end: no replay, the next reply bolds', async () => {
+    const runStartedAt = writtenAt.getTime() - 60_000;
+    let locator = claudeLocator();
+    const probe = createReplyProbe({
+      agentTypeOf: () => 'claude', locatorOf: () => locator, isIdle: () => true,
+      readTurns: readFinishedTurns, wait: async () => undefined,
+      loadCursors: async () => [], saveCursors: async () => undefined, runStartedAtMs: runStartedAt,
+    });
+    // A, made this run: its reply bolds, and the person reads it.
+    const fileA = writeClaude(sessionId, [prompt('first', '2026-09-27T18:40:00.000Z'), say('msg_1', 'A reply the person read.', '2026-09-27T18:40:01.000Z')]);
+    await expect(probe.turnEnded('panel')).resolves.toBe(true);
+    // Eight more conversations push A off the kept cursors.
+    for (let index = 0; index < 8; index += 1) {
+      const id = `11111111-2222-4333-8444-5555555555${String(10 + index)}`;
+      writeClaude(id, [prompt(`chat ${index}`, '2026-09-27T18:45:00.000Z'), say(`msg_c${index}`, `Reply ${index}.`, '2026-09-27T18:45:01.000Z')]);
+      locator = { agent: 'claude', cwd: worktree, sessionId: id };
+      await probe.turnEnded('panel');
+    }
+    // Back on A: a tool-only turn replays nothing.
+    locator = claudeLocator();
+    append(fileA, [prompt('/resume', '2026-09-27T18:50:00.000Z'), tool('msg_2', '2026-09-27T18:50:01.000Z')]);
+    await expect(probe.turnEnded('panel')).resolves.toBe(false);
+    // A new reply on A bolds.
+    append(fileA, [prompt('more', '2026-09-27T18:51:00.000Z'), say('msg_3', 'A new reply on A.', '2026-09-27T18:51:01.000Z')]);
+    await expect(probe.turnEnded('panel')).resolves.toBe(true);
   });
 
   it('a resumed transcript that existed before this Pane run credits nothing until a fresh prompt', async () => {
