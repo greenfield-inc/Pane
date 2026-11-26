@@ -8,13 +8,14 @@ function plugin(name: string): ProfilePlugin {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  useProfilesStore.setState({ overview: null, place: { level: 'list' }, photos: { profiles: {}, sources: {} }, photosLoaded: false });
+  useProfilesStore.setState({ overview: null, place: { level: 'list' }, photos: { profiles: {}, sources: {}, titles: {} }, photosLoaded: false });
 });
 
 describe('profile photos', () => {
   const photos = {
     profiles: { 'greenfield/orchestrator': 'data:image/svg+xml;base64,AA==', 'greenfield/seo': 'data:image/svg+xml;base64,BB==' },
     sources: { 'greenfield/orchestrator': 'yours' as const, 'greenfield/seo': 'plugin' as const },
+    titles: { 'greenfield/orchestrator': 'Orchestrator', 'greenfield/seo': 'SEO' },
   };
 
   it('shows a profile\'s photo, variant or not, and says whether it is yours or the plugin\'s', () => {

@@ -35,6 +35,13 @@ describe('profileAvatar', () => {
     expect(profileAvatar({ profileRef: 'writer/writer' })).toMatchObject({ text: 'WR' });
   });
 
+  it('takes the initials from Agent Farm\'s title when there is one (T-83), keeping the tint of the ref', () => {
+    const fromRef = profileAvatar({ profileRef: 'greenfield/seo' });
+    expect(profileAvatar({ profileRef: 'greenfield/seo', title: 'SEO' })).toEqual({ kind: 'initials', text: 'SE', tone: fromRef.kind === 'initials' ? fromRef.tone : 0 });
+    expect(profileAvatar({ profileRef: 'greenfield/business', title: 'Business desk' })).toMatchObject({ text: 'BD' });
+    expect(profileAvatar({ profileRef: 'greenfield/business', title: '  ' })).toMatchObject({ text: 'GB' });
+  });
+
   it('shows a picture when there is one, over everything else', () => {
     expect(profileAvatar({ profileRef: 'greenfield/orchestrator', picture: 'file:///a.png' })).toEqual({ kind: 'picture', src: 'file:///a.png' });
   });

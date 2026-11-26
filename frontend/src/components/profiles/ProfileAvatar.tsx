@@ -31,11 +31,14 @@ export function ProfileAvatar({ profileRef, agent, picture, generated, size, cla
   const named = profileRef && !plain;
   // Your photo here, else the plugin's own picture (T-63 PR 5); loaded once, the first time an avatar shows.
   const stored = useProfilesStore(state => (named && !generated ? profilePicture(state.photos, profileRef) : undefined));
+  // Agent Farm's title (T-83) names the avatar; the name made from the ref stands in until it loads.
+  const title = useProfilesStore(state => (named ? state.photos.titles[profileRef.split(':')[0]] : undefined));
+  const name = named ? (title ?? profileDisplayName(profileRef)) : undefined;
   // Photos come from the Profiles tab: with the Profiles switch off (D-474) none are read.
   const profilesOn = useConfigStore(state => isProfilesEnabled(state.config));
   useEffect(() => { if (named && profilesOn) ensureProfilePhotos(); }, [named, profilesOn]);
-  const face = profileAvatar({ profileRef, agent, picture: generated ? undefined : picture ?? stored });
-  const label = named ? `Profile ${profileDisplayName(profileRef)}` : `${agentLabel(plain ?? agent ?? '')}, no profile`;
+  const face = profileAvatar({ profileRef, agent, picture: generated ? undefined : picture ?? stored, title });
+  const label = named ? `Profile ${name}` : `${agentLabel(plain ?? agent ?? '')}, no profile`;
   const box: CSSProperties = { width: size, height: size, fontSize: Math.round(size * 0.42), ...style };
   if (face.kind === 'initials') {
     const tone = `var(--color-avatar-${face.tone})`;
@@ -48,7 +51,7 @@ export function ProfileAvatar({ profileRef, agent, picture, generated, size, cla
     <span
       role="img"
       aria-label={label}
-      title={named ? `${profileDisplayName(profileRef)} · ${profileRef}` : label}
+      title={named ? `${name} · ${profileRef}` : label}
       data-testid="profile-avatar"
       data-avatar={face.kind}
       className={cn(

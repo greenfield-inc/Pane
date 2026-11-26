@@ -67,7 +67,7 @@ describe('the Profiles channels', () => {
     readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: true }));
     const handlers = register(paneDir);
     expect(await handlers.get('profiles:parse-yaml')!(event, 'a: 1')).toEqual({ success: true, data: { data: { a: 1 } } });
-    expect(await handlers.get('profiles:photos')!(event)).toEqual({ success: true, data: { profiles: {}, sources: {} } });
+    expect(await handlers.get('profiles:photos')!(event)).toEqual({ success: true, data: { profiles: {}, sources: {}, titles: {} } });
     expect(await handlers.get('profiles:list')!(event)).toMatchObject({ success: true, data: { plugins: [] } });
   });
 

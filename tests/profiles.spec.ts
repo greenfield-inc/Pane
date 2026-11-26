@@ -3,35 +3,47 @@ import { gotoApp } from './electronApiMock';
 import { dismissStartupDialogs, installSessionsFixture, sessionFixture } from './orchestrationSessionsFixture';
 import { expectNoAxeViolations } from './axeTest';
 import type { AgentFarmProfileEntry } from '../shared/types/agentFarmProfiles';
-import type { ProfilePlugin, ProfileSubagentNode, ProfileSummary, ProfileTreeNode, ProfilesOverview } from '../shared/types/profileEditor';
+import type { ProfileLinkMode, ProfilePhotos, ProfilePlugin, ProfileSubagentNode, ProfileSummary, ProfileTreeNode, ProfilesOverview } from '../shared/types/profileEditor';
 import type { ProfileSyncStatus } from '../shared/types/profileSync';
 
 /**
- * The Profiles tab (T-63 PR 5, design round 4 "Tree + preview"): top-level profiles with pins, a
- * profile's cover page and its own files in a tree, previews (HTML, Markdown with front-matter,
- * YAML) with Edit, Edit details, Restore, photos, and changes made outside Pane.
- * PANE_PROFILES_SHOTS=<dir> also saves a screenshot of each screen, light and dark, for review.
+ * The Profiles tab (T-63 PR 5, design round 4 "Tree + preview"; T-83 P2, Agent Farm 0.3.0's
+ * `profiles list --json`): every listed profile with pins, a profile's cover page and the agents it
+ * links to in a tree (inside its parent, its own process, its own launch, a cycle back up), previews
+ * (HTML, Markdown with front-matter, YAML) with Edit, Edit details, Restore, SVG photos, and changes
+ * made outside Pane. PANE_PROFILES_SHOTS=<dir> also saves a screenshot of each screen, light and
+ * dark, for review.
  */
 
 const identity = (description: string, extra = '') => `---\ndescription: ${description}\nharness: claude\nmodel: claude-opus-5-5${extra}\n---\n\n`;
 const file = (id: string, path: string, note?: string): ProfileTreeNode => (note ? { kind: 'file', id, path, label: path.split('/').pop() ?? path, note } : { kind: 'file', id, path, label: path.split('/').pop() ?? path });
 const folder = (id: string, label: string, children: ProfileTreeNode[]): ProfileTreeNode => ({ kind: 'folder', id, label, children });
 const skill = (base: string, name: string): ProfileTreeNode => folder(`${base}/skills/${name}`, name, [file(`${base}/skills/${name}/SKILL.md`, `skills/${name}/SKILL.md`)]);
-function subagent(base: string, alias: string, label: string, children: ProfileTreeNode[], extra: { profile?: string; harness?: string; description?: string } = {}): ProfileTreeNode {
+
+interface LinkExtra { harness?: string; description?: string; variants?: string[]; command?: string; cycle?: boolean }
+
+/** A linked agent of greenfield, as Agent Farm lists it: `greenfield/<alias>`, run by `mode`. */
+function link(base: string, alias: string, label: string, mode: ProfileLinkMode, children: ProfileTreeNode[], extra: LinkExtra = {}): ProfileSubagentNode {
+  const id = `${base}/sub:${alias}`;
+  const harness = extra.harness ?? 'claude';
   const node: ProfileSubagentNode = {
-    kind: 'subagent', id: `${base}/sub:${alias}`, alias, agent: alias, label, harness: extra.harness ?? 'claude', model: extra.harness === 'codex' ? 'gpt-6.1-sol' : 'claude-opus-5-5',
-    identity: `agents/${alias}.md`, children: [file(`${base}/sub:${alias}/identity`, `agents/${alias}.md`, 'identity'), ...children],
+    kind: 'subagent', id, alias, agent: `greenfield/${alias}`, label, mode, harness, model: harness === 'codex' ? 'gpt-6.1-sol' : 'claude-opus-5-5',
+    identity: `agents/${alias}.md`,
+    // A cycle isn't expanded again: Agent Farm lists it with no rows under it.
+    children: extra.cycle ? [] : [file(`${id}/identity`, `agents/${alias}.md`, 'identity'), ...children],
   };
-  if (extra.profile) node.profile = extra.profile;
   if (extra.description) node.description = extra.description;
+  if (extra.variants) node.variants = extra.variants;
+  if (extra.command) node.command = extra.command;
+  if (extra.cycle) node.cycle = true;
   return node;
 }
-const settings = (base: string, name: string, pane = false): ProfileTreeNode => folder(`${base}/settings`, 'Settings', [file(`${base}/settings/profiles/${name}.yaml`, `profiles/${name}.yaml`), ...(pane ? [file(`${base}/settings/pane.yaml`, 'pane.yaml')] : [])]);
+const settings = (base: string, name: string): ProfileTreeNode => folder(`${base}/settings`, 'Settings', [file(`${base}/settings/profiles/${name}.yaml`, `profiles/${name}.yaml`)]);
 
-function profile(plugin: string, name: string, harness: string, description: string, tree: ProfileTreeNode[], extra: Partial<ProfileSummary> = {}): ProfileSummary {
+function profile(plugin: string, name: string, harness: string, title: string, description: string, tree: ProfileTreeNode[], extra: Partial<ProfileSummary> = {}): ProfileSummary {
   return {
-    name, ref: `${plugin}/${name}`, entry: `agents/${name}.md`, harness, model: harness === 'codex' ? 'gpt-6.1-sol' : 'claude-opus-5-5', description, listed: true,
-    uses: [], tree: tree.length ? tree : [file(`${name}/identity`, `agents/${name}.md`, 'identity'), settings(name, name)], ...extra,
+    name, ref: `${plugin}/${name}`, entry: `agents/${name}.md`, harness, model: harness === 'codex' ? 'gpt-6.1-sol' : 'claude-opus-5-5', title, description,
+    tree: tree.length ? tree : [file(`${name}/identity`, `agents/${name}.md`, 'identity'), settings(name, name)], ...extra,
   };
 }
 
@@ -39,64 +51,83 @@ function plugin(name: string, version: string, bundled: boolean, profiles: Profi
   return { name, version, bundled, edited: false, profiles, files: [...files].sort() };
 }
 
-function fixture() {
-  const orchestrator = profile('greenfield', 'orchestrator', 'claude', 'Coordinate planners, implementers and reviewers for one workstream.', [
-    file('orchestrator/identity', 'agents/orchestrator.md', 'identity'),
-    folder('orchestrator/instructions', 'Instructions', [file('orchestrator/instructions/standing-rules.md', 'instructions/standing-rules.md')]),
-    folder('orchestrator/skills', 'Skills', [skill('orchestrator', 'plan'), skill('orchestrator', 'review')]),
-    folder('orchestrator/subagents', 'Subagents', [
-      subagent('orchestrator', 'planner', 'Greenfield planner', [folder('orchestrator/sub:planner/skills', 'Skills', [skill('orchestrator/sub:planner', 'plan')])], { profile: 'greenfield/planner', description: 'Turn a request into a plan.' }),
-      subagent('orchestrator', 'implementer', 'Greenfield implementer', [], { profile: 'greenfield/implementer' }),
-      subagent('orchestrator', 'reviewer', 'Greenfield reviewer', [], { profile: 'greenfield/reviewer', harness: 'codex' }),
-      subagent('orchestrator', 'designer', 'Designer', [folder('orchestrator/sub:designer/skills', 'Skills', [skill('orchestrator/sub:designer', 'ui-mockup')])], { description: 'Draw three UI options on the real product.' }),
-      subagent('orchestrator', 'verifier', 'Front End Verifier', []),
+const BOTH = ['claude', 'codex'];
+const LAUNCH = (agent: string) => `agent-farm run greenfield/${agent} --agent-only`;
+
+/** The Orchestrator's own agent tree in greenfield 0.1.0: launch links, native links, a process link, and implementer ↔ reviewer. */
+function orchestratorTree(): ProfileTreeNode[] {
+  const base = 'orchestrator';
+  const implementer = `${base}/sub:implementer`;
+  const reviewer = `${implementer}/sub:reviewer`;
+  return [
+    file(`${base}/identity`, 'agents/orchestrator.md', 'identity'),
+    folder(`${base}/instructions`, 'Instructions', [file(`${base}/instructions/standing-rules.md`, 'instructions/standing-rules.md')]),
+    folder(`${base}/skills`, 'Skills', [skill(base, 'plan'), skill(base, 'review')]),
+    folder(`${base}/subagents`, 'Subagents', [
+      link(base, 'planner', 'Planner', 'launch', [folder(`${base}/sub:planner/skills`, 'Skills', [skill(`${base}/sub:planner`, 'plan')])],
+        { description: 'Turn a request into a plan.', variants: BOTH, command: LAUNCH('planner') }),
+      link(base, 'implementer', 'Implementer', 'launch', [
+        folder(`${implementer}/subagents`, 'Subagents', [
+          link(implementer, 'reviewer', 'Reviewer', 'launch', [
+            folder(`${reviewer}/subagents`, 'Subagents', [link(reviewer, 'implementer', 'Implementer', 'launch', [], { cycle: true, variants: BOTH, command: LAUNCH('implementer') })]),
+          ], { harness: 'codex', variants: ['codex', 'claude'], command: LAUNCH('reviewer') }),
+        ]),
+      ], { description: 'Build an approved plan.', variants: BOTH, command: LAUNCH('implementer') }),
+      link(base, 'qa-and-fix', 'QA and fix', 'launch', [], { variants: BOTH, command: LAUNCH('qa-and-fix') }),
+      link(base, 'explorer', 'Explorer', 'native', [], { description: 'Inspect the repository and return facts.' }),
+      link(base, 'cold-reader', 'Cold reader', 'native', []),
+      link(base, 'advisor', 'Advisor', 'process', [], { harness: 'codex', command: 'agent-farm run greenfield/advisor' }),
+      link(base, 'designer', 'Designer', 'native', [folder(`${base}/sub:designer/skills`, 'Skills', [skill(`${base}/sub:designer`, 'ui-mockup')])], { description: 'Draw three UI options on the real product.' }),
     ]),
-    settings('orchestrator', 'orchestrator', true),
-  ], { cover: 'covers/orchestrator.html' });
-  const business = profile('greenfield', 'business', 'claude', 'Answers BloomText support tickets and escalates refunds to you.', [
+    settings(base, 'orchestrator'),
+  ];
+}
+
+/** greenfield's own SVG photo for the Orchestrator, as Agent Farm resolves it. */
+const ORCHESTRATOR_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2f6f4f"/><circle cx="32" cy="26" r="11" fill="#e9f5ee"/></svg>';
+const ORCHESTRATOR_PHOTO = `data:image/svg+xml;utf8,${encodeURIComponent(ORCHESTRATOR_SVG)}`;
+
+function fixture() {
+  const orchestrator = profile('greenfield', 'orchestrator', 'claude', 'Orchestrator', 'Coordinate planners, implementers and reviewers for one workstream.', orchestratorTree(),
+    { cover: 'covers/orchestrator.html', variants: BOTH });
+  const business = profile('greenfield', 'business', 'claude', 'Business', 'Answers BloomText support tickets and escalates refunds to you.', [
     file('business/identity', 'agents/business.md', 'identity'),
     folder('business/skills', 'Skills', [skill('business', 'triage')]),
     folder('business/references', 'References', [file('business/references/tone.md', 'references/business/tone.md')]),
     settings('business', 'business'),
-  ], { title: 'Support desk' });
-  const greenfield = plugin('greenfield', '0.0.46', true, [
-    orchestrator,
-    business,
-    profile('greenfield', 'seo', 'claude', 'Draft blog posts in my voice.', []),
-    profile('greenfield', 'planner', 'claude', 'Turn a request into a plan.', [], { listed: false }),
-    profile('greenfield', 'implementer', 'claude', 'Build an approved plan.', [], { listed: false }),
-    profile('greenfield', 'reviewer', 'codex', 'Review a pull request.', [], { listed: false }),
-  ], ['plugin.yaml', 'pane.yaml', 'covers/orchestrator.html', 'profiles/orchestrator.yaml', 'profiles/business.yaml', 'profiles/seo.yaml', 'profiles/planner.yaml', 'profiles/implementer.yaml', 'profiles/reviewer.yaml',
-    'agents/orchestrator.md', 'agents/business.md', 'agents/seo.md', 'agents/planner.md', 'agents/implementer.md', 'agents/reviewer.md', 'agents/designer.md', 'agents/verifier.md',
+  ], { variants: BOTH });
+  // SEO has a single agent: no variants.
+  const seo = profile('greenfield', 'seo', 'claude', 'SEO', 'Draft blog posts in my voice.', []);
+  const agents = ['planner', 'implementer', 'reviewer', 'qa-and-fix', 'explorer', 'cold-reader', 'advisor', 'designer'];
+  const greenfield = plugin('greenfield', '0.1.0', true, [orchestrator, business, seo], [
+    'plugin.yaml', 'covers/orchestrator.html', 'profiles/orchestrator.yaml', 'profiles/business.yaml', 'profiles/seo.yaml',
+    'agents/orchestrator.md', 'agents/orchestrator-codex.md', 'agents/business.md', 'agents/seo.md', ...agents.map(agent => `agents/${agent}.md`),
     'instructions/standing-rules.md', 'skills/plan/SKILL.md', 'skills/review/SKILL.md', 'skills/ui-mockup/SKILL.md', 'skills/triage/SKILL.md', 'references/business/tone.md']);
-  // Installed but not on the TEMPORARY short list: not shown in the list (T-83).
-  const dcouple = plugin('dcouple', '0.1.27', true, [profile('dcouple', 'business', 'claude', 'Run BloomText business tasks.', [])], ['plugin.yaml', 'profiles/business.yaml', 'agents/business.md']);
   const files: Record<string, string> = {};
-  for (const entry of [greenfield, dcouple]) {
-    for (const path of entry.files) files[`${entry.name}/${path}`] = `# ${path}\n`;
-    files[`${entry.name}/plugin.yaml`] = `name: ${entry.name}\nversion: ${entry.version}\ncli_major: 0\n`;
-    for (const item of entry.profiles) {
-      files[`${entry.name}/profiles/${item.name}.yaml`] = `agent: ${item.name}\n`;
-      files[`${entry.name}/agents/${item.name}.md`] = `${identity(item.description ?? '')}# ${item.name}\n\n${item.description}\n`;
-    }
+  for (const path of greenfield.files) files[`greenfield/${path}`] = `# ${path}\n`;
+  // Each linked agent's identity, so its generated cover reads like the real one.
+  for (const agent of agents) files[`greenfield/agents/${agent}.md`] = `${identity(`The ${agent} agent.`)}You are the ${agent} for one workstream. Do your part, then report back to whoever started you.\n`;
+  files['greenfield/plugin.yaml'] = 'name: greenfield\nversion: 0.1.0\ncli_major: 0\n';
+  for (const item of greenfield.profiles) {
+    files[`greenfield/profiles/${item.name}.yaml`] = `title: ${item.title}\nagent: ${item.name}\n`;
+    files[`greenfield/agents/${item.name}.md`] = `${identity(item.description ?? '')}# ${item.name}\n\n${item.description}\n`;
   }
-  files['greenfield/profiles/orchestrator.yaml'] = 'variants:\n  claude: { agent: orchestrator }\n  codex: { agent: orchestrator-codex }\ndefault: claude\n';
+  files['greenfield/profiles/orchestrator.yaml'] = 'title: Orchestrator\nphoto: covers/orchestrator.svg\nvariants:\n  claude: { agent: orchestrator }\n  codex: { agent: orchestrator-codex }\ndefault: claude\n';
   files['greenfield/agents/orchestrator.md'] = `${identity('Coordinate planners, implementers and reviewers for one workstream.', '\nskills: [plan, review]')}# Orchestrator\n\nYou run one workstream. Plan before building, and send every pull request to the reviewer.\n`;
   files['greenfield/agents/designer.md'] = `${identity('Draw three UI options on the real product.', '\nskills: [ui-mockup]')}# Designer\n\nCapture the real screen, then draw three options.\n`;
+  files['greenfield/agents/planner.md'] = `${identity('Turn a request into a plan.', '\nskills: [plan]')}# Planner\n\nWrite the plan, then wait for the person to approve it.\n`;
   files['greenfield/covers/orchestrator.html'] = '<html><head><title>Orchestrator</title></head><body><h1>Greenfield orchestrator</h1><p>Runs one workstream from idea to merged pull request.</p><h2>How it works</h2><p>1 Plan with you · 2 Build in a Pane · 3 Review every PR · 4 Ask before merging</p><script>document.body.dataset.ran = "yes"</script></body></html>';
-  // TEMPORARY (T-83): the title lives in pane.yaml for the test build.
-  files['greenfield/pane.yaml'] = 'profiles:\n  orchestrator:\n    title: Greenfield orchestrator\n';
   files['greenfield/agents/business.md'] = `${identity('Answer BloomText support tickets.', '\nskills: [triage]\nreferences: business')}# Support\n\nAnswer new tickets in the help desk. Escalate refunds to the person through an approval.\n`;
-  const overview: ProfilesOverview = { machine: 'studio-mac', plugins: [greenfield, dcouple] };
-  return { overview, files };
+  const overview: ProfilesOverview = { machine: 'studio-mac', plugins: [greenfield] };
+  const photos: ProfilePhotos = { profiles: { 'greenfield/orchestrator': ORCHESTRATOR_PHOTO }, sources: { 'greenfield/orchestrator': 'plugin' }, titles: { 'greenfield/orchestrator': 'Orchestrator', 'greenfield/business': 'Business', 'greenfield/seo': 'SEO' } };
+  return { overview, files, photos };
 }
 
-/** The same profiles as New Session reads them (chat-tab:profiles). */
+/** The same profiles as New Session reads them (chat-tab:profiles), titled by Agent Farm. */
 const PALETTE_PROFILES: AgentFarmProfileEntry[] = [
-  { ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false },
-  { ref: 'greenfield/planner', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false, listed: false },
-  { ref: 'greenfield/business', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false },
-  { ref: 'greenfield/seo', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false },
+  { ref: 'greenfield/orchestrator', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false, title: 'Orchestrator' },
+  { ref: 'greenfield/business', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false, title: 'Business' },
+  { ref: 'greenfield/seo', plugin: 'greenfield', version: '0.1.0', harness: 'claude', hidden: false, title: 'SEO' },
 ];
 
 async function installProfiles(page: Page, options: { theme?: string; saveError?: string; pins?: string[]; on?: boolean; sync?: ProfileSyncStatus } = {}): Promise<void> {
@@ -135,18 +166,23 @@ async function shot(page: Page, name: string): Promise<void> {
   if (shotsDir) await page.screenshot({ path: `${shotsDir}/${name}.png` });
 }
 
-test('the list shows only top-level profiles, pinned first, and pins from a row', async ({ page }) => {
+test('the list shows every profile Agent Farm lists, by title, pinned first, and pins from a row', async ({ page }) => {
   await openProfilesTab(page, { pins: ['greenfield/business'] });
   const list = page.getByTestId('profiles-list');
   await expect(page.getByTestId('profiles-pinned-heading')).toBeVisible();
-  await expect(list.getByTestId('profile-row-greenfield-business')).toContainText('Support desk');
-  // The orchestrator's subagent profiles live inside it, not in the list; TEMPORARY (T-83): neither
-  // does a profile off the short list (dcouple/business).
-  await expect(list.getByTestId('profile-row-greenfield-planner')).toHaveCount(0);
-  await expect(list.getByTestId('profile-row-dcouple-business')).toHaveCount(0);
+  await expect(list.getByTestId('profile-row-greenfield-business')).toContainText('Business');
+  // greenfield 0.1.0's three profiles; its helpers are agents in the Orchestrator's tree, not profiles.
   await expect(list.locator('[data-profiles-item]')).toHaveCount(3);
-  await expect(page.getByTestId('profiles-all-heading')).toContainText('· 2 · subagents appear inside the profile that uses them');
-  await expect(list.getByTestId('profile-row-greenfield-orchestrator')).toContainText('5 subagents · 1 Session · Claude');
+  await expect(list.getByTestId('profile-row-greenfield-planner')).toHaveCount(0);
+  await expect(page.getByTestId('profiles-all-heading')).toHaveText('All profiles· 2');
+  await expect(list.getByTestId('profile-row-greenfield-orchestrator')).toContainText('Orchestrator');
+  await expect(list.getByTestId('profile-row-greenfield-orchestrator')).toContainText('7 subagents · 1 Session · Claude or Codex');
+  await expect(list.getByTestId('profile-row-greenfield-seo')).toContainText('SEO');
+  // A single-agent profile names its one harness.
+  await expect(list.getByTestId('profile-row-greenfield-seo')).toContainText(/voice\.Claude$/);
+  // greenfield's own SVG photo shows on the Orchestrator's row.
+  await expect(list.getByTestId('profile-row-greenfield-orchestrator').getByTestId('profile-avatar')).toHaveAttribute('data-avatar', 'picture');
+  await expect(list.getByTestId('profile-row-greenfield-seo').getByTestId('profile-avatar')).toHaveAttribute('data-avatar', 'initials');
   const rows = list.locator('[data-profiles-item]');
   await expect(rows.first()).toHaveAttribute('data-testid', 'profile-row-greenfield-business');
   await page.getByTestId('profile-pin-greenfield/orchestrator').click();
@@ -161,18 +197,19 @@ test('the list shows only top-level profiles, pinned first, and pins from a row'
   await page.keyboard.press('ArrowDown');
   await expect(rows.nth(1)).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page.getByTestId('profiles-title')).toHaveText('Greenfield orchestrator');
+  await expect(page.getByTestId('profiles-title')).toHaveText('Orchestrator');
+  await expect(page.getByTestId('profiles-subtitle')).toHaveText('greenfield/orchestrator · Coordinate planners, implementers and reviewers for one workstream. · ships with Pane');
   await expect(page.getByTestId('profiles-tree-cover')).toHaveAttribute('aria-selected', 'true');
 });
 
-test('pins lead Create New\'s To, and a profile Agent Farm doesn\'t list is left out', async ({ page }) => {
+test('pins lead Create New\'s To, which shows each profile by its title', async ({ page }) => {
   await openProfilesTab(page, { pins: ['greenfield/business'] });
   await page.getByTestId('new-orchestration-session').click();
   const dialog = page.getByTestId('create-new-dialog');
   await dialog.getByRole('combobox', { name: 'To', exact: true }).focus();
   await page.keyboard.type('green');
   const options = dialog.getByRole('listbox', { name: 'Agents and profiles' }).getByRole('option');
-  await expect(options).toHaveText([/Greenfield business/, /Greenfield orchestrator/, /Greenfield seo/]);
+  await expect(options).toHaveText([/Business\s*greenfield\/business/, /Orchestrator\s*greenfield\/orchestrator/, /SEO\s*greenfield\/seo/]);
 });
 
 test('a profile opens on its cover page: its own HTML in a sandbox, or one Pane makes', async ({ page }) => {
@@ -189,8 +226,9 @@ test('a profile opens on its cover page: its own HTML in a sandbox, or one Pane 
   await page.getByTestId('profiles-back').click();
   await page.getByTestId('profile-row-greenfield-business').click();
   const cover = page.getByTestId('profiles-generated-cover');
-  await expect(cover).toContainText('Support desk');
+  await expect(cover.getByRole('heading', { name: 'Business', exact: true })).toBeVisible();
   await expect(cover).toContainText('Answers BloomText support tickets and escalates refunds to you.');
+  await expect(cover).toContainText('Claude or Codex');
   await expect(cover).toContainText('Escalate refunds to the person through an approval.');
   await expect(cover).toContainText('Add covers/business.html to replace it.');
   await expect(cover.getByText('triage', { exact: true })).toBeVisible();
@@ -215,14 +253,14 @@ test('the tree holds only the profile\'s files; folders open and close; a subage
   await tree.getByTestId('profiles-tree-orchestrator/sub:designer').click();
   await expect(page.getByTestId('profiles-path')).toHaveText('Designer');
   await expect(page.getByTestId('profiles-generated-cover')).toContainText('Capture the real screen, then draw three options.');
+  await expect(page.getByTestId('profiles-cover-link')).toHaveText('designer · greenfield/designer · runs inside its parent');
   await expect(tree.getByTestId('profiles-file-agents/designer.md')).toBeVisible();
-  // A subagent that is a profile offers its own page.
+  // A launch link's cover says how it runs and gives the command that starts it on its own.
   await tree.getByTestId('profiles-tree-orchestrator/sub:planner').click();
-  await page.getByTestId('profiles-open-subagent-profile').click();
-  await expect(page.getByTestId('profiles-title')).toHaveText('Greenfield planner');
-  await page.getByTestId('profiles-back').click();
+  await expect(page.getByTestId('profiles-cover-link')).toHaveText('planner · greenfield/planner · runs as its own launch, in a tab or headless');
+  await expect(page.getByTestId('profiles-cover-command')).toHaveText('agent-farm run greenfield/planner --agent-only');
+  await expect(page.getByTestId('profiles-generated-cover')).toContainText('Claude or Codex');
   // Keyboard: ← closes a folder, → opens it.
-  await page.getByTestId('profile-row-greenfield-orchestrator').click();
   await tree.getByTestId('profiles-tree-orchestrator/skills').focus();
   await page.keyboard.press('ArrowLeft');
   await expect(tree.getByTestId('profiles-tree-orchestrator/skills/plan')).toHaveCount(0);
@@ -230,6 +268,36 @@ test('the tree holds only the profile\'s files; folders open and close; a subage
   await expect(tree.getByTestId('profiles-tree-orchestrator/skills/plan')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('profiles-list')).toBeVisible();
+});
+
+test('the tree says how each agent runs, and implementer ↔ reviewer stops at a cycle node', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+  const note = (id: string) => tree.getByTestId(`profiles-tree-note-orchestrator/${id}`);
+  await expect(note('sub:planner')).toHaveText('own launch');
+  await expect(note('sub:qa-and-fix')).toHaveText('own launch');
+  await expect(note('sub:explorer')).toHaveText('inside parent');
+  await expect(note('sub:cold-reader')).toHaveText('inside parent');
+  await expect(note('sub:advisor')).toHaveText('own process');
+  await expect(tree.getByTestId('profiles-tree-orchestrator/sub:advisor')).toHaveAttribute('title', 'greenfield/advisor · Runs as its own process');
+  await expect(tree.getByTestId('profiles-tree-orchestrator/sub:planner')).toHaveAttribute('title', 'greenfield/planner · Runs as its own launch, in a tab or headless · Claude or Codex');
+  // Implementer → Reviewer → Implementer again: the last is a cycle, marked ↻ and not expanded.
+  await tree.getByTestId('profiles-tree-orchestrator/sub:implementer').click();
+  await tree.getByTestId('profiles-tree-orchestrator/sub:implementer/subagents').click();
+  await tree.getByTestId('profiles-tree-orchestrator/sub:implementer/sub:reviewer').click();
+  await expect(note('sub:implementer/sub:reviewer')).toHaveText('own launch');
+  await tree.getByTestId('profiles-tree-orchestrator/sub:implementer/sub:reviewer/subagents').click();
+  const cycleId = 'orchestrator/sub:implementer/sub:reviewer/sub:implementer';
+  const cycle = tree.getByTestId(`profiles-tree-${cycleId}`);
+  await expect(cycle).toBeVisible();
+  await expect(cycle.getByTestId('profiles-tree-mark-cycle')).toBeVisible();
+  await expect(tree.getByTestId(`profiles-tree-note-${cycleId}`)).toHaveText('already above');
+  await expect(cycle).toHaveAttribute('title', 'greenfield/implementer, already above on this path · Runs as its own launch, in a tab or headless · Claude or Codex');
+  await expect(cycle).not.toHaveAttribute('aria-expanded', /.+/);
+  await cycle.click();
+  await expect(page.getByTestId('profiles-cover-cycle')).toContainText('already above on this path');
+  await expect(tree.getByTestId(`profiles-tree-${cycleId}/sub:reviewer`)).toHaveCount(0);
 });
 
 test('files preview first: Markdown under a metadata header, YAML as key/value; Edit, ⌘S and Cancel', async ({ page }) => {
@@ -273,22 +341,28 @@ test('files preview first: Markdown under a metadata header, YAML as key/value; 
   await expect(page.getByTestId('profiles-restore')).toHaveCount(0);
 });
 
-test('Edit details writes the description into the identity, and the title (for now) beside it', async ({ page }) => {
+test('Edit details saves the title and description through Agent Farm, leaving greenfield\'s files and Edited alone', async ({ page }) => {
   await openProfilesTab(page);
   await page.getByTestId('profile-row-greenfield-seo').click();
   await page.getByTestId('profiles-edit-details').click();
   const dialog = page.getByTestId('profiles-details-dialog');
+  await expect(dialog.getByLabel('Title')).toHaveValue('SEO');
+  await expect(dialog).toContainText('Agent Farm keeps the title, description and photo on this computer, apart from greenfield’s files');
   await dialog.getByLabel('Title').fill('Blog writer');
   await dialog.getByLabel('Description').fill('Drafts posts in my voice, then cuts a third.');
   await page.getByTestId('profiles-details-save').click();
   await expect(page.getByTestId('profiles-title')).toHaveText('Blog writer');
-  await expect(page.getByTestId('profiles-subtitle')).toContainText('Drafts posts in my voice, then cuts a third.');
+  // Still Pane's own copy: no ", edited", and nothing to restore.
+  await expect(page.getByTestId('profiles-subtitle')).toHaveText('greenfield/seo · Drafts posts in my voice, then cuts a third. · ships with Pane');
+  await expect(page.getByTestId('profiles-restore')).toHaveCount(0);
   await page.getByTestId('profiles-back').click();
   await expect(page.getByTestId('profile-row-greenfield-seo')).toContainText('Blog writer');
-  // The description is written in the agent's own identity file.
+  await expect(page.getByTestId('profiles-edited-greenfield')).toHaveCount(0);
+  // The agent's identity file keeps the plugin's own description.
   await page.getByTestId('profile-row-greenfield-seo').click();
   await page.getByTestId('profiles-file-agents/seo.md').click();
-  await expect(page.getByTestId('profiles-front-matter')).toContainText('Drafts posts in my voice, then cuts a third.');
+  await expect(page.getByTestId('profiles-front-matter')).toContainText('Draft blog posts in my voice.');
+  await expect(page.getByTestId('profiles-front-matter')).not.toContainText('cuts a third');
 });
 
 test('a save Agent Farm refuses shows why, and keeps the edit', async ({ page }) => {
@@ -321,18 +395,56 @@ test('New subagent, skill and reference add a file to the tree and open it; New 
   await expect(page.getByTestId('profiles-tree-cover')).toHaveAttribute('aria-selected', 'true');
 });
 
-test('a sample photo shows in the profile and its Session row; removing it brings the initials back', async ({ page }) => {
+test('a sample photo shows in the profile and its Session row; removing it brings the initials back, or the plugin\'s own photo', async ({ page }) => {
   await openProfilesTab(page);
   await page.getByTestId('profile-row-greenfield-business').click();
   await page.getByTestId('profile-photo').click();
   await page.getByTestId('profile-photo-sample-star').click();
-  await expect(page.getByTestId('profile-photo').getByTestId('profile-avatar')).toHaveAttribute('data-avatar', 'picture');
+  const avatar = page.getByTestId('profile-photo').getByTestId('profile-avatar');
+  await expect(avatar).toHaveAttribute('data-avatar', 'picture');
+  await expect(avatar.locator('img')).toHaveAttribute('src', /^data:image\/svg\+xml/);
   const row = page.getByTestId('orchestration-session-s3');
   await expect(row.getByTestId('profile-avatar').first()).toHaveAttribute('data-avatar', 'picture');
   await page.getByTestId('profiles-edit-details').click();
   await page.getByTestId('profiles-details-initials').click();
-  await expect(page.getByTestId('profile-photo').getByTestId('profile-avatar')).toHaveAttribute('data-avatar', 'initials');
+  await expect(avatar).toHaveAttribute('data-avatar', 'initials');
   await expect(row.getByTestId('profile-avatar').first()).toHaveAttribute('data-avatar', 'initials');
+  await page.keyboard.press('Escape');
+  // The Orchestrator has greenfield's own photo: yours replaces it, and removing yours brings it back.
+  await page.getByTestId('profiles-back').click();
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  await expect(avatar.locator('img')).toHaveAttribute('src', ORCHESTRATOR_PHOTO);
+  await page.getByTestId('profile-photo').click();
+  await expect(page.getByRole('menuitem', { name: 'Remove my photo' })).toBeDisabled();
+  await page.getByTestId('profile-photo-sample-star').click();
+  await expect(avatar.locator('img')).not.toHaveAttribute('src', ORCHESTRATOR_PHOTO);
+  await page.getByTestId('profile-photo').click();
+  await page.getByRole('menuitem', { name: 'Remove my photo' }).click();
+  await expect(page.getByTestId('profiles-notice')).toContainText('Photo removed. The plugin’s own photo shows');
+  await expect(avatar.locator('img')).toHaveAttribute('src', ORCHESTRATOR_PHOTO);
+});
+
+test('a photo is an SVG: a PNG is refused before it is sent, and an SVG file is set', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-greenfield-seo').click();
+  await page.getByTestId('profiles-edit-details').click();
+  const dialog = page.getByTestId('profiles-details-dialog');
+  await expect(page.getByTestId('profiles-details-upload')).toHaveText('Upload SVG…');
+  await expect(page.getByTestId('profiles-details-photo-file')).toHaveAttribute('accept', '.svg,image/svg+xml');
+  await page.getByTestId('profiles-details-photo-file').setInputFiles({ name: 'avatar.png', mimeType: 'image/png', buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) });
+  await expect(dialog.getByRole('alert')).toHaveText('avatar.png isn\'t an SVG. Profile photos are SVG files only: choose a .svg file, or pick a sample.');
+  // SAFETY: installElectronApiMock adds this control before the app loads.
+  const calls = () => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getProfilesCalls: () => string[] } }).__paneTestElectronMock.getProfilesCalls());
+  expect(await calls()).not.toContain('setPhoto');
+  const avatar = dialog.getByTestId('profile-avatar');
+  await expect(avatar).toHaveAttribute('data-avatar', 'initials');
+  // A .svg whose text isn't an SVG: Agent Farm refuses it and says why.
+  await page.getByTestId('profiles-details-photo-file').setInputFiles({ name: 'notes.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('just some text') });
+  await expect(dialog.getByRole('alert')).toContainText('isn\'t an SVG image');
+  await page.getByTestId('profiles-details-photo-file').setInputFiles({ name: 'seo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(ORCHESTRATOR_SVG) });
+  await expect(avatar).toHaveAttribute('data-avatar', 'picture');
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByTestId('profiles-details-initials')).toBeEnabled();
 });
 
 test('Enter on the sidebar\'s Profiles row puts keyboard focus on the first profile', async ({ page }) => {
@@ -443,6 +555,18 @@ for (const theme of ['light', 'dark']) {
     await shot(page, `page-cover-custom-${theme}`);
     await page.getByTestId('profiles-tree-orchestrator/sub:designer').click();
     await shot(page, `page-tree-subagent-${theme}`);
+    // The agent tree open down to the implementer ↔ reviewer cycle, on the launch link's cover.
+    await page.getByTestId('profiles-tree-orchestrator/sub:implementer').click();
+    await page.getByTestId('profiles-tree-orchestrator/sub:implementer/subagents').click();
+    await page.getByTestId('profiles-tree-orchestrator/sub:implementer/sub:reviewer').click();
+    await page.getByTestId('profiles-tree-orchestrator/sub:implementer/sub:reviewer/subagents').click();
+    await expect(page.getByTestId('profiles-tree-mark-cycle')).toBeVisible();
+    await expect(page.getByTestId('profiles-cover-command')).toBeVisible();
+    await shot(page, `page-tree-links-${theme}`);
+    await page.getByTestId('profiles-tree-orchestrator/sub:implementer/sub:reviewer/sub:implementer').click();
+    await expect(page.getByTestId('profiles-cover-cycle')).toBeVisible();
+    await shot(page, `page-tree-cycle-${theme}`);
+    await page.getByTestId('profiles-tree-orchestrator/sub:designer').click();
     await page.getByTestId('profiles-file-agents/designer.md').click();
     await expect(page.getByTestId('profiles-front-matter')).toContainText('ui-mockup');
     await shot(page, `page-md-preview-${theme}`);
@@ -459,6 +583,9 @@ for (const theme of ['light', 'dark']) {
     await shot(page, `page-cover-generated-${theme}`);
     await page.getByTestId('profiles-edit-details').click();
     await shot(page, `page-details-${theme}`);
+    await page.getByTestId('profiles-details-photo-file').setInputFiles({ name: 'avatar.png', mimeType: 'image/png', buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
+    await expect(page.getByTestId('profiles-details-dialog').getByRole('alert')).toBeVisible();
+    await shot(page, `page-details-png-refused-${theme}`);
     await page.keyboard.press('Escape');
     await page.getByTestId('profiles-file-agents/business.md').click();
     await page.getByTestId('profiles-edit').click();

@@ -99,10 +99,14 @@ export interface ProfileSubagentNode {
 /** Where a profile's photo comes from: your edit (`profiles set`), the plugin's own SVG, or none (initials). */
 export type ProfilePhotoSource = 'yours' | 'plugin' | 'default';
 
-/** Profile photos on this computer (SVG only, T-83), as data URLs by `plugin/profile`, and where each came from. */
+/**
+ * Profile photos on this computer (SVG only, T-83), as data URLs by `plugin/profile`, and where each
+ * came from; and each profile's title, which its avatar's initials and label are made from.
+ */
 export interface ProfilePhotos {
   profiles: Record<string, string>;
   sources: Record<string, Exclude<ProfilePhotoSource, 'default'>>;
+  titles: Record<string, string>;
 }
 
 /** Largest SVG photo Agent Farm accepts (T-83 §5). */
@@ -196,6 +200,7 @@ export const profilesOverviewSchema: BoundarySchema<ProfilesOverview> = boundary
 export const profilePhotosSchema: BoundarySchema<ProfilePhotos> = boundary.object({
   profiles: boundary.record(boundary.string),
   sources: boundary.record(boundary.enumeration('yours', 'plugin')),
+  titles: boundary.record(boundary.string),
 });
 
 export const profileSaveResultSchema: BoundarySchema<ProfileSaveResult> = boundary.object({

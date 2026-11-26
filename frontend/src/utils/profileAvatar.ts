@@ -27,13 +27,22 @@ function qualified(ref: string): string {
   return ref.split(':')[0];
 }
 
-export function profileAvatar({ profileRef, agent, picture }: { profileRef?: string; agent?: string; picture?: string }): ProfileAvatarFace {
+/** Initials of a title: the first letters of its first two words, or its first two letters (SEO → SE). */
+function titleInitials(title: string): string {
+  const words = title.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (!words.length) return '';
+  return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : words[0].slice(0, 2)).toUpperCase();
+}
+
+/** `title` is Agent Farm's title for the profile (T-83), when known: the initials come from it. */
+export function profileAvatar({ profileRef, agent, picture, title }: { profileRef?: string; agent?: string; picture?: string; title?: string }): ProfileAvatarFace {
   if (picture) return { kind: 'picture', src: picture };
   const plain = profileRef ? plainProfileAgent(profileRef) : undefined;
   if (profileRef && !plain) {
     const name = qualified(profileRef);
     const [plugin = '', profile = ''] = name.split('/');
-    const text = (plugin === profile || !profile ? (profile || plugin).slice(0, 2) : `${plugin[0]}${profile[0]}`).toUpperCase();
+    const fromTitle = title ? titleInitials(title) : '';
+    const text = fromTitle || (plugin === profile || !profile ? (profile || plugin).slice(0, 2) : `${plugin[0]}${profile[0]}`).toUpperCase();
     return { kind: 'initials', text, tone: (hash(name) % AVATAR_TONES) + 1 };
   }
   const id = plain ?? agent ?? '';

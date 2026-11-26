@@ -39,11 +39,12 @@ export const ToField = forwardRef<HTMLInputElement, ToFieldProps>(function ToFie
   const optionId = (choice: SessionChoice) => `${listboxId}-${choice.key.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 
   // The choice shown can change while the field is focused (the remembered profile arrives once
-  // the profiles are read); keep it selected so typing still replaces it.
+  // the profiles are read, and its Agent Farm title replaces the name made from its ref); keep it
+  // selected so typing still replaces it.
   useEffect(() => {
     const input = inputRef.current;
     if (input && document.activeElement === input && !query) input.select();
-  }, [value?.key, query]);
+  }, [value?.key, value?.label, query]);
 
   useEffect(() => {
     if (!open || !active) return;

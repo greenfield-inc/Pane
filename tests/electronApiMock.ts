@@ -1397,7 +1397,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     // The Profiles tab (T-63 PR 5): an in-memory copy of the plugins it edits. Saves mark Pane's own plugins Edited.
     const profilesApi = mockOptions.profileEditor ? (() => {
       const state = clone(mockOptions.profileEditor);
-      const photos: { profiles: Record<string, string>; plugins: Record<string, string> } = state.photos ?? { profiles: {}, plugins: {} };
+      // Photos as Agent Farm resolves them (T-83, SVG only): yours over the plugin's own, by `plugin/profile`.
+      const photos: ProfilePhotos = state.photos ?? { profiles: {}, sources: {}, titles: {} };
+      const pluginPhotos = Object.fromEntries(Object.entries(photos.profiles).filter(([ref]) => photos.sources[ref] === 'plugin'));
       const pristine = clone(state.files);
       const pristinePlugins = clone(state.overview.plugins);
       const sync: ProfileSyncStatus = state.sync ?? { running: false, lastSyncAt: 1, computers: [] };
@@ -1478,7 +1480,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             state.files[`${plugin}/${change.path}`] = change.content;
             if (entry && !entry.files.includes(change.path)) entry.files = [...entry.files, change.path].sort();
           }
-          if (entry?.bundled && changes.some(change => change.path !== 'pane.yaml' && !change.path.startsWith('covers/'))) entry.edited = true;
+          if (entry?.bundled && changes.some(change => !change.path.startsWith('covers/'))) entry.edited = true;
           if (entry) for (const profile of entry.profiles) {
             const cover = [`covers/${profile.name}.html`, `covers/${profile.name}.md`].find(file => entry.files.includes(file));
             if (cover) profile.cover = cover;
@@ -1488,15 +1490,15 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         setDetails: (plugin: string, profile: string, details: { title: string; description: string }) => {
           const summary = pluginOf(plugin)?.profiles.find(item => item.name === profile);
           if (!summary) return Promise.resolve({ success: false, error: `${plugin} has no profile named ${profile}.` });
-          if (details.title.trim()) summary.title = details.title.trim(); else delete summary.title;
-          // The description is the agent's own: it goes in the identity's front-matter, as main writes it.
-          const key = `${plugin}/${summary.entry}`;
-          const identity = state.files[key] ?? '---\n---\n';
-          const description = details.description.trim();
+          // `agent-farm profiles set` (T-83): Agent Farm keeps both apart from the plugin's files, so no
+          // file changes and a bundled plugin doesn't become Edited; empty goes back to the plugin's own.
+          const shipped = pristinePlugins.find(item => item.name === plugin)?.profiles.find(item => item.name === profile);
+          const title = details.title.trim() || shipped?.title;
+          const description = details.description.trim() || shipped?.description;
+          if (title) summary.title = title; else delete summary.title;
           if (description) summary.description = description; else delete summary.description;
-          const withoutOld = identity.replace(/^description:.*\n/m, '');
-          state.files[key] = description ? withoutOld.replace(/^---\n/, `---\ndescription: ${JSON.stringify(description)}\n`) : withoutOld;
-          state.files[`${plugin}/pane.yaml`] = `profiles:\n  ${profile}:\n    title: ${details.title}\n`;
+          // Avatars take the title from the photos answer, as main gives it.
+          if (title) photos.titles[summary.ref] = title; else delete photos.titles[summary.ref];
           return result(plugin, summary.entry);
         },
         parseYaml: (source: string) => ok(parseYamlText(source)),
@@ -1507,7 +1509,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           state.files[`${name}/${entry}`] = `---\nharness: ${agent}\n---\n\n# ${name}\n\nWho you are and what you do.\n`;
           const files = [entry, 'plugin.yaml', `profiles/${name}.yaml`];
           state.overview.plugins.push({ name, version: '0.1.0', bundled: false, edited: false, files, profiles: [{
-            name, ref: `${name}/${name}`, entry, harness: agent, uses: files, listed: true,
+            name, ref: `${name}/${name}`, entry, harness: agent,
             tree: [
               { kind: 'file', id: `${name}/identity`, path: entry, label: `${name}.md`, note: 'identity' },
               { kind: 'folder', id: `${name}/settings`, label: 'Settings', children: [{ kind: 'file', id: `${name}/settings/profiles/${name}.yaml`, path: `profiles/${name}.yaml`, label: `${name}.yaml` }] },
@@ -1522,10 +1524,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           const path = kind === 'skill' ? `skills/${name}/SKILL.md` : kind === 'subagent' ? `agents/${name}.md` : `references/${profile}/${name}.md`;
           state.files[`${plugin}/${path}`] = `# ${name}\n`;
           entry.files = [...entry.files, path].sort();
-          summary.uses = [...summary.uses, path].sort();
           const id = `${profile}/new/${path}`;
           if (kind === 'skill') addRow(summary.tree, profile, 'Skills', { kind: 'folder', id, label: name, children: [{ kind: 'file', id: `${id}/SKILL.md`, path, label: 'SKILL.md' }] });
-          else if (kind === 'subagent') addRow(summary.tree, profile, 'Subagents', { kind: 'subagent', id, alias: name, agent: name, label: name, harness: summary.harness, identity: path, children: [{ kind: 'file', id: `${id}/identity`, path, label: `${name}.md`, note: 'identity' }] });
+          else if (kind === 'subagent') addRow(summary.tree, profile, 'Subagents', { kind: 'subagent', id, alias: name, agent: `${plugin}/${name}`, label: name, mode: 'native', harness: summary.harness, identity: path, children: [{ kind: 'file', id: `${id}/identity`, path, label: `${name}.md`, note: 'identity' }] });
           else addRow(summary.tree, profile, 'References', { kind: 'file', id, path, label: `${name}.md` });
           if (entry.bundled) entry.edited = true;
           return result(plugin, path);
@@ -1536,7 +1537,14 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           for (const key of Object.keys(state.files)) if (key.startsWith(`${plugin}/`)) delete state.files[key];
           for (const [key, value] of Object.entries(pristine)) if (key.startsWith(`${plugin}/`)) state.files[key] = value;
           const shipped = pristinePlugins.find(item => item.name === plugin);
+          // Your titles and descriptions (`profiles set`) stay: they aren't the plugin's files.
+          const details = new Map(entry.profiles.map(item => [item.name, { title: item.title, description: item.description }]));
           if (shipped) Object.assign(entry, clone(shipped));
+          for (const item of entry.profiles) {
+            const kept = details.get(item.name);
+            if (kept?.title) item.title = kept.title;
+            if (kept?.description) item.description = kept.description;
+          }
           entry.edited = false;
           return result(plugin, entry.profiles[0]?.entry ?? 'plugin.yaml');
         },
@@ -1557,11 +1565,27 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           // A new profiles/<name>.yaml is a new profile, as Agent Farm reads it.
           const profile = /^profiles\/([a-z][a-z0-9_-]*)\.yaml$/.exec(path)?.[1];
           if (entry && profile && !entry.profiles.some(item => item.name === profile)) {
-            entry.profiles = [...entry.profiles, { name: profile, ref: `${plugin}/${profile}`, entry: `agents/${profile}.md`, harness: 'claude', uses: [path], listed: true, tree: [] }];
+            entry.profiles = [...entry.profiles, { name: profile, ref: `${plugin}/${profile}`, entry: `agents/${profile}.md`, harness: 'claude', tree: [] }];
           }
         },
-        setPhoto: (ref: string, base64: string) => { photos.profiles[ref] = `data:image/png;base64,${base64}`; return ok(null); },
-        removePhoto: (ref: string) => { delete photos.profiles[ref]; return ok(null); },
+        // Agent Farm checks the SVG's text; as main does, anything without an <svg> element is refused.
+        setPhoto: (ref: string, svg: string) => {
+          if (!/<svg[\s>]/i.test(svg)) return Promise.resolve({ success: false, error: 'That photo isn\'t an SVG image. Profile photos are SVG only. Choose an SVG file.' });
+          photos.profiles[ref] = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+          photos.sources[ref] = 'yours';
+          return ok(null);
+        },
+        // Removing yours shows the plugin's own photo again, or initials when it has none.
+        removePhoto: (ref: string) => {
+          if (pluginPhotos[ref]) {
+            photos.profiles[ref] = pluginPhotos[ref];
+            photos.sources[ref] = 'plugin';
+          } else {
+            delete photos.profiles[ref];
+            delete photos.sources[ref];
+          }
+          return ok(null);
+        },
         // Profile sync (T-63 PR 6): each other computer's state; Sync now reports the online ones up to date.
         syncStatus: () => ok(sync),
         syncNow: () => {

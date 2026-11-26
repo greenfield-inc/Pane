@@ -177,7 +177,7 @@ export function ProfileTree({ plugin, profile, file, selectedId, onSelect }: {
               </span>
               {node.kind === 'file' && node.note && <span className="shrink-0 text-[11.5px] text-text-secondary">{node.note}</span>}
               {node.kind === 'subagent' && (
-                <span className={cn('shrink-0 text-[11.5px]', state === 'error' ? 'text-status-warning' : 'text-text-secondary')} data-testid={`profiles-tree-note-${node.id}`}>
+                <span className={cn('min-w-0 shrink-[4] truncate text-[11.5px]', state === 'error' ? 'text-status-warning' : 'text-text-secondary')} data-testid={`profiles-tree-note-${node.id}`}>
                   {state === 'cycle' ? 'already above' : state === 'error' ? 'not found' : LINK_MODE_SHORT[node.mode]}
                 </span>
               )}
