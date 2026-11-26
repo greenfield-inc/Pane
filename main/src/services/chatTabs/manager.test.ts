@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -811,6 +811,34 @@ describe('chat tab manager', () => {
     const resumed = manager.view('p1');
     expect(replyText(resumed)).toBe('You said: hello|You said: again');
     expect(turnEnds(resumed)).toEqual(['end_turn', 'end_turn']);
+  });
+
+  it('keeps the newest messages beside the tab, so a read that starts nothing shows them after a relaunch (F-lite, T-87)', { timeout: 30_000 }, async () => {
+    const first = harness();
+    const { store, directory } = first;
+    store.add('p1', newTab(directory));
+    await first.manager.ensure('p1');
+    first.manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => first.manager.receipt('p1', 'a')?.state).toBe('completed');
+    const recentFiles = () => readdirSync(path.join(directory, 'spool')).map(folder => path.join(directory, 'spool', folder, 'recent.json')).filter(file => existsSync(file));
+    await expect.poll(() => recentFiles().length, { timeout: 10_000 }).toBe(1);
+    const [recent] = recentFiles();
+    await first.manager.stopAll();
+
+    // Pane relaunched: nothing runs yet, and a read that may not start shows the saved window.
+    const second = harness(store, {}, directory);
+    const peeked = second.manager.view('p1', 200, false);
+    expect(replyText(peeked)).toBe('You said: hello');
+    expect(second.manager.isRunning('p1')).toBe(false);
+
+    // Saved for another conversation (Switch, /clear): not shown.
+    const third = harness(store, {}, directory);
+    store.commit('p1', { ...store.state('p1')!, acpSessionId: 'another-conversation' });
+    expect(third.manager.view('p1', 200, false).transcript).toBeUndefined();
+
+    // Closing the tab removes it.
+    await second.manager.close('p1');
+    expect(existsSync(recent)).toBe(false);
   });
 
   const MARK = { at: '2026-11-13T00:00:00.000Z', by: 'auto' as const };

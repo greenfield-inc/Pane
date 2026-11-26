@@ -22,7 +22,7 @@ import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import type { AppConfig } from '../types/config';
 
 /** How long the cursor rests on a row before its Session is selected and its agent starts. */
-export const SETTLE_MS = 1000;
+const SETTLE_MS = 1000;
 
 /** The sidebar row attribute naming the chat Session a row shows; set only where the cursor may follow. */
 export const SESSION_CURSOR_ATTRIBUTE = 'data-session-cursor';
@@ -53,9 +53,8 @@ function clearTimer(): void {
 
 /** Focus that leaves the sidebar (a click in the chat, Tab, ⌘⌥→) is the person using what the cursor shows. */
 function onFocusIn(event: FocusEvent): void {
-  // SAFETY: focusin targets on the window are elements or the document.
-  const target = event.target as Element | null;
-  if (!pending || !target || typeof target.closest !== 'function') return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (!pending || !target) return;
   if (target.closest('[data-focus-region="sidebar"], [data-sidebar-item]')) return;
   settleSessionCursor();
 }

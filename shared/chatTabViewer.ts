@@ -51,6 +51,8 @@ export class ChatTabViewer {
   private transport = 0;
   private frame?: ReturnType<typeof setTimeout>;
   private notifiedAt = 0;
+  /** Off while the sidebar cursor only shows the chat's Session (T-87): reads then never start its agent. */
+  private startOnRead = true;
 
   constructor(private chatClient: ChatTabClient, readonly panelId: string) {}
 
@@ -78,6 +80,23 @@ export class ChatTabViewer {
     this.frame = undefined;
     this.notifiedAt = performance.now();
     this.listeners.forEach(listener => listener());
+  }
+
+  /**
+   * Whether this viewer's reads start a stopped agent (as opening a chat always has). Off
+   * while the chat's Session is only shown by the sidebar cursor (T-87); turning it back on
+   * reads nothing by itself: the Session's own `open` starts the agent.
+   */
+  setStartOnRead(start: boolean): void { this.startOnRead = start; }
+
+  /**
+   * Paints a window read elsewhere (the Session's one `open` or `peek` call, T-87) when the
+   * viewer holds none, so the chat shows before its own read returns. That read still runs
+   * and replaces it, with any events that arrived meanwhile.
+   */
+  prime(view: ChatTabView): void {
+    if (view.panelId !== this.panelId || this.state.transcript || !view.transcript) return;
+    this.state = { ...this.state, view: this.state.view ?? { ...view, transcript: undefined }, transcript: view.transcript, hasNewer: false };
   }
 
   setDraft(draft: string): void { this.publish({ draft }); }
@@ -166,7 +185,8 @@ export class ChatTabViewer {
     if (this.loading) return this.loading;
     const transport = this.transport;
     switchMark('chat:get:start', { panelId: this.panelId });
-    const loading: Promise<void> = this.chatClient.get(this.panelId, PAGE * 2).then(view => {
+    const read = this.startOnRead ? this.chatClient.get(this.panelId, PAGE * 2) : this.chatClient.get(this.panelId, PAGE * 2, { start: false });
+    const loading: Promise<void> = read.then(view => {
       switchMark('chat:get:end', { panelId: this.panelId, status: view.status, start: view.transcript?.start, n: view.transcript?.messages.length });
       if (transport !== this.transport) return;
       let transcript = view.transcript;

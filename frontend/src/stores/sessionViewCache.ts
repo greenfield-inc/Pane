@@ -114,7 +114,7 @@ export function peekSessionView(target: SessionViewTarget): Promise<SessionViewE
   const pending = peeks.get(sessionId) ?? opens.get(sessionId)?.then(() => cachedSessionView(sessionId) ?? null);
   if (pending) return pending;
   const started = generation;
-  switchMark('session:peek', sessionId);
+  switchMark('session:peek', { sessionId });
   const peek = (async () => {
     const [response, remembered] = await Promise.all([API.orchestrationSessions.peek({ sessionId }), rememberedLayout(target)]);
     const result = responseData(response, 'Failed to show Session');
@@ -139,7 +139,7 @@ export function openSessionView(target: SessionViewTarget, { select = false }: {
   // A selecting open is never folded into a reading one: it saves something the other does not.
   if (pending && !select) return pending;
   const started = generation;
-  switchMark('session:open', sessionId);
+  switchMark('session:open', { sessionId });
   const open = (async () => {
     const [response, remembered] = await Promise.all([API.orchestrationSessions.open({ sessionId }, { select }), rememberedLayout(target)]);
     const result = responseData(response, 'Failed to open Session');
