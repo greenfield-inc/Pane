@@ -23,7 +23,8 @@ This is the implementation checklist for Remote Pane setup, teardown, and runtim
 | --- | --- | --- |
 | Import connection and connect succeeds | Save the code as a route of its computer (or a new computer), activate it, set remote mode | Resync config, sessions, panels |
 | Import connection and connect fails | Save the route, keep current active runtime | No runtime resync |
-| Connect saved computer | Activate the computer before persisting remote mode | Resync config, sessions, panels |
+| Connect saved computer | Activate the computer before persisting remote mode. The connection checklist runs first, unless this desktop's own connection to that computer (`MachineConnections`) heard from it in the last 30 s; then the switch skips it and dials that connection's route first | Resync config, sessions, panels |
+| Press another computer while a switch is still checking | `remote-daemon:cancel-switch` stops the older switch before it closes the current connection, so the window stays where it was; the newer one runs. A switch already past the checks finishes | Only the newest press reports |
 | Change route on the active computer | Reopen the event stream on the new route; no runtime switch | Reconnect resync (no `hostChanged`) |
 | Switch to local runtime | Disconnect active remote client, save local mode | Resync config, sessions, panels, clear stale active session |
 | Remove inactive computer, or its last route | Remove the computer | No runtime resync |

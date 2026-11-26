@@ -1271,6 +1271,66 @@ describe('RemotePaneClientController', () => {
   });
 });
 
+describe('RemotePaneClientController switches fast (T-128)', () => {
+  it('skips the connection checklist for a machine that answered in the last 30 s, and runs it for one that did not', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'test-token' }] };
+    config.client.computers = [studio];
+    const controller = createController();
+    let checklistShown = false;
+    controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {
+      if (controller.getConnectionState().check) checklistShown = true;
+    } } });
+    let fresh = true;
+    const asked: Array<[string, number]> = [];
+    controller.setRecentAnswers((computerId, ms) => {
+      asked.push([computerId, ms]);
+      return fresh ? { routeId: studio.routes[0].id } : null;
+    });
+
+    await controller.activateProfile(primaryProfile(studio));
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(asked).toEqual([['studio-mac', 30_000]]);
+    expect(checklistShown).toBe(false);
+
+    await controller.switchToLocalMode();
+    fresh = false;
+    await controller.activateProfile(primaryProfile(studio));
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(checklistShown).toBe(true);
+    await controller.switchToLocalMode();
+  });
+
+  it('a switch cancelled part-way leaves the window on its old machine, with no checklist left open', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [{ id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'test-token' }] };
+    config.client = { ...config.client, mode: 'remote', activeProfileId: 'studio-mac', computers: [studio] };
+    const controller = createController();
+    controller.initialize({
+      configManager: createConfigManagerStub(config),
+      rendererEventSink: { send() {} },
+      // The other machine's Tailscale lookup never answers.
+      checkDependencies: { lookupTailnetMachine: () => new Promise(() => undefined) },
+    });
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(controller.cancelActivation()).toBe(false);
+
+    const switching = controller.activateProfile({
+      id: 'build-box', label: 'build-box', baseUrl: 'https://build-box.tail1234.ts.net:8443', token: '', transport: 'http+sse', tailnetMachine: 'build-box', tailnetDomain: 'tail1234.ts.net',
+    });
+    await waitFor(() => controller.getConnectionState().check?.outcome === 'running');
+    expect(controller.cancelActivation()).toBe(true);
+
+    await expect(switching).rejects.toMatchObject({ code: 'ERR_REMOTE_SWITCH_CANCELLED' });
+    expect(controller.getConnectionState()).toMatchObject({ status: 'connected', activeProfileId: 'studio-mac', check: null });
+    await controller.switchToLocalMode();
+  });
+});
+
 describe('RemotePaneClientController links to host ports', () => {
   const cleanups: Array<() => Promise<void> | void> = [];
   afterEach(async () => {

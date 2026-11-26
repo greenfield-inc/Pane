@@ -1299,6 +1299,8 @@ async function initializeServices() {
     },
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
+  // A switch to a machine this connection heard from in the last 30 s skips the connection checklist.
+  remotePaneClientController.setRecentAnswers((computerId, ms) => machineConnections?.answeredWithin(computerId, ms) ?? null);
   setDeviceMachines(machineConnections);
   const machines = machineConnections;
   powerMonitor.on('suspend', () => machines.suspend());

@@ -33,7 +33,7 @@ import {
 const RETRY_AFTER_GIVE_UP_MS = 60_000;
 
 type RemoteClientOptions = NonNullable<ConstructorParameters<typeof RemotePaneClient>[1]>;
-export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume' | 'openPortStream' | 'measureLatency'>;
+export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume' | 'openPortStream' | 'measureLatency' | 'lastHeardAt'>;
 export type CreateMachineClient = (profile: RemotePaneConnectionProfile, options: RemoteClientOptions) => MachineClient;
 
 export interface MachineConnectionsDeps {
@@ -209,6 +209,18 @@ export class MachineConnections {
       .finally(() => this.latencies.delete(machineId));
     this.latencies.set(machineId, measured);
     return measured;
+  }
+
+  /**
+   * The route a saved machine's connection is on, when the machine is online and sent an event or
+   * heartbeat in the last `ms`; null otherwise. A switch to it can skip the connection checklist (T-128).
+   */
+  answeredWithin(machineId: string, ms: number): { routeId: string | null } | null {
+    const machine = this.machines.get(machineId);
+    if (machine?.state.status !== 'online') return null;
+    const heard = machine.client.lastHeardAt();
+    if (heard === null || Date.now() - heard > ms) return null;
+    return { routeId: machine.state.routeId ?? null };
   }
 
   /** A saved machine's current state, or undefined for an unknown id. */
