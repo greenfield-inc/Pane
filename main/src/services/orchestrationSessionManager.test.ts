@@ -2220,6 +2220,9 @@ describe('OrchestrationSessionManager', () => {
     await seedPanel(worker);
     await fixture.manager.associate({ sessionId: created.session.id }, { paneId: pane.id, panelIds: [worker.id] });
     const repliedAt = async () => (await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentRepliedAt;
+    // Every turn here ends with text the person can read; the probe's own tests are in sessionReply.test.ts.
+    const probe = vi.fn(async () => true);
+    fixture.manager.setReplyProbe(probe);
 
     // A worker finishing, its report, and a Pane line on the Session are not the Session's agent talking.
     await fixture.manager.notifyLiveActivity(worker.id, 'working');
@@ -2237,12 +2240,36 @@ describe('OrchestrationSessionManager', () => {
     await fixture.manager.notifyLiveActivity(created.panel.id, 'idle');
     expect(await repliedAt()).toBe('2026-11-26T10:05:00.000Z');
     expect(changed).toContainEqual(expect.objectContaining({ sessionId: created.session.id }));
+    // Asked about the Session's own tab only, from when its turn began.
+    expect(probe.mock.calls).toEqual([[created.panel.id, Date.parse('2026-11-26T10:00:00.000Z')]]);
 
     // An idle that follows idle (a resize, a reconnect) is not another message.
     vi.setSystemTime(new Date('2026-11-26T10:09:00.000Z'));
     await fixture.manager.notifyLiveActivity(created.panel.id, 'blocked');
     await fixture.manager.notifyLiveActivity(created.panel.id, 'idle');
     expect(await repliedAt()).toBe('2026-11-26T10:05:00.000Z');
+  });
+
+  it('does not stamp a turn that ended without a message the person can read', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-26T11:00:00.000Z') });
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Quiet turns' });
+    const repliedAt = async () => (await fixture.manager.list()).sessions.find(session => session.id === created.session.id)?.agentRepliedAt;
+    let visibleText = false;
+    fixture.manager.setReplyProbe(async () => visibleText);
+
+    // A watcher wake answered with tool calls only.
+    await fixture.manager.notifyLiveActivity(created.panel.id, 'working');
+    await fixture.manager.notifyLiveActivity(created.panel.id, 'idle');
+    expect(await repliedAt()).toBeUndefined();
+
+    // The next turn, started by a [From Pane …] line, ends with a reply.
+    visibleText = true;
+    vi.setSystemTime(new Date('2026-11-26T11:02:00.000Z'));
+    await fixture.manager.notifyLiveActivity(created.panel.id, 'working');
+    vi.setSystemTime(new Date('2026-11-26T11:03:00.000Z'));
+    await fixture.manager.notifyLiveActivity(created.panel.id, 'idle');
+    expect(await repliedAt()).toBe('2026-11-26T11:03:00.000Z');
   });
 
   it('tells sidebars when a Session was viewed, so its unread mark clears everywhere', async () => {

@@ -6,7 +6,7 @@ import { claudeProjectDirName, parseClaudeLine } from './claude';
 import { CLAUDE_API_ENOTFOUND_TRANSCRIPT_LINE } from '../agentStatus/__fixtures__/claudeApiErrorScreens';
 import { agentTranscripts, turnTextMatches, type TranscriptLocator } from './index';
 
-const { findUserTurnSince, lastAssistantMessage } = agentTranscripts;
+const { assistantTextSince, findUserTurnSince, lastAssistantMessage } = agentTranscripts;
 import { readTranscriptTail } from './tail';
 import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
 
@@ -260,6 +260,42 @@ describe('lastAssistantMessage', () => {
 
     await expect(lastAssistantMessage(codexLocator())).resolves.toBe('QUEUED');
     await expect(lastAssistantMessage(claudeLocator())).resolves.toBeUndefined();
+  });
+});
+
+describe('assistantTextSince', () => {
+  const turnStart = Date.parse('2026-09-27T18:40:00.000Z');
+
+  it('finds a reply the agent wrote in a turn a Pane line started', async () => {
+    writeClaude('11111111-2222-4333-8444-555555555504', [
+      claude.assistant('msg_0', { type: 'text', text: 'Earlier turn' }, '2026-09-27T18:30:00.000Z'),
+      claude.user('[From Pane, Workers] T-12 reported ready', '2026-09-27T18:40:00.100Z', { origin: { kind: 'pane' } }),
+      claude.assistant('msg_1', { type: 'tool_use', name: 'Bash', input: {} }, '2026-09-27T18:40:01.000Z'),
+      claude.assistant('msg_2', { type: 'text', text: 'T-12 is ready: PR 88 is green.' }, '2026-09-27T18:40:05.000Z'),
+    ]);
+
+    await expect(assistantTextSince(claudeLocator(), turnStart)).resolves.toBe(true);
+  });
+
+  it('finds nothing in a turn of tool calls only, even with text from an earlier turn', async () => {
+    writeClaude('11111111-2222-4333-8444-555555555504', [
+      claude.assistant('msg_0', { type: 'text', text: 'Earlier turn' }, '2026-09-27T18:30:00.000Z'),
+      claude.assistant('msg_1', { type: 'tool_use', name: 'Bash', input: {} }, '2026-09-27T18:40:01.000Z'),
+      claude.assistant('msg_1', { type: 'thinking', thinking: 'nothing to say' }, '2026-09-27T18:40:02.000Z'),
+      claude.assistant('msg_2', { type: 'text', text: '   ' }, '2026-09-27T18:40:03.000Z'),
+    ]);
+
+    await expect(assistantTextSince(claudeLocator(), turnStart)).resolves.toBe(false);
+  });
+
+  it('reads Codex replies too, and answers undefined without a transcript', async () => {
+    writeCodex('01a0e428', [
+      codex.meta(worktree, '2026-09-27T18:37:14.814Z'),
+      codex.assistant('Watching the workers.', '2026-09-27T18:40:02.000Z'),
+    ]);
+
+    await expect(assistantTextSince(codexLocator(), turnStart)).resolves.toBe(true);
+    await expect(assistantTextSince(claudeLocator(), turnStart)).resolves.toBeUndefined();
   });
 });
 
