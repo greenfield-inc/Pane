@@ -18,8 +18,8 @@ describe('toPosition', () => {
 });
 
 describe('namesByLabel', () => {
-  it('is true for a Switch Pro Controller on Android (057e:2009)', () => {
-    expect(namesByLabel('android', { id: '1', vendorId: 0x057e, productId: 0x2009 })).toBe(true);
+  it('is false for a Switch Pro Controller on Android (057e:2009), whose key layout is positional', () => {
+    expect(namesByLabel('android', { id: '1', vendorId: 0x057e, productId: 0x2009 })).toBe(false);
   });
 
   it('is false for an Xbox pad on Android (045e:0b13)', () => {

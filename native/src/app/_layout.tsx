@@ -10,6 +10,7 @@ import { DaemonProvider, queryClient } from '@/daemon';
 import { ReopenLastScreen } from '@/features/app/ReopenLastScreen';
 import { CheatSheet } from '@/features/controller/CheatSheet';
 import { ControllerInput } from '@/features/controller/ControllerInput';
+import { FocusRing, hideRingOnTouch } from '@/features/controller/FocusRing';
 import { WideFrame } from '@/features/layout/WideFrame';
 import { useShowsBack } from '@/features/layout/wideLayout';
 import { RelayComputerSync } from '@/features/hosts/RelayComputerSync';
@@ -49,7 +50,7 @@ export default function RootLayout() {
   };
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1 }} onStartShouldSetResponderCapture={hideRingOnTouch}>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider value={navigationTheme}>
           <StatusBar style="auto" />
@@ -62,8 +63,6 @@ export default function RootLayout() {
                 <TerminalPrewarm />
                 <NotifyAlertCleanup />
                 <RelayComputerSync />
-                <ControllerInput />
-                <CheatSheet />
               </DaemonProvider>
               <ReopenLastScreen hostId={activeHost.id} />
               <SharedCredentialSync />
@@ -72,6 +71,9 @@ export default function RootLayout() {
           ) : (
             <RootStack signedIn={false} />
           )}
+          <FocusRing scope="" />
+          <ControllerInput />
+          <CheatSheet />
           <NotificationTapRouter />
         </ThemeProvider>
       </QueryClientProvider>

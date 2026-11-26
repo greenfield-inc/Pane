@@ -1,4 +1,4 @@
-import { Linking, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { cheatSheet } from '@shared/controller/bindings';
 import { BUTTON_LETTERS_OVERRIDES } from '@shared/controller/profiles';
@@ -22,8 +22,7 @@ export function CheatSheet() {
   if (!shown) return null;
   const sheet = cheatSheet(family);
   const close = () => useControllerState.setState({ cheatSheet: null });
-  return (
-    <Modal transparent animationType="fade" visible onRequestClose={close} supportedOrientations={['portrait', 'landscape']}>
+  const body = (
       <Pressable testID="controller-cheat-sheet" accessibilityLabel="Close controller buttons" style={[styles.backdrop, { backgroundColor: withAlpha(theme.colors.background, 0.72) }]} onPress={close}>
         <View style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
           <Text variant="headline">Controller</Text>
@@ -48,6 +47,12 @@ export function CheatSheet() {
           </Text>
         </View>
       </Pressable>
+  );
+  // An Android Modal is a window of its own, which the controller's keys never reach: there it draws over the app instead.
+  if (Platform.OS === 'android') return <View style={StyleSheet.absoluteFill}>{body}</View>;
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={close} supportedOrientations={['portrait', 'landscape']}>
+      {body}
     </Modal>
   );
 }

@@ -84,3 +84,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
 });
+
+/** A touch hides the controller's focus ring until the next controller press; the touch itself goes on as usual. */
+export function hideRingOnTouch(): boolean {
+  if (useControllerState.getState().ringShown) useControllerState.setState({ ringShown: false });
+  return false;
+}

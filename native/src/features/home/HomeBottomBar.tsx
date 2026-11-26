@@ -9,6 +9,10 @@ import { InColumn, screenJustClosed, useWideLayout } from '@/features/layout/wid
 import { IconButton } from '@/features/panes/PaneKit';
 import { useTheme } from '@/theme';
 import { Icon } from '@/ui';
+import { ListeningBar } from '@/features/controller/ListeningBar';
+import { useControllerActions } from '@/features/controller/useControllerActions';
+import { useVoiceDictation } from '@/features/voice/useVoiceDictation';
+import { VoiceAudio } from '@/features/voice/VoiceAudio';
 
 const CONTROL = 44;
 const PADDING_TOP = 10;
@@ -48,6 +52,7 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
       input.current?.focus();
     }
   }, [inColumn, searchRequested]);
+<<<<<<< HEAD
   const onFocus = () => {
     const wanted = asked.current;
     asked.current = false;
@@ -55,6 +60,18 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
     if (inColumn && !wanted && screenJustClosed()) return input.current?.blur();
     onFocusChange(true);
   };
+||||||| parent of d6a1f7924 (Controller layer for the whole app, cheat sheet overlay on Android, search dictation, positional Android Nintendo pads)
+=======
+  // While searching, a controller's R2 dictates the query.
+  const voice = useVoiceDictation(words => onQuery(query.trim() ? `${query.trimEnd()} ${words}` : words));
+  useControllerActions('search', {
+    'dictate-hold': event => {
+      if (!voice.available) return false;
+      if (event.phase === 'start') voice.hold();
+      else voice.release();
+    },
+  }, typing);
+>>>>>>> d6a1f7924 (Controller layer for the whole app, cheat sheet overlay on Android, search dictation, positional Android Nintendo pads)
   const onFocusChange = (focused: boolean) => {
     setTyping(focused);
     if (inColumn) setSearching(focused);
@@ -75,6 +92,8 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
         </Defs>
         <Rect width="100%" height="100%" fill="url(#home-bar-fade)" />
       </Svg>
+      {voice.audio ? <VoiceAudio {...voice.audio} /> : null}
+      {voice.phase === 'idle' ? null : <View style={styles.listening}><ListeningBar phase={voice.phase} preview={voice.preview} /></View>}
       <View style={[styles.search, { backgroundColor: theme.colors.surfaceRaised }]}>
         <Icon ios="magnifyingglass" android="search" size={16} />
         <TextInput
@@ -132,6 +151,7 @@ function useReturnsToForeground(): number {
 }
 
 const styles = StyleSheet.create({
+  listening: { position: 'absolute', left: 16, right: 16, bottom: '100%' },
   bar: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: PADDING_TOP },
   search: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, height: CONTROL, borderRadius: CONTROL / 2, paddingLeft: 16, paddingRight: 7 },
   input: { flex: 1, paddingVertical: 0 },

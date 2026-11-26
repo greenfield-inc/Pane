@@ -56,7 +56,10 @@ export function ControllerInput() {
       return;
     }
     const layout = useWideLayout.getState();
-    if (action === 'controller-activate') controllerFocus.activate();
+    // A with nothing focused puts the ring on the screen's first control.
+    if (action === 'controller-activate') {
+      if (!controllerFocus.activate()) controllerFocus.move('down');
+    }
     else if (action === 'controller-back') {
       if (router.canGoBack()) router.back();
       // Wide, the first screen beside Home goes nowhere: B moves the ring into Home's column instead.
@@ -117,7 +120,6 @@ export function ControllerInput() {
         state.markSheetSeen();
         useControllerState.setState({ cheatSheet: 'open' });
       }
-      if (!controllerFocus.focused()) controllerFocus.move('down');
     };
 
     const subscription = pads.listen({
@@ -137,6 +139,11 @@ export function ControllerInput() {
       },
       onButton(event) {
         use(event.deviceId);
+        // The cheat sheet that opened on its own, or from Settings, closes on the next press, which does nothing else.
+        if (event.pressed && useControllerState.getState().cheatSheet === 'open') {
+          useControllerState.setState({ cheatSheet: null });
+          return;
+        }
         const position = toPosition(event.button, namesByLabel(platform, devices.get(event.deviceId)));
         if (event.pressed) held.add(position);
         else held.delete(position);
