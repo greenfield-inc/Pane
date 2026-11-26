@@ -99,7 +99,7 @@ export const REPLY_RULE_PHRASES = ['runpane reply M-12 "…"', 'never only in yo
  * orchestrator mode, the pane-orchestrator and pane-orchestration skills; runpane agent-context has the same
  * words in its workspace rules).
  */
-export const AGENT_REPLY_RULE = 'A message from another agent (another Session\'s orchestrator, a worker, Autopilot) ends with a reply line, `Reply with runpane reply M-12 "…"`: answer it with `runpane reply M-12 "…"`, never only in your own chat, which the sender never sees. Its reply reaches you as `reply: M-12 → "…"`, typed into your tab even when `--await-reply` or `runpane messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13).';
+export const AGENT_REPLY_RULE = 'A message from another agent (another Session\'s orchestrator, a worker, Autopilot) ends with a reply line, `Reply with runpane reply M-12 "…"`: answer it with `runpane reply M-12 "…"`, never only in your own chat, which the sender never sees. Its reply is typed into your current tab (the Session\'s current orchestrator tab after a handoff) as `reply: M-12 → "…"`, even when `--await-reply` or `runpane messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13).';
 
 /** The app's channel for a tab's messages, and the event that says they changed. */
 export const AGENT_MESSAGES_FOR_PANEL_CHANNEL = 'agent-messages:for-panel';

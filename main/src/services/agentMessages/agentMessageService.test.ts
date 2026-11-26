@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3-multiple-ciphers';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentMessageService, type AgentMessageHost, type MessagePanelInfo, type MessageTypeResult } from './agentMessageService';
 import { AgentMessageStore } from './agentMessageStore';
 
@@ -22,8 +22,11 @@ class FakeHost implements AgentMessageHost {
   panel(panelId: string): MessagePanelInfo | null { return this.panels.get(panelId) ?? null; }
   orchestratorPanel(sessionId: string): string | null { return this.orchestrators.get(sessionId) ?? null; }
   isPanelDown(panelId: string): Promise<boolean> { return Promise.resolve(this.down.has(panelId)); }
+  /** Runs as a resume starts (a Session handoff while the tab restarts, say). */
+  onResume: (() => void) | undefined;
   resumePanel(panelId: string): Promise<boolean> {
     this.resumes.push(panelId);
+    this.onResume?.();
     if (this.resumeError) return Promise.reject(this.resumeError);
     this.down.delete(panelId);
     return Promise.resolve(true);
@@ -366,7 +369,7 @@ describe('AgentMessageService', () => {
       host.typingGate = new Promise<void>(resolve => { open = resolve; });
       host.goneOnType.add('a');
       const replying = service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
-      await Promise.resolve();
+      await vi.waitFor(() => expect(host.attempts).toBe(1));
       handOff();
       host.panels.delete('a');
       host.typingGate = undefined;
@@ -375,6 +378,42 @@ describe('AgentMessageService', () => {
       await service.flush();
       expect(replyLines().map(entry => entry.panelId)).toEqual(['a2']);
       expect(service.show(1).replies[0]).toMatchObject({ state: 'delivered' });
+    });
+    // Review 9: a reroute restarts the ordered scan, so later replies never jump ahead of the one that moved.
+    it('keeps two queued replies in order in the new orchestrator when the Session switches during the first one\'s readiness check', async () => {
+      host.orchestrators.set('s1', 'a');
+      host.add('c', 'Worker C');
+      service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+      host.busy.add('a');
+      await service.reply({ to: 1, body: 'A1', callerPanelId: 'b' });
+      await service.reply({ to: 1, body: 'A2', callerPanelId: 'c' });
+      host.busy.delete('a');
+      let open: () => void = () => undefined;
+      host.draftGate = new Promise<void>(resolve => { open = resolve; });
+      const flushing = service.flush();
+      await Promise.resolve();
+      handOff();
+      host.draftGate = undefined;
+      open();
+      await flushing;
+      await service.flush();
+      expect(replyLines().map(entry => [entry.panelId, entry.text.match(/"(A\d)"/u)?.[1]])).toEqual([['a2', 'A1'], ['a2', 'A2']]);
+    });
+
+    it("doesn't count a failed resume against a reply whose route moved while the old tab restarted", async () => {
+      host.orchestrators.set('s1', 'a');
+      service.beginMessage({ callerPanelId: 'a', receiverPanelId: 'b', body: 'Q' });
+      host.down.add('a');
+      host.resumeError = new Error('no agent');
+      await service.reply({ to: 1, body: 'A', callerPanelId: 'b' });
+      await service.flush();
+      // Two tries failed for A; the third starts, and the Session moves to a new orchestrator while it runs.
+      host.onResume = handOff;
+      await service.flush();
+      host.onResume = undefined;
+      await service.flush();
+      expect(service.show(1).replies[0]).toMatchObject({ state: 'delivered', undeliveredReason: null });
+      expect(replyLines().map(entry => entry.panelId)).toEqual(['a2']);
     });
   });
 

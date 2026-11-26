@@ -236,9 +236,8 @@ export class AgentMessageService extends EventEmitter {
     }
   }
 
-  /** One pass over the outbox, one attempt per tab. True when an attempt found its reply's route had moved. */
+  /** One pass over the outbox, oldest first, one attempt per tab. Stops, returning true, when a reply's route moved mid-attempt. */
   private async flushPass(): Promise<boolean> {
-    let rerouted = false;
     const tried = new Set<string>();
     for (const number of [...this.outbox]) {
       const reply = this.store.get(number);
@@ -254,12 +253,13 @@ export class AgentMessageService extends EventEmitter {
       if (tried.has(target)) continue;
       tried.add(target);
       try {
-        if (await this.deliver(reply, target) === 'rerouted') rerouted = true;
+        // A reply whose route moved goes first in its new tab: start the ordered scan again before any later reply is typed.
+        if (await this.deliver(reply, target) === 'rerouted') return true;
       } catch (error) {
         this.host.log(`[Messages] delivery of ${messageRef(number)} to ${target} failed`, error instanceof Error ? error : String(error));
       }
     }
-    return rerouted;
+    return false;
   }
 
   /**
@@ -269,6 +269,9 @@ export class AgentMessageService extends EventEmitter {
    */
   private async deliver(reply: StoredMessage, panelId: string): Promise<'rerouted' | undefined> {
     if (await this.host.isPanelDown(panelId)) {
+      // A tab the Session left while Pane checked it isn't resumed: the reply goes to the new route.
+      const before = this.store.get(reply.number);
+      if (before?.state === 'queued' && this.targetOf(before) !== panelId) return 'rerouted';
       // Resume before delivery: the sender's tab is down after a restart. A resume that throws failed too.
       let why = 'it would not restart';
       let resumed = false;
@@ -277,8 +280,14 @@ export class AgentMessageService extends EventEmitter {
       } catch (error) {
         why = `it would not restart: ${error instanceof Error ? error.message : String(error)}`;
       }
-      if (resumed) this.resumeFailures.delete(reply.number);
-      else this.resumeFailed(reply, why);
+      if (resumed) {
+        this.resumeFailures.delete(reply.number);
+        return undefined;
+      }
+      // The Session moved to another orchestrator tab while this one restarted: that failure is not the reply's.
+      const now = this.store.get(reply.number);
+      if (now?.state === 'queued' && this.targetOf(now) !== panelId) return 'rerouted';
+      this.resumeFailed(reply, why);
       return undefined;
     }
     if (this.host.isMidTurn(panelId) || await this.host.hasUnsentText(panelId)) return undefined;

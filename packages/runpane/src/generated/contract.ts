@@ -4404,7 +4404,7 @@ const CONTRACT_SECTION_12 = {
     },
     {
       "name": "--await-reply",
-      "description": "panels submit only: wait for the receiving agent's `runpane reply` and print it. The reply is typed into your tab as well; act on it once."
+      "description": "panels submit only: wait for the receiving agent's `runpane reply` and print it. The reply is typed into your current tab (the Session's current orchestrator tab after a handoff) as well; act on it once, by its id."
     },
     {
       "name": "--for-person",
@@ -5338,7 +5338,8 @@ const CONTRACT_SECTION_13 = {
       "  --for-person                   The person's own words this agent passes on: sent as the person's, no reply line",
       "  --await-reply                  From an agent's tab: block until the receiver answers with `runpane reply`, then",
       "                                 print the reply (exit 0, or 124 after --timeout). Not with --wait.",
-      "                                 The reply is typed into your tab as well: act on it once.",
+      "                                 The reply is typed into your current tab as well (after a Session",
+      "                                 handoff, the new orchestrator tab): act on it once, by its id.",
       "  --timeout <duration>           With --wait or --await-reply: give up after this long (30m, 2h)",
       "  --pane-dir <path>              Connect to a specific Pane data directory",
       "  --json                         Print machine-readable output",
@@ -7369,7 +7370,7 @@ const CONTRACT_SECTION_13 = {
       "follows a Session's orchestrator to its current tab, even when the sender's --await-reply call also returned it.",
       "",
       "Rules:",
-      "  - A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees. A reply to yours is typed into your tab even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13).",
+      "  - A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees. A reply to yours is typed into your current tab (the Session's current orchestrator tab after a handoff) even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13).",
       "",
       "Options:",
       "  <message>                      The message id from its reply line, such as M-12.",
@@ -7416,7 +7417,7 @@ const CONTRACT_SECTION_13 = {
       "  runpane messages wait <message> [--timeout <duration>] [--json] [--pane-dir <path>]",
       "",
       "Wait for the reply to a message you sent, and print it (exit 0), or exit 124 after --timeout.",
-      "The reply is typed into your tab as well, so act on it once, from whichever reaches you first.",
+      "The reply is typed into your current tab (the Session's current orchestrator tab after a handoff) as well, so act on it once, by its id, from whichever reaches you first.",
       "",
       "Options:",
       "  <message>                      The id `panels submit` returned as messageId, such as M-12.",
@@ -8283,7 +8284,8 @@ const CONTRACT_SECTION_13 = {
       "  --for-person                   The person's own words this agent passes on: sent as the person's, no reply line",
       "  --await-reply                  From an agent's tab: block until the receiver answers with `runpane reply`, then",
       "                                 print the reply (exit 0, or 124 after --timeout). Not with --wait.",
-      "                                 The reply is typed into your tab as well: act on it once.",
+      "                                 The reply is typed into your current tab as well (after a Session",
+      "                                 handoff, the new orchestrator tab): act on it once, by its id.",
       "  --timeout <duration>           With --wait or --await-reply: give up after this long (30m, 2h)",
       "  --pane-dir <path>              Connect to a specific Pane data directory",
       "  --json                         Print machine-readable output",
@@ -10063,7 +10065,7 @@ const CONTRACT_SECTION_13 = {
       "follows a Session's orchestrator to its current tab, even when the sender's --await-reply call also returned it.",
       "",
       "Rules:",
-      "  - A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees. A reply to yours is typed into your tab even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13).",
+      "  - A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees. A reply to yours is typed into your current tab (the Session's current orchestrator tab after a handoff) even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13).",
       "",
       "Options:",
       "  <message>                      The message id from its reply line, such as M-12.",
@@ -10110,7 +10112,7 @@ const CONTRACT_SECTION_13 = {
       "  python -m runpane messages wait <message> [--timeout <duration>] [--json] [--pane-dir <path>]",
       "",
       "Wait for the reply to a message you sent, and print it (exit 0), or exit 124 after --timeout.",
-      "The reply is typed into your tab as well, so act on it once, from whichever reaches you first.",
+      "The reply is typed into your current tab (the Session's current orchestrator tab after a handoff) as well, so act on it once, by its id, from whichever reaches you first.",
       "",
       "Options:",
       "  <message>                      The id `panels submit` returned as messageId, such as M-12.",
@@ -23934,7 +23936,7 @@ const CONTRACT_SECTION_17 = {
     "Pane: one per feature (one worktree, one branch). Before creating one, find the feature's Pane (`runpane panes list --json`, match the branch) and create one only when none exists.",
     "Tab: reviews, review reruns, QA, fixes and follow-ups for a feature go in new tabs in its Pane (`runpane panels create --pane <id>`), never a new Pane or a plain `git worktree`.",
     "Scratch: in Pane, put temporary files, clones, captures, downloads, logs and test instances (an isolated PANE_DIR and HOME for QA) in `$PANE_SCRATCH_DIR`, not /tmp or your tool's own scratchpad. When the feature is done, archive the Pane and Pane cleans it up.",
-    "Messages: a message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply M-12 \"…\"`, never only in your own chat, which the sender never sees. A reply to yours is typed into your tab even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13)."
+    "Messages: a message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply M-12 \"…\"`, never only in your own chat, which the sender never sees. A reply to yours is typed into your current tab (the Session's current orchestrator tab after a handoff) even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13)."
   ],
   "brief": {
     "title": "Pane agent context",
@@ -26506,7 +26508,7 @@ const CONTRACT_SECTION_17 = {
         {
           "name": "--await-reply",
           "required": false,
-          "description": "From an agent's tab: block until the receiving agent answers with `runpane reply`, then print its first reply (`messageWaitResult`; exit 0, or 124 after --timeout). Read-only: the reply is typed into your tab as well, so act on it once. Not with --wait."
+          "description": "From an agent's tab: block until the receiving agent answers with `runpane reply`, then print its first reply (`messageWaitResult`; exit 0, or 124 after --timeout). Read-only: the reply is typed into your current tab (the Session's current orchestrator tab after a handoff) as well, so act on it once, by its id. Not with --wait."
         },
         {
           "name": "--for-person",
@@ -32812,7 +32814,7 @@ const CONTRACT_SECTION_17 = {
         "replyResult"
       ],
       "notes": [
-        "A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees. A reply to yours is typed into your tab even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13)."
+        "A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees. A reply to yours is typed into your current tab (the Session's current orchestrator tab after a handoff) even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13)."
       ]
     },
     "messages list": {
@@ -32858,7 +32860,7 @@ const CONTRACT_SECTION_17 = {
         "messageListResult"
       ],
       "notes": [
-        "A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees. A reply to yours is typed into your tab even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13)."
+        "A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees. A reply to yours is typed into your current tab (the Session's current orchestrator tab after a handoff) even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13)."
       ]
     },
     "messages show": {
@@ -32892,7 +32894,7 @@ const CONTRACT_SECTION_17 = {
         "messageShowResult"
       ],
       "notes": [
-        "A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees. A reply to yours is typed into your tab even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13)."
+        "A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees. A reply to yours is typed into your current tab (the Session's current orchestrator tab after a handoff) even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13)."
       ]
     },
     "messages wait": {
@@ -32932,7 +32934,7 @@ const CONTRACT_SECTION_17 = {
         "messageWaitResult"
       ],
       "notes": [
-        "A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees. A reply to yours is typed into your tab even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13)."
+        "A message from another agent ends with a reply line (`Reply with runpane reply M-12 \"…\"`): answer it with `runpane reply`, never only in your own chat, which the sender never sees. A reply to yours is typed into your current tab (the Session's current orchestrator tab after a handoff) even when `--await-reply` or `messages wait` already returned it, and a Pane crash can type it twice: act on each reply once, by its id (M-13)."
       ]
     }
   },

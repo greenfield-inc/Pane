@@ -341,7 +341,8 @@ it when it is down and follows a Session's orchestrator to its current tab.
 Your own sends carry `messageId` in their result. To wait for the answer, add
 `--await-reply --timeout 30m` to the submit, or run
 `runpane messages wait M-12 --timeout 30m`: it prints the first reply. Pane
-still types that reply into your tab, so act on each reply once, from the
+still types that reply into your current tab (after a Session handoff, the
+Session's current orchestrator tab), so act on each reply once, by its id, from the
 call's result or the line, whichever comes first. `runpane messages list` and
 `messages show M-12` say what was answered. Text the person sends (Pane's UI, a
 shell tab, `--source user`) gets no reply line.
