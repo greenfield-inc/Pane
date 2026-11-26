@@ -1,10 +1,34 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { ChevronRight, FileText, Folder, LayoutTemplate } from 'lucide-react';
-import type { ProfileSummary, ProfileTreeNode } from '../../../../shared/types/profileEditor';
+import { AlertTriangle, Asterisk, ChevronRight, FileText, Folder, LayoutTemplate, Repeat } from 'lucide-react';
+import { agentLabel } from '../../../../shared/agents';
+import type { ProfileSubagentNode, ProfileSummary, ProfileTreeNode } from '../../../../shared/types/profileEditor';
 import { coverPlace, fileKey, isCoverPlace, useProfilesStore } from '../../stores/profilesStore';
 import { cn } from '../../utils/cn';
 import { ProfileAvatar } from './ProfileAvatar';
-import { ancestorsOf, visibleRows } from './profilePreview';
+import { LINK_MODE_SHORT, LINK_MODE_TEXT, ancestorsOf, isExpandable, subagentLabel, subagentState, variantsText, visibleRows } from './profilePreview';
+
+/**
+ * A linked agent's mark, always the 16 px box an avatar takes: its avatar, ↻ for a link back to an
+ * agent above it, an asterisk for any agent of a plugin, a warning for a link that doesn't resolve.
+ */
+function SubagentMark({ node }: { node: ProfileSubagentNode }) {
+  const state = subagentState(node);
+  if (state === 'agent') return <ProfileAvatar profileRef={node.profile} agent={node.harness} size={16} />;
+  const Icon = state === 'cycle' ? Repeat : state === 'any' ? Asterisk : AlertTriangle;
+  return (
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center" data-testid={`profiles-tree-mark-${state}`} aria-hidden="true">
+      <Icon className={cn('h-3.5 w-3.5', state === 'error' ? 'text-status-warning' : 'text-text-tertiary')} />
+    </span>
+  );
+}
+
+/** The row's tooltip: what it is, how its parent runs it, its variants, or why it doesn't resolve. */
+function subagentTooltip(node: ProfileSubagentNode): string {
+  const state = subagentState(node);
+  if (state === 'error') return `${node.label}: ${node.error ?? 'Agent Farm couldn’t find it.'}`;
+  const what = state === 'cycle' ? `${node.agent}, already above on this path` : state === 'any' ? `Any agent in ${node.agent}` : node.agent;
+  return [what, LINK_MODE_TEXT[node.mode], variantsText(node.variants, agentLabel)].filter(Boolean).join(' · ');
+}
 
 const ROW = 'mx-1.5 flex h-[27px] w-[calc(100%-0.75rem)] items-center gap-1.5 rounded-md pr-2 text-left text-[13px] focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive';
 
@@ -86,13 +110,13 @@ export function ProfileTree({ plugin, profile, file, selectedId, onSelect }: {
     const focus = (target: HTMLElement | undefined) => { if (target) { event.preventDefault(); target.focus(); target.scrollIntoView({ block: 'nearest' }); } };
     if (event.key === 'ArrowDown') focus(items[Math.min(index + 1, items.length - 1)]);
     else if (event.key === 'ArrowUp') focus(items[Math.max(index - 1, 0)]);
-    else if (event.key === 'ArrowRight' && row && row.node.kind !== 'file') {
+    else if (event.key === 'ArrowRight' && row && isExpandable(row.node)) {
       event.preventDefault();
       if (!open.has(row.node.id)) toggle(row.node.id, true);
       else focus(items[index + 1]);
     } else if (event.key === 'ArrowLeft' && row) {
       event.preventDefault();
-      if (row.node.kind !== 'file' && open.has(row.node.id)) toggle(row.node.id, false);
+      if (isExpandable(row.node) && open.has(row.node.id)) toggle(row.node.id, false);
       else if (row.parent) focus(items.find(item => item.dataset.treeRow === row.parent));
     }
   };
@@ -117,9 +141,10 @@ export function ProfileTree({ plugin, profile, file, selectedId, onSelect }: {
         {rows.map(({ node, depth }) => {
           const isOn = selected(node);
           const pad = 10 + depth * 16;
-          const expandable = node.kind !== 'file';
+          const expandable = isExpandable(node);
           const isOpen = expandable && open.has(node.id);
           const dirty = node.kind === 'file' && drafts[fileKey(plugin, node.path)] !== undefined;
+          const state = node.kind === 'subagent' ? subagentState(node) : undefined;
           return (
             <button
               key={node.id}
@@ -130,7 +155,7 @@ export function ProfileTree({ plugin, profile, file, selectedId, onSelect }: {
               data-tree-row={node.id}
               data-focus-entry={isOn ? '' : undefined}
               data-testid={node.kind === 'file' ? `profiles-file-${node.path}` : `profiles-tree-${node.id}`}
-              title={node.kind === 'file' ? node.path : undefined}
+              title={node.kind === 'file' ? node.path : node.kind === 'subagent' ? subagentTooltip(node) : undefined}
               onClick={() => choose(node)}
               className={cn(ROW, isOn ? 'bg-surface-hover text-text-primary' : 'text-text-primary hover:bg-surface-hover')}
               style={{ paddingLeft: pad }}
@@ -145,10 +170,17 @@ export function ProfileTree({ plugin, profile, file, selectedId, onSelect }: {
                 </span>
               ) : <span className="-ml-1 w-4 shrink-0" aria-hidden="true" />}
               {node.kind === 'folder' && <Folder className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />}
-              {node.kind === 'subagent' && <ProfileAvatar profileRef={node.profile} agent={node.harness} size={16} />}
+              {node.kind === 'subagent' && <SubagentMark node={node} />}
               {node.kind === 'file' && <FileText className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />}
-              <span className={cn('truncate', node.kind !== 'file' && 'font-medium')}>{node.label}</span>
+              <span className={cn('truncate', node.kind !== 'file' && 'font-medium', state === 'error' && 'text-status-warning', (state === 'cycle' || state === 'any') && 'font-normal text-text-secondary')}>
+                {node.kind === 'subagent' ? subagentLabel(node) : node.label}
+              </span>
               {node.kind === 'file' && node.note && <span className="shrink-0 text-[11.5px] text-text-secondary">{node.note}</span>}
+              {node.kind === 'subagent' && (
+                <span className={cn('shrink-0 text-[11.5px]', state === 'error' ? 'text-status-warning' : 'text-text-secondary')} data-testid={`profiles-tree-note-${node.id}`}>
+                  {state === 'cycle' ? 'already above' : state === 'error' ? 'not found' : LINK_MODE_SHORT[node.mode]}
+                </span>
+              )}
               {dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-status-warning" title="Unsaved changes" aria-label="unsaved" data-testid="profiles-file-dirty" />}
             </button>
           );

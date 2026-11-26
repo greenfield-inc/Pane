@@ -1,4 +1,4 @@
-import type { ProfileTreeNode } from '../../../../shared/types/profileEditor';
+import type { ProfileLinkMode, ProfileSubagentNode, ProfileTreeNode } from '../../../../shared/types/profileEditor';
 
 export interface FrontMatterSplit {
   /** The YAML between the leading `---` lines; null when the file has none. */
@@ -51,6 +51,13 @@ export function sandboxedHtml(html: string, baseCss = ''): string {
   return `${start}${html}`;
 }
 
+/** The agents a profile links to directly: those in its Subagents folder, and any at the top of its tree. */
+export function directSubagents(tree: readonly ProfileTreeNode[]): ProfileSubagentNode[] {
+  const folder = tree.find(node => node.kind === 'folder' && node.label === 'Subagents');
+  const inFolder = folder?.kind === 'folder' ? folder.children : [];
+  return [...inFolder, ...tree].filter((node): node is ProfileSubagentNode => node.kind === 'subagent');
+}
+
 /** What a generated cover lists: the profile's skills, reference files and subagents (top level only). */
 export function coverFacts(tree: readonly ProfileTreeNode[]): CoverFacts {
   const folder = (label: string) => tree.find((node): node is Extract<ProfileTreeNode, { kind: 'folder' }> => node.kind === 'folder' && node.label === label);
@@ -58,8 +65,49 @@ export function coverFacts(tree: readonly ProfileTreeNode[]): CoverFacts {
   return {
     skills: (folder('Skills')?.children ?? []).map(node => node.label),
     references: files(folder('References')?.children ?? []),
-    subagents: (folder('Subagents')?.children ?? []).flatMap(node => (node.kind === 'subagent' ? [{ id: node.id, label: node.label }] : [])),
+    subagents: directSubagents(tree).map(node => ({ id: node.id, label: subagentLabel(node) })),
   };
+}
+
+/** What a linked agent is: an agent, a link back to one above it, any agent of a plugin, or a link that doesn't resolve. */
+export type SubagentState = 'agent' | 'cycle' | 'any' | 'error';
+
+export function subagentState(node: ProfileSubagentNode): SubagentState {
+  if (node.error) return 'error';
+  if (node.any) return 'any';
+  if (node.cycle) return 'cycle';
+  return 'agent';
+}
+
+/** A linked agent's name in the tree and on covers; an `any` link reads "any agent in <plugin>". */
+export function subagentLabel(node: ProfileSubagentNode): string {
+  return node.any ? `any agent in ${node.agent}` : node.label;
+}
+
+/** How its parent runs it (Agent Farm's link modes), as a sentence for the cover and the row's tooltip. */
+export const LINK_MODE_TEXT = {
+  native: 'Runs inside its parent',
+  process: 'Runs as its own process',
+  launch: 'Runs as its own launch, in a tab or headless',
+} satisfies Record<ProfileLinkMode, string>;
+
+/** The same, short, for the tree row. */
+export const LINK_MODE_SHORT = {
+  native: 'inside parent',
+  process: 'own process',
+  launch: 'own launch',
+} satisfies Record<ProfileLinkMode, string>;
+
+/** "Claude or Codex" for an agent with both variants; undefined for one with none. */
+export function variantsText(variants: readonly string[] | undefined, label: (agent: string) => string): string | undefined {
+  return variants?.length ? variants.map(label).join(' or ') : undefined;
+}
+
+/** Whether a tree row opens and closes: folders, and linked agents with rows under them (never a cycle). */
+export function isExpandable(node: ProfileTreeNode): boolean {
+  if (node.kind === 'file') return false;
+  if (node.kind === 'subagent') return !node.cycle && node.children.length > 0;
+  return true;
 }
 
 export function findNode(tree: readonly ProfileTreeNode[], id: string): ProfileTreeNode | undefined {
@@ -85,7 +133,7 @@ export function visibleRows(tree: readonly ProfileTreeNode[], open: ReadonlySet<
   return tree.flatMap(node => {
     const row: TreeRow = { node, depth };
     if (parent) row.parent = parent;
-    return [row, ...(node.kind !== 'file' && open.has(node.id) ? visibleRows(node.children, open, depth + 1, node.id) : [])];
+    return [row, ...(isExpandable(node) && node.kind !== 'file' && open.has(node.id) ? visibleRows(node.children, open, depth + 1, node.id) : [])];
   });
 }
 

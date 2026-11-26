@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { profileAvatar, profileDisplayName } from './profileAvatar';
+import { profileEntryName } from '../../../shared/agentProfiles';
 
 describe('profileAvatar', () => {
   it('shows a plain Claude or Codex Session, and one from before profiles, as its agent logo', () => {
@@ -45,5 +46,14 @@ describe('profileDisplayName', () => {
     expect(profileDisplayName('writer/writer')).toBe('Writer');
     expect(profileDisplayName('pane/claude')).toBe('Claude');
     expect(profileDisplayName('greenfield/orchestrator:codex')).toBe('Greenfield orchestrator (codex)');
+  });
+});
+
+describe('profileEntryName', () => {
+  it('names a listed profile by Agent Farm\'s title, else by its ref; a plain one stays its agent', () => {
+    expect(profileEntryName({ ref: 'greenfield/orchestrator', title: 'Orchestrator' })).toBe('Orchestrator');
+    expect(profileEntryName({ ref: 'greenfield/orchestrator', title: ' ' })).toBe('Greenfield orchestrator');
+    expect(profileEntryName({ ref: 'greenfield/seo' })).toBe('Greenfield seo');
+    expect(profileEntryName({ ref: 'pane/claude', title: 'Plain Claude' })).toBe('Claude');
   });
 });

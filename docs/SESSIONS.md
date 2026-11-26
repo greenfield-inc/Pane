@@ -65,10 +65,9 @@ With Profiles on, **New**, the `+` beside Sessions and Search's **New Session**
 open **Create New** instead of the dialogs below. It asks, in order:
 
 1. **To** (required): one type-ahead of Claude and Codex on their own, this
-   machine's listed Agent Farm profiles, then Other agents (Cursor, OpenCode, Pi,
-   which start directly). Type to filter, **↑**/**↓** to move, **Return** picks
-   and moves on. A profile Agent Farm marks unlisted (such as a subagent's own)
-   isn't offered; an Agent Farm too old to say lists every profile. Profiles
+   machine's Agent Farm profiles (`profiles list --json`, by their titles), then
+   Other agents (Cursor, OpenCode, Pi, which start directly). Type to filter,
+   **↑**/**↓** to move, **Return** picks and moves on. Profiles
    pinned in the Profiles tab (`pinnedProfiles` in config.json) come first. It
    starts on the last choice made here.
 2. **Name** (optional): left empty, the Session is named from its first message.
@@ -90,9 +89,9 @@ A project's `+` still opens New Pane for that project.
 Session rows show the profile's avatar at the row's left padding (a profile's
 initials on a tint, `--color-avatar-1` to `--color-avatar-8`; Claude's or Codex's
 logo for the agent on its own and for older Sessions; another agent's initial).
-A photo set in the Profiles tab replaces the initials (yours, stored on this
-computer in `<PANE_DIR>/agent-farm/avatars/`, overrides a plugin's own
-`avatar.png`). A Session with Panes shows its expand chevron in the avatar's place on hover or
+A profile's SVG photo replaces the initials: yours, set in the Profiles tab
+(kept by Agent Farm in `<PANE_DIR>/agent-farm/profile-overrides/`), else the
+one its plugin ships. A Session with Panes shows its expand chevron in the avatar's place on hover or
 keyboard focus. While it works, a grey spinner sits on the right, before the
 approvals count and, in All machines, the machine mark; an idle row shows none.
 With Profiles off, New, the `+` and the rows are as described below.

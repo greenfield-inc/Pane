@@ -155,7 +155,7 @@ interface ElectronAPI {
     newFile: (plugin: string, profile: string, kind: import('../../../shared/types/profileEditor').ProfileNewFileKind, name: string) => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfileSaveResult>>;
     restore: (plugin: string) => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfileSaveResult>>;
     photos: () => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfilePhotos>>;
-    setPhoto: (ref: string, base64: string) => Promise<IPCResponse<void>>;
+    setPhoto: (ref: string, svg: string) => Promise<IPCResponse<void>>;
     removePhoto: (ref: string) => Promise<IPCResponse<void>>;
     setDetails: (plugin: string, profile: string, details: import('../../../shared/types/profileEditor').ProfileDetails) => Promise<IPCResponse<import('../../../shared/types/profileEditor').ProfileSaveResult>>;
     /** YAML as data for a preview, or why it doesn't parse. */

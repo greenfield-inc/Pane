@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Bot, ChevronDown, ChevronRight, FileText, ImageIcon, Pencil, Pin, Plus, RefreshCw, RotateCcw, Sparkles, X } from 'lucide-react';
 import { DEFAULT_AGENT_ID, agentLabel, configuredAgent } from '../../../../shared/agents';
-import { isTemporarilyShownProfile, plainProfileAgents } from '../../../../shared/agentProfiles';
-import { PROFILE_NAME_PATTERN, type ProfileNewFileKind, type ProfilePlugin, type ProfileSummary } from '../../../../shared/types/profileEditor';
+import { plainProfileAgents } from '../../../../shared/agentProfiles';
+import { MAX_PROFILE_PHOTO_BYTES, PROFILE_NAME_PATTERN, type ProfileNewFileKind, type ProfilePlugin, type ProfileSummary } from '../../../../shared/types/profileEditor';
 import { isProfilesEnabled, useConfigStore } from '../../stores/configStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { profilePhotoSource, useProfilesStore } from '../../stores/profilesStore';
@@ -20,8 +20,9 @@ import { ProfileAvatar } from './ProfileAvatar';
 import { ProfileFilePane } from './ProfileFilePane';
 import { ProfileTree } from './ProfileTree';
 import { isPinned, pinnedFirst, togglePinnedProfile, usePinnedProfiles } from './profilePins';
-import { PHOTO_SAMPLES, readFileAsDataUrl, squarePhoto } from './profilePhotos';
+import { PHOTO_ACCEPT, PHOTO_SAMPLES, readSvgPhoto } from './profilePhotos';
 import { leaveProfiles } from './profilesNavigation';
+import { directSubagents } from './profilePreview';
 import { syncFooterText, syncNowText, syncStateText } from './profileSyncText';
 import { MachineMark } from '../machines/MachineMark';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
@@ -59,10 +60,14 @@ function titleOf(profile: ProfileSummary): string {
   return profile.title ?? profileDisplayName(profile.ref);
 }
 
-/** How many subagents a profile calls directly. */
+/** The agents a profile runs on: "Claude or Codex" for one with both variants, else its harness. */
+function runsOn(profile: ProfileSummary): string {
+  return profile.variants?.length ? profile.variants.map(agentLabel).join(' or ') : agentLabel(profile.harness);
+}
+
+/** How many agents a profile links to directly. */
 function subagentCount(profile: ProfileSummary): number {
-  const folder = profile.tree.find(node => node.kind === 'folder' && node.label === 'Subagents');
-  return folder?.kind === 'folder' ? folder.children.length : 0;
+  return directSubagents(profile.tree).length;
 }
 
 /** A short notice at the bottom of the tab, which fades after a few seconds unless hovered. */
@@ -212,7 +217,7 @@ export function ProfilesView() {
 function ProfileRow({ plugin, profile, pinned, sessions, first }: { plugin: ProfilePlugin; profile: ProfileSummary; pinned: boolean; sessions: number; first: boolean }) {
   const open = useProfilesStore(state => state.open);
   const subagents = subagentCount(profile);
-  const meta = [subagents ? `${subagents} subagent${subagents === 1 ? '' : 's'}` : '', sessions ? `${sessions} Session${sessions === 1 ? '' : 's'}` : '', agentLabel(profile.harness)].filter(Boolean).join(' · ');
+  const meta = [subagents ? `${subagents} subagent${subagents === 1 ? '' : 's'}` : '', sessions ? `${sessions} Session${sessions === 1 ? '' : 's'}` : '', runsOn(profile)].filter(Boolean).join(' · ');
   return (
     <div role="listitem" className="group relative flex items-center rounded-lg hover:bg-surface-hover focus-within:bg-surface-hover">
       <button
@@ -241,20 +246,16 @@ function ProfileRow({ plugin, profile, pinned, sessions, first }: { plugin: Prof
 }
 
 /**
- * The list (build-6 feedback items 1 and 2): top-level profiles only, as Agent Farm lists them (a
- * subagent profile shows inside the profile that calls it), with pinned ones first.
+ * The list (build-6 feedback items 1 and 2): every profile Agent Farm lists (T-83: the helpers a
+ * profile starts are agents in its tree, not profiles), with pinned ones first.
  */
 function ProfileList({ plugins }: { plugins: ProfilePlugin[] }) {
   const used = useSessionsByProfile();
   const pins = usePinnedProfiles();
   const listRef = useRef<HTMLDivElement>(null);
   const all = plugins.flatMap(plugin => plugin.profiles.map(profile => ({ plugin, profile })));
-  // TEMPORARY (T-83): only the short list New's To shows too (shared/agentProfiles.ts), until
-  // greenfield marks the rest unlisted. Display only; their trees still show their subagents.
-  const listed = all.filter(item => item.profile.listed && isTemporarilyShownProfile(item.profile.ref));
-  const pinned = pinnedFirst(listed.filter(item => isPinned(pins, item.profile.ref)), pins, item => item.profile.ref);
-  const rest = listed.filter(item => !isPinned(pins, item.profile.ref));
-  const hidden = all.length - listed.length;
+  const pinned = pinnedFirst(all.filter(item => isPinned(pins, item.profile.ref)), pins, item => item.profile.ref);
+  const rest = all.filter(item => !isPinned(pins, item.profile.ref));
   // Keys belong to the list once it is open: the first profile takes focus.
   useEffect(() => { listRef.current?.querySelector<HTMLElement>('[data-profiles-item]')?.focus({ preventScroll: true }); }, []);
   if (!all.length) {
@@ -276,7 +277,7 @@ function ProfileList({ plugins }: { plugins: ProfilePlugin[] }) {
       )}
       <div role="presentation" className="mb-1 mt-5 flex items-center gap-1.5 px-2 text-[12.5px]" data-testid="profiles-all-heading">
         <span className="font-semibold text-text-primary">{pinned.length ? 'All profiles' : 'Profiles'}</span>
-        <span className="text-text-tertiary">· {rest.length}{hidden ? ' · subagents appear inside the profile that uses them' : ''}</span>
+        <span className="text-text-tertiary">· {rest.length}</span>
       </div>
       {rest.map(row)}
     </div>
@@ -290,7 +291,7 @@ function ProfilesFooter() {
   const telemetry = useConfigStore(state => state.config?.agentFarmTelemetry === true);
   const used = useSessionsByProfile();
   if (!overview) return null;
-  const profiles = overview.plugins.reduce((total, plugin) => total + plugin.profiles.filter(profile => profile.listed && isTemporarilyShownProfile(profile.ref)).length, 0);
+  const profiles = overview.plugins.reduce((total, plugin) => total + plugin.profiles.length, 0);
   const known = new Set(overview.plugins.flatMap(plugin => plugin.profiles.map(profile => profile.ref)));
   const sessions = [...used].filter(([ref]) => known.has(ref)).reduce((total, [, count]) => total + count, 0);
   return (
@@ -337,7 +338,7 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
         <span className="flex min-w-0 flex-col leading-tight">
           <span className="truncate text-[15px] font-semibold" data-testid="profiles-title">{titleOf(profile)}</span>
           <span className="truncate text-[11.5px] text-text-tertiary" data-testid="profiles-subtitle">
-            {profile.ref}{profile.description ? ` · ${profile.description}` : ` · ${agentLabel(profile.harness)}`}{plugin.bundled ? ` · ships with Pane${plugin.edited ? ', edited' : ''}` : ''}
+            {profile.ref}{profile.description ? ` · ${profile.description}` : ` · ${runsOn(profile)}`}{plugin.bundled ? ` · ships with Pane${plugin.edited ? ', edited' : ''}` : ''}
           </span>
         </span>
         <PinButton profile={profile} pinned={isPinned(pins, profile.ref)} />
@@ -386,10 +387,10 @@ function ProfileDetail({ plugin, profile, file, notify }: { plugin: ProfilePlugi
 }
 
 /**
- * Edit details (build-6 feedback item 6): a profile's photo, title and description. The description
- * is the agent's own Agent Farm `description:`, written in its identity file. The title goes in the
- * plugin's pane.yaml and the photo stays on this computer: both TEMPORARY, until Agent Farm's profile
- * format has title and photo fields (T-83), since profile metadata doesn't live in Pane.
+ * Edit details (build-6 feedback item 6, T-83): a profile's photo, title and description, which
+ * Agent Farm owns. Saving goes through `agent-farm profiles set`, kept by Agent Farm on this
+ * computer apart from the plugin, so it survives Pane updates and never marks a plugin Edited. An
+ * empty title or description goes back to the plugin's own; removing your photo shows the plugin's.
  */
 function EditDetailsDialog({ plugin, profile, onClose, notify }: { plugin: ProfilePlugin; profile: ProfileSummary; onClose: () => void; notify: (text: string) => void }) {
   const setProfileDetails = useProfilesStore(state => state.setDetails);
@@ -405,7 +406,8 @@ function EditDetailsDialog({ plugin, profile, onClose, notify }: { plugin: Profi
   const ownPhoto = profilePhotoSource(photos, profile.ref) === 'yours';
 
   const upload = (chosen: File) => {
-    readFileAsDataUrl(chosen).then(squarePhoto).then(base64 => setPhoto(profile.ref, base64))
+    setError(null);
+    readSvgPhoto(chosen).then(svg => setPhoto(profile.ref, svg))
       .catch(cause => setError(cause instanceof Error ? cause.message : String(cause)));
   };
 
@@ -429,14 +431,15 @@ function EditDetailsDialog({ plugin, profile, onClose, notify }: { plugin: Profi
         <h3 className="mb-4 text-lg font-medium text-text-primary">Edit details</h3>
         <div className="mb-4 flex items-center gap-3">
           <ProfileAvatar profileRef={profile.ref} agent={profile.harness} size={56} />
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" data-testid="profiles-details-photo-file"
+          <input ref={fileRef} type="file" accept={PHOTO_ACCEPT} className="hidden" data-testid="profiles-details-photo-file"
             onChange={event => { const chosen = event.target.files?.[0]; event.target.value = ''; if (chosen) upload(chosen); }} />
           <button type="button" className={TODOS_HEADER_BUTTON} data-testid="profiles-details-upload" onClick={() => fileRef.current?.click()}>
-            <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />Upload photo…
+            <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />Upload SVG…
           </button>
           <button type="button" className="rounded px-2 py-1 text-[13px] text-text-secondary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive disabled:opacity-50"
-            data-testid="profiles-details-initials" disabled={!ownPhoto} onClick={() => { removePhoto(profile.ref).catch(cause => setError(cause instanceof Error ? cause.message : String(cause))); }}>
-            Use initials
+            data-testid="profiles-details-initials" disabled={!ownPhoto} title="The plugin’s own photo shows again, or initials when it has none"
+            onClick={() => { removePhoto(profile.ref).catch(cause => setError(cause instanceof Error ? cause.message : String(cause))); }}>
+            Remove my photo
           </button>
         </div>
         <label className="mb-1 block text-[12.5px] font-medium text-text-primary" htmlFor="profiles-details-title">Title</label>
@@ -446,7 +449,7 @@ function EditDetailsDialog({ plugin, profile, onClose, notify }: { plugin: Profi
         <textarea id="profiles-details-description" value={description} onChange={event => setDescription(event.target.value)} rows={3}
           className="mb-2 w-full rounded-md border border-border-primary bg-surface-primary px-2.5 py-1.5 text-[13px] text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive" />
         <p className="mb-4 text-[12px] text-text-secondary">
-          The description is the agent’s own, in {profile.entry}; saving it is checked by Agent Farm{plugin.bundled ? ' and makes this Pane plugin yours (Edited)' : ''}. The title is kept in {plugin.name}/pane.yaml for now, and the photo on this computer.
+          Agent Farm keeps the title, description and photo on this computer, apart from {plugin.name}’s files, so they survive Pane updates. Leave a box empty to use the plugin’s own. A photo is an SVG file of at most {MAX_PROFILE_PHOTO_BYTES / 1024} KiB.
         </p>
         {error && <p role="alert" className="mb-3 text-[12.5px] text-status-error">{error}</p>}
         <div className="flex justify-end gap-3">
@@ -465,9 +468,10 @@ function PhotoMenu({ profile, notify }: { profile: ProfileSummary; notify: (text
   const source = profilePhotoSource(photos, profile.ref);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const apply = async (src: string, done: string) => {
+  /** Sends an SVG's text; Agent Farm checks it, and its reason shows when it refuses. */
+  const apply = async (svg: string | Promise<string>, done: string) => {
     try {
-      await setPhoto(profile.ref, await squarePhoto(src));
+      await setPhoto(profile.ref, await svg);
       notify(done);
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error));
@@ -479,22 +483,18 @@ function PhotoMenu({ profile, notify }: { profile: ProfileSummary; notify: (text
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept={PHOTO_ACCEPT}
         className="hidden"
         data-testid="profile-photo-file"
         onChange={event => {
           const chosen = event.target.files?.[0];
           event.target.value = '';
-          if (chosen) {
-            readFileAsDataUrl(chosen)
-              .then(src => apply(src, `Photo set.${elsewhere()}`))
-              .catch(error => notify(error instanceof Error ? error.message : String(error)));
-          }
+          if (chosen) void apply(readSvgPhoto(chosen), `Photo set.${elsewhere()}`);
         }}
       />
       <Dropdown
         trigger={(
-          <button type="button" className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive" data-testid="profile-photo" title="Change photo" aria-label={`Photo of ${profileDisplayName(profile.ref)}`}>
+          <button type="button" className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive" data-testid="profile-photo" title="Change photo" aria-label={`Photo of ${titleOf(profile)}`}>
             <ProfileAvatar profileRef={profile.ref} agent={profile.harness} size={30} />
           </button>
         )}
@@ -510,14 +510,14 @@ function PhotoMenu({ profile, notify }: { profile: ProfileSummary; notify: (text
           </div>
         )}
         items={[
-          { id: 'choose', label: 'Choose photo…', icon: ImageIcon, onClick: () => fileRef.current?.click() },
+          { id: 'choose', label: 'Choose SVG…', icon: ImageIcon, onClick: () => fileRef.current?.click() },
           {
             id: 'remove',
             label: 'Remove my photo',
             icon: X,
             disabled: source !== 'yours',
             onClick: () => {
-              removePhoto(profile.ref).then(() => notify('Photo removed.'), error => notify(error instanceof Error ? error.message : String(error)));
+              removePhoto(profile.ref).then(() => notify('Photo removed. The plugin’s own photo shows, or initials when it has none.'), error => notify(error instanceof Error ? error.message : String(error)));
             },
           },
         ]}
@@ -530,7 +530,7 @@ function PhotoMenu({ profile, notify }: { profile: ProfileSummary; notify: (text
                 title={sample.label}
                 aria-label={`Use sample: ${sample.label}`}
                 data-testid={`profile-photo-sample-${sample.id}`}
-                onClick={() => { close(); void apply(sample.src, `Photo set.${elsewhere()}`); }}
+                onClick={() => { close(); void apply(sample.svg, `Photo set.${elsewhere()}`); }}
                 className="h-7 w-7 overflow-hidden rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
               >
                 <img src={sample.src} alt="" className="h-full w-full" />
