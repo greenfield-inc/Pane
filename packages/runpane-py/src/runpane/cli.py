@@ -2002,6 +2002,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "browser screenshot": lambda parsed, context: run_unsupported_contract(parsed, context),
     "browser click": lambda parsed, context: run_unsupported_contract(parsed, context),
     "browser type": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser fill": lambda parsed, context: run_unsupported_contract(parsed, context),
     "browser press": lambda parsed, context: run_unsupported_contract(parsed, context),
     "browser select": lambda parsed, context: run_unsupported_contract(parsed, context),
     "browser scroll": lambda parsed, context: run_unsupported_contract(parsed, context),

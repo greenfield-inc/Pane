@@ -3,6 +3,10 @@
 Pane's browser tabs have no password manager built in, and browser extensions
 don't run in them. To sign in to a page beside your agent:
 
+- **Let the agent sign in.** Save the site's password or PIN as a
+  [login](PANE_SECRETS.md#logins) in Settings → Secrets with the site it is for,
+  and your agent fills it there without seeing it
+  ([Saved logins](BROWSER_AGENTS.md#saved-logins)).
 - **Open in your browser.** On the computer that runs the tab, the address
   bar's **Open in your browser** button (the arrow out of a box, after Copy
   URL) opens the page in your default browser, where your password manager's

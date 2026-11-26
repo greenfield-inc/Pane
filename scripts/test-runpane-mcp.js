@@ -913,7 +913,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   const core = await names([]);
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
     'agents_ask', 'agents_send', 'agents_start', 'agents_status',
-    'browser_click', 'browser_close', 'browser_dialog', 'browser_evaluate', 'browser_navigate', 'browser_open', 'browser_press',
+    'browser_click', 'browser_close', 'browser_dialog', 'browser_evaluate', 'browser_fill', 'browser_navigate', 'browser_open', 'browser_press',
     'browser_screenshot', 'browser_scroll', 'browser_select', 'browser_snapshot', 'browser_tabs', 'browser_type', 'browser_upload', 'browser_wait',
     'device_act', 'device_close', 'device_list', 'device_open', 'device_run', 'device_screenshot',
     'docs_read', 'docs_search', 'doctor', 'links_create',
@@ -931,7 +931,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   ]);
   const browser = await names(['--toolsets', 'browser']);
   assert.deepEqual(browser.map((tool) => tool.name).sort(), [
-    'browser_click', 'browser_close', 'browser_dialog', 'browser_evaluate', 'browser_navigate', 'browser_open', 'browser_press',
+    'browser_click', 'browser_close', 'browser_dialog', 'browser_evaluate', 'browser_fill', 'browser_navigate', 'browser_open', 'browser_press',
     'browser_screenshot', 'browser_scroll', 'browser_select', 'browser_snapshot', 'browser_tabs', 'browser_type', 'browser_upload', 'browser_wait',
   ]);
   const git = await names(['--toolsets', 'git']);

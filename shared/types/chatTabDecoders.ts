@@ -1,6 +1,6 @@
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../validation/boundaryDecoder';
 import type { AgentChatMessage, AgentChatPart, AgentChatReceipt } from './agentChat';
-import type { ChatAgentEntry, ChatTabConversation, ChatTabEvent, ChatTabProblem, ChatTabQuestion, ChatTabQueuedPrompt, ChatTabSwitchBanner, ChatTabTranscript, ChatTabView, ChatToolPatch } from './chatTab';
+import type { ChatAgentEntry, ChatTabConversation, ChatTabEvent, ChatTabFile, ChatTabProblem, ChatTabQuestion, ChatTabQueuedPrompt, ChatTabSwitchBanner, ChatTabTranscript, ChatTabView, ChatToolPatch } from './chatTab';
 
 const status = boundary.enumeration('pending', 'in_progress', 'completed', 'failed');
 const part: BoundarySchema<AgentChatPart> = boundary.union(
@@ -45,7 +45,7 @@ const conversation: BoundarySchema<ChatTabConversation> = boundary.object({
   current: boundary.optional(boundary.literal(true)), openIn: boundary.optional(boundary.object({ panelId: boundary.string, title: boundary.string })),
 });
 const controls: BoundarySchema<ChatTabView['controls']> = boundary.array(boundary.object({ id: boundary.string, name: boundary.string, category: boundary.optional(boundary.string), currentValue: boundary.string, options: boundary.array(boundary.object({ value: boundary.string, name: boundary.string })) }));
-const commands: BoundarySchema<ChatTabView['commands']> = boundary.array(boundary.object({ name: boundary.string, description: boundary.optional(boundary.string), hint: boundary.optional(boundary.string) }));
+const commands: BoundarySchema<ChatTabView['commands']> = boundary.array(boundary.object({ name: boundary.string, description: boundary.optional(boundary.string), hint: boundary.optional(boundary.string), skill: boundary.optional(boundary.literal(true)) }));
 const transcript: BoundarySchema<ChatTabTranscript> = boundary.object({ panelId: boundary.string, generation: boundary.number, revision: boundary.number, start: boundary.number, messages: boundary.array(chatMessageSchema) });
 const view: BoundarySchema<ChatTabView> = boundary.object({
   panelId: boundary.string, agent: boundary.string, generation: boundary.number,
@@ -61,6 +61,7 @@ const view: BoundarySchema<ChatTabView> = boundary.object({
   tasks: boundary.optional(boundary.array(boundary.object({ id: boundary.string, kind: boundary.string, title: boundary.optional(boundary.string), startedAt: boundary.string, canStop: boundary.optional(boundary.literal(false)) }))),
   clearedAt: boundary.optional(boundary.string),
   sendNowSteers: boundary.optional(boundary.literal(true)),
+  mentions: boundary.optional(boundary.object({ files: boundary.optional(boundary.literal(true)), skills: boundary.optional(boundary.literal(true)) })),
   banner: boundary.optional(banner),
 });
 const receipt: BoundarySchema<AgentChatReceipt> = boundary.object({
@@ -123,3 +124,6 @@ export function decodeChatMessages(value: unknown): AgentChatMessage[] { return 
 export function decodeChatConversations(value: unknown): ChatTabConversation[] { return decodeBoundary(value, boundary.array(conversation)); }
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Remote chat tab data is decoded immediately with the receipt schema.
 export function decodeChatReceipt(value: unknown): AgentChatReceipt | undefined { return value === undefined || value === null ? undefined : decodeBoundary(value, receipt); }
+const file: BoundarySchema<ChatTabFile> = boundary.object({ path: boundary.nonEmptyString, isDirectory: boundary.boolean, changed: boundary.optional(boundary.literal(true)) });
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Remote chat tab data is decoded immediately with the file schema.
+export function decodeChatFiles(value: unknown): ChatTabFile[] { return decodeBoundary(value, boundary.array(file)); }

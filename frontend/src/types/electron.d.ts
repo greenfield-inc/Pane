@@ -149,12 +149,14 @@ interface ElectronAPI {
   };
   paneSecrets: {
     list: () => Promise<IPCResponse<PaneSecretsOverview>>;
-    /** Data is true when it replaced a saved value. */
-    set: (project: string, name: string, value: string) => Promise<IPCResponse<boolean>>;
+    /** Data is true when it replaced a saved value. With `sites` it saves a login. */
+    set: (project: string, name: string, value: string, sites?: string[]) => Promise<IPCResponse<boolean>>;
+    /** Makes a saved secret a login for these sites, or changes a login's sites. */
+    setSites: (project: string, name: string, sites: string[]) => Promise<IPCResponse<boolean>>;
     /** Deletes a typed secret, or removes a 1Password reference. */
     delete: (project: string, name: string) => Promise<IPCResponse<boolean>>;
     /** Points a name at a 1Password item. Data is true when it replaced (deleted) a typed secret of that name. */
-    setReference: (project: string, name: string, reference: string) => Promise<IPCResponse<boolean>>;
+    setReference: (project: string, name: string, reference: string, sites?: string[]) => Promise<IPCResponse<boolean>>;
     /** Reads 1Password once (it may ask for Touch ID or Windows Hello) and leases to the machines named. */
     startLease: (request: SecretLeaseStartRequest) => Promise<IPCResponse<SecretLeaseStartResult>>;
     /** Ends a lease here and on every machine that holds it. */

@@ -297,6 +297,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'browser screenshot': async (parsed) => runBrowser(parsed),
   'browser click': async (parsed) => runBrowser(parsed),
   'browser type': async (parsed) => runBrowser(parsed),
+  'browser fill': async (parsed) => runBrowser(parsed),
   'browser press': async (parsed) => runBrowser(parsed),
   'browser select': async (parsed) => runBrowser(parsed),
   'browser scroll': async (parsed) => runBrowser(parsed),

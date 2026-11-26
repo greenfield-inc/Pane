@@ -37,7 +37,7 @@ import { thisMachineName, type ApprovalStore } from '../services/approvals/appro
 import type { LoopManager } from '../services/loops/loopManager';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 import type { AgentState } from '../../../shared/types/agentStatus';
-import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
+import { leaseReferenceText, paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import { paneSecretStore, secretLeaseStore } from '../services/paneSecrets';
 import { secretLeaseService } from '../services/secretLeaseRuntime';
 import type { SecretLeaseStart } from '../services/secretLeaseService';
@@ -456,7 +456,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     machine: thisMachineName(),
     secrets: {
       exists: (project, name) => paneSecretStore().has(project, name),
-      save: async (project, name, value) => { await paneSecretStore().set(project, name, value); },
+      save: async (project, name, value) => { await paneSecretStore().replaceValue(project, name, value); },
     },
     leases: {
       describe: (project, names) => {
@@ -464,7 +464,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
         const references: Record<string, string> = {};
         for (const name of names) {
           const reference = store.referenceOf(project, name);
-          if (reference) references[name] = reference;
+          if (!reference) continue;
+          references[name] = leaseReferenceText(reference, store.sitesOf(project, name));
         }
         // Only a desktop knows the length it will grant; a headless host's card shows none until a desktop shows it.
         const lengthMs = secretLeaseService()?.lengthFor(project) ?? null;
@@ -478,6 +479,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       const request: SecretLeaseStart = {
         project: lease.project,
         names: lease.names,
+        approved: lease.references ?? {},
         machines: machineId ? [machineId] : [],
         requestedBy: `${item.source.agent} in "${item.source.name}"`,
       };

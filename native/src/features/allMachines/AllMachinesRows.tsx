@@ -5,7 +5,6 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { originLine } from '@shared/approvalReceipts';
 
 import { askerLine, questionDetail, type ApprovalList } from '@/features/approvals/approvals';
-import { openApproval } from '@/features/approvals/ApprovalScreen';
 import { WaitingCount } from '@/features/approvals/WaitingCount';
 import { MachineBadge } from '@/features/machines/MachineBadge';
 import { MachineMark } from '@/features/machines/MachineMark';
@@ -30,6 +29,7 @@ export interface AllMachinesFeed extends MachineFeed {
 /** Pin, pause and archive on the machine the phone is on; other machines' rows don't swipe. */
 export interface CurrentMachineActions {
   openPane(paneId: string): void;
+  openSession(sessionId: string): void;
   togglePanePinned(paneId: string): void;
   archivePane(pane: { id: string; name: string }): void;
   toggleSessionPinned(sessionId: string, pinned: boolean): void;
@@ -39,25 +39,27 @@ export interface CurrentMachineActions {
 }
 
 /** Opens a Pane or Session row: here, or on its machine after switching there, like a notification tap. */
-export function openRecentRow(row: RecentRow, currentKey: string, actions: Pick<CurrentMachineActions, 'openPane'>, sayOffline: (machineKey: string, what: string) => void) {
+export function openRecentRow(row: RecentRow, currentKey: string, actions: Pick<CurrentMachineActions, 'openPane' | 'openSession'>, sayOffline: (machineKey: string, what: string) => void) {
   if (row.stale) return sayOffline(row.machineKey, row.type === 'pane' ? 'Pane' : 'Session');
   const here = row.machineKey === currentKey;
   if (row.type === 'pane') {
     if (here) actions.openPane(row.pane.id);
     else router.push({ pathname: '/open', params: { host: row.machineKey, paneId: row.pane.id } });
   } else if (here) {
-    router.push({ pathname: '/session/[sessionId]', params: { sessionId: row.session.id } });
+    actions.openSession(row.session.id);
   } else {
     router.push({ pathname: '/open', params: { host: row.machineKey, sessionId: row.session.id } });
   }
 }
 
+type ApprovalHref = { pathname: '/approval/[notifyId]'; params: { notifyId: string; list?: string } };
+
 /** Opens a question or permission request: here, or switching to its machine first. */
-export function openWaitingRow(row: WaitingRow, list: ApprovalList, currentKey: string) {
+export function openWaitingRow(row: WaitingRow, list: ApprovalList, currentKey: string, open: (href: ApprovalHref) => void = href => router.push(href)) {
   const here = row.machineKey === currentKey;
   if (row.type === 'question') {
     // The approval screen shows its machine's Session below the card, so another machine's switches first.
-    if (here) openApproval(row.item.id, list);
+    if (here) open({ pathname: '/approval/[notifyId]', params: list === 'waiting' ? { notifyId: row.item.id } : { notifyId: row.item.id, list } });
     else router.push({ pathname: '/open', params: { host: row.machineKey, notifyId: row.item.id, ...(list === 'waiting' ? {} : { list }) } });
   } else if (here) {
     router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: row.request.sessionId, requestId: row.request.id } });

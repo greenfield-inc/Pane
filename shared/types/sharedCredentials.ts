@@ -21,10 +21,15 @@ export type SharedCredentials = Partial<Record<SharedCredentialId, SharedCredent
    * A field of its own, so hosts, desktops and phones from before references drop it whole and never read one as a tombstone.
    */
   paneSecretReferences?: Record<string, SharedCredential>;
+  /**
+   * Typed logins by `<project>/<NAME>`: `value` holds the sites and the value together. A field of its
+   * own, so a host from before logins never holds one, and never puts one in a command's environment.
+   */
+  paneLogins?: Record<string, SharedCredential>;
 };
 
 /** The per-key maps that merge by newest copy. */
-const SECRET_MAPS = ['paneSecrets', 'paneSecretReferences'] as const;
+const SECRET_MAPS = ['paneSecrets', 'paneSecretReferences', 'paneLogins'] as const;
 
 /** When and where a host's copy of a key was set; stored next to the key in host config. */
 export interface SharedCredentialMeta extends Pick<SharedCredential, 'updatedAt' | 'source'> {

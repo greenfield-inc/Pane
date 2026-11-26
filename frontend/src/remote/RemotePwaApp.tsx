@@ -1413,7 +1413,7 @@ export function RemotePwaApp() {
               )}
               {selectedPanel.type === 'chat' && adapter && (
                 <Suspense fallback={null}>
-                  <RemoteChatTab key={selectedPanel.id} adapter={adapter} panel={selectedPanel} panels={selectedPanels} connected={connectionStatus === 'connected'}
+                  <RemoteChatTab key={selectedPanel.id} adapter={adapter} panel={selectedPanel} panels={selectedPanels} worktreePath={selectedSession.worktreePath} connected={connectionStatus === 'connected'}
                     onOpenWorker={openWorkerPane} onSelectPanel={selectPanel} />
                 </Suspense>
               )}

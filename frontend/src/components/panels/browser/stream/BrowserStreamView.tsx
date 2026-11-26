@@ -7,6 +7,7 @@ import { browserInputQueue, clickCounter, fitFrame, keyboardField, modifiersOf, 
 import type { BrowserStream, StreamStop } from './useBrowserStream';
 import type { BrowserStreamClient } from './streamClient';
 import { SignInLine } from '../TabNotices';
+import { browserLoginLine } from '../../../../../../shared/types/browser';
 
 /** How long the agent's cursor stays at a click before it fades (as on the host's own tab). */
 const CURSOR_SHOWN_MS = 1_200;
@@ -385,6 +386,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   const [signInDismissed, setSignInDismissed] = useState<string | undefined>(undefined);
   // The host drops the sign-in when the page loads again, so the next refusal shows its line.
   if (!signIn && signInDismissed !== undefined) setSignInDismissed(undefined);
+  const login = view?.logins?.at(-1);
   const download = view?.downloads.at(-1);
   const [downloadSeenAt, setDownloadSeenAt] = useState(0);
   const firstDownload = useRef<number | undefined | null>(null);
@@ -471,6 +473,11 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       {stream.reloadedAt !== undefined && Date.now() - stream.reloadedAt < RELOADED_SHOWN_MS && !stop && (
         <div role="status" className="absolute inset-x-0 bottom-0 flex justify-center p-3">
           <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">The page reloaded on {host}.</p>
+        </div>
+      )}
+      {login && (
+        <div role="status" className="absolute bottom-3 left-3 max-w-[calc(100%-24px)] truncate rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md" data-testid="browser-stream-login">
+          {browserLoginLine(login)}
         </div>
       )}
       {download && downloadSeenAt > 0 && Date.now() - downloadSeenAt < 60_000 && (

@@ -1,6 +1,8 @@
+import { randomUUID } from 'crypto';
 import { PaneError } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { attachDebugger, type DebuggableContents } from '../debuggerLifetime';
+import { LOGIN_MARK, loginWorldScript } from './loginScript';
 import { PANE_WORLD_ID, pageCall } from './pageScript';
 import type { BrowserPageSize } from '../../../../shared/types/panels';
 import type { BrowserInput, BrowserInputResult } from '../../../../shared/types/browserStream';
@@ -19,6 +21,10 @@ export const ALLOWED_CDP_METHODS: ReadonlySet<string> = new Set([
   'Input.dispatchKeyEvent',
   'Runtime.evaluate',
   'Runtime.terminateExecution',
+  // A saved login's fill: a world made in the page's current document, and calls on its handle.
+  'Page.getFrameTree',
+  'Page.createIsolatedWorld',
+  'Runtime.callFunctionOn',
   'DOM.getDocument',
   'DOM.querySelector',
   'DOM.setFileInputFiles',
@@ -58,6 +64,7 @@ export interface BrowserPageContents extends DebuggableContents {
   on(event: 'cursor-changed', listener: (event: Electron.Event, type: string) => void): void;
   /** Every input event the page gets, the person's and the agent's alike. */
   on(event: 'input-event', listener: (event: Electron.Event, input: { type: string }) => void): void;
+  on(event: 'will-navigate', listener: (event: { preventDefault(): void; url: string }) => void): void;
   removeListener(event: 'did-stop-loading' | 'did-navigate', listener: () => void): void;
   debugger: DebuggableContents['debugger'] & {
     sendCommand(method: string, params?: JsonObject): Promise<JsonValue>;
@@ -77,12 +84,27 @@ export type ClickTarget = { ref: string } | PagePoint;
 export interface PageReading { url: string; title: string; snapshot: string; truncated: boolean; controlsCut?: boolean }
 export interface PageScreenshot { png: Buffer; width: number; height: number }
 export interface Evaluated { value: JsonValue; truncated: boolean }
+/** A saved login, as the driver needs it: where it may go, its value once that is known to be fine, and the record of its use. */
+export interface LoginToFill {
+  /** `<project>/<NAME>`, for messages. */
+  key: string;
+  /** The sites the person chose, known without reading the value. */
+  sites: readonly string[];
+  read(): Promise<{ value: string; sites: readonly string[] }>;
+  record(site: string): Promise<void>;
+}
 interface Chord { key: string; modifiers: number }
 
 const readingSchema = boundary.object({ snapshot: boundary.string, truncated: boundary.boolean, controlsCut: boundary.optional(boundary.boolean), url: boundary.string, title: boundary.string });
 /** A ref call the page refused: the ref is stale, or the element is not ready yet. */
 const refusalSchema = boundary.object({ stale: boundary.optional(boundary.string), wait: boundary.optional(boundary.string) });
 const pointSchema = boundary.object({ x: boundary.number, y: boundary.number });
+const loginCheckSchema = boundary.object({ origin: boundary.string, problem: boundary.optional(boundary.string) });
+const loginFillSchema = boundary.object({ problem: boundary.optional(boundary.string), partly: boundary.optional(boundary.boolean) });
+const frameTreeSchema = boundary.object({ frameTree: boundary.object({ frame: boundary.object({ id: boundary.string }) }) });
+const worldSchema = boundary.object({ executionContextId: boundary.number });
+const handleSchema = boundary.object({ result: boundary.object({ objectId: boundary.string }) });
+const returnedSchema = boundary.object({ result: boundary.object({ value: boundary.json }) });
 const checkSchema = boundary.object({ met: boundary.boolean, stale: boundary.optional(boundary.string) });
 const sizeSchema = boundary.object({ width: boundary.number, height: boundary.number });
 const stillViewSchema = boundary.object({ width: boundary.number, height: boundary.number, x: boundary.number, y: boundary.number, ratio: boundary.number });
@@ -195,6 +217,15 @@ export class PageDriver {
   private cast: { settings: ScreencastSettings; onFrame: (frame: ScreencastFrame) => void; unacked?: number } | undefined;
   private forwarding = 0;
   private lastForwardEnd = 0;
+  /** An agent ran a script in this page's life, so a login never goes into it: the script may still be listening. */
+  private scripted = false;
+  /** A login was filled in this page's life; its documents say whether they hold it (pageScript's holdsLogin). */
+  private filled = false;
+  /** Stops the page putting a filled login in an address, until the document that holds it goes. */
+  private addressGuard: ((url: string) => boolean) | undefined;
+  private guardListening = false;
+  /** What an action's result must say about something Pane stopped. */
+  private notice: string | undefined;
 
   /** `captureMs`: how long a screenshot may wait for the page to paint before the queue gives up on it. */
   constructor(private readonly contents: BrowserPageContents, private readonly captureMs = CAPTURE_MS) {
@@ -299,6 +330,31 @@ export class PageDriver {
 
   evaluate(expression: string, ref: string | undefined): Promise<Evaluated> {
     return this.exclusive(() => this.evaluateNow(expression, ref));
+  }
+
+  /** Puts a saved login into the field behind `ref`; returns the site it went to. */
+  fill(ref: string, login: LoginToFill): Promise<ActionOutcome & { site: string; sure: boolean }> {
+    return this.exclusive(() => this.fillNow(ref, login));
+  }
+
+  /**
+   * An agent's script is about to run where it reaches this page: here, or in a popup linked to it.
+   * Refused while the page holds a filled login. Marked first and checked after, and a fill does the
+   * reverse, so whichever comes second sees the other.
+   */
+  async noteScript(): Promise<void> {
+    const before = this.scripted;
+    this.scripted = true;
+    if (!this.filled || await this.page('holdsLogin') === false) return;
+    this.scripted = before;
+    throw new PaneError('ERR_BROWSER_LOGIN_ON_PAGE', 'This page, or the one that opened it, holds a saved login Pane filled, so scripts don\'t run on it. Nothing ran.', 'Use browser_snapshot and browser_screenshot. Scripts run again once that tab loads a new page (browser_navigate).');
+  }
+
+  /** Something Pane stopped since the last action, told once. */
+  takeNotice(): string | undefined {
+    const notice = this.notice;
+    this.notice = undefined;
+    return notice;
   }
 
   upload(ref: string | undefined, paths: string[]): Promise<void> {
@@ -605,6 +661,95 @@ export class PageDriver {
     }, false);
   }
 
+  /**
+   * Fills a saved login. The value is read only after the page's own origin and field are known to be
+   * fine, and goes only to a handle in that document: if the page navigates first, Chromium drops the
+   * handle and the value goes nowhere. The document checks its origin and the field again as it fills.
+   */
+  private async fillNow(ref: string, login: LoginToFill): Promise<ActionOutcome & { site: string; sure: boolean }> {
+    this.refuseWhileDialog();
+    this.refuseScripted();
+    await this.attach();
+    const token = `pane-${randomUUID()}`;
+    await this.withRef(ref, () => this.page('mark', ref, LOGIN_MARK, token));
+    let world: string;
+    let found: { origin: string; problem?: string };
+    try {
+      world = await this.loginWorld();
+      found = decodeBoundary(await this.callLogin(world, 'check', [LOGIN_MARK, token]), loginCheckSchema);
+    } catch {
+      throw new PaneError('ERR_BROWSER_LOGIN_FIELD', 'The page changed while Pane checked the field. Nothing was filled.', 'Call browser_snapshot, then try again.');
+    }
+    refuseLoginSite(login.key, found.origin, login.sites);
+    if (found.problem) throw refusedField(ref, found.problem, 'Nothing was filled.');
+    const { value, sites } = await login.read();
+    refuseLoginSite(login.key, found.origin, sites);
+    await login.record(found.origin);
+    // From here the document counts as holding the login, whatever becomes of the fill.
+    this.filled = true;
+    await this.page('holdLogin');
+    this.refuseScripted();
+    this.guardAddress(value);
+    await this.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    let problem: string | undefined;
+    let partly: boolean | undefined;
+    let cutOff = false;
+    const outcome = await this.input(async () => {
+      try {
+        ({ problem, partly } = decodeBoundary(await this.callLogin(world, 'fill', [value, [...sites]]), loginFillSchema));
+      } catch {
+        // The page left partway (a PIN that submits itself), or it stopped answering. The cause is never shown: it can quote the call.
+        cutOff = true;
+      }
+    }, true);
+    if (problem) throw refusedField(ref, problem, partly ? 'It may be partly filled.' : 'Nothing was filled.');
+    // Pane can't tell a page that left before the value arrived from one that submitted by itself once it had it.
+    return { ...outcome, site: found.origin, sure: !cutOff || outcome.dialog !== undefined };
+  }
+
+  private refuseScripted(): void {
+    if (!this.scripted) return;
+    throw new PaneError('ERR_BROWSER_LOGIN_SCRIPTED', 'An agent ran a script in this tab, and that script could read a login filled here. Nothing was filled.', 'Open the page in a new tab (browser_close this one if you opened it, then browser_open), and fill the login there before any browser_evaluate.');
+  }
+
+  /** A handle to a fresh isolated world in the page's current document, gone once that document is. */
+  private async loginWorld(): Promise<string> {
+    const frameId = decodeBoundary(await this.send('Page.getFrameTree'), frameTreeSchema).frameTree.frame.id;
+    const contextId = decodeBoundary(await this.send('Page.createIsolatedWorld', { frameId, worldName: 'pane-login' }), worldSchema).executionContextId;
+    return decodeBoundary(await this.send('Runtime.evaluate', { contextId, expression: loginWorldScript() }), handleSchema).result.objectId;
+  }
+
+  private async callLogin(world: string, method: 'check' | 'fill', args: readonly (string | string[])[]): Promise<JsonValue> {
+    const call = this.send('Runtime.callFunctionOn', {
+      objectId: world,
+      functionDeclaration: `function (...args) { return this.${method}(...args); }`,
+      arguments: args.map(value => ({ value })),
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    call.catch(() => undefined);
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('late')), PAGE_CALL_MS); });
+    const answer = await Promise.race([call, late]).finally(() => clearTimeout(timer));
+    return decodeBoundary(answer, returnedSchema).result.value;
+  }
+
+  /**
+   * Stops the page sending the filled value in an address (a form that submits with GET), where the
+   * tab, its history and every tool result would show it.
+   */
+  private guardAddress(value: string): void {
+    this.addressGuard = url => addressHolds(url, value);
+    if (this.guardListening) return;
+    this.guardListening = true;
+    this.contents.on('will-navigate', event => {
+      if (!this.addressGuard?.(event.url)) return;
+      event.preventDefault();
+      this.notice = 'Pane stopped the page from opening an address that holds the saved login (its form submits in the address). This site\'s sign-in stays with the person.';
+    });
+    this.contents.on('did-navigate', () => { this.addressGuard = undefined; });
+  }
+
   private async pressNow(chord: string, ref: string | undefined): Promise<ActionOutcome> {
     this.refuseWhileDialog();
     const { key, modifiers } = parseChord(chord);
@@ -688,6 +833,7 @@ export class PageDriver {
   /** Runs an expression in the page (or a function of a ref's element); the value as JSON, capped. */
   private async evaluateNow(expression: string, ref: string | undefined): Promise<Evaluated> {
     this.refuseWhileDialog();
+    await this.noteScript();
     let source = expression;
     if (ref) {
       const token = `pane-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -924,6 +1070,31 @@ export class PageDriver {
     }
     return this.contents.debugger.sendCommand(method, params);
   }
+}
+
+function refuseLoginSite(key: string, origin: string, sites: readonly string[]): void {
+  if (sites.includes(origin)) return;
+  throw new PaneError(
+    'ERR_BROWSER_LOGIN_SITE',
+    `${key} may be filled on ${sites.join(', ') || 'no site'}, and this page is ${origin === 'null' ? 'a document with no site of its own' : origin}. Nothing was filled.`,
+    'Open the login\'s own site and check its address. Only the person changes a login\'s sites, in Settings → Secrets.',
+  );
+}
+
+function refusedField(ref: string, problem: string, outcome: string): PaneError {
+  return new PaneError('ERR_BROWSER_LOGIN_FIELD', `${ref} ${problem}. ${outcome}`, 'Call browser_snapshot, then fill a visible text or password field the person could type in. If the page can\'t take it, the sign-in stays with the person.');
+}
+
+/** Whether an address carries `value` as one of its parameters, or one character of it in each. */
+function addressHolds(address: string, value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(address);
+  } catch {
+    return false;
+  }
+  const parameters = [...url.searchParams.values(), ...new URLSearchParams(url.hash.slice(1)).values()];
+  return parameters.includes(value) || parameters.filter(parameter => [...parameter].length === 1).join('') === value;
 }
 
 /** "an alert", "a confirm". */

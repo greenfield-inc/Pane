@@ -38,6 +38,7 @@
 //                       finished background task), announced as an async task to a client that takes them
 //
 // SCRIPTED_AGENT_OWN_TURN_AFTER_LOAD=1 runs a silent turn of its own shortly after each load.
+// SCRIPTED_AGENT_SKILLS=1 lists the skills simplify and audit, and answers every prompt with the parts it was sent.
 // SCRIPTED_AGENT_NO_STEERING=1 does not offer steering; SCRIPTED_AGENT_STEER_FAILS=1 answers each steer `failed` (as codex-acp can); SCRIPTED_AGENT_SIGNED_OUT=1 refuses every session with ACP authRequired; SCRIPTED_AGENT_LIST_FAILS=1 refuses session/list.
 import { agent, methods, ndJsonStream, RequestError } from '@agentclientprotocol/sdk';
 import { Readable, Writable } from 'node:stream';
@@ -50,6 +51,7 @@ const store = process.env.SCRIPTED_AGENT_STORE ?? path.join(process.cwd(), '.scr
 mkdirSync(store, { recursive: true });
 const file = id => path.join(store, `${id}.json`);
 const sessions = new Map();
+const SKILLS = process.env.SCRIPTED_AGENT_SKILLS === '1';
 /** Background tasks still running, by id: the session they belong to. Never persisted, as a real adapter's are not. */
 const liveTasks = new Map();
 let clientCapabilities = {};
@@ -174,6 +176,14 @@ async function prompt({ params, client }) {
     const send = async update => { session.updates.push(update); persist(id); await client.notify(methods.client.session.update, { sessionId: id, update }); };
     // Each reply carries its own message id, as claude-agent-acp's live and replayed updates do.
     const say = async reply => { const messageId = randomUUID(); for (const chunk of reply.match(/[\s\S]{1,12}/g) ?? []) await send({ sessionUpdate: 'agent_message_chunk', messageId, content: { type: 'text', text: chunk } }); };
+    const texts = params.prompt.flatMap(part => part.type === 'text' ? [part.text] : []);
+    // As claude-agent-acp: no echo of a prompt, and the saved history of a run skill holds only its own part.
+    if (SKILLS) {
+      session.updates.push({ sessionUpdate: 'user_message_chunk', messageId: randomUUID(), content: { type: 'text', text: texts.at(-1) } });
+      persist(id);
+      await say(`Parts: ${JSON.stringify(params.prompt.map(part => part.type === 'text' ? part.text : part.type))}`);
+      return { stopReason: 'end_turn' };
+    }
     await send({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text } });
     const [word, ...rest] = text.trim().split(/\s+/);
     if (word === 'signout') throw RequestError.authRequired();
@@ -387,7 +397,8 @@ async function prompt({ params, client }) {
 }
 
 async function commands(client, sessionId) {
-  await client.notify(methods.client.session.update, { sessionId, update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'compact', description: 'Compact the conversation' }, { name: 'review', description: 'Review changes', input: { hint: 'what to review' } }] } });
+  const skill = name => ({ name, description: `The ${name} skill`, _meta: { jetbrains: { air: { version: 1, kind: 'skill', skillPath: `/home/me/${name}/SKILL.md` } } } });
+  await client.notify(methods.client.session.update, { sessionId, update: { sessionUpdate: 'available_commands_update', availableCommands: [...(SKILLS ? [skill('simplify'), skill('audit')] : []), { name: 'compact', description: 'Compact the conversation' }, { name: 'review', description: 'Review changes', input: { hint: 'what to review' } }] } });
 }
 
 const connection = app.connect(ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));

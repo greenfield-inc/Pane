@@ -434,9 +434,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
   paneSecrets: {
     list: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:list'),
-    set: (project: string, name: string, value: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value),
+    set: (project: string, name: string, value: string, sites?: string[]): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value, sites),
+    setSites: (project: string, name: string, sites: string[]): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-sites', project, name, sites),
     delete: (project: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:delete', project, name),
-    setReference: (project: string, name: string, reference: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-reference', project, name, reference),
+    setReference: (project: string, name: string, reference: string, sites?: string[]): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-reference', project, name, reference, sites),
     startLease: (request: SecretLeaseStartRequest): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:start-lease', request),
     endLease: (leaseId: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:end-lease', leaseId),
     endAllLeases: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:end-all-leases'),
@@ -590,6 +591,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     conversations: (panelId: string) => invokeIpc('chat-tab:conversations', panelId),
     resume: (panelId: string, sessionId: string) => invokeIpc('chat-tab:resume', panelId, sessionId),
     dismissBanner: (panelId: string) => invokeIpc('chat-tab:dismiss-banner', panelId),
+    files: (panelId: string, query: string) => invokeIpc('chat-tab:files', panelId, query),
     signIn: (panelId: string) => invokeIpc('chat-tab:sign-in', panelId),
     keys: () => invokeIpc('chat-tab:keys'),
     setKey: (agent: string, key: string | null) => invokeIpc('chat-tab:set-key', agent, key),

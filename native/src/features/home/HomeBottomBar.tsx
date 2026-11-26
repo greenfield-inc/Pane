@@ -1,10 +1,11 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
+import { InColumn, useWideLayout } from '@/features/layout/wideLayout';
 import { IconButton } from '@/features/panes/PaneKit';
 import { useTheme } from '@/theme';
 import { Icon } from '@/ui';
@@ -20,7 +21,8 @@ export function bottomBarHeight(insetBottom: number): number {
 /**
  * Home's bottom bar, in thumb reach: Search panes, and + for a new Session or Pane
  * (none when no machine takes one, `canCreate`). It rides up with
- * the keyboard, and fades the list out under it.
+ * the keyboard, and fades the list out under it. Docked beside an open screen, it rises only for
+ * its own keyboard, not one the screen beside it opens.
  */
 export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; onQuery: (query: string) => void; canCreate: boolean }) {
   const theme = useTheme();
@@ -28,10 +30,27 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
   const { width } = useWindowDimensions();
   const keyboard = useAnimatedKeyboard();
   const returns = useReturnsToForeground();
+  const inColumn = use(InColumn);
+  const [typing, setTyping] = useState(false);
+  const setSearching = useWideLayout(state => state.setSearching);
+  const follows = !inColumn || typing;
+  // A fold that moves Home out of the column takes its keyboard along.
+  useEffect(() => () => {
+    if (inColumn) setSearching(false);
+  }, [inColumn, setSearching]);
+  // Search on the rail expands Home with the keyboard up.
+  const input = useRef<TextInput>(null);
+  useEffect(() => {
+    if (inColumn && useWideLayout.getState().takeSearchRequest()) input.current?.focus();
+  }, [inColumn]);
+  const onFocusChange = (focused: boolean) => {
+    setTyping(focused);
+    if (inColumn) setSearching(focused);
+  };
   // The keyboard closes while the app is in the background, and that last update never reaches
   // the screen; reading it again on each return puts the bar back on the bottom edge. Listing
   // deps replaces Reanimated's own, so the inset is listed too (a rotation changes it).
-  const lift = useAnimatedStyle(() => ({ transform: [{ translateY: -Math.max(0, keyboard.height.value - insets.bottom) }] }), [returns, insets.bottom]);
+  const lift = useAnimatedStyle(() => ({ transform: [{ translateY: follows ? -Math.max(0, keyboard.height.value - insets.bottom) : 0 }] }), [returns, insets.bottom, follows]);
   return (
     <Animated.View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 12) }, lift]}>
       {/* Keyed by its size: an Svg keeps drawing at its first one when a foldable opens or closes. */}
@@ -47,6 +66,7 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
       <View style={[styles.search, { backgroundColor: theme.colors.surfaceRaised }]}>
         <Icon ios="magnifyingglass" android="search" size={16} />
         <TextInput
+          ref={input}
           testID="panes-search"
           accessibilityLabel="Search panes"
           placeholder="Search panes"
@@ -57,6 +77,8 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
           returnKeyType="search"
           value={query}
           onChangeText={onQuery}
+          onFocus={() => onFocusChange(true)}
+          onBlur={() => onFocusChange(false)}
           style={[theme.typography.body, styles.input, { color: theme.colors.text }]}
         />
         {query ? (

@@ -3,7 +3,7 @@ import { READ_ONLY_HOST_ANSWERS } from '../../../../shared/remoteClient/readOnly
 import { tokenAccess, type ReadOnlyMark } from '../../../../shared/types/accessLevel';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { ChatTabClient, ChatTabCreate, ChatTabView } from '../../../../shared/types/chatTab';
-import { decodeChatAgents, decodeChatConversations, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
+import { decodeChatAgents, decodeChatConversations, decodeChatFiles, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
 import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
@@ -167,6 +167,7 @@ export class RemoteRuntimeAdapter {
     conversations: async panelId => decodeChatConversations(await this.invoke('chat-tab:conversations', [panelId])),
     resume: (panelId, sessionId) => this.invoke('chat-tab:resume', [panelId, sessionId]),
     dismissBanner: panelId => this.invoke('chat-tab:dismiss-banner', [panelId]),
+    files: async (panelId, query) => decodeChatFiles(await this.invoke('chat-tab:files', [panelId, query])),
     signIn: panelId => this.invoke('chat-tab:sign-in', [panelId]),
     agents: async () => decodeChatAgents(await this.invoke('chat-tab:agents')),
     onEvent: callback => this.onEvent(event => { if (event.channel === 'chat-tab:event') callback(decodeChatTabEvent(event.args[0])); }),

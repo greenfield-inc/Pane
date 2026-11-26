@@ -1,4 +1,4 @@
-import type { ChatTabCommand, ChatTabQueuedPrompt, ChatTabSend } from '@shared/types/chatTab';
+import type { ChatTabQueuedPrompt, ChatTabSend } from '@shared/types/chatTab';
 
 /** The same limits desktop's composer puts on an attached image. */
 export const CHAT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -12,17 +12,6 @@ export interface ChatDraftImage {
   mimeType: string;
   /** The image's bytes, base64-encoded. */
   data: string;
-}
-
-/** The commands matching a draft that is only "/name" so far, best match first (as desktop's menu). */
-export function matchingCommands(draft: string, commands: readonly ChatTabCommand[]): ChatTabCommand[] {
-  const match = /^\/(\S*)$/.exec(draft);
-  if (!match) return [];
-  const query = match[1].toLowerCase();
-  return commands
-    .filter(command => command.name.toLowerCase().includes(query))
-    .sort((a, b) => Number(!a.name.toLowerCase().startsWith(query)) - Number(!b.name.toLowerCase().startsWith(query)) || a.name.localeCompare(b.name))
-    .slice(0, 12);
 }
 
 /** Why an image can't be attached, or undefined when it can. */

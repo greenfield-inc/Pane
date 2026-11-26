@@ -1,10 +1,12 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { router } from 'expo-router';
+import { use, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { DEVICE_ACCESS_LABELS } from '@shared/types/accessLevel';
 
 import { ReadOnlyChip } from '@/features/hosts/ReadOnlyChip';
+import { InColumn } from '@/features/layout/wideLayout';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
@@ -31,6 +33,9 @@ export function MachineChips({ machines, showAll }: { machines: Machine[]; showA
   const { select, connecting } = useSelectMachine();
   const all = useMachinePrefs(state => state.all) && showAll;
   const setAll = useMachinePrefs(state => state.setAll);
+  // Legend List keeps each pill's measured width, so a pill measured in a narrower column (before
+  // an unfold, a turn or an expand from the rail) stays cut short. A new width lays them out again.
+  const [layout, setLayout] = useState({ width: 0, pass: 0 });
   const chips: Chip[] = [...(showAll ? [{ kind: 'all' as const }] : []), ...machines.map(machine => ({ kind: 'machine' as const, machine })), { kind: 'add' }];
 
   const press = (machine: Machine) => {
@@ -46,6 +51,11 @@ export function MachineChips({ machines, showAll }: { machines: Machine[]; showA
 
   return (
     <LegendList
+      key={layout.pass}
+      onLayout={event => {
+        const width = Math.round(event.nativeEvent.layout.width);
+        if (width !== layout.width) setLayout({ width, pass: layout.width === 0 ? 0 : layout.pass + 1 });
+      }}
       testID="machine-chips"
       horizontal
       data={chips}
@@ -75,9 +85,11 @@ export function MachineChips({ machines, showAll }: { machines: Machine[]; showA
 
 const openDetails = (machine: Machine) => router.push({ pathname: '/machine/[key]', params: { key: machine.key } });
 
-/** All machines: the layers icon alone. VoiceOver and TalkBack read "All machines". */
+/** All machines: the layers icon, labelled "All" in the docked column. VoiceOver and TalkBack read "All machines". */
 function AllChip({ selected, onPress }: { selected: boolean; onPress: () => void }) {
   const theme = useTheme();
+  const labelled = use(InColumn);
+  const color = selected ? theme.colors.background : theme.colors.text;
   return (
     <Pressable
       testID="machine-chip-all"
@@ -86,9 +98,10 @@ function AllChip({ selected, onPress }: { selected: boolean; onPress: () => void
       accessibilityHint="Lists every machine's Panes"
       accessibilityState={{ selected }}
       onPress={onPress}
-      style={({ pressed }) => [styles.chip, styles.iconChip, { backgroundColor: chipBackground(theme, selected, pressed) }]}
+      style={({ pressed }) => [styles.chip, !labelled && styles.iconChip, { backgroundColor: chipBackground(theme, selected, pressed) }]}
     >
-      <Icon ios="square.3.layers.3d" android="layers" size={16} color={selected ? theme.colors.background : theme.colors.text} />
+      <Icon ios="square.3.layers.3d" android="layers" size={16} color={color} />
+      {labelled ? <Text variant="callout" numberOfLines={1} maxFontSizeMultiplier={MAX_TEXT_SCALE} style={[styles.name, { color }]}>All</Text> : null}
     </Pressable>
   );
 }

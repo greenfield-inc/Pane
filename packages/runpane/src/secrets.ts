@@ -17,6 +17,8 @@ interface SecretSummary {
   name: string;
   updatedAt: string;
   machine: string;
+  /** Present on a login: where `browser fill` may fill it. */
+  sites?: string[];
 }
 
 const secretSummarySchema: BoundarySchema<SecretSummary> = boundary.object({
@@ -24,6 +26,7 @@ const secretSummarySchema: BoundarySchema<SecretSummary> = boundary.object({
   name: boundary.string,
   updatedAt: boundary.string,
   machine: boundary.string,
+  sites: boundary.optional(boundary.array(boundary.string)),
 });
 const referenceSummarySchema = boundary.object({
   project: boundary.string,
@@ -31,6 +34,7 @@ const referenceSummarySchema = boundary.object({
   reference: boundary.string,
   updatedAt: boundary.string,
   machine: boundary.string,
+  sites: boundary.optional(boundary.array(boundary.string)),
 });
 const leaseSummarySchema = boundary.object({
   id: boundary.string,
@@ -72,7 +76,7 @@ function invalid(message: string, next: string): RunpaneError {
  * Pane secrets are the owner's. Pane sets PANE_TEAMMATE_LOGIN on a teammate's `workspace exec`, and
  * every secrets command refuses it before asking Pane for anything.
  */
-function refuseTeammate(action: string, env: NodeJS.ProcessEnv = process.env): void {
+export function refuseTeammate(action: string, env: NodeJS.ProcessEnv = process.env): void {
   const teammate = env.PANE_TEAMMATE_LOGIN;
   if (!teammate) return;
   throw new RunpaneError(
@@ -85,6 +89,10 @@ function refuseTeammate(action: string, env: NodeJS.ProcessEnv = process.env): v
 function requireFlag(parsed: ParsedArgs, value: string | undefined, flag: string, outcome: string): string {
   if (value?.trim()) return value;
   throw invalid(`runpane ${parsed.command} requires ${flag}. ${outcome}`, `See the options with \`runpane help ${parsed.command}\`.`);
+}
+
+function loginText(sites: readonly string[] | undefined): string {
+  return sites ? `  login for ${sites.join(', ')}` : '';
 }
 
 export async function runSecretsList(parsed: ParsedArgs): Promise<number> {
@@ -100,7 +108,7 @@ export async function runSecretsList(parsed: ParsedArgs): Promise<number> {
     console.log(`No Pane secrets${parsed.project === undefined ? '' : ` in project ${parsed.project}`} on this machine yet.`);
   }
   for (const secret of result.secrets) {
-    console.log(`${secret.project}/${secret.name}  set ${secret.updatedAt} on ${secret.machine}`);
+    console.log(`${secret.project}/${secret.name}  set ${secret.updatedAt} on ${secret.machine}${loginText(secret.sites)}`);
   }
   for (const reference of references) {
     const until = (result.leases ?? [])
@@ -108,7 +116,7 @@ export async function runSecretsList(parsed: ParsedArgs): Promise<number> {
       .map((lease) => lease.expiresAt)
       .sort()
       .at(-1);
-    console.log(`${reference.project}/${reference.name}  from 1Password (${reference.reference})  ${until ? `leased until ${until}` : 'no lease'}`);
+    console.log(`${reference.project}/${reference.name}  from 1Password (${reference.reference})  ${until ? `leased until ${until}` : 'no lease'}${loginText(reference.sites)}`);
   }
   if (result.storage.kind === 'file' && !result.storage.encrypted) {
     console.log('This machine has no OS keyring, so its secret values are stored unencrypted in a file only you can read.');
@@ -357,7 +365,7 @@ export async function runSecretsLease(parsed: ParsedArgs, env: NodeJS.ProcessEnv
 function describeLeaseResult(result: NotifyResult): string {
   if ('status' in result && result.status === 'leased') {
     return `Leased ${result.project}/${result.names.join(', ')} until ${result.expiresAt} on ${result.machines.join(', ')}. Lease ${result.leaseId}. `
-      + `Use them with \`runpane secrets exec --project ${result.project} -- <command>\`.`;
+      + `Use them with \`runpane secrets exec --project ${result.project} -- <command>\`, and logins with \`runpane browser fill\`.`;
   }
   if (('status' in result && result.status === 'declined') || ('approved' in result && !result.approved)) return 'The person declined the lease.';
   // A Pane from before leases shows a plain approve card and starts nothing.
