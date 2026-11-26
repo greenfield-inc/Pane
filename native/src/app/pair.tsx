@@ -7,9 +7,10 @@ import { takePendingPairingCode } from '@/features/pairing/deepLink';
 import { ConnectForm } from '@/features/pairing/ConnectForm';
 import { RelayPairPrompt } from '@/features/pairing/RelayPairPrompt';
 import { Screen } from '@/ui';
+import { FocusScope } from '@/features/controller/FocusScope';
 
 /** Opened by a pairing link, signed in or not. The person confirms before connecting. */
-export default function PairFromLinkScreen() {
+function PairFromLinkScreen() {
   const [code] = useState(() => takePendingPairingCode() ?? '');
   const link = parseRelayPairingLink(code);
   // Pairing switches hosts, which remounts the navigator; leave for the
@@ -20,4 +21,9 @@ export default function PairFromLinkScreen() {
       {link ? <RelayPairPrompt code={code} link={link} onPaired={onPaired} /> : <ConnectForm initialCode={code} onPaired={onPaired} />}
     </Screen>
   );
+}
+
+/** A controller stays inside this screen while it is open; B closes it. */
+export default function PairFromLinkScreenRoute() {
+  return <FocusScope onBack={() => router.back()}><PairFromLinkScreen /></FocusScope>;
 }

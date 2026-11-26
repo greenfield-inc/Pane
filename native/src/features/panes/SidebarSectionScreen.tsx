@@ -1,6 +1,6 @@
-import { LegendList } from '@legendapp/list/react-native';
+import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -20,6 +20,8 @@ import { buildSidebar, type SidebarSection } from './paneList';
 import { SidebarItemView } from './SidebarItemView';
 import { useOpenSessions } from './useOpenSessions';
 import { usePaneActions } from './usePaneActions';
+import { FocusListContext } from '@/features/controller/focusContext';
+import { useFocusList } from '@/features/controller/useFocusList';
 
 const TITLES: Record<Exclude<SidebarSection, 'pinned'>, string> = { sessions: 'Sessions', repositories: 'Repositories', archived: 'Archived' };
 
@@ -74,6 +76,8 @@ export function SidebarSectionScreen() {
     setRefreshing(false);
   };
 
+  const listRef = useRef<LegendListRef>(null);
+  const focusList = useFocusList(listRef);
   return (
     <View style={[styles.fill, { backgroundColor: theme.colors.background }]}>
       <Stack.Screen options={{ title: TITLES[section] }} />
@@ -84,7 +88,9 @@ export function SidebarSectionScreen() {
           style={styles.fill}
           skeleton={<View style={styles.content}><LoadingRows archived={section === 'archived'} /></View>}
         >
+          <FocusListContext value={focusList}>
           <LegendList
+            ref={listRef}
             testID={`section-list-${section}`}
             data={items}
             keyExtractor={item => item.key}
@@ -113,6 +119,7 @@ export function SidebarSectionScreen() {
               />
             )}
           />
+          </FocusListContext>
         </SkeletonSwap>
       </Dimmed>
     </View>

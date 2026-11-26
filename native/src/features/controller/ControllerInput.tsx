@@ -83,8 +83,20 @@ export function ControllerInput() {
     const context = (): ControllerContext =>
       (controllerFocus.focused()?.context as ControllerContext | undefined) ?? controllerActions.context('home');
 
+    // Set by a press or a stick push while the ring is hidden (after a touch): that input only shows the
+    // ring, so A never acts on a control the person can't see.
+    let revealing = false;
     const run = (action: ControllerActionId, event: ControllerActionEvent) => {
+      if (revealing && (action === 'controller-activate' || FOCUS_MOVES[action])) {
+        if (!controllerFocus.focused()) controllerFocus.move('down');
+        return;
+      }
       if (!controllerActions.dispatch(action, event)) fallback(action);
+    };
+    const showRing = () => {
+      if (useControllerState.getState().ringShown) return;
+      revealing = true;
+      useControllerState.setState({ ringShown: true });
     };
 
     const step = () => {
@@ -115,7 +127,7 @@ export function ControllerInput() {
       activePad.id = id;
       activePad.hasRumble = raw.hasRumble ?? false;
       const state = useControllerState.getState();
-      useControllerState.setState({ active: true, family, padName: raw.name ?? '', ringShown: true });
+      useControllerState.setState({ active: true, family, padName: raw.name ?? '' });
       if (!state.sheetSeen) {
         state.markSheetSeen();
         useControllerState.setState({ cheatSheet: 'open' });
@@ -148,8 +160,9 @@ export function ControllerInput() {
         const position = toPosition(event.button, namesByLabel(platform, devices.get(event.deviceId)));
         if (event.pressed) held.add(position);
         else held.delete(position);
-        if (event.pressed && !useControllerState.getState().ringShown) useControllerState.setState({ ringShown: true });
+        if (event.pressed) showRing();
         step();
+        revealing = false;
       },
       onAxes(event) {
         if (event.deviceId !== deviceId) {
@@ -158,8 +171,9 @@ export function ControllerInput() {
           use(event.deviceId);
         }
         axes = event.axes;
-        if (Math.max(Math.abs(axes.leftX), Math.abs(axes.leftY)) > 0.5 && !useControllerState.getState().ringShown) useControllerState.setState({ ringShown: true });
+        if (Math.max(Math.abs(axes.leftX), Math.abs(axes.leftY)) > 0.5) showRing();
         step();
+        revealing = false;
       },
     });
     return () => {

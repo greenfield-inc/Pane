@@ -55,7 +55,8 @@ public class PaneControllerModule: Module {
     observers.forEach { NotificationCenter.default.removeObserver($0) }
     observers = []
     for controller in GCController.controllers() {
-      controller.extendedGamepad?.valueChangedHandler = nil
+      controller.extendedGamepad?.leftThumbstick.valueChangedHandler = nil
+      controller.extendedGamepad?.rightThumbstick.valueChangedHandler = nil
       forEachButton(controller) { element, _ in element.pressedChangedHandler = nil }
     }
   }

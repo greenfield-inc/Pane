@@ -285,7 +285,7 @@ export function HomeScreen() {
       if (!focused) router.dismissTo('/');
       useWideLayout.getState().requestSearch();
     },
-  });
+  }, 'always');
   const nothingWaiting = board.waiting.length + board.offline.length + inTerminal.length === 0;
   // The approvals card's amber: both lists wait on you.
   const needsTint = withAlpha(theme.colors.warning, 0.09);

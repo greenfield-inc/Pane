@@ -66,6 +66,9 @@ object PaneControllerInput {
     if (event.action == KeyEvent.ACTION_MULTIPLE) return true
     // Repeats of a held key change nothing.
     if (event.repeatCount > 0) return true
+    // A pad with analog triggers (PlayStation) also sends L2/R2 keys at its own threshold; the axis
+    // alone decides, or one squeeze reads as press, release, press.
+    if ((name == "l2" || name == "r2") && hasTriggerAxis(event.device, name)) return true
     setButton(target, event.deviceId, name, event.action == KeyEvent.ACTION_DOWN)
     return true
   }
@@ -110,6 +113,11 @@ object PaneControllerInput {
     lastAxes.remove(deviceId)
     lastAxesAt.remove(deviceId)
     pendingAxes.remove(deviceId)
+  }
+
+  private fun hasTriggerAxis(device: InputDevice?, name: String): Boolean {
+    val axes = if (name == "l2") listOf(MotionEvent.AXIS_LTRIGGER, MotionEvent.AXIS_BRAKE) else listOf(MotionEvent.AXIS_RTRIGGER, MotionEvent.AXIS_GAS)
+    return device != null && axes.any { device.getMotionRange(it) != null }
   }
 
   private fun hasAxis(event: MotionEvent, axis: Int) = event.device?.getMotionRange(axis, event.source) != null
