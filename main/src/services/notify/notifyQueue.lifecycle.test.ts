@@ -344,6 +344,24 @@ describe('NotifyQueue with its store', () => {
     expect(typed).toEqual([]);
   });
 
+  it("review F-2: an orchestrator's resumed relay takes the answer, and the worker's busy tab still gets its line", async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-39: run?', source: worker, at: Date.now() });
+    const relay = queue.ask({ relays: 'in-1', returnAfterMs: 50_000, question: { ui: 'options', title: 'Q-39: run the script?', choices: [{ label: 'Run', recommended: true }, { label: 'Stop' }] }, source: orchestrator });
+    await vi.advanceTimersByTimeAsync(50_000);
+    expect(await relay).toMatchObject({ waiting: true, id: 'in-1' });
+    tabState = 'busy';
+    queue.run({ type: 'answer', id: 'in-1', answer: { choice: 'Run' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await queue.ask({ resume: 'in-1', source: orchestrator })).toEqual({ answer: 'Run' });
+    expect(item(queue, 'in-1')?.delivered).toBeUndefined();
+    tabState = 'delivered';
+    queue.flushTabMessages();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed).toEqual([['w1', 'answer: Q-39 → Run (by you)']]);
+    expect(item(queue, 'in-1')?.delivered?.via).toBe('tab');
+  });
+
   it('review Must-Fix: an Autopilot answer between resume rounds reaches the tab when no resume comes, and is never marked delivered by a call', async () => {
     const queue = queueWith();
     const first = queue.ask({ question: ask('Q-2: ship?'), source: orchestrator, returnAfterMs: 50_000 });
