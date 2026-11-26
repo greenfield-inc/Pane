@@ -84,6 +84,8 @@ import type { SessionManager } from './services/sessionManager';
 import type { ConfigManager } from './services/configManager';
 import {
   activePaneChords,
+  appZoomForInput,
+  applyAppZoom,
   areKeyboardShortcutsEnabled,
   createMenuKeyState,
   isWindowCloseInput,
@@ -724,7 +726,15 @@ async function createWindow() {
         isBrowserTab,
         findActive: isBrowserTab && findActiveWebviews.has(wvContents.id),
       }, keySequence);
-      if (forwarded.length === 0) return;
+      if (forwarded.length === 0) {
+        // ⌘= / ⌘- / ⌘⇧0 in a page zoom Pane's window, not the page (T-125).
+        const zoom = appZoomForInput(input, configManager.getConfig());
+        if (zoom && mainWindow && !mainWindow.isDestroyed()) {
+          event.preventDefault();
+          applyAppZoom(mainWindow.webContents, zoom);
+        }
+        return;
+      }
 
       event.preventDefault();
       if (input.key === 'Escape') {
@@ -862,12 +872,13 @@ async function createWindow() {
   // (⌘H remapped, the ⌘M of ⌘K ⌘M) from the menu. We intercept at
   // before-input-event, where preventDefault also stops menu shortcuts, and
   // re-emit the key as a DOM keydown via IPC so the renderer's hotkey system sees it.
+  // View › Zoom's keys are answered here too, on this window (appZoomForInput).
   const menuKeys = createMenuKeyState();
   mainWindow.webContents.on('before-input-event', (event, input) => {
     const config = configManager.getConfig();
-    if (!areKeyboardShortcutsEnabled(config)) return;
-    const takeFromMenu = menuKeyTakenFromWindow(input, config, menuKeys);
-    if (input.type === 'keyDown' && (isWindowCloseInput(input) || takeFromMenu)) {
+    const shortcutsOn = areKeyboardShortcutsEnabled(config);
+    const takeFromMenu = shortcutsOn && menuKeyTakenFromWindow(input, config, menuKeys);
+    if (input.type === 'keyDown' && shortcutsOn && (isWindowCloseInput(input) || takeFromMenu)) {
       event.preventDefault();
       mainWindow?.webContents.send('synthetic-keydown', {
         key: input.key,
@@ -877,6 +888,13 @@ async function createWindow() {
         shiftKey: input.shift,
         altKey: input.alt,
       });
+      return;
+    }
+    // Main zooms the window itself: the menu never matches a plain ⌘= (appZoomForInput).
+    const zoom = appZoomForInput(input, config);
+    if (zoom && mainWindow) {
+      event.preventDefault();
+      applyAppZoom(mainWindow.webContents, zoom);
     }
   });
 
@@ -1468,6 +1486,9 @@ if (launchRemoteSetup) {
       installApplicationMenu({
         isPackaged: app.isPackaged,
         onAction: sendMenuAction,
+        onZoom: (zoom) => {
+          if (mainWindow && !mainWindow.isDestroyed()) applyAppZoom(mainWindow.webContents, zoom);
+        },
         paneChords: activePaneChords(config),
         settingsAccelerator: settingsMenuAccelerator(config),
         resetCustomTheme: configManager ? {

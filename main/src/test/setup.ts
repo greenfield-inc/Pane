@@ -65,6 +65,7 @@ export class Tray {
 
 export const Menu = {
   buildFromTemplate: vi.fn(() => ({})),
+  setApplicationMenu: vi.fn(),
 };
 
 export const nativeImage = {

@@ -391,7 +391,7 @@ Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ct
 
 A game controller drives the same commands; see [Game controllers](docs/CONTROLLERS.md).
 
-On macOS, Control+letter keys (`⌃A`, `⌃E`, `⌃K`, `⌃W`…) always reach the terminal. View → Actual Size is `⌘⇧0`, since `⌘0` focuses the sidebar.
+On macOS, Control+letter keys (`⌃A`, `⌃E`, `⌃K`, `⌃W`…) always reach the terminal. View → Zoom In is `⌘=` (or `⌘+`), Zoom Out `⌘-`, and Actual Size `⌘⇧0`, since `⌘0` focuses the sidebar. They size Pane itself from anywhere, a browser tab included.
 
 ---
 

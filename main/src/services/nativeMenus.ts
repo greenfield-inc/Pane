@@ -3,6 +3,7 @@ import { syntheticInputInFlight } from './browser/pageDriver';
 import { externalUrlOrNull } from '../utils/externalUrl';
 import { openExternalUrl } from '../utils/openExternalUrl';
 import type { ContextMenuEntry } from '../../../shared/types/contextMenu';
+import type { AppZoom } from '../utils/keyboardShortcuts';
 
 export const APP_MENU_ACTION_CHANNEL = 'app:menu-action';
 export type AppMenuAction = 'open-about' | 'open-settings';
@@ -20,6 +21,8 @@ const ISSUES_URL = 'https://github.com/dcouple/Pane/issues';
 export function installApplicationMenu(options: {
   isPackaged: boolean;
   onAction: (action: AppMenuAction) => void;
+  /** View › Zoom In, Zoom Out and Actual Size: zoom Pane's window. */
+  onZoom: (zoom: AppZoom) => void;
   /** Keys Pane's commands own now; a menu item with the same key shows it but stops answering it. */
   paneChords?: ReadonlySet<string>;
   /** Settings…'s key: Open Settings' binding, or null when it has none. */
@@ -88,9 +91,11 @@ export function installApplicationMenu(options: {
       submenu: [
         ...developerItems,
         // ⌘0 is Focus Sidebar in Pane's VS Code keymap (D-236), so Actual Size moves to ⌘⇧0.
-        keyed({ role: 'resetZoom' }, 'mod+shift+0', RESET_ZOOM_ACCELERATOR),
-        keyed({ role: 'zoomIn' }, 'mod+=', 'CmdOrCtrl+Plus'),
-        keyed({ role: 'zoomOut' }, 'mod+-', 'CmdOrCtrl+-'),
+        // Zoom steps Pane's window, never the focused page (a browser tab's).
+        // Main answers these keys before the menu does (appZoomForInput).
+        keyed({ label: 'Actual Size', click: () => options.onZoom('reset') }, 'mod+shift+0', RESET_ZOOM_ACCELERATOR),
+        keyed({ label: 'Zoom In', click: () => options.onZoom('in') }, 'mod+=', 'CmdOrCtrl+='),
+        keyed({ label: 'Zoom Out', click: () => options.onZoom('out') }, 'mod+-', 'CmdOrCtrl+-'),
         { type: 'separator' },
         keyed({ role: 'togglefullscreen' }, 'mod+ctrl+f', 'Ctrl+Command+F'),
         ...(options.resetCustomTheme ? [
