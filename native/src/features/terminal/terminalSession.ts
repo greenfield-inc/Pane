@@ -47,7 +47,6 @@ export class TerminalSession {
   private live = false;
   private pendingAck = 0;
   private ackInFlight = false;
-  private inputQueue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly options: TerminalSessionOptions) {}
 
@@ -149,12 +148,13 @@ export class TerminalSession {
       });
   }
 
-  /** Sends keystrokes in order: each waits for the previous one to reach the host. */
-  sendInput(data: string): Promise<void> {
-    const { invoke, panelId } = this.options;
-    const sent = this.inputQueue.then(() => invoke('terminal:input', [panelId, data]));
-    this.inputQueue = sent.catch(() => undefined);
-    return sent.then(() => undefined);
+  /**
+   * Sends keystrokes at once. The client keeps them in order and batches what
+   * piles up behind a request in flight, so a scroll's wheel reports cost one
+   * round trip, not one each, and a message sent after them is not held back.
+   */
+  async sendInput(data: string): Promise<void> {
+    await this.options.invoke('terminal:input', [this.options.panelId, data]);
   }
 
   resize(size: TerminalSize): void {

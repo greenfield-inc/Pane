@@ -18,6 +18,8 @@ export interface TerminalInputBarProps {
   onChangeDraft: (text: string) => void;
   /** Sends the draft followed by Enter, or a bare Enter when the draft is empty. */
   onSubmit: () => void;
+  /** A message is on its way: the box is read-only and Send waits until the host confirms it. */
+  sending?: boolean;
   voice: Voice;
   /** Opens Photos, Camera and Files. */
   onAttach: () => void;
@@ -46,7 +48,7 @@ export interface TerminalInputBarProps {
  * dictating, the words heard so far show in the box, dimmed and read-only.
  */
 export function TerminalInputBar({
-  draft, onChangeDraft, onSubmit, voice, onAttach, onPaste, onShortcuts, onCopy, onSetupVoice, controllerShown, onToggleController, onSelectionChange, selection, disabled = false,
+  draft, onChangeDraft, onSubmit, sending = false, voice, onAttach, onPaste, onShortcuts, onCopy, onSetupVoice, controllerShown, onToggleController, onSelectionChange, selection, disabled = false,
 }: TerminalInputBarProps) {
   const theme = useTheme();
   const { colors } = theme;
@@ -61,17 +63,18 @@ export function TerminalInputBar({
       <TextInput
         testID="terminal-input"
         value={shown}
-        onChangeText={text => !previewing && onChangeDraft(autocorrect ? straightenKeyboardEdit(draft, text) : text)}
+        // Android still takes keys into a read-only multiline box, so a send in flight drops them here too.
+        onChangeText={text => !previewing && !sending && onChangeDraft(autocorrect ? straightenKeyboardEdit(draft, text) : text)}
         onSelectionChange={event => onSelectionChange(event.nativeEvent.selection)}
         selection={previewing ? undefined : selection}
-        editable={!previewing}
+        editable={!previewing && !sending}
         placeholder="Type, dictate or pick a shortcut"
         placeholderTextColor={colors.textMuted}
         multiline
         // Return is the terminal's Enter: it sends and closes the keyboard, like the button.
         returnKeyType="send"
         submitBehavior="blurAndSubmit"
-        onSubmitEditing={() => { if (!disabled && !voiceBusy) onSubmit(); }}
+        onSubmitEditing={() => { if (!disabled && !voiceBusy && !sending) onSubmit(); }}
         // No capitals even with autocorrect on: a capitalized first word breaks a command.
         autoCapitalize="none"
         autoCorrect={autocorrect}
@@ -99,7 +102,7 @@ export function TerminalInputBar({
           onPress={onToggleController}
         />
         <MicButton voice={voice} disabled={disabled} onSetup={onSetupVoice} />
-        <SendButton hasText={draft.trim().length > 0} dimmed={disabled || voiceBusy} onPress={onSubmit} />
+        <SendButton hasText={draft.trim().length > 0} sending={sending} dimmed={disabled || voiceBusy} onPress={onSubmit} />
       </View>
     </View>
   );
@@ -151,9 +154,10 @@ function BoxAction({ testID, label, hint, ios, android, tinted: alwaysTinted = f
 /**
  * Empty box: outlined "Enter" that sends a bare Enter, to answer a menu or
  * confirm a prompt. With text: filled "Send" that sends it, then Enter. One
- * footprint in every state, so nothing beside it moves.
+ * footprint in every state, so nothing beside it moves. While sending, a spinner takes the icon's
+ * place and the button waits for the host.
  */
-function SendButton({ hasText, dimmed, onPress }: { hasText: boolean; dimmed: boolean; onPress: () => void }) {
+function SendButton({ hasText, sending, dimmed, onPress }: { hasText: boolean; sending: boolean; dimmed: boolean; onPress: () => void }) {
   const theme = useTheme();
   const { colors } = theme;
   const send = hasText || dimmed;
@@ -164,8 +168,8 @@ function SendButton({ hasText, dimmed, onPress }: { hasText: boolean; dimmed: bo
       accessibilityRole="button"
       accessibilityLabel={hasText ? 'Send' : 'Enter'}
       accessibilityHint={hasText ? 'Sends the text, then Enter' : 'Sends Enter'}
-      accessibilityState={{ disabled: dimmed }}
-      disabled={dimmed}
+      accessibilityState={{ disabled: dimmed, busy: sending }}
+      disabled={dimmed || sending}
       onPress={() => {
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onPress();
@@ -180,7 +184,11 @@ function SendButton({ hasText, dimmed, onPress }: { hasText: boolean; dimmed: bo
         },
       ]}
     >
-      <Icon ios={send ? 'paperplane.fill' : 'return.left'} android={send ? 'send' : 'keyboard_return'} size={14} color={tint} />
+      <View style={styles.sendIcon}>
+        {sending
+          ? <ActivityIndicator size="small" color={tint} />
+          : <Icon ios={send ? 'paperplane.fill' : 'return.left'} android={send ? 'send' : 'keyboard_return'} size={14} color={tint} />}
+      </View>
       <Text variant="callout" style={[styles.sendLabel, { color: tint }]}>{send ? 'Send' : 'Enter'}</Text>
     </Pressable>
   );
@@ -283,5 +291,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 5,
   },
+  sendIcon: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
   sendLabel: { fontSize: 13, fontWeight: '600' },
 });
