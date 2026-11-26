@@ -4,7 +4,6 @@ import { app, BrowserWindow, powerMonitor, type IpcMain } from 'electron';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { isDesktopAlertHandedOff, showDesktopAlert } from './desktopAlerts';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
@@ -1140,7 +1139,7 @@ function parseLinks(links: Array<{ label: string; path?: string; url?: string; a
     if (approval) return { label, approval };
     if (url) {
       const local = localFileUrl(url);
-      if (local === null) throw invalid(`${where}.url is a file:// URL Pane can't open here; for a local file use {"label":…,"path":"/abs/path"}.`);
+      if (local === null) throw invalid(`${where}.url is a file:// URL that names no file on this computer (it needs file:///abs/path or file://localhost/abs/path); for a local file use {"label":…,"path":"/abs/path"}.`);
       if (local !== undefined) return { label, path: local };
       if (!/^https?:\/\/\S+$/i.test(url)) throw invalid(`${where}.url must be an http(s) URL; for a local file use {"label":…,"path":"/abs/path"}; url is only for http(s) pages.`);
       return { label, url };
@@ -1150,21 +1149,31 @@ function parseLinks(links: Array<{ label: string; path?: string; url?: string; a
   });
 }
 
+/** file:///abs/path or file://localhost/abs/path: the only file URLs that name a file on this computer. */
+const LOCAL_FILE_URL = /^file:\/\/(?:localhost)?(\/[^?#]*)(?:[?#].*)?$/iu;
+
 /**
- * A link's url that names a local file (file://, an absolute path or ~/) as that file's path, so
- * an agent that reached for url still gets a chip that opens it. Undefined for any other url;
- * null for a file:// URL on another host, which Pane can't open.
+ * A link url that names a local file (file://, an absolute path, ~/ or a Windows drive path) as
+ * that file's path, so a card asked with url still opens the file. Undefined for any other url;
+ * null for a file: URL that names no file here: another host (never a network share), a relative
+ * one, a bad escape, or on Windows no drive. runpane (npm and pip) reads them the same way.
  */
 function localFileUrl(url: string): string | null | undefined {
   if (/^file:/iu.test(url)) {
+    const match = LOCAL_FILE_URL.exec(url);
+    if (!match || /%(?:2f|5c)/iu.test(match[1])) return null;
+    let decoded: string;
     try {
-      return fileURLToPath(url);
+      decoded = decodeURIComponent(match[1]);
     } catch {
       return null;
     }
+    if (process.platform !== 'win32') return decoded;
+    return /^\/[A-Za-z]:\//u.test(decoded) ? decoded.slice(1).replace(/\//gu, '\\') : null;
   }
   if (url.startsWith('~/')) return path.join(os.homedir(), url.slice(2));
-  if (path.isAbsolute(url) && !url.startsWith('//')) return url;
+  if (/^[A-Za-z]:[\\/]/u.test(url)) return url;
+  if (url.startsWith('/') && !url.startsWith('//')) return url;
   return undefined;
 }
 

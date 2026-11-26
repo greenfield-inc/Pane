@@ -1,6 +1,5 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { boundary, decodeBoundary, type BoundarySchema, type JsonObject, type JsonValue } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
 import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
@@ -399,7 +398,7 @@ function parseLinks(text: string): NotifyLink[] {
     }
     if (link.url === undefined) throw invalid('links', `links[${index}] needs one of "path" (a file), "url" (a web page) or "approval" (another approval's id or Q-n).`);
     const local = localFileUrl(link.url);
-    if (local === null) throw invalid('links', `links[${index}] url is a file:// URL on another computer; ${PATH_FORM}.`);
+    if (local === null) throw invalid('links', `links[${index}] url is a file:// URL that names no file on this computer (it needs file:///abs/path or file://localhost/abs/path); ${PATH_FORM}.`);
     if (local !== undefined) return { label: link.label, path: local };
     if (!LINK_URL.test(link.url)) throw invalid('links', `links[${index}] url must start with http:// or https://; ${PATH_FORM}; url is only for http(s) pages.`);
     return { label: link.label, url: link.url };
@@ -408,20 +407,30 @@ function parseLinks(text: string): NotifyLink[] {
 
 const PATH_FORM = 'for a local file use {"label":…,"path":"/abs/path"}';
 
+/** file:///abs/path or file://localhost/abs/path: the only file URLs that name a file on this computer. */
+const LOCAL_FILE_URL = /^file:\/\/(?:localhost)?(\/[^?#]*)(?:[?#].*)?$/iu;
+
 /**
- * A link url that names a local file (file://, an absolute path or ~/) as that file's path, so a
- * card asked with url still opens the file. Undefined for any other url; null for a file:// URL
- * on another host. Python's wrapper reads them the same way.
+ * A link url that names a local file (file://, an absolute path, ~/ or a Windows drive path) as
+ * that file's path, so a card asked with url still opens the file. Undefined for any other url;
+ * null for a file: URL that names no file here: another host (never a network share), a relative
+ * one, a bad escape, or on Windows no drive. Pane (main/src/ipc/notify.ts) and Python's wrapper reads them the same way.
  */
 function localFileUrl(url: string): string | null | undefined {
-  if (/^file:/i.test(url)) {
+  if (/^file:/iu.test(url)) {
+    const match = LOCAL_FILE_URL.exec(url);
+    if (!match || /%(?:2f|5c)/iu.test(match[1])) return null;
+    let decoded: string;
     try {
-      return fileURLToPath(url);
+      decoded = decodeURIComponent(match[1]);
     } catch {
       return null;
     }
+    if (process.platform !== 'win32') return decoded;
+    return /^\/[A-Za-z]:\//u.test(decoded) ? decoded.slice(1).replace(/\//gu, '\\') : null;
   }
   if (url.startsWith('~/')) return path.join(os.homedir(), url.slice(2));
+  if (/^[A-Za-z]:[\\/]/u.test(url)) return url;
   if (url.startsWith('/') && !url.startsWith('//')) return url;
   return undefined;
 }

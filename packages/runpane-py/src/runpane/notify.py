@@ -8,7 +8,7 @@ import os
 import re
 import sys
 from typing import Any, Dict, List, Mapping, Optional, Tuple
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote
 
 from .daemon_client import PaneDaemonClientError, invoke_daemon
 
@@ -355,7 +355,7 @@ def parse_links(text: str) -> List[Dict[str, str]]:
             raise invalid("links", f'links[{index}] needs one of "path" (a file), "url" (a web page) or "approval" (another approval\'s id or Q-n).')
         local = local_file_url(url)
         if local is _MISSING:
-            raise invalid("links", f"links[{index}] url is a file:// URL on another computer; {PATH_FORM}.")
+            raise invalid("links", f"links[{index}] url is a file:// URL that names no file on this computer (it needs file:///abs/path or file://localhost/abs/path); {PATH_FORM}.")
         if local is not None:
             links.append({"label": label, "path": local})
             continue
@@ -368,28 +368,31 @@ def parse_links(text: str) -> List[Dict[str, str]]:
 PATH_FORM = 'for a local file use {"label":…,"path":"/abs/path"}'
 
 
-def local_file_url(url: str) -> Any:
-    """A link url naming a local file (file://, an absolute path or ~/) as its path, as the Node wrapper reads it.
+# file:///abs/path or file://localhost/abs/path: the only file URLs that name a file on this computer.
+LOCAL_FILE_URL = re.compile(r"^file://(?:localhost)?(/[^?#]*)(?:[?#].*)?$", re.IGNORECASE)
 
-    None for any other url; _MISSING for a file:// URL on another host.
+
+def local_file_url(url: str) -> Any:
+    """A link url naming a local file (file://, an absolute path, ~/ or a Windows drive path) as its path, as npm runpane and Pane read it.
+
+    None for any other url; _MISSING for a file: URL that names no file here: another host (never a
+    network share), a relative one, a bad escape, or on Windows no drive.
     """
     if url[:5].lower() == "file:":
-        parts = urlparse(url)
-        encoded = parts.path.lower()
-        if os.name == "nt":
-            # As Node's fileURLToPath on Windows: another host is a UNC path; a local one needs a drive.
-            if "%2f" in encoded or "%5c" in encoded:
-                return _MISSING
-            if parts.netloc not in ("", "localhost"):
-                return "\\\\" + parts.netloc + unquote(parts.path).replace("/", "\\")
-            if not re.match(r"^/[A-Za-z]:", parts.path):
-                return _MISSING
-            return unquote(parts.path[1:]).replace("/", "\\")
-        if parts.netloc not in ("", "localhost") or "%2f" in encoded:
+        match = LOCAL_FILE_URL.match(url)
+        if not match or re.search(r"%(?:2f|5c)", match.group(1), re.IGNORECASE) or re.search(r"%(?![0-9A-Fa-f]{2})", match.group(1)):
             return _MISSING
-        return unquote(parts.path)
+        try:
+            decoded = unquote(match.group(1), errors="strict")
+        except UnicodeDecodeError:
+            return _MISSING
+        if os.name != "nt":
+            return decoded
+        return decoded[1:].replace("/", "\\") if re.match(r"^/[A-Za-z]:/", decoded) else _MISSING
     if url.startswith("~/"):
         return os.path.join(os.path.expanduser("~"), url[2:])
+    if re.match(r"^[A-Za-z]:[\\/]", url):
+        return url
     if url.startswith("/") and not url.startswith("//"):
         return url
     return None

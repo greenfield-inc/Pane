@@ -688,8 +688,10 @@ describe('Approvals items, through the registered handlers', () => {
       code: 'ERR_NOTIFY_INVALID',
       message: expect.stringContaining('for a local file use {"label":…,"path":"/abs/path"}; url is only for http(s) pages'),
     });
-    // On Windows the same URL is a UNC path (\\server\share\a.md), which Pane can open.
-    if (process.platform !== 'win32') await expect(call([{ label: 'Share', url: 'file://server/share/a.md' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
+    // A file: URL that names no file here: another host (never a network share, on any platform), a relative one, a bad escape.
+    for (const url of ['file://server/share/a.md', 'file:docs/a.md', 'file:///tmp/a%ZZ.md']) {
+      await expect(call([{ label: 'File', url }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID', message: expect.stringContaining('file:///abs/path or file://localhost/abs/path') });
+    }
     await expect(call([{ label: 'Both', url: 'https://a.example', path: '/a' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
     await expect(call(Array.from({ length: 7 }, (_, index) => ({ label: `L${index}`, url: 'https://a.example' })))).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
     await expect(call([{ label: 'x'.repeat(81), url: 'https://a.example' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
@@ -800,7 +802,7 @@ describe('Approvals items, through the registered handlers', () => {
     const fileUrl = pathToFileURL(path.resolve('/tmp/mock ups/index.html')).href;
     void pane.registry.invoke('runpane:notify', [{
       ui: 'approve', title: 'Ship the mock-ups?', caller: { cwd: '/repo' },
-      links: [{ label: 'Mock-ups', url: fileUrl }, { label: 'Plan', url: '/tmp/plan.md' }, { label: 'Notes', url: '~/notes.md' }, { label: 'Draft', path: '~/draft.md' }],
+      links: [{ label: 'Mock-ups', url: fileUrl.replace('file://', 'file://LOCALHOST') }, { label: 'Plan', url: '/tmp/plan.md' }, { label: 'Notes', url: '~/notes.md' }, { label: 'Draft', path: '~/draft.md' }],
     }]);
     await flush();
     expect(pane.notify.snapshot().items[0].links).toEqual([

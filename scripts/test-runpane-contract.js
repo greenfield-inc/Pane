@@ -6941,9 +6941,10 @@ async function checkNotifyCardCheck() {
   const outsidePane = { PANE_SESSION_ID: '', PANE_PANEL_ID: '', RUNPANE_NOTIFY_AGENT: '', RUNPANE_NOTIFY_RETURN_AFTER_MS: '' };
   const warning = 'Attached /tmp/mock/index.html as a link: the card names it but --links didn\'t.';
   const mockUps = path.resolve('/tmp/mock ups/index.html');
-  const links = JSON.stringify([{ label: 'Mock-ups', url: pathToFileURL(mockUps).href }, { label: 'Plan', url: '/tmp/plan.md' }, { label: 'PR #1611', url: 'https://github.com/org/repo/pull/1611' }]);
+  const notes = path.resolve('/tmp/notes.md');
+  const links = JSON.stringify([{ label: 'Mock-ups', url: pathToFileURL(mockUps).href }, { label: 'Plan', url: '/tmp/plan.md' }, { label: 'PR #1611', url: 'https://github.com/org/repo/pull/1611' }, { label: 'Notes', url: pathToFileURL(notes).href.replace('file://', 'file://LOCALHOST') }, { label: 'Spec', url: 'C:\\specs\\a.md' }]);
   const card = ['notify', '--ui', 'approve', '--title', 'Ship the mock-ups?', '--links', links];
-  const sentLinks = [{ label: 'Mock-ups', path: mockUps }, { label: 'Plan', path: '/tmp/plan.md' }, { label: 'PR #1611', url: 'https://github.com/org/repo/pull/1611' }];
+  const sentLinks = [{ label: 'Mock-ups', path: mockUps }, { label: 'Plan', path: '/tmp/plan.md' }, { label: 'PR #1611', url: 'https://github.com/org/repo/pull/1611' }, { label: 'Notes', path: notes }, { label: 'Spec', path: 'C:\\specs\\a.md' }];
   const sent = { npm: [], pip: [] };
   try {
     for (const runtime of ['npm', 'pip']) {
@@ -6975,6 +6976,8 @@ async function checkNotifyCardCheck() {
         `  Mock-ups: ${mockUps}`,
         '  Plan: /tmp/plan.md',
         '  PR #1611: https://github.com/org/repo/pull/1611',
+        `  Notes: ${notes}`,
+        '  Spec: C:\\specs\\a.md',
         'No warnings.',
       ].join('\n'), `${runtime} notify --check text`);
 
@@ -7161,7 +7164,9 @@ async function checkNotifyParity() {
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","path":" "}]'], 'links[0] path must be non-empty text.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"PR","url":"https://example.com"},{"label":"Files","url":"ftp://files.example/a.md"}]'], 'links[1] url must start with http:// or https://; for a local file use {"label":…,"path":"/abs/path"}; url is only for http(s) pages.'],
     // On Windows another host's file:// URL is a UNC path, which both wrappers take as the path.
-    ...(process.platform === 'win32' ? [] : [['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Share","url":"file://server/share/a.md"}]'], 'links[0] url is a file:// URL on another computer; for a local file use {"label":…,"path":"/abs/path"}.']]),
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Share","url":"file://server/share/a.md"}]'], 'links[0] url is a file:// URL that names no file on this computer (it needs file:///abs/path or file://localhost/abs/path); for a local file use {"label":…,"path":"/abs/path"}.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Docs","url":"file:docs/a.md"}]'], 'links[0] url is a file:// URL that names no file on this computer (it needs file:///abs/path or file://localhost/abs/path); for a local file use {"label":…,"path":"/abs/path"}.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Bad","url":"file:///tmp/a%ZZ.md"}]'], 'links[0] url is a file:// URL that names no file on this computer (it needs file:///abs/path or file://localhost/abs/path); for a local file use {"label":…,"path":"/abs/path"}.'],
     ['check', ['--check', '--resume', 'n-1'], 'check shows a new card or an --update without posting it, so it does not go with --resume, --took or --close.'],
     ['check', ['--check', '--close', 'Q-20'], 'check shows a new card or an --update without posting it, so it does not go with --resume, --took or --close.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"","url":"https://example.com"}]'], 'links[0] must be an object with a non-empty "label" and one of "path", "url" or "approval".'],

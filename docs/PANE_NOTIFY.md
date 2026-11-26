@@ -34,9 +34,11 @@ takes up to 6 `links` (`--links`), related files and pages shown as chips:
 `{label, path}` for a file on the asking machine (relative to its working
 directory, `~/` for the home folder), `{label, url}` for an http or https
 page, or `{label, approval}` for another approval (its id or Q-n). A `url`
-that is a `file://` URL or an absolute path is taken as the file's `path`;
-any other non-http(s) `url` is refused with the `path` form in the error.
-Older Panes ignore links.
+that is `file:///abs/path` (or `file://localhost/…`), an absolute path or a
+Windows drive path is taken as the file's `path`. A `file:` URL naming another
+host (never a network share), a relative or badly escaped one, and any other
+non-http(s) `url` is refused with the `path` form in the error. Older Panes
+ignore links.
 In Approvals, clicking a chip opens it as a tab beside the card: a file in an
 editor tab, a page in a browser tab, another approval in place, with **Back**.
 A Q-n names an approval from the same Session (or, outside one, the same Pane
@@ -56,10 +58,15 @@ PRs and other approvals. Every way of asking goes through one check
 characters or with a line break, and two recommended options in one question,
 and returns a warning for each softer miss, which `runpane notify` and
 `runpane report` print. A file the title, context, a question or an option
-names by absolute (or `~/`) path but no link opens is attached as a link, with
-a warning; a card naming one that isn't on the disk is refused
-(`ERR_NOTIFY_UNLINKED_PATH`). A path whose first folder isn't on the disk (an
-API route) and a folder stay plain text (`cardAdmit.ts`). Because a card's
+names by absolute, `~/` or drive path (whole when it is in backticks or
+quotes, so spaces are fine) but no link opens is attached as a link, with a
+warning; when the card's 6 links are full it is refused instead
+(`ERR_NOTIFY_LINKS_FULL`). A path with a file extension that isn't on the disk
+is refused (`ERR_NOTIFY_UNLINKED_PATH`) when its top folder is, and warned
+about when it isn't. Folders, routes and other paths without an extension stay
+plain text (`cardAdmit.ts`). An `--update` or a relay is checked as the card
+it leaves, and only for paths it adds; files it names join the card's links,
+and without `--links` it keeps the card's own. Because a card's
 call waits on the person, often in the background, `runpane notify` first
 runs the same check without posting (`runpane:notify:check`) and prints its
 warnings on stderr before it waits; `runpane notify --check` prints the
