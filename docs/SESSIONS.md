@@ -45,9 +45,11 @@ nothing of Agent Farm's), the launch command's profile for `agent-farm run
 (for example `greenfield/orchestrator`, which then picks the agent; a named variant must exist, and Pane asks its Agent Farm which agent a non-default variant runs, refusing an `agent` that disagrees before it saves anything). A new launch command keeps a named profile; a new agent moves the Session to that agent's plain profile. `hash` is the
 content hash of the profile's plugin when the Session took it. The profile's
 instructions go into the Session folder as `PROFILE.md` and a section of its
-`AGENTS.md`, rewritten at every start; a `PROFILE.md` Pane didn't write (it marks its
-own on the first line) is left alone, and the `AGENTS.md` section alone carries the
-profile. Sessions created before this, Sessions that
+`AGENTS.md`, rewritten at every start, naming the profile by Agent Farm's title
+and its ref (`Orchestrator (greenfield/orchestrator)`) and telling the agent to
+start linked agents with the exact command its Launch links list; a `PROFILE.md`
+Pane didn't write (it marks its own on the first line) is left alone, and the
+`AGENTS.md` section alone carries the profile. Sessions created before this, Sessions that
 keep a terminal, and Cursor, OpenCode and Pi Sessions have no `agentProfile` and
 start their agent directly, as before; so does a new Session when Pane's own
 plugin isn't installed yet. Changing a Session's agent or launch command keeps it
@@ -150,6 +152,11 @@ the agent to finish its current reply, then restart its chat tab on the new laun
   dot and Reload profile is marked; listing Sessions re-checks the plugins at most
   every 10 seconds. A Session whose agent runs in a terminal, or one from before
   profiles (Reload only), refuses with why.
+- When this computer's Agent Farm no longer lists a Session's profile (greenfield
+  0.1.0 removed most of them), the row shows a red dot, Reload profile reads
+  *profile gone* and refuses (`SESSION_PROFILE_GONE`), and Switch profile reads
+  *pick again*: the person picks a profile again. A list Pane can't read marks
+  nothing.
 
 With Profiles off, the menu has neither item, `orchestration-sessions:switch-profile`
 and `:reload-profile` refuse (`SESSION_PROFILE_UNSUPPORTED`), Pane reads no plugin for the changed mark, and rows show no amber dot.
