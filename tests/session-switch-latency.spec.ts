@@ -148,6 +148,19 @@ function fixture(baseURL: string | undefined): Promise<Fixture> {
       saved.updates = conversation(session.turns, endMark(session));
       writeFileSync(file, JSON.stringify(saved));
     }
+    // Each chat replays its new history once and saves its newest messages beside it (F-lite,
+    // T-87), so after the next launch a Session the cursor passes over can show them without
+    // starting its agent. A build without F-lite just starts and stops each agent here.
+    const warm = await launch(pane, baseURL);
+    try {
+      for (const session of sessions) {
+        await warm.page.getByTestId(`orchestration-session-${session.id}`).click();
+        await expect(warm.page.locator('[aria-label="Conversation messages"]').filter({ hasText: endMark(session) }).first()).toBeVisible({ timeout: 60_000 });
+      }
+      await warm.page.waitForTimeout(2_000);
+    } finally {
+      await warm.app.close().catch(() => undefined);
+    }
     return { pane, sessions: sessions.map(({ name, id, panelId, size, messages }) => ({ name, id, panelId, size, messages })) };
   })();
   return seeded;
@@ -157,12 +170,15 @@ function fixture(baseURL: string | undefined): Promise<Fixture> {
 // One switch: the trigger, an in-page rAF probe for "visible", and the stage marks.
 
 /** How a switch starts. t0 is the trigger's first input event (click or keydown, capture phase). */
-type Trigger = 'click' | 'enter';
+type Trigger = 'click' | 'enter' | 'down' | 'up';
 interface TriggerSpec { focuses: boolean; run: (page: Page, row: ReturnType<Page['getByTestId']>) => Promise<void> }
 const TRIGGERS = {
   click: { focuses: false, run: async (_page, row) => { await row.click(); } },
   // Enter on a focused row (regionFocus.ts): opens the Session and moves focus into its composer.
   enter: { focuses: true, run: async (page, row) => { await row.focus(); await page.keyboard.press('Enter'); } },
+  // The sidebar cursor (T-87): the row above or below holds focus, and the arrow shows this Session.
+  down: { focuses: false, run: async page => { await page.keyboard.press('ArrowDown'); } },
+  up: { focuses: false, run: async page => { await page.keyboard.press('ArrowUp'); } },
 } satisfies Record<Trigger, TriggerSpec>;
 
 interface Sample {
@@ -190,10 +206,11 @@ interface Sample {
 
 interface ProbeResult { input?: number; visible?: number; painted?: number; focused?: number; timedOut?: boolean }
 
-async function switchTo(page: Page, session: Seeded, trigger: Trigger, scenario: string): Promise<Sample> {
+async function switchTo(page: Page, session: Seeded, trigger: Trigger, scenario: string, probeMs = 60_000): Promise<Sample> {
   const row = page.getByTestId(`orchestration-session-${session.id}`);
-  await row.scrollIntoViewIfNeeded();
-  await page.evaluate(({ panelId, mark, focuses }) => {
+  // An arrow moves from the focused row; scrolling the target first would not change that.
+  if (trigger === 'click' || trigger === 'enter') await row.scrollIntoViewIfNeeded();
+  await page.evaluate(({ panelId, mark, focuses, probeMs }) => {
     globalThis.__paneSwitchMarks = [];
     const done: ProbeResult = {};
     globalThis.__paneSwitchProbe = done;
@@ -224,7 +241,7 @@ async function switchTo(page: Page, session: Seeded, trigger: Trigger, scenario:
       } else if (done.visible !== undefined && done.painted === undefined && now > done.visible) done.painted = now;
       if (focuses && done.focused === undefined && composer && document.activeElement === composer) done.focused = now;
       const finished = done.painted !== undefined && (!focuses || done.focused !== undefined);
-      if (finished || now - started > 60_000) {
+      if (finished || now - started > probeMs) {
         done.timedOut = !finished;
         window.removeEventListener('click', input, { capture: true });
         window.removeEventListener('keydown', input, { capture: true });
@@ -233,7 +250,7 @@ async function switchTo(page: Page, session: Seeded, trigger: Trigger, scenario:
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
-  }, { panelId: session.panelId, mark: endMark(session), focuses: TRIGGERS[trigger].focuses });
+  }, { panelId: session.panelId, mark: endMark(session), focuses: TRIGGERS[trigger].focuses, probeMs });
   await TRIGGERS[trigger].run(page, row);
   await page.waitForFunction(() => globalThis.__paneSwitchProbe?.timedOut !== undefined, undefined, { timeout: 90_000, polling: 50 });
   const { done, marks } = await page.evaluate(() => ({ done: globalThis.__paneSwitchProbe ?? {}, marks: globalThis.__paneSwitchMarks ?? [] }));
@@ -320,7 +337,7 @@ function summarize(samples: Sample[]): Summary[] {
 
 const ms = (value: number | null) => (value === null ? '–' : String(Math.round(value)));
 
-function markdown(summary: Summary[], retention: Retention | undefined): string {
+function markdown(summary: Summary[], retention: Retention | undefined, arrowRetention?: Retention): string {
   const lines = [
     '### Session switch latency (reported only)',
     '',
@@ -328,6 +345,9 @@ function markdown(summary: Summary[], retention: Retention | undefined): string 
     '|---|---|---|---|---|---|---|',
     ...summary.map(row => `| ${row.scenario} | ${row.n} | ${row.cacheHits}/${row.n} | **${ms(row.visibleP50)} / ${ms(row.visibleP95)}** | ${ms(row.paintedP50)} | ${ms(row.focusedP50)} | ${ms(row.commitP50)} |`),
   ];
+  if (arrowRetention) {
+    lines.push('', `Arrow keys: retained after ${arrowRetention.switches} switches and a forced GC, per switch: **${arrowRetention.perSwitch.nodes} DOM nodes** (limit ${MAX_RETAINED_NODES_PER_SWITCH}), ${arrowRetention.perSwitch.listeners} listeners, ${arrowRetention.perSwitch.heapMB} MB heap.`);
+  }
   if (retention) {
     lines.push('', `Retained after ${retention.switches} switches and a forced GC, per switch: **${retention.perSwitch.nodes} DOM nodes** (limit ${MAX_RETAINED_NODES_PER_SWITCH}), ${retention.perSwitch.listeners} listeners, ${retention.perSwitch.heapMB} MB heap.`);
   }
@@ -335,7 +355,7 @@ function markdown(summary: Summary[], retention: Retention | undefined): string 
 }
 
 interface Meta { commit: string; branch: string; platform: string; renderer: string; at: string }
-interface Report { meta?: Meta; summary: Summary[]; samples: Sample[]; retention?: Retention }
+interface Report { meta?: Meta; summary: Summary[]; samples: Sample[]; retention?: Retention; arrowRetention?: Retention }
 const report: Report = { summary: [], samples: [] };
 
 /** Writes session-switch.json (every sample) and session-switch.md (the table); returns the table. */
@@ -343,7 +363,7 @@ function writeReport(): string {
   mkdirSync(OUT, { recursive: true });
   report.summary = summarize(report.samples);
   writeFileSync(path.join(OUT, 'session-switch.json'), JSON.stringify(report, null, 2));
-  const table = markdown(report.summary, report.retention);
+  const table = markdown(report.summary, report.retention, report.arrowRetention);
   writeFileSync(path.join(OUT, 'session-switch.md'), table);
   return table;
 }
@@ -378,7 +398,7 @@ async function countersAfterGc(app: ElectronApplication): Promise<Counters> {
 // ---------------------------------------------------------------------------
 
 test.afterAll(() => {
-  if (report.samples.length === 0 && !report.retention) return;
+  if (report.samples.length === 0 && !report.retention && !report.arrowRetention) return;
   const table = writeReport();
   console.log(`\n${table}\nSamples: ${path.join(OUT, 'session-switch.json')}`);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
@@ -434,6 +454,202 @@ test(`switching leaves at most ${MAX_RETAINED_NODES_PER_SWITCH} DOM nodes per sw
     const per = (key: keyof Counters) => (after[key] - before[key]) / RETENTION_SWITCHES;
     report.retention = { switches: RETENTION_SWITCHES, before, after, perSwitch: { nodes: Math.round(per('nodes')), listeners: Math.round(per('listeners')), heapMB: +per('heapMB').toFixed(3) } };
     expect(per('nodes'), `DOM nodes kept per switch (before ${JSON.stringify(before)}, after ${JSON.stringify(after)})`).toBeLessThanOrEqual(MAX_RETAINED_NODES_PER_SWITCH);
+  } finally {
+    writeReport();
+    await app.close().catch(() => undefined);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The sidebar cursor (T-87 Phase 1): ↑/↓ show a chat Session at once, and only a settle
+// (1 s rest, Enter, typing) selects it and starts its agent. Hard checks, none of them timing.
+
+/** In-page counters for the cursor scenarios: agent starts, and skeletons shown. */
+interface CursorWatch { starts: string[]; skeletons: number; skeletonAt: string[] }
+declare global {
+  var __paneCursorWatch: CursorWatch | undefined;
+}
+
+async function watchCursor(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const watch: CursorWatch = { starts: [], skeletons: 0, skeletonAt: [] };
+    globalThis.__paneCursorWatch = watch;
+    const last = new Map<string, string>();
+    // Every agent start publishes its tab as starting; a tab already starting is not a new start.
+    window.electronAPI.chatTab.onState(view => {
+      if (view.status === 'starting' && last.get(view.panelId) !== 'starting') watch.starts.push(view.panelId);
+      last.set(view.panelId, view.status);
+    });
+    new MutationObserver(() => {
+      const bones = document.querySelector('[data-skeleton="visible"]');
+      if (!bones) return;
+      watch.skeletons += 1;
+      // Where it showed: the test ids around it, for the failure message.
+      const where: string[] = [];
+      for (let node: Element | null = bones; node && where.length < 4; node = node.parentElement) {
+        const id = node.getAttribute('data-testid');
+        if (id) where.push(id);
+      }
+      if (watch.skeletonAt.length < 5) watch.skeletonAt.push(where.join(' < ') || bones.outerHTML.slice(0, 120));
+    }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-skeleton'] });
+  });
+}
+
+async function resetWatch(page: Page): Promise<CursorWatch> {
+  return page.evaluate(() => {
+    const watch = globalThis.__paneCursorWatch ?? { starts: [], skeletons: 0, skeletonAt: [] };
+    const copy = { starts: [...watch.starts], skeletons: watch.skeletons, skeletonAt: [...watch.skeletonAt] };
+    watch.starts.length = 0;
+    watch.skeletons = 0;
+    watch.skeletonAt.length = 0;
+    return copy;
+  });
+}
+
+/** The Sessions in sidebar order, as the cursor walks them. */
+async function sidebarOrder(page: Page, sessions: Seeded[]): Promise<Seeded[]> {
+  const ids = await page.evaluate(() => Array.from(document.querySelectorAll('[data-session-cursor]')).map(row => row.getAttribute('data-session-cursor') ?? ''));
+  return ids.flatMap(id => sessions.filter(session => session.id === id));
+}
+
+/** What one cursor move did: peeks and opens per Session, chat mounts, and whether focus stayed on the row. */
+interface MoveCheck { peeks: number; opens: number; focusOnRow: boolean }
+async function moveCheck(page: Page, session: Seeded): Promise<MoveCheck> {
+  return page.evaluate(id => {
+    const marks = globalThis.__paneSwitchMarks ?? [];
+    const active = document.activeElement;
+    return {
+      peeks: marks.filter(mark => mark.name === 'session:peek' && mark.detail.sessionId === id).length,
+      opens: marks.filter(mark => mark.name === 'session:open' && mark.detail.sessionId === id).length,
+      focusOnRow: active?.getAttribute('data-session-cursor') === id,
+    };
+  }, session.id);
+}
+
+async function focusRow(page: Page, session: Seeded): Promise<void> {
+  const row = page.getByTestId(`orchestration-session-${session.id}`);
+  await row.scrollIntoViewIfNeeded();
+  await row.focus();
+}
+
+/** One arrow press onto `session`, checked hard and timed (reported only). */
+async function arrowTo(page: Page, session: Seeded, key: 'down' | 'up', scenario: string, held: Set<string>, pauseMs: number): Promise<Sample> {
+  const started = Date.now();
+  const sample = await switchTo(page, session, key, scenario, 5_000);
+  const check = await moveCheck(page, session);
+  expect(check.focusOnRow, `${scenario}: focus stays on ${session.name}'s sidebar row`).toBe(true);
+  expect(sample.visible, `${scenario}: ${session.name} shows its last message`).not.toBeNull();
+  expect(sample.chatMounts, `${scenario}: ${session.name} mounts its chat at most once`).toBeLessThanOrEqual(1);
+  expect(check.peeks, `${scenario}: ${held.has(session.id) ? 'no peek for a held' : 'at most one peek for'} ${session.name}`).toBeLessThanOrEqual(held.has(session.id) ? 0 : 1);
+  expect(check.opens, `${scenario}: passing over ${session.name} opens nothing`).toBe(0);
+  held.add(session.id);
+  const left = pauseMs - (Date.now() - started);
+  if (left > 0) await page.waitForTimeout(left);
+  return sample;
+}
+
+test('arrow keys show chat Sessions at once, and only a settle starts an agent (T-87)', async ({ baseURL }) => {
+  test.setTimeout(15 * 60_000);
+  const { pane, sessions } = await fixture(baseURL);
+  report.meta ??= meta();
+  const { app, page } = await launch(pane, baseURL);
+  try {
+    const order = await sidebarOrder(page, sessions);
+    expect(order.length, 'every seeded Session follows the cursor').toBe(sessions.length);
+    const held = new Set<string>();
+    // The Session the app opened on is selected and held; start from it.
+    await switchTo(page, order[0], 'click', 'cursor-start');
+    held.add(order[0].id);
+    await page.waitForTimeout(1_500);
+    await watchCursor(page);
+    await focusRow(page, order[0]);
+    await resetWatch(page);
+
+    // ↓ through 20 Sessions, 400 ms apart (shorter than the 1 s settle): each shows from F-lite or the cache.
+    const walk = order.slice(1, 21);
+    for (const session of walk) report.samples.push(await arrowTo(page, session, 'down', 'arrow-walk-not-opened', held, 400));
+    let watch = await resetWatch(page);
+    expect(watch.starts, 'the 400 ms walk starts no agent').toEqual([]);
+    expect(watch.skeletons, `the walk shows no skeleton (${watch.skeletonAt.join('; ')})`).toBe(0);
+
+    // Back up the same rows: every one is held now, so no peek at all.
+    for (const session of walk.slice(0, -1).reverse()) report.samples.push(await arrowTo(page, session, 'up', 'arrow-walk-held', held, 400));
+    watch = await resetWatch(page);
+    expect(watch.starts, 'walking back starts no agent').toEqual([]);
+    expect(watch.skeletons, `walking back shows no skeleton (${watch.skeletonAt.join('; ')})`).toBe(0);
+
+    // ↑/↓ between two Sessions, 20 times.
+    const [a, b] = [walk[0], walk[1]];
+    await focusRow(page, a);
+    for (let index = 0; index < 20; index++) {
+      report.samples.push(await arrowTo(page, index % 2 === 0 ? b : a, index % 2 === 0 ? 'down' : 'up', 'arrow-pingpong', held, 400));
+    }
+    watch = await resetWatch(page);
+    expect(watch.starts, 'the ping-pong starts no agent').toEqual([]);
+    expect(watch.skeletons, `the ping-pong shows no skeleton (${watch.skeletonAt.join('; ')})`).toBe(0);
+
+    // Held ↓ at key-repeat rate (about 30 a second). ↑ onto the selected Session first clears the cursor.
+    await page.keyboard.press('ArrowUp');
+    await page.evaluate(() => { globalThis.__paneSwitchMarks = []; });
+    const repeat = order.slice(1, 16);
+    for (let index = 0; index < repeat.length; index++) {
+      await page.keyboard.press('ArrowDown');
+      await page.waitForTimeout(33);
+    }
+    await page.waitForTimeout(300);
+    const repeated = await page.evaluate(() => (globalThis.__paneSwitchMarks ?? []).filter(mark => mark.name === 'session:peek' || mark.name === 'session:open').map(mark => `${mark.name}:${mark.detail.sessionId}`));
+    expect(repeated.filter(name => name.startsWith('session:open')), 'holding ↓ opens nothing').toEqual([]);
+    expect(new Set(repeated).size, 'holding ↓ peeks each Session at most once').toBe(repeated.length);
+    watch = await resetWatch(page);
+    expect(watch.starts, 'holding ↓ starts no agent').toEqual([]);
+    expect(watch.skeletons, `holding ↓ shows no skeleton (${watch.skeletonAt.join('; ')})`).toBe(0);
+    const last = repeat[repeat.length - 1];
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('data-session-cursor')), 'focus ends on the last row').toBe(last.id);
+
+    // A 1.2 s rest on one row settles it: one open call and its agent starts, and only it.
+    await page.evaluate(() => { globalThis.__paneSwitchMarks = []; });
+    await page.waitForTimeout(1_200);
+    const settled = await moveCheck(page, last);
+    expect(settled.opens, `resting on ${last.name} opens it once`).toBe(1);
+    await expect.poll(async () => (await page.evaluate(() => globalThis.__paneCursorWatch?.starts ?? [])), { timeout: 10_000 }).toEqual([last.panelId]);
+    await resetWatch(page);
+    // Enter then focuses its message box, without opening it again.
+    await page.evaluate(() => { globalThis.__paneSwitchMarks = []; });
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.evaluate(id => document.activeElement?.getAttribute('data-chat-composer') === id, last.panelId), { timeout: 5_000 }).toBe(true);
+    expect((await moveCheck(page, last)).opens, 'Enter on a settled Session opens nothing more').toBe(0);
+    watch = await resetWatch(page);
+    expect(watch.starts, 'Enter starts no other agent').toEqual([]);
+  } finally {
+    writeReport();
+    await app.close().catch(() => undefined);
+  }
+});
+
+test(`arrow-key switching leaves at most ${MAX_RETAINED_NODES_PER_SWITCH} DOM nodes per switch after GC (T-87)`, async ({ baseURL }) => {
+  test.setTimeout(10 * 60_000);
+  const { pane, sessions } = await fixture(baseURL);
+  const { app, page } = await launch(pane, baseURL);
+  try {
+    const order = await sidebarOrder(page, sessions);
+    // Two neighbouring rows, long chats where the order has them side by side.
+    const long = (session: Seeded | undefined) => session !== undefined && session.size !== 'short';
+    const found = order.findIndex((session, index) => long(session) && long(order[index + 1]));
+    const pairAt = found >= 0 ? found : 1;
+    const [a, b] = [order[pairAt], order[pairAt + 1]];
+    await switchTo(page, a, 'click', 'arrow-retention-warmup');
+    await focusRow(page, a);
+    const held = new Set<string>([a.id]);
+    for (let index = 0; index < 8; index++) await arrowTo(page, index % 2 === 0 ? b : a, index % 2 === 0 ? 'down' : 'up', 'arrow-retention-warmup', held, 0);
+    await page.waitForTimeout(1_000);
+    const before = await countersAfterGc(app);
+    for (let index = 0; index < RETENTION_SWITCHES; index++) await arrowTo(page, index % 2 === 0 ? b : a, index % 2 === 0 ? 'down' : 'up', 'arrow-retention', held, 0);
+    // Back on the Session the count started on (it ended on b after an even number of switches).
+    await page.waitForTimeout(1_000);
+    const after = await countersAfterGc(app);
+    const per = (key: keyof Counters, digits: number) => +((after[key] - before[key]) / RETENTION_SWITCHES).toFixed(digits);
+    report.arrowRetention = { switches: RETENTION_SWITCHES, before, after, perSwitch: { nodes: per('nodes', 0), listeners: per('listeners', 0), heapMB: per('heapMB', 3) } };
+    expect(report.arrowRetention.perSwitch.nodes, `DOM nodes kept per arrow switch (before ${JSON.stringify(before)}, after ${JSON.stringify(after)})`).toBeLessThanOrEqual(MAX_RETAINED_NODES_PER_SWITCH);
   } finally {
     writeReport();
     await app.close().catch(() => undefined);

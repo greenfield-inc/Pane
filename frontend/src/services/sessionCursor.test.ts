@@ -109,3 +109,13 @@ describe('Arrow keys open chat Sessions (T-87)', () => {
     expect(settle).not.toHaveBeenCalled();
   });
 });
+
+describe('settling from a click or Enter (T-87)', () => {
+  it('opens nothing again for the Session already settled and shown', async () => {
+    const { cursor, settle } = await setup();
+    await cursor.settleOnSession('a');
+    expect(settle).not.toHaveBeenCalled();
+    await cursor.settleOnSession('b');
+    expect(settle).toHaveBeenCalledWith('b', null);
+  });
+});

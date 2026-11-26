@@ -1,3 +1,4 @@
+import { cachedOverview, rememberOverview } from '../stores/sessionViewCache';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { List, PanelRight, Pencil, RefreshCw, X } from 'lucide-react';
 import { API } from '../utils/api';
@@ -40,7 +41,8 @@ export interface SessionOverviewState {
  * orchestration-sessions-changed or -overview-updated for it, batched 50 ms apart.
  */
 export function useSessionOverview(sessionId: string): SessionOverviewState {
-  const [overview, setOverview] = useState<OrchestrationSessionOverview | null>(null);
+  // A Session shown before paints its overview at once (T-87); it reads again below.
+  const [overview, setOverview] = useState<OrchestrationSessionOverview | null>(() => cachedOverview(sessionId) ?? null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const overviewRequestId = useRef(0);
   const overviewRefreshTimer = useRef<number | null>(null);
@@ -59,6 +61,7 @@ export function useSessionOverview(sessionId: string): SessionOverviewState {
         return;
       }
       setOverview(response.data);
+      rememberOverview(sessionId, response.data);
       setOverviewError(null);
     } catch (cause) {
       if (!isCurrentRequest()) { if (required && isMounted.current) throw cause; return; }

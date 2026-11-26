@@ -141,5 +141,8 @@ export function pendingCursorSession(): string | undefined {
 export function settleOnSession(sessionId: string): Promise<void> {
   clearTimer();
   pending = undefined;
-  return useOrchestrationSessionStore.getState().settle(sessionId, hostIdOf(useConfigStore.getState().config));
+  const sessions = useOrchestrationSessionStore.getState();
+  // Already settled and shown (the cursor rested on it, then Enter): nothing to read again.
+  if (sessionId === sessions.selectedSessionId && !sessions.cursorSessionId && sessions.availability === 'ready' && !sessions.selectionError) return Promise.resolve();
+  return sessions.settle(sessionId, hostIdOf(useConfigStore.getState().config));
 }

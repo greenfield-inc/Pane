@@ -5,7 +5,7 @@ import { switchMark } from '../../../shared/switchMarks';
 import type { Session } from '../types/session';
 import type { ChatTabView } from '../../../shared/types/chatTab';
 import type { SessionPanelLayout, ToolPanel } from '../../../shared/types/panels';
-import type { OrchestrationSessionOpenResult, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionOpenResult, OrchestrationSessionOverview, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
 
 /**
  * What this window last read of a Session, so showing it again paints at once (T-87, B):
@@ -151,8 +151,30 @@ function entryFrom(result: OrchestrationSessionOpenResult<Session>, remembered: 
   return { view: panel === result.view.panel ? result.view : { ...result.view, panel }, panels, layout: result.layout, remembered, chat: result.chat, opened };
 }
 
+/**
+ * Each Session's overview (its Panes and their changes) as last read, so showing the
+ * Session again paints it at once while the overview reads again in the background.
+ */
+const overviews = new Map<string, OrchestrationSessionOverview>();
+
+export function cachedOverview(sessionId: string): OrchestrationSessionOverview | undefined {
+  return overviews.get(sessionId);
+}
+
+export function rememberOverview(sessionId: string, overview: OrchestrationSessionOverview): void {
+  overviews.delete(sessionId);
+  overviews.set(sessionId, overview);
+  // As many as the Sessions held, the oldest first out.
+  while (overviews.size > KEPT_SESSIONS) {
+    const oldest = overviews.keys().next().value;
+    if (oldest === undefined) break;
+    overviews.delete(oldest);
+  }
+}
+
 /** Forget every Session (the window switched machine). Replies still in flight are dropped. */
 export function clearSessionViewCache(): void {
+  overviews.clear();
   generation += 1;
   peeks.clear();
   opens.clear();
