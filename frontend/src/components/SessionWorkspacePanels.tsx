@@ -5,7 +5,7 @@ import { ChevronDown, ChevronUp, ListTodo, PanelRight, Terminal } from 'lucide-r
 import type { PanelLayoutNode, SessionPanelLayout, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { panelApi } from '../services/panelApi';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
-import { isTodosEnabled, useConfigStore } from '../stores/configStore';
+import { isProfilesEnabled, isTodosEnabled, useConfigStore } from '../stores/configStore';
 import { readPaneLayout, rememberPaneLayout } from '../utils/paneLayoutMemory';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { usePanelStore } from '../stores/panelStore';
@@ -363,9 +363,9 @@ export function SessionWorkspacePanels({
       const splitIds = new Set<string>();
       for (const panel of stage) if (panel.metadata?.openPlacement === 'split') splitIds.add(panel.id);
       const reconciled = reconcile(withOverview, [agentPanelId, overviewId, ...(todosId ? [todosId] : []), ...stage.map(panel => panel.id)], splitIds).layout;
-      // A Session whose agent changed (Switch profile to the other agent, T-63) opens on its new agent's tab,
-      // not on whatever took the old agent's place.
-      const agentNew = stored?.version === 1 && !layoutPanelIds(base).has(agentPanelId);
+      // With Profiles on, a Session whose agent changed (Switch profile to the other agent, T-63) opens on its
+      // new agent's tab, not on whatever took the old agent's place. Off, the layout is main's.
+      const agentNew = isProfilesEnabled(useConfigStore.getState().config) && stored?.version === 1 && !layoutPanelIds(base).has(agentPanelId);
       applyLayout(agentNew ? activatePanelInLayout(reconciled, agentPanelId) : reconciled);
       setLoaded(true);
     }).catch(error => {

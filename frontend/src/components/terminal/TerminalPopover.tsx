@@ -78,10 +78,12 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
       setPosition(current => current.top === top && current.left === left ? current : { top, left });
     };
     place();
+    // A submenu fills in after it opens (Switch profile's list), so it is placed again as it grows.
+    if (!submenu) return;
     const observer = new ResizeObserver(place);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [visible, x, y, flipY]);
+  }, [visible, x, y, flipY, submenu]);
 
   useEffect(() => {
     if (!visible) return;

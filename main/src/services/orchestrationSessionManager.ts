@@ -644,6 +644,7 @@ export class OrchestrationSessionManager extends EventEmitter {
    */
   async switchProfile(selector: OrchestrationSessionSelector, ref: string, source: 'user' | 'agent' = 'user'): Promise<OrchestrationSessionProfileSwitch> {
     const outcome = 'The Session was not switched.';
+    this.refuseProfilesOff(outcome);
     const target = await this.profileTarget(ref, undefined, outcome);
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
@@ -707,6 +708,7 @@ export class OrchestrationSessionManager extends EventEmitter {
    * waits for the current reply, and continues the conversation.
    */
   async reloadProfile(selector: OrchestrationSessionSelector, source: 'user' | 'agent' = 'user'): Promise<OrchestrationSessionRecord> {
+    this.refuseProfilesOff('Nothing was reloaded.');
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
@@ -735,6 +737,12 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
+  /** Switch and Reload exist only with Profiles on (T-63); off, Sessions behave as on main. */
+  private refuseProfilesOff(outcome: string): void {
+    if (this.profilesOn()) return;
+    throw new PaneError('SESSION_PROFILE_UNSUPPORTED', `Profiles is off on this computer, so a Session's profile can't change. ${outcome}`, 'Turn on Profiles in Settings > Advanced > Experimental, then try again.');
+  }
+
   /** The Session's agent tab, a chat tab, for a Switch or Reload; refused for one that can't change profile now. */
   private profileChatPanel(record: OrchestrationSessionRecord, done: 'switched' | 'reloaded'): ToolPanel {
     const outcome = done === 'switched' ? 'The Session was not switched.' : 'Nothing was reloaded.';
@@ -757,6 +765,8 @@ export class OrchestrationSessionManager extends EventEmitter {
    * profile changed since (T-63). PR 5's Save calls it after a save, with `force`.
    */
   refreshPluginHashes(force = false): Promise<void> {
+    // With Profiles off nothing shows the mark, so no plugin is read.
+    if (!this.profilesOn()) return Promise.resolve();
     if (this.pluginHashesChecking) return this.pluginHashesChecking;
     if (!force && Date.now() - this.pluginHashesCheckedAt < PLUGIN_HASH_INTERVAL_MS) return Promise.resolve();
     this.pluginHashesCheckedAt = Date.now();
@@ -1127,7 +1137,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   /** A Session is paused when its chat and every Pane in it are paused; computed on read, never stored. */
   private withPaused(record: OrchestrationSessionRecord): OrchestrationSessionRecord {
     const profile = record.agentProfile;
-    const newest = profile ? this.pluginHashes.get(profilePlugin(profile.ref)) : undefined;
+    const newest = profile && this.profilesOn() ? this.pluginHashes.get(profilePlugin(profile.ref)) : undefined;
     const marked: OrchestrationSessionRecord = { ...record, agentProfileChanged: newest !== undefined && newest !== profile?.hash ? true : undefined };
     let latest: TerminalPausedMark | undefined;
     for (const paneId of this.pausablePaneIdsOf(record)) {
