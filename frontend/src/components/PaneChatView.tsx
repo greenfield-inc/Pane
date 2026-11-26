@@ -908,7 +908,12 @@ function SessionSettingsDialog({ record, onClose, onSave }: {
       await onSave(form.saveInput({ launchCommand: command, profile, customResume }));
       onClose();
     } catch (cause) {
-      const next = form.afterFailure(cause instanceof Error ? cause.message : 'Failed to save Session settings', record);
+      // Save stays disabled while the current settings load.
+      const next = await form.afterFailure(cause instanceof Error ? cause.message : 'Failed to save Session settings', async () => {
+        const response = await API.orchestrationSessions.get({ sessionId: record.id });
+        if (!response.success || !response.data) throw new Error(response.error ?? 'The host did not send the Session.');
+        return response.data.session;
+      });
       if (next.form !== form) {
         setForm(next.form);
         setCommand(next.form.values.launchCommand);
