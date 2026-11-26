@@ -5,14 +5,15 @@
  * there until the switch lands, and the switch re-renders the sidebar and the main area meanwhile:
  * focus fell to a main-area button, then to the page body, and arrow keys stopped moving the
  * cursor (#1767's rig: 39 of 40 presses lost). The hold puts focus back on the cursor's row (found
- * again by its key when the row re-rendered) every time something else takes it, so the person can
- * keep arrowing. When the switch ends with the cursor still on the pressed row, focus moves into
+ * again by its key when the row re-rendered) whenever the switch, not the person, moved it, so the
+ * person can keep arrowing. When the switch ends with the cursor still on the pressed row, focus moves into
  * the work as Enter does elsewhere; when the cursor moved on, it stays where the person put it.
  */
 
 /** A sidebar row as the hold uses it; an HTMLElement is one. */
 interface CursorRow {
   readonly isConnected: boolean;
+  closest?(selector: string): unknown;
   getAttribute(name: string): string | null;
   focus(options?: FocusOptions): void;
 }
@@ -61,11 +62,24 @@ export function releaseSwitchCursorHold(): void {
 /** Keys the sidebar uses to move or open; any other key is the person going somewhere else. */
 const SIDEBAR_KEYS = new Set(['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Enter', ' ', 'j', 'k']);
 
+/** Where focus is kept even with no key press or click: a dialog or menu (the palette is one) or a text field. */
+const KEEPS_FOCUS = [
+  '[data-sidebar-item]',
+  '[role="dialog"]', '[role="alertdialog"]', '[aria-modal="true"]', '[role="menu"]', '[role="listbox"]',
+  '[data-radix-popper-content-wrapper]',
+  'input', 'textarea', 'select', '[contenteditable]:not([contenteditable="false"])',
+].join(', ');
+
+interface FocusTarget { closest?(selector: string): unknown }
+
 /**
- * Starts a hold for `options.switching`, replacing any hold already running. Focus goes back to the
- * cursor's row only when it was lost: to the body, or with a row that re-rendered away. Anywhere
- * else focus goes (a dialog, the palette, the composer) is left alone, so the hold never takes
- * input from where the person or a dialog put it, and never fights a focus trap (review F-1).
+ * Starts a hold for `options.switching`, replacing any hold already running. While it runs, the
+ * person's own moves end it: a click, or a key that isn't the sidebar's. Every other move is the
+ * switch's, and focus goes back to the cursor's row: when it was lost (to the body, or with a row
+ * that re-rendered away), and when the restore, a re-render or the old tile's fallback focused a
+ * button or page in the main area (review F-5). A dialog, menu or field keeps focus even then, so
+ * the hold never takes input from where a dialog put it and never fights a focus trap (review F-1);
+ * if anything else takes focus straight back, the hold lets go rather than loop.
  */
 export function holdCursorThroughSwitch(options: SwitchCursorHoldOptions): void {
   releaseCurrent?.();
@@ -92,14 +106,33 @@ export function holdCursorThroughSwitch(options: SwitchCursorHoldOptions): void 
     if (focusLost()) cursorRow()?.focus({ preventScroll: true });
     frame = requestAnimationFrame(watch);
   };
+  let restoring = false;
+  // A focus move with no key or click from the person since the hold began is the switch's.
+  const onFocusIn = (event: FocusEvent) => {
+    if (released) return;
+    const target = event.target as FocusTarget | null;
+    if (!target || target === document.body || typeof target.closest !== 'function') return;
+    if (target.closest(KEEPS_FOCUS)) return;
+    if (restoring) {
+      // Something took focus back while the hold was restoring it: let it have focus.
+      release();
+      return;
+    }
+    const row = cursorRow();
+    if (!row) return;
+    restoring = true;
+    try { row.focus({ preventScroll: true }); } finally { restoring = false; }
+  };
   const onKeyDown = (event: KeyboardEvent) => {
-    if (!SIDEBAR_KEYS.has(event.key)) release();
+    // mod+K is the palette, not the sidebar's k.
+    if (!SIDEBAR_KEYS.has(event.key) || event.metaKey || event.ctrlKey || event.altKey) release();
   };
   const release = () => {
     if (released) return;
     released = true;
     window.removeEventListener('keydown', onKeyDown, true);
     window.removeEventListener('mousedown', release, true);
+    window.removeEventListener('focusin', onFocusIn, true);
     if (frame !== null) cancelAnimationFrame(frame);
     if (releaseCurrent === release) releaseCurrent = null;
   };
@@ -107,6 +140,7 @@ export function holdCursorThroughSwitch(options: SwitchCursorHoldOptions): void 
   // A click, or a key that isn't the sidebar's, is the person choosing where focus goes.
   window.addEventListener('keydown', onKeyDown, true);
   window.addEventListener('mousedown', release, true);
+  window.addEventListener('focusin', onFocusIn, true);
   frame = requestAnimationFrame(watch);
   releaseCurrent = release;
 

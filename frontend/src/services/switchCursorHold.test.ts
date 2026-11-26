@@ -9,7 +9,7 @@ interface FakeNode {
   focus(): void;
 }
 interface FakeDocument { activeElement: FakeNode; body: FakeNode }
-interface FakeEvent { target: FakeNode; key?: string }
+interface FakeEvent { target: FakeNode; key?: string; metaKey?: boolean }
 type FakeListener = (event: FakeEvent) => void;
 
 /** Just enough of a page: rows with keys, a main-area button, the body, focus events and frames. */
@@ -18,13 +18,19 @@ function page() {
   const frames: Array<() => void> = [];
   const body: FakeNode = { name: 'body', isConnected: true, getAttribute: () => null, closest: () => null, focus: () => undefined };
   const doc: FakeDocument = { activeElement: body, body };
-  const fire = (type: string, target: FakeNode, key?: string) => listeners.get(type)?.forEach(listener => listener({ target, key }));
-  const element = (name: string, row: boolean): FakeNode => {
+  const fire = (type: string, target: FakeNode, key?: string, metaKey?: boolean) => listeners.get(type)?.forEach(listener => listener({ target, key, metaKey }));
+  /** `kind` places a non-row element: a text field, or inside a dialog (the palette is both). */
+  const element = (name: string, row: boolean, kind?: 'field' | 'dialog'): FakeNode => {
     const node: FakeNode = {
       name,
       isConnected: true,
       getAttribute: (attribute: string) => (attribute === 'data-sidebar-key' && row ? name : null),
-      closest: (selector: string) => (row && selector === '[data-sidebar-item]' ? node : null),
+      closest: (selector: string) => {
+        if (row) return selector.includes('[data-sidebar-item]') ? node : null;
+        if (kind === 'field') return selector.includes('textarea') ? node : null;
+        if (kind === 'dialog') return selector.includes('[aria-modal="true"]') ? node : null;
+        return null;
+      },
       focus: () => { doc.activeElement = node; fire('focusin', node); },
     };
     return node;
@@ -99,7 +105,7 @@ describe('the cursor through a switch to another machine (T-128, D-6)', () => {
   it('keeps focus in the command palette the person opened with mod+K', async () => {
     const { doc, element, fire, nextFrame } = page();
     const pressed = element('machine-session-build:release', true);
-    const paletteInput = element('command-palette-input', false);
+    const paletteInput = element('command-palette-input', false, 'field');
     const switching = deferred();
     const landed = vi.fn();
     pressed.focus();
@@ -118,7 +124,7 @@ describe('the cursor through a switch to another machine (T-128, D-6)', () => {
   it('keeps focus in a field that took it without a key press, and does not move into the work over it', async () => {
     const { doc, element, nextFrame } = page();
     const pressed = element('machine-session-build:release', true);
-    const composer = element('composer', false);
+    const composer = element('composer', false, 'field');
     const switching = deferred();
     const landed = vi.fn();
     pressed.focus();
@@ -136,7 +142,7 @@ describe('the cursor through a switch to another machine (T-128, D-6)', () => {
   it('does not fight a modal focus trap (the stack-overflow repro)', async () => {
     const { doc, element, listen, nextFrame } = page();
     const pressed = element('machine-session-build:release', true);
-    const dialogButton = element('dialog-button', false);
+    const dialogButton = element('dialog-button', false, 'dialog');
     const switching = deferred();
     pressed.focus();
     holdCursorThroughSwitch({ switching: switching.promise, cursor: () => pressed, findByKey: () => pressed, onLanded: vi.fn() });
@@ -175,6 +181,98 @@ describe('the cursor through a switch to another machine (T-128, D-6)', () => {
     await settled();
   });
 
+  // Review F-5 (#1767 Bug 2, first half): a focus move the switch made, with no key or click from
+  // the person, goes back to the cursor's row at once, so the next arrow press still moves it.
+  it('brings focus back from a main-area button the switch focused, before the next press', async () => {
+    const { doc, element, fire, nextFrame } = page();
+    const pressed = element('machine-session-build:release', true);
+    const below = element('machine-session-build:notes', true);
+    const closeTile = element('close-tile', false);
+    let cursor = pressed;
+    const switching = deferred();
+    const landed = vi.fn();
+    pressed.focus();
+    holdCursorThroughSwitch({ switching: switching.promise, cursor: () => cursor, findByKey: () => cursor, onLanded: landed });
+
+    // The restore focuses a tile's button that stays on screen: back on the row with no frame waited.
+    closeTile.focus();
+    expect(doc.activeElement).toBe(pressed);
+    nextFrame(); nextFrame();
+    expect(doc.activeElement).toBe(pressed);
+
+    // An arrow press reaches the sidebar, which moves the cursor; then the old tile's "Retry" fallback
+    // takes focus as it renders, and it comes back to the new cursor row.
+    fire('keydown', pressed, 'ArrowDown');
+    below.focus();
+    cursor = below;
+    element('retry', false).focus();
+    expect(doc.activeElement).toBe(below);
+
+    switching.resolve();
+    await settled();
+    expect(landed).not.toHaveBeenCalled();
+  });
+
+  it('leaves a main-area button the person clicked or tabbed to', async () => {
+    const { doc, element, fire } = page();
+    const pressed = element('machine-session-build:release', true);
+    const button = element('close-tile', false);
+    pressed.focus();
+    holdCursorThroughSwitch({ switching: new Promise(() => undefined), cursor: () => pressed, findByKey: () => pressed, onLanded: vi.fn() });
+    fire('mousedown', button);
+    button.focus();
+    expect(doc.activeElement).toBe(button);
+
+    pressed.focus();
+    holdCursorThroughSwitch({ switching: new Promise(() => undefined), cursor: () => pressed, findByKey: () => pressed, onLanded: vi.fn() });
+    fire('keydown', pressed, 'Tab');
+    button.focus();
+    expect(doc.activeElement).toBe(button);
+  });
+
+  it('lets go on mod+K, so a plain button the palette focuses is the person\'s', () => {
+    const { doc, element, fire } = page();
+    const pressed = element('machine-session-build:release', true);
+    const button = element('palette-action', false);
+    pressed.focus();
+    holdCursorThroughSwitch({ switching: new Promise(() => undefined), cursor: () => pressed, findByKey: () => pressed, onLanded: vi.fn() });
+    fire('keydown', pressed, 'k', true);
+    button.focus();
+    expect(doc.activeElement).toBe(button);
+  });
+
+  it('keeps a dialog the app opened by itself, with no key press', async () => {
+    const { doc, element, nextFrame } = page();
+    const pressed = element('machine-session-build:release', true);
+    const approval = element('approval-dialog', false, 'dialog');
+    pressed.focus();
+    holdCursorThroughSwitch({ switching: new Promise(() => undefined), cursor: () => pressed, findByKey: () => pressed, onLanded: vi.fn() });
+    approval.focus();
+    nextFrame();
+    expect(doc.activeElement).toBe(approval);
+  });
+
+  it('lets go, instead of looping, when something outside a dialog takes focus straight back', async () => {
+    const { doc, element, listen, nextFrame } = page();
+    const pressed = element('machine-session-build:release', true);
+    const grabby = element('custom-trap', false);
+    pressed.focus();
+    holdCursorThroughSwitch({ switching: new Promise(() => undefined), cursor: () => pressed, findByKey: () => pressed, onLanded: vi.fn() });
+    let bounces = 0;
+    listen('focusin', (event) => {
+      if (event.target !== grabby && bounces < 1000) { bounces += 1; grabby.focus(); }
+    });
+
+    grabby.focus();
+    nextFrame();
+    expect(bounces).toBeLessThanOrEqual(1);
+    expect(doc.activeElement).toBe(grabby);
+    // Released: a later move isn't undone.
+    pressed.focus();
+    grabby.focus();
+    expect(doc.activeElement).toBe(grabby);
+  });
+
   it('moves into the work when the switch ends with the cursor still on the pressed row', async () => {
     const { element } = page();
     const pressed = element('machine-session-build:release', true);
@@ -204,7 +302,7 @@ describe('the cursor through a switch to another machine (T-128, D-6)', () => {
 
     // A click is the person choosing where focus goes.
     fire('mousedown', rows[3]);
-    const button = element('composer', false);
+    const button = element('composer', false, 'field');
     button.focus();
     expect(doc.activeElement).toBe(button);
 
