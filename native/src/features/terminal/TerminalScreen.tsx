@@ -165,13 +165,20 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
     if (next.left) ownLeft.current = next.left;
     navigation.setParams({ ...(next.left && next.left !== panel?.id ? { panelId: next.left } : {}), beside: next.right ?? '', focus: next.focus, ...extra });
   };
+  // The split as last shown: a screen that names a tab can replace the route's params (a new tab's `dismissTo`).
+  const shownRoute = useRef({ beside, focus, mirrored });
   useEffect(() => {
     const previous = ownLeft.current;
     ownLeft.current = panelId;
     if (!panelId || !previous || panelId === previous || leading) return;
     // A tab named from outside shows on the focused side, beside the other column.
-    applySplit(selectTab({ left: previous, right: beside || null, focus: focus === 'right' ? 'right' : 'left' }, panelId));
+    const was = shownRoute.current;
+    const next = selectTab({ left: previous, right: was.beside || null, focus: was.focus === 'right' ? 'right' : 'left' }, panelId);
+    applySplit(next, was.mirrored === undefined ? undefined : { mirrored: was.mirrored });
   }, [panelId]);
+  useEffect(() => {
+    shownRoute.current = { beside, focus, mirrored };
+  });
   // Home folds to its rail when that makes room for both columns.
   const makeRoom = useEffectEvent(() => {
     const layout = useWideLayout.getState();
@@ -189,6 +196,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   const followMirror = useEffectEvent(() => {
     if (leading || mirrorKey === (mirrored || null)) return;
     const named = mirrored === undefined ? namedAtOpen.current : undefined;
+    namedAtOpen.current = undefined;
     if (mirror) applySplit(named ? selectTab(mirror, named) : mirror, { mirrored: mirrorKey ?? '' });
     else applySplit(closeBeside(split), { mirrored: '' });
   });
