@@ -13,7 +13,7 @@ import { NewBadge } from '@/features/approvals/NewBadge';
 
 import { RAIL_WIDTH } from './windowRule';
 
-// Rail labels stop growing here, so a count and its word stay inside 64 dp.
+// Rail labels stop growing here (UI scale and system text size together), so a count and its word stay inside 64 dp.
 const MAX_TEXT_SCALE = 1.2;
 const COUNTS: ReadonlyArray<{ tile: BoardTile; label: string; spoken: string; color: keyof ThemeColors }> = [
   { tile: 'all', label: 'Panes', spoken: 'All panes', color: 'allPanes' },
@@ -50,7 +50,7 @@ export function HomeRail({ machine, counts, fresh = 0, onExpand, onSelectTile, o
         </RailButton>
         <RailButton testID="home-rail-machine" label={machine ? `${machine.name}, open Home on this machine` : 'All machines, open Home'} onPress={onExpand} tall>
           {machine ? <MachineMark os={machine.os} slot={machine.slot} state={machine.state} /> : <Icon ios="square.3.layers.3d" android="layers" size={18} color={theme.colors.text} />}
-          <Text variant="caption" numberOfLines={1} maxFontSizeMultiplier={MAX_TEXT_SCALE} style={styles.label}>{machineName}</Text>
+          <Text variant="caption" numberOfLines={1} maxScale={MAX_TEXT_SCALE} style={styles.label}>{machineName}</Text>
         </RailButton>
         <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
         {COUNTS.map(({ tile, label, spoken, color }) => {
@@ -58,8 +58,8 @@ export function HomeRail({ machine, counts, fresh = 0, onExpand, onSelectTile, o
           const fresher = tile === 'needs' && count !== undefined ? fresh : 0;
           return (
             <RailButton key={tile} testID={`home-rail-${tile}`} label={[spoken, count === undefined ? undefined : String(count), fresher > 0 ? `${fresher} new` : undefined].filter(Boolean).join(', ')} onPress={() => onSelectTile(tile)} tall>
-              <Text variant="headline" maxFontSizeMultiplier={MAX_TEXT_SCALE} style={[styles.count, { color: theme.colors[color] }]}>{count === undefined ? ' ' : String(count)}</Text>
-              <Text variant="caption" tone="secondary" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={MAX_TEXT_SCALE} style={styles.label}>{label}</Text>
+              <Text variant="headline" maxScale={MAX_TEXT_SCALE} style={[styles.count, { color: theme.colors[color] }]}>{count === undefined ? ' ' : String(count)}</Text>
+              <Text variant="caption" tone="secondary" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} maxScale={MAX_TEXT_SCALE} style={styles.label}>{label}</Text>
               <NewBadge count={fresher} testID="home-rail-needs-new" style={styles.fresh} />
             </RailButton>
           );

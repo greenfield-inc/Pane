@@ -259,7 +259,7 @@ function CodeView({ content, language }: { content: string; language: Parameters
       contentContainerStyle={styles.code}
       renderItem={({ item, index }) => (
         <View style={styles.line}>
-          <Text style={[styles.mono, styles.number, { width: gutter * 8.5 + 4, color: theme.colors.textMuted }]}>{index + 1}</Text>
+          <Text style={[styles.mono, styles.number, { width: (gutter * 8.5 + 4) * theme.uiScale, color: theme.colors.textMuted }]}>{index + 1}</Text>
           <Text selectable style={[styles.mono, styles.shrink, { color: theme.colors.text }]}>
             {item.map((token: Token, at: number) => (
               <Text key={at} style={token.scope && theme.syntax[token.scope] ? { color: theme.syntax[token.scope] } : undefined}>{token.text}</Text>

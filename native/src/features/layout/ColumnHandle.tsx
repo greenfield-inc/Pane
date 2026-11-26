@@ -51,8 +51,9 @@ export function ColumnHandle({ left, width, min, max, onResize, onReset }: Colum
       atLimit.value = limited;
       edge.value = next;
     })
-    .onEnd(() => {
-      scheduleOnRN(onResize, Math.round(edge.value));
+    .onEnd((_event, success) => {
+      // A pan the system cancelled (onFinalize puts the edge back) never resizes the column.
+      if (success) scheduleOnRN(onResize, Math.round(edge.value));
     })
     .onFinalize((_event, success) => {
       // A drag the system cancelled leaves the column as it was.

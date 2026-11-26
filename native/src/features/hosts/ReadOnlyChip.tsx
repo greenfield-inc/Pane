@@ -11,7 +11,7 @@ export function ReadOnlyChip({ color }: { color?: string }) {
   const ink = color ?? colors.textSecondary;
   return (
     <View testID="read-only-chip" style={[styles.chip, { borderRadius: radius.sm, borderColor: color ?? colors.border }]}>
-      <Text variant="footnote" numberOfLines={1} maxFontSizeMultiplier={1.2} style={[styles.label, { color: ink }]}>{DEVICE_ACCESS_LABELS.read}</Text>
+      <Text variant="footnote" numberOfLines={1} maxScale={1.2} style={[styles.label, { color: ink }]}>{DEVICE_ACCESS_LABELS.read}</Text>
     </View>
   );
 }

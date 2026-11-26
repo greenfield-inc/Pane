@@ -1,4 +1,4 @@
-import type { TextStyle } from 'react-native';
+import type { TextStyle, ViewStyle } from 'react-native';
 
 /** UI scale, as on the desktop (Settings › Appearance): 0.8x to 1.5x in steps of 0.1. */
 export const UI_SCALE = { min: 0.8, max: 1.5, default: 1 } as const;
@@ -35,6 +35,15 @@ export function scaleType<Style extends TextStyle>(style: Style, scale: number):
   if (style.fontSize !== undefined) scaled.fontSize = style.fontSize * scale;
   if (style.lineHeight !== undefined) scaled.lineHeight = style.lineHeight * scale;
   if (style.letterSpacing !== undefined) scaled.letterSpacing = style.letterSpacing * scale;
+  return scaled;
+}
+
+/** A fixed box that holds a line of text or an icon, at the UI scale: its width and height. */
+export function scaleBox<Style extends ViewStyle>(style: Style, scale: number): Style {
+  if (scale === 1) return style;
+  const scaled = { ...style };
+  if (typeof style.width === 'number') scaled.width = style.width * scale;
+  if (typeof style.height === 'number') scaled.height = style.height * scale;
   return scaled;
 }
 

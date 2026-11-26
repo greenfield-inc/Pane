@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { useChatTab } from '@/features/chatTab/useChatTab';
-import { scaleType, useTheme, withAlpha } from '@/theme';
+import { scaleBox, scaleType, useTheme, withAlpha } from '@/theme';
 import { Button, Icon, Text } from '@/ui';
 
 import { awayLine, awaySummary, parseLogEntries, type SentinelLogEntry } from '@shared/autopilotTranscript';
@@ -16,9 +16,9 @@ const KIND: Record<SentinelLogEntry['kind'], { label: string; glyph: { ios: SFSy
 };
 
 function EntryIcon({ kind }: { kind: SentinelLogEntry['kind'] }) {
-  const { colors } = useTheme();
+  const { colors, uiScale } = useTheme();
   const color = kind === 'answered' ? colors.success : kind === 'sent' ? colors.warning : colors.textMuted;
-  return <View style={styles.iconBox}><Icon {...KIND[kind].glyph} size={15} color={color} /></View>;
+  return <View style={scaleBox(styles.iconBox, uiScale)}><Icon {...KIND[kind].glyph} size={15} color={color} /></View>;
 }
 
 /** An `autopilot-log` block: Sentinel's calls as it makes them, one tinted line each (round 7, d1). */
@@ -55,7 +55,7 @@ export function SentinelAwayCard({ content, panelId }: { content: string; panelI
   return (
     <View testID="autopilot-away" style={[styles.card, { borderColor: withAlpha(colors.autopilot, 0.45), backgroundColor: colors.surface }]}>
       <View style={[styles.head, { borderBottomColor: colors.border }]}>
-        <View style={styles.iconBox}><Icon ios="shield" android="shield" size={16} color={colors.autopilot} /></View>
+        <View style={scaleBox(styles.iconBox, theme.uiScale)}><Icon ios="shield" android="shield" size={16} color={colors.autopilot} /></View>
         <View style={styles.shrink}>
           <Text variant="headline">While you were away</Text>
           <Text testID="autopilot-away-line" variant="footnote" tone="muted">{awayLine(content)}</Text>

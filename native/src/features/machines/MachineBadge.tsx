@@ -23,7 +23,7 @@ export function MachineBadge({ machine, full = false }: { machine: Pick<Machine,
       style={[full ? styles.full : styles.badge, { borderRadius: theme.radius.sm, backgroundColor: withAlpha(tint, 0.15) }]}
     >
       <MachineMark os={machine.os} slot={machine.slot} state={machine.state} size={12} />
-      <Text variant="footnote" numberOfLines={1} maxFontSizeMultiplier={1.3} style={[styles.name, full && styles.shrink, { color: tint }]}>
+      <Text variant="footnote" numberOfLines={1} maxScale={1.3} style={[styles.name, full && styles.shrink, { color: tint }]}>
         {full ? machine.name : Array.from(machine.name).slice(0, LETTERS).join('')}
       </Text>
     </View>

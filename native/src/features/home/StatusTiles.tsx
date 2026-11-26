@@ -51,14 +51,14 @@ export function StatusTiles({ counts, fresh = 0, selected, onSelect }: {
           >
             {/* Until it's counted, a bone sits where the number goes, on a hidden digit that holds its line. */}
             <View>
-              <Text style={[styles.count, { color: count === undefined ? 'transparent' : on ? color : theme.colors.text }]} numberOfLines={1} maxFontSizeMultiplier={1.4}>
+              <Text style={[styles.count, { color: count === undefined ? 'transparent' : on ? color : theme.colors.text }]} numberOfLines={1} maxScale={1.4}>
                 {count === undefined ? '0' : String(count)}
               </Text>
               {count === undefined ? <Skeleton width={28} height={22} style={styles.countBone} /> : null}
             </View>
             <View style={styles.label}>
               <View style={[styles.dot, { backgroundColor: color }]} />
-              <Text variant="rowDetail" tone="secondary" numberOfLines={1} maxFontSizeMultiplier={1.4}>{tile.label}</Text>
+              <Text variant="rowDetail" tone="secondary" numberOfLines={1} maxScale={1.4}>{tile.label}</Text>
             </View>
             {/* In the corner, so the count and label never move when it comes and goes. */}
             <NewBadge count={fresher} testID="home-tile-needs-new" style={styles.fresh} />
