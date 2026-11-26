@@ -98,6 +98,9 @@ def to_machine(peer: Dict[str, Any], is_self: bool, owner: str, mine: bool) -> O
 
 
 def run_tailscale(args: List[str]) -> Optional[str]:
+    # Isolated test Panes (tests/isolatedPane.ts, D-288) see no Tailscale, as the app does (tailscaleSetup.ts).
+    if os.environ.get("PANE_DISABLE_TAILSCALE") == "1":
+        return None
     candidates = [("tailscale", None)]
     if sys.platform == "darwin":
         for app in ["/Applications/Tailscale.app", os.path.join(os.path.expanduser("~"), "Applications", "Tailscale.app")]:
