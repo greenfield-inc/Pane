@@ -4,9 +4,9 @@
  * that returns false passes the action to the scope below it. The newest
  * scope also names the screen context the button bindings are read for.
  */
-export type ActionHandler<Event> = (event: Event) => boolean | void;
+type ActionHandler<Event> = (event: Event) => boolean | void;
 
-export interface ActionScope<Context extends string, Action extends string, Event> {
+interface ActionScope<Context extends string, Action extends string, Event> {
   context: Context;
   handlers: Partial<Record<Action, ActionHandler<Event>>>;
 }

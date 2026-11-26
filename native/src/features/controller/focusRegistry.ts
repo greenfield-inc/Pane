@@ -12,7 +12,7 @@ export type { Direction, Rect };
  * (`onEdge`), and the caller moves again once the new rows are mounted.
  */
 
-export interface FocusItem {
+interface FocusItem {
   id: string;
   scope: string;
   measure(): Rect | null;
@@ -27,11 +27,11 @@ export interface FocusItem {
   reveal?(rect: Rect): void;
 }
 
-export interface FocusScope {
+interface FocusScope {
   key: string;
 }
 
-export type MoveResult = 'moved' | 'scrolled' | 'none';
+type MoveResult = 'moved' | 'scrolled' | 'none';
 
 export interface FocusRegistry {
   openScope(scope: FocusScope): () => void;

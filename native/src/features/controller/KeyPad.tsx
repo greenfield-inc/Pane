@@ -7,7 +7,7 @@ import { Focusable } from './Focusable';
 import { FocusScope } from './FocusScope';
 
 /** The keys a controller's X offers in a terminal; Shift+Tab is the back-tab sequence. */
-export const KEY_PAD_KEYS = [
+const KEY_PAD_KEYS = [
   { label: 'Esc', data: '\x1b' },
   { label: '^C', data: '\x03' },
   { label: 'Tab', data: '\t' },
