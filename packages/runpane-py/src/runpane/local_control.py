@@ -2163,6 +2163,8 @@ def build_panel_create_request(parsed: Any) -> Dict[str, Any]:
         raise ValueError("Use either --focus or --no-focus, not both.")
     if parsed.launch_args and not parsed.agent_farm:
         raise ValueError("--arg is a launch argument for --agent-farm; pass --agent-farm <profile> too.")
+    if parsed.agent_farm_parent and not parsed.agent_farm:
+        raise ValueError("--parent is the Agent Farm parent token of a linked agent; pass --agent-farm <profile> too, or run the link's command with --tool-command.")
     if parsed.chat or parsed.agent_farm:
         if parsed.tool_command:
             raise ValueError("A chat tab runs its agent over ACP, so it takes --agent or --agent-farm, not --tool-command.")
@@ -2175,6 +2177,7 @@ def build_panel_create_request(parsed: Any) -> Dict[str, Any]:
             **optional_value("agent", parsed.agent),
             **optional_value("profile", parsed.agent_farm),
             **optional_value("args", parsed.launch_args or None),
+            **optional_value("parent", parsed.agent_farm_parent),
             **optional_value("initialInput", initial_input or None),
             **optional_value("title", parsed.title),
         }

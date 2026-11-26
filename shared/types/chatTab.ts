@@ -25,8 +25,10 @@ export type ChatTabLaunch =
    * which keep the permissions the agent had before Agent Farm ran it; every other profile sets its own.
    * `fromSession`: Pane chose the profile from its Session's Agent Farm profile (T-63), not from a launch
    * command, so the agent starts on its own again once Profiles is off.
+   * `parent`: the Agent Farm parent token (PLUGIN/NAME[:VARIANT]@LAUNCH-ID) of the agent that started
+   * this one from its launch links, passed as `--parent` at every start (T-83 P3; Profiles on only).
    */
-  | { kind: 'profile'; profile: string; args?: Record<string, string>; fullAccess?: true; fromSession?: true };
+  | { kind: 'profile'; profile: string; args?: Record<string, string>; parent?: string; fullAccess?: true; fromSession?: true };
 
 /** Last known runtime state. `stopped` always carries a `problem` or an explicit stop. */
 export type ChatTabStatus = 'starting' | 'idle' | 'working' | 'blocked' | 'stopped';

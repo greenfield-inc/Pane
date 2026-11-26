@@ -3819,7 +3819,7 @@ async function createRunpaneChatTab(services: AppServices, paneId: string, reque
   const activate = request.focus === true || (request.noFocus !== true && request.source !== 'agent');
   const created = await createChatTab(services, {
     sessionId: paneId, agent: chat.agent, title: chat.title, initialInput: chat.initialInput, activate,
-    launch: chat.profile ? { kind: 'profile', profile: chat.profile, args: chat.args } : { kind: 'agent' },
+    launch: chat.profile ? { kind: 'profile', profile: chat.profile, args: chat.args, parent: chat.parent } : { kind: 'agent' },
   }, panelOpener(request.source, request.callerPanelId));
   const manager = getChatTabManager();
   const expected = shouldExpectReport(request, Boolean(chat.initialInput)) ? services.expectedReportTracker?.arm(created.panelId, new Date().toISOString(), true) : undefined;
@@ -5413,6 +5413,7 @@ function parsePanelCreateRequest(value: PaneCommandValue): RunpanePanelCreateReq
       agent: boundary.optional(boundary.nonEmptyString),
       profile: boundary.optional(boundary.nonEmptyString),
       args: boundary.optional(boundary.record(boundary.string)),
+      parent: boundary.optional(boundary.nonEmptyString),
       initialInput: boundary.optional(boundary.string),
       title: boundary.optional(boundary.string),
     }));

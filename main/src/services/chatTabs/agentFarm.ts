@@ -126,7 +126,7 @@ export class AgentFarmProfiles implements ChatProfileResolver {
 
   async resolve(panel: ToolPanel, state: ChatPanelState, env: ChatAgentEnv): Promise<ResolvedLaunch> {
     if (state.launch.kind !== 'profile') throw new PaneError('CHAT_PROFILE_MISSING', 'This chat tab has no Agent Farm profile.', 'Open a new chat tab.');
-    const printed = await this.print(state.launch.profile, state.launch.args ?? {}, state.agent, state.cwd, env);
+    const printed = await this.print(state.launch.profile, state.launch.args ?? {}, state.agent, state.cwd, env, state.launch.parent);
     if (printed.harness !== state.agent) {
       throw new PaneError('CHAT_PROFILE_AGENT_CHANGED', `The profile ${state.launch.profile} now runs ${printed.harness}, but this tab was started for ${state.agent}.`, 'Open a new chat tab for the profile.');
     }
@@ -164,13 +164,16 @@ export class AgentFarmProfiles implements ChatProfileResolver {
     launch.meta = { ...launch.meta, [namespace]: { ...decodeOptionalBoundary(launch.meta?.[namespace], boundary.jsonObject), options: next } };
   }
 
-  /** Prints a profile's launch. `agent` picks the adapter to pass; the printed harness is the truth. */
-  async print(profile: string, args: Record<string, string>, agent: ChatAgent, cwd: string, env: ChatAgentEnv): Promise<PrintedAcpLaunch> {
+  /**
+   * Prints a profile's launch. `agent` picks the adapter to pass; the printed harness is the truth.
+   * `parent` (a launch link's parent token) goes to Agent Farm as `--parent` while Profiles is on.
+   */
+  async print(profile: string, args: Record<string, string>, agent: ChatAgent, cwd: string, env: ChatAgentEnv, parent?: string): Promise<PrintedAcpLaunch> {
     const adapter = await this.options.adapter(agent);
-    const argv = ['run', profile, '--print-acp', '--acp-adapter', adapter, ...Object.entries(args).flatMap(([key, value]) => ['--arg', `${key}=${value}`])];
     // Profiles on: Pane's bundled copy only. Off: the person's own agent-farm when one is on PATH,
     // otherwise the bundled copy, as before T-63.
     const profilesOn = this.options.profilesOn();
+    const argv = ['run', profile, '--print-acp', '--acp-adapter', adapter, ...Object.entries(args).flatMap(([key, value]) => ['--arg', `${key}=${value}`]), ...(profilesOn && parent ? ['--parent', parent] : [])];
     const cli = profilesOn ? undefined : this.options.executable();
     const bundled = cli ? undefined : await this.options.bundled(argv, cwd, env);
     if (!cli && !bundled) {

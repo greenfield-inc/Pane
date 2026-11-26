@@ -601,7 +601,7 @@
       "--name",
       "farm",
       "--tool-command",
-      "agent-farm run free-range",
+      "agent-farm run greenfield/orchestrator",
       "--agent",
       "claude",
       "--prompt",
