@@ -7,6 +7,7 @@ import { promisify } from 'util';
 import { reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { hashDirectory } from '../skillCacheManager';
+import { syncedPluginEdits } from './profileSyncFile';
 import { panePluginFiles, panePluginInstalled, parseProfileList, writePanePluginSource } from './agentFarmProfiles';
 import { PANE_PROFILE_PLUGIN } from '../../../../shared/agentProfiles';
 import type { AgentFarmProfileList } from '../../../../shared/types/agentFarmProfiles';
@@ -512,10 +513,12 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
     const clear: string[] = [];
     // Bundled plugins whose install receipt can't be read (review F-10).
     const unreadable: string[] = [];
+    // An edited copy that arrived from another computer matches its own receipt, so sync.json says it is yours (T-63 PR 6).
+    const synced = await syncedPluginEdits(configRoot);
     for (const name of BUNDLED_AGENT_FARM_PLUGINS) {
       // A plugin Pane was installing when it stopped is Pane's half-copy, not an edit.
       const state = unfinished.includes(name) ? undefined : await installedState(configRoot, name);
-      if (state === 'edited') {
+      if (state === 'edited' || (state && synced.has(name))) {
         edited.push(name);
         plugins[name] = await installedVersionOf(configRoot, name);
         continue;

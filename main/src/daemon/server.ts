@@ -47,6 +47,8 @@ const DAEMON_EVENT_EXACT_CHANNELS = new Set<string>([
   'permission:request',
   'permission:resolved',
   'process:ended',
+  // A profile changed on this computer, so a desktop syncing with it sends the change on (T-63 PR 6).
+  'profiles:changed',
   'project-script-changed',
   'project-script-closing',
   'remote:settings-changed',

@@ -282,7 +282,9 @@ through its daemon socket under that folder, never the network. Start the
 target with `PANE_MOVE_TEST_PEERS` too (naming the source, so you can also move
 back): a dev build that has test peers handles the move's incoming calls as
 remote commands, the way they arrive over Tailscale, so it hits the same checks
-as a real move. Packaged builds ignore the variable.
+as a real move. Packaged builds ignore the variable. Profile sync uses the same peers, so three
+instances that name each other in `PANE_MOVE_TEST_PEERS` sync profiles among
+themselves.
 
 ## Code Style
 

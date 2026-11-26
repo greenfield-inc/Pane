@@ -51,7 +51,8 @@ const ATTEMPTS = 3;
 
 /** The target's side: a staging folder per move, under the Pane folder. */
 export class MoveReceiver {
-  constructor(private readonly root: string) {}
+  /** `maxFileBytes`: a file that unpacks larger than this is refused and removed (profile sync, review F-10). */
+  constructor(private readonly root: string, private readonly limits: { maxFileBytes?: number } = {}) {}
 
   moveDir(moveId: string): string {
     if (!MOVE_ID.test(moveId)) throw new PaneError('ERR_MOVE_ID', `"${moveId}" is not a move id, so nothing was written.`, 'Start the move again from the other machine.');
@@ -83,7 +84,13 @@ export class MoveReceiver {
     const hash = createHash('sha256');
     let bytes = 0;
     const count = new Transform({
-      transform(chunk: Buffer, _encoding, done) { hash.update(chunk); bytes += chunk.length; done(null, chunk); },
+      transform: (chunk: Buffer, _encoding, done) => {
+        hash.update(chunk);
+        bytes += chunk.length;
+        const max = this.limits.maxFileBytes;
+        if (max !== undefined && bytes > max) done(new Error(`it unpacks to more than ${max} bytes`));
+        else done(null, chunk);
+      },
     });
     try {
       await pipeline(fs.createReadStream(compressed), zlib.createGunzip(), count, fs.createWriteStream(target));

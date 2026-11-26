@@ -4,6 +4,7 @@ import { dismissStartupDialogs, installSessionsFixture, sessionFixture } from '.
 import { expectNoAxeViolations } from './axeTest';
 import type { AgentFarmProfileEntry } from '../shared/types/agentFarmProfiles';
 import type { ProfilePlugin, ProfileSubagentNode, ProfileSummary, ProfileTreeNode, ProfilesOverview } from '../shared/types/profileEditor';
+import type { ProfileSyncStatus } from '../shared/types/profileSync';
 
 /**
  * The Profiles tab (T-63 PR 5, design round 4 "Tree + preview"): top-level profiles with pins, a
@@ -98,7 +99,7 @@ const PALETTE_PROFILES: AgentFarmProfileEntry[] = [
   { ref: 'greenfield/seo', plugin: 'greenfield', version: '0.0.46', harness: 'claude', hidden: false },
 ];
 
-async function installProfiles(page: Page, options: { theme?: string; saveError?: string; pins?: string[]; on?: boolean } = {}): Promise<void> {
+async function installProfiles(page: Page, options: { theme?: string; saveError?: string; pins?: string[]; on?: boolean; sync?: ProfileSyncStatus } = {}): Promise<void> {
   await page.setViewportSize({ width: 1440, height: 900 });
   const data = fixture();
   await installSessionsFixture(page, [
@@ -107,14 +108,14 @@ async function installProfiles(page: Page, options: { theme?: string; saveError?
     { ...sessionFixture('s3', 'Sprint tracker upkeep', '', '', '2026-11-25T08:02:00.000Z'), agentProfile: { ref: 'greenfield/business', hash: 'h2' } },
   ], [], {
     initialConfig: { theme: options.theme ?? 'light', chatTabsEnabled: true, pinnedProfiles: options.pins ?? [], sessionProfilesEnabled: options.on ?? true },
-    profileEditor: { ...data, saveError: options.saveError },
+    profileEditor: { ...data, saveError: options.saveError, sync: options.sync },
     agentFarmProfiles: { profiles: PALETTE_PROFILES },
   });
   await gotoApp(page);
   await dismissStartupDialogs(page);
 }
 
-async function openProfilesTab(page: Page, options: { theme?: string; saveError?: string; pins?: string[] } = {}): Promise<void> {
+async function openProfilesTab(page: Page, options: { theme?: string; saveError?: string; pins?: string[]; sync?: ProfileSyncStatus } = {}): Promise<void> {
   await installProfiles(page, options);
   await page.getByTestId('profiles-nav').click();
   await expect(page.getByTestId('profiles-view')).toBeVisible();
@@ -152,7 +153,8 @@ test('the list shows only top-level profiles, pinned first, and pins from a row'
   await expect(page.getByTestId('profile-pin-greenfield/orchestrator')).toHaveAttribute('aria-pressed', 'true');
   await expect(rows.nth(1)).toHaveAttribute('data-testid', 'profile-row-greenfield-orchestrator');
   await expect(page.getByTestId('profiles-footer')).toContainText('3 profiles · 2 Sessions use one');
-  await expect(page.getByTestId('profiles-sync')).toBeDisabled();
+  // Sync (PR 6) is live while the Profiles switch is on.
+  await expect(page.getByTestId('profiles-sync')).toBeEnabled();
   await expectNoAxeViolations(page, { include: '[data-testid="profiles-view"]' });
   // Keyboard: the first profile has focus; ↓ moves, Enter opens on the cover page.
   await rows.first().focus();
@@ -378,6 +380,40 @@ test('with unsaved edits, a change on disk keeps them and asks: reload, or keep 
   await expect(notice).toHaveCount(0);
   await expect(editor).toHaveValue('# Theirs again\n');
 });
+
+/** build-box has every save; travel-laptop is offline and gets one when it reconnects (PR 6). */
+const SYNC: ProfileSyncStatus = { running: false, lastSyncAt: 1, computers: [
+  { key: 'build', id: 'b', name: 'build-box', state: 'up-to-date', waiting: [] },
+  { key: 'travel', id: 't', name: 'travel-laptop', state: 'offline', waiting: ['business'] },
+] };
+
+for (const theme of ['light', 'dark']) {
+  test(`Sync shows each computer's state and sends every profile again; a save says where it goes (PR 6, ${theme})`, async ({ page }) => {
+    await openProfilesTab(page, { theme, sync: SYNC });
+    await expect(page.getByTestId('profiles-sync-status')).toHaveText('Synced to build-box · travel-laptop gets 1 change when it reconnects');
+    if (shotsDir) await page.screenshot({ path: `${shotsDir}/sync7-footer-${theme}.png` });
+    await page.getByTestId('profiles-sync').click();
+    const sheet = page.getByTestId('profiles-sync-sheet');
+    await expect(sheet.getByRole('heading', { name: 'Sync profiles now' })).toBeVisible();
+    await expect(page.getByTestId('profiles-sync-row-build-box')).toContainText('Up to date (every save is pushed)');
+    await expect(page.getByTestId('profiles-sync-row-travel-laptop')).toContainText('Offline: gets 1 change when it reconnects');
+    await expect(page.getByTestId('profiles-sync-now')).toBeFocused();
+    await expectNoAxeViolations(page, { include: '[data-testid="profiles-sync-sheet"]' });
+    await shot(page, `sync7-sheet-${theme}`);
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('profiles-notice')).toHaveText('Sent all profiles to build-box; travel-laptop gets them when it reconnects.');
+    await expect(sheet).toHaveCount(0);
+
+    await page.getByTestId('profile-row-greenfield-business').click();
+    await page.getByTestId('profiles-file-agents/business.md').click();
+    await page.getByTestId('profiles-edit').click();
+    await page.keyboard.press('End');
+    await page.getByTestId('profiles-editor').pressSequentially('\nMarker: X');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s');
+    await expect(page.getByTestId('profiles-notice')).toHaveText('Saved greenfield/agents/business.md. Sending it to build-box; travel-laptop gets it when it reconnects. 2 Sessions can reload it.');
+    await shot(page, `sync7-saved-${theme}`);
+  });
+}
 
 test('with Profiles off, there is no Profiles row or page, and nothing reads profiles', async ({ page }) => {
   await installProfiles(page, { on: false });

@@ -122,6 +122,8 @@ export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'projects:',
   'relay:',
   'prompts:',
+  // Profile sync between your computers (T-63 PR 6).
+  'profile-sync:',
   'resource-monitor:',
   'runpane:',
   'session-import:',

@@ -750,6 +750,8 @@ export class OrchestrationSessionManager extends EventEmitter {
    */
   async reloadProfile(selector: OrchestrationSessionSelector, source: 'user' | 'agent' = 'user'): Promise<OrchestrationSessionRecord> {
     this.refuseProfilesOff('Nothing was reloaded.');
+    const ref = (await this.get(selector).catch(() => undefined))?.agentProfile?.ref;
+    if (ref) await this.bringProfileCurrent(ref);
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
@@ -1641,6 +1643,18 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   private agentFarmPort?: SessionAgentFarm;
+  private profileSyncPort?: (plugin: string) => Promise<void>;
+
+  /**
+   * Profile sync (T-63 PR 6): brings a profile's plugin up to date from your other computers before a
+   * Session starts, switches to or reloads it. Waits a few seconds at most and never throws.
+   */
+  attachProfileSync(port: (plugin: string) => Promise<void>): void { this.profileSyncPort = port; }
+
+  private async bringProfileCurrent(ref: string): Promise<void> {
+    if (plainProfileAgent(ref.split(':')[0])) return;
+    await this.profileSyncPort?.(profilePlugin(ref)).catch(error => console.warn(`[Sessions] ${ref} wasn't brought up to date from your other computers: ${reasonOf(error)}`));
+  }
 
   /** Settings › Advanced › Profiles (T-63): off, Sessions start their agent directly, as before T-63. */
   private profilesOn(): boolean { return profilesEnabled(this.configManager.getConfig()); }
@@ -1695,6 +1709,7 @@ export class OrchestrationSessionManager extends EventEmitter {
    * `outcome` ("No Session was created.") when the profile isn't here or Pane can't run its agent.
    */
   private async profileTarget(ref: string, agentHint: PaneChatAgent | undefined, outcome: string): Promise<{ profile: SessionAgentProfile; agent: PaneChatAgent }> {
+    await this.bringProfileCurrent(ref);
     const refuse = (code: string, message: string, next: string): never => { throw new PaneError(code, `${message} ${outcome}`, next); };
     const [qualified, variant] = ref.split(':');
     const plain = plainProfileAgent(qualified);

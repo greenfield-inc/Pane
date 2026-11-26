@@ -102,6 +102,8 @@ export const MACHINE_EVENT_CHANNELS = [
   'permission:resolved',
   'notify:shared-changed',
   'remote:settings-changed',
+  // A profile changed there (a save, or one that arrived), so this desktop syncs again (T-63 PR 6).
+  'profiles:changed',
   'workspace:entry',
   'resource-monitor:machine-health-changed',
   'resource-monitor:machine-inventory-changed',

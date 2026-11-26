@@ -4,6 +4,8 @@ import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 import { readProfilesSwitchFrom } from '../services/agentFarm/profilesFeature';
+import { PaneCommandRegistry } from '../daemon/commandRegistry';
+import { PROFILE_SYNC_CHANNELS, PROFILE_SYNC_OFF_CODE } from '../../../shared/types/profileSync';
 import { registerProfileHandlers } from './profiles';
 import type { AppServices } from './types';
 
@@ -40,6 +42,9 @@ const CALLS: Array<[string, unknown[]]> = [
   ['profiles:remove-photo', ['labtest/writer']],
   ['profiles:set-details', ['labtest', 'writer', { title: 'x', description: 'y' }]],
   ['profiles:parse-yaml', ['a: 1']],
+  // Sync (PR 6).
+  ['profiles:sync-status', []],
+  ['profiles:sync-now', []],
 ];
 
 describe('the Profiles channels', () => {
@@ -64,5 +69,23 @@ describe('the Profiles channels', () => {
     expect(await handlers.get('profiles:parse-yaml')!(event, 'a: 1')).toEqual({ success: true, data: { data: { a: 1 } } });
     expect(await handlers.get('profiles:photos')!(event)).toEqual({ success: true, data: { profiles: {}, plugins: {} } });
     expect(await handlers.get('profiles:list')!(event)).toMatchObject({ success: true, data: { plugins: [] } });
+  });
+
+  it('sync answers other computers only while Profiles is on, and records nothing while it is off (PR 6)', async () => {
+    const paneDir = mkdtempSync(path.join(tmpdir(), 'pane-profiles-ipc-'));
+    temporary.push(paneDir);
+    let on = false;
+    readProfilesSwitchFrom(() => ({ sessionProfilesEnabled: on }));
+    const registry = new PaneCommandRegistry();
+    const handlers = new Map<string, Handler>();
+    const ipcMain: Pick<IpcMain, 'handle'> = { handle: (channel, handler) => { handlers.set(channel, handler); } };
+    // SAFETY: the handlers read only orchestrationSessionManager and configManager, which may be absent.
+    registerProfileHandlers(ipcMain, {} as AppServices, paneDir, registry);
+    for (const channel of Object.values(PROFILE_SYNC_CHANNELS)) {
+      await expect(registry.invoke(channel, [{}]), channel).rejects.toMatchObject({ code: PROFILE_SYNC_OFF_CODE });
+    }
+    expect(existsSync(path.join(paneDir, 'agent-farm', 'sync.json'))).toBe(false);
+    on = true;
+    expect(await registry.invoke(PROFILE_SYNC_CHANNELS.state, [{}])).toMatchObject({ plugins: {} });
   });
 });

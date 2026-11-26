@@ -628,8 +628,7 @@ unless Agent Farm accepts it, and Sessions using the plugin then show the change
 dot. Saving greenfield or dcouple makes it **Edited** this way, and **Restore
 Pane's version** reinstalls the bundled copy and takes it off `edited`. A new
 profile is a plugin installed with `agent-farm plugin install`, since Agent Farm
-finds plugins by their receipts. Saving to your other computers arrives with
-profile sync. `run` writes its launch bundle to
+finds plugins by their receipts. `run` writes its launch bundle to
 `<worktree>/.agent-farm/generated`, which Pane hides from git through
 `info/exclude` as it does `.pane/`.
 
@@ -665,6 +664,35 @@ small state of its own (workspace trust, launch records, MCP logins) under
 `scripts/after-pack.js`) fails a packaged build unless Agent Farm is inside
 `app.asar`, carries no native binaries, and answers `--version` under Electron
 as Node.
+
+### Profile sync across your computers
+
+Every change to a plugin here (a save, a new profile or file, Restore, a photo,
+or a plugin removed with `agent-farm plugin uninstall`) is recorded in
+`<PANE_DIR>/agent-farm/sync.json`: the plugin's sync hash (its files, ignoring a
+pack's `checksums`, plus its photos), the save time and this computer's install
+id, or a deletion. The desktop (`services/agentFarm/profileSyncCoordinator.ts`)
+reads every saved computer's records over the machine connection
+(`profile-sync:state`), brings this computer up to the newest save of each
+plugin, and sends it to every computer that is behind. The newest save wins;
+equal times go to the lower install id; nothing is merged. It runs on start,
+after a save here, when a computer comes back online or reports
+`profiles:changed`, and for one plugin before a Session starts, switches to or
+reloads it (here, or on the machine a remote Session is created on). The
+Profiles tab's **Sync** button sends everything again and lists each computer's
+state; its footer says what an offline computer gets when it reconnects.
+
+A save travels as one pack (`profile-sync:export`/`read` to pull,
+`profile-sync:write`/`apply` to push) with Session move's chunked, SHA-256-checked
+transfer. The receiving computer checks the pack's hash, then installs it with
+`agent-farm plugin install`, which refuses files that don't match the checksums
+in its plugin.yaml; the plugin there is moved aside first and put back if the
+install fails. greenfield and dcouple sync only once you change them: a photo
+alone keeps each computer's own Pane version (`pane` records), an edit travels as
+your copy and stays **Edited** there (Pane updates keep it), and Restore restores
+Pane's version everywhere. The calls answer only your own machines, never a
+teammate on a shared tailnet. Two dev instances on one computer sync through
+`PANE_MOVE_TEST_PEERS`, as a Session move does (CONTRIBUTING.md).
 
 ### A Session's Agent Farm profile
 
