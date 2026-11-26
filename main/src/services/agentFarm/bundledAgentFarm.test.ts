@@ -515,15 +515,15 @@ describe('paneAgentFarmProcess', () => {
 
 describe('the pinned package', () => {
   // T-83 P1: Agent Farm 0.3.0 carries greenfield 0.1.0 (three profiles; every helper is a linked agent).
-  it('is 0.3.0 in both package.json files, and resolves and answers --version with this Node', () => {
+  it('is 0.3.1 in both package.json files, and resolves and answers --version with this Node', () => {
     const pin = (file: string) => JSON.parse(readFileSync(path.join(__dirname, file), 'utf8')).dependencies['@greenfieldco/agent-farm'];
-    expect([pin('../../../../package.json'), pin('../../../package.json')]).toEqual(['0.3.0', '0.3.0']);
+    expect([pin('../../../../package.json'), pin('../../../package.json')]).toEqual(['0.3.1', '0.3.1']);
     const bundle = bundledAgentFarm();
-    expect(bundle?.version).toBe('0.3.0');
+    expect(bundle?.version).toBe('0.3.1');
     if (!bundle) return;
     const process = bundledAgentFarmProcess(bundle, ['--version'], tempDir());
     // --version takes no config root; run the entry alone.
-    expect(execFileSync(process.executable, [bundle.entry, '--version'], { env: process.env, encoding: 'utf8' }).trim()).toBe('0.3.0');
+    expect(execFileSync(process.executable, [bundle.entry, '--version'], { env: process.env, encoding: 'utf8' }).trim()).toBe('0.3.1');
   });
 
   // electron-builder strips `scripts` from every package.json it packs, which changes a bundled
