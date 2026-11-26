@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import { applyChatTabEvent, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabEvent, type ChatTabView } from '../../../../shared/types/chatTab';
 import { PaneError } from '../../../../shared/paneError';
+import { newSessionFirstMessagePrompt } from '../../../../shared/types/paneChat';
 import type { PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import { ChatTabManager, type ChatTabLauncher, type ChatTabManagerOptions, type ChatTabStore } from './manager';
 import { ChatTabNotifyBridge } from './notifyBridge';
@@ -436,6 +437,17 @@ describe('chat tab manager', () => {
     expect(store.state('p1')?.initialInputSentAt).toBeDefined();
     // Delivered from the saved copy: the agent got the whole message, not the queue's preview.
     await expect.poll(() => manager.view('p1').transcript?.messages.find(message => message.role === 'user')?.parts[0]).toEqual({ type: 'text', text: opening });
+    await manager.cancel('p1').catch(() => undefined);
+  });
+
+  it('sends a New Session first message as only what the person typed, so their bubble shows just that (T-118)', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', { ...newTab(directory), initialInput: newSessionFirstMessagePrompt('How are you doing?') });
+    await manager.ensure('p1');
+    await expect.poll(() => manager.view('p1').transcript?.messages.find(message => message.role === 'user')?.parts[0]).toEqual({ type: 'text', text: 'How are you doing?' });
+    // The saved prompt keeps Pane's marker, so a relaunch still never sends it twice.
+    expect(store.state('p1')?.initialInput).toBe(newSessionFirstMessagePrompt('How are you doing?'));
+    expect(store.state('p1')?.initialInputSentAt).toBeDefined();
     await manager.cancel('p1').catch(() => undefined);
   });
 

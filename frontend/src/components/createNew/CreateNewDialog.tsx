@@ -6,7 +6,7 @@ import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { nextOrchestrationSessionName, type OrchestrationSessionCreateInput, type SessionRuntimes } from '../../../../shared/types/orchestrationSession';
 import type { ProjectEnvironment } from '../../../../shared/types/panels';
 import { DEFAULT_SESSION_PROFILE } from '../../../../shared/types/sessionProfile';
-import { DEFAULT_PANE_CHAT_AGENT } from '../../../../shared/types/paneChat';
+import { DEFAULT_PANE_CHAT_AGENT, newSessionFirstMessagePrompt } from '../../../../shared/types/paneChat';
 import { useMachineStates } from '../../hooks/useMachineStates';
 import { useConfigStore } from '../../stores/configStore';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -49,7 +49,6 @@ import { Modal, ModalBody, ModalFooter } from '../ui/Modal';
 import { Toggle } from '../ui/Toggle';
 import {
   ATTACHABLE_IMAGE_TYPES,
-  firstMessagePrompt,
   formatSize,
   isAttachableImage,
   readImageAttachment,
@@ -353,7 +352,7 @@ export function CreateNewDialog({ projects, defaultProjectId, machines: entries,
       input.wslDistribution = wslDistribution;
     }
     // A message with images goes through the chat once it's open; text alone rides with the create.
-    const opening = sendImages ? undefined : firstMessagePrompt(text);
+    const opening = sendImages ? undefined : newSessionFirstMessagePrompt(text);
     if (opening) input.openingPrompt = opening;
     try {
       if (onOtherMachine) {
