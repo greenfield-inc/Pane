@@ -31,7 +31,8 @@ import { arrivingPreview, previewSourcePath, relativeInside, type MovedRoot } fr
 import { bindMovedApprovals } from './approvals';
 import type { MovedApproval } from '../notify/notifyService';
 import { MoveReceiver, type WriteRequest, type WriteResult } from './transfer';
-import { isRegeneratedSessionFile, isTextFile } from './sessionFolder';
+import { isRegeneratedSessionFile, isTextFile, isVerbatimSessionFile } from './sessionFolder';
+import { unreadableSnapshots } from '../agentFarm/sessionSnapshot';
 import { agentFarmProfileOf, movedLine } from './rules';
 import { MoveLedger, type CommitPlan, type JournalRecord, type LedgerEntry, type LedgerTab, type UndoStep } from './ledger';
 
@@ -707,9 +708,14 @@ export class MoveImporter {
       const source = this.receiver.filePath(moveId, `session/${relative}`);
       const target = path.join(targetFolder, ...relative.split('/'));
       await fs.promises.mkdir(path.dirname(target), { recursive: true });
-      const text = await readTextFile(source, relative);
+      const text = isVerbatimSessionFile(relative) ? null : await readTextFile(source, relative);
       if (text === null) await fs.promises.copyFile(source, target);
       else await fs.promises.writeFile(target, rewriteText(map, text));
+    }
+    // T-110 (D-3): each Agent Farm snapshot must read here as it did there, or its agents would refuse to start.
+    const brokenSnapshots = await unreadableSnapshots(targetFolder);
+    if (brokenSnapshots.length) {
+      throw new PaneError('ERR_MOVE_SNAPSHOT_UNREADABLE', `The Session's Agent Farm snapshot ${brokenSnapshots[0].path} didn't arrive intact on ${thisMachineName()}: ${brokenSnapshots[0].problem}.`, `Nothing was changed on ${manifest.source.machine}. Reload the Session's profile there, then move it again.`);
     }
     const moved: SessionMoveRecord = {
       moveId, from: manifest.source.machine, to: thisMachineName(), at: new Date().toISOString(), paths: map.entries,

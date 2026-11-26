@@ -10,6 +10,9 @@ const profile = args[1];
 const launchArgs = Object.fromEntries(args.flatMap((arg, index) => arg === '--arg' ? [args[index + 1].split('=')] : []));
 if (profile === 'old/agent-farm') { process.stderr.write("error: Unknown option '--print-acp'\n"); process.exit(1); }
 if (profile === 'missing/profile') { process.stderr.write('Unknown profile: missing/profile\n'); process.exit(1); }
+// Agent Farm 0.3.1 refuses a snapshot it can't read (T-110), in its own words.
+const snapshot = args.includes('--snapshot') ? args[args.indexOf('--snapshot') + 1] : undefined;
+if (snapshot?.includes('gone')) { process.stderr.write(`Error: Snapshot ${snapshot} is missing. Agent Farm will not fall back to the installed plugins. Use Reload profile (in Pane), or resume with --resume ID --reload, to take a new snapshot of what is installed now.\n`); process.exit(1); }
 const harness = process.env.FAKE_AGENT_FARM_HARNESS ?? 'claude';
 const launchContext = ['LAUNCH CONTEXT', 'headless: false', ...Object.entries(launchArgs).map(([key, value]) => `${key}: ${value}`)].join('\n');
 // As Agent Farm 0.2.34 prints them: Claude's instructions, skills and MCP servers in _meta; Codex's in CODEX_CONFIG.

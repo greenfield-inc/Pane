@@ -4,14 +4,23 @@ import path from 'path';
 /**
  * What of a Session folder travels: everything except the parts Pane or Agent Farm write again on
  * the target (Pane's own AGENTS.md and CLAUDE.md sections, the wrap-up skills, the WSL runtime
- * folder, Agent Farm's generated launch folders).
+ * folder, Agent Farm's generated launch folders, and a snapshot a killed launch left half built).
+ * Agent Farm's snapshots (`.agent-farm/snapshots/`, T-110) travel, so the Session runs the same files there.
  */
-const REGENERATED = [/^AGENTS\.md$/, /^CLAUDE\.md$/, /^\.agent-farm\/generated(?:\/|$)/, /^\.claude\/skills\/wrap-up(?:\/|$)/, /^\.agents\/skills\/wrap-up(?:\/|$)/, /^\.pane-runtime(?:\/|$)/, /^moved\.json$/];
+const REGENERATED = [/^AGENTS\.md$/, /^CLAUDE\.md$/, /^\.agent-farm\/generated(?:\/|$)/, /^\.agent-farm\/snapshots\/\.building-/, /^\.claude\/skills\/wrap-up(?:\/|$)/, /^\.agents\/skills\/wrap-up(?:\/|$)/, /^\.pane-runtime(?:\/|$)/, /^moved\.json$/];
 const SKIPPED_DIRS = new Set(['node_modules', '.git']);
 const TEXT = /\.(?:md|markdown|txt|json|jsonl|ya?ml|toml|html?|css|js|mjs|cjs|ts|tsx|jsx|sh|py|csv|tsv|svg|xml|ini|env|log)$/i;
 
 export function isRegeneratedSessionFile(relative: string): boolean {
   return REGENERATED.some(pattern => pattern.test(relative));
+}
+
+/**
+ * Files that travel byte for byte even when they are text: Agent Farm's snapshots, which it checks
+ * against their own checksums before it reads one (T-110, D-3).
+ */
+export function isVerbatimSessionFile(relative: string): boolean {
+  return relative.startsWith('.agent-farm/snapshots/');
 }
 
 /** Text files get their paths rewritten; any other file travels byte for byte. */

@@ -14,7 +14,7 @@ const report = boundary.object({
 });
 const launchSchema = boundary.union(
   boundary.object({ kind: boundary.literal('agent'), mode: boundary.optional(boundary.string), fullAccess: boundary.optional(boundary.literal(true)) }),
-  boundary.object({ kind: boundary.literal('profile'), profile: boundary.nonEmptyString, args: boundary.optional(boundary.record(boundary.string)), parent: boundary.optional(boundary.nonEmptyString), fullAccess: boundary.optional(boundary.literal(true)), fromSession: boundary.optional(boundary.literal(true)) }),
+  boundary.object({ kind: boundary.literal('profile'), profile: boundary.nonEmptyString, args: boundary.optional(boundary.record(boundary.string)), parent: boundary.optional(boundary.nonEmptyString), snapshot: boundary.optional(boundary.nonEmptyString), fullAccess: boundary.optional(boundary.literal(true)), fromSession: boundary.optional(boundary.literal(true)) }),
 );
 const schema: BoundarySchema<ChatPanelState> = boundary.object({
   agent: boundary.nonEmptyString,
@@ -25,7 +25,7 @@ const schema: BoundarySchema<ChatPanelState> = boundary.object({
   problem: boundary.optional(boundary.object({
     code: boundary.enumeration('signed-out', 'not-installed', 'adapter-setup', 'exited', 'failed', 'unsupported-host'),
     message: boundary.string, next: boundary.string,
-    action: boundary.optional(boundary.enumeration('sign-in', 'install', 'restart')), url: boundary.optional(boundary.string),
+    action: boundary.optional(boundary.enumeration('sign-in', 'install', 'restart', 'reload-profile')), url: boundary.optional(boundary.string),
   })),
   turn: boundary.optional(boundary.object({ operationId: boundary.string, startedAt: boundary.string })),
   settings: boundary.optional(boundary.record(boundary.string)),
@@ -38,6 +38,7 @@ const schema: BoundarySchema<ChatPanelState> = boundary.object({
   initialInputSentAt: boundary.optional(boundary.string),
   orchestrationSessionId: boundary.optional(boundary.string),
   sessionFolder: boundary.optional(boundary.string),
+  agentFarmSnapshot: boundary.optional(boundary.nonEmptyString),
   autopilotRunId: boundary.optional(boundary.string),
   agentReport: boundary.optional(report),
   clearedAt: boundary.optional(boundary.string),

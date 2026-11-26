@@ -12,6 +12,7 @@ import type { AgentFarmProcess } from '../agentFarm/bundledAgentFarm';
 import { plainProfileAgent } from '../../../../shared/agentProfiles';
 import { grantPaneMcp, paneMcpChatServer } from '../paneMcpEndpoint';
 import { PANE_MCP_PLUGIN_DENY_SETTINGS } from '../paneMcpNames';
+import { snapshotRefused } from '../agentFarm/sessionSnapshot';
 
 const execFileAsync = promisify(execFile);
 
@@ -126,7 +127,7 @@ export class AgentFarmProfiles implements ChatProfileResolver {
 
   async resolve(panel: ToolPanel, state: ChatPanelState, env: ChatAgentEnv): Promise<ResolvedLaunch> {
     if (state.launch.kind !== 'profile') throw new PaneError('CHAT_PROFILE_MISSING', 'This chat tab has no Agent Farm profile.', 'Open a new chat tab.');
-    const printed = await this.print(state.launch.profile, state.launch.args ?? {}, state.agent, state.cwd, env, state.launch.parent);
+    const printed = await this.print(state.launch.profile, state.launch.args ?? {}, state.agent, state.cwd, env, state.launch.parent, state.launch.snapshot);
     if (printed.harness !== state.agent) {
       throw new PaneError('CHAT_PROFILE_AGENT_CHANGED', `The profile ${state.launch.profile} now runs ${printed.harness}, but this tab was started for ${state.agent}.`, 'Open a new chat tab for the profile.');
     }
@@ -166,10 +167,11 @@ export class AgentFarmProfiles implements ChatProfileResolver {
 
   /**
    * Prints a profile's launch. `agent` picks the adapter to pass; the printed harness is the truth.
-   * `parent` (a launch link's parent token) goes to Agent Farm as `--parent` while Profiles is on;
-   * with it off, a linked agent's tab doesn't start without its parent (review F-5).
+   * `parent` (a launch link's parent token) goes to Agent Farm as `--parent`, and `snapshot` (the
+   * snapshot folder it resolves from, T-110) as `--snapshot`, while Profiles is on; with it off, a
+   * linked agent's tab doesn't start without its parent (review F-5).
    */
-  async print(profile: string, args: Record<string, string>, agent: ChatAgent, cwd: string, env: ChatAgentEnv, parent?: string): Promise<PrintedAcpLaunch> {
+  async print(profile: string, args: Record<string, string>, agent: ChatAgent, cwd: string, env: ChatAgentEnv, parent?: string, snapshot?: string): Promise<PrintedAcpLaunch> {
     const adapter = await this.options.adapter(agent);
     // Profiles on: Pane's bundled copy only. Off: the person's own agent-farm when one is on PATH,
     // otherwise the bundled copy, as before T-63.
@@ -177,7 +179,7 @@ export class AgentFarmProfiles implements ChatProfileResolver {
     if (parent && !profilesOn) {
       throw new PaneError('CHAT_PROFILE_PARENT_OFF', `Profiles is off on this computer, so Pane can't start ${profile} as a linked agent of ${parent}. Nothing was run.`, 'Turn on Profiles in Settings > Advanced > Experimental, then press Retry.');
     }
-    const argv = ['run', profile, '--print-acp', '--acp-adapter', adapter, ...Object.entries(args).flatMap(([key, value]) => ['--arg', `${key}=${value}`]), ...(parent ? ['--parent', parent] : [])];
+    const argv = ['run', profile, '--print-acp', '--acp-adapter', adapter, ...Object.entries(args).flatMap(([key, value]) => ['--arg', `${key}=${value}`]), ...(parent ? ['--parent', parent] : []), ...(profilesOn && snapshot ? ['--snapshot', snapshot] : [])];
     const cli = profilesOn ? undefined : this.options.executable();
     const bundled = cli ? undefined : await this.options.bundled(argv, cwd, env);
     if (!cli && !bundled) {
@@ -191,7 +193,10 @@ export class AgentFarmProfiles implements ChatProfileResolver {
       ({ stdout } = await execFileAsync(command.executable, command.args, { cwd, env: bundled?.env ?? env, timeout: 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true, windowsVerbatimArguments: command.windowsVerbatimArguments }));
     } catch (error) {
       if (error instanceof PaneError) throw error;
-      const stderr = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1);
+      const output = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim();
+      const stderr = output?.split('\n').at(-1);
+      // T-110 (D-3): Agent Farm never falls back to the installed plugins for a snapshot it can't read.
+      if (snapshotRefused(output)) throw new PaneError('CHAT_PROFILE_SNAPSHOT_UNREADABLE', `Agent Farm can't start ${profile} from its snapshot: ${(stderr ?? '').replace(/^Error:\s*/, '').replace(/\s*Agent Farm will not fall back[\s\S]*$/, '')}`, 'Reload the Session\'s profile to take a new snapshot of the plugins installed now.');
       // Agent Farm before package 2 has no --print-acp.
       const outdated = !!stderr && /unknown option.*--print-acp/i.test(stderr);
       throw new PaneError('CHAT_PROFILE_FAILED', `Agent Farm could not prepare ${profile}: ${stderr || reasonOf(error)}.`, outdated ? 'Update Agent Farm to a version with run --print-acp, then try again.' : 'Check the profile name and its launch arguments, then try again.');

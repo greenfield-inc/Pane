@@ -18,4 +18,14 @@ describe('ChatProblem', () => {
     expect(html).not.toContain('Press Restart.');
     expect(html).toContain('Press Start above to start it again.');
   });
+
+  // T-110 (D-3): a Session's lead whose snapshot Agent Farm refused offers Reload profile, which takes a new one.
+  it('offers Reload profile first when the tab can reload, and only Retry when it can\'t', () => {
+    const refused = { code: 'failed' as const, message: 'Agent Farm can\'t start greenfield/orchestrator from its snapshot.', next: 'Press Reload profile.', action: 'reload-profile' as const };
+    const lead = renderToStaticMarkup(<ChatProblem problem={refused} agent="Claude" busy={false} onRestart={noop} onSignIn={noop} onInstall={noop} onReloadProfile={noop} />);
+    expect(lead).toMatch(/chat-button-primary[^>]*>Reload profile</);
+    expect(lead).toContain('>Retry<');
+    const elsewhere = renderToStaticMarkup(<ChatProblem problem={refused} agent="Claude" busy={false} onRestart={noop} onSignIn={noop} onInstall={noop} />);
+    expect(elsewhere).not.toContain('Reload profile<');
+  });
 });
