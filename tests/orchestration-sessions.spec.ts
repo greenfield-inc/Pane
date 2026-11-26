@@ -3744,6 +3744,70 @@ function sessionApprovalsSnapshot(): NotifySnapshot {
   };
 }
 
+test('T-88: a Session\'s approvals open newest first, and the column moves on to the next after each Send until all caught up', async ({ page }, testInfo) => {
+  const approvals = sessionApprovalsSnapshot();
+  const [realUse, q20] = approvals.items;
+  const q21: NotifyItem = { ...realUse, id: 'q21', title: 'Q-21: Rename the org setting?', choices: [{ label: 'Rename it', recommended: true }, { label: 'Keep the name' }], createdAt: Date.now() - 60_000 };
+  const waiting = { ...approvals, items: [realUse, q20, q21], queue: ['q21', 'q20', 'real-use'] };
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())], [], { notifySnapshot: waiting, initialLayout: overviewFoldedIntoChat('plans') });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await page.getByTestId('orchestration-session-plans').click();
+  await expect(page.getByTestId('session-workspace-tabs').getByRole('tab').first()).toBeVisible();
+  // The Session's terminal focuses itself when its first activation finishes; let that happen
+  // before typing, so the keys below land where the test puts them.
+  await expect(page.locator('.xterm-helper-textarea').first()).toBeAttached();
+  await page.waitForTimeout(1_000);
+  // SAFETY: installElectronApiMock adds these controls before the app loads.
+  const emit = (next: NotifySnapshot) => page.evaluate(([snapshot]) => (window as typeof window & { __paneTestElectronMock: { emitNotifySnapshot: (value: NotifySnapshot) => void } }).__paneTestElectronMock.emitNotifySnapshot(snapshot), [next] as const);
+  // SAFETY: installElectronApiMock adds these controls before the app loads.
+  const answers = () => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getNotifyCommands: () => unknown[] } }).__paneTestElectronMock.getNotifyCommands());
+
+  // Newest first: asked 1, 4 and 17 minutes ago.
+  await page.getByTestId('session-approvals-button').click();
+  const split = page.getByTestId('session-approval-split');
+  await expect(split.getByTestId('approval-title')).toHaveText(q21.title);
+  await expect(split.getByTestId('approval-pager')).toHaveText('1 of 3');
+  await page.screenshot({ path: testInfo.outputPath('t88-04-session-newest-first.png') });
+
+  // 1 picks, ⌘↩ sends; the column stays open on the next one, with focus in it.
+  await split.getByRole('radio', { name: /Rename it/ }).focus();
+  await page.keyboard.press('1');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await expect.poll(answers).toEqual([{ type: 'answer', id: 'q21', answer: { picks: ['Rename it'] } }]);
+  await emit({ ...waiting, items: [realUse, q20, { ...q21, state: 'sent', answerSummary: 'Rename it' }], queue: ['q20', 'real-use'] });
+  await expect(split.getByTestId('approval-title')).toHaveText(q20.title);
+  await expect(split.getByTestId('approval-sent-before')).toContainText('Sent “Rename it” to Plan demo');
+  await expect(split.getByTestId('approval-sent-before')).toContainText('2 left');
+  await expect.poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('[data-testid="approval-column"]')))).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('t88-05-session-next-after-send.png') });
+
+  // Two questions: a number for each, then send.
+  await page.keyboard.press('1');
+  await split.getByRole('radio', { name: /One train/ }).focus();
+  await page.keyboard.press('1');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await expect.poll(answers).toHaveLength(2);
+  await emit({ ...waiting, items: [realUse, { ...q20, state: 'sent', answerSummary: 'Yes, turn it on · One train' }, { ...q21, state: 'answered' }], queue: ['real-use'] });
+  await expect(split.getByTestId('approval-title')).toHaveText(realUse.title);
+  await page.keyboard.press('2');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await expect.poll(answers).toHaveLength(3);
+  await emit({ ...waiting, items: [{ ...realUse, state: 'sent', answerSummary: 'Copy to dev' }, { ...q20, state: 'answered' }, { ...q21, state: 'answered' }], queue: [] });
+
+  // None left: all caught up, with Undo and the way back focused.
+  const caughtUp = page.getByTestId('approval-caught-up');
+  await expect(caughtUp).toContainText('All caught up');
+  await expect(caughtUp).toContainText('Sent “Copy to dev” to Plan demo');
+  await expect(caughtUp.getByTestId('approval-caught-up-close')).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath('t88-06-session-all-caught-up.png') });
+
+  // A new approval for the Session takes the caught-up column's place.
+  const q22: NotifyItem = { ...q21, id: 'q22', title: 'Q-22: Ship the docs today?', createdAt: Date.now() };
+  await emit({ ...waiting, items: [{ ...realUse, state: 'answered' }, q22], queue: ['q22'] });
+  await expect(split.getByTestId('approval-title')).toHaveText(q22.title);
+});
+
 /**
  * A saved layout where the person dragged the Overview into the conversation's group: one
  * group and no split, the only way a Session has none.
@@ -3770,10 +3834,11 @@ test('an approval covers the Session\'s right split exactly, and ✕ shows it ag
   const created = testInfo.outputPath('session-approval-created-split.png');
   await page.screenshot({ path: created });
   await testInfo.attach('session-approval-created-split.png', { path: created, contentType: 'image/png' });
-  // Paging keeps the same split.
-  await split.getByRole('button', { name: 'Next approval' }).click();
+  // Newest first (T-88): Q-20, then Real use. Paging keeps the same split.
   await expect(split.getByTestId('approval-title')).toContainText('Q-20');
   await expect(split.getByTestId('approval-question')).toHaveCount(2);
+  await split.getByRole('button', { name: 'Next approval' }).click();
+  await expect(split.getByTestId('approval-title')).toContainText('Real use');
   await split.getByTestId('approval-column-close').click();
   await expect(split).toHaveCount(0);
   await expect(stage).toHaveCount(0);
@@ -4040,16 +4105,17 @@ test('T-11: Dismissing the dock\'s first card shows the next one, after either p
   await page.getByTestId('orchestration-session-plans').click();
   const title = page.getByTestId('session-approval-card-title');
   const pager = page.getByTestId('session-approval-card-pager');
-  // The dock pages to C and opens it; the column's pager then wraps to A, which the dock follows.
+  // Newest first (T-88): C, B, A. The dock pages back to A and opens it; the column's pager then
+  // wraps to C, which the dock follows.
   await page.getByTestId('session-approval-card-prev').click();
-  await expect(title).toHaveText('Approval C');
+  await expect(title).toHaveText('Approval A');
   await page.getByTestId('session-approval-card-open').click();
   const column = page.getByTestId('approval-column');
   await expect(column.getByTestId('approval-pager')).toHaveText('3 of 3');
   await column.getByRole('button', { name: 'Next approval' }).click();
-  await expect(title).toHaveText('Approval A');
+  await expect(title).toHaveText('Approval C');
 
-  // Dismissing A shows B, the next one, with the focus on the card itself.
+  // Dismissing C shows B, the next one, with the focus on the card itself.
   await page.getByTestId('session-approval-card-dismiss').focus();
   await page.keyboard.press('Enter');
   await expect(title).toHaveText('Approval B');
@@ -4066,7 +4132,7 @@ test('D-289: a worker\'s approval shows its asking tab live in the Session colum
   await page.getByTestId('orchestration-session-plans').click();
   await page.getByTestId('session-approvals-button').click();
   const column = page.getByTestId('approval-column');
-  await column.getByRole('button', { name: 'Next approval' }).click();
+  // Q-20 is the newest, so it opens first (T-88).
   await expect(column.getByTestId('approval-title')).toContainText('Q-20');
   await column.getByTestId('approval-tab').filter({ hasText: "doozy-overhaul's tab" }).click();
   const origin = column.getByTestId('approval-origin');

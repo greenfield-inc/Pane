@@ -141,7 +141,7 @@ test.describe('Approvals in the main window', () => {
     await expect(rows.filter({ hasText: 'PR #812 checks passed' })).toContainText('Update');
   });
 
-  test('Dismiss closes the open approval without answering it, and it stays in the list', async ({ page }) => {
+  test('Dismiss opens the next approval without answering this one, which stays in the list (T-88)', async ({ page }, testInfo) => {
     await boot(page);
     await page.getByTestId('approvals-nav').click();
     const queue = page.getByTestId('approvals-queue');
@@ -152,9 +152,10 @@ test.describe('Approvals in the main window', () => {
     await expect(dismiss).toHaveText('Dismiss');
     await dismiss.click();
 
-    // Nothing answered: it only leaves the floating strip, and no other item takes its place.
-    await expect(column).toHaveCount(0);
+    // Nothing answered: it only leaves the floating strip, and the next approval down the list opens.
+    await expect(column.getByTestId('approval-title')).toHaveText('Apply migration 0042 to staging?');
     await expect.poll(() => commands(page)).toEqual([{ type: 'dismiss', id: 'q-options' }]);
+    await page.screenshot({ path: testInfo.outputPath('t88-07-page-next-after-dismiss.png') });
     await expect(queue.getByRole('tab', { name: 'Waiting 3' })).toHaveAttribute('aria-selected', 'true');
     await expect(queue.getByTestId('approvals-row').filter({ hasText: 'Which session store' })).toHaveCount(1);
 
@@ -163,15 +164,15 @@ test.describe('Approvals in the main window', () => {
     await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
   });
 
-  test("Dismiss with the keyboard returns focus to the approval's row in the list", async ({ page }) => {
+  test('Dismiss with the keyboard opens the next approval with focus inside it (T-88)', async ({ page }) => {
     await boot(page);
     await page.getByTestId('approvals-nav').click();
     const column = page.getByTestId('approval-column');
     await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
     await column.getByRole('button', { name: 'Dismiss' }).focus();
     await page.keyboard.press('Enter');
-    await expect(column).toHaveCount(0);
-    await expect(page.getByTestId('approvals-queue').getByTestId('approvals-row').filter({ hasText: 'Which session store' })).toBeFocused();
+    await expect(column.getByTestId('approval-title')).toHaveText('Apply migration 0042 to staging?');
+    await expect.poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('[data-testid="approval-column"]')))).toBe(true);
   });
 
   test("an Autopilot answer is overridden with a click on a choice, and its notes don't hide Send behind Details", async ({ page }) => {
@@ -391,7 +392,71 @@ test.describe('Approvals in the main window', () => {
     await reply.fill('Keep Redis, but only for now.');
     await column.getByTestId('approval-send').click();
     await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-options', answer: { picks: [''], text: 'Keep Redis, but only for now.' } }]);
+    // Nothing else waits, so the column says so (T-88); opened again, the box is empty.
+    await expect(page.getByTestId('approval-caught-up')).toContainText('All caught up');
+    await page.getByTestId('approvals-queue').getByTestId('approvals-row').filter({ hasText: 'Which session store' }).click();
     await expect(reply).toHaveValue('');
+  });
+});
+
+test.describe('Approvals newest first, one after another (T-88)', () => {
+  const emit = (page: Page, snapshot: NotifySnapshot) => page.evaluate((next) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(next), snapshot);
+  const focusInColumn = (page: Page) => page.evaluate(() => Boolean(document.activeElement?.closest('[data-testid="approval-column"], [data-testid="approval-caught-up"]')));
+
+  test('lists the newest first, and the keyboard answers one approval after another until all caught up', async ({ page }, testInfo) => {
+    const snapshot = notifyFixture();
+    snapshot.items = snapshot.items.filter(item => item.state === 'waiting');
+    snapshot.queue = snapshot.items.map(item => item.id);
+    await page.addInitScript(() => localStorage.setItem('pane-approvals-sort', 'recent'));
+    await boot(page, snapshot);
+    await page.getByTestId('approvals-nav').click();
+    const rows = page.getByTestId('approvals-queue').getByTestId('approvals-row');
+    await expect(rows).toHaveCount(3);
+    // Newest on top: asked 2, 6 and 11 minutes ago.
+    await expect(rows.nth(0)).toContainText('Which session store should the refactor use?');
+    await expect(rows.nth(1)).toContainText('Apply migration 0042 to staging?');
+    await expect(rows.nth(2)).toContainText('What should the 2.5 release headline say?');
+    const column = page.getByTestId('approval-column');
+    await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
+    await page.screenshot({ path: testInfo.outputPath('t88-01-page-newest-first.png') });
+
+    // 2 picks the second option; ⌘↩ sends.
+    await column.getByRole('radio', { name: /Postgres table/ }).focus();
+    await page.keyboard.press('2');
+    await expect(column.getByRole('radio', { name: /Keep Redis/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(column.getByRole('radio', { name: /Keep Redis/ })).toBeFocused();
+    await page.keyboard.press('ControlOrMeta+Enter');
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-options', answer: { picks: ['Keep Redis'] } }]);
+    const [options, approve, ask] = snapshot.items;
+    await emit(page, { ...snapshot, items: [{ ...options, state: 'sent', answerSummary: 'Keep Redis' }, approve, ask], queue: [approve.id, ask.id] });
+
+    // The next one opens by itself, focus inside it, saying what was sent and how many are left.
+    await expect(column.getByTestId('approval-title')).toHaveText('Apply migration 0042 to staging?');
+    await expect(column.getByTestId('approval-sent-before')).toContainText('Sent “Keep Redis” to auth-refactor');
+    await expect(column.getByTestId('approval-sent-before')).toContainText('2 left');
+    await expect.poll(() => focusInColumn(page)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('t88-02-page-next-after-send.png') });
+
+    await page.keyboard.press('1');
+    await page.keyboard.press('ControlOrMeta+Enter');
+    await expect.poll(() => commands(page)).toHaveLength(2);
+    await emit(page, { ...snapshot, items: [{ ...options, state: 'answered', answerSummary: 'Keep Redis' }, { ...approve, state: 'sent', answerSummary: 'Approved' }, ask], queue: [ask.id] });
+
+    // A free-text question: focus goes to the reply box, and digits typed there are text, not picks.
+    await expect(column.getByTestId('approval-title')).toHaveText('What should the 2.5 release headline say?');
+    await expect(column.getByTestId('approval-reply-box')).toBeFocused();
+    await page.keyboard.type('Pane 2.5: answer 1 approval after another');
+    await expect(column.getByTestId('approval-reply-box')).toHaveValue('Pane 2.5: answer 1 approval after another');
+    await page.keyboard.press('ControlOrMeta+Enter');
+    await expect.poll(() => commands(page)).toHaveLength(3);
+    await emit(page, { ...snapshot, items: [{ ...options, state: 'answered' }, { ...approve, state: 'answered' }, { ...ask, state: 'sent', answerSummary: 'Pane 2.5: answer 1 approval after another' }], queue: [] });
+
+    // None left: all caught up, with Undo for the last one and the way back focused.
+    const caughtUp = page.getByTestId('approval-caught-up');
+    await expect(caughtUp).toContainText('All caught up');
+    await expect(caughtUp).toContainText('Sent “Pane 2.5: answer 1 approval after another” to docs-changelog');
+    await expect(caughtUp.getByRole('button', { name: 'Back to where you were' })).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath('t88-03-page-all-caught-up.png') });
   });
 });
 
