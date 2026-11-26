@@ -259,7 +259,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
   // T-105: messages this tab sent and received (M-n), for their senders, state and replies.
   const agentMessageRecords = useAgentMessageRecords(panelId);
-  const sentByTurn = useMemo(() => sentMessagesByTurn(turns, agentMessageRecords, panelId), [turns, agentMessageRecords, panelId]);
+  const sentByTurn = useMemo(() => sentMessagesByTurn(turns, agentMessageRecords.records, panelId), [turns, agentMessageRecords, panelId]);
   const agentMessages = useAgentMessagesView(panelId, agentMessageRecords, sentByTurn);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);

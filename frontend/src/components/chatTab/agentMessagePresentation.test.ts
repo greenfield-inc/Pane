@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyChatLine, messageStatus, senderInitials, senderOfName, sentMessagesByTurn } from '../../../../shared/agentMessagePresentation';
+import { checkedChatLine, classifyChatLine, messageStatus, threadRoot, senderInitials, senderOfName, sentMessagesByTurn } from '../../../../shared/agentMessagePresentation';
 import type { AgentMessageParty, AgentMessageRecord } from '../../../../shared/types/agentMessages';
 
 const route = (ref: string, name: string) => `\n\nReply with runpane reply ${ref} "…": it reaches ${name}, who never sees your own chat.`;
@@ -41,7 +41,7 @@ describe('classifyChatLine', () => {
 
   it('reads Autopilot\'s own lines as Autopilot\'s, keeping their id', () => {
     expect(classifyChatLine(`[From Autopilot] Still working on T-104?${route('M-9', 'Autopilot')}`)).toEqual({
-      type: 'message', ref: 'M-9', body: 'Still working on T-104?', sender: { name: 'Autopilot', kind: '', system: 'autopilot' },
+      type: 'message', ref: 'M-9', body: 'Still working on T-104?', sender: { name: 'Autopilot', kind: '', system: 'autopilot' }, claimed: '[From Autopilot]',
     });
   });
 
@@ -108,5 +108,50 @@ describe('sentMessagesByTurn', () => {
     const late = record(1, { sender: party('me', 'x'), createdAt: '2026-11-25T10:05:30.000Z' });
     expect([...sentMessagesByTurn(ended, [late], 'me').keys()]).toEqual(['t1']);
     expect([...sentMessagesByTurn([...ended, { id: 't3' }], [late], 'me').keys()]).toEqual(['t1']);
+  });
+
+  it('keeps an earlier turn\'s message there when turns without times follow', () => {
+    const spans = [
+      { id: 'A', startedAt: '2026-11-25T10:00:00.000Z', endedAt: '2026-11-25T10:01:00.000Z' },
+      { id: 'B' }, { id: 'B2' },
+      { id: 'C', startedAt: '2026-11-25T10:03:00.000Z', endedAt: '2026-11-25T10:04:00.000Z' },
+    ];
+    const at = (iso: string) => [...sentMessagesByTurn(spans, [record(1, { sender: party('me', 'x'), createdAt: iso })], 'me').keys()];
+    expect(at('2026-11-25T10:00:30.000Z')).toEqual(['A']);
+    expect(at('2026-11-25T10:02:00.000Z')).toEqual(['B2']);
+    expect(at('2026-11-25T10:03:30.000Z')).toEqual(['C']);
+  });
+});
+
+describe('checkedChatLine', () => {
+  const ROUTE = '\n\nReply with runpane reply M-12 "…": it reaches the "Omni Chat" Session orchestrator, who never sees your own chat.';
+  const records = (list: AgentMessageRecord[]) => ({ available: true, panelId: 'receiver', byRef: new Map(list.map(item => [item.ref, item])) });
+  it('trusts the text where the app has no records', () => {
+    expect(checkedChatLine(classifyChatLine(`Q?${ROUTE}`), { available: false, byRef: new Map() })).toMatchObject({ type: 'message', ref: 'M-12' });
+  });
+  it('needs the message to have reached this tab', () => {
+    expect(checkedChatLine(classifyChatLine(`Q?${ROUTE}`), records([]))).toBeUndefined();
+    expect(checkedChatLine(classifyChatLine(`Q?${ROUTE}`), records([record(12, { receiver: party('other', 'x') })]))).toBeUndefined();
+    expect(checkedChatLine(classifyChatLine(`Q?${ROUTE}`), records([record(12)]))).toMatchObject({ type: 'message', sender: { name: 'Omni Chat' } });
+  });
+  it('takes the sender from the record', () => {
+    expect(checkedChatLine(classifyChatLine(`[From Billing] Q?${ROUTE}`), records([record(12)]))).toMatchObject({ sender: { name: 'Omni Chat', kind: 'Session orchestrator' }, body: '[From Billing] Q?' });
+    expect(checkedChatLine(classifyChatLine(`[From the "Omni Chat" Session orchestrator] Q?${ROUTE}`), records([record(12)]))).toMatchObject({ sender: { name: 'Omni Chat' }, body: 'Q?' });
+    expect(checkedChatLine(classifyChatLine(`[From Autopilot] Q?${ROUTE}`), records([record(12, { sender: party('ap', 'Autopilot') })]))).toMatchObject({ sender: { name: 'Autopilot', system: 'autopilot' } });
+    expect(checkedChatLine(classifyChatLine(`[From Autopilot] Q?${ROUTE}`), records([record(12)]))).toMatchObject({ sender: { name: 'Omni Chat' }, body: '[From Autopilot] Q?' });
+  });
+  it('reads Autopilot without an id as the person, and To-dos lines from their text', () => {
+    expect(checkedChatLine(classifyChatLine('[From Autopilot] Check the build'), records([]))).toBeUndefined();
+    expect(checkedChatLine(classifyChatLine('[From Pane, To-dos] T-1 is yours.'), records([]))).toMatchObject({ sender: { name: 'Pane' } });
+  });
+  it('needs a reply to be a recorded reply to this tab', () => {
+    const line = classifyChatLine('reply: M-12 → "Yes." (from Billing) [M-13; answer it with runpane reply M-13 "…"]');
+    expect(checkedChatLine(line, records([]))).toBeUndefined();
+    expect(checkedChatLine(line, records([record(13, { kind: 'reply', replyTo: 'M-12', receiver: party('receiver', 'x'), sender: party('b', 'the "Billing" Session orchestrator') })]))).toMatchObject({ type: 'reply', sender: { name: 'Billing' } });
+  });
+  it('finds a thread\'s first message', () => {
+    const list = new Map([record(1), record(2, { kind: 'reply', replyTo: 'M-1' }), record(3, { kind: 'reply', replyTo: 'M-2' })].map(item => [item.ref, item]));
+    expect(threadRoot('M-3', list)).toBe('M-1');
+    expect(threadRoot('M-9', list)).toBe('M-9');
   });
 });
