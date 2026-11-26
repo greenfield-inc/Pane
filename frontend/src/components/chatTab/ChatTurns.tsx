@@ -13,6 +13,8 @@ import { ReferencedText } from './ReferencedText';
 import { ChatCopyButton } from './ChatCopyButton';
 import { DeviceCard, type ChatDeviceActions } from './DeviceCard';
 import { deviceMarkerOf } from '../../../../shared/deviceMarker';
+import { AgentLineView, SentMessageCards } from './AgentMessageCard';
+import { useChatLine } from './agentMessagesContext';
 
 export interface ChatTurnActions {
   /** Opens the file's diff in Pane's diff view. A diff never renders in the thread by itself. */
@@ -170,7 +172,7 @@ function TodoList({ entries }: { entries: PlanEntry[] }) {
 function Item({ item, waiting, actions, live }: { item: TurnItem; waiting: ReadonlySet<string>; actions: ChatTurnActions; live: boolean }) {
   switch (item.type) {
     case 'text': return <div data-pane-part="chat-message" data-anchor-id={item.id}><Markdown text={item.text} live={live} /></div>;
-    case 'user': return <div className="chat-user-row"><div className="chat-user" data-pane-part="chat-message" data-anchor-id={item.id}><UserParts message={item.message} /></div></div>;
+    case 'user': return <SteeredMessage id={item.id} message={item.message} />;
     case 'thought': return <details className="chat-thought"><summary><Brain aria-hidden="true" />Thinking</summary><div className="whitespace-pre-wrap">{item.text}</div></details>;
     case 'image': return <img className="chat-image" alt="Sent by the agent" src={`data:${item.mimeType};base64,${item.data}`} />;
     case 'plan': return <TodoList entries={item.entries} />;
@@ -193,11 +195,27 @@ function UserParts({ message }: { message: AgentChatMessage }) {
     : part.type === 'content' ? <UserImage key={`${message.id}:${index}`} content={part.content} /> : null)}</>;
 }
 
+const renderAgentText = (text: string) => <Markdown text={text} live={false} />;
+
+const messageText = (message: AgentChatMessage) => message.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
+
+/** A message sent into a running turn (Send now): drawn like any other, an agent's as its sender's card (T-105). */
+function SteeredMessage({ id, message }: { id: string; message: AgentChatMessage }) {
+  const text = messageText(message);
+  const line = useChatLine(text);
+  if (line) return <AgentLineView line={line} anchorId={id} text={text} renderText={renderAgentText} />;
+  return <div className="chat-user-row"><div className="chat-user" data-pane-part="chat-message" data-anchor-id={id}><UserParts message={message} /></div></div>;
+}
+
 function UserMessage({ turn }: { turn: ChatTurn }) {
   const { userMessage } = useContext(ChatBlocksContext);
+  const text = turn.user ? messageText(turn.user) : '';
+  // T-105: a message Pane or another agent typed here is drawn with its sender, not as the person's own.
+  const line = useChatLine(text);
   if (!turn.user) return null;
-  const custom = userMessage?.(turn.user.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'));
+  const custom = userMessage?.(text);
   if (custom !== undefined) return <>{custom}</>;
+  if (line) return <AgentLineView line={line} anchorId={turn.user.id} startedAt={turn.startedAt} text={text} renderText={renderAgentText} />;
   return <div className="chat-user-row" title={messageTime(turn.startedAt)?.full}>
     <div className="chat-user" data-pane-part="chat-message" data-anchor-id={turn.user.id}><UserParts message={turn.user} /></div>
     {userMarkdown(turn) && <div className="chat-message-actions"><ChatCopyButton label="Copy message" text={() => userMarkdown(turn)} /></div>}
@@ -245,6 +263,7 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions,
     {fold}
     {!open && actions.device && pinnedMarkers(activity, latest ? actions.device.openedHere : []).map(marker => <PinnedDeviceCard key={marker.panelId} marker={marker} device={actions.device!} />)}
     <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
+    <SentMessageCards turnId={turn.id} renderText={renderAgentText} />
     {!turn.running && (responseText(turn) || (latest && !activity.length && ended)) && <div className="chat-message-actions chat-response-actions">
       {responseText(turn) && <ChatCopyButton label="Copy response" text={() => responseText(turn)} />}
       {latest && !activity.length && ended && <span className="chat-turn-time" title={ended.full}>{ended.short}</span>}

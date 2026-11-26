@@ -321,6 +321,37 @@ composer marks it in amber like a mode that never asks.
   Diff tab forward, which shows the branch's changes read-only), *Run* with the command's output
   streaming in its own row, *Ran 9 commands*.
 - To-do lists from the agent's plan updates.
+- **Messages from agents** (T-105, D-1) are cards on the left with their
+  sender, not the person's 'You' bubble: another agent's message
+  ([AGENT_MESSAGES.md](AGENT_MESSAGES.md)) with its avatar, name, kind
+  ("Session orchestrator"), `M-n` and time; Pane's `[From Pane, To-dos]` lines
+  and Autopilot's `[From Autopilot]` lines with their own icon. The `[From …]`
+  prefix and the reply line are left off; Copy message copies the text as it
+  was typed. A message waiting for an answer says *Waiting for reply*; once
+  answered, the reply fills the card's lower half with *Answered*. The sending
+  tab shows what its agent sent as the same card, at the end of the turn that
+  sent it ("Sent to Billing"), and the reply fills in there too; the `reply:
+  M-n →` line that brought it shows as one line that jumps up to the card.
+  The person's words passed on by Autopilot or To-dos (`[From the person, via
+  Autopilot]`) stay the 'You' bubble, captioned *You, via Autopilot*. A
+  message sent as a file pointer is a card whose text is its
+  `Read and follow <file>` line. A reply shows its own delivery (*Reply
+  queued*, *Not delivered: its tab closed*), and a reply to a reply sits under
+  the reply it answers. The state and replies come from
+  `agentMessages.forPanel`, read back page by page as far as the oldest turn
+  loaded, up to the tab's 2,000 newest messages. Where the app has the
+  records, a line counts as a message only when that message reached this tab
+  with this exact text, and the recorded sender wins over any `[From …]` in
+  it, so a pasted message stays the person's own. A line Pane wrote that the
+  records can't vouch for is shown as typed in a dashed row marked *not in
+  this tab's message records*, credited to nobody: a message older than the
+  2,000 read, a `reply: M-n →` line with no record here (pasted, or a Session
+  orchestrator's reply that reached its new tab while its record names the
+  old one). A reply line folds into a jump up to its card only when that
+  card's thread shows that reply. Messages older than the 2,000 read also have
+  no sent card in the sending tab. Where the app has no records (the PWA and phone today) the cards come from
+  the text alone, without state or replies. Terminal tabs show the lines as
+  typed.
 - **Approvals** dock above the composer with exactly the choices the agent
   sent; keys 1 to 9 answer while the composer is empty. Typing a message
   instead sends it and, once Pane has it, declines the request. ExitPlanMode shows the

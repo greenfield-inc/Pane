@@ -347,3 +347,38 @@ a.chat-status-item:hover,button.chat-status-item:hover:not(:disabled),.chat-stat
 .chat-status-agents button:hover:not(:disabled) { background:var(--color-surface-hover); }
 .chat-status-agent-name { font-weight:500; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .chat-status-agents .chat-status-panel-muted { flex-shrink:0; margin-left:auto; font-size:12px; }
+
+/* T-105 (D-1): a message another agent, To-dos or Autopilot typed here is a card with its sender; its reply is the card's lower half. */
+.chat-agent-row { align-self:flex-start; display:flex; flex-direction:column; align-items:flex-start; gap:2px; max-width:min(92%, 40rem); min-width:0; }
+.chat-agent-row[data-outgoing=true] { align-self:flex-end; align-items:flex-end; }
+.chat-agent-card { width:100%; min-width:0; border:1px solid var(--chat-border); border-radius:14px; background:var(--chat-background); box-shadow:0 1px 2px color-mix(in oklab,var(--chat-foreground) 6%,transparent); overflow:hidden; overflow-wrap:anywhere; }
+.chat-agent-head { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; padding:8px 12px 0; font-size:13px; line-height:1.4; min-width:0; }
+.chat-agent-name { font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chat-agent-kind,.chat-agent-time { color:var(--chat-muted-foreground); white-space:nowrap; }
+.chat-agent-time { font-size:12px; }
+.chat-agent-spacer { flex:1; }
+.chat-agent-ref { padding:0 6px; border:1px solid var(--chat-border); border-radius:6px; font:600 11px/1.6 var(--font-mono,ui-monospace,monospace); color:var(--chat-muted-foreground); }
+.chat-agent-avatar { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; flex-shrink:0; border-radius:999px; background:var(--chat-muted); color:var(--chat-foreground); font-size:9px; font-weight:700; letter-spacing:.02em; }
+.chat-agent-avatar[data-system] { background:var(--chat-primary); color:var(--chat-primary-foreground); }
+.chat-agent-avatar svg { width:12px; height:12px; }
+.chat-agent-body { padding:4px 14px 10px; font-size:15px; }
+.chat-agent-foot { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:0 12px 10px; }
+.chat-agent-pill { display:inline-flex; align-items:center; gap:4px; height:22px; padding:0 8px; border-radius:999px; border:1px solid transparent; font-size:12px; font-weight:500; white-space:nowrap; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+.chat-agent-pill svg { width:12px; height:12px; flex-shrink:0; }
+.chat-agent-pill[data-state=waiting],.chat-agent-pill[data-state=sending] { border:1px dashed var(--chat-muted-foreground); color:var(--chat-muted-foreground); }
+.chat-agent-pill[data-state=answered] { background:var(--chat-primary); color:var(--chat-primary-foreground); }
+.chat-agent-pill[data-state=undelivered] { border-color:color-mix(in oklab,var(--chat-destructive) 50%,transparent); color:var(--chat-destructive); }
+.chat-agent-hint { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--chat-muted-foreground); }
+.chat-agent-hint svg { width:12px; height:12px; }
+.chat-agent-hint code { background:var(--chat-muted); border-radius:6px; padding:1px 5px; font:11px var(--font-mono,ui-monospace,monospace); }
+.chat-agent-reply { background:var(--chat-muted); border-top:1px solid var(--chat-border); }
+.chat-agent-reply-icon { width:14px; height:14px; color:var(--chat-muted-foreground); }
+.chat-agent-arrival { align-self:center; }
+.chat-agent-jump { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border:1px solid var(--chat-border); border-radius:999px; font-size:12px; color:var(--chat-muted-foreground); }
+.chat-agent-jump:hover { color:var(--chat-foreground); background:var(--chat-muted); }
+.chat-agent-jump svg { width:12px; height:12px; }
+.chat-relayed-caption { display:inline-flex; align-items:center; gap:4px; padding-right:6px; font-size:12px; color:var(--chat-muted-foreground); }
+.chat-relayed-caption svg { width:12px; height:12px; }
+@media (hover:hover) { .chat-agent-row:hover .chat-copy { opacity:1; } }
+.chat-agent-reply .chat-markdown :not(pre)>code { background:var(--chat-background); }
+.chat-agent-unverified { border-style:dashed; box-shadow:none; }
