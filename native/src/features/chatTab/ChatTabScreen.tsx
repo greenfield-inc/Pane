@@ -35,6 +35,7 @@ import { chatImageAdapter, chatImageAttachment, chatSendFromComposer, chatThread
 import { pickChatImages } from './pickChatImages';
 import { onChatImageAdded, takeChatImages } from './chatAddedImages';
 import { useChatAgents, useChatTab } from './useChatTab';
+import { insertAtSelection } from '../composer/insertText';
 
 function newOperationId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
@@ -237,8 +238,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   // A controller: Y sends like Send, R2 dictates into the box (the words wait for Y), the right stick scrolls.
   const list = useRef<LegendListRef>(null);
   const voice = useVoiceDictation(text => {
-    const draft = viewer.snapshot().draft;
-    const next = draft.trim() ? `${draft}${/\s$/.test(draft) ? '' : ' '}${text}` : text;
+    const next = insertAtSelection(viewer.snapshot().draft, null, text).text;
     viewer.setDraft(next);
     runtime.thread.composer.setText(next);
   });

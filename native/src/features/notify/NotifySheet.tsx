@@ -20,6 +20,7 @@ import { ListeningBar } from '@/features/controller/ListeningBar';
 import { useControllerActions } from '@/features/controller/useControllerActions';
 import { useVoiceDictation } from '@/features/voice/useVoiceDictation';
 import { VoiceAudio } from '@/features/voice/VoiceAudio';
+import { insertAtSelection } from '@/features/composer/insertText';
 
 /**
  * One Notify question, drawn like the desktop card (frontend/src/components/notify/NotifyCard.tsx) in the app's sheet chrome.
@@ -185,7 +186,7 @@ export function QuestionForm({ item, answer, busy, children }: {
   };
   const several = replies ? optionsAnswer(item, picks, note) : null;
   // A controller's R2 dictates into the answer box (or the note riding on a choice); never into a secret.
-  const append = (current: string, words: string) => (current.trim() ? `${current}${/\s$/.test(current) ? '' : ' '}${words}` : words);
+  const append = (current: string, words: string) => insertAtSelection(current, null, words).text;
   const voice = useVoiceDictation(words => (item.ui === 'ask' ? setText(current => append(current, words)) : setNote(current => append(current, words))));
   useControllerActions('sheet', {
     'dictate-hold': event => {

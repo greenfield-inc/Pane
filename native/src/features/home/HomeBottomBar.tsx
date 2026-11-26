@@ -13,6 +13,7 @@ import { ListeningBar } from '@/features/controller/ListeningBar';
 import { useControllerActions } from '@/features/controller/useControllerActions';
 import { useVoiceDictation } from '@/features/voice/useVoiceDictation';
 import { VoiceAudio } from '@/features/voice/VoiceAudio';
+import { insertAtSelection } from '@/features/composer/insertText';
 
 const CONTROL = 44;
 const PADDING_TOP = 10;
@@ -63,7 +64,7 @@ export function HomeBottomBar({ query, onQuery, canCreate }: { query: string; on
 ||||||| parent of d6a1f7924 (Controller layer for the whole app, cheat sheet overlay on Android, search dictation, positional Android Nintendo pads)
 =======
   // While searching, a controller's R2 dictates the query.
-  const voice = useVoiceDictation(words => onQuery(query.trim() ? `${query.trimEnd()} ${words}` : words));
+  const voice = useVoiceDictation(words => onQuery(insertAtSelection(query, null, words).text.trimEnd()));
   useControllerActions('search', {
     'dictate-hold': event => {
       if (!voice.available) return false;
