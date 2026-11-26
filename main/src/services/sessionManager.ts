@@ -156,6 +156,7 @@ import { panelManager } from './panelManager';
 import { ProjectEnvService, type ResolvedProjectEnv } from './projectEnvVars';
 import { teammatePaneCaller } from '../daemon/commandRegistry';
 import type { AnalyticsManager } from './analyticsManager';
+import { repoProperties } from './repoAnalytics';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import { comparePaneOrder, type NewPanePlacement, type PaneOrderSettings } from '../../../shared/utils/paneOrder';
 
@@ -617,7 +618,7 @@ export class SessionManager extends EventEmitter {
       const allProjects = this.db.getAllProjects();
       const projectCount = allProjects.length;
 
-      this.analyticsManager.track('session_created', {
+      const properties = {
         tool_type: toolType || 'none',
         template_type: worktreeName.startsWith('main') ? 'main' : 'worktree',
         session_count: 1, // This is for a single session creation
@@ -634,7 +635,13 @@ export class SessionManager extends EventEmitter {
         existing_sessions_stopped: statusCounts['stopped'] || 0,
         existing_sessions_error: statusCounts['error'] || 0,
         existing_projects_count: projectCount
-      });
+      };
+      // The repository properties need git, so they are read after creation returns.
+      const analytics = this.analyticsManager;
+      const repo = targetProject && analytics.isEnabled()
+        ? repoProperties(targetProject.path, this.getOrCreateContext(targetProject).commandRunner)
+        : Promise.resolve({});
+      void repo.then(repoProps => analytics.track('session_created', { ...properties, ...repoProps }));
     }
 
     return session;
