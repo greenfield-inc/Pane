@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { AGENT_LAUNCH_PRESETS } from '@shared/constants/agentLaunchPresets';
 
 import { sinceLabel } from '@/features/allMachines/allMachinesList';
+import { NewBadge } from '@/features/approvals/NewBadge';
 import type { Machine } from '@/features/machines/machines';
 import { MachineMark } from '@/features/machines/MachineMark';
 import { PausedBadge, StatusBadge, statusPresentation } from '@/features/panes/StatusBadge';
@@ -49,7 +50,7 @@ export function RowDivider({ inset = 33 }: { inset?: number }) {
 }
 
 /** A question or permission request: its status dot, who asks, what, how long ago, and what's under it. */
-export function ApprovalRow({ title, detail, below, spoken = [], at, machine, stale = false, done = false, divided, onPress, onArchive, background, testID }: {
+export function ApprovalRow({ title, detail, below, spoken = [], at, machine, stale = false, done = false, fresh = false, divided, onPress, onArchive, background, testID }: {
   title: string;
   detail: string;
   /** A question's subtitle and reply status. */
@@ -63,6 +64,8 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
   stale?: boolean;
   /** Answered, held for Undo, or with the agent: a gray dot. */
   done?: boolean;
+  /** New since you last looked at Needs you: "New" before its time. */
+  fresh?: boolean;
   divided: boolean;
   onPress: () => void;
   /** Swipe left (or the screen reader's Archive) to archive it; `swipeId` names its swipe action. */
@@ -78,7 +81,7 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={[title, detail, ...spoken, time, machine?.name].filter(Boolean).join(', ')}
+      accessibilityLabel={[fresh ? 'New' : undefined, title, detail, ...spoken, time, machine?.name].filter(Boolean).join(', ')}
       accessibilityHint={stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
       {...accessibility}
       onPress={onPress}
@@ -90,6 +93,7 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
         <View style={styles.titleLine}>
           {machine ? <MachineMark os={machine.os} slot={machine.slot} state={machine.state} size={12} /> : null}
           <Text variant="callout" numberOfLines={1} style={[styles.fill, styles.bold]}>{title}</Text>
+          {fresh ? <NewBadge label="New" testID={`${testID}-new`} /> : null}
           <Text variant="footnote" tone="muted" style={styles.time}>{time}</Text>
         </View>
         <Text variant="rowDetail" tone="muted" numberOfLines={2}>{detail}</Text>
@@ -106,8 +110,10 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
 }
 
 /** A Working or Ready Pane: its name over agent, time and repository, with a chevron. */
-export function ActivityRow({ row, machine, divided, onPress, swipe, background }: {
+export function ActivityRow({ row, machine, divided, onPress, swipe, background, fresh = false }: {
   row: PaneRecentRow;
+  /** New since you last looked at Needs you: "New" at its end. */
+  fresh?: boolean;
   /** The card's colour, over the page's own so its swipe actions stay hidden behind a tint. */
   background?: string;
   machine?: MarkedMachine;
@@ -125,7 +131,7 @@ export function ActivityRow({ row, machine, divided, onPress, swipe, background 
     <Pressable
       testID={`board-pane-${row.key}`}
       accessibilityRole="button"
-      accessibilityLabel={[pane.name, statusPresentation[pane.status].label, detail, pane.session, machine?.name].filter(Boolean).join(', ')}
+      accessibilityLabel={[fresh ? 'New' : undefined, pane.name, statusPresentation[pane.status].label, detail, pane.session, machine?.name].filter(Boolean).join(', ')}
       accessibilityHint={row.stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
       {...accessibility}
       onPress={onPress}
@@ -140,6 +146,7 @@ export function ActivityRow({ row, machine, divided, onPress, swipe, background 
         </View>
         <Text variant="rowDetail" tone="muted" numberOfLines={1}>{detail}</Text>
       </View>
+      {fresh ? <NewBadge label="New" testID={`board-pane-${row.key}-new`} /> : null}
       <Icon ios="chevron.right" android="chevron_right" size={14} />
     </Pressable>
   );

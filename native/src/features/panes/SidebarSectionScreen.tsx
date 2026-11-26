@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { buildAllMachinesList } from '@/features/allMachines/allMachinesList';
 import { sessionKey } from '@/features/approvals/approvals';
+import { useFreshCounts } from '@/features/home/seenStore';
 import { sessionWaiting } from '@/features/home/statusBoard';
 import { useCurrentMachine } from '@/features/home/useHomeData';
 import { ConnectionBar, Dimmed } from '@/features/hosts/ConnectionStatus';
@@ -46,6 +47,7 @@ export function SidebarSectionScreen() {
   const board = buildAllMachinesList([here.feed], '');
   const statusOf = new Map(board.recent.flatMap(row => (row.type === 'pane' ? [[row.pane.id, row.pane] as const] : [])));
   const waitingBySession = sessionWaiting(board);
+  const fresh = useFreshCounts();
   const items = buildSidebar({
     projects: here.projects.data ?? [],
     sessions: here.sessions.unavailable ? 'unavailable' : here.sessions.data?.sessions ?? (here.sessions.isError ? [] : undefined),
@@ -103,6 +105,7 @@ export function SidebarSectionScreen() {
                 context={{
                   actions,
                   waitingFor: sessionId => waitingBySession.get(sessionKey(here.profile.id, sessionId)) ?? 0,
+                  freshFor: row => ('sessionId' in row ? fresh.bySession.get(sessionKey(here.profile.id, row.sessionId)) : fresh.byPane.get(`${here.profile.id}:${row.paneId}`)) ?? 0,
                   onToggleSection: () => undefined,
                   onToggleSession: sessionId => toggleSession(here.profile.id, sessionId),
                   retry: what => void (what === 'archived' ? archived.refetch() : here.sessions.refetch()),

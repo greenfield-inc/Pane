@@ -39,7 +39,7 @@ vi.mock('@/daemon/invoke', () => ({ invokeChannel: native.invoke }));
 vi.mock('@/features/notifications/usePushSetup', () => ({ requestPushRegistration: native.refresh }));
 vi.mock('@/features/notifications/device', () => ({
   clearPaneNotifications: () => Promise.resolve(), dismissNotifyAlerts: () => Promise.resolve(),
-  devicePush: { platform: 'android' }, getInstallationId: () => Promise.resolve('install-1'),
+  devicePush: { platform: 'android' }, getInstallationId: () => Promise.resolve('install-1'), LOUD_NOTICE: 'paneNotice',
 }));
 
 beforeAll(async () => {

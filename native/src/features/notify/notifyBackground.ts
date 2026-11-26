@@ -8,7 +8,7 @@ import { secureStore } from '@/auth/secureStore';
 import { CLIENT_LABEL, createDaemonClient, DEVICE_LABEL, getRuntimeId, streamingFetch } from '@/daemon/createClient';
 import { invokeChannel } from '@/daemon/invoke';
 import { parseGrantPush, parseNotifyPush, type NotifyPush } from '@/features/links/links';
-import { clearPaneNotifications, devicePush, dismissNotifyAlerts, getInstallationId } from '@/features/notifications/device';
+import { clearPaneNotifications, devicePush, dismissNotifyAlerts, getInstallationId, LOUD_NOTICE } from '@/features/notifications/device';
 import { requestPushRegistration } from '@/features/notifications/usePushSetup';
 
 import { commandForAction, IOS_BUTTONS_OPEN_APP, NOTIFY_CATEGORY, notifyCategories, optionsCategory, sendNotifyCommand, type NotifySendResult } from './notifyActions';
@@ -85,7 +85,7 @@ async function answerFromAlert(response: Notifications.NotificationResponse): Pr
 /** A short local alert, only when a button's answer didn't surely reach the agent. */
 async function postNotice(push: NotifyPush, title: string | null, result: Exclude<NotifySendResult, { status: 'sent' }>): Promise<void> {
   // Tapping it opens the question while it may still be waiting or its answer needs checking, otherwise the Pane.
-  const data: Record<string, string> = { hostProfileId: push.host };
+  const data: Record<string, string> = { hostProfileId: push.host, [LOUD_NOTICE]: '1' };
   if (result.status !== 'refused') data.notifyId = push.notifyId;
   if (push.paneId) data.paneId = push.paneId;
   await Notifications.scheduleNotificationAsync({

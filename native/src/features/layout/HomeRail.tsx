@@ -9,6 +9,8 @@ import type { Machine } from '@/features/machines/machines';
 import { useTheme, type ThemeColors } from '@/theme';
 import { Icon, Text } from '@/ui';
 
+import { NewBadge } from '@/features/approvals/NewBadge';
+
 import { RAIL_WIDTH } from './windowRule';
 
 // Rail labels stop growing here, so a count and its word stay inside 64 dp.
@@ -25,10 +27,12 @@ const COUNTS: ReadonlyArray<{ tile: BoardTile; label: string; spoken: string; co
  * + (when a machine here takes new work) and Settings. A count, the machine or search expands Home there. On a short window the upper
  * part scrolls; search, + and Settings stay in reach.
  */
-export function HomeRail({ machine, counts, onExpand, onSelectTile, onSearch, canCreate }: {
+export function HomeRail({ machine, counts, fresh = 0, onExpand, onSelectTile, onSearch, canCreate }: {
   /** The machine Home is on, or undefined on All. */
   machine: Pick<Machine, 'name' | 'os' | 'slot' | 'state'> | undefined;
   counts: Partial<Record<BoardTile, number>> | undefined;
+  /** "+N" on Needs: what waits on you that the phone hasn't shown you yet. */
+  fresh?: number;
   onExpand: () => void;
   onSelectTile: (tile: BoardTile) => void;
   onSearch: () => void;
@@ -51,10 +55,12 @@ export function HomeRail({ machine, counts, onExpand, onSelectTile, onSearch, ca
         <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
         {COUNTS.map(({ tile, label, spoken, color }) => {
           const count = counts?.[tile];
+          const fresher = tile === 'needs' && count !== undefined ? fresh : 0;
           return (
-            <RailButton key={tile} testID={`home-rail-${tile}`} label={count === undefined ? spoken : `${spoken}, ${count}`} onPress={() => onSelectTile(tile)} tall>
+            <RailButton key={tile} testID={`home-rail-${tile}`} label={[spoken, count === undefined ? undefined : String(count), fresher > 0 ? `${fresher} new` : undefined].filter(Boolean).join(', ')} onPress={() => onSelectTile(tile)} tall>
               <Text variant="headline" maxFontSizeMultiplier={MAX_TEXT_SCALE} style={[styles.count, { color: theme.colors[color] }]}>{count === undefined ? ' ' : String(count)}</Text>
               <Text variant="caption" tone="secondary" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={MAX_TEXT_SCALE} style={styles.label}>{label}</Text>
+              <NewBadge count={fresher} testID="home-rail-needs-new" style={styles.fresh} />
             </RailButton>
           );
         })}
@@ -108,6 +114,7 @@ const styles = StyleSheet.create({
   tall: { minHeight: 60, paddingVertical: 6 },
   count: { fontWeight: '700', fontVariant: ['tabular-nums'] },
   label: { fontWeight: '600' },
+  fresh: { position: 'absolute', top: -4, right: -4 },
   divider: { width: 32, height: StyleSheet.hairlineWidth, marginVertical: 2 },
   new: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
 });
