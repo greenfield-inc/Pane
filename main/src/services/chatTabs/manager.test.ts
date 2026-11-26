@@ -209,6 +209,29 @@ describe('chat tab manager', () => {
     expect(followed.messages).toEqual(view.transcript!.messages);
   });
 
+  it('says, as the turn ends, whether it ended with text the person can read, whatever started it (T-117 D-1)', { timeout: 30_000 }, async () => {
+    const statuses: PanelAgentStatusEvent[] = [];
+    const { manager, store, directory } = harness(new MemoryStore(), {}, undefined, { onStatus: event => statuses.push(event) });
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    const endOf = async (operationId: string, text: string) => {
+      const before = statuses.length;
+      manager.send('p1', { operationId, text });
+      await expect.poll(() => manager.receipt('p1', operationId)?.state).toBe('completed');
+      await expect.poll(() => statuses.slice(before).some(event => event.state === 'idle')).toBe(true);
+      return statuses.slice(before).find(event => event.state === 'idle');
+    };
+
+    // A Pane line starts the turn; the agent answers in words.
+    expect((await endOf('op-1', '[From Pane, Workers] T-12 reported ready'))?.turnEndedWithText).toBe(true);
+    // A watcher wake answered with tool calls only.
+    expect((await endOf('op-2', 'quiet'))?.turnEndedWithText).toBe(false);
+    // Progress text before a tool call is not how the turn ended.
+    expect((await endOf('op-3', 'progress'))?.turnEndedWithText).toBe(false);
+    // The next reply in words counts again, though the turn marker rows sit between them.
+    expect((await endOf('op-4', 'hello'))?.turnEndedWithText).toBe(true);
+  });
+
   it('tells viewers when it has finished starting, so they fetch the replayed history', async () => {
     const { manager, store, directory, states } = harness();
     store.add('p1', newTab(directory));

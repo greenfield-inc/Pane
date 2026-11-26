@@ -1,3 +1,4 @@
+import { promises as fs } from 'fs';
 import { claudeTranscriptFiles, parseClaudeLine } from './claude';
 import { codexTranscriptFiles, parseCodexLine } from './codex';
 import { readTranscriptTail, type TranscriptEntry } from './tail';
@@ -17,6 +18,11 @@ export interface TranscriptLocator {
   sessionId?: string;
   /** Transcripts last written before this are not the panel's (the panel's creation time). */
   notBeforeMs?: number;
+}
+
+/** Whether Pane can read this agent's transcript (it knows these agents' file formats). */
+export function isTranscriptAgent(agent: string | undefined): agent is TranscriptLocator['agent'] {
+  return agent === 'claude' || agent === 'codex';
 }
 
 interface UserTurnLookup {
@@ -106,7 +112,7 @@ async function findUserTurnSince(
     if (!entries) continue;
     result.file ??= file;
     for (const entry of entries) {
-      if (entry.kind === 'assistant' || entry.timestampMs === undefined || entry.timestampMs < earliest) continue;
+      if ((entry.kind !== 'user' && entry.kind !== 'queued') || entry.timestampMs === undefined || entry.timestampMs < earliest) continue;
       if (text !== undefined && !turnTextMatches(entry.text, text)) continue;
       const state = entry.kind === 'user' ? 'taken' : 'queued';
       if (result.state !== 'taken') {
@@ -138,8 +144,109 @@ async function lastAssistantMessage(locator: TranscriptLocator): Promise<string 
   return parts.join('\n');
 }
 
+/**
+ * Where a judgment of a panel's turns stopped: rows from `offset` on in `file` are not judged yet.
+ * `id` is the file's identity (device and inode): a file replaced or rewritten shorter is another
+ * transcript. `fresh` marks a start set at a transcript's end on first sight: rows before the next
+ * prompt belong to a turn Pane did not see start, and never count.
+ */
+export interface TranscriptCursor {
+  file: string;
+  id: string;
+  offset: number;
+  fresh?: boolean;
+}
+
+export interface FinishedTurns {
+  /** Whether a finished turn ended with text the person can read; undefined when no turn finished since the cursor. */
+  endedWithText: boolean | undefined;
+  /** Where the next judgment starts: before a turn still working, else after the last row read. */
+  cursor: TranscriptCursor | undefined;
+  /** No cursor for this transcript (a restart, another file, a rewrite): `cursor` is a fresh start at its end, and nothing counted. */
+  missed?: boolean;
+}
+
+/** A turn: the rows after the prompt that started it (typed, taken, or one nobody typed). */
+interface TranscriptTurn {
+  start: number;
+  rows: TranscriptEntry[];
+}
+
+/** A turn ended with text when its last reply-or-tool-call row is non-blank reply text; an empty turn did not. */
+function turnEndsWithText(turn: TranscriptTurn): boolean {
+  const last = turn.rows.filter(row => row.kind === 'assistant' || row.kind === 'tool').at(-1);
+  return last !== undefined && last.kind === 'assistant' && last.text.trim() !== '';
+}
+
+/**
+ * The agent's turns finished since `cursor`, split at the transcript's own prompt rows (a typed
+ * prompt, a queued one the agent took, or one nobody typed, such as a task notification), whether
+ * or not a turn wrote anything. Row order decides, never the clock. Every turn followed by another
+ * prompt has finished; the last one has finished only when the agent is idle now (`idleNow`), so a
+ * turn still working never lends its reply to the one before.
+ *
+ * `known` holds the tab's cursors, one per transcript it read (path and identity), so going back to
+ * a transcript (A, then /clear to B, then /resume A) reads it from its own place. With no cursor for
+ * this transcript (none yet, or the same path replaced or rewritten shorter), nothing counts: the
+ * answer is a fresh start at the transcript's end, so resumed history is never read as a new reply.
+ * The exception is a transcript at a path the tab has no cursor for and has never read in this
+ * Pane run (`seen`), created since Pane started (`runStartedAtMs`), as a new Session or a relaunched
+ * agent writes: it holds no history the person read, so it is read from its start. One the tab read
+ * earlier in the run but no longer keeps a cursor for starts at its end like any other.
+ */
+async function readFinishedTurns(
+  locator: TranscriptLocator,
+  known: readonly TranscriptCursor[],
+  idleNow: boolean,
+  runStartedAtMs?: number,
+  seen: ReadonlySet<string> = new Set(),
+): Promise<FinishedTurns> {
+  const [file] = await transcriptFiles(locator, locator.notBeforeMs ?? 0);
+  if (!file) return { endedWithText: undefined, cursor: undefined };
+  let id: string;
+  let size: number;
+  let createdMs: number;
+  try {
+    const stats = await fs.stat(file);
+    id = `${stats.dev}:${stats.ino}`;
+    size = stats.size;
+    // 0 where the file system keeps no creation time: such a file is never taken as new.
+    createdMs = stats.birthtimeMs;
+  } catch {
+    return { endedWithText: undefined, cursor: undefined };
+  }
+  const samePath = known.filter(candidate => candidate.file === file);
+  const newToRun = samePath.length === 0 && !seen.has(file) && runStartedAtMs !== undefined && createdMs > 0 && createdMs >= runStartedAtMs;
+  const cursor = newToRun ? { file, id, offset: 0 } : samePath.find(candidate => candidate.id === id);
+  if (!cursor || size < cursor.offset) {
+    return { endedWithText: undefined, cursor: { file, id, offset: size, fresh: true }, missed: true };
+  }
+  const entries = await readEntries(locator, file);
+  if (!entries) return { endedWithText: undefined, cursor: undefined };
+  const turns: TranscriptTurn[] = [];
+  let lastOffset: number | undefined;
+  for (const entry of entries) {
+    if (entry.offset === undefined || entry.offset < cursor.offset) continue;
+    lastOffset = entry.offset;
+    if (entry.kind === 'user' || entry.kind === 'boundary') turns.push({ start: entry.offset, rows: [] });
+    else if (entry.kind !== 'queued' && !(cursor.fresh && turns.length === 0)) {
+      // Rows with no prompt before them since the cursor are a turn of their own, unless the cursor is a fresh start.
+      if (turns.length === 0) turns.push({ start: entry.offset, rows: [] });
+      turns[turns.length - 1].rows.push(entry);
+    }
+  }
+  const working = idleNow ? undefined : turns.at(-1);
+  const finished = working ? turns.slice(0, -1) : turns;
+  if (lastOffset === undefined) return { endedWithText: undefined, cursor: undefined };
+  const next: TranscriptCursor = { file, id, offset: working ? working.start : lastOffset + 1 };
+  // Only rows before the next prompt so far: the fresh start still holds.
+  if (cursor.fresh && turns.length === 0) next.fresh = true;
+  return { endedWithText: finished.length > 0 ? finished.some(turnEndsWithText) : undefined, cursor: next };
+}
+
 /** The transcript reader, as one object so callers' tests can stub its reads. */
 export const agentTranscripts = {
   findUserTurnSince,
   lastAssistantMessage,
+  readFinishedTurns,
 };

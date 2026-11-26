@@ -27,6 +27,7 @@ import { Tooltip } from './ui/Tooltip';
 import { UndoToast } from './ui/UndoToast';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 import { cn } from '../utils/cn';
+import { SessionName } from './SessionName';
 import { SessionActivityDot, SessionActivitySummary } from './SessionActivity';
 import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../utils/sessionDrag';
 import { dropOrder, stepOrder, type SessionDropTarget } from '../utils/sessionReorder';
@@ -495,7 +496,7 @@ export function OrchestrationSessionNav({
         ) : (
           <>
             {loopName !== undefined ? <LoopMark loopName={loopName} /> : <SessionActivityDot session={session} paneIds={visiblePaneIds} />}
-            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
+            <SessionName name={label} session={session} />
             {loopName !== undefined && <LoopLabel loopName={loopName} />}
             <SessionApprovalsCount sessionId={session.id} opensApprovals otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
           </>

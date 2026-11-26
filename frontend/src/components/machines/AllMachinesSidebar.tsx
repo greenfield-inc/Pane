@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Archive, ArrowRightLeft, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
 import { PausedGlyph } from '../ui/AgentStatusDot';
 import { SessionActivityIcon } from '../SessionActivity';
+import { SessionName } from '../SessionName';
 import { Button } from '../ui/Button';
 import { PopoverButton, TerminalPopover } from '../terminal/TerminalPopover';
 import { RenameDialog } from '../CompactSessionMenu';
@@ -299,7 +300,9 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
         {dimmed
           ? <PausedGlyph size="sm" className="pointer-events-none flex-shrink-0" />
           : <SessionActivityIcon state={row.activity} className="pointer-events-none" />}
-        <span className={cn('pointer-events-none min-w-0 flex-1 truncate text-[13px]', dimmed ? 'text-text-muted' : 'font-semibold text-text-primary')}>{session.name}</span>
+        {dimmed
+          ? <span className="pointer-events-none min-w-0 flex-1 truncate text-[13px] text-text-muted">{session.name}</span>
+          : <SessionName name={session.name} session={session} className="pointer-events-none" />}
         {moveLabel ? (
           <span data-testid="session-move-label" className="pointer-events-none max-w-[55%] flex-shrink-0 truncate text-[11px] text-text-tertiary">{moveLabel}</span>
         ) : (

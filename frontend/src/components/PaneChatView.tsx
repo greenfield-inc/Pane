@@ -1,3 +1,4 @@
+import { sessionIsUnread } from '../../../shared/sessionUnread';
 import { registerRemoteWorkspaceRestore } from '../utils/remoteRestoration';
 import { useApprovalColumnStore } from '../stores/approvalColumnStore';
 import { SessionApprovalColumn, SessionApprovalsButton } from './approvals/SessionApprovals';
@@ -202,15 +203,7 @@ function SessionWorkspace() {
     void select({ sessionId }).catch(() => undefined);
   }, [select]);
 
-  // The Session on screen counts as opened when it shows (a launch restores one without a click)
-  // and each time the window comes back to it: a phone's Recent lists Sessions by when they were opened.
-  const shownChatPaneId = sessions.find(session => session.id === selectedSessionId)?.internalSessionId;
-  useEffect(() => {
-    if (!shownChatPaneId) return;
-    const markOpened = () => { void API.sessions.markViewed(shownChatPaneId).catch(() => undefined); };
-    markOpened();
-    return window.electronAPI?.events?.onWindowFocusChanged?.(focused => { if (focused) markOpened(); });
-  }, [shownChatPaneId]);
+  useReadWhileShown(sessions.find(session => session.id === selectedSessionId));
 
   // Something always has to be selected for the layout to have a starting tile;
   // what the layout already shows beats an arbitrary first Session.
@@ -411,11 +404,35 @@ interface SessionTileProps {
 const ignoreTileEvent = () => undefined;
 
 /**
+ * Reads a Session the person has settled on (the workspace's selected Session, or one beside its
+ * approval): it counts as opened when it shows and each time the window comes back to it (a phone's
+ * Recent lists Sessions by when they were opened), and a reply that lands while the window has focus
+ * is read at once, so the sidebar never bolds the Session on screen. A hover preview never calls it.
+ */
+function useReadWhileShown(session: OrchestrationSessionRecord | undefined): void {
+  const chatPaneId = session?.internalSessionId;
+  // Each new unread reply, even one that lands before the last view has cleared the one before.
+  const unreadReply = session && sessionIsUnread(session) ? session.readState?.replied : undefined;
+  useEffect(() => {
+    if (!chatPaneId) return;
+    const markOpened = () => { void API.sessions.markViewed(chatPaneId).catch(() => undefined); };
+    markOpened();
+    return window.electronAPI?.events?.onWindowFocusChanged?.(focused => { if (focused) markOpened(); });
+  }, [chatPaneId]);
+  useEffect(() => {
+    if (!chatPaneId || unreadReply === undefined || !document.hasFocus()) return;
+    void API.sessions.markViewed(chatPaneId).catch(() => undefined);
+  }, [chatPaneId, unreadReply]);
+}
+
+/**
  * One Session shown live beside something else (Approvals' right side): the same workspace as
  * its tile, with its orchestrator tab, chat or terminal, and its tab controls kept inside it.
  */
 export function SessionBeside({ sessionId }: { sessionId: string }) {
   const tile = useMemo((): SessionTileNode => ({ type: 'session', id: `beside-${sessionId}`, sessionId }), [sessionId]);
+  // Shown here because the person settled on its approval: reading it here reads it.
+  useReadWhileShown(useOrchestrationSessionStore(state => state.sessions.find(session => session.id === sessionId)));
   return <SessionTile tile={tile} isFocused tiled={false} inline draggedSessionId={null} onFocus={ignoreTileEvent} onDropSession={ignoreTileEvent} />;
 }
 

@@ -53,6 +53,7 @@ import { detectAgentState } from '../services/agentStatus/manifestEngine';
 import { getManifestForAgent, CURSOR_MANIFEST } from '../services/agentStatus/manifests';
 import { detectAgentBackgroundWork, detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from '../services/agents/agentScreenSignature';
 import { agentTranscripts, type TranscriptLocator } from '../services/agentTranscript';
+import { panelTranscriptLocator } from '../services/agentTranscript/panelLocator';
 import {
   AGENT_REPORT_STATES,
   journalAgentReport,
@@ -4448,24 +4449,6 @@ async function waitForTranscriptDelivery(probe: DeliveryProbe, timeoutMs: number
     if (check.delivery) return check.delivery;
   }
   return undefined;
-}
-
-/** Where the panel's agent writes its transcript; undefined for other panels or a Pane with no worktree. */
-function panelTranscriptLocator(
-  panel: ToolPanel,
-  cwd: string | undefined,
-  agentType: RunpaneAgentId | undefined,
-): TranscriptLocator | undefined {
-  if (!cwd || (agentType !== 'claude' && agentType !== 'codex')) return undefined;
-  const current = panelManager.getPanel(panel.id) ?? panel;
-  const customState = isRecord(current.state?.customState) ? current.state.customState : {};
-  const createdAt = Date.parse(panel.metadata?.createdAt ?? '');
-  return {
-    agent: agentType,
-    cwd,
-    sessionId: optionalString(customState.agentSessionId),
-    notBeforeMs: Number.isNaN(createdAt) ? undefined : createdAt,
-  };
 }
 
 /** A delivery probe for a Claude or Codex composer; other panels have none. */

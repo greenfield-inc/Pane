@@ -117,6 +117,14 @@ const sessionSchema = boundary.object({
   archived: boundary.optional(boundary.boolean),
   archivedAt: boundary.optional(boundary.string),
   isPinned: boundary.optional(boundary.boolean),
+  agentRepliedAt: boundary.optional(boundary.string),
+  readState: boundary.optional(boundary.object({ clock: boundary.number, viewed: boundary.number, replied: boundary.number })),
+  replyCursors: boundary.optional(boundary.object({
+    panelId: boundary.nonEmptyString,
+    cursors: boundary.array(boundary.object({
+      file: boundary.nonEmptyString, id: boundary.string, offset: boundary.number, fresh: boundary.optional(boundary.boolean),
+    })),
+  })),
   todoNumber: boundary.optional(boundary.refine(boundary.number, value => Number.isInteger(value) && value > 0, 'expected a to-do number')),
   agent: paneChatAgentSchema,
   launchCommand: boundary.optional(boundary.string),

@@ -56,13 +56,19 @@ export function parseCodexLine(line: string): TranscriptEntry | undefined {
   if (row.type === 'response_item' && payload.type === 'message' && 'role' in payload) {
     if (payload.role === 'user') {
       const text = decodeOptionalBoundary(payload.content, userContent);
-      return text && !isInjectedContext(text) ? { kind: 'user', text, timestampMs: at } : undefined;
+      if (!text) return undefined;
+      return { kind: isInjectedContext(text) ? 'boundary' : 'user', text, timestampMs: at };
     }
     if (payload.role === 'assistant') {
       const text = decodeOptionalBoundary(payload.content, assistantContent);
       return text ? { kind: 'assistant', text, timestampMs: at, messageId: payload.id } : undefined;
     }
     return undefined;
+  }
+
+  // function_call, custom_tool_call, local_shell_call, web_search_call: never their outputs.
+  if (row.type === 'response_item' && payload.type.endsWith('_call')) {
+    return { kind: 'tool', text: '', timestampMs: at };
   }
 
   if (row.type === 'event_msg' && payload.type === 'user_message' && 'message' in payload) {

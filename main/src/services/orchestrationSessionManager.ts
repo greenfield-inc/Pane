@@ -51,6 +51,7 @@ import {
   type OrchestrationSessionListResult,
   type OrchestrationSessionOverview,
   type OrchestrationSessionRecord,
+  type SessionReadState,
   type OrchestrationSessionSelector,
   type OrchestrationSessionStatus,
   type OrchestrationSessionStoreData,
@@ -79,6 +80,8 @@ import type { SessionMoveMark } from '../../../shared/types/sessionMove';
 import { releaseMoveHolds } from './sessionMove/restore';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import type { MobileAlertSubject } from '../daemon/mobilePushSender';
+import { createReplyProbe, hostReplyProbeSources, type ReplyProbe } from './sessionReply';
+import type { TranscriptCursor } from './agentTranscript';
 
 /** The desktop's saved machines, as the Session manager reads remote members through them. */
 export interface RemoteMachineAccess {
@@ -118,6 +121,11 @@ export class OrchestrationSessionManager extends EventEmitter {
     },
   });
   private remoteMachines: RemoteMachineAccess | undefined;
+  /** Whether a Session agent's finished turn ended with a message the person can read (sessionReply.ts). */
+  private replyProbe: ReplyProbe = createReplyProbe(hostReplyProbeSources(
+    paneId => this.sessionManager.getSession(paneId)?.worktreePath,
+    { loadCursors: panelId => this.replyCursorsOf(panelId), saveCursors: (panelId, cursors) => this.saveReplyCursors(panelId, cursors) },
+  ));
 
   constructor(
     private readonly configManager: ConfigManager,
@@ -177,10 +185,12 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (session.archived === true) {
         throw new Error(`Session ${session.name} is archived; restore it before selecting it`);
       }
-      // Opening a Session views its chat Pane, which is when the Session counts as last opened.
+      // Opening a Session views its chat Pane, which is when the Session counts as last opened, and reads it.
       this.sessionManager.markSessionAsViewed(session.internalSessionId);
       const data = this.store.read();
-      const next: OrchestrationSessionStoreData = { ...data, selectedSessionId: session.id };
+      const viewed = viewedReadState(session.readState);
+      const opened = viewed ? replaceSession(data, { ...session, readState: viewed }) : data;
+      const next: OrchestrationSessionStoreData = { ...opened, selectedSessionId: session.id };
       this.store.write(next);
       this.emit('changed', { sessionId: session.id, kind: 'selected' });
       return {
@@ -950,6 +960,39 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /**
+   * A Pane was marked viewed. When it is a Session's own chat Pane and the Session's agent finished a
+   * turn since the last view, the Session is read: record the view after that turn and tell every
+   * client, so a sidebar clears its mark at once. Nothing to clear writes and sends nothing.
+   */
+  async notifyViewed(paneId: string): Promise<void> {
+    await withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const data = this.store.read();
+      const current = data.sessions.find(session => session.internalSessionId === paneId);
+      const viewed = current && viewedReadState(current.readState);
+      if (!current || !viewed) return;
+      this.store.write(replaceSession(data, { ...current, readState: viewed }));
+      this.emit('changed', { sessionId: current.id, kind: 'viewed' });
+    });
+  }
+
+  /**
+   * Whether marking `paneId` viewed should write its view time (`sessions.last_viewed_at`, and with
+   * it a Pane update to every client). A Session's chat Pane with nothing to clear, viewed under a
+   * minute ago, needs no write: window focus would otherwise update it, and re-read every machine's
+   * Panes in All machines, each time. Any other Pane is written as before.
+   */
+  async viewNeedsWrite(paneId: string, lastViewedAt: string | undefined, now = Date.now()): Promise<boolean> {
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const record = this.store.read().sessions.find(session => session.internalSessionId === paneId);
+      if (!record || viewedReadState(record.readState)) return true;
+      const lastMs = lastViewedAt ? parseSessionTimestampMs(lastViewedAt) : Number.NaN;
+      return Number.isNaN(lastMs) || now - lastMs >= VIEW_REFRESH_MS;
+    });
+  }
+
+  /**
    * Adds what a read computes, never stored: `paused` when its chat and every Pane in it are paused,
    * and `openedAt`, its chat Pane's last view.
    */
@@ -1030,8 +1073,18 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
-  /** Persist meaningful live state transitions and notify visible overviews. */
-  async notifyLiveActivity(panelId: string, state: AgentState): Promise<void> {
+  /** Replaces how a finished turn is checked for a readable message; tests pass a stub. */
+  setReplyProbe(probe: ReplyProbe): void {
+    this.replyProbe = probe;
+  }
+
+  /**
+   * Persist meaningful live state transitions and notify visible overviews. When a Session's own
+   * agent finishes a turn that ended with a message the person can read, stamps `agentRepliedAt`
+   * with the time the turn ended, so the sidebar bolds the Session until it is opened.
+   */
+  async notifyLiveActivity(panelId: string, state: AgentState, evidence: { turnEndedWithText?: boolean } = {}): Promise<void> {
+    const endedTurns: Array<{ sessionId: string; turn: number; endedAt: string }> = [];
     await withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
@@ -1051,12 +1104,25 @@ export class OrchestrationSessionManager extends EventEmitter {
           refreshed.push({ panelId, sessionId: current.id, state });
           continue;
         }
+        const now = new Date().toISOString();
         const nextRecord: OrchestrationSessionRecord = {
           ...current,
           revision: current.revision + 1,
-          updatedAt: new Date().toISOString(),
+          updatedAt: now,
           activity: [...current.activity, this.activity(state, `Agent state changed to ${state}.`, 'agent', association?.paneId, panelId)],
         };
+        // The Session's own agent finished a turn: it takes its place in the read order now, so a
+        // view while its text is still being checked wins. A chat tab says at once how it ended.
+        if (isOrchestratorPanel && state === 'idle' && lastForPanel?.kind === 'working') {
+          const turn = (current.readState?.clock ?? 0) + 1;
+          nextRecord.readState = { viewed: 0, replied: 0, ...current.readState, clock: turn };
+          if (evidence.turnEndedWithText === true) {
+            nextRecord.readState.replied = turn;
+            nextRecord.agentRepliedAt = now;
+          } else if (evidence.turnEndedWithText === undefined) {
+            endedTurns.push({ sessionId: current.id, turn, endedAt: now });
+          }
+        }
         this.trimActivity(nextRecord);
         nextData = replaceSession(nextData, nextRecord);
         changed.push(nextRecord);
@@ -1067,6 +1133,43 @@ export class OrchestrationSessionManager extends EventEmitter {
         for (const item of changed) this.emitChanged(item, item.activity.at(-1)?.kind ?? state);
       }
       for (const item of refreshed) this.emit('overview-updated', item);
+    });
+    // A terminal tab's transcript is read outside the lock.
+    for (const ended of endedTurns) {
+      if (await this.replyProbe.turnEnded(panelId)) {
+        await this.stampAgentReply(ended.sessionId, ended.turn, ended.endedAt);
+      }
+    }
+  }
+
+  /** Where the reply probe last finished reading `panelId`'s transcripts, as saved with its Session. */
+  private async replyCursorsOf(panelId: string): Promise<TranscriptCursor[]> {
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const saved = this.store.read().sessions.find(session => session.replyCursors?.panelId === panelId)?.replyCursors;
+      return saved ? saved.cursors.map(cursor => ({ ...cursor })) : [];
+    });
+  }
+
+  private async saveReplyCursors(panelId: string, cursors: readonly TranscriptCursor[]): Promise<void> {
+    await withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const data = this.store.read();
+      const current = data.sessions.find(session => Object.values(session.panelIds).includes(panelId));
+      if (!current) return;
+      this.store.write(replaceSession(data, { ...current, replyCursors: { panelId, cursors: cursors.map(cursor => ({ ...cursor })) } }));
+    });
+  }
+
+  /** Records turn `turn` as a reply, unless a view or a later reply came after it. */
+  private async stampAgentReply(sessionId: string, turn: number, at: string): Promise<void> {
+    await withLock('orchestration-sessions', async () => {
+      const data = this.store.read();
+      const current = data.sessions.find(session => session.id === sessionId);
+      const state = current?.readState;
+      if (!current || !state || turn <= state.viewed || turn <= state.replied) return;
+      this.store.write(replaceSession(data, { ...current, readState: { ...state, replied: turn }, agentRepliedAt: at }));
+      this.emit('changed', { sessionId, kind: 'replied' });
     });
   }
 
@@ -1858,6 +1961,15 @@ function orderedSessions(data: OrchestrationSessionStoreData): OrchestrationSess
     if (leftPosition !== rightPosition) return leftPosition - rightPosition;
     return right.createdAt.localeCompare(left.createdAt);
   });
+}
+
+/** A Session's view time is rewritten at most this often when there is nothing to clear (a phone's Recent orders by it). */
+const VIEW_REFRESH_MS = 60_000;
+
+/** The read state after a view: the next clock value, when a turn ended since the last view; otherwise nothing changes. */
+function viewedReadState(state: SessionReadState | undefined): SessionReadState | undefined {
+  if (!state || state.clock <= state.viewed) return undefined;
+  return { ...state, clock: state.clock + 1, viewed: state.clock + 1 };
 }
 
 function replaceSession(data: OrchestrationSessionStoreData, record: OrchestrationSessionRecord): OrchestrationSessionStoreData {

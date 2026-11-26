@@ -3744,6 +3744,42 @@ function sessionApprovalsSnapshot(): NotifySnapshot {
   };
 }
 
+test('T-117: reading a Session beside its approval clears its bold, and a reply that lands there while shown is read too', async ({ page }) => {
+  const unread = { ...sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString()), readState: { clock: 2, viewed: 1, replied: 2 } };
+  await installSessionsFixture(page, [unread], [], { notifySnapshot: sessionApprovalsSnapshot() });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissStartupDialogs(page);
+  // SAFETY: installElectronApiMock adds this control before the app loads.
+  const marks = () => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getSessionMarkViewedCalls: () => string[] } }).__paneTestElectronMock.getSessionMarkViewedCalls());
+  const chatPane = '__orchestration_session_plansterminal__';
+
+  // Home shows no Session: it stays unread, and nothing marked it viewed.
+  await expect(page.getByTestId('orchestration-session-plans').locator('[data-unread]')).toHaveCount(1);
+  expect(await marks()).toEqual([]);
+
+  // Choosing the orchestrator's approval shows its question, not the Session: still unread.
+  await page.getByTestId('approvals-nav').click();
+  await page.getByRole('button', { name: /^Real use: how do you want to use the new build/ }).click();
+  await page.waitForTimeout(500);
+  expect(await marks()).toEqual([]);
+  // Its Session live beside it, in the origin tab: reading it there reads it.
+  await page.getByTestId('approval-tab').last().click();
+  await expect(page.getByTestId('approvals-origin')).toContainText('Plan demo');
+  await expect.poll(marks).toContain(chatPane);
+
+  // SAFETY: installSessionsFixture adds this control before the app loads.
+  const setReadState = (readState: { clock: number; viewed: number; replied: number }) => page.evaluate(next => (window as typeof window & { __paneTestElectronMock: { setOrchestrationReadState: (sessionId: string, value: typeof next) => void } }).__paneTestElectronMock.setOrchestrationReadState('plans', next), readState);
+  // The host records the view: the bold clears.
+  await setReadState({ clock: 3, viewed: 3, replied: 2 });
+  await expect(page.getByTestId('orchestration-session-plans').locator('[data-unread]')).toHaveCount(0);
+
+  // A reply arrives while the Session is shown there, with the window in focus: read at once.
+  const before = (await marks()).length;
+  await setReadState({ clock: 4, viewed: 3, replied: 4 });
+  await expect.poll(async () => (await marks()).length).toBeGreaterThan(before);
+});
+
 test('T-88: ⇧↩ in a Session\'s column sends the recommended option and moves on to the next', async ({ page }) => {
   const approvals = sessionApprovalsSnapshot();
   const [realUse, q20] = approvals.items;

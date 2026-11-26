@@ -3,12 +3,18 @@ import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../
 
 /** What a transcript line says about the conversation, reduced to what delivery checks need. */
 export interface TranscriptEntry {
-  /** `user`: a turn the agent took; `queued`: a message waiting for the current turn to end. */
-  kind: 'user' | 'queued' | 'assistant';
+  /**
+   * `user`: a turn the agent took; `queued`: a message waiting for the current turn to end;
+   * `assistant`: reply text; `tool`: a tool call the agent made (its text is empty);
+   * `boundary`: a prompt nobody typed (a task notification, injected context) that starts a turn.
+   */
+  kind: 'user' | 'queued' | 'assistant' | 'tool' | 'boundary';
   text: string;
   timestampMs?: number;
   /** Assistant entries of one message share it, so their text blocks can be joined. */
   messageId?: string;
+  /** Where the entry's line starts in the file; set by readTranscriptTail. */
+  offset?: number;
 }
 
 export type TranscriptLineParser = (line: string) => TranscriptEntry | undefined;
@@ -21,6 +27,8 @@ const MAX_ENTRIES = 400;
 const MAX_TAILS = 32;
 
 interface TailState {
+  /** The file's identity (device and inode): a file replaced at the same path is read again from its tail. */
+  id: string;
   /** End of the last complete line read. */
   offset: number;
   /** Whether `offset` is the start of a line (a first read from the tail is not). */
@@ -80,12 +88,13 @@ export function timestampMs(value: string | undefined): number | undefined {
 export async function readTranscriptTail(file: string, parse: TranscriptLineParser): Promise<TranscriptEntry[]> {
   const handle = await fs.open(file, 'r');
   try {
-    const { size } = await handle.stat();
+    const { size, dev, ino } = await handle.stat();
+    const id = `${dev}:${ino}`;
     let state = tails.get(file);
     tails.delete(file);
-    if (!state || size < state.offset) {
+    if (!state || state.id !== id || size < state.offset) {
       const offset = Math.max(0, size - INITIAL_TAIL_BYTES);
-      state = { offset, aligned: offset === 0, entries: [] };
+      state = { id, offset, aligned: offset === 0, entries: [] };
     }
     tails.set(file, state);
     const oldest = tails.size > MAX_TAILS ? tails.keys().next().value : undefined;
@@ -109,10 +118,13 @@ export async function readTranscriptTail(file: string, parse: TranscriptLinePars
       return state.entries;
     }
 
-    const text = bytes.subarray(firstLineStart, lastNewline).toString('utf8');
-    for (const line of text.split('\n')) {
+    // Line by line in bytes, so each entry knows where its line starts in the file.
+    for (let lineStart = firstLineStart; lineStart < lastNewline;) {
+      const lineEnd = bytes.indexOf(0x0a, lineStart);
+      const line = bytes.subarray(lineStart, lineEnd).toString('utf8');
       const entry = line.trim() ? parse(line) : undefined;
-      if (entry) state.entries.push(entry);
+      if (entry) state.entries.push({ ...entry, offset: start + lineStart });
+      lineStart = lineEnd + 1;
     }
     if (state.entries.length > MAX_ENTRIES) state.entries.splice(0, state.entries.length - MAX_ENTRIES);
     state.offset = start + lastNewline + 1;

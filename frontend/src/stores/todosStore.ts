@@ -1,3 +1,4 @@
+import { isReadStateChange } from '../../../shared/sessionUnread';
 import { isReadOnlyHost } from './readOnlyHostStore';
 import { useEffect, useMemo } from 'react';
 import { create } from 'zustand';
@@ -479,7 +480,8 @@ export function useTodosMachines(): void {
     const onEvent = (event: MachineConnectionsEvent) => {
       if (event.type === 'machines') applyMachines(event.machines);
       else if (event.type === 'resync') schedule(event.machineId);
-      else if (REMOTE_TODO_EVENTS.has(event.channel)) schedule(event.machineId);
+      // A Session's read state (a view, a reply) never changes how its to-dos read.
+      else if (REMOTE_TODO_EVENTS.has(event.channel) && !isReadStateChange(event)) schedule(event.machineId);
     };
     const unsubscribe = api.onEvent(onEvent);
     // The settings can arrive after the machines: which computer this window shows decides who is listed (T-8).

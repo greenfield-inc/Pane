@@ -63,6 +63,8 @@ export type UiSessionFixture = {
   createdAt: string;
   updatedAt: string;
   archived: boolean;
+  /** The host's order of the last reply and the last view (unread Sessions, T-117). */
+  readState?: { clock: number; viewed: number; replied: number };
   isPinned: boolean;
 };
 
@@ -502,6 +504,13 @@ export async function installSessionsFixture(
       emitOrchestrationChanged: (kind = 'updated') => window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { sessionId: selectedSessionId, kind } })),
       getOrchestrationSelectedSessionId: () => selectedSessionId,
       getOrchestrationRecord: (sessionId: string) => clone(sessions.find(session => session.id === sessionId) ?? null),
+      // Stands in for the host recording a reply (or a view): the record changes and the host says so.
+      setOrchestrationReadState: (sessionId: string, readState: NonNullable<SessionRecord['readState']>) => {
+        const record = find({ sessionId });
+        record.readState = clone(readState);
+        persistState();
+        window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { sessionId, kind: 'replied' } }));
+      },
       failNextOrchestrationUpdate: (message: string) => { nextOrchestrationUpdateError = message; },
       getOrchestrationArchiveSelections: () => clone(archiveSelections),
       blockPaneArchive: (paneId: string, code: string) => { archiveBlocks[paneId] = code; },

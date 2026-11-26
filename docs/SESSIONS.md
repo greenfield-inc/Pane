@@ -272,6 +272,45 @@ first. A host running an older Pane cannot save an order: the list snaps back
 and the error says to update Pane on that host. Dragging a Session onto the
 workspace still tiles it.
 
+A Session's name is bold while its agent has a message you haven't read: its
+own agent finished a turn with text you can read, after you last opened the
+Session. That counts whatever started the turn (you, a worker's report, a
+`[From Pane …]`, watcher or Autopilot line). A turn that ends with no message
+(tool calls only, progress text followed by a tool call, or an empty reply to a
+watcher wake) does not bold it. Pane lines (status, approvals, to-dos,
+`[From Pane …]` messages), worker tabs and your own messages never bold it by
+themselves.
+
+Opening the Session clears the bold, and so does reading it beside its approval
+in Approvals, or coming back to the window while it is on screen. A reply that
+arrives while you are looking at it is read at once. A hover preview doesn't
+count as reading.
+
+How Pane knows a turn ended with text:
+- A chat Session checks the turn's last reply as the turn ends.
+- A Claude or Codex terminal Session reads the agent's own transcript, split
+  into turns at its own prompts (typed, queued or a task notification). Pane
+  judges the turns finished since it last looked, by the order of the rows, not
+  the clock: a turn still working never counts, and an empty turn never takes
+  the next turn's reply. If the transcript lands a moment after the turn ends,
+  Pane reads it again for a few seconds, and a reply counts only once a second
+  read agrees. With no transcript, the turn doesn't bold the Session. Pane saves
+  where it stopped reading with the Session, for each of the last 8 transcript
+  files, so a restart, or going back to an earlier conversation after `/clear`,
+  picks up there. A transcript made since Pane started and not read before (a
+  new Session, or an agent relaunched without resuming) is read from its start,
+  so its first reply bolds. Otherwise, when Pane has no such place (an older
+  transcript, one rewritten or replaced, or one it read earlier but no longer
+  keeps a place for), it starts at the transcript's end and counts nothing until
+  the agent's next turn: resumed history never bolds a Session.
+- Any other terminal agent has no transcript Pane can read, so each of its
+  finished turns counts as a message. That is a known limit.
+
+The Session's host keeps the order of its last reply and your last view, so the
+clock never decides: a reply in the same second as a view, or after the clock
+was set back, still reads right. The mark survives a restart and reads the same
+in This Mac and All machines.
+
 In the sidebar's **All machines** view, Sessions from every machine form one
 list you arrange the same way, by drag or **Alt+↑**/**Alt+↓**. That arrangement
 is saved on the computer you are looking from, not on any machine it shows: two

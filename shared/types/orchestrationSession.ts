@@ -98,6 +98,13 @@ export interface OrchestrationActivity {
   panelId?: string;
 }
 
+/** See `OrchestrationSessionRecord.readState`. */
+export interface SessionReadState {
+  clock: number;
+  viewed: number;
+  replied: number;
+}
+
 export interface OrchestrationSessionRecord {
   /** Omitted means the native host. 'windows' is a legacy alias for native and is dropped on read. */
   runtime?: 'windows' | 'wsl';
@@ -125,6 +132,25 @@ export interface OrchestrationSessionRecord {
   paused?: TerminalPausedMark;
   /** When someone last opened the Session, on the desktop or a phone (its chat Pane's last view). Computed when read, never stored. */
   openedAt?: string;
+  /**
+   * When the Session's own agent last finished a turn that ended with a message the person can
+   * read (full precision). Stored; for display only: `readState` decides unread.
+   */
+  agentRepliedAt?: string;
+  /**
+   * The host's order of the Session's last reply and last view, so no clock decides unread
+   * (sessionIsUnread). `clock` counts every finished turn of the Session's agent and every view
+   * that cleared something; `replied` and `viewed` are the clock values of the last of each.
+   * Stored; older records omit it and read as read.
+   */
+  readState?: SessionReadState;
+  /**
+   * Where the host last finished reading the Session agent's terminal transcripts for replies
+   * (sessionReply.ts): the tab, and per transcript (path and identity, the last 8) the offset.
+   * Stored, so a restart or a return to an earlier conversation neither replays an old reply nor
+   * misses a new one.
+   */
+  replyCursors?: { panelId: string; cursors: Array<{ file: string; id: string; offset: number; fresh?: boolean }> };
   agent: PaneChatAgent;
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;

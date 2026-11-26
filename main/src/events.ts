@@ -62,8 +62,9 @@ export function setupEventListeners(services: AppServices): void {
   orchestrationSessionManager?.on('overview-updated', (change: { panelId: string; state: string }) => {
     sendRendererEvent('orchestration-sessions:overview-updated', change);
   });
-  terminalPanelManager.on('agent-status', (change: { panelId: string; state: AgentState }) => {
-    void orchestrationSessionManager?.notifyLiveActivity(change.panelId, change.state).catch(error => {
+  // A chat tab's idle carries whether its turn ended with text; a terminal tab's transcript is read on the host.
+  terminalPanelManager.on('agent-status', (change: { panelId: string; state: AgentState; turnEndedWithText?: boolean }) => {
+    void orchestrationSessionManager?.notifyLiveActivity(change.panelId, change.state, { turnEndedWithText: change.turnEndedWithText }).catch(error => {
       console.error('[Sessions] Failed to persist live activity:', error);
     });
   });

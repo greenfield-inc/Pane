@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { boundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { decodeJsonLine, listDir, textContent, timestampMs, type TranscriptEntry } from './tail';
 
 // Claude Code 2.1 keeps one JSONL transcript per session at
@@ -40,10 +40,18 @@ const claudeLine = boundary.union(
     message: boundary.object({
       id: boundary.optional(boundary.string),
       role: boundary.optional(boundary.string),
-      content: textContent('text'),
+      content: boundary.json,
     }),
   }),
 );
+
+const messageText = textContent('text');
+const contentBlocks = boundary.array(boundary.object({ type: boundary.string }));
+
+/** Claude writes each block of a message as its own line; a tool call's line holds a `tool_use` block. */
+function isToolUse(content: JsonValue): boolean {
+  return decodeOptionalBoundary(content, contentBlocks)?.some(block => block.type === 'tool_use') ?? false;
+}
 
 // Claude queues its own background-task notifications (`<task-notification>…`) like typed messages.
 const INJECTED_TEXT = /^<[a-z_-]+[\s>]/iu;
@@ -58,11 +66,16 @@ export function parseClaudeLine(line: string): TranscriptEntry | undefined {
       : undefined;
   }
 
-  const text = row.message.content;
-  if (!text || row.isSidechain === true) return undefined;
+  if (row.isSidechain === true) return undefined;
+  if (row.type === 'assistant' && isToolUse(row.message.content)) {
+    return { kind: 'tool', text: '', timestampMs: timestampMs(row.timestamp), messageId: row.message.id };
+  }
+  const text = decodeOptionalBoundary(row.message.content, messageText);
+  if (!text) return undefined;
   if (row.type === 'user') {
     const typed = row.message.role === 'user' && row.isMeta !== true && (row.origin?.kind ?? 'human') === 'human';
-    return typed ? { kind: 'user', text, timestampMs: timestampMs(row.timestamp) } : undefined;
+    // A prompt nobody typed (a background task's notification) still starts a turn.
+    return { kind: typed ? 'user' : 'boundary', text, timestampMs: timestampMs(row.timestamp) };
   }
   return { kind: 'assistant', text, timestampMs: timestampMs(row.timestamp), messageId: row.message.id };
 }

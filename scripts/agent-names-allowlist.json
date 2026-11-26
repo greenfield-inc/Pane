@@ -77,7 +77,7 @@
   },
   "main/src/ipc/runpane.ts": {
     "reason": "Deferred terminal composer delivery, readiness and resume per agent.",
-    "count": 53
+    "count": 51
   },
   "main/src/ipc/runpaneComposerEvidence.ts": {
     "reason": "Deferred terminal composer delivery evidence per agent.",
@@ -93,7 +93,7 @@
   },
   "main/src/services/agentTranscript/index.ts": {
     "reason": "Vendor file format: reads this agent's own files, which Pane does not own.",
-    "count": 4
+    "count": 6
   },
   "main/src/services/agentUsageService.ts": {
     "reason": "Vendor file format: parses this agent's usage logs and rate limits.",
