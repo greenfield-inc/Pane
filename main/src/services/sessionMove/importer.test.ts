@@ -624,7 +624,8 @@ describe('MoveImporter after a restart (F-10, J9)', () => {
   });
 
   // T-110 review F-11: a restore replays the stored command with --resume, and its --snapshot wins over Agent Farm's record.
-  it('points a link-line tab\'s stored --snapshot at the moved Session folder, so its restore there reads the moved snapshot', async () => {
+  // A Session moves only between macOS and Linux (the target's preflight refuses Windows), so this test's POSIX paths aren't run there.
+  it.skipIf(process.platform === 'win32')('points a link-line tab\'s stored --snapshot at the moved Session folder, so its restore there reads the moved snapshot', async () => {
     // A target whose Session folders sit under a path with a space: the moved folder must stay one word.
     process.env.PANE_DIR = path.join(root, 'pane dir');
     const machine = targetMachine(path.join(root, 'target'));
