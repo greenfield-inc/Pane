@@ -26,7 +26,11 @@ interface UseMachinesOptions {
 // One switch at a time across the sidebar and Settings, which each hold their own copy of this
 // hook. A press during a switch waits and then runs, and a newer press replaces it (T-128, D-6).
 const useSwitching = create<{ id: string | null }>(() => ({ id: null }));
-const machineSwitches = createLatestSwitch((job: () => Promise<MachineSelectOutcome>) => job());
+// A press for another machine stops the switch still checking an older one, so the newer one starts now (D-6).
+const machineSwitches = createLatestSwitch(
+  (press: { machineId: string; job: () => Promise<MachineSelectOutcome> }) => press.job(),
+  { cancel: (running, next) => { if (running.machineId !== next.machineId) void API.remoteDaemon.cancelSwitch().catch(() => undefined); } },
+);
 
 function errorText(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
@@ -144,7 +148,7 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
   const select = useCallback(async (machine: MachineEntry, password?: string): Promise<MachineSelectOutcome> => {
     if (machine.action === 'none') return { ok: true };
     if (machine.action === 'password' && password === undefined) return { ok: false, needsPassword: true };
-    const result = await machineSwitches.request(() => switchTo(machine, password));
+    const result = await machineSwitches.request({ machineId: machine.id, job: () => switchTo(machine, password) });
     // A newer press replaced this one: it says nothing, and the newer one reports for both.
     return result.superseded ? { ok: true } : result.value;
   }, [switchTo]);

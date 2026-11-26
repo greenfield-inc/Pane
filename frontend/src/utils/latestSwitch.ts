@@ -1,5 +1,5 @@
 /** What one request came to: its own result, or that a newer request replaced it. */
-export type LatestSwitchResult<Value> =
+type LatestSwitchResult<Value> =
   | { superseded: false; value: Value }
   /** A newer request came in. `value` is set when this one had already started and finished anyway. */
   | { superseded: true; value?: Value };
@@ -19,16 +19,25 @@ export interface LatestSwitch<Target, Value> {
  * switch to end and then runs, and a still newer press replaces it while it waits. The caller is
  * never held up to make a press: `request` queues and returns.
  */
-export function createLatestSwitch<Target, Value>(run: (target: Target) => Promise<Value>): LatestSwitch<Target, Value> {
+export function createLatestSwitch<Target, Value>(
+  run: (target: Target) => Promise<Value>,
+  options: {
+    /**
+     * Called when a press queues behind the switch in flight, so that switch can stop early instead
+     * of making the newer one wait for it (D-6). Its result still settles the running request.
+     */
+    cancel?: (running: Target, next: Target) => void;
+  } = {},
+): LatestSwitch<Target, Value> {
   let ticketCount = 0;
-  let running = false;
+  let running: { target: Target } | null = null;
   let waiting: { ticket: number; target: Target; settle: (result: Promise<LatestSwitchResult<Value>>) => void } | null = null;
 
   const start = (ticket: number, target: Target): Promise<LatestSwitchResult<Value>> => {
-    running = true;
+    running = { target };
     const ran = run(target);
     void ran.catch(() => undefined).finally(() => {
-      running = false;
+      running = null;
       const next = waiting;
       waiting = null;
       if (next) next.settle(start(next.ticket, next.target));
@@ -41,9 +50,11 @@ export function createLatestSwitch<Target, Value>(run: (target: Target) => Promi
       const ticket = ++ticketCount;
       if (!running) return start(ticket, target);
       waiting?.settle(Promise.resolve({ superseded: true }));
-      return new Promise((resolve) => {
+      const queued = new Promise<LatestSwitchResult<Value>>((resolve) => {
         waiting = { ticket, target, settle: result => resolve(result) };
       });
+      options.cancel?.(running.target, target);
+      return queued;
     },
     isSuperseded: ticket => ticket !== ticketCount,
     latestTicket: () => ticketCount,

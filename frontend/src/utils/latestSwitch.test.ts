@@ -66,4 +66,26 @@ describe('createLatestSwitch (T-128, D-6)', () => {
     void latest.request('b');
     expect(performance.now() - started).toBeLessThan(5);
   });
+
+  it('asks the switch in flight to stop when a press for another target queues behind it, and lets the newer one run at once', async () => {
+    const hung = deferred<string>();
+    const cancels: Array<[string, string]> = [];
+    const latest = createLatestSwitch(async (target: string) => (target === 'build' ? hung.promise : `on ${target}`), {
+      cancel: (running, next) => {
+        cancels.push([running, next]);
+        // The host stops the probes it was running, so that switch ends without switching.
+        if (running !== next) hung.resolve('cancelled');
+      },
+    });
+
+    const toBuild = latest.request('build');
+    const again = latest.request('build');
+    expect(cancels).toEqual([['build', 'build']]);
+    const toStudio = latest.request('studio');
+    expect(cancels).toEqual([['build', 'build'], ['build', 'studio']]);
+
+    expect(await again).toEqual({ superseded: true });
+    expect(await toBuild).toEqual({ superseded: true, value: 'cancelled' });
+    expect(await toStudio).toEqual({ superseded: false, value: 'on studio' });
+  });
 });

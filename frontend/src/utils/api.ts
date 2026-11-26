@@ -866,6 +866,11 @@ export class API {
       return window.electronAPI.remoteDaemon.dismissCheck(checkId);
     },
 
+    async cancelSwitch() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.cancelSwitch();
+    },
+
     onSetupProgress(callback: (progress: RemoteHostSetupProgress) => void) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.remoteDaemon.onSetupProgress(callback);
