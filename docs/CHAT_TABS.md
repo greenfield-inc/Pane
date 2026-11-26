@@ -663,7 +663,9 @@ small state of its own (workspace trust, launch records, MCP logins) under
 `~/.local/state/agent-farm` and `~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
 `scripts/after-pack.js`) fails a packaged build unless Agent Farm is inside
 `app.asar`, carries no native binaries, answers `--version` under Electron
-as Node, and installs its bundled greenfield plugin into a scratch config root.
+as Node, has its plugins packed byte for byte as installed (packing once stripped
+`scripts` from a plugin's `package.json`, which Agent Farm's checksum check
+refuses), and installs its bundled greenfield plugin into a scratch config root.
 
 ### Profile sync across your computers
 

@@ -241,8 +241,9 @@ agent-farm ([docs/CHAT_TABS.md](docs/CHAT_TABS.md#profiles-switch)). To ship a n
 3. Check that the bundled greenfield plugin is at least as new as the one the last
    release shipped (`agent-farm plugin list` in a Pane terminal of a dev build).
 4. Package once (`pnpm run build:mac:arm64` or your platform's build). Its after-pack
-   check (`scripts/verify-chat-adapters.js`) installs greenfield from inside
-   `app.asar`, which fails if packing changed a plugin file. That is why
+   check (`scripts/verify-chat-adapters.js`) compares every bundled plugin file in
+   `app.asar` with `node_modules` and installs greenfield from inside it, and fails
+   if packing changed a plugin file. That is why
    `build.removePackageScripts` is `false` in `package.json`: electron-builder
    otherwise strips `scripts` from every packed `package.json`, and Agent Farm
    refuses a plugin whose files no longer match its checksums.
