@@ -3,7 +3,7 @@
     "name": "Pane",
     "slug": "pane",
     "version": "1.2",
-    "runtimeVersion": "1.5",
+    "runtimeVersion": "1.6",
     "updates": {
       "url": "https://pane-native-updates-297294606300.us-central1.run.app/manifest",
       "checkAutomatically": "ON_LOAD",
@@ -116,7 +116,8 @@
         }
       ],
       "./plugins/withQuietDevMenu",
-      "./plugins/withLoopbackHttp"
+      "./plugins/withLoopbackHttp",
+      "./plugins/withControllerInput"
     ],
     "experiments": {
       "typedRoutes": true,
