@@ -1,4 +1,4 @@
-import { createContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useEffect, useState } from 'react';
 import type { AgentMessageRecord } from '../../../../shared/types/agentMessages';
 
 /** This tab's messages (T-105), sent and received, by ref; and the ones it sent, by the turn that sent them. */
@@ -29,6 +29,22 @@ export function useAgentMessageRecords(panelId: string): AgentMessageRecord[] {
   return records;
 }
 
+/** Which turn each sent message sits in, as one string: equal while the placement is. */
+function placementKey(sentByTurn: ReadonlyMap<string, AgentMessageRecord[]>): string {
+  return [...sentByTurn].map(([turn, sent]) => `${turn}:${sent.map(record => record.ref).join(',')}`).join(';');
+}
+
+/**
+ * The view the chat's cards read. It changes only when the records or the placement do, not on
+ * every streamed token (turns change with each one), so a turn's cards don't re-render while an agent writes.
+ */
 export function useAgentMessagesView(panelId: string, records: readonly AgentMessageRecord[], sentByTurn: ReadonlyMap<string, AgentMessageRecord[]>): AgentMessagesView {
-  return useMemo(() => ({ panelId, byRef: new Map(records.map(record => [record.ref, record])), sentByTurn }), [panelId, records, sentByTurn]);
+  const key = placementKey(sentByTurn);
+  const build = (): AgentMessagesView => ({ panelId, byRef: new Map(records.map(record => [record.ref, record])), sentByTurn });
+  const [held, setHeld] = useState(() => ({ panelId, records, key, view: build() }));
+  if (held.panelId === panelId && held.records === records && held.key === key) return held.view;
+  // Adjusting state while rendering (react.dev "storing information from previous renders"): the new view is used now.
+  const next = { panelId, records, key, view: build() };
+  setHeld(next);
+  return next.view;
 }
