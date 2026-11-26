@@ -12,7 +12,8 @@
  *
  * It checks the bundled Agent Farm the same way (main/src/services/agentFarm/bundledAgentFarm.ts):
  * inside app.asar, with no native binaries, answering `--version` under Electron as Node, and
- * installing its bundled greenfield plugin into a scratch config root (its checksums must survive packing).
+ * with its plugins packed byte for byte as installed (Agent Farm checks packed plugins' checksums), and
+ * installing its bundled greenfield plugin into a scratch config root.
  * scripts/after-pack.js runs it for every packed app, before signing or
  * publishing; run it by hand on a dist-electron folder too.
  *
@@ -108,19 +109,33 @@ async function verifyAgentFarm(app, files, runnable) {
   const native = files.filter(file => file.startsWith(root) && AGENT_FARM_NATIVE.test(file));
   if (native.length) throw new Error(`${app.asar} carries native binaries inside ${AGENT_FARM}, for example ${native[0]}. Pane runs it as plain JavaScript; check the package before bumping it.`);
   const { version } = JSON.parse(asar.extractFile(app.asar, path.join('node_modules', ...AGENT_FARM.split('/'), 'package.json')).toString('utf8'));
-  if (!runnable) return `${AGENT_FARM}@${version} present (not started: built for another platform)`;
+  // Packing must leave the bundled plugins byte for byte: Agent Farm refuses a packed plugin whose
+  // files no longer match the checksums in its plugin.yaml, and Pane then sets up no profiles
+  // (electron-builder once stripped a plugin package.json's scripts). Compare with the installed package.
+  const source = path.dirname(require.resolve(`${AGENT_FARM}/package.json`));
+  const sourceVersion = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8')).version;
+  if (sourceVersion !== version) throw new Error(`${app.asar} carries ${AGENT_FARM}@${version}, but node_modules has ${sourceVersion}; run pnpm install and package again.`);
+  const packed = files.filter(file => file.startsWith(`${root}plugins/`));
+  const sourceFiles = [];
+  const walk = dir => { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const full = path.join(dir, entry.name); if (entry.isDirectory()) walk(full); else sourceFiles.push(full); } };
+  walk(path.join(source, 'plugins'));
+  for (const file of sourceFiles) {
+    const relative = path.relative(source, file).split(path.sep).join('/');
+    if (!packed.includes(`${root}${relative}`)) throw new Error(`${app.asar} is missing ${AGENT_FARM}/${relative}, so its plugin would fail Agent Farm's integrity check. Check build.files in package.json.`);
+    const bytes = asar.extractFile(app.asar, path.join('node_modules', ...AGENT_FARM.split('/'), ...relative.split('/')));
+    if (!bytes.equals(fs.readFileSync(file))) throw new Error(`Packing changed ${AGENT_FARM}/${relative} in ${app.asar}; Agent Farm refuses a packed plugin whose files differ from its checksums, and Pane then sets up no profiles. Check that package.json build.removePackageScripts is false and nothing else rewrites files under node_modules.`);
+  }
+  if (!runnable) return `${AGENT_FARM}@${version} present, plugins packed unchanged (not started: built for another platform)`;
   const entry = path.join(app.asar, 'node_modules', ...AGENT_FARM.split('/'), 'dist', 'cli.js');
   let answered;
   try { answered = await runAgentFarm(app, entry, ['--version']); }
   catch (error) { throw new Error(`${AGENT_FARM}@${version} did not start from ${app.asar}: ${error.message}`); }
   if (answered !== version) throw new Error(`${AGENT_FARM} in ${app.asar} answered --version with "${answered}", expected ${version}.`);
-  // Packing must leave the bundled plugins byte for byte, or Agent Farm's checksum check refuses
-  // them and Pane sets up no profiles (electron-builder once stripped a plugin package.json's scripts).
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-verify-agent-farm-'));
   try { await runAgentFarm(app, entry, ['plugin', 'install', '--config-root', path.join(scratch, 'agent-farm')], { HOME: scratch, USERPROFILE: scratch, AGENT_FARM_TELEMETRY: 'off' }); }
   catch (error) { throw new Error(`${AGENT_FARM}@${version} in ${app.asar} could not install its bundled greenfield plugin, so Pane would set up no profiles: ${error.message} Check that package.json build.removePackageScripts is false and nothing else rewrites files under node_modules/${AGENT_FARM}/plugins.`); }
   finally { fs.rmSync(scratch, { recursive: true, force: true }); }
-  return `${AGENT_FARM}@${version} answered --version and installed greenfield under Electron as Node`;
+  return `${AGENT_FARM}@${version} packed its plugins unchanged, answered --version and installed greenfield under Electron as Node`;
 }
 
 /** The packed app in an electron-builder appOutDir: its app.asar and the Electron executable beside it. */
