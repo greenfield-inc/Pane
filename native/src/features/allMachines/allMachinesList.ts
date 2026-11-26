@@ -91,12 +91,14 @@ export interface AllPane {
 }
 
 export type RecentRow =
-  | RowBase & { type: 'pane'; pane: AllPane }
+  | RowBase & { type: 'pane'; pane: AllPane; openedAt?: number }
   | RowBase & {
     type: 'session';
     session: OrchestrationSessionRecord;
     paneCount: number;
     activeAt: number;
+    /** Epoch ms someone last opened it, on any device. Hosts before `openedAt` leave it out. */
+    openedAt?: number;
   };
 
 export interface AllMachinesList {
@@ -163,13 +165,14 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
             paused: pane.paused,
             activeAt: timeOf(pane.lastActivity) ?? timeOf(pane.createdAt) ?? 0,
           },
+          openedAt: timeOf(pane.lastViewedAt),
         });
       }
     }
     for (const session of sessions) {
       if (!matches(session.name, machine.name)) continue;
       const paneCount = session.associations.filter(association => paneNames.has(association.paneId)).length;
-      recent.push({ ...base('session', session.id), type: 'session', session, paneCount, activeAt: timeOf(session.updatedAt) ?? 0 });
+      recent.push({ ...base('session', session.id), type: 'session', session, paneCount, activeAt: timeOf(session.updatedAt) ?? 0, openedAt: timeOf(session.openedAt) });
     }
     // A machine that isn't online shows one row with its count, never cards you can't act on.
     if (machine.offlineSince !== undefined) {
@@ -226,8 +229,18 @@ export function sinceLabel(at: number, now: number): string {
   return days === 1 ? '1 day' : `${days} days`;
 }
 
+/** Home's Recent: how many rows it shows before Show more, and after. */
+export const RECENT_PREVIEW = 3;
+const RECENT_LIMIT = 10;
+
+/** The Panes and Sessions someone last opened, on the desktop or a phone, newest first. */
+export function recentlyOpened(recent: readonly RecentRow[]): RecentRow[] {
+  return recent.filter(row => row.openedAt !== undefined).sort((a, b) => (b.openedAt ?? 0) - (a.openedAt ?? 0)).slice(0, RECENT_LIMIT);
+}
+
+/** An ISO time, or SQLite's UTC `YYYY-MM-DD HH:MM:SS` (a Pane's `lastViewedAt`). */
 function timeOf(iso: string | undefined): number | undefined {
   if (!iso) return undefined;
-  const time = Date.parse(iso);
+  const time = Date.parse(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/.test(iso) ? `${iso.replace(' ', 'T')}Z` : iso);
   return Number.isNaN(time) ? undefined : time;
 }

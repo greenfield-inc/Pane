@@ -27,6 +27,7 @@ import { terminalPanelManager } from './terminalPanelManager';
 import { databaseService } from './database';
 import type { ConfigManager } from './configManager';
 import type { SessionManager } from './sessionManager';
+import { parseSessionTimestampMs } from './paneInactivity';
 import type { Session } from '../types/session';
 import type { SkillCacheManager } from './skillCacheManager';
 import type { PaneChatManager } from './paneChatManager';
@@ -145,7 +146,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
       return {
-        sessions: orderedSessions(data).map(record => this.withPaused(clone(record))),
+        sessions: orderedSessions(data).map(record => this.withComputed(clone(record))),
         selectedSessionId: data.selectedSessionId,
       };
     });
@@ -165,7 +166,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       const nextData: OrchestrationSessionStoreData = { ...data, order };
       this.store.write(nextData);
       this.emit('changed', { sessionId: sessionIds.find(id => order.includes(id)) ?? '', kind: 'reordered' });
-      return { sessions: orderedSessions(nextData).map(record => this.withPaused(clone(record))), selectedSessionId: nextData.selectedSessionId };
+      return { sessions: orderedSessions(nextData).map(record => this.withComputed(clone(record))), selectedSessionId: nextData.selectedSessionId };
     });
   }
 
@@ -176,12 +177,14 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (session.archived === true) {
         throw new Error(`Session ${session.name} is archived; restore it before selecting it`);
       }
+      // Opening a Session views its chat Pane, which is when the Session counts as last opened.
+      this.sessionManager.markSessionAsViewed(session.internalSessionId);
       const data = this.store.read();
       const next: OrchestrationSessionStoreData = { ...data, selectedSessionId: session.id };
       this.store.write(next);
       this.emit('changed', { sessionId: session.id, kind: 'selected' });
       return {
-        sessions: orderedSessions(next).map(record => this.withPaused(clone(record))),
+        sessions: orderedSessions(next).map(record => this.withComputed(clone(record))),
         selectedSessionId: next.selectedSessionId,
       };
     });
@@ -211,7 +214,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         : data.selectedSessionId;
       this.store.write({ ...replaced, selectedSessionId });
       this.emitChanged(next, 'updated', selectedSessionId !== data.selectedSessionId);
-      return this.withPaused(clone(next));
+      return this.withComputed(clone(next));
     });
   }
 
@@ -308,7 +311,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   async get(selector: OrchestrationSessionSelector): Promise<OrchestrationSessionRecord> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
-      return this.withPaused(clone(this.findSession(this.store.read(), selector)));
+      return this.withComputed(clone(this.findSession(this.store.read(), selector)));
     });
   }
 
@@ -581,7 +584,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       this.emitChanged(nextRecord, input.report ? 'report' : 'updated', selectedSessionId !== data.selectedSessionId);
       // Every way of archiving (the app, a phone, the CLI, another machine) passes here.
       if (isArchiving) this.emit('archived', nextRecord.id);
-      return this.withPaused(clone(nextRecord));
+      return this.withComputed(clone(nextRecord));
     });
   }
 
@@ -706,7 +709,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         this.sessionManager.emit('session-updated', pane);
       }
       this.emitChanged(nextRecord, 'associated', false, joined ? [input.paneId] : []);
-      return this.withPaused(clone(nextRecord));
+      return this.withComputed(clone(nextRecord));
     });
   }
 
@@ -743,7 +746,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       this.trimActivity(nextRecord);
       this.store.write(replaceSession(data, nextRecord));
       this.emitChanged(nextRecord, 'associated', false, joined ? [member.paneId] : []);
-      return this.withPaused(clone(nextRecord));
+      return this.withComputed(clone(nextRecord));
     });
   }
 
@@ -795,7 +798,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       this.trimActivity(nextRecord);
       this.store.write(replaceSession(data, nextRecord));
       this.emitChanged(nextRecord, 'detached', false, removed.map(item => item.paneId));
-      return this.withPaused(clone(nextRecord));
+      return this.withComputed(clone(nextRecord));
     });
   }
 
@@ -946,15 +949,21 @@ export class OrchestrationSessionManager extends EventEmitter {
     }
   }
 
-  /** A Session is paused when its chat and every Pane in it are paused; computed on read, never stored. */
-  private withPaused(record: OrchestrationSessionRecord): OrchestrationSessionRecord {
+  /**
+   * Adds what a read computes, never stored: `paused` when its chat and every Pane in it are paused,
+   * and `openedAt`, its chat Pane's last view.
+   */
+  private withComputed(record: OrchestrationSessionRecord): OrchestrationSessionRecord {
+    const viewedAt = this.sessionManager.getSession(record.internalSessionId)?.lastViewedAt;
+    const openedMs = viewedAt ? parseSessionTimestampMs(viewedAt) : NaN;
+    const openedAt = Number.isNaN(openedMs) ? undefined : new Date(openedMs).toISOString();
     let latest: TerminalPausedMark | undefined;
     for (const paneId of this.pausablePaneIdsOf(record)) {
       const mark = this.sessionManager.getSession(paneId)?.paused;
-      if (!mark) return { ...record, paused: undefined };
+      if (!mark) return { ...record, paused: undefined, openedAt };
       if (!latest || mark.at > latest.at) latest = mark;
     }
-    return { ...record, paused: latest };
+    return { ...record, paused: latest, openedAt };
   }
 
   /**
