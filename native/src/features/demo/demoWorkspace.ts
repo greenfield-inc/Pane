@@ -2,7 +2,7 @@ import type { AgentState } from '@shared/types/agentStatus';
 import type { NotifyAnswer, NotifyItem, NotifyRemoteCommand, NotifyReply, NotifySharedState } from '@shared/types/notify';
 import type { OrchestrationSessionRecord, OrchestrationSessionView } from '@shared/types/orchestrationSession';
 import type { PaneChatAgent } from '@shared/types/paneChat';
-import type { TerminalPausedMark, ToolPanel } from '@shared/types/panels';
+import type { SessionPanelLayout, TerminalPausedMark, ToolPanel } from '@shared/types/panels';
 import type { RemotePwaAffordances, RemotePwaTerminalShortcut } from '@shared/types/remoteDaemon';
 import type { RunpanePaneCreateRequest, RunpanePaneCreateResult, RunpanePauseResult, RunpanePauseScope, RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestration';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
@@ -158,6 +158,7 @@ export class DemoWorkspace {
       case 'credentials:shared:apply': return null;
       case 'panels:list': return toJson(this.panelsOf(this.pane(first)));
       case 'panels:getActive': return toJson(this.panelsOf(this.pane(first))[0] ?? null);
+      case 'panels:get-layout': return toJson(this.layoutOf(this.pane(first)));
       case 'panels:set-active': return null;
       case 'panels:update': return this.updatePanel(first, second as Partial<ToolPanel>);
       case 'panels:read-browser-file': return { data: btoa(demoPageHtml(String(second))), contentType: 'text/html' };
@@ -572,6 +573,24 @@ export class DemoWorkspace {
         { id: session.panelIds[session.agent], title, agentType: session.agent, state: 'idle', buffer: screen, pending: [], typed: '' },
         ...toolPanels(session.internalSessionId, session.id === DEMO_SESSION.id ? DEMO_SESSION_PAGES : undefined),
       ],
+    };
+  }
+
+  /** The sample Session as a desktop leaves it: its agent's chat on the left, its status page beside it. Other Panes show one tab. */
+  private layoutOf(pane: DemoPane): SessionPanelLayout | null {
+    if (pane.id !== this.sessions[0]?.internalSessionId) return null;
+    const [chat, page] = pane.panels;
+    if (!chat || !page) return null;
+    return {
+      version: 1,
+      focusedGroupId: 'demo-left',
+      root: {
+        type: 'split', id: 'demo-split', direction: 'row', sizes: [1, 1],
+        children: [
+          { type: 'group', id: 'demo-left', panelIds: [chat.id], activePanelId: chat.id },
+          { type: 'group', id: 'demo-right', panelIds: [page.id], activePanelId: page.id },
+        ],
+      },
     };
   }
 

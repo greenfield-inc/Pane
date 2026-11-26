@@ -142,7 +142,7 @@ describe('demo host', () => {
       ['runpane:workspace:state', [{}]], ['permission:getPending', []], ['projects:list-branches', ['1']],
       ['orchestration-sessions:list', []], ['notify:remote-snapshot', []], ['remote:pwa-affordances', []],
       ['mobile:push-status', [{ platform: 'ios', installationId: 'demo' }]], ['runpane:glasses:list', []],
-      ['panels:list', ['demo-dark-mode']], ['panels:getActive', ['demo-dark-mode']], ['panels:checkInitialized', ['demo-dark-mode-agent']],
+      ['panels:list', ['demo-dark-mode']], ['panels:getActive', ['demo-dark-mode']], ['panels:get-layout', ['demo-dark-mode']], ['panels:checkInitialized', ['demo-dark-mode-agent']],
       ['terminal:getState', ['demo-dark-mode-agent']], ['terminal:getScrollbackClean', ['demo-dark-mode-agent', 300]],
       ['ports:list', []], ['panels:read-browser-file', ['demo-fix-checkout-race-browser-0', 'http://localhost:5173/checkout']],
     ];
