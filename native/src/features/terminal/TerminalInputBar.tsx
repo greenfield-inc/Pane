@@ -63,7 +63,8 @@ export function TerminalInputBar({
       <TextInput
         testID="terminal-input"
         value={shown}
-        onChangeText={text => !previewing && onChangeDraft(autocorrect ? straightenKeyboardEdit(draft, text) : text)}
+        // Android still takes keys into a read-only multiline box, so a send in flight drops them here too.
+        onChangeText={text => !previewing && !sending && onChangeDraft(autocorrect ? straightenKeyboardEdit(draft, text) : text)}
         onSelectionChange={event => onSelectionChange(event.nativeEvent.selection)}
         selection={previewing ? undefined : selection}
         editable={!previewing && !sending}
