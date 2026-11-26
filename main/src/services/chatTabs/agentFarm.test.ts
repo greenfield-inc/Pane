@@ -165,7 +165,7 @@ describe('Agent Farm profiles in chat tabs', () => {
   it('says Reload profile is the way on when Agent Farm refuses an unreadable snapshot', async () => {
     const profiles = new AgentFarmProfiles({ ...PROFILES_ON, sessionProfile: async () => undefined, bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     await expect(profiles.print('greenfield/orchestrator', {}, 'claude', scratch(), { PATH: process.env.PATH ?? '' }, undefined, '/s/.agent-farm/snapshots/gone'))
-      .rejects.toMatchObject({ code: 'CHAT_PROFILE_SNAPSHOT_UNREADABLE', message: expect.stringContaining('/s/.agent-farm/snapshots/gone is missing'), next: expect.stringContaining('Reload the Session\'s profile') });
+      .rejects.toMatchObject({ code: 'CHAT_PROFILE_SNAPSHOT_UNREADABLE', message: "Agent Farm can't start greenfield/orchestrator from its snapshot: Snapshot /s/.agent-farm/snapshots/gone is missing.", next: expect.stringContaining('Reload the Session\'s profile') });
   });
 });
 
