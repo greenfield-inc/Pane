@@ -30,7 +30,7 @@
     "@xterm/addon-web-links": "0.13.0-beta.299",
     "@xterm/addon-webgl": "0.20.0-beta.298",
     "@xterm/xterm": "6.1.0-beta.302",
-    "allotment": "^1.20.5",
+    "allotment": "^1.20.6",
     "ansi-to-html": "^0.7.2",
     "clsx": "^2.1.1",
     "dompurify": "^3.4.17",

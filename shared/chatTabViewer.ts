@@ -1,4 +1,5 @@
 import { STREAM_FRAME_MS } from './constants/streamCadence';
+import { switchMark } from './switchMarks';
 import type { AgentChatMessage } from './types/agentChat';
 import { applyChatTabEvent, type ChatTabClient, type ChatTabEvent, type ChatTabSend, type ChatTabTranscript, type ChatTabView } from './types/chatTab';
 
@@ -151,6 +152,7 @@ export class ChatTabViewer {
       const newGeneration = view.generation !== this.state.transcript?.generation;
       // History replays while a tab starts; the window is only complete once it has.
       const finishedStarting = this.state.view?.status === 'starting' && view.status !== 'starting';
+      if (finishedStarting) switchMark('chat:ready', { panelId: this.panelId });
       this.publish({ view: { ...view, transcript: undefined } });
       if ((newGeneration || finishedStarting) && view.status !== 'starting') void this.refresh();
     });
@@ -163,7 +165,9 @@ export class ChatTabViewer {
   refresh(): Promise<void> {
     if (this.loading) return this.loading;
     const transport = this.transport;
+    switchMark('chat:get:start', { panelId: this.panelId });
     const loading: Promise<void> = this.chatClient.get(this.panelId, PAGE * 2).then(view => {
+      switchMark('chat:get:end', { panelId: this.panelId, status: view.status, start: view.transcript?.start, n: view.transcript?.messages.length });
       if (transport !== this.transport) return;
       let transcript = view.transcript;
       let gap = false;
