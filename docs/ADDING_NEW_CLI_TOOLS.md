@@ -226,8 +226,8 @@ agent shown in `panels list` depend on the panel's `agentType`.
 Managed agent panels emit `agent.busy`, `agent.ready`, `agent.blocked`,
 `agent.unknown` and `agent.idle` events before identification. These reach the
 default agents-only workspace watch even without an `agentType`; ordinary shell
-panels do not emit them. For example, an Agent Farm variant picker can report
-`agent.blocked` before the agent starts. An untyped `panel.exited` is still
+panels do not emit them. For example, Agent Farm's workspace-trust question
+can report `agent.blocked` before the agent starts. An untyped `panel.exited` is still
 filtered by the agents-only watch.
 
 Pane decides a terminal panel's agent in this order, and records the source in
