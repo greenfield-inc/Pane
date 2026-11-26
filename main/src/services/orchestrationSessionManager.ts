@@ -725,7 +725,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       const qualified = profile.ref.split(':')[0];
       if (!plainProfileAgent(qualified)) {
         const list = await this.agentFarm().profiles();
-        if (!list.error && !list.profiles.some(entry => entry.ref === qualified)) {
+        if (!list.error && !profileListed(list, qualified)) {
           if (!this.goneProfiles.has(qualified)) { this.goneProfiles.add(qualified); this.emitChanged(current, 'updated'); }
           throw new PaneError('SESSION_PROFILE_GONE', `${current.name} runs the profile ${profile.ref}, which this computer's Agent Farm no longer has. ${outcome}`, 'Pick a profile again: right-click the Session, then Switch profile.');
         }
@@ -812,9 +812,8 @@ export class OrchestrationSessionManager extends EventEmitter {
     if (!named.length) return changed;
     const list = await this.agentFarm().profiles().catch(() => undefined);
     if (!list || list.error) return changed;
-    const listed = new Set(list.profiles.map(entry => entry.ref));
     for (const ref of named) {
-      const gone = !listed.has(ref);
+      const gone = !profileListed(list, ref);
       if (gone === this.goneProfiles.has(ref)) continue;
       if (gone) this.goneProfiles.add(ref); else this.goneProfiles.delete(ref);
       changed.add(ref);
@@ -2226,6 +2225,15 @@ function newestAgentReport(panels: readonly ToolPanel[]): (TerminalAgentReport &
 
 function isInspectorPanel(panel: ToolPanel): boolean {
   return panel.type === 'explorer' || panel.type === 'diff';
+}
+
+/**
+ * Whether Agent Farm's list still has a Session's profile: as a profile, or as an agent a profile links
+ * to, which a Session started from a launch link's command runs (T-83 P3).
+ */
+function profileListed(list: AgentFarmProfileList, ref: string): boolean {
+  const plugin = ref.split('/')[0];
+  return list.profiles.some(entry => entry.ref === ref) || !!list.linked?.some(linked => linked === ref || linked === `${plugin}/*`);
 }
 
 function missingPanel(panelId: string): OrchestrationPanelOverview {
