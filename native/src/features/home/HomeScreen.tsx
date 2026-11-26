@@ -43,6 +43,8 @@ import { ActivityRow, ApprovalRow, BoardHeader, BoardSkeleton, Card, CardSkeleto
 import { useBoardTile } from './boardTile';
 import { bottomBarHeight, HomeBottomBar } from './HomeBottomBar';
 import { homeScroll, useHomeView } from './homeView';
+import { useFreshCounts, useSeenWaiting } from './seenStore';
+import { waitingThings } from './seenWaiting';
 import { boardCounts, PINNED_PREVIEW, sessionWaiting, terminalWaiting, tilePanes, type PaneRecentRow } from './statusBoard';
 import { StatusTiles } from './StatusTiles';
 import { useHomeFeeds } from './useHomeData';
@@ -130,6 +132,16 @@ export function HomeScreen() {
   const markOf = (key: string) => (all ? machineOf(key) : undefined);
   const sayOffline = offlineAlert(feeds, chipMachines);
   const waitingBySession = sessionWaiting(board, held);
+  // What waits on you that the phone hasn't shown you yet ("+N"). The machines here whose lists are
+  // all in decide what is gone; Needs you on screen shows everything, and its rows say which were new.
+  const things = waitingThings(board, held);
+  const complete = new Set(feeds.filter(feed => feed.snapshot && feed.offlineSince === undefined && !feed.waiting?.lists && !feed.waiting?.approvals).map(feed => feed.key));
+  useEffect(() => useSeenWaiting.getState().publish(things, complete), [things, complete]);
+  const showingNeeds = focused && tile === 'needs' && !searching && !rail;
+  useEffect(() => (showingNeeds ? useSeenWaiting.getState().show('needs') : undefined), [showingNeeds]);
+  const fresh = useFreshCounts();
+  const justSeen = useSeenWaiting(state => state.justSeen);
+  const freshPane = (machineKey: string, paneId: string) => fresh.byPane.get(`${machineKey}:${paneId}`) ?? 0;
   // The machine the phone is on, as Pinned, Sessions, Repositories and Archived list it.
   const statusOf = new Map(board.recent.flatMap(row => (row.type === 'pane' && row.machineKey === profile.id ? [[row.pane.id, row.pane] as const] : [])));
   const sidebar = (sidebarQuery: string, sections: Record<SidebarSection, boolean>) => buildSidebar({
@@ -150,6 +162,7 @@ export function HomeScreen() {
     actions,
     background,
     waitingFor: sessionId => waitingBySession.get(sessionKey(profile.id, sessionId)) ?? 0,
+    freshFor: row => ('sessionId' in row ? fresh.bySession.get(sessionKey(profile.id, row.sessionId)) ?? 0 : freshPane(profile.id, row.paneId)),
     onToggleSection: toggleSection,
     onToggleSession: sessionId => toggleSession(profile.id, sessionId),
     retry: what => void (what === 'archived' ? archived.refetch() : here.sessions.refetch()),
@@ -197,6 +210,7 @@ export function HomeScreen() {
             machine={markOf(row.machineKey)}
             divided={!first}
             background={tint}
+            fresh={justSeen.has(row.key)}
             onPress={() => openRecentRow(row, profile.id, actions, sayOffline)}
             swipe={swipes ? {
               onTogglePinned: () => actions.togglePanePinned(row.pane.id),
@@ -217,7 +231,7 @@ export function HomeScreen() {
         return (
           <View style={styles.below}>
             <OpenMark open={item.row.type === 'pane' ? isOpen('/pane/[paneId]', item.row.pane.id, item.row.machineKey) : isOpen('/session/[sessionId]', item.row.session.id, item.row.machineKey)}>
-              <RecentRowView row={item.row} waiting={item.row.type === 'session' ? waitingBySession.get(sessionKey(item.row.machineKey, item.row.session.id)) ?? 0 : 0} machine={machineOf(item.row.machineKey)} currentKey={profile.id} actions={actions} onOpen={() => openRecentRow(item.row, profile.id, actions, sayOffline)} />
+              <RecentRowView row={item.row} waiting={item.row.type === 'session' ? waitingBySession.get(sessionKey(item.row.machineKey, item.row.session.id)) ?? 0 : 0} fresh={item.row.type === 'session' ? fresh.bySession.get(sessionKey(item.row.machineKey, item.row.session.id)) ?? 0 : freshPane(item.row.machineKey, item.row.pane.id)} machine={machineOf(item.row.machineKey)} currentKey={profile.id} actions={actions} onOpen={() => openRecentRow(item.row, profile.id, actions, sayOffline)} />
             </OpenMark>
           </View>
         );
@@ -282,6 +296,7 @@ export function HomeScreen() {
                       machine={markOf(row.machineKey)}
                       stale={row.stale}
                       done={list === 'agent' || !row.waiting}
+                      fresh={justSeen.has(row.key)}
                       divided={divided}
                       onPress={() => openWaitingRow(row, list, profile.id, open)}
                       // The card's Close with no reason, for this machine's questions it can close.
@@ -328,6 +343,7 @@ export function HomeScreen() {
         row={row}
         at={row.openedAt}
         waiting={row.type === 'session' ? waitingBySession.get(sessionKey(row.machineKey, row.session.id)) ?? 0 : 0}
+        fresh={row.type === 'session' ? fresh.bySession.get(sessionKey(row.machineKey, row.session.id)) ?? 0 : freshPane(row.machineKey, row.pane.id)}
         machine={markOf(row.machineKey)}
         currentKey={profile.id}
         actions={actions}
@@ -379,6 +395,7 @@ export function HomeScreen() {
                     pane={item.pane}
                     label={item.pane.name}
                     detail={item.pane.projectName}
+                    fresh={freshPane(profile.id, item.pane.id)}
                     background={theme.colors.surfaceRaised}
                     onOpen={() => actions.openPane(item.pane.id)}
                     onTogglePinned={() => actions.togglePanePinned(item.pane.id)}
@@ -426,7 +443,7 @@ export function HomeScreen() {
   const tileTitle = tile === 'working' ? 'Working' : 'Ready';
   const header = searching ? null : (
     <View>
-      <StatusTiles counts={counts} selected={tile} onSelect={selectTile} />
+      <StatusTiles counts={counts} fresh={fresh.total} selected={tile} onSelect={selectTile} />
       <View style={styles.below}>
         {tile === 'needs' ? needsYou
           : tile === 'all' ? (all ? <>{recent}<BoardHeader title={allOffline(feeds) ? 'Last seen' : 'All panes'} count={counts?.all} /></> : allPanes)
@@ -487,6 +504,7 @@ export function HomeScreen() {
       <HomeRail
         machine={all ? undefined : current}
         counts={counts}
+        fresh={fresh.total}
         onExpand={() => setCollapsed(false)}
         onSelectTile={next => {
           selectTile(next);

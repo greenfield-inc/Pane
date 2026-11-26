@@ -5,6 +5,7 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { originLine } from '@shared/approvalReceipts';
 
 import { askerLine, questionDetail, type ApprovalList } from '@/features/approvals/approvals';
+import { NewBadge } from '@/features/approvals/NewBadge';
 import { WaitingCount } from '@/features/approvals/WaitingCount';
 import { MachineBadge } from '@/features/machines/MachineBadge';
 import { MachineMark } from '@/features/machines/MachineMark';
@@ -89,7 +90,7 @@ export function waitingRowText(row: WaitingRow): { title: string; detail: string
 }
 
 /** One row of All machines' every Pane and Session, newest first, with its machine's badge. */
-export function RecentRowView({ row, waiting, machine, currentKey, actions, onOpen, at, idPrefix = 'all', card }: {
+export function RecentRowView({ row, waiting, fresh = 0, machine, currentKey, actions, onOpen, at, idPrefix = 'all', card }: {
   row: RecentRow;
   /** The time its detail shows: its last activity unless given. */
   at?: number;
@@ -99,6 +100,8 @@ export function RecentRowView({ row, waiting, machine, currentKey, actions, onOp
   card?: { divided: boolean };
   /** What waits on the person in a Session's row. */
   waiting: number;
+  /** What waits on the person in the row's Session or Pane that the phone hasn't shown yet. */
+  fresh?: number;
   machine: Machine | undefined;
   currentKey: string;
   actions: CurrentMachineActions;
@@ -112,11 +115,12 @@ export function RecentRowView({ row, waiting, machine, currentKey, actions, onOp
       testID={`${idPrefix}-pane-row-${row.key}`}
       title={row.pane.name}
       detail={[row.pane.repository, row.pane.session?.name, time].filter(Boolean).join(' · ')}
-      label={paneLabel(row.pane, machine?.name)}
+      label={[paneLabel(row.pane, machine?.name), fresh > 0 ? `${fresh} new` : undefined].filter(Boolean).join(', ')}
       machine={machine}
       stale={row.stale}
       paused={Boolean(row.pane.paused)}
       leading={row.pane.paused ? <PausedBadge /> : <StatusBadge status={row.pane.status} />}
+      trailing={<NewBadge count={fresh} testID={`${idPrefix}-pane-new-${row.key}`} />}
       divided={divided}
       onPress={onOpen}
       swipe={swipes ? {
@@ -133,10 +137,10 @@ export function RecentRowView({ row, waiting, machine, currentKey, actions, onOp
       detail={['Session', row.paneCount === 1 ? '1 Pane' : row.paneCount > 1 ? `${row.paneCount} Panes` : undefined, time].filter(Boolean).join(' · ')}
       machine={machine}
       stale={row.stale}
-      label={[row.session.name || 'Untitled', 'Session', waiting > 0 ? `${waiting} waiting` : undefined, machine?.name].filter(Boolean).join(', ')}
+      label={[row.session.name || 'Untitled', 'Session', waiting > 0 ? `${waiting} waiting` : undefined, fresh > 0 ? `${fresh} new` : undefined, machine?.name].filter(Boolean).join(', ')}
       paused={Boolean(row.session.paused)}
       leading={row.session.paused ? <PausedBadge /> : <Icon ios="bubble.left" android="chat_bubble" size={12} />}
-      trailing={<WaitingCount testID={`${idPrefix}-session-waiting-${row.key}`} count={waiting} />}
+      trailing={<WaitingCount testID={`${idPrefix}-session-waiting-${row.key}`} count={waiting} fresh={fresh} />}
       divided={divided}
       onPress={onOpen}
       swipe={swipes ? {
@@ -243,7 +247,7 @@ function AllRow({ title, detail, below, spoken = [], label, machine, stale, paus
   paused?: boolean;
   divided?: boolean;
   leading: ReactNode;
-  /** Before the machine badge: a Session row's waiting count. */
+  /** Before the machine badge: a Session row's waiting count, or a Pane's "+N". */
   trailing?: ReactNode;
   onPress: () => void;
   swipe?: { pinned: boolean; onTogglePinned: () => void; onArchive: () => void; pause?: { paused: boolean; onToggle: () => void } };

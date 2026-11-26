@@ -3,6 +3,8 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { useTheme, type ThemeColors } from '@/theme';
 import { Skeleton, Text } from '@/ui';
 
+import { NewBadge } from '@/features/approvals/NewBadge';
+
 import type { BoardTile } from './statusBoard';
 
 const ROWS: ReadonlyArray<ReadonlyArray<{ id: BoardTile; label: string; color: keyof ThemeColors }>> = [[
@@ -13,9 +15,14 @@ const ROWS: ReadonlyArray<ReadonlyArray<{ id: BoardTile; label: string; color: k
   { id: 'ready', label: 'Ready', color: 'success' },
 ]];
 
-/** Four counts in a 2×2 grid. The selected tile wears its status color and filters the list below. */
-export function StatusTiles({ counts, selected, onSelect }: {
+/**
+ * Four counts in a 2×2 grid. The selected tile wears its status color and filters the list below.
+ * Needs you carries "+N" in its corner for what arrived since you last looked.
+ */
+export function StatusTiles({ counts, fresh = 0, selected, onSelect }: {
   counts: Partial<Record<BoardTile, number>> | undefined;
+  /** What waits on you that the phone hasn't shown you yet. */
+  fresh?: number;
   selected: BoardTile;
   onSelect: (tile: BoardTile) => void;
 }) {
@@ -26,12 +33,13 @@ export function StatusTiles({ counts, selected, onSelect }: {
         const color = theme.colors[tile.color];
         const on = tile.id === selected;
         const count = counts?.[tile.id];
+        const fresher = tile.id === 'needs' && count !== undefined ? fresh : 0;
         return (
           <Pressable
             key={tile.id}
             testID={`home-tile-${tile.id}`}
             accessibilityRole="tab"
-            accessibilityLabel={count === undefined ? tile.label : `${tile.label}, ${count}`}
+            accessibilityLabel={[tile.label, count === undefined ? undefined : String(count), fresher > 0 ? `${fresher} new` : undefined].filter(Boolean).join(', ')}
             accessibilityState={{ selected: on }}
             onPress={() => onSelect(tile.id)}
             style={({ pressed }) => [styles.tile, {
@@ -51,6 +59,8 @@ export function StatusTiles({ counts, selected, onSelect }: {
               <View style={[styles.dot, { backgroundColor: color }]} />
               <Text variant="rowDetail" tone="secondary" numberOfLines={1} maxFontSizeMultiplier={1.4}>{tile.label}</Text>
             </View>
+            {/* In the corner, so the count and label never move when it comes and goes. */}
+            <NewBadge count={fresher} testID="home-tile-needs-new" style={styles.fresh} />
           </Pressable>
         );
       })}</View>)}
@@ -67,4 +77,5 @@ const styles = StyleSheet.create({
   countBone: { position: 'absolute', left: 0, top: 4 },
   label: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
   dot: { width: 8, height: 8, borderRadius: 4 },
+  fresh: { position: 'absolute', top: 8, right: 8 },
 });
