@@ -21,10 +21,10 @@ export interface SessionSnapshot {
 }
 
 /** Agent Farm's variable for the snapshot a launch resolves from, inherited by everything it starts. */
-export const AGENT_FARM_SNAPSHOT_ENV = 'AGENT_FARM_SNAPSHOT';
+const AGENT_FARM_SNAPSHOT_ENV = 'AGENT_FARM_SNAPSHOT';
 
 /** Where Agent Farm keeps a launch directory's snapshots. */
-export const SNAPSHOTS_FOLDER = '.agent-farm/snapshots';
+const SNAPSHOTS_FOLDER = '.agent-farm/snapshots';
 
 const createdOutput = boundary.object({ path: boundary.nonEmptyString, digest: boundary.nonEmptyString, plugins: boundary.record(boundary.string) });
 
