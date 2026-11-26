@@ -1,4 +1,5 @@
 import { showActionError } from '../stores/errorStore';
+import { ipcErrorMessage } from './ipcErrorMessage';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
@@ -99,10 +100,10 @@ export async function openOnMachine(machineId: string, target: MachineTarget): P
   // The switch's restore clears this host's Sessions; the landing then picks the pressed one
   // over the host's own last-used Session, whatever else selects meanwhile (#1767's rig).
   sessions.landOn(target.kind === 'session' ? target.id : undefined);
-  const failed = (error: unknown) => {
+  const failed = (reason: string | undefined) => {
     if (press !== openPresses) return;
     useOrchestrationSessionStore.getState().landOn(undefined);
-    showActionError(`Could not open ${target.name} on ${name}`, error);
+    showActionError(`Could not open ${target.name} on ${name}`, reason);
   };
   try {
     await rememberOnMachine(machineId, target);
@@ -110,7 +111,7 @@ export async function openOnMachine(machineId: string, target: MachineTarget): P
     const outcome = await state.switchMachine(machineId);
     if (!outcome.ok) failed(outcome.needsPassword ? `${name} needs its password. Enter it in Remote Access settings, then try again.` : outcome.error);
   } catch (error) {
-    failed(error);
+    failed(ipcErrorMessage(error, 'Pane did not say why.'));
   }
 }
 

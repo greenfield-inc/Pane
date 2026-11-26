@@ -1,8 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
-
-const showActionError = vi.fn();
-vi.mock('../stores/errorStore', () => ({ showActionError }));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -16,6 +13,8 @@ async function setup(switchMachine: (machineId: string) => Promise<MachineSelect
   const { useAllMachinesStore } = await import('../stores/allMachinesStore');
   const { useOrchestrationSessionStore } = await import('../stores/orchestrationSessionStore');
   const { openOnMachine } = await import('./machineRowActions');
+  const { useErrorStore } = await import('../stores/errorStore');
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
   useAllMachinesStore.setState({
     entries: [
       { id: 'local', name: 'studio', os: 'macOS', slot: 0, letters: 'S', active: true },
@@ -26,11 +25,14 @@ async function setup(switchMachine: (machineId: string) => Promise<MachineSelect
     switchMachine,
   });
   const landOn = vi.spyOn(useOrchestrationSessionStore.getState(), 'landOn');
-  return { openOnMachine, landOn };
+  const shownError = () => useErrorStore.getState().currentError;
+  return { openOnMachine, landOn, shownError };
 }
 
-beforeEach(() => showActionError.mockClear());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe('openOnMachine (T-128)', () => {
   it('asks the switch to land on the pressed Session', async () => {
@@ -43,17 +45,17 @@ describe('openOnMachine (T-128)', () => {
   });
 
   it('drops the landing and says so when the switch fails', async () => {
-    const { openOnMachine, landOn } = await setup(async () => ({ ok: false, error: 'build-box did not answer.' }));
+    const { openOnMachine, landOn, shownError } = await setup(async () => ({ ok: false, error: 'build-box did not answer.' }));
 
     await openOnMachine('build', { kind: 'session', id: 'release', name: 'Release' });
 
     expect(landOn).toHaveBeenLastCalledWith(undefined);
-    expect(showActionError).toHaveBeenCalledWith('Could not open Release on build-box', 'build-box did not answer.');
+    expect(shownError()).toMatchObject({ title: 'Could not open Release on build-box', error: 'build-box did not answer.' });
   });
 
   it('keeps a newer press\'s landing, and stays quiet, when the press it replaced fails', async () => {
     const first = deferred<MachineSelectOutcome>();
-    const { openOnMachine, landOn } = await setup(machineId => (machineId === 'build' ? first.promise : Promise.resolve({ ok: true })));
+    const { openOnMachine, landOn, shownError } = await setup(machineId => (machineId === 'build' ? first.promise : Promise.resolve({ ok: true })));
 
     const older = openOnMachine('build', { kind: 'session', id: 'release', name: 'Release' });
     await openOnMachine('mini', { kind: 'session', id: 'notes', name: 'Notes' });
@@ -61,6 +63,6 @@ describe('openOnMachine (T-128)', () => {
     await older;
 
     expect(landOn).toHaveBeenLastCalledWith('notes');
-    expect(showActionError).not.toHaveBeenCalled();
+    expect(shownError()).toBeNull();
   });
 });
