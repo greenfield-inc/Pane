@@ -4,7 +4,7 @@
  */
 @import '../../styles/tokens/agentChat.css';
 
-.agent-chat { --thread-max-width: 44rem; --composer-radius: 1rem; background: var(--chat-background); color: var(--chat-foreground); font-size: 16px; line-height: 1.5; }
+.agent-chat { --thread-max-width: var(--chat-reading-width); --composer-radius: 1rem; background: var(--chat-background); color: var(--chat-foreground); font-size: var(--chat-message-font-size); line-height: 1.5; }
 .chat-header { display:grid; grid-template-columns:minmax(0,1fr); flex-shrink:0; align-items:center; gap:8px; min-height:44px; padding:6px 12px; }
 .chat-header-state { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; }
 .chat-status { min-width:0; flex:1 1 140px; font-size:12px; color:var(--chat-muted-foreground); }
@@ -21,7 +21,7 @@
 .chat-message { min-width:0; overflow-wrap:anywhere; }
 .chat-message[data-role=user] { display:grid; grid-template-columns:minmax(72px,1fr) auto; padding:0 8px; }
 .chat-user-content { grid-column:2; min-width:0; border-radius:var(--composer-radius); padding:8px 16px; background:var(--chat-muted); }
-.chat-message[data-role=assistant] { padding:0 8px; line-height:1.625; }
+.chat-message[data-role=assistant] { padding:0 8px; line-height:var(--chat-message-line-height); }
 .chat-message[data-role=assistant]+.chat-message[data-role=assistant] { margin-top:-16px; }
 .chat-markdown { min-width:0; overflow-wrap:anywhere; }
 .chat-markdown p { margin:12px 0; }

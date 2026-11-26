@@ -91,6 +91,26 @@ function orchestratorTree(): ProfileTreeNode[] {
 const ORCHESTRATOR_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#2f6f4f"/><circle cx="32" cy="26" r="11" fill="#e9f5ee"/></svg>';
 const ORCHESTRATOR_PHOTO = `data:image/svg+xml;utf8,${encodeURIComponent(ORCHESTRATOR_SVG)}`;
 
+/** A long Markdown file, for the reading column, its text size and find (build 8 feedback). */
+const STANDING_RULES = [
+  '# Standing rules',
+  '',
+  'These apply to every agent in the workstream. Chat is scratch: decisions, plans and reports live in documents, and work is handed to another agent by document path, never by paraphrase. Revise a document in place with a change-log line.',
+  '',
+  '## What needs asking',
+  '',
+  'Go ahead without asking for reading and searching, local tests, lint, type checks, builds and a local dev server. Ask first for migrations, anything that touches production, deleting data, spending money and merging a pull request.',
+  '',
+  '- Never merge a pull request unless the person asks for that pull request to be merged.',
+  '- Never push to a default branch.',
+  '- Close every browser, simulator and preview server you open once you are done.',
+  '',
+  '## When you are done',
+  '',
+  'Report what you did, what you checked, and what is left for the person. A workstream is done when its pull requests are reviewed, its checks are green, and the person has what they need to decide.',
+  '',
+].join('\n');
+
 function fixture() {
   const orchestrator = profile('greenfield', 'orchestrator', 'claude', 'Orchestrator', 'Coordinate planners, implementers and reviewers for one workstream.', orchestratorTree(),
     { cover: 'covers/orchestrator.html', variants: BOTH });
@@ -121,7 +141,8 @@ function fixture() {
   files['greenfield/agents/designer.md'] = `${identity('Draw three UI options on the real product.', '\nskills: [ui-mockup]')}# Designer\n\nCapture the real screen, then draw three options.\n`;
   files['greenfield/agents/planner.md'] = `${identity('Turn a request into a plan.', '\nskills: [plan]')}# Planner\n\nWrite the plan, then wait for the person to approve it.\n`;
   files['greenfield/covers/orchestrator.html'] = '<html><head><title>Orchestrator</title></head><body><h1>Greenfield orchestrator</h1><p>Runs one workstream from idea to merged pull request.</p><h2>How it works</h2><p>1 Plan with you · 2 Build in a Pane · 3 Review every PR · 4 Ask before merging</p><script>document.body.dataset.ran = "yes"</script></body></html>';
-  files['greenfield/agents/business.md'] = `${identity('Answer BloomText support tickets.', '\nskills: [triage]\nreferences: business')}# Support\n\nAnswer new tickets in the help desk. Escalate refunds to the person through an approval.\n`;
+  files['greenfield/instructions/standing-rules.md'] = STANDING_RULES;
+  files['greenfield/agents/business.md'] =`${identity('Answer BloomText support tickets.', '\nskills: [triage]\nreferences: business')}# Support\n\nAnswer new tickets in the help desk. Escalate refunds to the person through an approval.\n`;
   const overview: ProfilesOverview = { machine: 'studio-mac', plugins: [greenfield] };
   const photos: ProfilePhotos = { profiles: { 'greenfield/orchestrator': ORCHESTRATOR_PHOTO }, sources: { 'greenfield/orchestrator': 'plugin' }, titles: { 'greenfield/orchestrator': 'Orchestrator', 'greenfield/business': 'Business', 'greenfield/seo': 'SEO' } };
   return { overview, files, photos };
@@ -157,6 +178,30 @@ async function openProfilesTab(page: Page, options: { theme?: string; saveError?
   await page.getByTestId('profiles-nav').click();
   await expect(page.getByTestId('profiles-view')).toBeVisible();
 }
+
+/** The source editor's input, once it has loaded. */
+async function editorInput(page: Page) {
+  const input = page.getByTestId('profiles-editor').locator('textarea.inputarea');
+  await expect(input).toBeFocused({ timeout: 30_000 });
+  return input;
+}
+
+/** The editor's platform key: it reads the browser's user agent (Windows in these tests), not the host's. */
+const editorMod = (page: Page) => page.evaluate(() => (navigator.userAgent.includes('Macintosh') ? 'Meta' : 'Control'));
+
+/** Replaces everything in the source editor with `value`. */
+async function setEditorText(page: Page, value: string): Promise<void> {
+  await editorInput(page);
+  await page.keyboard.press(`${await editorMod(page)}+a`);
+  await page.keyboard.insertText(value);
+}
+
+/** What the source editor holds. */
+const editorText = (page: Page) => page.evaluate(() => {
+  // SAFETY: the editor's loader puts its API on window once it has loaded.
+  const api = (window as typeof window & { monaco?: { editor: { getEditors(): Array<{ getValue(): string }> } } }).monaco;
+  return api?.editor.getEditors()[0]?.getValue() ?? null;
+});
 
 /** Changes a profile file "on disk" behind the tab's back, as an agent, the CLI or sync would. Null removes it. */
 const writeOnDisk = (page: Page, plugin: string, path: string, content: string | null) => page.evaluate(({ plugin, path, content }) => {
@@ -222,13 +267,18 @@ test('a profile opens on its cover page: its own HTML in a sandbox, or one Pane 
   await openProfilesTab(page);
   await page.getByTestId('profile-row-greenfield-orchestrator').click();
   const frame = page.getByTestId('profiles-html-preview');
-  await expect(frame).toHaveAttribute('sandbox', '');
+  await expect(frame).toHaveAttribute('sandbox', 'allow-same-origin');
   await expect(page.getByTestId('profiles-cover-note')).toHaveText('From the profile: covers/orchestrator.html');
   const content = page.frameLocator('[data-testid="profiles-html-preview"]');
   await expect(content.getByRole('heading', { name: 'Greenfield orchestrator' })).toBeVisible();
-  // Scripts don't run in the cover.
-  // SAFETY: the locator is the preview's <iframe>; its sandbox has no same-origin, so contentDocument stays out of reach.
-  expect(await frame.evaluate(element => (element as HTMLIFrameElement).contentDocument?.body?.dataset.ran ?? null).catch(() => null)).toBeNull();
+  // Scripts don't run in the cover (its sandbox allows none); Pane reads its text for find.
+  const body = await frame.evaluate(element => {
+    // SAFETY: the locator is the preview's <iframe>.
+    const doc = (element as HTMLIFrameElement).contentDocument;
+    return { ran: doc?.body?.dataset.ran ?? null, text: doc?.body?.textContent ?? '' };
+  });
+  expect(body.ran).toBeNull();
+  expect(body.text).toContain('Runs one workstream');
   await page.getByTestId('profiles-back').click();
   await page.getByTestId('profile-row-greenfield-business').click();
   const cover = page.getByTestId('profiles-generated-cover');
@@ -325,17 +375,16 @@ test('files preview first: Markdown under a metadata header, YAML as key/value; 
   // Edit, then ⌘S saves and returns to the preview; Pane's own plugin becomes Edited.
   await page.getByTestId('profiles-edit').click();
   const editor = page.getByTestId('profiles-editor');
-  await expect(editor).toBeFocused();
   await page.keyboard.press('End');
-  await editor.pressSequentially('\nmarker: KUMQUAT');
+  await (await editorInput(page)).pressSequentially('\nmarker: KUMQUAT');
   await expect(page.getByTestId('profiles-editor-status')).toHaveText('Unsaved changes');
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s');
+  await page.keyboard.press(`${await editorMod(page)}+s`);
   await expect(page.getByTestId('profiles-notice')).toContainText('Saved greenfield/profiles/orchestrator.yaml. 2 Sessions can reload it.');
   await expect(editor).toHaveCount(0);
   await expect(page.getByTestId('profiles-restore')).toBeVisible();
   // Cancel with edits asks first; Esc in the editor does the same.
   await page.getByTestId('profiles-edit').click();
-  await page.getByTestId('profiles-editor').fill('changed: yes\n');
+  await setEditorText(page, 'changed: yes\n');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog', { name: 'Discard your edits?' })).toBeVisible();
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
@@ -376,7 +425,7 @@ test('a save Agent Farm refuses shows why, and keeps the edit', async ({ page })
   await page.getByTestId('profile-row-greenfield-seo').click();
   await page.getByTestId('profiles-file-agents/seo.md').click();
   await page.getByTestId('profiles-edit').click();
-  await page.getByTestId('profiles-editor').fill('---\nskills: [nope]\n---\n');
+  await setEditorText(page, '---\nskills: [nope]\n---\n');
   await page.getByTestId('profiles-save').click();
   await expect(page.getByTestId('profiles-save-error')).toContainText('Missing skill greenfield/nope');
   await expect(page.getByTestId('profiles-editor-status')).toHaveText('Unsaved changes');
@@ -483,20 +532,19 @@ test('with unsaved edits, a change on disk keeps them and asks: reload, or keep 
   await page.getByTestId('profile-row-greenfield-seo').click();
   await page.getByTestId('profiles-file-agents/seo.md').click();
   await page.getByTestId('profiles-edit').click();
-  const editor = page.getByTestId('profiles-editor');
-  await editor.fill('# Mine\n');
+  await setEditorText(page, '# Mine\n');
   await writeOnDisk(page, 'greenfield', 'agents/seo.md', '# Theirs\n');
   const notice = page.getByTestId('profiles-disk-changed');
   await expect(notice).toContainText('changed outside Pane', { timeout: 8000 });
-  await expect(editor).toHaveValue('# Mine\n');
+  await expect.poll(() => editorText(page)).toBe('# Mine\n');
   await page.getByTestId('profiles-disk-keep').click();
   await expect(notice).toHaveCount(0);
-  await expect(editor).toHaveValue('# Mine\n');
+  await expect.poll(() => editorText(page)).toBe('# Mine\n');
   await writeOnDisk(page, 'greenfield', 'agents/seo.md', '# Theirs again\n');
   await expect(notice).toBeVisible({ timeout: 8000 });
   await page.getByTestId('profiles-disk-reload').click();
   await expect(notice).toHaveCount(0);
-  await expect(editor).toHaveValue('# Theirs again\n');
+  await expect.poll(() => editorText(page)).toBe('# Theirs again\n');
 });
 
 /** build-box has every save; travel-laptop is offline and gets one when it reconnects (PR 6). */
@@ -526,8 +574,8 @@ for (const theme of ['light', 'dark']) {
     await page.getByTestId('profiles-file-agents/business.md').click();
     await page.getByTestId('profiles-edit').click();
     await page.keyboard.press('End');
-    await page.getByTestId('profiles-editor').pressSequentially('\nMarker: X');
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s');
+    await (await editorInput(page)).pressSequentially('\nMarker: X');
+    await page.keyboard.press(`${await editorMod(page)}+s`);
     await expect(page.getByTestId('profiles-notice')).toHaveText('Saved greenfield/agents/business.md. Sending it to build-box; travel-laptop gets it when it reconnects. 2 Sessions can reload it.');
     await shot(page, `sync7-saved-${theme}`);
   });
@@ -595,7 +643,7 @@ for (const theme of ['light', 'dark']) {
     await page.keyboard.press('Escape');
     await page.getByTestId('profiles-file-agents/business.md').click();
     await page.getByTestId('profiles-edit').click();
-    await page.getByTestId('profiles-editor').fill('# Support\n\nMy edit, not saved yet.\n');
+    await setEditorText(page, '# Support\n\nMy edit, not saved yet.\n');
     await writeOnDisk(page, 'greenfield', 'agents/business.md', '# Support\n\nAn agent changed this.\n');
     await expect(page.getByTestId('profiles-disk-changed')).toBeVisible({ timeout: 8000 });
     await shot(page, `page-disk-changed-${theme}`);
@@ -695,5 +743,141 @@ for (const theme of ['light', 'dark']) {
     await page.getByTestId('profiles-tree-tab-orchestrator/sub:planner').click();
     await expect(page.getByTestId('profiles-notice')).toBeVisible();
     await shot(page, `tab-no-pane-${theme}`);
+  });
+}
+
+test('the open file\'s folder closes and opens again, and the file stays selected (build 8 feedback 4)', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+  const folderRow = tree.getByTestId('profiles-tree-orchestrator/instructions');
+  const fileRow = tree.getByTestId('profiles-file-instructions/standing-rules.md');
+  await folderRow.click();
+  await fileRow.click();
+  await expect(page.getByTestId('profiles-path')).toHaveText('instructions/standing-rules.md');
+  // Its folder closes: the file hides, and the page still shows it.
+  await folderRow.click();
+  await expect(folderRow).toHaveAttribute('aria-expanded', 'false');
+  await expect(fileRow).toHaveCount(0);
+  await expect(page.getByTestId('profiles-path')).toHaveText('instructions/standing-rules.md');
+  // ← on the folder keeps it closed; → opens it with the file still selected.
+  await folderRow.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(fileRow).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowLeft');
+  await expect(fileRow).toHaveCount(0);
+  // A subagent's folder holding the shown file closes too, from its chevron.
+  await tree.getByTestId('profiles-tree-orchestrator/sub:designer').click();
+  await tree.getByTestId('profiles-file-agents/designer.md').click();
+  await tree.getByTestId('profiles-tree-orchestrator/sub:designer').locator('[role="presentation"]').first().click();
+  await expect(tree.getByTestId('profiles-file-agents/designer.md')).toHaveCount(0);
+  await expect(page.getByTestId('profiles-path')).toHaveText('agents/designer.md');
+});
+
+test('Markdown reads at the chat\'s text size in a reading column (build 8 feedback 1 and 2)', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+  await tree.getByTestId('profiles-tree-orchestrator/instructions').click();
+  await tree.getByTestId('profiles-file-instructions/standing-rules.md').click();
+  const paragraph = page.getByTestId('profiles-markdown-preview').locator('p').first();
+  await expect(paragraph).toBeVisible();
+  const read = await paragraph.evaluate(element => {
+    const style = getComputedStyle(element);
+    const root = getComputedStyle(document.documentElement);
+    return {
+      fontSize: style.fontSize,
+      lineHeight: parseFloat(style.lineHeight) / parseFloat(style.fontSize),
+      width: element.getBoundingClientRect().width,
+      chatSize: root.getPropertyValue('--chat-message-font-size').trim(),
+      chatLine: root.getPropertyValue('--chat-message-line-height').trim(),
+    };
+  });
+  // The chat's own tokens, so a change to the chat's text changes this too.
+  expect(read.chatSize).toBe('16px');
+  expect(read.fontSize).toBe(read.chatSize);
+  expect(read.lineHeight).toBeCloseTo(Number(read.chatLine), 2);
+  // At most the chat column's 44rem (about 75 characters a line), on a 1440 px window.
+  expect(read.width).toBeLessThanOrEqual(44 * 16);
+  expect(read.width).toBeGreaterThan(500);
+});
+
+test('⌘F finds in a previewed file and in Edit, with next and previous (build 8 feedback 3)', async ({ page }) => {
+  await openProfilesTab(page);
+  await page.getByTestId('profile-row-greenfield-orchestrator').click();
+  const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+  await tree.getByTestId('profiles-tree-orchestrator/instructions').click();
+  await tree.getByTestId('profiles-file-instructions/standing-rules.md').click();
+  const preview = page.getByTestId('profiles-markdown-preview');
+  await preview.click({ position: { x: 4, y: 4 } });
+  await page.keyboard.press('ControlOrMeta+f');
+  const find = page.getByRole('search', { name: 'Find in tab' });
+  await expect(find).toBeVisible();
+  await page.keyboard.type('person');
+  // "person" appears three times in the rules.
+  await expect(find).toContainText('1 of 3');
+  await page.keyboard.press('Enter');
+  await expect(find).toContainText('2 of 3');
+  await page.keyboard.press('Shift+Enter');
+  await expect(find).toContainText('1 of 3');
+  await find.getByRole('button', { name: 'Next match' }).click();
+  await expect(find).toContainText('2 of 3');
+  // Esc closes find and leaves the file open.
+  await page.getByRole('textbox', { name: 'Find' }).press('Escape');
+  await expect(find).toHaveCount(0);
+  await expect(page.getByTestId('profiles-path')).toHaveText('instructions/standing-rules.md');
+  // In Edit, the editor's own find takes ⌘F, as in a file tab; Pane's bar stays closed.
+  await page.getByTestId('profiles-edit').click();
+  const editor = page.getByTestId('profiles-editor');
+  await expect(editor.locator('.monaco-editor')).toBeVisible({ timeout: 30_000 });
+  await editorInput(page);
+  await page.keyboard.press(`${await editorMod(page)}+f`);
+  await expect(editor.locator('.find-widget.visible')).toBeVisible();
+  await page.keyboard.type('person');
+  await expect(editor.locator('.find-widget .matchesCount')).toHaveText('1 of 3');
+  await expect(find).toHaveCount(0);
+  // Esc closes the editor's find first, then a second Esc leaves Edit.
+  await page.keyboard.press('Escape');
+  await expect(editor.locator('.find-widget.visible')).toHaveCount(0);
+  await expect(editor).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(editor).toHaveCount(0);
+});
+
+// PANE_PROFILES_SHOTS=<dir> saves the file viewer after build 8's feedback, light and dark: the Markdown
+// reading column at the chat's text size (and larger, as a bigger text size zooms the window), find in
+// the preview and in Edit, and the open file's folder collapsed.
+for (const theme of ['light', 'dark']) {
+  test(`file viewer screenshots, ${theme}`, async ({ page }) => {
+    test.skip(!shotsDir, 'set PANE_PROFILES_SHOTS to save screenshots');
+    await openProfilesTab(page, { theme });
+    await page.getByTestId('profile-row-greenfield-orchestrator').click();
+    const tree = page.getByRole('tree', { name: 'greenfield/orchestrator files' });
+    await tree.getByTestId('profiles-tree-orchestrator/instructions').click();
+    await tree.getByTestId('profiles-file-instructions/standing-rules.md').click();
+    const preview = page.getByTestId('profiles-markdown-preview');
+    await expect(preview.getByRole('heading', { name: 'Standing rules' })).toBeVisible();
+    await shot(page, `viewer-markdown-${theme}`);
+    await preview.click({ position: { x: 4, y: 4 } });
+    await page.keyboard.press('ControlOrMeta+f');
+    await page.keyboard.type('person');
+    await page.keyboard.press('Enter');
+    await shot(page, `viewer-find-preview-${theme}`);
+    // Build 8 has no find here: the keys reach nothing, or type into its editor below.
+    const closeFind = page.getByRole('button', { name: 'Close find' });
+    if (await closeFind.count()) await closeFind.click();
+    await page.getByTestId('profiles-edit').click();
+    await page.waitForTimeout(1500);
+    await page.keyboard.press(`${await editorMod(page)}+f`);
+    await page.keyboard.type('person');
+    await shot(page, `viewer-find-edit-${theme}`);
+    await page.getByTestId('profiles-cancel').click();
+    const discard = page.getByRole('button', { name: 'Discard', exact: true });
+    if (await discard.count()) await discard.click();
+    await tree.getByTestId('profiles-tree-orchestrator/instructions').click();
+    await shot(page, `viewer-folder-collapsed-${theme}`);
+    await tree.getByTestId('profiles-tree-orchestrator/instructions').click();
+    await page.evaluate(() => { document.documentElement.style.zoom = '1.3'; });
+    await shot(page, `viewer-markdown-larger-${theme}`);
   });
 }

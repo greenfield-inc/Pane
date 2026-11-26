@@ -8,6 +8,8 @@ import { MarkdownPreview } from '../MarkdownPreview';
 import { ProfileAvatar } from './ProfileAvatar';
 import { SquareTerminal } from 'lucide-react';
 import { TODOS_HEADER_BUTTON } from '../todos/todoStyles';
+import { FIND_FRAME_ATTRIBUTE } from '../find/surfaceFind';
+import { SUMMARY_FRAME_SANDBOX } from '../../../../shared/utils/summaryPolicy';
 import { tabActionLabel, tabCommand, useTabPane } from './subagentTab';
 import { LINK_MODE_TEXT, coverFacts, sandboxedHtml, splitFrontMatter, subagentLabel, subagentState, variantsText } from './profilePreview';
 
@@ -24,10 +26,13 @@ function themeCss(): string {
   return `html{background:${token('--color-bg-primary')};color:${token('--color-text-primary')};font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{margin:24px 32px}a{color:${token('--color-interactive')}}`;
 }
 
-/** An HTML file as a page: no scripts (the frame's sandbox), nothing from the network (its policy). */
+/**
+ * An HTML file as a page: no scripts (the frame's sandbox), nothing from the network (its policy).
+ * Like an approval's Summary frame, Pane may read it (same origin, still no scripts), so ⌘F finds in it.
+ */
 export function HtmlPage({ html, title }: { html: string; title: string }) {
   const page = useMemo(() => sandboxedHtml(html, themeCss()), [html]);
-  return <iframe title={title} sandbox="" srcDoc={page} className="min-h-0 w-full flex-1 border-0" data-testid="profiles-html-preview" />;
+  return <iframe title={title} sandbox={SUMMARY_FRAME_SANDBOX} srcDoc={page} {...{ [FIND_FRAME_ATTRIBUTE]: '' }} className="min-h-0 w-full flex-1 border-0" data-testid="profiles-html-preview" />;
 }
 
 /** YAML (or front-matter) as data, parsed in main; undefined while it is read. */
@@ -122,7 +127,9 @@ export function MarkdownWithMeta({ source }: { source: string }) {
   const { frontMatter, body } = useMemo(() => splitFrontMatter(source), [source]);
   const parsed = useParsedYaml(frontMatter);
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4" data-testid="profiles-markdown-preview">
+    // The chat's reading column and message text (build 8 feedback 1 and 2): its width, size and line height.
+    <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6" data-testid="profiles-markdown-preview">
+      <div className="mx-auto w-full max-w-[var(--chat-reading-width)] [&_.markdown-preview]:px-0 [&_.markdown-preview]:text-[length:var(--chat-message-font-size)] [&_.markdown-preview]:leading-[var(--chat-message-line-height)]">
       {frontMatter !== null && (
         <div className="mb-4 rounded-lg border border-border-primary" data-testid="profiles-front-matter">
           <div className="border-b border-border-primary px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">Metadata</div>
@@ -130,6 +137,7 @@ export function MarkdownWithMeta({ source }: { source: string }) {
         </div>
       )}
       <MarkdownPreview content={body} />
+      </div>
     </div>
   );
 }
