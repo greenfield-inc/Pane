@@ -1,9 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CHEAT_SHEET_SCHEME, cheatSheet, pressAction, RELEASE_ACTIONS, MINUS_TAP_ACTION, R2_HOLD_ACTION } from '../../../shared/controller/bindings';
 import { pickInDirection, type Rect } from '../../../shared/controller/geometry';
 import { createControllerInterpreter, type ControllerEvent } from '../../../shared/controller/interpreter';
 import { nextNeedsYou, orderNeedsYou, type NeedsYouItem } from '../../../shared/controller/needsYou';
-import { detectFamily, deviceFromGamepadId, keyForButton, resolveFamily } from '../../../shared/controller/profiles';
+import { detectFamily, deviceFromGamepadId, keyForButton, keyLabel, resolveFamily } from '../../../shared/controller/profiles';
 import { RESTING_AXES, type ControllerAxes, type ControllerButton, type ControllerFrame } from '../../../shared/controller/types';
 import { getCatalogEntry } from '../../../shared/constants/keyboardShortcuts';
 
@@ -120,6 +121,17 @@ describe('cheat sheet', () => {
     expect(labels('playstation')).toEqual(['✕']);
     expect(cheatSheet('playstation').rows.find(row => row.label === 'Send')?.keys).toEqual(['△']);
     expect(cheatSheet('nintendo').rows.find(row => row.label.startsWith('Hold to talk'))?.keys).toEqual(['ZR']);
+  });
+
+  it('is the table docs/CONTROLLERS.md documents: every button the scheme uses has a row there', () => {
+    const doc = readFileSync(new URL('../../../docs/CONTROLLERS.md', import.meta.url), 'utf8');
+    const documented = doc.split('\n').filter(line => line.startsWith('| ')).map(line => line.split('|')[1].trim());
+    for (const row of CHEAT_SHEET_SCHEME) {
+      for (const key of row.keys) {
+        const name = key === 'up' || key === 'down' || key === 'left' || key === 'right' ? 'D-pad' : keyLabel('unrecognised', key);
+        expect(documented.some(cell => cell.split(/[ ,/(]+/).includes(name)), `${name} (${row.action})`).toBe(true);
+      }
+    }
   });
 
   it('says it cannot read an unrecognised pad', () => {

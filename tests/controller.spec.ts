@@ -6,6 +6,8 @@ interface PadStub {
   set(index: number, value: number): void;
   connect(): void;
   rumbles(): number;
+  /** How many times the page read navigator.getGamepads(). */
+  reads(): number;
 }
 
 declare global {
@@ -48,22 +50,26 @@ const panels = [
 
 async function installPad(page: Page, id: string): Promise<void> {
   await page.addInitScript((padId: string) => {
-    const pad = { buttons: Array.from({ length: 17 }, () => 0), axes: [0, 0, 0, 0], timestamp: 0, rumbles: 0 };
+    const pad = { buttons: Array.from({ length: 17 }, () => 0), axes: [0, 0, 0, 0], timestamp: 0, rumbles: 0, reads: 0 };
     const snapshot = () => ({
       id: padId, index: 0, connected: true, mapping: 'standard', timestamp: pad.timestamp,
       buttons: pad.buttons.map(value => ({ pressed: value > 0, touched: value > 0, value })),
       axes: [...pad.axes],
       vibrationActuator: { playEffect: async () => { pad.rumbles += 1; return 'complete'; } },
     });
-    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => [snapshot()] });
+    // Like Chromium, no pad shows until one is connected and pressed.
+    let connected = false;
+    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => { pad.reads += 1; return connected ? [snapshot()] : [null]; } });
     window.__pad = {
       set(index: number, value: number) { pad.buttons[index] = value; pad.timestamp += 1; },
       connect() {
+        connected = true;
         const event = new Event('gamepadconnected');
         Object.defineProperty(event, 'gamepad', { value: snapshot() });
         window.dispatchEvent(event);
       },
       rumbles: () => pad.rumbles,
+      reads: () => pad.reads,
     };
   }, id);
 }
@@ -76,14 +82,14 @@ async function press(page: Page, button: Button): Promise<void> {
   await page.waitForTimeout(50);
 }
 
-async function openFixture(page: Page, padId = XBOX, preferences: Record<string, string> = { controller_cheat_sheet_seen: 'true' }): Promise<void> {
+async function openFixture(page: Page, padId = XBOX, preferences: Record<string, string> = { controller_cheat_sheet_seen: 'true' }, connect = true): Promise<void> {
   await installPad(page, padId);
   await installElectronApiMock(page, { initialProjects: [project], initialSessions: sessions, initialPanels: panels, activeProjectId: project.id, initialPreferences: preferences });
   await gotoApp(page);
   await page.getByRole('button', { name: 'Expand project Pad fixture', exact: true }).click();
   await page.getByRole('button', { name: 'pad-pane', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
-  await page.evaluate(() => window.__pad.connect());
+  if (connect) await page.evaluate(() => window.__pad.connect());
 }
 
 const terminalInputs = (page: Page, panelId: string) => page.evaluate(id => {
@@ -175,4 +181,11 @@ test('holding R2 with no voice key says where to add one', async ({ page }, test
   await expect(bar).toContainText('Settings › Integrations');
   await page.screenshot({ path: testInfo.outputPath('dictation-needs-key.png') });
   await page.evaluate(() => window.__pad.set(7, 0));
+});
+
+test('with no pad connected, Pane never polls for one', async ({ page }) => {
+  await openFixture(page, XBOX, { controller_cheat_sheet_seen: 'true' }, false);
+  const before = await page.evaluate(() => window.__pad.reads());
+  await page.waitForTimeout(1000);
+  expect(await page.evaluate(() => window.__pad.reads())).toBe(before);
 });
