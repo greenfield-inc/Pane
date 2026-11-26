@@ -3,7 +3,7 @@ import * as Haptics from 'expo-haptics';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
-import { useTheme } from '@/theme';
+import { scaleType, useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
 import { useAutocorrect } from '../composer/autocorrectPreference';
@@ -84,7 +84,7 @@ export function TerminalInputBar({
         keyboardAppearance={theme.scheme}
         textAlignVertical="top"
         selectionColor={colors.accent}
-        style={[styles.input, { color: previewing ? colors.textMuted : colors.text }]}
+        style={[scaleType(styles.input, theme.uiScale), { color: previewing ? colors.textMuted : colors.text }]}
       />
       <View style={styles.actions}>
         <BoxAction testID="terminal-attach" label="Attach files" hint="Copies photos or files to the host and inserts their paths" ios="paperclip" android="attach_file" disabled={disabled} onPress={onAttach} />

@@ -13,7 +13,7 @@ import { useApprovalSort } from '@/features/approvals/approvalSortPreference';
 import { ConnectionBar } from '@/features/hosts/ConnectionStatus';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { useNotifyShared } from '@/features/notify/hooks';
-import { useTheme } from '@/theme';
+import { scaleType, useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
 import { useAvoidsKeyboard } from '@/features/layout/wideLayout';
 
@@ -201,7 +201,7 @@ function AnswerBar({ model, state, answer, bottom }: { model: DecisionModel; sta
     content = (
       <>
         <TextInput testID="autopilot-answer-text" accessibilityLabel="Your answer" placeholder="Type your answer" placeholderTextColor={colors.textMuted}
-          value={text} onChangeText={setText} multiline style={[styles.input, styles.fill, { color: colors.text, borderColor: colors.border, borderRadius: theme.radius.md }]} />
+          value={text} onChangeText={setText} multiline style={[scaleType(styles.input, theme.uiScale), styles.fill, { color: colors.text, borderColor: colors.border, borderRadius: theme.radius.md }]} />
         <Button testID="autopilot-answer-send" title="Send" loading={answer.busy} disabled={!text.trim()} onPress={() => answer.answer({ text: text.trim() })} />
       </>
     );

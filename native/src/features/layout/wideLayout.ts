@@ -1,4 +1,5 @@
 import { router, type Href } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import { createContext, use } from 'react';
 import { Dimensions } from 'react-native';
 import { create } from 'zustand';
@@ -6,7 +7,7 @@ import { create } from 'zustand';
 import { secureStore } from '@/auth/secureStore';
 import { screenCount, topScreen, type NavigationState, type ScreenToReopen } from '@/features/app/reopenScreen';
 
-import { isWide, type WindowSize } from './windowRule';
+import { isWide, type Orientation, type WindowSize } from './windowRule';
 
 interface WideLayoutState {
   /** The app's window as laid out, in dp. */
@@ -23,13 +24,34 @@ interface WideLayoutState {
   collapsed: boolean;
   /** The search box should take the keyboard once Home expands from the rail. */
   searchRequested: boolean;
+  /** The column's width as the person dragged it, per orientation. Remembered on the phone. */
+  columnWidths: Partial<Record<Orientation, number>>;
   setWindow(window: WindowSize): void;
   setStack(root: NavigationState | undefined): void;
   setSearching(searching: boolean): void;
   setCollapsed(collapsed: boolean, options?: { search?: boolean }): void;
+  /** Keeps the dragged width for this orientation; null goes back to the default. */
+  setColumnWidth(orientation: Orientation, width: number | null): void;
   takeSearchRequest(): boolean;
   /** Asks Home's search box for the keyboard (a controller's L3); a collapsed column expands first. */
   requestSearch(): void;
+}
+
+const COLUMN_WIDTHS_KEY = 'pane.native.homeColumnWidths';
+
+/** Read synchronously, so the first frame already draws the column at its width. */
+function readColumnWidths(): Partial<Record<Orientation, number>> {
+  try {
+    const saved: unknown = JSON.parse(SecureStore.getItem(COLUMN_WIDTHS_KEY) ?? '{}');
+    const widths: Partial<Record<Orientation, number>> = {};
+    for (const orientation of ['portrait', 'landscape'] as const) {
+      const width = (saved as Record<string, unknown> | null)?.[orientation];
+      if (typeof width === 'number' && Number.isFinite(width)) widths[orientation] = width;
+    }
+    return widths;
+  } catch {
+    return {};
+  }
 }
 
 const initial = Dimensions.get('window');
@@ -43,6 +65,7 @@ export const useWideLayout = create<WideLayoutState>((set, get) => ({
   searching: false,
   collapsed: false,
   searchRequested: false,
+  columnWidths: readColumnWidths(),
   setWindow: window => set({ window, wide: isWide(window) }),
   setStack: root => {
     const open = topScreen(root);
@@ -53,6 +76,15 @@ export const useWideLayout = create<WideLayoutState>((set, get) => ({
   setCollapsed: (collapsed, options) => {
     set({ collapsed, searchRequested: Boolean(options?.search) });
     void secureStore.setItem(COLLAPSED_KEY, collapsed ? '1' : '0').catch(() => undefined);
+  },
+  setColumnWidth: (orientation, width) => {
+    const columnWidths = { ...get().columnWidths };
+    if (width === null) delete columnWidths[orientation];
+    else columnWidths[orientation] = width;
+    set({ columnWidths });
+    void SecureStore.setItemAsync(COLUMN_WIDTHS_KEY, JSON.stringify(columnWidths), {
+      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+    }).catch(() => undefined);
   },
   requestSearch: () => {
     const state = get();

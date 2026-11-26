@@ -18,7 +18,7 @@ export function NewBadge({ count, label, style, testID }: { count?: number; labe
       accessibilityLabel={label ?? `${count} new`}
       style={[styles.pill, { backgroundColor: theme.colors.accent }, style]}
     >
-      <Text variant="caption" numberOfLines={1} maxFontSizeMultiplier={1.2} style={[styles.text, { color: theme.colors.onAccent }]}>{text}</Text>
+      <Text variant="caption" numberOfLines={1} maxScale={1.2} style={[styles.text, { color: theme.colors.onAccent }]}>{text}</Text>
     </View>
   );
 }

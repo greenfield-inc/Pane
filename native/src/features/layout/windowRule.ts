@@ -21,3 +21,26 @@ export function isWide({ width, height }: WindowSize): boolean {
 export function columnWidth(windowWidth: number): number {
   return Math.min(352, Math.max(280, Math.round(windowWidth * 0.36)));
 }
+
+/**
+ * How far the person can drag Home's column: from 240 dp to the desktop sidebar's 500 dp, always
+ * leaving the open screen 320 dp (a small phone's width).
+ */
+export function columnRange(windowWidth: number): { min: number; max: number } {
+  const min = 240;
+  return { min, max: Math.max(min, Math.min(500, windowWidth - 320)) };
+}
+
+/** Home's column: the width the person dragged it to, kept in range, or the default. */
+export function homeColumnWidth(windowWidth: number, dragged: number | undefined): number {
+  if (dragged === undefined) return columnWidth(windowWidth);
+  const { min, max } = columnRange(windowWidth);
+  return Math.round(Math.min(max, Math.max(min, dragged)));
+}
+
+/** Widths are kept per orientation: an unfolded phone held either way has room for different columns. */
+export type Orientation = 'portrait' | 'landscape';
+
+export function orientationOf({ width, height }: WindowSize): Orientation {
+  return width > height ? 'landscape' : 'portrait';
+}

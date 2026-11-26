@@ -1,9 +1,7 @@
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { monoFontFamily, useTheme, withAlpha } from '@/theme';
+import { monoFontFamily, useDisplayPreferences, useTheme, withAlpha } from '@/theme';
 import { Skeleton } from '@/ui';
-
-import { TERMINAL_FONT_SIZE } from './terminalSize';
 
 const LINE_WIDTHS = ['62%', '38%', '84%', '50%', '72%', '28%'] as const;
 
@@ -61,6 +59,7 @@ export function PanelTabsSkeleton() {
  */
 export function KeptScreen({ text, rows, height }: { text: string; rows: number; height: number }) {
   const { terminal } = useTheme();
+  const fontSize = useDisplayPreferences(state => state.terminalFontSize);
   const lineHeight = rows > 0 && height > 0 ? (height - KEPT_INSET.paddingTop - 8) / rows : 14;
   return (
     <View
@@ -76,7 +75,7 @@ export function KeptScreen({ text, rows, height }: { text: string; rows: number;
           numberOfLines={1}
           ellipsizeMode="clip"
           allowFontScaling={false}
-          style={{ fontFamily: monoFontFamily, fontSize: TERMINAL_FONT_SIZE, lineHeight, height: lineHeight, color: terminal.foreground }}
+          style={{ fontFamily: monoFontFamily, fontSize, lineHeight, height: lineHeight, color: terminal.foreground }}
         >
           {line}
         </Text>

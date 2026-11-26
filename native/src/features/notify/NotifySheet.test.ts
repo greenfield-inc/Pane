@@ -18,7 +18,7 @@ vi.mock('expo-router', () => ({ router: { back: () => undefined, push: () => und
 vi.mock('@/auth/hostsStore', () => ({ useHostsStore: (select: (state: { profiles: [] }) => unknown) => select({ profiles: [] }) }));
 vi.mock('@/daemon', () => ({ useDaemon: () => ({ profile: { id: 'host-1' } }) }));
 vi.mock('@/features/panes/PaneKit', () => ({ DialogSection: 'DialogSection', DialogSheet: 'DialogSheet', Notice: 'Notice', SheetButton: 'SheetButton' }));
-vi.mock('@/theme', () => ({ monoFontFamily: 'Menlo', useTheme: () => ({ radius: { lg: 12 }, colors: {} }) }));
+vi.mock('@/theme', () => ({ monoFontFamily: 'Menlo', useTheme: () => ({ radius: { lg: 12 }, colors: {}, typography: { footnote: { lineHeight: 16 } }, uiScale: 1 }) }));
 vi.mock('@/ui', () => ({ Icon: 'Icon', Skeleton: 'Skeleton', SkeletonSwap: 'SkeletonSwap', Text: 'Text', TextField: 'TextField' }));
 vi.mock('@/features/controller/Focusable', () => ({ Focusable: ({ children }: { children: ReactNode }) => children }));
 vi.mock('@/features/controller/ListeningBar', () => ({ ListeningBar: 'ListeningBar' }));

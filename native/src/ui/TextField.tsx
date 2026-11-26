@@ -30,7 +30,7 @@ export function TextField({ label, error, hint, mono, style, ...props }: TextFie
             borderColor: error ? theme.colors.danger : theme.colors.border,
             borderRadius: theme.radius.md,
           },
-          mono && { fontFamily: monoFontFamily, fontSize: 14 },
+          mono && { fontFamily: monoFontFamily, fontSize: 14 * theme.uiScale },
           style,
         ]}
       />

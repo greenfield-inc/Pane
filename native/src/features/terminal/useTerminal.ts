@@ -7,14 +7,14 @@ import type { MissionControlSnapshotResult } from '@shared/types/missionControl'
 
 import { isReadOnlyProfile } from '@/auth/access';
 import { invokeChannel, useDaemon, useDaemonEvent, useReadOnlyHost } from '@/daemon';
-import { useTheme } from '@/theme';
+import { useDisplayPreferences, useTheme } from '@/theme';
 
 import { connectionMark, perfMark } from '../perf/perfMarks';
 
 import { parsePageEvent, type TerminalCommand } from './bridge';
 import { TerminalSession, type TerminalSize } from './terminalSession';
 import { keepScreen, keptScreen as keptScreenOf } from './keptScreens';
-import { lastTerminalSize, rememberTerminalSize, TERMINAL_FONT_SIZE } from './terminalSize';
+import { lastTerminalSize, rememberTerminalSize } from './terminalSize';
 
 /** The host forgets viewers after a few minutes; the web app re-announces every minute too. */
 const VISIBILITY_REFRESH_MS = 60_000;
@@ -241,7 +241,9 @@ export function useTerminal(panelId: string, sessionId: string) {
     return () => clearTimeout(timer);
   }, [refitting, size]);
 
-  const themeCommand: TerminalCommand = { type: 'theme', theme: theme.terminal, fontSize: TERMINAL_FONT_SIZE };
+  // Settings › Display › Terminal font size: a change refits the page, which resizes the PTY once it settles.
+  const fontSize = useDisplayPreferences(state => state.terminalFontSize);
+  const themeCommand: TerminalCommand = { type: 'theme', theme: theme.terminal, fontSize };
   const themeJson = JSON.stringify(themeCommand);
   useEffect(() => {
     webView.current?.injectJavaScript(`window.paneTerminal&&window.paneTerminal.receive(${themeJson});true;`);

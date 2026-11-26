@@ -289,11 +289,11 @@ export function QuestionForm({ item, answer, busy, children }: {
           />
           {/* A failed save swaps in for the destination line, in the same two-line box. */}
           {item.secretError ? (
-            <Text testID="notify-secret-error" variant="footnote" tone="danger" numberOfLines={2} style={styles.secretLine} accessibilityLiveRegion="polite">
+            <Text testID="notify-secret-error" variant="footnote" tone="danger" numberOfLines={2} style={{ height: 2 * theme.typography.footnote.lineHeight }} accessibilityLiveRegion="polite">
               {item.secretError}
             </Text>
           ) : item.secret ? (
-            <Text testID="notify-secret-target" variant="footnote" tone="muted" numberOfLines={2} style={styles.secretLine}>
+            <Text testID="notify-secret-target" variant="footnote" tone="muted" numberOfLines={2} style={{ height: 2 * theme.typography.footnote.lineHeight }}>
               {`Saves as Pane secret ${item.secret.project}/${item.secret.name}${item.secret.replaces ? ' · replaces the saved value' : ''}`}
             </Text>
           ) : null}
@@ -447,8 +447,6 @@ export function SentLine({ summary }: { summary?: string }) {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  // Two footnote lines (16 pt each), so the destination and an error take the same room.
-  secretLine: { height: 32 },
   bold: { fontWeight: '600' },
   answer: { flex: 1 },
   // The sheet footer's row, so a skeleton's buttons and Close sit where the answers do.

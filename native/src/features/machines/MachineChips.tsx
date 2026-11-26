@@ -101,7 +101,7 @@ function AllChip({ selected, onPress }: { selected: boolean; onPress: () => void
       style={({ pressed }) => [styles.chip, !labelled && styles.iconChip, { backgroundColor: chipBackground(theme, selected, pressed) }]}
     >
       <Icon ios="square.3.layers.3d" android="layers" size={16} color={color} />
-      {labelled ? <Text variant="callout" numberOfLines={1} maxFontSizeMultiplier={MAX_TEXT_SCALE} style={[styles.name, { color }]}>All</Text> : null}
+      {labelled ? <Text variant="callout" numberOfLines={1} maxScale={MAX_TEXT_SCALE} style={[styles.name, { color }]}>All</Text> : null}
     </Pressable>
   );
 }
@@ -146,7 +146,7 @@ function MachineChip({ machine, selected, connecting, onPress }: { machine: Mach
       <Text
         variant="callout"
         numberOfLines={1}
-        maxFontSizeMultiplier={MAX_TEXT_SCALE}
+        maxScale={MAX_TEXT_SCALE}
         style={[styles.name, { color: selected ? theme.colors.background : theme.colors.text }]}
       >
         {machine.name}
