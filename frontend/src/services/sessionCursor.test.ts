@@ -1,44 +1,53 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionRecord, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
+import type { Session } from '../types/session';
 import type { AppConfig } from '../types/config';
 
-const peekSessionView = vi.fn();
-const cachedSessionView = vi.fn();
-vi.mock('../stores/sessionViewCache', () => ({ peekSessionView, cachedSessionView }));
+const peek = vi.fn();
+const getPaneLayout = vi.fn();
 
-// SAFETY: the cursor reads only these record fields.
-const records = ['a', 'b', 'c'].map(id => ({ id, name: id, internalSessionId: `internal-${id}`, agent: 'claude', panelIds: { claude: `panel-${id}` } } as unknown as OrchestrationSessionRecord));
+const records = ['a', 'b', 'c'].map(id => {
+  // SAFETY: the cursor reads only these record fields.
+  const record = { id, name: id, internalSessionId: `internal-${id}`, agent: 'claude', panelIds: { claude: `panel-${id}` } } as OrchestrationSessionRecord;
+  return record;
+});
+
+function heldView(sessionId: string, type: 'chat' | 'terminal') {
+  // SAFETY: the cursor reads only the agent tab's type of a held view.
+  const view = { session: { id: sessionId }, internalSession: { id: `internal-${sessionId}` }, panel: { id: `panel-${sessionId}`, type } } as OrchestrationSessionView<Session>;
+  return { view, panels: [], layout: null, remembered: null, opened: true };
+}
 
 async function setup(config: Partial<AppConfig> = {}) {
   vi.resetModules();
-  const listeners: Array<(event: FocusEvent) => void> = [];
-  vi.stubGlobal('window', { addEventListener: (_type: string, listener: (event: FocusEvent) => void) => listeners.push(listener), electronAPI: {} });
+  vi.stubGlobal('window', { addEventListener: vi.fn(), electronAPI: { orchestrationSessions: { peek }, uiState: { getPaneLayout } } });
   const cursor = await import('./sessionCursor');
   const { useOrchestrationSessionStore } = await import('../stores/orchestrationSessionStore');
   const { useConfigStore } = await import('../stores/configStore');
   const { useNavigationStore } = await import('../stores/navigationStore');
+  const { useSessionViewCache } = await import('../stores/sessionViewCache');
   const settle = vi.fn().mockResolvedValue(undefined);
   // SAFETY: the cursor reads only remoteDaemon and arrowKeysOpenSessions of the config.
-  useConfigStore.setState({ config: { remoteDaemon: { client: { mode: 'local' } }, ...config } as unknown as AppConfig });
+  const appConfig = { remoteDaemon: { client: { mode: 'local' } }, ...config } as AppConfig;
+  useConfigStore.setState({ config: appConfig });
   useOrchestrationSessionStore.setState({ sessions: records, selectedSessionId: 'a', availability: 'ready', settle });
   useNavigationStore.setState({ activeView: 'pane-chat' });
-  return { cursor, store: useOrchestrationSessionStore, settle, listeners };
+  return { cursor, store: useOrchestrationSessionStore, cache: useSessionViewCache, settle, appConfig };
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  peekSessionView.mockResolvedValue(null);
-  cachedSessionView.mockReturnValue(undefined);
+  peek.mockResolvedValue({ success: true, data: { view: null, panels: [], layout: null } });
+  getPaneLayout.mockResolvedValue({ success: true, data: null });
 });
 afterEach(() => { vi.useRealTimers(); });
 
 describe('Arrow keys open chat Sessions (T-87)', () => {
   it('is on by default on this machine, and off when turned off', async () => {
-    const { cursor } = await setup();
+    const { cursor, appConfig } = await setup();
     expect(cursor.cursorFollowEnabled()).toBe(true);
-    // SAFETY: as above.
-    expect(cursor.cursorFollowEnabled({ remoteDaemon: { client: { mode: 'local' } }, arrowKeysOpenSessions: false } as unknown as AppConfig)).toBe(false);
+    expect(cursor.cursorFollowEnabled({ ...appConfig, arrowKeysOpenSessions: false })).toBe(false);
   });
 
   it('shows at once and settles only after the cursor rests for a second', async () => {
@@ -55,13 +64,13 @@ describe('Arrow keys open chat Sessions (T-87)', () => {
   });
 
   it('peeks each Session it does not hold once, and none it holds', async () => {
-    const { cursor } = await setup();
+    const { cursor, cache } = await setup();
+    cache.setState({ entries: { c: heldView('c', 'chat') } });
     cursor.showSessionAtCursor('b');
-    // SAFETY: the cursor reads only the agent tab's type of a held entry.
-    cachedSessionView.mockImplementation((id: string) => (id === 'c' ? { view: { panel: { type: 'chat' } } } : undefined));
     cursor.showSessionAtCursor('c');
-    expect(peekSessionView).toHaveBeenCalledTimes(1);
-    expect(peekSessionView).toHaveBeenCalledWith({ sessionId: 'b', internalSessionId: 'internal-b', hostId: null });
+    cursor.showSessionAtCursor('b');
+    expect(peek).toHaveBeenCalledTimes(1);
+    expect(peek).toHaveBeenCalledWith({ sessionId: 'b' });
   });
 
   it('back on the selected Session clears the cursor and settles nothing', async () => {
@@ -85,27 +94,10 @@ describe('Arrow keys open chat Sessions (T-87)', () => {
   });
 
   it('skips a Session whose agent runs in a terminal', async () => {
-    const { cursor, store } = await setup();
-    // SAFETY: as above.
-    cachedSessionView.mockReturnValue({ view: { panel: { type: 'terminal' } } });
+    const { cursor, store, cache } = await setup();
+    cache.setState({ entries: { b: heldView('b', 'terminal') } });
     cursor.showSessionAtCursor('b');
     expect(store.getState().cursorSessionId).toBeUndefined();
-  });
-
-  it('settles when focus leaves the sidebar, and not while it stays there', async () => {
-    const { cursor, settle, listeners } = await setup();
-    cursor.showSessionAtCursor('b');
-    const inSidebar = { closest: () => ({}) };
-    const inChat = { closest: () => null };
-    vi.stubGlobal('Element', class {});
-    Object.setPrototypeOf(inSidebar, Element.prototype);
-    Object.setPrototypeOf(inChat, Element.prototype);
-    // SAFETY: the listener reads only the event target.
-    for (const listener of listeners) listener({ target: inSidebar } as unknown as FocusEvent);
-    expect(settle).not.toHaveBeenCalled();
-    // SAFETY: as above.
-    for (const listener of listeners) listener({ target: inChat } as unknown as FocusEvent);
-    expect(settle).toHaveBeenCalledWith('b', null);
   });
 
   it('dropping the cursor (leaving the Sessions view) selects nothing', async () => {

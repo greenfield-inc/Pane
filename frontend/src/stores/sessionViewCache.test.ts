@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { OrchestrationSessionOpenResult } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionOpenResult, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
+import type { Session } from '../types/session';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -11,15 +12,16 @@ const peek = vi.fn();
 const open = vi.fn();
 const getPaneLayout = vi.fn();
 
-function result(sessionId: string, panelType: 'chat' | 'terminal' = 'chat'): { success: true; data: OrchestrationSessionOpenResult } {
+function result(sessionId: string, panelType: 'chat' | 'terminal' = 'chat') {
   // SAFETY: the cache reads only these fields of the view; no record content is rendered.
   const view = {
     session: { id: sessionId, revision: 1 },
     internalSession: { id: `internal-${sessionId}` },
     panel: { id: `panel-${sessionId}`, type: panelType },
     agent: 'claude',
-  } as unknown as NonNullable<OrchestrationSessionOpenResult['view']>;
-  return { success: true, data: { view, panels: [], layout: null } };
+  } as OrchestrationSessionView<Session>;
+  const data: OrchestrationSessionOpenResult<Session> = { view, panels: [], layout: null };
+  return { success: true, data };
 }
 
 const target = (sessionId: string) => ({ sessionId, internalSessionId: `internal-${sessionId}`, hostId: null });
