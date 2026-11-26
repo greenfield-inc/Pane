@@ -25,67 +25,88 @@ export interface ProfilePlugin {
   files: string[];
 }
 
+/**
+ * One profile, as `agent-farm profiles list --json` lists it (T-83): every entry under a plugin's
+ * profiles/ is a profile; the helpers it starts are agents in its tree.
+ */
 export interface ProfileSummary {
   /** The profile's name in its plugin. */
   name: string;
   /** `plugin/profile`. */
   ref: string;
-  /** The identity file of the default variant, such as `agents/orchestrator.md`. */
+  /** The identity file of the default variant, such as `agents/orchestrator.md`; empty when it lives in another plugin. */
   entry: string;
+  /** The default variant's harness. */
   harness: string;
   model?: string;
-  /** Its description: the one set in Edit details (pane.yaml), else the identity's own. */
-  description?: string;
-  /** Its title from Edit details (pane.yaml); absent shows the name Pane makes from the ref. */
+  /** Agent Farm's title, with your edit (`profiles set`) merged in; absent shows the name Pane makes from the ref. */
   title?: string;
-  /**
-   * Whether it is a top-level profile, shown in the list and in New. Agent Farm reports
-   * `listed: false` for a profile another profile runs as a subagent; absent there means listed.
-   */
-  listed: boolean;
+  /** Agent Farm's description, with your edit merged in. */
+  description?: string;
+  /** Its variants, `claude` and `codex`, default first; absent for a single-agent profile. */
+  variants?: string[];
   /** Its cover page, `covers/<profile>.html` or `.md`, when the plugin has one; else Pane makes one. */
   cover?: string;
-  /** The plugin's files this profile reads (its settings, identity, subagents, skills, references, instructions). */
-  uses: string[];
-  /** Its own files and subagents, nested, as the profile page's tree shows them. */
+  /** Its own files and the agents it links to, nested, as the profile page's tree shows them. */
   tree: ProfileTreeNode[];
 }
 
 /**
  * One row of a profile's file tree: a file, a folder (Instructions, Skills, a skill, References,
- * Settings), or a subagent with its own files nested under it.
+ * Subagents, Settings), or a linked agent with its own files and links nested under it.
  */
 export type ProfileTreeNode =
   | { kind: 'file'; id: string; path: string; label: string; note?: string }
   | { kind: 'folder'; id: string; label: string; children: ProfileTreeNode[] }
   | ProfileSubagentNode;
 
+/**
+ * How a parent runs a linked agent (Agent Farm's link modes): `native` inside the parent's own
+ * harness, `process` as its own headless process, `launch` as its own launch, in a tab or headless.
+ */
+export type ProfileLinkMode = 'native' | 'process' | 'launch';
+
 export interface ProfileSubagentNode {
   kind: 'subagent';
   id: string;
   /** The name the parent calls it by. */
   alias: string;
-  /** The agent it runs (`agents/<agent>.md`). */
+  /** The agent it runs, `plugin/agent`; for an `any` link, the plugin's name. */
   agent: string;
   label: string;
-  harness: string;
+  mode: ProfileLinkMode;
+  /** The harness of the agent (its default variant's); absent when Pane can't read it (another plugin's agent). */
+  harness?: string;
   model?: string;
   description?: string;
+  /** Its variants, `claude` and `codex`, default first, for an agent that has both. */
+  variants?: string[];
+  /** The command that starts it on its own, for process and launch links (no `--parent`: a person needs none). */
+  command?: string;
+  /** A link back to an agent already above it on this path: it isn't expanded again. */
+  cycle?: boolean;
+  /** An `any: true` link: it may start any agent in its plugin. */
+  any?: boolean;
+  /** Why Agent Farm couldn't resolve the link's target. */
+  error?: string;
   /** `plugin/profile` when a profile in the plugin runs this agent, so its own cover and avatar apply. */
   profile?: string;
-  /** Its identity file. */
-  identity: string;
+  /** Its identity file in this plugin; absent for another plugin's agent or an `any` link. */
+  identity?: string;
   children: ProfileTreeNode[];
 }
 
-/** Where a profile's avatar picture comes from: your photo here, the plugin's own picture, or none (initials). */
+/** Where a profile's photo comes from: your edit (`profiles set`), the plugin's own SVG, or none (initials). */
 export type ProfilePhotoSource = 'yours' | 'plugin' | 'default';
 
-/** Profile pictures on this computer, as data URLs: your photos by `plugin/profile`, plugin pictures by plugin. */
+/** Profile photos on this computer (SVG only, T-83), as data URLs by `plugin/profile`, and where each came from. */
 export interface ProfilePhotos {
   profiles: Record<string, string>;
-  plugins: Record<string, string>;
+  sources: Record<string, Exclude<ProfilePhotoSource, 'default'>>;
 }
+
+/** Largest SVG photo Agent Farm accepts (T-83 §5). */
+export const MAX_PROFILE_PHOTO_BYTES = 64 * 1024;
 
 /** One file of a plugin and its content. */
 export interface ProfileFileChange {
@@ -114,11 +135,17 @@ const treeNodeSchema: BoundarySchema<ProfileTreeNode> = boundary.union(
     alias: boundary.string,
     agent: boundary.string,
     label: boundary.string,
-    harness: boundary.string,
+    mode: boundary.enumeration('native', 'process', 'launch'),
+    harness: boundary.optional(boundary.string),
     model: boundary.optional(boundary.string),
     description: boundary.optional(boundary.string),
+    variants: boundary.optional(boundary.array(boundary.string)),
+    command: boundary.optional(boundary.string),
+    cycle: boundary.optional(boundary.boolean),
+    any: boundary.optional(boundary.boolean),
+    error: boundary.optional(boundary.string),
     profile: boundary.optional(boundary.string),
-    identity: boundary.string,
+    identity: boundary.optional(boundary.string),
     children: boundary.array(anyTreeNode),
   }),
 );
@@ -129,11 +156,10 @@ const profileSummarySchema: BoundarySchema<ProfileSummary> = boundary.object({
   entry: boundary.string,
   harness: boundary.string,
   model: boundary.optional(boundary.string),
-  description: boundary.optional(boundary.string),
   title: boundary.optional(boundary.string),
-  listed: boundary.boolean,
+  description: boundary.optional(boundary.string),
+  variants: boundary.optional(boundary.array(boundary.string)),
   cover: boundary.optional(boundary.string),
-  uses: boundary.array(boundary.string),
   tree: boundary.array(anyTreeNode),
 });
 
@@ -143,7 +169,7 @@ export interface ParsedYaml {
   error?: string;
 }
 
-/** What Edit details sets for a profile, saved in its plugin's pane.yaml. Empty clears it. */
+/** What Edit details sets for a profile through `agent-farm profiles set`. Empty goes back to the plugin's own. */
 export interface ProfileDetails {
   title: string;
   description: string;
@@ -169,7 +195,7 @@ export const profilesOverviewSchema: BoundarySchema<ProfilesOverview> = boundary
 
 export const profilePhotosSchema: BoundarySchema<ProfilePhotos> = boundary.object({
   profiles: boundary.record(boundary.string),
-  plugins: boundary.record(boundary.string),
+  sources: boundary.record(boundary.enumeration('yours', 'plugin')),
 });
 
 export const profileSaveResultSchema: BoundarySchema<ProfileSaveResult> = boundary.object({

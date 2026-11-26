@@ -61,7 +61,7 @@ async function atMost(work: Promise<void>, ms: number): Promise<void> {
 
 /**
  * The Profiles tab (T-63 PR 5): renderer-only channels on this computer's own Agent Farm folder.
- * Every file Pane writes stays inside `<PANE_DIR>/agent-farm/{plugins,drafts,avatars}` (ProfileEditor's
+ * Every file Pane writes stays inside `<PANE_DIR>/agent-farm/{plugins,drafts}` (ProfileEditor's
  * path checks). After a change, Sessions using the plugin are re-checked so they show the changed dot,
  * and the change is synced to your other computers (PR 6). `runpane profiles` (PR 7) reuses both.
  *
@@ -182,7 +182,8 @@ export function registerProfileHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
     respond(() => editor.newFile(decodeBoundary(plugin, text), decodeBoundary(profile, text), decodeBoundary(kind, kindSchema), decodeBoundary(name, text))));
   ipcMain.handle('profiles:restore', (_event, plugin: PaneCommandValue) => respond(() => editor.restore(decodeBoundary(plugin, text))));
   ipcMain.handle('profiles:photos', () => respond(() => editor.photos()));
-  ipcMain.handle('profiles:set-photo', (_event, ref: PaneCommandValue, base64: PaneCommandValue) => respond(() => editor.setPhoto(decodeBoundary(ref, text), decodeBoundary(base64, text))));
+  // The photo is an SVG's text (T-83); Agent Farm checks it and keeps it as its own display override.
+  ipcMain.handle('profiles:set-photo', (_event, ref: PaneCommandValue, svg: PaneCommandValue) => respond(() => editor.setPhoto(decodeBoundary(ref, text), decodeBoundary(svg, text))));
   ipcMain.handle('profiles:set-details', (_event, plugin: PaneCommandValue, profile: PaneCommandValue, details: PaneCommandValue) =>
     respond(() => editor.setDetails(decodeBoundary(plugin, text), decodeBoundary(profile, text), decodeBoundary(details, profileDetailsSchema))));
   // The preview's YAML view and a Markdown file's front-matter: the renderer has no YAML parser of its own.
