@@ -3,7 +3,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
-import { hashDirectory } from '../skillCacheManager';
 import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
 
 /**
@@ -104,17 +103,42 @@ export async function unreadableSnapshots(sessionFolder: string): Promise<Array<
   return failed;
 }
 
+const receiptSchema = boundary.object({ checksums: boundary.record(boundary.string) });
+
 /**
- * The content hash (hashDirectory, as Pane hashes an installed plugin) of each plugin folder in a
- * snapshot, by plugin name. A snapshot never changes once written, so callers may keep the result.
+ * The content hash of an installed plugin as a snapshot holds it (review r2): only the files its
+ * Agent Farm receipt (`.plugins/<plugin>.json`) lists, read as they are now, so an edit in place
+ * counts and a cache, virtualenv or `.DS_Store` left beside them doesn't. A listed file that is gone
+ * counts as a change. Undefined when the plugin has no readable receipt in `configRoot`.
+ */
+export async function receiptFilesHash(configRoot: string, plugin: string): Promise<string | undefined> {
+  if (!/^[a-z0-9][a-z0-9_-]*$/i.test(plugin)) return undefined;
+  let listed: string[];
+  try { listed = Object.keys(decodeBoundary(JSON.parse(await fs.readFile(path.join(configRoot, '.plugins', `${plugin}.json`), 'utf8')), receiptSchema).checksums).sort(); }
+  catch { return undefined; }
+  const hash = createHash('sha256');
+  const folder = path.join(configRoot, 'plugins', plugin);
+  for (const relative of listed) {
+    const content = await fs.readFile(path.join(folder, ...relative.split('/'))).catch(() => undefined);
+    hash.update(`${relative}\0`).update(content === undefined ? '\0missing' : `${content.length}\0`);
+    if (content) hash.update(content);
+  }
+  return hash.digest('hex');
+}
+
+/**
+ * Each plugin's receiptFilesHash in a snapshot folder, which reads as a config root, by plugin name.
+ * A snapshot never changes once written, so callers may keep the result.
  */
 export async function snapshotPluginHashes(folder: string): Promise<Record<string, string>> {
-  const plugins = path.join(folder, 'plugins');
-  let names: string[];
-  try { names = (await fs.readdir(plugins, { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name); }
+  let receipts: string[];
+  try { receipts = (await fs.readdir(path.join(folder, '.plugins'))).filter(name => name.endsWith('.json')).map(name => name.slice(0, -'.json'.length)); }
   catch { return {}; }
   const hashes: Record<string, string> = {};
-  for (const name of names.sort()) hashes[name] = await hashDirectory(path.join(plugins, name));
+  for (const plugin of receipts.sort()) {
+    const hash = await receiptFilesHash(folder, plugin);
+    if (hash) hashes[plugin] = hash;
+  }
   return hashes;
 }
 

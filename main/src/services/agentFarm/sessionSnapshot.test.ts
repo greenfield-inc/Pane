@@ -3,8 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseSnapshotCreated, snapshotHoldsProfile, sessionSnapshotForTab, snapshotPluginHashes, snapshotProblem, snapshotRefused, unreadableSnapshots, withSnapshotEnv, type SnapshotHolder } from './sessionSnapshot';
-import { hashDirectory } from '../skillCacheManager';
+import { parseSnapshotCreated, receiptFilesHash, snapshotHoldsProfile, sessionSnapshotForTab, snapshotPluginHashes, snapshotProblem, snapshotRefused, unreadableSnapshots, withSnapshotEnv, type SnapshotHolder } from './sessionSnapshot';
 
 const folders: string[] = [];
 function tempFolder(): string {
@@ -88,17 +87,43 @@ describe('snapshotProblem and unreadableSnapshots', () => {
   });
 });
 
-describe('snapshotPluginHashes', () => {
-  it('hashes each plugin folder the way Pane hashes the installed copy, so equal files compare equal', async () => {
+describe('snapshotPluginHashes and receiptFilesHash', () => {
+  /** A config root with plugin `team` installed: its files and the receipt that lists them. */
+  function installedRoot(files: Record<string, string>, listed: string[] = Object.keys(files)): string {
+    const root = tempFolder();
+    for (const [relative, content] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(root, 'plugins', 'team', relative)), { recursive: true });
+      fs.writeFileSync(path.join(root, 'plugins', 'team', relative), content);
+    }
+    fs.mkdirSync(path.join(root, '.plugins'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.plugins', 'team.json'), JSON.stringify({ name: 'team', version: '1.0.0', checksums: Object.fromEntries(listed.map(relative => [relative, 'x'])) }));
+    return root;
+  }
+
+  // Review r2: a snapshot copies only the files a plugin's receipt lists, so the dot compares only those.
+  it('hashes only the files the receipt lists, so caches and .DS_Store left in the installed folder change nothing', async () => {
+    const plain = await receiptFilesHash(installedRoot({ 'plugin.yaml': 'name: team\n', 'agents/lead.md': 'Lead.' }), 'team');
+    const cluttered = await receiptFilesHash(installedRoot({ 'plugin.yaml': 'name: team\n', 'agents/lead.md': 'Lead.', '.DS_Store': 'x', 'skills/s/.venv/bin/python': 'x' }, ['plugin.yaml', 'agents/lead.md']), 'team');
+    expect(plain).toBeDefined();
+    expect(cluttered).toBe(plain);
+  });
+
+  it('changes when a listed file is edited in place or deleted, and is undefined without a receipt', async () => {
+    const plain = await receiptFilesHash(installedRoot({ 'plugin.yaml': 'name: team\n', 'agents/lead.md': 'Lead.' }), 'team');
+    expect(await receiptFilesHash(installedRoot({ 'plugin.yaml': 'name: team\n', 'agents/lead.md': 'Lead, edited.' }), 'team')).not.toBe(plain);
+    expect(await receiptFilesHash(installedRoot({ 'plugin.yaml': 'name: team\n' }, ['plugin.yaml', 'agents/lead.md']), 'team')).not.toBe(plain);
+    expect(await receiptFilesHash(tempFolder(), 'team')).toBeUndefined();
+    expect(await receiptFilesHash(tempFolder(), '../team')).toBeUndefined();
+  });
+
+  it('gives a snapshot\'s plugins the same hash as the installed plugin it was copied from', async () => {
     const session = tempFolder();
-    const folder = writeSnapshot(session, 'abc', { 'plugins/team/plugin.yaml': 'name: team\n', 'plugins/team/agents/lead.md': 'Lead.', 'plugins/other/plugin.yaml': 'name: other\n' });
-    const installed = path.join(tempFolder(), 'team');
-    fs.mkdirSync(path.join(installed, 'agents'), { recursive: true });
-    fs.writeFileSync(path.join(installed, 'plugin.yaml'), 'name: team\n');
-    fs.writeFileSync(path.join(installed, 'agents', 'lead.md'), 'Lead.');
+    const receipt = JSON.stringify({ name: 'team', version: '1.0.0', layout: 2, checksums: { 'plugin.yaml': 'x', 'agents/lead.md': 'x' } });
+    const folder = writeSnapshot(session, 'abc', { 'plugins/team/plugin.yaml': 'name: team\n', 'plugins/team/agents/lead.md': 'Lead.', '.plugins/team.json': receipt });
+    const installed = installedRoot({ 'plugin.yaml': 'name: team\n', 'agents/lead.md': 'Lead.', '.DS_Store': 'x' }, ['plugin.yaml', 'agents/lead.md']);
     const hashes = await snapshotPluginHashes(folder);
-    expect(Object.keys(hashes)).toEqual(['other', 'team']);
-    expect(hashes.team).toBe(await hashDirectory(installed));
+    expect(Object.keys(hashes)).toEqual(['team']);
+    expect(hashes.team).toBe(await receiptFilesHash(installed, 'team'));
     expect(await snapshotPluginHashes(path.join(session, 'nowhere'))).toEqual({});
   });
 });
